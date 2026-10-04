@@ -1,0 +1,26 @@
+use std.fs
+// GATE #4494: retained source filesystem traversal.
+// Rust: tests/package_root_single_home.rs:9
+ROOT_HOME :: "crates/jet-driver/src/Loader.rs"
+// Rust: tests/package_root_single_home.rs:11
+fn root() -> OSPath { OSPath.from(env("CARGO_MANIFEST_DIR")) }
+// Rust: tests/package_root_single_home.rs:15
+fn collect_rs_files(dir: &OSPath, out: &[OSPath]) -> {
+    entries :: match fs.read_dir(dir) { Ok(entries) -> entries, Err(_) -> return }
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() { collect_rs_files(&path, out) }
+        else if path.extension().is_some_and(|extension| extension == "rs") { out.push(path) }
+    }
+}
+// Rust: tests/package_root_single_home.rs:29
+fn homes_for(needle: String) -> [String] {
+    base :: root()
+    files: [OSPath] := []
+    collect_rs_files(&base.join("Source"), &files)
+    collect_rs_files(&base.join("crates"), &files)
+    files.into_iter().filter_map(|file| {
+        text :: fs.read_to_string(&file).ok()?
+        text.contains(needle).then(|| file.strip_prefix(&base).unwrap_or(&file).display().to_string())
+    }).collect()
+}

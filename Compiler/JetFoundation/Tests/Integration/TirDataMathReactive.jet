@@ -1,0 +1,45 @@
+use std.fs
+use std.env.temp_dir
+use std.process.id
+use jet
+
+// Rust: tests/tir_data_math_reactive.rs:15
+// GATE #4494: native scratch filesystem and process identity.
+pub fn compile_rust(name: String, src: String) -> String {
+    dir :: temp_dir().join("jet_tir_test_{id()}")
+    _ :: fs.create_dir_all(&dir).unwrap()
+    jet_path :: dir.join("{name}.jet")
+    _ :: fs.write(&jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy().into_owned()
+    jet.compile_with_path(src, &shown).unwrap_or_else((diags) -> {
+        panic("front end rejected:\n{jet.render_diagnostics(&shown, src, &diags)}")
+    }).rust
+}
+
+// Rust: tests/tir_data_math_reactive.rs:31
+pub const COLUMNAR_PROG: String = """
+#Layout(columnar)
+struct P {{
+    x: Float
+    mass: Float
+}}
+fn total(ps: [P]) -> Float {{
+    s := Float{{0.0}}
+    loop p in ps {{ s = s + p.mass }}
+    return s
+}}
+fn particle_energy(ps: [P]) -> Float {{
+    total := Float{{0.0}}
+    loop i in 0..<ps.len() {{ total += ps[i].x * ps[i].mass }}
+    return total
+}}
+fn run() {{
+    ps := [P]{{ P{{ x: 0.0, mass: 1.0 }}, P{{ x: 1.0, mass: 2.0 }} }}
+    ps.push(P{{ x: 2.0, mass: 3.0 }})
+    print(ps.len())
+    print(ps[2].x)
+    print(ps[1].mass)
+    print(total(ps))
+    print(particle_energy(ps))
+}}
+"""

@@ -1,2019 +1,553 @@
-// PORT-PENDING 0963 tests-agent-workloads-slice-1: tests/agent_workloads.rs:1-2015
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! #769: executable AI-agent workload conformance corpus.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fs;
-//RS use std::io::Write;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Command, Output, Stdio};
-//RS use std::sync::{LazyLock, Mutex, MutexGuard};
-//RS use std::thread;
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS static JET_WORKLOAD_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
-//RS 
-//RS fn jet_workload_lock() -> MutexGuard<'static, ()> {
-//RS     JET_WORKLOAD_LOCK
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner())
-//RS }
-//RS 
-//RS fn jet_workload_guard(command: &Command) -> Option<MutexGuard<'static, ()>> {
-//RS     if command.get_program() == Path::new(env!("CARGO_BIN_EXE_jet")).as_os_str() {
-//RS         Some(jet_workload_lock())
-//RS     } else {
-//RS         None
-//RS     }
-//RS }
-//RS 
-//RS const HEADER: &str = "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards";
-//RS const COMPILED_RECEIPT_HEADER: &str = "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority";
-//RS const PEER_LAUNCH_CONTRACT: &str = "compiled-workload-peer-isolation-v1";
-//RS const DOMAIN_CONTRACT_HEADER: &str =
-//RS     "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring";
-//RS const BASELINE_HEADER: &str =
-//RS     "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest";
-//RS const PROCESS_DEADLINE: Duration = Duration::from_secs(120);
-//RS const PROCESS_OUTPUT_LIMIT_BYTES: u64 = 1_048_576;
-//RS const DOMAIN_SCORING: &str =
-//RS     "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed";
-//RS const POLICY_CONTRACT: &str = include_str!("agent_workloads/policy.tsv");
-//RS const POLICY_FIELDS: &[&str] = &[
-//RS     "version",
-//RS     "plan",
-//RS     "launch_transaction",
-//RS     "descendants",
-//RS     "limits",
-//RS     "outputs",
-//RS     "receipt",
-//RS     "authority",
-//RS ];
-//RS const NATIVE_OS_MATRIX_HEADER: &str = "version\tos\tarch_policy\trequirement\tadapters\treason";
-//RS const EXPECTED_NATIVE_OS_MATRIX: &[(&str, &str, &str, &str, &str)] = &[
-//RS     (
-//RS         "linux",
-//RS         "x86_64",
-//RS         "required",
-//RS         "jet,bash,python,node",
-//RS         "native",
-//RS     ),
-//RS     ("macos", "any", "required", "jet,bash,python,node", "native"),
-//RS     (
-//RS         "windows",
-//RS         "any",
-//RS         "excluded",
-//RS         "jet,python,node",
-//RS         "bash-not-native;exclusion=D-PLATFORM-EVIDENCE1;expires=2026-11-24;reopen=windows-native-bash-adapter-lands",
-//RS     ),
-//RS ];
-//RS const JET_BASELINE_HEADER: &str = "version\ttask_id\tjet_status\tloss_owner";
-//RS const SANDBOX_HOSTILE_CORPUS: &str = include_str!("fixtures/build_sandbox/hostile-corpus.tsv");
-//RS const EXPECTED_TASKS: &[(&str, &str, &str, &str)] = &[
-//RS     (
-//RS         "repository-marker-scan",
-//RS         "repository-search-and-edit",
-//RS         "success",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "repository-marker-scan-empty",
-//RS         "repository-search-and-edit",
-//RS         "hostile-empty",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "repository-semantic-inspection",
-//RS         "repository-search-and-edit",
-//RS         "semantic-index",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "repository-semantic-edit",
-//RS         "repository-search-and-edit",
-//RS         "semantic-rename-with-decoys",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "git-diff-review",
-//RS         "build-test-debug-and-git",
-//RS         "mixed-change",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "git-diff-empty",
-//RS         "build-test-debug-and-git",
-//RS         "hostile-empty-diff",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "build-test-failure-recovery",
-//RS         "build-test-debug-and-git",
-//RS         "compile-check-recovery",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "incident-report-success",
-//RS         "data-cleanup-and-report-generation",
-//RS         "success",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "incident-report-malformed",
-//RS         "data-cleanup-and-report-generation",
-//RS         "malformed-input",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "incident-report-partial",
-//RS         "data-cleanup-and-report-generation",
-//RS         "partial-failure",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "structured-data-transform",
-//RS         "structured-data",
-//RS         "json-normalize",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "structured-data-hostile",
-//RS         "structured-data",
-//RS         "malformed-json",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "database-access",
-//RS         "databases",
-//RS         "parameterized-query",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "database-hostile",
-//RS         "databases",
-//RS         "invalid-row",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "http-api",
-//RS         "http-apis",
-//RS         "loopback-json-post",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "http-hostile",
-//RS         "http-apis",
-//RS         "rejected-payload",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "process-batch-success",
-//RS         "long-running-and-interactive-commands",
-//RS         "success",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "process-batch-large-stderr",
-//RS         "long-running-and-interactive-commands",
-//RS         "large-stderr",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "process-batch-timeout-recovery",
-//RS         "long-running-and-interactive-commands",
-//RS         "timeout-cancellation-cleanup",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "browser-automation-preflight",
-//RS         "browser-and-desktop-work",
-//RS         "profile-timeout-hostile",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "desktop-interaction-focus",
-//RS         "browser-and-desktop-work",
-//RS         "keyboard-focus-hostile",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "document-markdown-inspection",
-//RS         "document-and-media-work",
-//RS         "malformed-document",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "media-asset-inventory",
-//RS         "document-and-media-work",
-//RS         "unsupported-media-hostile",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "mcp-environment-readonly",
-//RS         "mcp-tools-and-hooks",
-//RS         "readonly-resource",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "mcp-environment-denied",
-//RS         "mcp-tools-and-hooks",
-//RS         "hostile-denied-resource",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "interactive-terminal-dialogue",
-//RS         "interactive-terminals",
-//RS         "pty-dialogue",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "interactive-terminal-closed",
-//RS         "interactive-terminals",
-//RS         "hostile-closed-session",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "service-lifecycle-roundtrip",
-//RS         "service-lifecycle",
-//RS         "up-health-wait-logs-down",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS     (
-//RS         "service-lifecycle-readiness-timeout",
-//RS         "service-lifecycle",
-//RS         "hostile-readiness-timeout",
-//RS         "exit=0;stdout=exact",
-//RS     ),
-//RS ];
-//RS const ADAPTERS: &[(&str, &str)] = &[
-//RS     ("jet", "jet"),
-//RS     ("bash", "bash"),
-//RS     ("python", "py"),
-//RS     ("node", "mjs"),
-//RS ];
-//RS const BASELINE_ADAPTERS: &[&str] = &["bash", "python", "node"];
-//RS const EXPECTED_DOMAIN_CONTRACT: &[(&str, &str, &str, &str)] = &[
-//RS     (
-//RS         "build-test-failure-recovery",
-//RS         "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "process-batch-success",
-//RS         "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "process-batch-large-stderr",
-//RS         "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "process-batch-timeout-recovery",
-//RS         "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "structured-data-transform",
-//RS         "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "structured-data-hostile",
-//RS         "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "database-access",
-//RS         "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "database-hostile",
-//RS         "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "http-api",
-//RS         "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "http-hostile",
-//RS         "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "browser-automation-preflight",
-//RS         "jet=Core:web.browser,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "desktop-interaction-focus",
-//RS         "jet=Core:ui,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "document-markdown-inspection",
-//RS         "jet=Core:files,process;bash=find,awk;python=stdlib-pathlib;node=stdlib-fs-path",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "media-asset-inventory",
-//RS         "jet=Core:files,net.mime,process;bash=find,wc;python=stdlib-pathlib;node=stdlib-fs-path",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "mcp-environment-readonly",
-//RS         "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "mcp-environment-denied",
-//RS         "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "interactive-terminal-dialogue",
-//RS         "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "interactive-terminal-closed",
-//RS         "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "service-lifecycle-roundtrip",
-//RS         "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "service-lifecycle-readiness-timeout",
-//RS         "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process",
-//RS         "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "repository-marker-scan",
-//RS         "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "repository-marker-scan-empty",
-//RS         "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "repository-semantic-inspection",
-//RS         "jet=Core:process,sys,inspect-semindex;bash=awk;python=stdlib-pathlib;node=stdlib-fs",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "repository-semantic-edit",
-//RS         "jet=Core:files,process,inspect-codemod;bash=cp,awk,mv;python=stdlib-shutil,pathlib;node=stdlib-fs",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS     (
-//RS         "git-diff-review",
-//RS         "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "normal",
-//RS     ),
-//RS     (
-//RS         "git-diff-empty",
-//RS         "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git",
-//RS         "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable",
-//RS         "hostile",
-//RS     ),
-//RS ];
-//RS 
-//RS #[derive(Debug)]
-//RS struct Task {
-//RS     id: String,
-//RS     domain: String,
-//RS     case: String,
-//RS     outcome: String,
-//RS     input: String,
-//RS     expected: String,
-//RS     authority: String,
-//RS     adapters: String,
-//RS     platforms: String,
-//RS     evidence: String,
-//RS     tower_card: String,
-//RS     loss_cards: String,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct DomainContract {
-//RS     task_id: String,
-//RS     allowed_dependencies: String,
-//RS     machine_spec: String,
-//RS     variant: String,
-//RS     scoring: String,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct Measurement {
-//RS     adapter: &'static str,
-//RS     source_tokens: usize,
-//RS     cold: Duration,
-//RS     warm: Duration,
-//RS     version: String,
-//RS     cold_stderr_bytes: usize,
-//RS     cold_stderr_sha256: String,
-//RS     warm_stderr_bytes: usize,
-//RS     warm_stderr_sha256: String,
-//RS }
-//RS 
-//RS struct Scratch {
-//RS     path: PathBuf,
-//RS }
-//RS 
-//RS impl Scratch {
-//RS     fn new(prefix: &str) -> Self {
-//RS         let path = common::unique_tmp(prefix);
-//RS         fs::create_dir_all(&path).unwrap();
-//RS         Self { path }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for Scratch {
-//RS     fn drop(&mut self) {
-//RS         fs::remove_dir_all(&self.path).unwrap_or_else(|error| {
-//RS             panic!(
-//RS                 "scratch cleanup failed for {}: {error}",
-//RS                 self.path.display()
-//RS             )
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS struct BoundedOutput {
-//RS     output: Output,
-//RS     elapsed: Duration,
-//RS     timed_out: bool,
-//RS     limit_exceeded: bool,
-//RS }
-//RS 
-//RS fn corpus_root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/agent_workloads")
-//RS }
-//RS 
-//RS fn compiled_workload_root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/compiled_workloads")
-//RS }
-//RS 
-//RS fn read_compiled_workload_tsv(relative: &str, header: &str, width: usize) -> Vec<Vec<String>> {
-//RS     let text = fs::read_to_string(compiled_workload_root().join(relative)).unwrap();
-//RS     let mut lines = text.lines();
-//RS     assert_eq!(lines.next(), Some(header), "compiled workload schema drifted");
-//RS     lines
-//RS         .filter(|line| !line.is_empty())
-//RS         .map(|line| {
-//RS             let fields = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
-//RS             assert_eq!(fields.len(), width, "bad compiled workload row: {line}");
-//RS             fields
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn policy_field(name: &str) -> &'static str {
-//RS     POLICY_CONTRACT
-//RS         .lines()
-//RS         .find_map(|line| {
-//RS             line.strip_prefix(name)
-//RS                 .and_then(|value| value.strip_prefix('='))
-//RS         })
-//RS         .unwrap_or_else(|| panic!("policy contract lacks field {name}"))
-//RS }
-//RS 
-//RS fn policy_digest() -> String {
-//RS     for field in POLICY_FIELDS {
-//RS         policy_field(field);
-//RS     }
-//RS     jet::SHA256::sha256_hex(POLICY_CONTRACT.trim_end_matches('\n').as_bytes())
-//RS }
-//RS 
-//RS fn policy_receipt(digest: &str) -> String {
-//RS     format!(
-//RS         "policy\tversion={}\tdigest={digest}\tplan={}\tlaunch_transaction={}\tdescendants={}\tlimits={}\toutputs={}\treceipt={}\tauthority={}",
-//RS         policy_field("version"),
-//RS         policy_field("plan"),
-//RS         policy_field("launch_transaction"),
-//RS         policy_field("descendants"),
-//RS         policy_field("limits"),
-//RS         policy_field("outputs"),
-//RS         policy_field("receipt"),
-//RS         policy_field("authority")
-//RS     )
-//RS }
-//RS 
-//RS fn validate_corpus_relative_path(relative: &str) -> Result<(), String> {
-//RS     if relative.is_empty()
-//RS         || Path::new(relative).is_absolute()
-//RS         || relative.contains(':')
-//RS         || relative
-//RS             .split(|character| character == '/' || character == '\\')
-//RS             .any(|part| part.is_empty() || part == "." || part == "..")
-//RS     {
-//RS         return Err(format!("invalid corpus fixture path: {relative}"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_authority(authority: &str) -> Result<(), String> {
-//RS     if authority == policy_field("authority") {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(format!("unsupported authority enforcement: {authority}"))
-//RS     }
-//RS }
-//RS 
-//RS fn adapter_stem(task_id: &str) -> &'static str {
-//RS     if task_id == "repository-marker-scan" || task_id == "repository-marker-scan-empty" {
-//RS         "repository_marker_scan"
-//RS     } else if task_id == "repository-semantic-inspection" {
-//RS         "repository_semantic_inspection"
-//RS     } else if task_id == "repository-semantic-edit" {
-//RS         "repository_semantic_edit"
-//RS     } else if task_id == "git-diff-review" || task_id == "git-diff-empty" {
-//RS         "git_diff_review"
-//RS     } else if task_id == "build-test-failure-recovery" {
-//RS         "build_test_recovery"
-//RS     } else if task_id.starts_with("incident-report-") {
-//RS         "incident_report"
-//RS     } else if task_id.starts_with("structured-data-") {
-//RS         "structured_data"
-//RS     } else if task_id.starts_with("database-") {
-//RS         "database_access"
-//RS     } else if task_id.starts_with("http-") {
-//RS         "http_api"
-//RS     } else if task_id.starts_with("process-batch-") {
-//RS         "process_batch"
-//RS     } else if task_id.starts_with("mcp-environment-") {
-//RS         "mcp_resource"
-//RS     } else if task_id.starts_with("interactive-terminal-") {
-//RS         "interactive_terminal"
-//RS     } else if task_id.starts_with("service-lifecycle-") {
-//RS         "service_lifecycle"
-//RS     } else if task_id == "browser-automation-preflight" {
-//RS         "browser_automation_preflight"
-//RS     } else if task_id == "desktop-interaction-focus" {
-//RS         "desktop_interaction_focus"
-//RS     } else if task_id == "document-markdown-inspection" {
-//RS         "document_markdown_inspection"
-//RS     } else if task_id == "media-asset-inventory" {
-//RS         "media_asset_inventory"
-//RS     } else {
-//RS         panic!("task has no adapter source: {task_id}")
-//RS     }
-//RS }
-//RS 
-//RS fn read_domain_contract() -> Vec<DomainContract> {
-//RS     let contract = fs::read_to_string(corpus_root().join("domain_contract.tsv")).unwrap();
-//RS     let mut lines = contract.lines();
-//RS     assert_eq!(
-//RS         lines.next(),
-//RS         Some(DOMAIN_CONTRACT_HEADER),
-//RS         "agent workload domain contract schema drifted"
-//RS     );
-//RS     lines
-//RS         .filter(|line| !line.is_empty())
-//RS         .map(|line| {
-//RS             let fields = line.split('\t').collect::<Vec<_>>();
-//RS             assert_eq!(fields.len(), 6, "bad domain contract row: {line}");
-//RS             assert_eq!(
-//RS                 fields[0], "1",
-//RS                 "unsupported domain contract version: {line}"
-//RS             );
-//RS             assert_eq!(fields[5], DOMAIN_SCORING, "domain scoring drifted: {line}");
-//RS             DomainContract {
-//RS                 task_id: fields[1].into(),
-//RS                 allowed_dependencies: fields[2].into(),
-//RS                 machine_spec: fields[3].into(),
-//RS                 variant: fields[4].into(),
-//RS                 scoring: fields[5].into(),
-//RS             }
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn read_tasks() -> Vec<Task> {
-//RS     let manifest = fs::read_to_string(corpus_root().join("manifest.tsv")).unwrap();
-//RS     let mut lines = manifest.lines();
-//RS     assert_eq!(
-//RS         lines.next(),
-//RS         Some(HEADER),
-//RS         "agent workload manifest schema drifted"
-//RS     );
-//RS     lines
-//RS         .filter(|line| !line.is_empty())
-//RS         .map(|line| {
-//RS             let fields = line.split('\t').collect::<Vec<_>>();
-//RS             assert_eq!(fields.len(), 13, "bad agent workload manifest row: {line}");
-//RS             assert_eq!(fields[0], "1", "unsupported corpus version in: {line}");
-//RS             validate_corpus_relative_path(fields[5]).unwrap_or_else(|error| panic!("{error}"));
-//RS             validate_corpus_relative_path(fields[6]).unwrap_or_else(|error| panic!("{error}"));
-//RS             Task {
-//RS                 id: fields[1].into(),
-//RS                 domain: fields[2].into(),
-//RS                 case: fields[3].into(),
-//RS                 outcome: fields[4].into(),
-//RS                 input: fields[5].into(),
-//RS                 expected: fields[6].into(),
-//RS                 authority: fields[7].into(),
-//RS                 adapters: fields[8].into(),
-//RS                 platforms: fields[9].into(),
-//RS                 evidence: fields[10].into(),
-//RS                 tower_card: fields[11].into(),
-//RS                 loss_cards: fields[12].into(),
-//RS             }
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn read_native_os_matrix() -> Vec<(String, String, String, String, String)> {
-//RS     let matrix = fs::read_to_string(corpus_root().join("native_os_matrix.tsv")).unwrap();
-//RS     let mut lines = matrix.lines();
-//RS     assert_eq!(
-//RS         lines.next(),
-//RS         Some(NATIVE_OS_MATRIX_HEADER),
-//RS         "native OS matrix schema drifted"
-//RS     );
-//RS     lines
-//RS         .filter(|line| !line.is_empty())
-//RS         .map(|line| {
-//RS             let fields = line.split('\t').collect::<Vec<_>>();
-//RS             assert_eq!(fields.len(), 6, "bad native OS matrix row: {line}");
-//RS             assert_eq!(
-//RS                 fields[0], "1",
-//RS                 "unsupported native OS matrix version: {line}"
-//RS             );
-//RS             (
-//RS                 fields[1].into(),
-//RS                 fields[2].into(),
-//RS                 fields[3].into(),
-//RS                 fields[4].into(),
-//RS                 fields[5].into(),
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn read_jet_baseline() -> Vec<(String, String, String)> {
-//RS     let baseline = fs::read_to_string(corpus_root().join("jet_baseline.tsv")).unwrap();
-//RS     let mut lines = baseline.lines();
-//RS     assert_eq!(
-//RS         lines.next(),
-//RS         Some(JET_BASELINE_HEADER),
-//RS         "Jet baseline schema drifted"
-//RS     );
-//RS     lines
-//RS         .filter(|line| !line.is_empty())
-//RS         .map(|line| {
-//RS             let fields = line.split('\t').collect::<Vec<_>>();
-//RS             assert_eq!(fields.len(), 4, "bad Jet baseline row: {line}");
-//RS             assert_eq!(fields[0], "1", "unsupported Jet baseline version: {line}");
-//RS             (fields[1].into(), fields[2].into(), fields[3].into())
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn pinned_adapter_versions() -> BTreeMap<&'static str, String> {
-//RS     let receipt = fs::read_to_string(corpus_root().join("baselines/receipt.tsv")).unwrap();
-//RS     let mut lines = receipt.lines();
-//RS     assert_eq!(
-//RS         lines.next(),
-//RS         Some(BASELINE_HEADER),
-//RS         "baseline schema drifted while reading tool pins"
-//RS     );
-//RS     let mut versions = BTreeMap::new();
-//RS     for line in lines.filter(|line| !line.is_empty()) {
-//RS         let fields = line.split('\t').collect::<Vec<_>>();
-//RS         assert_eq!(fields.len(), 23, "bad baseline receipt row: {line}");
-//RS         let adapter = match fields[3] {
-//RS             "bash" => "bash",
-//RS             "python" => "python",
-//RS             "node" => "node",
-//RS             other => panic!("unknown pinned adapter: {other}"),
-//RS         };
-//RS         let version = fields[21];
-//RS         assert!(!version.is_empty() && version != "unknown");
-//RS         if let Some(previous) = versions.insert(adapter, version.to_string()) {
-//RS             assert_eq!(previous, version, "pinned tool version drifted for {adapter}");
-//RS         }
-//RS     }
-//RS     let mut adapters = versions.keys().copied().collect::<Vec<_>>();
-//RS     adapters.sort_unstable();
-//RS     let mut expected = BASELINE_ADAPTERS.to_vec();
-//RS     expected.sort_unstable();
-//RS     assert_eq!(
-//RS         adapters, expected,
-//RS         "baseline must pin every competitor adapter exactly once"
-//RS     );
-//RS     versions
-//RS }
-//RS 
-//RS fn run_bounded(mut command: Command, label: &str, deadline: Duration) -> BoundedOutput {
-//RS     // A Jet invocation may own a rustc child and a shared runtime-cache lease.
-//RS     // Keep those resource-heavy launches serial within this test binary so
-//RS     // libtest's default parallelism cannot turn a healthy cold build into a
-//RS     // deadline failure.
-//RS     let _jet_guard = jet_workload_guard(&command);
-//RS     let capture = Scratch::new("jet_agent_process_output");
-//RS     let stdout_path = capture.path.join("stdout");
-//RS     let stderr_path = capture.path.join("stderr");
-//RS     command
-//RS         .stdout(Stdio::from(fs::File::create(&stdout_path).unwrap()))
-//RS         .stderr(Stdio::from(fs::File::create(&stderr_path).unwrap()));
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::process::CommandExt;
-//RS         command.process_group(0);
-//RS     }
-//RS     let started = Instant::now();
-//RS     let mut child = command
-//RS         .spawn()
-//RS         .unwrap_or_else(|err| panic!("cannot start `{label}`: {err}"));
-//RS     let child_pid = child.id();
-//RS 
-//RS     let (status, timed_out, limit_exceeded) = loop {
-//RS         if let Some(status) = child.try_wait().unwrap() {
-//RS             // The bounded child owns its process group, including detached
-//RS             // helpers. Reap that group on normal completion as well as on
-//RS             // timeout/limit failure, or a descendant can race the next run.
-//RS             #[cfg(unix)]
-//RS             let group_result = kill_process_group(child_pid);
-//RS             #[cfg(not(unix))]
-//RS             let group_result: Result<(), String> = Ok(());
-//RS             let status = child.wait().unwrap_or(status);
-//RS             if let Err(error) = group_result {
-//RS                 panic!("process-group cleanup failed for `{label}`: {error}");
-//RS             }
-//RS             break (
-//RS                 status,
-//RS                 false,
-//RS                 output_size(&stdout_path, &stderr_path) > PROCESS_OUTPUT_LIMIT_BYTES,
-//RS             );
-//RS         }
-//RS         if output_size(&stdout_path, &stderr_path) > PROCESS_OUTPUT_LIMIT_BYTES {
-//RS             #[cfg(unix)]
-//RS             let group_result = kill_process_group(child.id());
-//RS             #[cfg(not(unix))]
-//RS             let group_result: Result<(), String> = Ok(());
-//RS             let _ = child.kill();
-//RS             let status = child.wait().unwrap();
-//RS             if let Err(error) = group_result {
-//RS                 panic!("process-group cleanup failed for `{label}`: {error}");
-//RS             }
-//RS             break (status, false, true);
-//RS         }
-//RS         if started.elapsed() >= deadline {
-//RS             #[cfg(unix)]
-//RS             let group_result = kill_process_group(child.id());
-//RS             #[cfg(not(unix))]
-//RS             let group_result: Result<(), String> = Ok(());
-//RS             let _ = child.kill();
-//RS             let status = child.wait().unwrap();
-//RS             if let Err(error) = group_result {
-//RS                 panic!("process-group cleanup failed for `{label}`: {error}");
-//RS             }
-//RS             break (status, true, false);
-//RS         }
-//RS         thread::sleep(Duration::from_millis(5));
-//RS     };
-//RS     BoundedOutput {
-//RS         output: Output {
-//RS             status,
-//RS             stdout: fs::read(stdout_path).unwrap(),
-//RS             stderr: fs::read(stderr_path).unwrap(),
-//RS         },
-//RS         elapsed: started.elapsed(),
-//RS         timed_out,
-//RS         limit_exceeded,
-//RS     }
-//RS }
-//RS 
-//RS fn output_size(stdout: &Path, stderr: &Path) -> u64 {
-//RS     fs::metadata(stdout).map(|file| file.len()).unwrap_or(0)
-//RS         + fs::metadata(stderr).map(|file| file.len()).unwrap_or(0)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn kill_process_group(pid: u32) -> Result<(), String> {
-//RS     unsafe extern "C" {
-//RS         fn kill(pid: i32, signal: i32) -> i32;
-//RS     }
-//RS     let Ok(pid) = i32::try_from(pid) else {
-//RS         return Err("child PID does not fit platform process ID".into());
-//RS     };
-//RS     // SAFETY: the negative PID targets only the process group created for the
-//RS     // bounded child; SIGKILL makes timeout cleanup fail closed.
-//RS     let result = unsafe { kill(-pid, 9) };
-//RS     if result == 0 {
-//RS         Ok(())
-//RS     } else {
-//RS         let error = std::io::Error::last_os_error();
-//RS         // Linux reports ESRCH for a group that exited between `wait()` and
-//RS         // this cleanup. The absence is already the desired fail-closed state.
-//RS         if error.kind() == std::io::ErrorKind::NotFound || error.raw_os_error() == Some(3) {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(format!("kill(-{pid}, SIGKILL): {error}"))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn stderr_receipt(output: &Output) -> String {
-//RS     format!(
-//RS         "stderr_bytes={} stderr_sha256={}",
-//RS         output.stderr.len(),
-//RS         jet::SHA256::sha256_hex(&output.stderr)
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(target_os = "linux")]
-//RS fn process_is_gone_or_zombie(pid: u32) -> bool {
-//RS     let path = format!("/proc/{pid}/stat");
-//RS     let Ok(stat) = fs::read_to_string(path) else {
-//RS         return true;
-//RS     };
-//RS     stat.rsplit_once(") ")
-//RS         .and_then(|(_, fields)| fields.split_whitespace().next())
-//RS         == Some("Z")
-//RS }
-//RS 
-//RS fn command_version(program: &Path, arg: &str, label: &str) -> String {
-//RS     let mut command = Command::new(program);
-//RS     command.arg(arg);
-//RS     let bounded = run_bounded(command, label, PROCESS_DEADLINE);
-//RS     assert!(!bounded.timed_out, "`{label}` version timed out");
-//RS     assert!(!bounded.limit_exceeded, "`{label}` output limit exceeded");
-//RS     assert!(bounded.output.status.success(), "`{label} {arg}` failed");
-//RS     let text = if bounded.output.stdout.is_empty() {
-//RS         &bounded.output.stderr
-//RS     } else {
-//RS         &bounded.output.stdout
-//RS     };
-//RS     String::from_utf8_lossy(text)
-//RS         .lines()
-//RS         .next()
-//RS         .unwrap_or("unknown")
-//RS         .trim()
-//RS         .to_string()
-//RS }
-//RS 
-//RS fn write_agent_workload_package(scratch: &Path) {
-//RS     fs::write(
-//RS         scratch.join("package.jet"),
-//RS         "name: \"agent-workload\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FS, IO, Mem.Alloc, Net, Time] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS }
-//RS 
-//RS fn adapter_command(
-//RS     adapter: &'static str,
-//RS     source: &Path,
-//RS     jet_cli: &Path,
-//RS     input: &Path,
-//RS     scratch: &Path,
-//RS     task_id: &str,
-//RS ) -> Command {
-//RS     if adapter != "jet" {
-//RS         let package = scratch.join("package.jet");
-//RS         match fs::remove_file(&package) {
-//RS             Ok(()) => {}
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-//RS             Err(error) => panic!("remove fixture package `{}`: {error}", package.display()),
-//RS         }
-//RS     }
-//RS     let mut command = match adapter {
-//RS         "jet" => {
-//RS             write_agent_workload_package(scratch);
-//RS             let local_source = scratch.join(source.file_name().unwrap());
-//RS             fs::copy(source, &local_source).unwrap();
-//RS             let mut cmd = Command::new(jet_cli);
-//RS             cmd.args(["run", "--release"])
-//RS                 .arg(local_source)
-//RS                 .arg("--")
-//RS                 .env("JET_RECEIPT_BYPASS", "1");
-//RS             cmd
-//RS         }
-//RS         "bash" => {
-//RS             let mut cmd = Command::new("bash");
-//RS             cmd.arg(source);
-//RS             cmd
-//RS         }
-//RS         "python" => {
-//RS             let mut cmd = Command::new("python3");
-//RS             cmd.arg(source);
-//RS             cmd
-//RS         }
-//RS         "node" => {
-//RS             let mut cmd = Command::new("node");
-//RS             cmd.arg(source);
-//RS             cmd
-//RS         }
-//RS         other => panic!("unknown adapter {other}"),
-//RS     };
-//RS     command
-//RS         .arg(input)
-//RS         .env("JET_CORPUS_JET", jet_cli)
-//RS         .env("JET_CORPUS_JETPACK", common::jetpack_bin())
-//RS         .env("JET_CORPUS_TASK", task_id)
-//RS         .current_dir(scratch);
-//RS     command
-//RS }
-//RS 
-//RS fn jet_tier_command(
-//RS     jet_cli: &Path,
-//RS     source: &Path,
-//RS     input: &Path,
-//RS     scratch: &Path,
-//RS     task_id: &str,
-//RS     tier_args: &[&str],
-//RS ) -> Command {
-//RS     let mut command = Command::new(jet_cli);
-//RS     command
-//RS         .args(["run"])
-//RS         .args(tier_args)
-//RS         .arg(source)
-//RS         .arg("--")
-//RS         .env("JET_RECEIPT_BYPASS", "1");
-//RS     command
-//RS         .arg(input)
-//RS         .env("JET_CORPUS_JET", jet_cli)
-//RS         .env("JET_CORPUS_JETPACK", common::jetpack_bin())
-//RS         .env("JET_CORPUS_TASK", task_id)
-//RS         .current_dir(scratch);
-//RS     command
-//RS }
-//RS 
-//RS fn tree_hashes(root: &Path) -> BTreeMap<String, String> {
-//RS     fn walk(root: &Path, dir: &Path, out: &mut BTreeMap<String, String>) {
-//RS         for entry in fs::read_dir(dir).unwrap() {
-//RS             let path = entry.unwrap().path();
-//RS             if path.is_dir() {
-//RS                 walk(root, &path, out);
-//RS             } else {
-//RS                 let relative = path
-//RS                     .strip_prefix(root)
-//RS                     .unwrap()
-//RS                     .to_string_lossy()
-//RS                     .replace('\\', "/");
-//RS                 out.insert(relative, jet::SHA256::sha256_hex(&fs::read(path).unwrap()));
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut out = BTreeMap::new();
-//RS     walk(root, root, &mut out);
-//RS     out
-//RS }
-//RS 
-//RS fn input_hashes(input: &Path) -> BTreeMap<String, String> {
-//RS     if input.is_dir() {
-//RS         return tree_hashes(input);
-//RS     }
-//RS     BTreeMap::from([(
-//RS         input.file_name().unwrap().to_string_lossy().into_owned(),
-//RS         jet::SHA256::sha256_hex(&fs::read(input).unwrap()),
-//RS     )])
-//RS }
-//RS 
-//RS fn input_digest(input: &Path) -> String {
-//RS     let mut canonical = String::new();
-//RS     for (path, hash) in input_hashes(input) {
-//RS         canonical.push_str(&path);
-//RS         canonical.push('\t');
-//RS         canonical.push_str(&hash);
-//RS         canonical.push('\n');
-//RS     }
-//RS     jet::SHA256::sha256_hex(canonical.as_bytes())
-//RS }
-//RS 
-//RS struct BaselineCapture {
-//RS     root: PathBuf,
-//RS     run_id: String,
-//RS     machine: String,
-//RS     receipt: fs::File,
-//RS }
-//RS 
-//RS impl BaselineCapture {
-//RS     fn from_env() -> Option<Self> {
-//RS         let root = PathBuf::from(std::env::var_os("JET_CORPUS_BASELINE_DIR")?);
-//RS         let run_id = std::env::var("JET_CORPUS_BASELINE_RUN_ID")
-//RS             .expect("JET_CORPUS_BASELINE_RUN_ID is required when capturing baselines");
-//RS         let machine = std::env::var("JET_CORPUS_BASELINE_MACHINE")
-//RS             .expect("JET_CORPUS_BASELINE_MACHINE is required when capturing baselines");
-//RS         fs::create_dir_all(root.join("outputs")).unwrap();
-//RS         let mut receipt = fs::File::create(root.join("receipt.tsv")).unwrap();
-//RS         writeln!(receipt, "{BASELINE_HEADER}").unwrap();
-//RS         Some(Self {
-//RS             root,
-//RS             run_id,
-//RS             machine,
-//RS             receipt,
-//RS         })
-//RS     }
-//RS 
-//RS     fn record(
-//RS         &mut self,
-//RS         task: &Task,
-//RS         adapter: &str,
-//RS         source: &Path,
-//RS         input: &Path,
-//RS         expected: &[u8],
-//RS         cold: &BoundedOutput,
-//RS         warm: &BoundedOutput,
-//RS         version: &str,
-//RS     ) {
-//RS         let output_dir = self.root.join("outputs").join(adapter);
-//RS         fs::create_dir_all(&output_dir).unwrap();
-//RS         let stdout_file = format!("outputs/{adapter}/{}.stdout", task.id);
-//RS         let stderr_file = format!("outputs/{adapter}/{}.stderr", task.id);
-//RS         fs::write(self.root.join(&stdout_file), &cold.output.stdout).unwrap();
-//RS         fs::write(self.root.join(&stderr_file), &cold.output.stderr).unwrap();
-//RS         let output_stable = cold.output.stdout == warm.output.stdout;
-//RS         let supported = cold.output.status.code() == Some(0)
-//RS             && warm.output.status.code() == Some(0)
-//RS             && cold.output.stdout == expected
-//RS             && warm.output.stdout == expected
-//RS             && output_stable;
-//RS         let expressibility = if supported {
-//RS             "supported"
-//RS         } else {
-//RS             "unsupported"
-//RS         };
-//RS         let finding = if supported {
-//RS             "none".to_string()
-//RS         } else {
-//RS             format!(
-//RS                 "cold_exit={:?};warm_exit={:?};stdout_expected={};warm_stable={}",
-//RS                 cold.output.status.code(),
-//RS                 warm.output.status.code(),
-//RS                 cold.output.stdout == expected && warm.output.stdout == expected,
-//RS                 output_stable
-//RS             )
-//RS         };
-//RS         let row = [
-//RS             "1".to_string(),
-//RS             self.run_id.clone(),
-//RS             self.machine.clone(),
-//RS             adapter.to_string(),
-//RS             task.id.clone(),
-//RS             expressibility.to_string(),
-//RS             finding,
-//RS             input_digest(input),
-//RS             jet::SHA256::sha256_hex(expected),
-//RS             cold.output.status.code().unwrap_or(-1).to_string(),
-//RS             source_tokens(source).to_string(),
-//RS             stdout_file,
-//RS             jet::SHA256::sha256_hex(&cold.output.stdout),
-//RS             stderr_file,
-//RS             jet::SHA256::sha256_hex(&cold.output.stderr),
-//RS             cold.elapsed.as_nanos().to_string(),
-//RS             warm.elapsed.as_nanos().to_string(),
-//RS             jet::SHA256::sha256_hex(&warm.output.stdout),
-//RS             jet::SHA256::sha256_hex(&warm.output.stderr),
-//RS             output_stable.to_string(),
-//RS             DOMAIN_SCORING.to_string(),
-//RS             version.replace('\t', " "),
-//RS             policy_digest(),
-//RS         ]
-//RS         .join("\t");
-//RS         writeln!(self.receipt, "{row}").unwrap();
-//RS     }
-//RS }
-//RS 
-//RS fn fixture_files(root: &Path) -> BTreeSet<String> {
-//RS     fn walk(corpus: &Path, dir: &Path, out: &mut BTreeSet<String>) {
-//RS         for entry in fs::read_dir(dir).unwrap() {
-//RS             let path = entry.unwrap().path();
-//RS             if path.is_dir() {
-//RS                 walk(corpus, &path, out);
-//RS             } else {
-//RS                 out.insert(
-//RS                     path.strip_prefix(corpus)
-//RS                         .unwrap()
-//RS                         .to_string_lossy()
-//RS                         .replace('\\', "/"),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut files = BTreeSet::new();
-//RS     for name in ["inputs", "expected"] {
-//RS         let dir = root.join(name);
-//RS         if dir.is_dir() {
-//RS             walk(root, &dir, &mut files);
-//RS         }
-//RS     }
-//RS     files
-//RS }
-//RS 
-//RS fn verify_checksum_closure(root: &Path, sums: &str) -> Result<usize, String> {
-//RS     let mut declared = BTreeMap::new();
-//RS     for line in sums.lines().filter(|line| !line.is_empty()) {
-//RS         let (hash, relative) = line
-//RS             .split_once("  ")
-//RS             .ok_or_else(|| format!("bad SHA256SUMS row: {line}"))?;
-//RS         if validate_corpus_relative_path(relative).is_err() {
-//RS             return Err(format!("invalid checksum path: {relative}"));
-//RS         }
-//RS         if declared
-//RS             .insert(relative.to_string(), hash.to_string())
-//RS             .is_some()
-//RS         {
-//RS             return Err(format!("duplicate checksum path: {relative}"));
-//RS         }
-//RS     }
-//RS     let actual = fixture_files(root);
-//RS     let listed = declared.keys().cloned().collect::<BTreeSet<_>>();
-//RS     if actual != listed {
-//RS         let unhashed = actual.difference(&listed).cloned().collect::<Vec<_>>();
-//RS         let missing = listed.difference(&actual).cloned().collect::<Vec<_>>();
-//RS         return Err(format!(
-//RS             "checksum closure mismatch; unhashed={unhashed:?}; missing={missing:?}"
-//RS         ));
-//RS     }
-//RS     for (relative, hash) in &declared {
-//RS         let bytes = fs::read(root.join(relative)).map_err(|err| err.to_string())?;
-//RS         let actual_hash = jet::SHA256::sha256_hex(&bytes);
-//RS         if actual_hash != *hash {
-//RS             return Err(format!("fixture drift: {relative}"));
-//RS         }
-//RS     }
-//RS     Ok(declared.len())
-//RS }
-//RS 
-//RS fn source_tokens(path: &Path) -> usize {
-//RS     fs::read_to_string(path).unwrap().split_whitespace().count()
-//RS }
-//RS 
-//RS fn scratch_output_violations(adapter: &str, path: &Path, jet_artifact_name: &str) -> Vec<String> {
-//RS     fn walk(root: &Path, dir: &Path, entries: &mut BTreeMap<String, &'static str>) {
-//RS         for entry in fs::read_dir(dir).unwrap() {
-//RS             let path = entry.unwrap().path();
-//RS             let relative = path
-//RS                 .strip_prefix(root)
-//RS                 .unwrap()
-//RS                 .to_string_lossy()
-//RS                 .replace('\\', "/");
-//RS             let file_type = fs::symlink_metadata(&path).unwrap().file_type();
-//RS             let kind = if file_type.is_dir() {
-//RS                 "directory"
-//RS             } else if file_type.is_file() {
-//RS                 "file"
-//RS             } else if file_type.is_symlink() {
-//RS                 "symlink"
-//RS             } else {
-//RS                 "other"
-//RS             };
-//RS             entries.insert(relative, kind);
-//RS             if file_type.is_dir() {
-//RS                 walk(root, &path, entries);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut actual = BTreeMap::new();
-//RS     walk(path, path, &mut actual);
-//RS     let (required, optional) = if adapter == "jet" {
-//RS         (
-//RS             BTreeMap::from([
-//RS                 (".jet".to_string(), "directory"),
-//RS                 (".jet/build".to_string(), "directory"),
-//RS                 (format!(".jet/build/{jet_artifact_name}"), "file"),
-//RS             ]),
-//RS             BTreeMap::from([(format!(".jet/build/{jet_artifact_name}.rs"), "file")]),
-//RS         )
-//RS     } else {
-//RS         (BTreeMap::new(), BTreeMap::new())
-//RS     };
-//RS     let mut violations = actual
-//RS         .iter()
-//RS         .filter(|(entry, kind)| {
-//RS             required.get(*entry) != Some(*kind) && optional.get(*entry) != Some(*kind)
-//RS         })
-//RS         .map(|(entry, kind)| format!("unexpected {kind}: {entry}"))
-//RS         .collect::<Vec<_>>();
-//RS     violations.extend(
-//RS         required
-//RS             .iter()
-//RS             .filter(|(entry, kind)| actual.get(*entry) != Some(*kind))
-//RS             .map(|(entry, kind)| format!("missing {kind}: {entry}")),
-//RS     );
-//RS     violations.sort();
-//RS     violations
-//RS }
-//RS 
-//RS fn baseline_artifact_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
-//RS     let path = Path::new(relative);
-//RS     if path.is_absolute() {
-//RS         return Err(format!("baseline artifact escaped root: {relative}"));
-//RS     }
-//RS     if validate_corpus_relative_path(relative).is_err() {
-//RS         return Err(format!("invalid baseline artifact path: {relative}"));
-//RS     }
-//RS     Ok(root.join(path))
-//RS }
-//RS 
-//RS #[test]
-//RS fn recorded_baselines_cover_frozen_tasks() {
-//RS     let root = corpus_root().join("baselines");
-//RS     let receipt = fs::read_to_string(root.join("receipt.tsv")).unwrap();
-//RS     let mut lines = receipt.lines();
-//RS     assert_eq!(
-//RS         lines.next(),
-//RS         Some(BASELINE_HEADER),
-//RS         "baseline schema drifted"
-//RS     );
-//RS 
-//RS     let tasks = read_tasks();
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut run_id = None;
-//RS     let mut machine = None;
-//RS     for line in lines.filter(|line| !line.is_empty()) {
-//RS         let fields = line.split('\t').collect::<Vec<_>>();
-//RS         assert_eq!(fields.len(), 23, "bad baseline receipt row: {line}");
-//RS         assert_eq!(
-//RS             fields[0], "1",
-//RS             "unsupported baseline receipt version: {line}"
-//RS         );
-//RS         assert!(
-//RS             BASELINE_ADAPTERS.contains(&fields[3]),
-//RS             "unknown baseline adapter: {line}"
-//RS         );
-//RS         let task = tasks
-//RS             .iter()
-//RS             .find(|task| task.id == fields[4])
-//RS             .unwrap_or_else(|| panic!("baseline names unknown task: {line}"));
-//RS         assert!(
-//RS             seen.insert((fields[3].to_string(), fields[4].to_string())),
-//RS             "duplicate baseline row: {line}"
-//RS         );
-//RS         if let Some(previous) = run_id {
-//RS             assert_eq!(previous, fields[1], "baseline mixes run IDs");
-//RS         } else {
-//RS             run_id = Some(fields[1]);
-//RS         }
-//RS         if let Some(previous) = machine {
-//RS             assert_eq!(previous, fields[2], "baseline mixes machines");
-//RS         } else {
-//RS             machine = Some(fields[2]);
-//RS         }
-//RS         assert!(!fields[1].is_empty() && !fields[2].is_empty());
-//RS         assert!(fields[21] != "" && fields[21] != "unknown");
-//RS         assert_eq!(
-//RS             fields[22],
-//RS             policy_digest(),
-//RS             "baseline policy digest drifted: {line}"
-//RS         );
-//RS         assert_eq!(fields[7], input_digest(&corpus_root().join(&task.input)));
-//RS         let expected = fs::read(corpus_root().join(&task.expected)).unwrap();
-//RS         assert_eq!(fields[8], jet::SHA256::sha256_hex(&expected));
-//RS         assert_eq!(fields[10].parse::<usize>().unwrap().to_string(), fields[10]);
-//RS         assert!(fields[15].parse::<u128>().is_ok());
-//RS         assert!(fields[16].parse::<u128>().is_ok());
-//RS         assert_eq!(fields[20], DOMAIN_SCORING);
-//RS 
-//RS         match fields[5] {
-//RS             "supported" => {
-//RS                 assert_eq!(fields[6], "none");
-//RS                 assert_eq!(fields[9], "0");
-//RS                 assert_eq!(fields[19], "true");
-//RS                 let stdout = fs::read(
-//RS                     baseline_artifact_path(&root, fields[11])
-//RS                         .unwrap_or_else(|error| panic!("{error}")),
-//RS                 )
-//RS                 .unwrap();
-//RS                 let stderr = fs::read(
-//RS                     baseline_artifact_path(&root, fields[13])
-//RS                         .unwrap_or_else(|error| panic!("{error}")),
-//RS                 )
-//RS                 .unwrap();
-//RS                 assert_eq!(stdout, expected, "baseline stdout drifted: {line}");
-//RS                 assert_eq!(fields[12], jet::SHA256::sha256_hex(&stdout));
-//RS                 assert_eq!(fields[14], jet::SHA256::sha256_hex(&stderr));
-//RS                 assert_eq!(fields[17], fields[12]);
-//RS             }
-//RS             "unsupported" => {
-//RS                 assert_ne!(
-//RS                     fields[6], "none",
-//RS                     "unsupported baseline lacks finding: {line}"
-//RS                 );
-//RS                 assert_eq!(fields[11], "-");
-//RS                 assert_eq!(fields[13], "-");
-//RS             }
-//RS             other => panic!("unknown baseline expressibility {other}: {line}"),
-//RS         }
-//RS     }
-//RS     assert_eq!(
-//RS         seen.len(),
-//RS         tasks.len() * BASELINE_ADAPTERS.len(),
-//RS         "baseline omitted a frozen task or adapter"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn policy_digest_covers_authority_and_receipt_contract() {
-//RS     let digest = policy_digest();
-//RS     let receipt = policy_receipt(&digest);
-//RS     let contract_fields = POLICY_CONTRACT.lines().collect::<Vec<_>>();
-//RS     assert_eq!(contract_fields.len(), POLICY_FIELDS.len());
-//RS     for (line, name) in contract_fields.iter().zip(POLICY_FIELDS) {
-//RS         assert!(
-//RS             line.starts_with(&format!("{name}=")),
-//RS             "policy field drifted: {line}"
-//RS         );
-//RS     }
-//RS     for field in [
-//RS         format!("digest={digest}"),
-//RS         format!("plan={}", policy_field("plan")),
-//RS         format!("launch_transaction={}", policy_field("launch_transaction")),
-//RS         format!("descendants={}", policy_field("descendants")),
-//RS         format!("limits={}", policy_field("limits")),
-//RS         format!("outputs={}", policy_field("outputs")),
-//RS         format!("receipt={}", policy_field("receipt")),
-//RS         format!("authority={}", policy_field("authority")),
-//RS     ] {
-//RS         assert!(receipt.contains(&field), "policy receipt lost {field}");
-//RS     }
-//RS     assert!(validate_authority(policy_field("authority")).is_ok());
-//RS     assert!(validate_authority(
-//RS         "argv=input-root;cwd=scratch;host=ambient;network=denied;external-write=unmeasured"
-//RS     )
-//RS     .is_err());
-//RS     assert!(validate_authority(
-//RS         "argv=input-root;cwd=scratch;host=ambient;network=unmeasured;external-write=denied"
-//RS     )
-//RS     .is_err());
-//RS }
-//RS 
-//RS #[test]
-//RS fn receipt_artifact_paths_reject_escape_attempts() {
-//RS     let root = Path::new("/corpus/baselines");
-//RS     assert!(baseline_artifact_path(root, "outputs/bash/task.stdout").is_ok());
-//RS     for path in [
-//RS         "/etc/passwd",
-//RS         "../outside",
-//RS         "outputs//task",
-//RS         "outputs/../task",
-//RS         "outputs/./task",
-//RS         r"..\outside",
-//RS         r"C:\outside",
-//RS     ] {
-//RS         assert!(
-//RS             baseline_artifact_path(root, path).is_err(),
-//RS             "accepted {path}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn corpus_fixture_paths_reject_escape_attempts() {
-//RS     assert!(validate_corpus_relative_path("inputs/repository").is_ok());
-//RS     for path in [
-//RS         "",
-//RS         "/etc/passwd",
-//RS         "../outside",
-//RS         "inputs/../outside",
-//RS         r"..\outside",
-//RS         r"C:\outside",
-//RS         "inputs//repository",
-//RS         "inputs/./repository",
-//RS     ] {
-//RS         assert!(
-//RS             validate_corpus_relative_path(path).is_err(),
-//RS             "accepted {path}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn manifest_is_complete_frozen_and_non_vacuous() {
-//RS     let hostile_cases = SANDBOX_HOSTILE_CORPUS
-//RS         .lines()
-//RS         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-//RS         .map(|line| line.split('\t').collect::<Vec<_>>())
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(hostile_cases.len(), 7);
-//RS     for row in &hostile_cases {
-//RS         assert_eq!(row.len(), 4, "malformed shared sandbox hostile corpus row");
-//RS         assert_eq!(row[3], "blocked-or-unsupported");
-//RS     }
-//RS     let tasks = read_tasks();
-//RS     let actual = tasks
-//RS         .iter()
-//RS         .map(|task| {
-//RS             (
-//RS                 task.id.as_str(),
-//RS                 task.domain.as_str(),
-//RS                 task.case.as_str(),
-//RS                 task.outcome.as_str(),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(
-//RS         actual, EXPECTED_TASKS,
-//RS         "task removed, added, or reclassified"
-//RS     );
-//RS 
-//RS     let mut ids = BTreeSet::new();
-//RS     let task_ids = tasks
-//RS         .iter()
-//RS         .map(|task| task.id.as_str())
-//RS         .collect::<BTreeSet<_>>();
-//RS     for task in &tasks {
-//RS         assert!(ids.insert(task.id.clone()), "duplicate task ID {}", task.id);
-//RS         assert_eq!(task.authority, policy_field("authority"));
-//RS         validate_authority(&task.authority).unwrap_or_else(|error| panic!("{error}"));
-//RS         assert_eq!(task.adapters, "jet,bash,python,node");
-//RS         assert_eq!(
-//RS             task.platforms,
-//RS             "linux=native;macos=native;windows=unavailable:bash-not-native"
-//RS         );
-//RS         assert_eq!(
-//RS             task.evidence,
-//RS             "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks"
-//RS         );
-//RS         assert_eq!(task.tower_card, "#769");
-//RS         assert_eq!(task.loss_cards, "default-run=#688;wall-time=#666");
-//RS         assert!(corpus_root().join(&task.input).exists());
-//RS         assert!(corpus_root().join(&task.expected).is_file());
-//RS         if matches!(
-//RS             task.id.as_str(),
-//RS             "build-test-failure-recovery"
-//RS                 | "process-batch-large-stderr"
-//RS                 | "process-batch-timeout-recovery"
-//RS                 | "browser-automation-preflight"
-//RS                 | "desktop-interaction-focus"
-//RS                 | "document-markdown-inspection"
-//RS                 | "media-asset-inventory"
-//RS                 | "mcp-environment-denied"
-//RS                 | "interactive-terminal-closed"
-//RS                 | "service-lifecycle-readiness-timeout"
-//RS         ) {
-//RS             let input = corpus_root().join(&task.input);
-//RS             match task.id.as_str() {
-//RS                 "build-test-failure-recovery" => {
-//RS                     for invalid in ["invalid.jet", "invalid.sh", "invalid.py", "invalid.mjs"] {
-//RS                         let source = fs::read_to_string(input.join(invalid)).unwrap();
-//RS                         assert!(
-//RS                             source.contains("fn run( {")
-//RS                                 || source.contains("if then")
-//RS                                 || source.contains("def run(:")
-//RS                                 || source.contains("function run( {"),
-//RS                             "build recovery lost hostile source {invalid}"
-//RS                         );
-//RS                     }
-//RS                 }
-//RS                 "process-batch-large-stderr" => {
-//RS                     let source = fs::read_to_string(input).unwrap();
-//RS                     assert!(
-//RS                         source.contains("100000") && source.contains(">&2"),
-//RS                         "large-stderr task lost hostile output pressure"
-//RS                     );
-//RS                 }
-//RS                 "process-batch-timeout-recovery" => {
-//RS                     let source = fs::read_to_string(input).unwrap();
-//RS                     assert!(
-//RS                         source.contains("trap '' TERM") && source.contains("50"),
-//RS                         "timeout task lost TERM-resistant cancellation case"
-//RS                     );
-//RS                 }
-//RS                 _ => {
-//RS                     let expected = fs::read_to_string(corpus_root().join(&task.expected)).unwrap();
-//RS                     let hostile = match task.id.as_str() {
-//RS                         "desktop-interaction-focus" => {
-//RS                             expected.lines().any(|line| line == "event|Empty|observed")
-//RS                         }
-//RS                         "browser-automation-preflight" => {
-//RS                             expected.lines().any(|line| line.ends_with("|rejected"))
-//RS                         }
-//RS                         "mcp-environment-denied" => {
-//RS                             expected.lines().any(|line| line == "error=-32002")
-//RS                         }
-//RS                         "interactive-terminal-closed" => {
-//RS                             expected.lines().any(|line| line == "closed=ok")
-//RS                         }
-//RS                         "service-lifecycle-readiness-timeout" => {
-//RS                             expected.lines().any(|line| line == "error=E1261")
-//RS                         }
-//RS                         _ => expected.lines().any(|line| line.starts_with("reject|")),
-//RS                     };
-//RS                     assert!(hostile, "target task {} lost its hostile variant", task.id);
-//RS                 }
-//RS             }
-//RS         }
-//RS         let stem = adapter_stem(&task.id);
-//RS         for (_, extension) in ADAPTERS {
-//RS             let source = format!("{stem}.{extension}");
-//RS             assert!(
-//RS                 corpus_root().join("adapters").join(&source).is_file(),
-//RS                 "missing adapter {source}"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     let contracts = read_domain_contract();
-//RS     let actual_contract = contracts
-//RS         .iter()
-//RS         .map(|contract| {
-//RS             (
-//RS                 contract.task_id.as_str(),
-//RS                 contract.allowed_dependencies.as_str(),
-//RS                 contract.machine_spec.as_str(),
-//RS                 contract.variant.as_str(),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(
-//RS         actual_contract, EXPECTED_DOMAIN_CONTRACT,
-//RS         "domain contract changed without a frozen task review"
-//RS     );
-//RS     for contract in contracts {
-//RS         assert!(
-//RS             task_ids.contains(contract.task_id.as_str()),
-//RS             "domain contract names unknown task {}",
-//RS             contract.task_id
-//RS         );
-//RS         assert_eq!(contract.scoring, DOMAIN_SCORING);
-//RS     }
-//RS 
-//RS     let sums = fs::read_to_string(corpus_root().join("SHA256SUMS")).unwrap();
-//RS     let verified = verify_checksum_closure(&corpus_root(), &sums).unwrap();
-//RS     assert_eq!(
-//RS         verified, 82,
-//RS         "all inputs and declared outputs must be frozen"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows() {
-//RS     let manifest = read_compiled_workload_tsv("manifest.tsv", HEADER, 13);
-//RS     let task_ids = manifest
-//RS         .iter()
-//RS         .map(|row| row[1].as_str())
-//RS         .collect::<BTreeSet<_>>();
-//RS     assert_eq!(manifest.len(), task_ids.len());
-//RS     assert_eq!(
-//RS         task_ids,
-//RS         BTreeSet::from([
-//RS             "systems-file-index",
-//RS             "service-json-http",
-//RS             "cli-archive-filter",
-//RS             "library-json-roundtrip",
-//RS             "compute-mandelbrot",
-//RS             "embedded-sensor-ring",
-//RS             "cross-platform-notes",
-//RS         ])
-//RS     );
-//RS     for row in &manifest {
-//RS         assert_eq!(row[0], "1");
-//RS         assert_eq!(row[11], "#1414");
-//RS         assert_eq!(row[12], "#2414");
-//RS         validate_corpus_relative_path(&row[5]).unwrap();
-//RS         validate_corpus_relative_path(&row[6]).unwrap();
-//RS         let input = compiled_workload_root().join(&row[5]);
-//RS         let expected = compiled_workload_root().join(&row[6]);
-//RS         if row[1] == "systems-file-index" {
-//RS             assert!(input.is_dir(), "systems input must be a directory");
-//RS         } else {
-//RS             assert!(input.is_file(), "{task_id} input must be a file", task_id = row[1]);
-//RS         }
-//RS         assert!(expected.is_file(), "{} expected output must be a file", row[1]);
-//RS     }
-//RS     let systems = manifest
-//RS         .iter()
-//RS         .find(|row| row[1] == "systems-file-index")
-//RS         .expect("systems task must stay declared");
-//RS     assert_eq!(systems[5], "fixtures/systems-file-index/input");
-//RS     assert_eq!(
-//RS         systems[7],
-//RS         "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled"
-//RS     );
-//RS     for (task_id, authority) in [
-//RS         (
-//RS             "service-json-http",
-//RS             "argv=input-root;cwd=scratch;host=ambient;network=loopback-only;external-write=disabled",
-//RS         ),
-//RS         (
-//RS             "cli-archive-filter",
-//RS             "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled",
-//RS         ),
-//RS     ] {
-//RS         let row = manifest
-//RS             .iter()
-//RS             .find(|row| row[1] == task_id)
-//RS             .unwrap_or_else(|| panic!("{task_id} manifest row missing"));
-//RS         assert_eq!(row[7], authority);
-//RS     }
-//RS     let adapters = read_compiled_workload_tsv(
-//RS         "adapter_ledger.tsv",
-//RS         "version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit",
-//RS         7,
-//RS     );
-//RS     assert_eq!(adapters.len(), manifest.len());
-//RS     assert_eq!(
-//RS         adapters
-//RS             .iter()
-//RS             .map(|row| row[1].as_str())
-//RS             .collect::<BTreeSet<_>>(),
-//RS         task_ids
-//RS     );
-//RS     for row in &adapters {
-//RS         assert_eq!(row[0], "1");
-//RS         validate_corpus_relative_path(&row[2]).unwrap();
-//RS         validate_corpus_relative_path(&row[3]).unwrap();
-//RS         validate_corpus_relative_path(&row[4]).unwrap();
-//RS         validate_corpus_relative_path(&row[5]).unwrap();
-//RS         for path in &row[2..6] {
-//RS             let path = compiled_workload_root().join(path);
-//RS             assert!(
-//RS                 path.is_file() || path.is_dir(),
-//RS                 "adapter path is missing: {}",
-//RS                 path.display()
-//RS             );
-//RS         }
-//RS         assert_eq!(row[3], row[5], "hostile path drifted between adapters");
-//RS         assert_eq!(row[6].len(), 40);
-//RS     }
-//RS     let systems_adapter = adapters
-//RS         .iter()
-//RS         .find(|row| row[1] == "systems-file-index")
-//RS         .expect("systems adapter must stay declared");
-//RS     assert_eq!(systems_adapter[3], "fixtures/systems-file-index/hostile");
-//RS     assert_eq!(systems_adapter[5], "fixtures/systems-file-index/hostile");
-//RS 
-//RS     let peers = read_compiled_workload_tsv(
-//RS         "peer_ledger.tsv",
-//RS         "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner",
-//RS         13,
-//RS     );
-//RS     let selected = peers
-//RS         .iter()
-//RS         .filter(|row| row[2] == "best-applicable")
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(selected.len(), manifest.len());
-//RS     assert_eq!(
-//RS         selected
-//RS             .iter()
-//RS             .map(|row| row[3].as_str())
-//RS             .collect::<BTreeSet<_>>(),
-//RS         BTreeSet::from(["cxx", "domain", "go", "rust", "zig"])
-//RS     );
-//RS     assert!(
-//RS         peers.iter().any(|row| row[2] == "candidate" && row[3] == "cxx"),
-//RS         "C++ must remain represented in the declared peer ledger"
-//RS     );
-//RS     assert_eq!(
-//RS         selected
-//RS             .iter()
-//RS             .map(|row| row[1].as_str())
-//RS             .collect::<BTreeSet<_>>(),
-//RS         task_ids
-//RS     );
-//RS     for adapter in &adapters {
-//RS         let peer = selected
-//RS             .iter()
-//RS             .find(|row| row[1] == adapter[1])
-//RS             .unwrap_or_else(|| panic!("{} selected peer missing", adapter[1]));
-//RS         assert_eq!(adapter[6], peer[6], "peer revision drifted from adapter ledger");
-//RS     }
-//RS     for (task_id, language, program, source, source_url, revision, dependency_rule) in [
-//RS         (
-//RS             "systems-file-index",
-//RS             "rust",
-//RS             "local systems file-index equivalent",
-//RS             "adapters/peer/systems-file-index.rs",
-//RS             "https://github.com/jet-language/jet",
-//RS             "8b9933668f7f7d3c1a62182ff865f68989b41209",
-//RS             "repository source only;no network",
-//RS         ),
-//RS         (
-//RS             "service-json-http",
-//RS             "go",
-//RS             "local JSON HTTP service equivalent",
-//RS             "adapters/peer/service-json-http.go",
-//RS             "https://github.com/jet-language/jet",
-//RS             "8b9933668f7f7d3c1a62182ff865f68989b41209",
-//RS             "repository source only;loopback only",
-//RS         ),
-//RS         (
-//RS             "cli-archive-filter",
-//RS             "cxx",
-//RS             "local archive filter equivalent",
-//RS             "adapters/peer/cli-archive-filter.cpp",
-//RS             "https://github.com/jet-language/jet",
-//RS             "8b9933668f7f7d3c1a62182ff865f68989b41209",
-//RS             "repository source only;no network",
-//RS         ),
-//RS     ] {
-//RS         let peer = selected
-//RS             .iter()
-//RS             .find(|row| row[1] == task_id)
-//RS             .unwrap_or_else(|| panic!("{task_id} selected peer missing"));
-//RS         assert_eq!(peer[3], language);
-//RS         assert_eq!(peer[4], program);
-//RS         assert_eq!(peer[5], source_url);
-//RS         assert_eq!(peer[6], revision);
-//RS         assert_eq!(peer[9], dependency_rule);
-//RS         let adapter = adapters
-//RS             .iter()
-//RS             .find(|row| row[1] == task_id)
-//RS             .unwrap_or_else(|| panic!("{task_id} adapter missing"));
-//RS         assert_eq!(adapter[4], source);
-//RS         assert_eq!(adapter[6], peer[6]);
-//RS     }
-//RS     let selected_cross_platform = selected
-//RS         .iter()
-//RS         .find(|row| row[1] == "cross-platform-notes")
-//RS         .expect("cross-platform task needs a selected peer");
-//RS     assert_eq!(selected_cross_platform[3], "domain");
-//RS     assert_eq!(selected_cross_platform[4], "ECMAScript browser notes task adapter");
-//RS     assert_eq!(selected_cross_platform[11], "linux,macos,windows,web");
-//RS     assert!(
-//RS         selected_cross_platform[11]
-//RS             .split(',')
-//RS             .any(|target| target == "web"),
-//RS         "browser peer must claim web applicability"
-//RS     );
-//RS     for row in &selected {
-//RS         assert!(task_ids.contains(row[1].as_str()));
-//RS         assert!(row[5].starts_with("https://"));
-//RS         assert!(row[6].starts_with("tag:") || row[6].len() == 40);
-//RS         assert!(row[7..12].iter().all(|field| !field.is_empty()));
-//RS         assert!(row[12].starts_with('#'));
-//RS     }
-//RS     assert!(peers.iter().all(|row| row[12] == "#1414"));
-//RS 
-//RS     let metrics = read_compiled_workload_tsv(
-//RS         "metric_contract.tsv",
-//RS         "version\tmetric\tunit\tcomparison\tmissing_policy",
-//RS         5,
-//RS     );
-//RS     assert_eq!(metrics.len(), 10);
-//RS     assert_eq!(
-//RS         metrics.iter().map(|row| row[1].as_str()).collect::<BTreeSet<_>>(),
-//RS         BTreeSet::from([
-//RS             "source_effort",
-//RS             "build_time",
-//RS             "edit_time",
-//RS             "runtime",
-//RS             "memory",
-//RS             "artifact_size",
-//RS             "diagnostics",
-//RS             "debugging",
-//RS             "deployment",
-//RS             "unsafe_burden",
-//RS         ])
-//RS     );
-//RS 
-//RS     assert!(metrics
-//RS         .iter()
-//RS         .all(|row| {
-//RS             row[0] == "1" && !row[2].is_empty() && row[3] == "lower" && row[4] == "fail"
-//RS         }));
-//RS     let domains = read_compiled_workload_tsv("domain_contract.tsv", DOMAIN_CONTRACT_HEADER, 6);
-//RS     assert!(domains.iter().all(|row| {
-//RS         row[0] == "1"
-//RS             && task_ids.contains(row[1].as_str())
-//RS             && !row[2].is_empty()
-//RS             && !row[3].is_empty()
-//RS             && !row[4].is_empty()
-//RS             && row[5].starts_with("#1414:")
-//RS     }));
-//RS     assert_eq!(domains.len(), manifest.len());
-//RS     let systems_domain = domains
-//RS         .iter()
-//RS         .find(|row| row[1] == "systems-file-index")
-//RS         .expect("systems domain contract missing");
-//RS     assert_eq!(
-//RS         systems_domain[2],
-//RS         "jet=Core:files,crypto;rust=rust-stdlib;cxx=libstdc++;go=stdlib-os-path-filepath;swift=Foundation;zig=std;domain=POSIX filesystem indexing"
-//RS     );
-//RS     let service_domain = domains
-//RS         .iter()
-//RS         .find(|row| row[1] == "service-json-http")
-//RS         .expect("service domain contract missing");
-//RS     assert_eq!(
-//RS         service_domain[2],
-//RS         "jet=Core:files,http.client,http.server,net,time;rust=tokio+hyper;cxx=boost-beast;go=stdlib-net-http;swift=swift-nio;zig=std-http;domain=bounded JSON HTTP service"
-//RS     );
-//RS     let archive_domain = domains
-//RS         .iter()
-//RS         .find(|row| row[1] == "cli-archive-filter")
-//RS         .expect("archive domain contract missing");
-//RS     assert_eq!(
-//RS         archive_domain[2],
-//RS         "jet=Core:archive,files;rust=std+tar;cxx=c++20-stdlib;go=archive-tar;swift=Foundation;zig=std-tar;domain=POSIX ustar extraction"
-//RS     );
-//RS     assert!(!archive_domain[2].contains("libarchive"));
-//RS     let toolchains = read_compiled_workload_tsv(
-//RS         "toolchain_contract.tsv",
-//RS         "version\tlanguage\tcommand\tversion_prefix",
-//RS         4,
-//RS     );
-//RS     assert_eq!(toolchains.len(), 6);
-//RS     assert_eq!(
-//RS         toolchains
-//RS             .iter()
-//RS             .map(|row| format!("{}|{}|{}", row[1], row[2], row[3]))
-//RS             .collect::<BTreeSet<_>>(),
-//RS         BTreeSet::from([
-//RS             "jet|jet|Jet 0.1.0".to_string(),
-//RS             "rust|rustc|rustc 1.97.1".to_string(),
-//RS             "go|go|go version go1.26.5".to_string(),
-//RS             "cxx|clang++|clang version 21.1.8".to_string(),
-//RS             "zig|zig|zig 0.16.0".to_string(),
-//RS             "domain|node|node v22.23.2".to_string(),
-//RS         ])
-//RS     );
-//RS     let receipt_fields = COMPILED_RECEIPT_HEADER.split('\t').collect::<Vec<_>>();
-//RS     assert_eq!(receipt_fields.len(), 20, "compiled receipts must remain 20 columns");
-//RS     assert_eq!(
-//RS         &receipt_fields[16..],
-//RS         [
-//RS             "peer_launcher_path",
-//RS             "peer_launcher_version",
-//RS             "peer_launcher_sha256",
-//RS             "authority",
-//RS         ]
-//RS     );
-//RS     assert_eq!(PEER_LAUNCH_CONTRACT, "compiled-workload-peer-isolation-v1");
-//RS 
-//RS     let tiers = read_compiled_workload_tsv(
-//RS         "tier_matrix.tsv",
-//RS         "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale",
-//RS         9,
-//RS     );
-//RS     assert_eq!(tiers.len(), 39);
-//RS     assert_eq!(
-//RS         tiers
-//RS             .iter()
-//RS             .map(|row| format!("{}|{}", row[6], row[7]))
-//RS             .collect::<BTreeSet<_>>(),
-//RS         BTreeSet::from([
-//RS             "local|host-toolchain".to_string(),
-//RS             "local|host-runtime".to_string(),
-//RS             "local|browser-runtime".to_string(),
-//RS             "external|host-platform".to_string(),
-//RS             "external|cross-toolchain".to_string(),
-//RS             "excluded|freestanding-profile".to_string(),
-//RS         ])
-//RS     );
-//RS     let aarch64_rows = tiers
-//RS         .iter()
-//RS         .filter(|row| row[2] == "cross-target" && row[3] == "aarch64-unknown-linux-gnu")
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(aarch64_rows.len(), 5);
-//RS     assert!(aarch64_rows
-//RS         .iter()
-//RS         .all(|row| row[5] == "required" && row[6] == "external" && row[7] == "cross-toolchain"));
-//RS     let web_row = tiers
-//RS         .iter()
-//RS         .find(|row| row[2] == "cross-target" && row[3] == "web")
-//RS         .expect("cross-target web tier must stay declared");
-//RS     assert_eq!(&web_row[5..8], ["required", "local", "browser-runtime"]);
-//RS     let hosted_targets = [
-//RS         ("systems-file-index", "aarch64-unknown-linux-gnu"),
-//RS         ("service-json-http", "aarch64-unknown-linux-gnu"),
-//RS         ("cli-archive-filter", "aarch64-unknown-linux-gnu"),
-//RS         ("library-json-roundtrip", "aarch64-unknown-linux-gnu"),
-//RS         ("compute-mandelbrot", "aarch64-unknown-linux-gnu"),
-//RS         ("cross-platform-notes", "web"),
-//RS     ];
-//RS     for (task_id, cross_target) in hosted_targets {
-//RS         let required = tiers
-//RS             .iter()
-//RS             .filter(|row| row[1] == task_id && row[5] == "required")
-//RS             .map(|row| format!("{}|{}|{}|{}", row[1], row[2], row[3], row[4]))
-//RS             .collect::<BTreeSet<_>>();
-//RS         assert_eq!(
-//RS             required,
-//RS             BTreeSet::from([
-//RS                 format!("{task_id}|linux|x86_64-unknown-linux-gnu|aot"),
-//RS                 format!("{task_id}|macos|x86_64-apple-darwin|aot"),
-//RS                 format!("{task_id}|windows|x86_64-pc-windows-msvc|aot"),
-//RS                 format!("{task_id}|cross-target|{cross_target}|aot"),
-//RS                 format!("{task_id}|linux|x86_64-unknown-linux-gnu|jit"),
-//RS             ])
-//RS         );
-//RS     }
-//RS     let cross_platform_web = tiers
-//RS         .iter()
-//RS         .find(|row| {
-//RS             row[1] == "cross-platform-notes"
-//RS                 && row[2] == "cross-target"
-//RS                 && row[3] == "web"
-//RS                 && row[4] == "aot"
-//RS         })
-//RS         .expect("cross-platform web tier must stay declared");
-//RS     assert_eq!(cross_platform_web[5], "required");
-//RS 
-//RS     let embedded = tiers
-//RS         .iter()
-//RS         .filter(|row| row[1] == "embedded-sensor-ring")
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(embedded.len(), 9, "embedded rows must stay visible");
-//RS     let embedded_excluded = embedded
-//RS         .iter()
-//RS         .filter(|row| row[5] == "excluded")
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(embedded_excluded.len(), 5);
-//RS     assert!(embedded_excluded
-//RS         .iter()
-//RS         .all(|row| {
-//RS             row[6] == "excluded"
-//RS                 && row[7] == "freestanding-profile"
-//RS                 && row[8].contains("#2046")
-//RS                 && row[8].contains("#2300")
-//RS         }));
-//RS     assert_eq!(
-//RS         embedded
-//RS             .iter()
-//RS             .filter(|row| row[5] == "required")
-//RS             .map(|row| format!("{}|{}|{}", row[2], row[3], row[4]))
-//RS             .collect::<BTreeSet<_>>(),
-//RS         BTreeSet::from([
-//RS             "linux|x86_64-unknown-linux-gnu|aot".to_string(),
-//RS             "macos|x86_64-apple-darwin|aot".to_string(),
-//RS             "windows|x86_64-pc-windows-msvc|aot".to_string(),
-//RS             "linux|x86_64-unknown-linux-gnu|jit".to_string(),
-//RS         ])
-//RS     );
-//RS 
-//RS     let canaries = read_compiled_workload_tsv(
-//RS         "canaries.tsv",
-//RS         "version\tcanary\tmutation\trequired_failure",
-//RS         4,
-//RS     );
-//RS     assert_eq!(canaries.len(), 20, "all declared removal canaries must stay present");
-//RS     assert_eq!(
-//RS         canaries
-//RS             .iter()
-//RS             .map(|row| row[1].as_str())
-//RS             .collect::<BTreeSet<_>>(),
-//RS         BTreeSet::from([
-//RS             "comparison-dependency-drift",
-//RS             "comparison-toolchain-drift",
-//RS             "statistics-drift",
-//RS             "receipt-input-drift",
-//RS             "missing-samples",
-//RS             "missing-statistics",
-//RS             "missing-receipt",
-//RS             "missing-tier-receipt",
-//RS             "missing-outcome",
-//RS             "unrelated-live-owner",
-//RS             "missing-metric",
-//RS             "missing-tier",
-//RS             "changed-input",
-//RS             "embedded-review-claim",
-//RS             "stale-candidate",
-//RS             "unowned-metric-loss",
-//RS             "required-tier-loss",
-//RS             "toolchain-drift",
-//RS             "missing-peer-coverage",
-//RS             "candidate-peer-loss",
-//RS         ])
-//RS     );
-//RS     assert!(canaries
-//RS         .iter()
-//RS         .all(|row| {
-//RS             row[0] == "1"
-//RS                 && !row[1].is_empty()
-//RS                 && !row[2].is_empty()
-//RS                 && !row[3].is_empty()
-//RS         }));
-//RS }
-//RS 
-//RS #[test]
-// END-PORT-PENDING 0963 tests/agent_workloads.rs:1-2015
+// #769: executable AI-agent workload conformance corpus.
+use std.fs
+use std.io.[Write, Error, ErrorKind]
+use std.process.[Command, Output, Stdio]
+use std.sync.[LazyLock, Mutex, MutexGuard]
+use std.thread
+use std.time.[Duration, Instant]
+use core.sys.target
+use jet.SHA256
+use common
 
+// Rust: tests/agent_workloads.rs:14
+// GATE #4494: native mutex and poison recovery.
+JET_WORKLOAD_LOCK :: LazyLock.new(() -> Mutex.new(()))
+// Rust: tests/agent_workloads.rs:16
+fn jet_workload_lock() -> MutexGuard<()> {
+    JET_WORKLOAD_LOCK.lock().unwrap_or_else((poisoned) -> poisoned.into_inner())
+}
+// Rust: tests/agent_workloads.rs:22
+fn jet_workload_guard(command: &Command) -> MutexGuard<()>? {
+    if command.get_program() == OSPath(common.jet_bin()).as_os_str() { Val(jet_workload_lock()) }
+    else { None }
+}
+// Rust: tests/agent_workloads.rs:30
+HEADER :: "version\ttask_id\tdomain\tcase\tdeclared_outcome\tinput\texpected\tauthority\tadapters\tplatforms\tevidence\ttower_card\tloss_cards"
+// Rust: tests/agent_workloads.rs:31
+COMPILED_RECEIPT_HEADER :: "version\ttask_id\tlanguage\tsource_sha256\tinput_sha256\texpected_sha256\toutput_sha256\thostile_input_sha256\thostile_output_sha256\tenvironment\tmachine\ttool_version\tcommand\tpeer_commit\texit_code\thostile_exit_code\tpeer_launcher_path\tpeer_launcher_version\tpeer_launcher_sha256\tauthority"
+// Rust: tests/agent_workloads.rs:32
+PEER_LAUNCH_CONTRACT :: "compiled-workload-peer-isolation-v1"
+// Rust: tests/agent_workloads.rs:33
+DOMAIN_CONTRACT_HEADER :: "version\ttask_id\tallowed_dependencies\tmachine_spec\tvariant\tscoring"
+// Rust: tests/agent_workloads.rs:35
+BASELINE_HEADER :: "version\trun_id\tmachine\tadapter\ttask_id\texpressibility\tfinding\tinput_sha256\texpected_sha256\texit_code\tsource_tokens\tstdout_file\tstdout_sha256\tstderr_file\tstderr_sha256\tcold_ns\twarm_ns\twarm_stdout_sha256\twarm_stderr_sha256\toutput_stable\tscoring\ttool_version\tpolicy_digest"
+// Rust: tests/agent_workloads.rs:37
+PROCESS_DEADLINE :: Duration.from_secs(120)
+// Rust: tests/agent_workloads.rs:38
+PROCESS_OUTPUT_LIMIT_BYTES: U64 :: 1_048_576
+// Rust: tests/agent_workloads.rs:39
+DOMAIN_SCORING :: "#769:v1;exit=0;stdout=exact;cold=recorded;warm=equal;input=unchanged;scratch=closed"
+// Rust: tests/agent_workloads.rs:41
+POLICY_CONTRACT :: include_str("tests/agent_workloads/policy.tsv")
+// Rust: tests/agent_workloads.rs:42
+POLICY_FIELDS :: ["version", "plan", "launch_transaction", "descendants", "limits", "outputs", "receipt", "authority"]
+// Rust: tests/agent_workloads.rs:52
+NATIVE_OS_MATRIX_HEADER :: "version\tos\tarch_policy\trequirement\tadapters\treason"
+// Rust: tests/agent_workloads.rs:53
+EXPECTED_NATIVE_OS_MATRIX :: [
+    ("linux", "x86_64", "required", "jet,bash,python,node", "native"),
+    ("macos", "any", "required", "jet,bash,python,node", "native"),
+    ("windows", "any", "excluded", "jet,python,node", "bash-not-native;exclusion=D-PLATFORM-EVIDENCE1;expires=2026-11-24;reopen=windows-native-bash-adapter-lands"),
+]
+// Rust: tests/agent_workloads.rs:70
+JET_BASELINE_HEADER :: "version\ttask_id\tjet_status\tloss_owner"
+// Rust: tests/agent_workloads.rs:71
+SANDBOX_HOSTILE_CORPUS :: include_str("tests/fixtures/build_sandbox/hostile-corpus.tsv")
+// Rust: tests/agent_workloads.rs:72
+EXPECTED_TASKS :: [
+    ("repository-marker-scan", "repository-search-and-edit", "success", "exit=0;stdout=exact"),
+    ("repository-marker-scan-empty", "repository-search-and-edit", "hostile-empty", "exit=0;stdout=exact"),
+    ("repository-semantic-inspection", "repository-search-and-edit", "semantic-index", "exit=0;stdout=exact"),
+    ("repository-semantic-edit", "repository-search-and-edit", "semantic-rename-with-decoys", "exit=0;stdout=exact"),
+    ("git-diff-review", "build-test-debug-and-git", "mixed-change", "exit=0;stdout=exact"),
+    ("git-diff-empty", "build-test-debug-and-git", "hostile-empty-diff", "exit=0;stdout=exact"),
+    ("build-test-failure-recovery", "build-test-debug-and-git", "compile-check-recovery", "exit=0;stdout=exact"),
+    ("incident-report-success", "data-cleanup-and-report-generation", "success", "exit=0;stdout=exact"),
+    ("incident-report-malformed", "data-cleanup-and-report-generation", "malformed-input", "exit=0;stdout=exact"),
+    ("incident-report-partial", "data-cleanup-and-report-generation", "partial-failure", "exit=0;stdout=exact"),
+    ("structured-data-transform", "structured-data", "json-normalize", "exit=0;stdout=exact"),
+    ("structured-data-hostile", "structured-data", "malformed-json", "exit=0;stdout=exact"),
+    ("database-access", "databases", "parameterized-query", "exit=0;stdout=exact"),
+    ("database-hostile", "databases", "invalid-row", "exit=0;stdout=exact"),
+    ("http-api", "http-apis", "loopback-json-post", "exit=0;stdout=exact"),
+    ("http-hostile", "http-apis", "rejected-payload", "exit=0;stdout=exact"),
+    ("process-batch-success", "long-running-and-interactive-commands", "success", "exit=0;stdout=exact"),
+    ("process-batch-large-stderr", "long-running-and-interactive-commands", "large-stderr", "exit=0;stdout=exact"),
+    ("process-batch-timeout-recovery", "long-running-and-interactive-commands", "timeout-cancellation-cleanup", "exit=0;stdout=exact"),
+    ("browser-automation-preflight", "browser-and-desktop-work", "profile-timeout-hostile", "exit=0;stdout=exact"),
+    ("desktop-interaction-focus", "browser-and-desktop-work", "keyboard-focus-hostile", "exit=0;stdout=exact"),
+    ("document-markdown-inspection", "document-and-media-work", "malformed-document", "exit=0;stdout=exact"),
+    ("media-asset-inventory", "document-and-media-work", "unsupported-media-hostile", "exit=0;stdout=exact"),
+    ("mcp-environment-readonly", "mcp-tools-and-hooks", "readonly-resource", "exit=0;stdout=exact"),
+    ("mcp-environment-denied", "mcp-tools-and-hooks", "hostile-denied-resource", "exit=0;stdout=exact"),
+    ("interactive-terminal-dialogue", "interactive-terminals", "pty-dialogue", "exit=0;stdout=exact"),
+    ("interactive-terminal-closed", "interactive-terminals", "hostile-closed-session", "exit=0;stdout=exact"),
+    ("service-lifecycle-roundtrip", "service-lifecycle", "up-health-wait-logs-down", "exit=0;stdout=exact"),
+    ("service-lifecycle-readiness-timeout", "service-lifecycle", "hostile-readiness-timeout", "exit=0;stdout=exact"),
+]
+// Rust: tests/agent_workloads.rs:248
+ADAPTERS :: [("jet", "jet"), ("bash", "bash"), ("python", "py"), ("node", "mjs")]
+// Rust: tests/agent_workloads.rs:254
+BASELINE_ADAPTERS :: ["bash", "python", "node"]
+// Rust: tests/agent_workloads.rs:255
+EXPECTED_DOMAIN_CONTRACT :: [
+    ("build-test-failure-recovery", "jet=Core:files,process,sys,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("process-batch-success", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("process-batch-large-stderr", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("process-batch-timeout-recovery", "jet=Core:files,process,time;bash=bash,coreutils;python=stdlib-pathlib,stdlib-subprocess;node=stdlib-fs,stdlib-child-process", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("structured-data-transform", "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("structured-data-hostile", "jet=Core:encoding.json,files,process;bash=jq;python=stdlib-json;node=stdlib-fs-json", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("database-access", "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("database-hostile", "jet=Core:db,files,process+bundled-SQLite;bash=python3-stdlib-sqlite3;python=stdlib-sqlite3;node=node:sqlite", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("http-api", "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("http-hostile", "jet=Core:http,http.client,http.server,net,files,process;bash=curl+python3-http.server;python=stdlib-urllib+http.server;node=stdlib-http-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("browser-automation-preflight", "jet=Core:web.browser,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("desktop-interaction-focus", "jet=Core:ui,files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("document-markdown-inspection", "jet=Core:files,process;bash=find,awk;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("media-asset-inventory", "jet=Core:files,net.mime,process;bash=find,wc;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("mcp-environment-readonly", "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("mcp-environment-denied", "jet=Core:process,sys;bash=jet-cli;python=jet-cli;node=jet-cli", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("interactive-terminal-dialogue", "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process", "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable", "normal"),
+    ("interactive-terminal-closed", "jet=Core:process,terminal,sh;bash=script,timeout,sh;python=script,stdlib-subprocess;node=script,stdlib-child-process", "linux-x86_64:nix-core;macos-native:util-linux-script-unavailable;windows-native:unavailable", "hostile"),
+    ("service-lifecycle-roundtrip", "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process", "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable", "normal"),
+    ("service-lifecycle-readiness-timeout", "jet=Core:process,files,sys,jetpack-cli,systemd-shim;bash=jetpack-cli,systemd-shim,coreutils;python=jetpack-cli,systemd-shim,stdlib-subprocess;node=jetpack-cli,systemd-shim,stdlib-child-process", "linux-x86_64:nix-core;macos-native:E1332-service-authority;windows-native:unavailable", "hostile"),
+    ("repository-marker-scan", "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("repository-marker-scan-empty", "jet=Core:files,process;bash=bash-stdlib;python=stdlib-pathlib;node=stdlib-fs-path", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("repository-semantic-inspection", "jet=Core:process,sys,inspect-semindex;bash=awk;python=stdlib-pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("repository-semantic-edit", "jet=Core:files,process,inspect-codemod;bash=cp,awk,mv;python=stdlib-shutil,pathlib;node=stdlib-fs", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+    ("git-diff-review", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "normal"),
+    ("git-diff-empty", "jet=Core:process,git;bash=git;python=stdlib-subprocess+git;node=stdlib-child-process+git", "linux-x86_64:nix-core;macos-native:host;windows-native:unavailable", "hostile"),
+]
+// Rust: tests/agent_workloads.rs:414
+struct Task {
+    id: String, domain: String, case: String, outcome: String, input: String,
+    expected: String, authority: String, adapters: String, platforms: String,
+    evidence: String, tower_card: String, loss_cards: String,
+}
+// Rust: tests/agent_workloads.rs:430
+struct DomainContract {
+    task_id: String, allowed_dependencies: String, machine_spec: String,
+    variant: String, scoring: String,
+}
+// Rust: tests/agent_workloads.rs:439
+struct Measurement {
+    adapter: String, source_tokens: USize, cold: Duration, warm: Duration,
+    version: String, cold_stderr_bytes: USize, cold_stderr_sha256: String,
+    warm_stderr_bytes: USize, warm_stderr_sha256: String,
+}
+// Rust: tests/agent_workloads.rs:452
+struct Scratch {
+    path: OSPath,
+    // Rust: tests/agent_workloads.rs:457
+    fn new(prefix: &String) -> Scratch {
+        path :: common.unique_tmp(prefix)
+        fs.create_dir_all(&path).unwrap()
+        Scratch { path }
+    }
+    // Rust: tests/agent_workloads.rs:465
+    fn drop(&self) -> {
+        fs.remove_dir_all(&self.path).unwrap_or_else((error) -> {
+            panic("scratch cleanup failed for {self.path.display()}: {error}")
+        })
+    }
+}
+// Rust: tests/agent_workloads.rs:475
+struct BoundedOutput { output: Output, elapsed: Duration, timed_out: Bool, limit_exceeded: Bool }
+// Rust: tests/agent_workloads.rs:482
+fn corpus_root() -> OSPath { OSPath(common.manifest_dir()).join("tests/agent_workloads") }
+// Rust: tests/agent_workloads.rs:486
+fn compiled_workload_root() -> OSPath { OSPath(common.manifest_dir()).join("tests/compiled_workloads") }
+// Rust: tests/agent_workloads.rs:490
+fn read_compiled_workload_tsv(relative: &String, header: &String, width: USize) -> [[String]] {
+    text :: fs.read_to_string(compiled_workload_root().join(relative)).unwrap()
+    lines := text.lines()
+    assert_eq(lines.next(), Val(header), "compiled workload schema drifted")
+    lines.filter((line) -> !line.is_empty()).map((line) -> {
+        fields :: line.split('\t').map((field) -> field.to_string()).collect()
+        assert_eq(fields.len(), width, "bad compiled workload row: {line}")
+        fields
+    }).collect()
+}
+// Rust: tests/agent_workloads.rs:504
+fn policy_field(name: &String) -> String {
+    POLICY_CONTRACT.lines().find_map((line) -> line.strip_prefix(name).and_then((value) -> value.strip_prefix('=')))
+        .unwrap_or_else(() -> panic("policy contract lacks field {name}")).to_string()
+}
+// Rust: tests/agent_workloads.rs:514
+fn policy_digest() -> String {
+    for field in POLICY_FIELDS { _ :: policy_field(field) }
+    text := POLICY_CONTRACT.trim_end_matches('\n') // #4303
+    SHA256.sha256_hex(text.as_bytes())
+}
+// Rust: tests/agent_workloads.rs:521
+fn policy_receipt(digest: &String) -> String {
+    "policy\tversion={policy_field("version")}\tdigest={digest}\tplan={policy_field("plan")}\tlaunch_transaction={policy_field("launch_transaction")}\tdescendants={policy_field("descendants")}\tlimits={policy_field("limits")}\toutputs={policy_field("outputs")}\treceipt={policy_field("receipt")}\tauthority={policy_field("authority")}" 
+}
+// Rust: tests/agent_workloads.rs:535
+fn validate_corpus_relative_path(relative: &String) -> () Err! {
+    if relative.is_empty() || OSPath(relative).is_absolute() || relative.contains(':') ||
+        relative.split((character) -> character == '/' || character == '\\').any((part) -> part.is_empty() || part == "." || part == "..") {
+        throw "invalid corpus fixture path: {relative}"
+    }
+}
+// Rust: tests/agent_workloads.rs:548
+fn validate_authority(authority: &String) -> () Err! {
+    if authority != policy_field("authority") { throw "unsupported authority enforcement: {authority}" }
+}
+// Rust: tests/agent_workloads.rs:556
+fn adapter_stem(task_id: &String) -> String {
+    if task_id == "repository-marker-scan" || task_id == "repository-marker-scan-empty" { "repository_marker_scan" }
+    else if task_id == "repository-semantic-inspection" { "repository_semantic_inspection" }
+    else if task_id == "repository-semantic-edit" { "repository_semantic_edit" }
+    else if task_id == "git-diff-review" || task_id == "git-diff-empty" { "git_diff_review" }
+    else if task_id == "build-test-failure-recovery" { "build_test_recovery" }
+    else if task_id.starts_with("incident-report-") { "incident_report" }
+    else if task_id.starts_with("structured-data-") { "structured_data" }
+    else if task_id.starts_with("database-") { "database_access" }
+    else if task_id.starts_with("http-") { "http_api" }
+    else if task_id.starts_with("process-batch-") { "process_batch" }
+    else if task_id.starts_with("mcp-environment-") { "mcp_resource" }
+    else if task_id.starts_with("interactive-terminal-") { "interactive_terminal" }
+    else if task_id.starts_with("service-lifecycle-") { "service_lifecycle" }
+    else if task_id == "browser-automation-preflight" { "browser_automation_preflight" }
+    else if task_id == "desktop-interaction-focus" { "desktop_interaction_focus" }
+    else if task_id == "document-markdown-inspection" { "document_markdown_inspection" }
+    else if task_id == "media-asset-inventory" { "media_asset_inventory" }
+    else { panic("task has no adapter source: {task_id}") }
+}
+// Rust: tests/agent_workloads.rs:596
+fn read_domain_contract() -> [DomainContract] {
+    contract :: fs.read_to_string(corpus_root().join("domain_contract.tsv")).unwrap()
+    lines := contract.lines()
+    assert_eq(lines.next(), Val(DOMAIN_CONTRACT_HEADER), "agent workload domain contract schema drifted")
+    lines.filter((line) -> !line.is_empty()).map((line) -> {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 6, "bad domain contract row: {line}")
+        assert_eq(fields[0], "1", "unsupported domain contract version: {line}")
+        assert_eq(fields[5], DOMAIN_SCORING, "domain scoring drifted: {line}")
+        DomainContract { task_id: fields[1].to_string(), allowed_dependencies: fields[2].to_string(), machine_spec: fields[3].to_string(), variant: fields[4].to_string(), scoring: fields[5].to_string() }
+    }).collect()
+}
+// Rust: tests/agent_workloads.rs:625
+fn read_tasks() -> [Task] {
+    manifest :: fs.read_to_string(corpus_root().join("manifest.tsv")).unwrap()
+    lines := manifest.lines()
+    assert_eq(lines.next(), Val(HEADER), "agent workload manifest schema drifted")
+    lines.filter((line) -> !line.is_empty()).map((line) -> {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 13, "bad agent workload manifest row: {line}")
+        assert_eq(fields[0], "1", "unsupported corpus version in: {line}")
+        validate_corpus_relative_path(fields[5]).unwrap_or_else((error) -> panic("{error}"))
+        validate_corpus_relative_path(fields[6]).unwrap_or_else((error) -> panic("{error}"))
+        Task { id: fields[1].to_string(), domain: fields[2].to_string(), case: fields[3].to_string(), outcome: fields[4].to_string(), input: fields[5].to_string(), expected: fields[6].to_string(), authority: fields[7].to_string(), adapters: fields[8].to_string(), platforms: fields[9].to_string(), evidence: fields[10].to_string(), tower_card: fields[11].to_string(), loss_cards: fields[12].to_string() }
+    }).collect()
+}
+// Rust: tests/agent_workloads.rs:659
+fn read_native_os_matrix() -> [(String, String, String, String, String)] {
+    matrix :: fs.read_to_string(corpus_root().join("native_os_matrix.tsv")).unwrap()
+    lines := matrix.lines()
+    assert_eq(lines.next(), Val(NATIVE_OS_MATRIX_HEADER), "native OS matrix schema drifted")
+    lines.filter((line) -> !line.is_empty()).map((line) -> {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 6, "bad native OS matrix row: {line}")
+        assert_eq(fields[0], "1", "unsupported native OS matrix version: {line}")
+        (fields[1].to_string(), fields[2].to_string(), fields[3].to_string(), fields[4].to_string(), fields[5].to_string())
+    }).collect()
+}
+// Rust: tests/agent_workloads.rs:687
+fn read_jet_baseline() -> [(String, String, String)] {
+    baseline :: fs.read_to_string(corpus_root().join("jet_baseline.tsv")).unwrap()
+    lines := baseline.lines()
+    assert_eq(lines.next(), Val(JET_BASELINE_HEADER), "Jet baseline schema drifted")
+    lines.filter((line) -> !line.is_empty()).map((line) -> {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 4, "bad Jet baseline row: {line}")
+        assert_eq(fields[0], "1", "unsupported Jet baseline version: {line}")
+        (fields[1].to_string(), fields[2].to_string(), fields[3].to_string())
+    }).collect()
+}
+// Rust: tests/agent_workloads.rs:706
+fn pinned_adapter_versions() -> [String:String] {
+    receipt :: fs.read_to_string(corpus_root().join("baselines/receipt.tsv")).unwrap()
+    lines := receipt.lines()
+    assert_eq(lines.next(), Val(BASELINE_HEADER), "baseline schema drifted while reading tool pins")
+    versions := [String:String]{}
+    for line in lines.filter((line) -> !line.is_empty()) {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 23, "bad baseline receipt row: {line}")
+        adapter :: if fields[3] == {
+            "bash" -> "bash"
+            "python" -> "python"
+            "node" -> "node"
+            other -> panic("unknown pinned adapter: {other}")
+        }
+        version :: fields[21]
+        assert(!version.is_empty() && version != "unknown")
+        if versions.insert(adapter, version.to_string()) == Val(previous) {
+            assert_eq(previous, version, "pinned tool version drifted for {adapter}")
+        }
+    }
+    adapters := versions.keys().collect()
+    adapters.sort()
+    expected := BASELINE_ADAPTERS.to_vec()
+    expected.sort()
+    assert_eq(adapters, expected, "baseline must pin every competitor adapter exactly once")
+    versions
+}
+// Rust: tests/agent_workloads.rs:741
+// GATE #4494: process launch, retained output files, threads and clock.
+fn run_bounded(command: Command, label: &String, deadline: Duration) -> BoundedOutput {
+    command := ^command
+    // Serial launches retain a cache lease until descendant cleanup has finished.
+    _jet_guard :: jet_workload_guard(&command)
+    capture :: Scratch.new("jet_agent_process_output")
+    defer capture.drop()
+    stdout_path :: capture.path.join("stdout")
+    stderr_path :: capture.path.join("stderr")
+    command.stdout(Stdio.from(fs.File.create(&stdout_path).unwrap())).stderr(Stdio.from(fs.File.create(&stderr_path).unwrap()))
+    // GATE #4483: selected-target family, not host cfg.
+    if target.selected_family() == "unix" { command.process_group(0) }
+    started :: Instant.now()
+    child := command.spawn().unwrap_or_else((err) -> panic("cannot start `{label}`: {err}"))
+    child_pid :: child.id()
+    (status, timed_out, limit_exceeded) :: loop {
+        if child.try_wait().unwrap() == Val(status) {
+            group_result :: if target.selected_family() == "unix" { kill_process_group(child_pid) } else { Ok(()) }
+            status :: child.wait().unwrap_or(status)
+            group_result.unwrap_or_else((error) -> panic("process-group cleanup failed for `{label}`: {error}"))
+            break (status, false, output_size(&stdout_path, &stderr_path) > PROCESS_OUTPUT_LIMIT_BYTES)
+        }
+        if output_size(&stdout_path, &stderr_path) > PROCESS_OUTPUT_LIMIT_BYTES {
+            group_result :: if target.selected_family() == "unix" { kill_process_group(child.id()) } else { Ok(()) }
+            _ :: child.kill()
+            status :: child.wait().unwrap()
+            group_result.unwrap_or_else((error) -> panic("process-group cleanup failed for `{label}`: {error}"))
+            break (status, false, true)
+        }
+        if started.elapsed() >= deadline {
+            group_result :: if target.selected_family() == "unix" { kill_process_group(child.id()) } else { Ok(()) }
+            _ :: child.kill()
+            status :: child.wait().unwrap()
+            group_result.unwrap_or_else((error) -> panic("process-group cleanup failed for `{label}`: {error}"))
+            break (status, true, false)
+        }
+        thread.sleep(Duration.from_millis(5))
+    }
+    BoundedOutput { output: Output { status, stdout: fs.read(stdout_path).unwrap(), stderr: fs.read(stderr_path).unwrap() }, elapsed: started.elapsed(), timed_out, limit_exceeded }
+}
+// Rust: tests/agent_workloads.rs:821
+fn output_size(stdout: &OSPath, stderr: &OSPath) -> U64 {
+    fs.metadata(stdout).map((file) -> file.len()).unwrap_or(0) + fs.metadata(stderr).map((file) -> file.len()).unwrap_or(0)
+}
+// Rust: tests/agent_workloads.rs:827
+fn kill_process_group(pid: U32) -> () Err! {
+    pid :: I32.try_from(pid).unwrap_or_else(() -> { throw "child PID does not fit platform process ID" })
+    // GATE #4494: Core native kill binding and errno; GATE #4409: NotFound fidelity.
+    // Rust: tests/agent_workloads.rs:829
+    #Unsafe("Negative PID targets only the bounded child's own group; SIGKILL fails closed")
+    result :: core.sys.posix.kill(-pid, 9)
+    if result != 0 {
+        error :: Error.last_os_error()
+        if error.kind() != ErrorKind.NotFound && error.raw_os_error() != Val(3) {
+            throw "kill(-{pid}, SIGKILL): {error}"
+        }
+    }
+}
+// Rust: tests/agent_workloads.rs:851
+fn stderr_receipt(output: &Output) -> String {
+    "stderr_bytes={output.stderr.len()} stderr_sha256={SHA256.sha256_hex(&output.stderr)}"
+}
+// Rust: tests/agent_workloads.rs:860
+// Linux-only caller dispatch uses target.selected_os(); GATE #4483.
+fn process_is_gone_or_zombie(pid: U32) -> Bool {
+    path :: OSPath("/proc/{pid}/stat")
+    stat :: fs.read_to_string(path).unwrap_or_else((_) -> { return true })
+    stat.rsplit_once(") ").and_then(((_, fields)) -> fields.split_whitespace().next()) == Val("Z")
+}
+// Rust: tests/agent_workloads.rs:870
+fn command_version(program: &OSPath, arg: &String, label: &String) -> String {
+    command := Command.new(program)
+    command.arg(arg)
+    bounded :: run_bounded(^command, label, PROCESS_DEADLINE)
+    assert(!bounded.timed_out, "`{label}` version timed out")
+    assert(!bounded.limit_exceeded, "`{label}` output limit exceeded")
+    assert(bounded.output.status.success(), "`{label} {arg}` failed")
+    text :: if bounded.output.stdout.is_empty() { &bounded.output.stderr } else { &bounded.output.stdout }
+    first := String.from_utf8_lossy(text).lines().next().unwrap_or("unknown").trim() // #4303
+    first.to_string()
+}
+// Rust: tests/agent_workloads.rs:890
+fn write_agent_workload_package(scratch: &OSPath) -> {
+    fs.write(scratch.join("package.jet"), "name: \"agent-workload\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FS, IO, Mem.Alloc, Net, Time] } }\n").unwrap()
+}
+// Rust: tests/agent_workloads.rs:898
+fn adapter_command(adapter: &String, source: &OSPath, jet_cli: &OSPath, input: &OSPath, scratch: &OSPath, task_id: &String) -> Command {
+    if adapter != "jet" {
+        package :: scratch.join("package.jet")
+        // GATE #4409: retain NotFound-only tolerance.
+        fs.remove_file(&package).unwrap_or_else((error) -> {
+            if error.kind() != ErrorKind.NotFound { panic("remove fixture package `{package.display()}`: {error}") }
+        })
+    }
+    command := if adapter == {
+        "jet" -> {
+            write_agent_workload_package(scratch)
+            local_source :: scratch.join(source.file_name().unwrap())
+            _ :: fs.copy(source, &local_source).unwrap()
+            cmd := Command.new(jet_cli)
+            cmd.args(["run", "--release"]).arg(local_source).arg("--").env("JET_RECEIPT_BYPASS", "1")
+            cmd
+        }
+        "bash" -> { cmd := Command.new("bash"); cmd.arg(source); cmd }
+        "python" -> { cmd := Command.new("python3"); cmd.arg(source); cmd }
+        "node" -> { cmd := Command.new("node"); cmd.arg(source); cmd }
+        other -> panic("unknown adapter {other}")
+    }
+    command.arg(input).env("JET_CORPUS_JET", jet_cli).env("JET_CORPUS_JETPACK", common.jetpack_bin()).env("JET_CORPUS_TASK", task_id).current_dir(scratch)
+    command
+}
+// Rust: tests/agent_workloads.rs:952
+fn jet_tier_command(jet_cli: &OSPath, source: &OSPath, input: &OSPath, scratch: &OSPath, task_id: &String, tier_args: &[String]) -> Command {
+    command := Command.new(jet_cli)
+    command.args(["run"]).args(tier_args).arg(source).arg("--").env("JET_RECEIPT_BYPASS", "1")
+    command.arg(input).env("JET_CORPUS_JET", jet_cli).env("JET_CORPUS_JETPACK", common.jetpack_bin()).env("JET_CORPUS_TASK", task_id).current_dir(scratch)
+    command
+}
+// Rust: tests/agent_workloads.rs:976
+fn tree_hashes(root: &OSPath) -> [String:String] {
+    // Rust: tests/agent_workloads.rs:977
+    fn walk(root: &OSPath, dir: &OSPath, out: &[String:String]) -> {
+        for entry in fs.read_dir(dir).unwrap() {
+            path :: entry.unwrap().path()
+            if path.is_dir() { walk(root, &path, out) }
+            else {
+                relative :: path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/")
+                out.insert(relative, SHA256.sha256_hex(&fs.read(path).unwrap()))
+            }
+        }
+    }
+    out := [String:String]{}
+    walk(root, root, &out)
+    out
+}
+// Rust: tests/agent_workloads.rs:997
+fn input_hashes(input: &OSPath) -> [String:String] {
+    if input.is_dir() { return tree_hashes(input) }
+    [input.file_name().unwrap().to_string_lossy().to_string(): SHA256.sha256_hex(&fs.read(input).unwrap())]
+}
+// Rust: tests/agent_workloads.rs:1007
+fn input_digest(input: &OSPath) -> String {
+    canonical := String.new()
+    hashes :: input_hashes(input)
+    paths := hashes.keys().collect()
+    paths.sort()
+    for path in paths { canonical.push_str(&path); canonical.push('\t'); canonical.push_str(&hashes[path]); canonical.push('\n') }
+    SHA256.sha256_hex(canonical.as_bytes())
+}
+// Rust: tests/agent_workloads.rs:1018
+struct BaselineCapture {
+    root: OSPath, run_id: String, machine: String, receipt: fs.File,
+    // Rust: tests/agent_workloads.rs:1026
+    fn from_env() -> BaselineCapture? {
+        root :: OSPath(std.env.var_os("JET_CORPUS_BASELINE_DIR")?)
+        run_id :: std.env.var("JET_CORPUS_BASELINE_RUN_ID").expect("JET_CORPUS_BASELINE_RUN_ID is required when capturing baselines")
+        machine :: std.env.var("JET_CORPUS_BASELINE_MACHINE").expect("JET_CORPUS_BASELINE_MACHINE is required when capturing baselines")
+        fs.create_dir_all(root.join("outputs")).unwrap()
+        receipt := fs.File.create(root.join("receipt.tsv")).unwrap()
+        receipt.write_all("{BASELINE_HEADER}\n".as_bytes()).unwrap()
+        Val(BaselineCapture { root, run_id, machine, receipt })
+    }
+    // Rust: tests/agent_workloads.rs:1043
+    fn record(&self, task: &Task, adapter: &String, source: &OSPath, input: &OSPath, expected: &[U8], cold: &BoundedOutput, warm: &BoundedOutput, version: &String) -> {
+        output_dir :: self.root.join("outputs").join(adapter)
+        fs.create_dir_all(&output_dir).unwrap()
+        stdout_file :: "outputs/{adapter}/{task.id}.stdout"
+        stderr_file :: "outputs/{adapter}/{task.id}.stderr"
+        fs.write(self.root.join(&stdout_file), &cold.output.stdout).unwrap()
+        fs.write(self.root.join(&stderr_file), &cold.output.stderr).unwrap()
+        output_stable :: cold.output.stdout == warm.output.stdout
+        supported :: cold.output.status.code() == Val(0) && warm.output.status.code() == Val(0) && cold.output.stdout == expected && warm.output.stdout == expected && output_stable
+        expressibility :: if supported { "supported" } else { "unsupported" }
+        finding :: if supported { "none" } else { "cold_exit={cold.output.status.code():?};warm_exit={warm.output.status.code():?};stdout_expected={cold.output.stdout == expected && warm.output.stdout == expected};warm_stable={output_stable}" }
+        row :: ["1", self.run_id, self.machine, adapter.to_string(), task.id, expressibility, finding, input_digest(input), SHA256.sha256_hex(expected), cold.output.status.code().unwrap_or(-1).to_string(), source_tokens(source).to_string(), stdout_file, SHA256.sha256_hex(&cold.output.stdout), stderr_file, SHA256.sha256_hex(&cold.output.stderr), cold.elapsed.as_nanos().to_string(), warm.elapsed.as_nanos().to_string(), SHA256.sha256_hex(&warm.output.stdout), SHA256.sha256_hex(&warm.output.stderr), output_stable.to_string(), DOMAIN_SCORING, version.replace('\t', " "), policy_digest()].join("\t")
+        self.receipt.write_all("{row}\n".as_bytes()).unwrap()
+    }
+}
+// Rust: tests/agent_workloads.rs:1112
+fn fixture_files(root: &OSPath) -> Set<String> {
+    // Rust: tests/agent_workloads.rs:1113
+    fn walk(corpus: &OSPath, dir: &OSPath, out: &Set<String>) -> {
+        for entry in fs.read_dir(dir).unwrap() {
+            path :: entry.unwrap().path()
+            if path.is_dir() { walk(corpus, &path, out) }
+            else { out.insert(path.strip_prefix(corpus).unwrap().to_string_lossy().replace('\\', "/")) }
+        }
+    }
+    files := Set<String>.new()
+    for name in ["inputs", "expected"] {
+        dir :: root.join(name)
+        if dir.is_dir() { walk(root, &dir, &files) }
+    }
+    files
+}
+// Rust: tests/agent_workloads.rs:1138
+fn verify_checksum_closure(root: &OSPath, sums: &String) -> USize Err! {
+    declared := [String:String]{}
+    for line in sums.lines().filter((line) -> !line.is_empty()) {
+        (hash, relative) :: line.split_once("  ").unwrap_or_else(() -> { throw "bad SHA256SUMS row: {line}" })
+        if validate_corpus_relative_path(relative).is_err() { throw "invalid checksum path: {relative}" }
+        if declared.insert(relative.to_string(), hash.to_string()).is_some() { throw "duplicate checksum path: {relative}" }
+    }
+    actual :: fixture_files(root)
+    listed :: declared.keys().collect::<Set<String>>()
+    if actual != listed {
+        unhashed := actual.difference(&listed).collect()
+        missing := listed.difference(&actual).collect()
+        unhashed.sort(); missing.sort()
+        throw "checksum closure mismatch; unhashed={unhashed:?}; missing={missing:?}"
+    }
+    paths := declared.keys().collect(); paths.sort()
+    for relative in paths {
+        bytes :: fs.read(root.join(relative)).map_err((err) -> err.to_string())?
+        actual_hash :: SHA256.sha256_hex(&bytes)
+        if actual_hash != declared[relative] { throw "fixture drift: {relative}" }
+    }
+    declared.len()
+}
+// Rust: tests/agent_workloads.rs:1173
+fn source_tokens(path: &OSPath) -> USize { fs.read_to_string(path).unwrap().split_whitespace().count() }
+// Rust: tests/agent_workloads.rs:1177
+fn scratch_output_violations(adapter: &String, path: &OSPath, jet_artifact_name: &String) -> [String] {
+    // Rust: tests/agent_workloads.rs:1178
+    fn walk(root: &OSPath, dir: &OSPath, entries: &[String:String]) -> {
+        for entry in fs.read_dir(dir).unwrap() {
+            path :: entry.unwrap().path()
+            relative :: path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/")
+            file_type :: fs.symlink_metadata(&path).unwrap().file_type()
+            kind :: if file_type.is_dir() { "directory" } else if file_type.is_file() { "file" } else if file_type.is_symlink() { "symlink" } else { "other" }
+            entries.insert(relative, kind)
+            if file_type.is_dir() { walk(root, &path, entries) }
+        }
+    }
+    actual := [String:String]{}
+    walk(path, path, &actual)
+    (required, optional) :: if adapter == "jet" {
+        ([".jet": "directory", ".jet/build": "directory", ".jet/build/{jet_artifact_name}": "file"], [".jet/build/{jet_artifact_name}.rs": "file"])
+    } else { ([String:String]{}, [String:String]{}) }
+    violations := [String]{}
+    for (entry, kind) in actual {
+        if required.get(entry) != Val(kind) && optional.get(entry) != Val(kind) { violations.push("unexpected {kind}: {entry}") }
+    }
+    for (entry, kind) in required {
+        if actual.get(entry) != Val(kind) { violations.push("missing {kind}: {entry}") }
+    }
+    violations.sort()
+    violations
+}
+// Rust: tests/agent_workloads.rs:1234
+fn baseline_artifact_path(root: &OSPath, relative: &String) -> OSPath Err! {
+    path :: OSPath(relative)
+    if path.is_absolute() { throw "baseline artifact escaped root: {relative}" }
+    if validate_corpus_relative_path(relative).is_err() { throw "invalid baseline artifact path: {relative}" }
+    root.join(path)
+}

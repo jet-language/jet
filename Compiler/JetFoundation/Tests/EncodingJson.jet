@@ -1,0 +1,29 @@
+use JetFoundation.EncodingJson.[MAX_JSON_DEPTH, parse_json, parse_json_typed, parse_json_exact_numbers]
+use DataTree.[DataTree]
+// Rust: crates/jet-foundation/src/EncodingJson.rs:13
+#Test("hostile_nested_json_is_rejected_before_unbounded_recursion") {
+    depth :: MAX_JSON_DEPTH + 1
+    input :: "[".repeat(depth) + "0" + "]".repeat(depth)
+    rejected := false
+    _ :: parse_json(input, false) catch error -> { rejected = true; assert(error.message.contains("nested too deeply")); DataTree.Null }
+    assert(rejected, "depth limit must reject input")
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:22
+#Test("integer_tokens_never_round_through_float") {
+    assert(parse_json("-9223372036854775808", false)? == DataTree.Int(I64.MIN))
+    assert(parse_json("9223372036854775808", false)? == DataTree.Number("9223372036854775808"))
+    assert(parse_json("123456789012345678901234567890", false)? == DataTree.Number("123456789012345678901234567890"))
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:37
+#Test("typed_json_keeps_quoted_numbers_distinct") {
+    assert(parse_json_typed("[\"123\",123]", false)? == DataTree.Array([DataTree.TypedText("123"), DataTree.Number("123")]))
+    assert(parse_json_exact_numbers("\"123\"", false)? == DataTree.Text("123"))
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:52
+#Test("rejects_trailing_commas_and_non_finite_numbers") {
+    loop input in ["[1,]", "{\"a\":1,}", "1e400", "-1e400"] {
+        rejected := false
+        _ :: parse_json(input, false) catch _ -> { rejected = true; DataTree.Null }
+        assert(rejected, "invalid JSON must be rejected")
+    }
+}

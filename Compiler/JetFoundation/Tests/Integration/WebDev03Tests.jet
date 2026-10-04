@@ -1,0 +1,623 @@
+use std.[fs, env, process, thread, io, mem]
+use std.process.Command
+use std.net.[TcpStream, Shutdown]
+use std.time.[Duration, Instant]
+use std.sync.[Arc, Barrier, mpsc]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.os.unix.net.UnixListener
+use std.os.unix.fs.symlink
+use std.os.windows.fs.[symlink_dir, symlink_file]
+use core.sys.target.[selected_os, selected_family]
+use jet_foundation.Tests.Integration.WebDev.[have_tool, jet_bin, unused_local_port, raw_http_exchange, raw_get_request, http_get_with_content_type, http_get_without_session, wait_for_version_change]
+use jet_foundation.Tests.Integration.WebDev02.[fn_fixture_src, start_embedded_devserver, wait_for_server_up]
+use jet_foundation.Tests.Integration.WebPartition.[codes, temp_web_project, manifest_partitions]
+use jet_foundation.Tests.Integration.Support.CorpusPolicy.CorpusPolicy
+use jet_devserver.[WatchSession, within_budget, EDIT_TO_VISIBLE_BUDGET_MS]
+use jet.AST.[ProgramBundle, LoadedModule, DevtoolsRegistry, NameLedger]
+use jet.Syntax.[RuntimeLayer, OSTarget, WebBucket]
+// GATE #4494: real process/TCP/atomic/thread/filesystem primitives.
+// GATE #4483: selected target guards for Unix and Windows tests.
+// GATE #4409: preserve exact connection failure kinds.
+
+// Rust: tests/web_dev.rs:3390
+#Test("embedded_devserver_http_line_and_header_bounds_are_exact") {
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_http_line_and_header_bounds_are_exact (need rustc)"); return }
+    const MAX_LINE_BYTES: USize = 8 * 1024
+    const MAX_HEADER_BYTES: USize = 32 * 1024
+    const MAX_HEADER_COUNT: USize = 100
+    dir :: env.temp_dir().join("jet_embedded_devserver_http_bounds_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    line_prefix :: "GET "
+    line_suffix :: " HTTP/1.1\r\n"
+    target_prefix :: "/__jet_dev_version?"
+    target_len :: MAX_LINE_BYTES - line_prefix.len() - line_suffix.len()
+    assert(target_len > target_prefix.len())
+    exact_target :: "{target_prefix}{\"q\".repeat(target_len - target_prefix.len())}"
+    assert_eq("{line_prefix}{exact_target}{line_suffix}".len(), MAX_LINE_BYTES)
+    exact_response :: raw_http_exchange(port, &raw_get_request(&exact_target, &[])).expect("request line at the 8 KiB boundary was not served")
+    assert(exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"), "request line at the exact cap should remain valid")
+    over_target :: "{target_prefix}{\"q\".repeat(target_len + 1 - target_prefix.len())}"
+    assert_eq("{line_prefix}{over_target}{line_suffix}".len(), MAX_LINE_BYTES + 1)
+    over_response :: raw_http_exchange(port, &raw_get_request(&over_target, &[]))
+    assert(over_response.map(fn(response) { !response.starts_with(b"HTTP/1.1 200 OK\r\n") }).unwrap_or(true), "a request line over 8 KiB was accepted")
+    header_prefix :: "X-Pad: "
+    exact_header :: "{header_prefix}{\"x\".repeat(MAX_LINE_BYTES - header_prefix.len() - 2)}"
+    assert_eq(exact_header.len() + 2, MAX_LINE_BYTES)
+    exact_response :: raw_http_exchange(port, &raw_get_request("/__jet_dev_version", &[exact_header.clone()])).expect("header line at the 8 KiB boundary was not served")
+    assert(exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"), "header line at the exact cap should remain valid")
+    over_header :: "{header_prefix}{\"x\".repeat(MAX_LINE_BYTES - header_prefix.len() - 1)}"
+    assert_eq(over_header.len() + 2, MAX_LINE_BYTES + 1)
+    over_response :: raw_http_exchange(port, &raw_get_request("/__jet_dev_version", &[over_header]))
+    assert(over_response.map(fn(response) { !response.starts_with(b"HTTP/1.1 200 OK\r\n") }).unwrap_or(true), "a header line over 8 KiB was accepted")
+    exact_headers :: [exact_header; MAX_HEADER_BYTES / MAX_LINE_BYTES]
+    exact_header_bytes: USize = exact_headers.iter().map(fn(header) { header.len() + 2 }).sum()
+    assert_eq(exact_header_bytes, MAX_HEADER_BYTES)
+    exact_response :: raw_http_exchange(port, &raw_get_request("/__jet_dev_version", &exact_headers)).expect("aggregate headers at the 32 KiB boundary were not served")
+    assert(exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"), "aggregate headers at the exact cap should remain valid")
+    over_headers := exact_headers.clone()
+    over_headers.push("X: y")
+    assert(over_headers.iter().all(fn(header) { header.len() + 2 <= MAX_LINE_BYTES }))
+    over_header_bytes: USize = over_headers.iter().map(fn(header) { header.len() + 2 }).sum()
+    assert(over_header_bytes > MAX_HEADER_BYTES)
+    over_response :: raw_http_exchange(port, &raw_get_request("/__jet_dev_version", &over_headers))
+    assert(over_response.map(fn(response) { !response.starts_with(b"HTTP/1.1 200 OK\r\n") }).unwrap_or(true), "aggregate headers over 32 KiB were accepted")
+    exact_count_headers: [String] = (0..MAX_HEADER_COUNT).map(fn(index) { "X-{index}: y" }).collect()
+    assert_eq(exact_count_headers.len(), MAX_HEADER_COUNT)
+    exact_response :: raw_http_exchange(port, &raw_get_request("/__jet_dev_version", &exact_count_headers)).expect("100 headers at the count boundary were not served")
+    assert(exact_response.starts_with(b"HTTP/1.1 200 OK\r\n"), "100 headers at the exact cap should remain valid")
+    over_count_headers := exact_count_headers.clone()
+    over_count_headers.push("X-extra: y")
+    assert_eq(over_count_headers.len(), MAX_HEADER_COUNT + 1)
+    over_response :: raw_http_exchange(port, &raw_get_request("/__jet_dev_version", &over_count_headers))
+    assert(over_response.map(fn(response) { !response.starts_with(b"HTTP/1.1 200 OK\r\n") }).unwrap_or(true), "more than 100 headers were accepted")
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3542
+#Test("embedded_devserver_admission_cap_drops_the_65th_connection") {
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_admission_cap_drops_the_65th_connection (need rustc)"); return }
+    const MAX_CONNECTIONS: USize = 64
+    dir :: env.temp_dir().join("jet_embedded_devserver_connection_cap_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    // Incomplete requests hold admitted workers, not merely backlog sockets.
+    holders := [TcpStream].with_capacity(MAX_CONNECTIONS)
+    for _ in 0..MAX_CONNECTIONS {
+        holder :: TcpStream.connect(("127.0.0.1", port)).expect("failed to connect an admission-cap holder")
+        holder.set_write_timeout(Some(Duration.from_secs(1))).unwrap()
+        holder.write_all(b"G").unwrap()
+        holders.push(holder)
+    }
+    probe_request :: b"GET /__jet_dev_version HTTP/1.1\r\n\r\n"
+    probe_deadline :: Instant.now() + Duration.from_secs(5)
+    dropped := false
+    while Instant.now() < probe_deadline {
+        probe_result :: TcpStream.connect(("127.0.0.1", port))
+        if probe_result.is_err() { dropped = true; break }
+        probe :: probe_result.unwrap()
+        probe.set_read_timeout(Some(Duration.from_millis(200))).unwrap()
+        if probe.write_all(probe_request).is_err() { dropped = true; break }
+        _ :: probe.shutdown(Shutdown.Write)
+        response := [U8].new()
+        result :: probe.read_to_end(&response)
+        closed :: response.is_empty() && result.map(fn(_) { true }).unwrap_or_else(fn(error) {
+            error.kind() == io.ErrorKind.ConnectionReset || error.kind() == io.ErrorKind.ConnectionAborted || error.kind() == io.ErrorKind.UnexpectedEof
+        })
+        if closed { dropped = true; break }
+        thread.yield_now()
+    }
+    drop(holders)
+    assert(dropped, "the connection after 64 occupied admission slots was not dropped or refused")
+    wait_for_server_up(port, Duration.from_secs(3))
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3626
+#Test("embedded_devserver_deadline_is_absolute_under_successful_byte_trickle") {
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_deadline_is_absolute_under_successful_byte_trickle (need rustc)"); return }
+    const TRICKLE_BYTES: USize = 32
+    const TRICKLE_INTERVAL: Duration = Duration.from_millis(200)
+    dir :: env.temp_dir().join("jet_embedded_devserver_absolute_deadline_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    client :: TcpStream.connect(("127.0.0.1", port)).unwrap()
+    client.set_read_timeout(Some(Duration.from_secs(12))).unwrap()
+    client.write_all(b"GET /__jet_dev_version HTTP/1.1\r\nHost: localhost").unwrap()
+    client.flush().unwrap()
+    stop :: Arc.new(AtomicBool.new(false))
+    start_barrier :: Arc.new(Barrier.new(2))
+    writer_stop :: Arc.clone(&stop)
+    writer_barrier :: Arc.clone(&start_barrier)
+    trickle :: client.try_clone().unwrap()
+    (sent_tx, sent_rx) :: mpsc.channel()
+    writer :: thread.spawn(fn [^writer_stop, ^writer_barrier, ^trickle, ^sent_tx]() {
+        writer_barrier.wait()
+        sent := 0
+        for index in 0..TRICKLE_BYTES {
+            if writer_stop.load(Ordering.Acquire) || trickle.write_all(b"x").is_err() || trickle.flush().is_err() { break }
+            sent += 1
+            if index + 1 < TRICKLE_BYTES { thread.sleep(TRICKLE_INTERVAL) }
+        }
+        _ :: sent_tx.send(sent)
+        while !writer_stop.load(Ordering.Acquire) { thread.yield_now() }
+    })
+    started :: Instant.now()
+    start_barrier.wait()
+    response := [U8].new()
+    read_result :: client.read_to_end(&response)
+    elapsed :: started.elapsed()
+    stop.store(true, Ordering.Release)
+    drop(client)
+    writer.join().unwrap()
+    sent :: sent_rx.recv_timeout(Duration.from_secs(1)).expect("trickle writer did not report its successful bytes")
+    deadline_closed :: read_result.as_ref().map(fn(_) { true }).unwrap_or_else(fn(error) {
+        error.kind() == io.ErrorKind.ConnectionReset || error.kind() == io.ErrorKind.ConnectionAborted || error.kind() == io.ErrorKind.UnexpectedEof
+    })
+    assert_eq(sent, TRICKLE_BYTES, "the client must deliver successful bytes before the absolute deadline")
+    assert(deadline_closed && response.is_empty(), "the incomplete request must close without a response: read={read_result:?}, response={response:?}")
+    assert(elapsed >= Duration.from_secs(9), "the deadline proof must allow the successful trickle to run: {elapsed:?}")
+    assert(elapsed < Duration.from_millis(11500), "successful bytes renewed the request deadline: {elapsed:?}")
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3726
+#Test("embedded_devserver_rejects_hardlinked_source") {
+    if selected_family() != "unix" && selected_os() != "windows" { return }
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_rejects_hardlinked_source (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_embedded_devserver_hardlinked_source_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    source :: fn_fixture_src(port, "hardlinked source")
+    outside :: dir.join("outside-app.jet")
+    fs.write(&outside, &source).unwrap()
+    fs.hard_link(&outside, dir.join("app.jet")).unwrap()
+    output :: Command.new(jet_bin()).args(["dev", "app.jet"]).current_dir(&dir).output().expect("failed to launch hardlinked-source fixture")
+    assert(!output.status.success(), "jet dev must fail closed for a hardlinked source")
+    assert_eq(fs.read(&outside).unwrap(), source.as_bytes())
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3762
+#Test("embedded_devserver_rejects_unix_hardlinks_and_special_files") {
+    if selected_family() != "unix" { return }
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_rejects_unix_hardlinks_and_special_files (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_embedded_devserver_unix_file_identity_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    build :: dir.join("build")
+    outside_static :: dir.join("outside-static.js")
+    fs.write(&outside_static, b"outside-static").unwrap()
+    hardlinked_static :: build.join("hardlinked.js")
+    fs.hard_link(&outside_static, &hardlinked_static).unwrap()
+    (status, _, body) :: http_get_with_content_type(port, "/hardlinked.js").expect("hardlinked static GET failed")
+    assert_eq(status, 400)
+    assert(body.is_empty() || body == b"bad path")
+    assert_eq(fs.read(&outside_static).unwrap(), b"outside-static")
+    special :: build.join("special.sock")
+    socket :: UnixListener.bind(&special).unwrap()
+    (status, _, _) :: http_get_with_content_type(port, "/special.sock").expect("special-file GET failed")
+    assert_eq(status, 400)
+    drop(socket)
+    outside_output :: dir.join("outside-output.js")
+    fs.write(&outside_output, b"outside-output").unwrap()
+    output_path :: build.join("app.js")
+    fs.remove_file(&output_path).unwrap()
+    fs.hard_link(&outside_output, &output_path).unwrap()
+    (_, baseline_body) :: http_get_without_session(port, "/__jet_dev_version").unwrap()
+    baseline_view := String.from_utf8_lossy(&baseline_body).trim() // #4303
+    baseline :: baseline_view.to_string()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "changed")).unwrap()
+    deadline :: Instant.now() + Duration.from_secs(5)
+    while Instant.now() < deadline {
+        (_, version_body) :: http_get_without_session(port, "/__jet_dev_version").unwrap()
+        if String.from_utf8_lossy(&version_body).trim() != baseline { panic("hardlinked output was published instead of rejected") }
+        thread.sleep(Duration.from_millis(100))
+    }
+    assert_eq(fs.read(&outside_output).unwrap(), b"outside-output")
+    assert_eq(fs.read(&output_path).unwrap(), b"outside-output")
+    fs.remove_file(&output_path).unwrap()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "recovered")).unwrap()
+    recovered :: wait_for_version_change(port, &baseline, Duration.from_secs(15))
+    assert_ne(recovered, baseline, "watcher did not recover after rejected publish")
+    assert_eq(fs.read(&outside_output).unwrap(), b"outside-output")
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3831
+#Test("embedded_devserver_parent_rename_stays_inside_held_root") {
+    if selected_family() != "unix" { return }
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_parent_rename_stays_inside_held_root (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_embedded_devserver_parent_rename_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    build :: dir.join("build")
+    nested :: build.join("nested")
+    parked :: build.join("nested.parked")
+    outside :: dir.join("outside-parent")
+    fs.create_dir_all(&nested).unwrap()
+    fs.create_dir_all(&outside).unwrap()
+    fs.write(nested.join("race.js"), b"inside-parent").unwrap()
+    fs.write(outside.join("race.js"), b"outside-parent").unwrap()
+    (status, body) :: http_get_without_session(port, "/nested/race.js").unwrap()
+    assert_eq(status, 200)
+    assert_eq(body, b"inside-parent")
+    stop :: Arc.new(AtomicBool.new(false))
+    leaked :: Arc.new(AtomicBool.new(false))
+    swaps :: Arc.new(AtomicUsize.new(0))
+    swap_stop :: Arc.clone(&stop)
+    swap_nested :: nested.clone()
+    swap_parked :: parked.clone()
+    swap_outside :: outside.clone()
+    swap_count :: Arc.clone(&swaps)
+    swapper :: thread.spawn(fn [^swap_stop, ^swap_nested, ^swap_parked, ^swap_outside, ^swap_count]() {
+        while !swap_stop.load(Ordering.Relaxed) {
+            _ :: fs.remove_dir(&swap_parked)
+            if fs.rename(&swap_nested, &swap_parked).is_ok() {
+                if symlink(&swap_outside, &swap_nested).is_ok() { _ :: swap_count.fetch_add(1, Ordering.Relaxed) }
+                _ :: fs.remove_file(&swap_nested)
+                _ :: fs.rename(&swap_parked, &swap_nested)
+            }
+        }
+    })
+    requests := []
+    for _ in 0..4 {
+        request_leaked :: Arc.clone(&leaked)
+        requests.push(thread.spawn(fn [^request_leaked, port]() {
+            for _ in 0..256 {
+                result :: http_get_without_session(port, "/nested/race.js")
+                if result.is_none() { continue }
+                (status, body) :: result.unwrap()
+                if status == 200 && body != b"inside-parent" { request_leaked.store(true, Ordering.Relaxed); break }
+            }
+        }))
+    }
+    for request in requests { request.join().unwrap() }
+    stop.store(true, Ordering.Relaxed)
+    swapper.join().unwrap()
+    _ :: fs.remove_file(&nested)
+    _ :: fs.rename(&parked, &nested)
+    assert(!leaked.load(Ordering.Relaxed))
+    assert(swaps.load(Ordering.Relaxed) > 0)
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3915
+#Test("embedded_devserver_rejects_invalid_utf8_index_within_response_budget") {
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_rejects_invalid_utf8_index_within_response_budget (need rustc)"); return }
+    const MAX_GENERATED_RESPONSE_BYTES: U64 = 64 * 1024 * 1024
+    const SCRIPT_HEADROOM_BYTES: U64 = 4096
+    dir :: env.temp_dir().join("jet_embedded_devserver_invalid_utf8_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    index :: dir.join("build").join("index.html")
+    file :: fs.File.create(&index).unwrap()
+    file.set_len(MAX_GENERATED_RESPONSE_BYTES - SCRIPT_HEADROOM_BYTES).unwrap()
+    file.write_all(&[0xff]).unwrap()
+    drop(file)
+    (status, content_type, body) :: http_get_with_content_type(port, "/").expect("invalid-UTF8 index GET failed")
+    assert_eq(status, 404)
+    assert_eq(content_type, "text/plain; charset=utf-8")
+    assert(body.len() < 128, "invalid UTF-8 must fail closed without echoing HTML")
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:3954
+#Test("embedded_devserver_windows_rejects_reparse_hardlink_and_renamed_entries") {
+    if selected_os() != "windows" { return }
+    if !have_tool("rustc") { eprintln("note: skipping embedded_devserver_windows_rejects_reparse_hardlink_and_renamed_entries (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_embedded_devserver_windows_identity_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    port :: unused_local_port()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "host")).unwrap()
+    guard :: start_embedded_devserver(&dir, port)
+    build :: dir.join("build")
+    outside_static :: dir.join("outside-static.js")
+    fs.write(&outside_static, b"outside-static").unwrap()
+    hardlinked_static :: build.join("hardlinked.js")
+    fs.hard_link(&outside_static, &hardlinked_static).unwrap()
+    (status, _, _) :: http_get_with_content_type(port, "/hardlinked.js").expect("Windows hardlink GET failed")
+    assert_eq(status, 400)
+    reparse :: build.join("reparse.js")
+    if symlink_file(&outside_static, &reparse) == {
+        .Ok(_) -> {
+            (status, _, _) :: http_get_with_content_type(port, "/reparse.js").expect("Windows reparse GET failed")
+            assert_eq(status, 400)
+            _ :: fs.remove_file(&reparse)
+        }
+        .Err(error) -> eprintln("note: Windows file-reparse test unavailable: {error}")
+    }
+    nested :: build.join("nested")
+    parked :: build.join("nested.parked")
+    outside :: dir.join("outside-parent")
+    fs.create_dir_all(&nested).unwrap()
+    fs.create_dir_all(&outside).unwrap()
+    fs.write(nested.join("race.js"), b"inside-parent").unwrap()
+    fs.write(outside.join("race.js"), b"outside-parent").unwrap()
+    fs.rename(&nested, &parked).unwrap()
+    if symlink_dir(&outside, &nested) == {
+        .Ok(_) -> {
+            (status, _) :: http_get_without_session(port, "/nested/race.js").unwrap()
+            assert_eq(status, 400)
+            fs.remove_dir(&nested).or_else(fn(_) { fs.remove_file(&nested) }).unwrap()
+        }
+        .Err(error) -> {
+            eprintln("note: Windows directory-reparse test unavailable: {error}")
+            fs.create_dir(&nested).unwrap()
+            fs.write(nested.join("race.js"), b"replacement").unwrap()
+            (status, body) :: http_get_without_session(port, "/nested/race.js").unwrap()
+            assert_eq(status, 200)
+            assert_eq(body, b"replacement")
+            fs.remove_dir_all(&nested).unwrap()
+        }
+    }
+    fs.rename(&parked, &nested).unwrap()
+    outside_output :: dir.join("outside-output.js")
+    fs.write(&outside_output, b"outside-output").unwrap()
+    output_path :: build.join("app.js")
+    fs.remove_file(&output_path).unwrap()
+    fs.hard_link(&outside_output, &output_path).unwrap()
+    (_, baseline_body) :: http_get_without_session(port, "/__jet_dev_version").unwrap()
+    baseline_view := String.from_utf8_lossy(&baseline_body).trim() // #4303
+    baseline :: baseline_view.to_string()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "changed")).unwrap()
+    deadline :: Instant.now() + Duration.from_secs(5)
+    while Instant.now() < deadline {
+        (_, version_body) :: http_get_without_session(port, "/__jet_dev_version").unwrap()
+        if String.from_utf8_lossy(&version_body).trim() != baseline { panic("Windows hardlinked output was published instead of rejected") }
+        thread.sleep(Duration.from_millis(100))
+    }
+    assert_eq(fs.read(&outside_output).unwrap(), b"outside-output")
+    assert_eq(fs.read(&output_path).unwrap(), b"outside-output")
+    fs.remove_file(&output_path).unwrap()
+    fs.write(dir.join("app.jet"), fn_fixture_src(port, "recovered")).unwrap()
+    recovered :: wait_for_version_change(port, &baseline, Duration.from_secs(15))
+    assert_ne(recovered, baseline, "Windows watcher did not recover after rejected publish")
+    assert_eq(fs.read(&outside_output).unwrap(), b"outside-output")
+    drop(guard)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/web_dev.rs:4054
+#Test("ul6_browser_watch_matrix_budget_reconnect_cleanup") {
+    if !have_tool("rustc") { eprintln("note: skipping ul6_browser_watch_matrix_budget_reconnect_cleanup (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_ul6_web_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src_path :: dir.join("app.jet")
+    fs.write(&src_path, "#Target(Web)\nfn run() {\n    print(\"hello\")\n}\n").unwrap()
+    session :: WatchSession.open(&src_path).unwrap()
+    session.recover()
+    assert(session.graph().node_count() >= 1)
+    started :: Instant.now()
+    thread.sleep(Duration.from_millis(30))
+    fs.write(&src_path, "#Target(Web)\nfn run() {\n    print(\"hello-2\")\n}\n").unwrap()
+    receipt :: session.poll().expect("web source change")
+    ms :: started.elapsed().as_millis()
+    assert(within_budget(&receipt) || ms <= EDIT_TO_VISIBLE_BUDGET_MS, "budget miss ms={ms} receipt={receipt.edit_to_visible_ms:?}")
+    assert(!receipt.render().is_empty())
+    session.acknowledge(&receipt).unwrap()
+    _ :: fs.remove_dir_all(&dir)
+    assert(!dir.exists() || fs.read_dir(&dir).map(fn(d) { d.count() }).unwrap_or(0) == 0)
+}
+
+// Rust: tests/web_examples_doc.rs:10
+#Test("web_examples_are_documented_and_have_expected_outputs") {
+    repo :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap())
+    web_dir :: repo.join("Examples/features/web")
+    expected_dir :: repo.join("Examples/features/expected/web")
+    doc :: fs.read_to_string(repo.join("Docs/spec/reference/web-backend-wasm.md")).expect("web backend doc")
+    jets := fs.read_dir(&web_dir).unwrap().filter_map(fn(e) { e.ok() }).map(fn(e) { e.path() }).filter(fn(p) { p.extension().is_some_and(fn(ext) { ext == "jet" }) }).collect()
+    jets.sort()
+    assert(!jets.is_empty(), "expected at least one web example")
+    for jet in jets {
+        name :: jet.file_name().unwrap().to_str().unwrap()
+        assert(doc.contains(name), "{name} missing from Docs/spec/reference/web-backend-wasm.md")
+        stem :: jet.file_stem().unwrap().to_str().unwrap()
+        native :: expected_dir.join("{stem}.out")
+        web :: expected_dir.join("{stem}.web.out")
+        harness :: expected_dir.join("{stem}.harness.out")
+        assert(native.is_file() || web.is_file() || harness.is_file(), "{name} has no golden under Examples/features/expected/web/")
+    }
+}
+// Rust: tests/web_examples_doc.rs:46
+#Test("semantic_corpus_policy_runs_with_site_sources") {
+    policy :: CorpusPolicy.load().expect("corpus manifest")
+    policy.check_gate("site").expect("site corpus semantic policy")
+    policy.check_gate("docs").expect("documentation corpus semantic policy")
+}
+
+// Rust: tests/web_partition.rs:20
+#Test("wasm_calling_js_is_cross_partition") {
+    src :: #include_str("tests/ui/web_cross_partition.jet")
+    c :: codes(src)
+    assert(c.iter().any(fn(x) { x == "E-WEB-CROSS-PARTITION" }), "expected E-WEB-CROSS-PARTITION, got {c:?}")
+}
+// Rust: tests/web_partition.rs:30
+#Test("wasm_export_struct_param_is_abi_error") {
+    src :: #include_str("tests/ui/web_abi_type.jet")
+    c :: codes(src)
+    assert(c.iter().any(fn(x) { x == "E-WEB-ABI-TYPE" }), "expected E-WEB-ABI-TYPE, got {c:?}")
+}
+// Rust: tests/web_partition.rs:40
+#Test("wasm_export_fn_callback_param_is_abi_error") {
+    src :: #include_str("tests/ui/web_abi_callback.jet")
+    c :: codes(src)
+    assert(c.iter().any(fn(x) { x == "E-WEB-ABI-TYPE" }), "expected E-WEB-ABI-TYPE for fn callback param, got {c:?}")
+}
+// Rust: tests/web_partition.rs:50
+#Test("browser_effect_infers_js_bucket_without_marker") {
+    src :: """
+use core.ui as ui
+fn dom_fn() { _b :: ui.null_backend() }
+#Target(Wasm)
+fn compute() -> Int { return 1 }
+fn run() { print("{compute()}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_ok(), "main path should compile: {res.err():?}")
+}
+// Rust: tests/web_partition.rs:72
+#Test("wasm_pin_with_browser_effect_is_target_browser_error") {
+    src :: #include_str("tests/ui/web_target_browser.jet")
+    c :: codes(src)
+    assert(c.iter().any(fn(x) { x == "E-WEB-TARGET-BROWSER" }), "expected E-WEB-TARGET-BROWSER, got {c:?}")
+}
+// Rust: tests/web_partition.rs:82
+#Test("codable_struct_wasm_export_is_abi_safe") {
+    src :: #include_str("tests/ui/web_abi_codable.jet")
+    res :: jet.compile_web_with_path(src, "tests/ui/web_abi_codable.jet")
+    assert(res.is_ok(), "Codable struct export should be ABI-safe: {res.err():?}")
+}
+// Rust: tests/web_partition.rs:93
+#Test("ordinary_wasm_struct_field_does_not_gain_export_boundary_support") {
+    src :: """struct Point { x: Int, y: Int }
+#Target(Wasm)
+fn read_x(p: Point) -> Int { return p.x }
+fn run() {}
+"""
+    diags :: jet.compile_web_with_path(src, "tests/fixtures/web_internal_struct_field.jet").expect_err("ordinary Wasm fields must remain outside the supported subset")
+    assert_eq(diags.iter().map(fn(d) { d.code.as_str() }).collect(), ["E-WEB-TIR-UNSUPPORTED"])
+}
+// Rust: tests/web_partition.rs:110
+#Test("recursive_map_export_remains_an_honest_unsupported_error") {
+    src :: """
+#WasmExport
+fn echo(values: [String: [Int]]) -> [String: [Int]] { return ~values }
+#Target(JS)
+fn run() {}
+"""
+    diags :: jet.compile_web_with_path(src, "tests/fixtures/web_recursive_map.jet").expect_err("recursive Map ABI must remain loud until an adapter exists")
+    assert_eq(diags.iter().map(fn(d) { d.code.as_str() }).collect(), ["E-WEB-TIR-UNSUPPORTED"])
+}
+// Rust: tests/web_partition.rs:127
+#Test("unsigned_sized_map_export_remains_an_honest_unsupported_error") {
+    src :: """
+#WasmExport
+fn echo(values: [String:U64]) -> [String:U64] { return ~values }
+#Target(JS)
+fn run() {}
+"""
+    diags :: jet.compile_web_with_path(src, "tests/fixtures/web_map_u64.jet").expect_err("[String:U64] must remain loud until an exact adapter exists")
+    assert_eq(diags.iter().map(fn(d) { d.code.as_str() }).collect(), ["E-WEB-TIR-UNSUPPORTED"])
+}
+// Rust: tests/web_partition.rs:144
+#Test("narrow_sized_map_export_remains_an_honest_unsupported_error") {
+    src :: """
+#WasmExport
+fn echo(values: [String:I32]) -> [String:I32] { return ~values }
+#Target(JS)
+fn run() {}
+"""
+    diags :: jet.compile_web_with_path(src, "tests/fixtures/web_map_i32.jet").expect_err("[String:I32] must remain loud until an exact adapter exists")
+    assert_eq(diags.iter().map(fn(d) { d.code.as_str() }).collect(), ["E-WEB-TIR-UNSUPPORTED"])
+}
+// Rust: tests/web_partition.rs:161
+#Test("web_partition_report_generated_for_web_compile") {
+    src :: #include_str("Examples/features/web/web_compute.jet")
+    out :: jet.compile_web_with_path(src, "Examples/features/web/web_compute.jet").expect("web compile should succeed")
+    report :: out.web_partition_report.expect("web compile should set partition report")
+    assert(report.contains("compute"), "report should list compute fn")
+}
+// Rust: tests/web_partition.rs:173
+#Test("browser_effect_partition_metadata") {
+    src :: """
+use core.ui as ui
+fn dom_fn() { _b :: ui.null_backend() }
+"""
+    (toks, _) :: jet.Lexer.lex(src)
+    prog := jet.Parser.parse(&toks).unwrap()
+    bundle := ProgramBundle {
+        entry: 0,
+        project_root: OSPath.from("."),
+        ffi_callback_fns: [].into_set(),
+        modules: [LoadedModule {
+            path: OSPath.from("t.jet"), display: "t.jet", source: src.to_string(), alias: "main",
+            imports: mem.take(&prog.imports), items: mem.take(&prog.items),
+            script_body: mem.take(&prog.script_body), block_spans: mem.take(&prog.block_spans),
+            web_target_ceiling: prog.web_target_ceiling, pub_file: prog.pub_file,
+            no_prelude: prog.no_prelude, default_target: prog.default_target,
+            html_path: prog.html_path.clone(), policy_declarations: mem.take(&prog.policy_declarations),
+            user_policy_declarations: mem.take(&prog.user_policy_declarations), rule_facts: mem.take(&prog.rule_facts)
+        }],
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: Default.default(),
+        cffi: Default.default(), comptime_inputs: [], name_ledger: NameLedger.default(),
+        layer_ceiling: None, inferred_layer: RuntimeLayer.Core,
+        web_partitions: Default.default(), web_partition_enforced: false, web_partition_report: None,
+        dep_roots: Default.default(), package_guarantees: Default.default(), program_allocator: Default.default(),
+        active_os: OSTarget.host(), build_facts: Default.default(), edition: "2026"
+    }
+    _ :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert_eq(bundle.web_partitions.get("dom_fn"), Some(&WebBucket.JS))
+}
+// Rust: tests/web_partition.rs:265
+#Test("imported_same_leaf_helpers_keep_distinct_buckets") {
+    dir :: temp_web_project("same_leaf", &[
+        ("main.jet", "#Target(Web)\nuse \"./left\" as left\nuse \"./right\" as right\n#Target(JS)\nfn run() { print(left.value() + right.value()) }\n"),
+        ("left.jet", "#Target(JS)\nfn helper() -> Int { return 1 }\n#Target(JS)\npub fn value() -> Int { return helper() }\n"),
+        ("right.jet", "fn helper() -> Int { return 2 }\n#WasmExport\npub fn value() -> Int { return helper() }\n")
+    ])
+    out :: jet.compile_web(dir.join("main.jet").to_str().unwrap()).expect("same-leaf partition fixture should compile")
+    web :: out.web.expect("web artifacts")
+    parts := manifest_partitions(&web.manifest_json)
+    parts.sort()
+    expected := [("__jet_left__helper", "JS"), ("__jet_left__value", "JS"), ("__jet_right__helper", "Wasm"), ("__jet_right__value", "Wasm"), ("run", "JS")]
+    expected.sort()
+    assert_eq(parts, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_partition.rs:301
+#Test("wasm_export_and_target_pins_are_deterministic") {
+    src :: """#Target(Web)
+#WasmExport
+fn exported() -> Int { return 3 }
+#Target(Wasm)
+fn pinned() -> Int { return 4 }
+#Target(JS)
+fn run() { print(exported()) }
+"""
+    out :: jet.compile_web_with_path(src, "tests/fixtures/web_partition_pins.jet").expect("pinned partition fixture should compile")
+    web :: out.web.expect("web artifacts")
+    parts := manifest_partitions(&web.manifest_json)
+    parts.sort()
+    expected := [("exported", "Wasm"), ("pinned", "Wasm"), ("run", "JS")]
+    expected.sort()
+    assert_eq(parts, expected)
+    report :: out.web_partition_report.expect("web compile should set partition report")
+    repeat :: jet.compile_web_with_path(src, "tests/fixtures/web_partition_pins.jet").expect("repeat compile").web_partition_report.expect("repeat report")
+    assert_eq(report, repeat, "partition report must be stable across compiles")
+}
+// Rust: tests/web_partition.rs:338
+#Test("inline_module_callback_keeps_qualified_js_partition") {
+    src :: """#Target(Web)
+module handlers {
+    #Target(JS)
+    pub fn init() { print("ready") }
+}
+#Target(JS)
+fn run() { handlers.init() }
+"""
+    out :: jet.compile_web_with_path(src, "tests/fixtures/web_partition_callback.jet").expect("callback partition fixture should compile")
+    web :: out.web.expect("web artifacts")
+    parts :: manifest_partitions(&web.manifest_json)
+    assert(parts.iter().any(fn((k, b)) { k == "handlers__init" && b == "JS" }), "callback module must stay JS-qualified: {parts:?}")
+    assert(parts.iter().any(fn((k, b)) { k == "run" && b == "JS" }), "entry must stay JS: {parts:?}")
+}

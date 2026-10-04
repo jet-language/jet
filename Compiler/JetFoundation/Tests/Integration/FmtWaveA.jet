@@ -1,0 +1,27 @@
+use std.env
+use std.process.[Command, Output]
+use jet.Lexer
+use jet.Parser
+use jet.Formatter
+// Rust: tests/fmt_wave_a.rs:13
+const WHITESPACE_AND_LITERALS: String = "fn run()->{{\n\t// tabbed comment: \"quotes\" {{braces}}\n\tvalue::\"quoted \\\"text\\\" and {{{{braces}}}}; escapes: \\t \\n\"\n\t/* outer {{brace}}, \"quote\", /* nested */ still here */\n\tprint(\"{{value}}\")\n}}\n"
+// Rust: tests/fmt_wave_a.rs:22
+const TRIPLE_STRING: String = "fn run() -> {{\n    who :: \"Jet\"\n    banner :: \"\"\"\n    hello, {{who}}\n        indented\n    \"\"\"\n    print(\"{{banner}}\")\n}}\n"
+// Rust: tests/fmt_wave_a.rs:32
+const INTERPOLATION_SELECTORS: String = "fn run()->{{\nprice::1234.5\nprint(\"{{price:Fixed(2)}}\")\nprint(\"{{price:Grouped(2)}}\")\n}}\n"
+// Rust: tests/fmt_wave_a.rs:40
+const ATTACHED_COMMENTS: String = "// declaration boundary comment\nfn run()->{{\n    // control boundary comment\n    if true {{\n        print(\"attached\")\n    }}\n}}\n"
+// Rust: tests/fmt_wave_a.rs:50
+fn semantic_identity(source: String) -> [UInt8] {
+    (tokens, diagnostics) :: Lexer.lex(source)
+    assert(diagnostics.is_empty(), "fixture should lex before identity comparison: {diagnostics:Debug}")
+    program :: Parser.parse_for_fmt(&tokens).unwrap_or_else((diagnostics) -> panic("fixture should parse: {diagnostics:Debug}"))
+    Formatter.canonical_program(&program)
+}
+// Rust: tests/fmt_wave_a.rs:145
+const CLI_FIXTURE: String = WHITESPACE_AND_LITERALS
+// Rust: tests/fmt_wave_a.rs:147
+fn run_fmt(root: &OSPath, args: &[String]) -> Output {
+    // GATE #4494: actual CLI subprocess.
+    Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(args).current_dir(root).env("NO_COLOR", "1").output().unwrap_or_else((error) -> panic("run jet fmt {args:Debug}: {error}"))
+}

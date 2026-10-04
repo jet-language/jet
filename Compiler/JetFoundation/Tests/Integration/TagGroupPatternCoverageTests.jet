@@ -1,0 +1,552 @@
+use TagGroupPatternCoverage as coverage
+use TailReturnParity.[COMPTIME_SOURCE, WEB_SOURCE, have_tool, have_wasm_target, assert_packaged_cli_tiers_agree]
+use Taint.[codes, b64url]
+use jet.[compile, compile_with_path, compile_web_with_path]
+use jet.FixEngine.apply_edits
+use std.[fs, fmt]
+use std.process.Command
+use common
+use core.auth as auth
+use core.crypto as crypto
+// GATE #4494: shared native auth-session provider seam, not Rust includes.
+use jet_codegen.Prelude.CoreLib.Top.AuthSession.[JetAuthOAuthState, jet_auth_delivery_capability, jet_auth_register_user, jet_auth_magic_link_issue, jet_auth_oauth_begin, jet_auth_oauth_finish, jet_auth_oauth_verify]
+
+// Rust: tests/tag_group_pattern_coverage.rs:28
+#Test("ancestor_group_arm_still_flags_later_leaf_as_unreachable") {
+    diagnostics := coverage.codes("""
+enum Damage {
+    Fire { Burn, Scald }
+    Cold
+}
+fn run() -> {
+    d := Damage.Fire.Burn
+    if d == {
+        .Fire -> { print("fire") }
+        .Fire.Burn -> { print("burn") }
+        .Cold -> { print("cold") }
+    }
+}
+""")
+    assert(diagnostics.iter().any(code -> code == "L0301"), "{diagnostics:?}")
+}
+// Rust: tests/tag_group_pattern_coverage.rs:55
+#Test("sibling_variant_with_shared_text_prefix_is_not_falsely_covered") {
+    diagnostics := coverage.codes("""
+enum Alarm {
+    Fire
+    FireAlarm
+}
+fn run() -> {
+    a := Alarm.FireAlarm
+    if a == {
+        .Fire -> { print("fire") }
+        .FireAlarm -> { print("fire alarm") }
+    }
+}
+""")
+    assert(!diagnostics.iter().any(code -> code == "L0301" || code == "E0365"), "{diagnostics:?}")
+}
+// Rust: tests/tail_return_parity.rs:163
+#Test("block_values_arm_tables_and_early_returns_match_comptime_and_hosted_tiers") {
+    assert_packaged_cli_tiers_agree(COMPTIME_SOURCE, "one\nother\nearly\nlate\none\nother\nearly\nlate\n100\n3\n9\n0\n0\n100\n3\n9\n0\n0\n")
+}
+// Rust: tests/tail_return_parity.rs:176
+#Test("l0507_arm_table_fix_keeps_a_tail_chain_meaning_on_every_tier") {
+    source := """
+fn grade(score: Int) -> String {
+    if score >= 90 {
+        return "a"
+    } else if score >= 80 {
+        return "b"
+    } else {
+        return "c"
+    }
+}
+fn show(score: Int) -> {
+    if score >= 90 {
+        print("A")
+    } else if score >= 80 {
+        print("B")
+    } else {
+        print("C")
+    }
+}
+fn run() -> {
+    print(grade(95))
+    print(grade(85))
+    print(grade(10))
+    show(95)
+    show(85)
+    show(10)
+}
+"""
+    // GATE #4494: real entry file used by the compiler driver.
+    scratch := common.unique_tmp("jet_l0507_fix")
+    fs.create_dir_all(scratch).unwrap()
+    compile_file := text -> {
+        path := scratch.join("run.jet")
+        fs.write(path, text).unwrap()
+        compile_with_path(text, path.to_str().unwrap())
+    }
+    compiled := compile_file(source).unwrap_or_else(diagnostics -> panic("classic chains must compile: {diagnostics:?}"))
+    edits := compiled.lints.iter().filter(d -> d.code == "L0507").filter_map(d -> d.edit.clone()).collect()
+    assert_eq(edits.len(), 2, "both chains must carry the arm-table fix")
+    fixed := apply_edits(source, edits).expect("the L0507 edits must apply")
+    assert(fixed.contains("    if {\n        score >= 90 -> {"), "{fixed}")
+    recompiled := compile_file(fixed).unwrap_or_else(diagnostics -> panic("fixed source must compile:\n{fixed}\n{diagnostics:?}"))
+    assert(!recompiled.lints.iter().any(d -> d.code == "L0507"), "fixed source still warns:\n{fixed}")
+    _ :: fs.remove_dir_all(scratch)
+    expected := "a\nb\nc\nA\nB\nC\n"
+    assert_packaged_cli_tiers_agree(source, expected)
+    assert_packaged_cli_tiers_agree(fixed, expected)
+}
+// Rust: tests/tail_return_parity.rs:239
+#Test("block_values_arm_tables_and_early_returns_match_web_runtime") {
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
+        eprintln("note: skipping tail-return web test (need rustc, wasm32 target, and node)")
+        return
+    }
+    out := compile_web_with_path(WEB_SOURCE, "tests/fixtures/tail_return_web.jet").expect("tail-return web source must compile")
+    web := out.web.expect("web compile must return web artifacts")
+    scratch := common.Scratch.new("jet_tail_return_web")
+    fs.write(scratch.join("app.js"), web.js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+    fs.write(scratch.join("app_wasm.rs"), web.wasm_rust).unwrap()
+    fs.write(scratch.join("package.json"), "{\"type\":\"module\"}").unwrap()
+    fs.write(scratch.join("harness.mjs"), "const { jet_main } = await import(\"./app.js\");\nawait jet_main();\n").unwrap()
+    // GATE #4494: actual generated Wasm compilation and web execution.
+    wasm := Command.new("rustc").current_dir(scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("rustc must build the generated Wasm partition")
+    assert(wasm.status.success(), "generated Wasm failed to compile:\n{String.from_utf8_lossy(wasm.stderr)}")
+    output := Command.new("node").current_dir(scratch.path).arg("harness.mjs").output().expect("node must run the generated web harness")
+    assert(output.status.success(), "generated web app failed:\n{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "7\n20\n30\n40\n100\n3\n9\n0\n0\n7\n20\n30\n40\n")
+}
+
+// Rust: tests/taint.rs:15
+#Test("origin_facts_clear_only_after_typed_decode") {
+    rejected_before_decode := """
+use core.files as files
+fn run() -> {
+    raw :: files.read("config.json") ?? return Err("test")
+    SQL.raw(raw)
+}
+"""
+    assert(codes(rejected_before_decode).iter().any(code -> code == "E0721"), "external text must stay origin-marked before validation: {codes(rejected_before_decode):?}")
+    accepted_after_decode := """
+use core.files as files
+use core.encoding.json as json
+#Codable
+struct Config {
+    name: String
+}
+fn run() -> {
+    raw :: files.read("config.json") ?? return Err("test")
+    config :: json.decode<Config>(raw) ?? return Err("test")
+    SQL.raw(config.name)
+}
+"""
+    assert(!codes(accepted_after_decode).iter().any(code -> code == "E0721"), "successful typed decode must clear origin facts: {codes(accepted_after_decode):?}")
+}
+// Rust: tests/taint.rs:56
+#Test("origin_marked_text_rejects_raw_sinks") {
+    src := """
+use core.files as files
+fn run() -> {
+    raw :: files.read("payload.txt") ?? return Err("test")
+    SQL.raw(raw)
+    HTML.raw(raw)
+    Sh.raw(raw)
+}
+"""
+    found := codes(src)
+    assert_eq(found.iter().filter(code -> code == "E0721").count(), 3, "all audited raw sinks must reject origin text: {found:?}")
+}
+// Rust: tests/taint.rs:75
+#Test("origin_facts_clear_through_scrub_gate") {
+    src := """
+use core.files as files
+#Scrub(Input) fn clean(raw: #Input String) -> String { return ~raw }
+fn run() -> {
+    raw :: files.read("payload.txt") ?? return Err("test")
+    safe :: clean(raw)
+    SQL.raw(safe)
+}
+"""
+    assert(codes(src).is_empty(), "an audited scrub gate must clear an origin fact: {codes(src):?}")
+}
+// Rust: tests/taint.rs:93
+#Test("external_boundaries_seed_origin_facts") {
+    cases := [
+        ("fs", """
+use core.files as files
+fn run() -> {
+    value :: files.read("payload.txt") ?? return Err("test")
+    SQL.raw(value)
+}
+"""),
+        ("env", """
+use core.sys as env
+fn run() -> {
+    value :: env.get("PAYLOAD") ?? return Err("test")
+    SQL.raw(value)
+}
+"""),
+        ("process", """
+use core.process as process
+fn run() -> {
+    result :: process.run(["echo", "payload"]) ?? return Err("test")
+    SQL.raw(result.output)
+}
+"""),
+        ("net", """
+use core.net as net
+fn run() -> {
+    stream :: net.tcp_connect("example.invalid:80") ?? return Err("test")
+    value :: net.tcp_read_text(stream, 1) ?? return Err("test")
+    SQL.raw(value)
+}
+"""),
+        ("ffi", """
+extern rust "std" {
+    fn identity(value: String) -> String = "std::convert::identity"
+}
+fn run() -> {
+    value :: identity("payload")
+    SQL.raw(value)
+}
+""")
+    ]
+    loop (source, program) in cases {
+        found := codes(program)
+        assert(found.iter().any(code -> code == "E0721"), "{source} boundary must seed an origin fact: {found:?}")
+    }
+}
+// Rust: tests/taint.rs:159
+#Test("declared_tag_sources_and_destinations_drive_dataflow") {
+    src := """
+use core.process as process
+tag Untrusted { from: [source], deny: [Exec] }
+fn source() -> String { "untrusted" }
+fn run() -> {
+    value := source()
+    process.run(["echo", value]) ?? return Err("test")
+}
+"""
+    assert_eq(codes(src).iter().filter(code -> code == "E0721").count(), 1)
+}
+// Rust: tests/taint.rs:173
+#Test("tagged_return_types_drive_dataflow") {
+    src := """
+use core.process as process
+tag PII { deny: [Exec] }
+fn account_name() -> #PII String { "Ada" }
+fn run() -> {
+    process.run(["echo", account_name()]) ?? return Err("test")
+}
+"""
+    assert_eq(codes(src).iter().filter(code -> code == "E0721").count(), 1)
+}
+// Rust: tests/taint.rs:186
+#Test("tagged_struct_fields_enter_dataflow_on_access") {
+    src := """
+use core.process as process
+tag PII { deny: [Exec] }
+struct Row {
+    secret: #PII String
+}
+fn run() -> {
+    row := Row{ secret: "Ada" }
+    process.run(["echo", row.secret]) ?? return Err("test")
+}
+"""
+    assert_eq(codes(src).iter().filter(code -> code == "E0721").count(), 1)
+}
+// Rust: tests/taint.rs:202
+#Test("resolved_instance_method_paths_introduce_declared_tags") {
+    src := """
+use core.process as process
+tag Stored { from: [Store.read], deny: [Exec] }
+struct Store {
+    value: String
+    fn read(self) -> String { self.value }
+}
+fn run() -> {
+    store := Store{ value: "Ada" }
+    process.run(["echo", store.read()]) ?? return Err("test")
+}
+"""
+    assert_eq(codes(src).iter().filter(code -> code == "E0721").count(), 1)
+}
+// Rust: tests/taint.rs:219
+#Test("scrub_removes_only_its_named_tag") {
+    src := """
+use core.process as process
+tag PII { deny: [Exec] }
+#Scrub(PII)
+fn redact(value: #PII String) -> String { value }
+fn run() -> {
+    value := redact(#PII #Input "secret")
+    process.run(["echo", value]) ?? return Err("test")
+}
+"""
+    assert_eq(codes(src).iter().filter(code -> code == "E0721").count(), 1, "the remaining Input fact must still be denied")
+}
+// Rust: tests/taint.rs:239
+#Test("tainted_to_exec_sink_is_error") {
+    src := """
+use core.process as process
+fn run() -> {
+    name :: #Input "world; rm -rf /"
+    process.run(["echo", name]) ?? return Err("test")
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0721"), "direct tainted→sink must be E0721")
+}
+// Rust: tests/taint.rs:256
+#Test("sanitized_value_reaches_sink_ok") {
+    src := """
+use core.process as process
+#Scrub(Input) fn clean(raw: #Input String) -> String { return raw.split(" ").to_list()[0] }
+fn run() -> {
+    name :: #Input "world; rm -rf /"
+    safe := clean(name)
+    process.run(["echo", safe]) ?? return Err("test")
+}
+"""
+    assert(codes(src).is_empty(), "sanitized value at sink must compile: {codes(src):?}")
+}
+// Rust: tests/taint.rs:276
+#Test("taint_propagates_through_binding") {
+    src := """
+use core.process as process
+fn run() -> {
+    raw :: #Input "evil"
+    cmd := raw
+    process.run(["echo", cmd]) ?? return Err("test")
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0721"), "taint must propagate through a binding")
+}
+// Rust: tests/taint.rs:294
+#Test("taint_propagates_through_interpolation") {
+    src := """
+use core.process as process
+fn run() -> {
+    user :: #Input "bob"
+    arg := "hello {user}"
+    process.run(["echo", arg]) ?? return Err("test")
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0721"), "taint must propagate through interpolation")
+}
+// Rust: tests/taint.rs:311
+#Test("reassign_to_clean_clears_taint") {
+    src := """
+use core.process as process
+fn run() -> {
+    x := #Input "evil"
+    x = "safe-literal"
+    process.run(["echo", x]) ?? return Err("test")
+}
+"""
+    assert(codes(src).is_empty(), "reassign to a clean value must clear taint: {codes(src):?}")
+}
+// Rust: tests/taint.rs:329
+#Test("clean_value_at_sink_ok") {
+    src := """
+use core.process as process
+fn run() -> {
+    process.run(["echo", "hello"]) ?? return Err("test")
+}
+"""
+    assert(codes(src).is_empty(), "clean value at sink must compile: {codes(src):?}")
+}
+// Rust: tests/taint.rs:346
+#Test("tainted_at_non_sink_is_ok") {
+    src := """
+fn run() -> {
+    name :: #Input "world"
+    print(name)
+}
+"""
+    assert(!codes(src).iter().any(c -> c == "E0721"), "a non-sink call is not a taint sink")
+}
+// Rust: tests/taint.rs:362
+#Test("taint_is_erased_in_codegen") {
+    tagged := """
+fn run() -> {
+    name :: #Input "world"
+    print(name)
+}
+"""
+    plain := """
+fn run() -> {
+    name :: "world"
+    print(name)
+}
+"""
+    a := compile(tagged).expect("tagged compiles").rust
+    b := compile(plain).expect("plain compiles").rust
+    assert_eq(a, b, "the #Input tag must leave no trace in generated Rust (I3)")
+}
+// Rust: tests/taint.rs:386
+#Test("sanitizer_fn_is_a_normal_function") {
+    src := """
+#Scrub(Input) fn clean(raw: #Input String) -> String { return raw.split(" ").to_list()[0] }
+fn run() -> {
+    print(clean("a b c"))
+}
+"""
+    assert(codes(src).is_empty(), "a #Scrub(Input) fn must compile and run: {codes(src):?}")
+}
+// Rust: tests/taint.rs:405
+#Test("bare_sanitizer_fn_is_e0059") {
+    src := """
+sanitizer fn clean(raw: #Input String) -> String { return raw.split(" ")[0] }
+fn run() -> {
+    print(clean("a b c"))
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0059"), "bare `sanitizer fn` must teach E0059: {codes(src):?}")
+}
+// Rust: tests/taint.rs:422
+#Test("bare_sanitizer_pub_fn_is_e0059") {
+    src := """
+sanitizer pub fn clean(raw: #Input String) -> String { return raw.split(" ")[0] }
+fn run() -> {
+    print(clean("a b c"))
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0059"), "bare `sanitizer pub fn` must teach E0059: {codes(src):?}")
+}
+// Rust: tests/taint.rs:439
+#Test("sanitizer_as_identifier_is_fine") {
+    src := """
+fn run() -> {
+    sanitizer :: 3
+    print("{sanitizer}")
+}
+"""
+    assert(codes(src).is_empty(), "`sanitizer` as a binding name must be fine: {codes(src):?}")
+}
+// Rust: tests/taint.rs:457
+#Test("tainted_credential_to_print_is_e0722") {
+    src := """
+fn run() -> {
+    token :: #Credential "bearer eyJhbGci..."
+    print(token)
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0722"), "credential reaching print must be E0722: {codes(src):?}")
+}
+// Rust: tests/taint.rs:474
+#Test("tainted_input_to_print_is_not_e0722") {
+    src := """
+fn run() -> {
+    user_input :: #Input "hello world"
+    print(user_input)
+}
+"""
+    assert(!codes(src).iter().any(c -> c == "E0722"), "bare #Input reaching print must NOT be E0722: {codes(src):?}")
+}
+// Rust: tests/taint.rs:490
+#Test("tainted_credential_propagates_through_binding") {
+    src := """
+fn run() -> {
+    raw_token :: #Credential "s3cr3t"
+    derived := raw_token
+    print(derived)
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0722"), "credential taint must propagate through binding to print: {codes(src):?}")
+}
+// Rust: tests/taint.rs:508
+#Test("auth_token_keeps_credential_leak_protection") {
+    src := """
+use core.auth as auth
+fn run() -> {
+    token :: #Credential "a.b.c"
+    key :: [U8]{ 0, 1, 2 }
+    _ := auth.verify_jwt(token, key: key, audience: "gateway")
+    print(token)
+}
+"""
+    found := codes(src)
+    assert_eq(found.iter().filter(code -> code == "E0722").count(), 1, "{found:?}")
+}
+// Rust: tests/taint.rs:537
+#Test("magic_link_rejects_oversized_dns_labels") {
+    valid := "user@{\"a\".repeat(63)}.example"
+    invalid := "user@{\"a\".repeat(64)}.example"
+    assert(jet_auth_delivery_capability(valid).is_some())
+    assert(jet_auth_delivery_capability(invalid).is_none(), "a delivery identity with a 64-byte DNS label must be rejected")
+    assert(jet_auth_register_user(invalid.clone(), "hash").is_ok())
+    assert(jet_auth_magic_link_issue(invalid, 0, 1000).is_err(), "registered users with invalid delivery identities must not receive magic links")
+}
+// Rust: tests/taint.rs:554
+#Test("session_show_redacts_bearer_and_oauth_fails_closed") {
+    session := auth.Session{ id: "sess-live-bearer", user_id: "alice", expires_at: 42, cookie: "jet_session=sess-live-bearer" }
+    shown := auth.session_show(session)
+    assert_eq(shown, "Session(id=<redacted>, user=alice, exp=42, cookie_len=28)")
+    assert(!shown.contains("sess-live-bearer"))
+    debug := fmt.debug(session)
+    assert(!debug.contains("sess-live-bearer"))
+    assert(!debug.contains("jet_session=sess-live-bearer"))
+    assert(debug.contains("<redacted>"))
+    assert(jet_auth_oauth_begin("google").is_err())
+    assert(jet_auth_oauth_finish("state", "attacker", 0, 1000).is_err())
+}
+// Rust: tests/taint.rs:581
+#Test("oauth_assertion_requires_provider_proof_and_state_nonce") {
+    entry := JetAuthOAuthState{ state: "oauth-state", provider: "google", nonce: "nonce-value", expires_at: 1700000060000 }
+    secret := "01234567890123456789012345678901".bytes().to_vec()
+    header := b64url("{\"alg\":\"HS256\",\"typ\":\"JWT\"}".bytes())
+    payload := b64url("{\"iss\":\"google\",\"aud\":\"google\",\"sub\":\"alice\",\"nonce\":\"nonce-value\",\"exp\":1700000100,\"iat\":1700000000}".bytes())
+    signing_input := "{header}.{payload}"
+    signature := b64url(crypto.hmac_sha256(secret, signing_input.bytes()).unwrap())
+    assertion := "{signing_input}.{signature}"
+    assert_eq(jet_auth_oauth_verify(entry, assertion, 1700000000000, secret, "google", "google").unwrap(), "alice")
+    tampered := assertion.clone()
+    tampered.pop()
+    tampered.push('A')
+    assert(jet_auth_oauth_verify(entry, tampered, 1700000000000, secret, "google", "google").is_err())
+    wrong_nonce := entry.clone()
+    wrong_nonce.nonce = "other"
+    assert(jet_auth_oauth_verify(wrong_nonce, assertion, 1700000000000, secret, "google", "google").is_err())
+}
+// Rust: tests/taint.rs:660
+#Test("clean_value_to_print_is_not_e0722") {
+    src := """
+fn run() -> {
+    msg := "hello"
+    print(msg)
+}
+"""
+    assert(codes(src).is_empty(), "clean value at print must produce no errors: {codes(src):?}")
+}
+// Rust: tests/taint.rs:679
+#Test("counted_loop_zero_iterations_keeps_pre_loop_taint") {
+    src := """
+use core.process as process
+#Scrub(Input) fn clean(raw: #Input String) -> String { return raw.split(" ").to_list()[0] }
+fn run(n: Int) -> {
+    value := #Input "world; rm -rf /"
+    loop i := 0, i < n {
+        value = clean(value)
+    }
+    process.run(["echo", value]) ?? return Err("test")
+}
+"""
+    assert(codes(src).iter().any(c -> c == "E0721"), "the loop may run zero times, so the pre-loop taint must still reach the sink: {codes(src):?}")
+}
+// Rust: tests/taint.rs:701
+#Test("tainted_credential_to_jsonl_is_e0722") {
+    src := """
+use core.encoding.jsonl as jsonl
+fn run() -> {
+    rows :: #Credential [JSON.Null]
+    jsonl.to_string(rows)
+}
+"""
+    assert(codes(src).iter().any(code -> code == "E0722"), "credential reaching JSONL serialization must be E0722: {codes(src):?}")
+}

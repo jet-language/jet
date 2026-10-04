@@ -1,0 +1,70 @@
+use jet_driver as jet
+use jet_diagnostics.[Diagnostic]
+
+// Rust: tests/typestate.rs:14
+TIER_SOURCE :: """
+struct Settlement { state { Queued, Approved, Settled } }
+impl Settlement {
+    #Transition(_, Queued) fn begin() -[]> Settlement { return Settlement{} }
+    #Transition(Queued, Approved) fn approve(self: ^Settlement) -[]> Settlement { return self }
+    #Transition(Approved, Settled) fn settle(self: ^Settlement) -[]> Settlement { return self }
+    #State(Settled) fn report(self) -[]> String { return "settled" }
+}
+STATE_INFO :: prep { Settlement.reflect() }
+fn run() -> {
+    item := Settlement.begin()
+    item = item.approve()
+    item = item.settle()
+    print(item.report())
+    print(STATE_INFO.states[2].terminal)
+    print(STATE_INFO.states[2].reachable ?? false)
+}
+"""
+// Rust: tests/typestate.rs:38
+TIER_EXPECTED :: "settled\ntrue\ntrue\n"
+// Rust: tests/typestate.rs:40
+fn codes(src: String) -> [String] {
+    if jet.compile(src) == {
+        .Ok(_) -> [String]{}
+        .Err(diags) -> diags.map(fn(d) { d.code })
+    }
+}
+// Rust: tests/typestate.rs:47
+fn diagnostics(src: String) -> [Diagnostic] { jet.compile(src).expect_err("fixture must produce diagnostics") }
+// Rust: tests/typestate.rs:51
+fn lint_codes(src: String) -> [String] {
+    if jet.compile(src) == {
+        .Ok(out) -> out.lints.map(fn(d) { d.code })
+        .Err(_) -> [String]{}
+    }
+}
+// Rust: tests/typestate.rs:59
+DECL :: """
+struct Reservation {
+    state { Pending, Confirmed, CheckedIn }
+    guest: String
+}
+impl Reservation {
+    #Transition(_, Pending) fn book(guest: String) -[]> Reservation {
+        return Reservation{ guest: ~guest }
+    }
+    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -[]> Reservation { return self }
+    #Transition(Confirmed, CheckedIn) fn check_in(self: ^Reservation) -[]> Reservation { return self }
+    #State(CheckedIn) fn room_key(self) -[]> String { return "key" }
+}
+"""
+// Rust: tests/typestate.rs:567
+DIVERGENT :: """
+struct Order {
+    state { Draft, Confirmed, Cancelled, Closed }
+    id: Int
+}
+impl Order {
+    #Transition(_, Draft) fn start(id: Int) -[]> Order { return Order{ id: id } }
+    #Transition(Draft, Confirmed) fn confirm(self: ^Order) -[]> Order { return self }
+    #Transition(Draft, Cancelled) fn cancel(self: ^Order) -[]> Order { return self }
+    #Transition(Confirmed, Closed) fn close(self: ^Order) -[]> Order { return self }
+    #Transition(Cancelled, Closed) fn archive(self: ^Order) -[]> Order { return self }
+    #State(Confirmed) fn ship(self) -[]> Int { return self.id }
+}
+"""

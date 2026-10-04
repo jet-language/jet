@@ -1,0 +1,446 @@
+use std.fs
+use jet
+use jet.AST.[Item, Expr, Namespace, ContribValue, EnumLitArg, StrPart]
+use jet.Sema.[BudgetQuantity, BudgetRawQuantity]
+use jet_foundation.MIR.*
+use jet_foundation.Tests.Integration.Common
+use jet_foundation.Tests.Integration.TirSupport
+use jet_foundation.Tests.Integration.MirFactLifecycle.*
+
+// Rust: tests/mir_fact_lifecycle.rs:49
+#Test("changed_mir_recomputes_facts_and_rejects_stale_passes") {
+    source :: """
+fn auto(values: [Float#4]) -> [Float#4] {{
+    output := [Float#4]{{0.0, 0.0, 0.0, 0.0}}
+    loop i in 0..<4 {{ output[i] = values[i] * 2.0 }}
+    return output
+}}
+fn scalar_sum(values: [Float#4]) -> Float {{
+    total := Float{{0.0}}
+    loop i in 0..<4 {{ total += values[i] }}
+    return total
+}}
+fn run() {{}}
+"""
+    mir :: lower_checked(source)
+    policy :: MirOptimizationPolicy.conservative()
+    optimized :: optimize_mir_program(^mir, policy).unwrap()
+    reduction :: function(optimized, "scalar_sum")
+    assert(!reduction.optimization.auto_vectorizable)
+    assert(reduction.optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()))
+    auto :: function(optimized, "auto")
+    assert(auto.optimization.auto_vectorizable, "loop facts: {auto.optimization.loop_facts:#?}\nvector facts: {auto.optimization.vector_facts:#?}")
+    assert(auto.optimization.vector_facts.iter().any(fact -> fact.decision.is_eligible()))
+    checked :: auto.optimization.checked_vector_facts.iter().find(proof -> auto.optimization.vector_facts.iter().any(fact -> fact.loop_header == proof.loop_header)).expect("eligible vector fact must retain its checked source proof")
+    derived :: auto.optimization.vector_facts.iter().find(fact -> fact.loop_header == checked.loop_header).expect("eligible loop must retain its derived vector fact")
+    cursor :: checked.cursor.expect("checked proof must identify its cursor")
+    assert(!checked.body_blocks.is_empty())
+    assert(checked.advance_block.is_some())
+    assert(!checked.accesses.is_empty())
+    assert(checked.packed)
+    assert(checked.span.start > 0 && checked.span.end > checked.span.start && checked.span.end <= source.len(), "checked proof must retain a non-default source origin: {checked.span:?}")
+    assert(source[checked.span.start..checked.span.end].bytes().any(byte -> !byte.is_ascii_whitespace()), "checked proof origin must cover source bytes")
+    assert(checked.same_checked_scope(derived), "checked proof scope must match the canonical post-optimization row:\nchecked={checked:#?}\nderived={derived:#?}")
+    assert_eq(checked.accesses.len(), 3, "the elementwise witness must retain all canonical input/output access identities: {checked.accesses:#?}")
+    assert(checked.accesses.iter().all(access -> {
+        place_root :: if access.root == .Place(_) { true } else { false }
+        return access.layout == MirVectorLayout.Flat && access.field.is_none() && access.column_index.is_none() && place_root
+    }), "flat elementwise proof must retain place roots without projections: {checked.accesses:#?}")
+    access_roots := checked.accesses.iter().map(access -> {
+        if access.root == .Place(place) { return place }
+        panic("flat elementwise access must use a place root")
+    }).collect()
+    access_roots.sort()
+    access_roots.dedup()
+    assert_eq(access_roots.len(), checked.accesses.len(), "each proven access must retain a distinct MIR place identity")
+    access_roles := [(String, Bool, Bool, Bool)]{}
+    induction_local :: auto.locals.iter().find(local -> local.name == "i").expect("counted witness must retain its induction local")
+    loop place_id in access_roots {
+        place :: auto.places.iter().find(place -> place.id == place_id).unwrap_or_else(() -> panic("checked access references unknown MIR place {place_id:?}"))
+        semantic_name :: if place.base == {
+            .Local(local) -> auto.locals.iter().find(candidate -> candidate.id == local).map(local -> local.name)
+            .Parameter(value) -> auto.blocks.iter().flat_map(block -> block.instructions.iter()).find_map(instruction -> {
+                if instruction.result == Some(value) && instruction.operation == .Parameter{name, ..} { return Some(name) }
+                return None
+            })
+            .Capture(value) -> auto.blocks.iter().flat_map(block -> block.instructions.iter()).find_map(instruction -> {
+                if instruction.result == Some(value) && instruction.operation == .Parameter{name, ..} { return Some(name) }
+                return None
+            })
+            .Temporary(value) -> auto.blocks.iter().flat_map(block -> block.instructions.iter()).find_map(instruction -> {
+                if instruction.result == Some(value) && instruction.operation == .Parameter{name, ..} { return Some(name) }
+                return None
+            })
+            .Static(_) -> None
+        }.unwrap_or_else(() -> panic("checked access has no semantic local name: {place:?}"))
+        has_index :: place.projections.iter().any(projection -> if projection == .Index{..} { true } else { false })
+        indexes_cursor :: place.projections.iter().any(projection -> if projection == .Index{index, ..} { index == cursor } else { false })
+        access_roles.push((semantic_name, has_index, indexes_cursor, place.projections.is_empty()))
+    }
+    access_roles.sort()
+    assert_eq(access_roles, [("i", false, false, true), ("output", true, false, false), ("values", true, true, false)], "checked access IDs must resolve to the induction, output, and input local roles")
+    output_place :: auto.places.iter().find(place -> {
+        output_local :: if place.base == .Local(local) { auto.locals.iter().any(candidate -> candidate.id == local && candidate.name == "output") } else { false }
+        return output_local && place.projections.iter().any(projection -> if projection == .Index{..} { true } else { false })
+    }).and_then(place -> place.projections.iter().find_map(projection -> if projection == .Index{index, ..} { Some(index) } else { None })).expect("output access must retain its index identity")
+    seen := [MirValueId]{}
+    assert(value_reads_place(auto, output_place, induction_local.place, &seen), "output write index must be tied to the induction local: output index={output_place:?}, induction place={induction_local.place:?}")
+    assert(checked.no_aliasing)
+    assert(checked.no_early_exit)
+    assert(checked.effect_free_body)
+    assert(checked.no_cross_iteration_dependencies)
+    overrun := optimized.clone()
+    overrun_function :: function_mut(&overrun, "auto")
+    upper_bound :: overrun_function.blocks.iter_mut().flat_map(block -> &block.instructions).find_map(instruction -> {
+        if instruction.operation == .Constant(.Int{value, ..}) { if value == 4 { return Some(&value) } }
+        return None
+    }).expect("the checked loop has a literal upper bound")
+    *upper_bound = 5
+    overrun_function.optimization.pass_ids.clear()
+    overrun_optimized :: optimize_mir_program(^overrun, policy).unwrap()
+    overrun_checked :: function(overrun_optimized, "auto")
+    assert(overrun_checked.optimization.loop_facts.iter().any(fact -> fact.trip_count == Some(5)))
+    assert(!overrun_checked.optimization.auto_vectorizable)
+    changed := optimized.clone()
+    function_mut(&changed, "auto").effects.direct.insert("IO")
+    assert(require_canonical_mir_optimization(changed).is_err(), "changed MIR must not inherit the old pass receipt")
+    function_mut(&changed, "auto").optimization.pass_ids.clear()
+    rejected :: optimize_mir_program(^changed, policy).unwrap()
+    rejected_auto :: function(rejected, "auto")
+    assert(!rejected_auto.optimization.auto_vectorizable)
+    assert(rejected_auto.optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()))
+    require_canonical_mir_optimization(rejected).unwrap()
+    no_op :: optimize_mir_program(rejected.clone(), policy).unwrap()
+    assert_eq(rejected.deterministic_digest(), no_op.deterministic_digest(), "reoptimizing unchanged MIR must preserve identity")
+}
+
+// Rust: tests/mir_fact_lifecycle.rs:321
+#Test("erased_loop_facts_do_not_make_the_function_vectorizable") {
+    source :: "fn erased(values: [Float#4]) -> [Float#4] {{\n    output := [Float#4]{{0.0, 0.0, 0.0, 0.0}}\n    #Off {{\n        loop i in 0..<4 {{ output[i] = values[i] * 2.0 }}\n    }}\n    return output\n}}\nfn active(values: [Float#4]) -> [Float#4] {{\n    output := [Float#4]{{0.0, 0.0, 0.0, 0.0}}\n    loop i in 0..<4 {{ output[i] = values[i] * 2.0 }}\n    return output\n}}\nfn run() {{}}\n"
+    optimized :: optimize_mir_program(lower_checked(source), MirOptimizationPolicy.conservative()).unwrap()
+    erased :: function(optimized, "erased")
+    active :: function(optimized, "active")
+    assert(!erased.optimization.auto_vectorizable, "erased loop facts must not make the function vectorizable: {erased.optimization:#?}")
+    assert(active.optimization.auto_vectorizable, "active loop must retain its optimizer premise: {active.optimization:#?}")
+}
+// Rust: tests/mir_fact_lifecycle.rs:362
+#Test("elementwise_list_writes_keep_copy_cost_outside_the_loop") {
+    source :: "fn bare(values: [Float#4]) -> [Float#4] {{\n    output := [Float#4]{{0.0, 0.0, 0.0, 0.0}}\n    loop i in 0..<4 {{ output[i] = values[i] * 2.0 }}\n    return output\n}}\nfn explicit(values: [Float#4]) -> [Float#4] {{\n    output := ~values\n    loop i in 0..<4 {{ output[i] = values[i] * 2.0 }}\n    return output\n}}\nfn run() {{}}\n"
+    policy :: MirOptimizationPolicy.conservative()
+    optimized :: optimize_mir_program(lower_checked(source), policy).unwrap()
+    bare :: function(optimized, "bare")
+    bare_loop :: bare.optimization.loop_facts.first().expect("bare elementwise loop fact")
+    assert_eq(bare_loop.copy_cost, MirCopyCost.None)
+    assert(bare.optimization.vector_facts.iter().any(fact -> fact.decision.is_eligible()), "bare/read elementwise writes must remain vector-eligible")
+    explicit :: function(optimized, "explicit")
+    explicit_loop :: explicit.optimization.loop_facts.first().expect("explicit-copy elementwise loop fact")
+    assert_eq(explicit_loop.copy_cost, MirCopyCost.None)
+    explicit_copies :: explicit.blocks.iter().flat_map(block -> block.instructions.iter()).filter(instruction -> if instruction.operation == .Copy{..} { true } else { false }).count()
+    assert_eq(explicit_copies, 1, "explicit copy must be materialized once before the loop")
+    assert(explicit.optimization.vector_facts.iter().any(fact -> fact.decision.is_eligible()), "explicit-copy destination must retain elementwise eligibility")
+}
+// Rust: tests/mir_fact_lifecycle.rs:429
+#Test("checked_vector_proof_conflicts_cannot_repromote_a_loop") {
+    source :: "fn auto(values: [Float#4]) -> [Float#4] {{\n    output := [Float#4]{{0.0, 0.0, 0.0, 0.0}}\n    loop i in 0..<4 {{ output[i] = values[i] * 2.0 }}\n    return output\n}}\nfn run() {{}}\n"
+    mir :: lower_checked(source)
+    policy :: MirOptimizationPolicy.conservative()
+    missing := optimize_mir_program(mir.clone(), policy).unwrap()
+    function_mut(&missing, "auto").optimization.checked_vector_facts.clear()
+    function_mut(&missing, "auto").optimization.pass_ids.clear()
+    missing_checked :: optimize_mir_program(^missing, policy).unwrap()
+    assert(function(missing_checked, "auto").optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()), "missing checked proof must keep the loop scalar")
+    duplicate := optimize_mir_program(mir.clone(), policy).unwrap()
+    duplicate_proof :: function(duplicate, "auto").optimization.checked_vector_facts.first().cloned().expect("auto loop checked proof")
+    function_mut(&duplicate, "auto").optimization.checked_vector_facts.push(^duplicate_proof)
+    function_mut(&duplicate, "auto").optimization.pass_ids.clear()
+    duplicate_checked :: optimize_mir_program(^duplicate, policy).unwrap()
+    assert(function(duplicate_checked, "auto").optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()), "duplicate checked proofs must remain conservatively rejected")
+    conflict := optimize_mir_program(mir.clone(), policy).unwrap()
+    proof :: function_mut(&conflict, "auto").optimization.checked_vector_facts.first_mut().expect("auto loop checked proof")
+    proof.no_cross_iteration_dependencies = false
+    function_mut(&conflict, "auto").optimization.pass_ids.clear()
+    conflict_checked :: optimize_mir_program(^conflict, policy).unwrap()
+    auto :: function(conflict_checked, "auto")
+    assert(auto.optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()), "conflicting checked proof must not be re-promoted")
+    assert(auto.optimization.vector_facts.iter().any(fact -> !fact.no_cross_iteration_dependencies), "the rejected cross-iteration fact must remain visible")
+    stale_access := optimize_mir_program(mir.clone(), policy).unwrap()
+    stale_proof :: function_mut(&stale_access, "auto").optimization.checked_vector_facts.first_mut().expect("auto loop checked proof")
+    assert(!stale_proof.accesses.is_empty())
+    stale_proof.accesses.clear()
+    function_mut(&stale_access, "auto").optimization.pass_ids.clear()
+    stale_checked :: optimize_mir_program(^stale_access, policy).unwrap()
+    assert(function(stale_checked, "auto").optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()), "a proof with stale access identity must not re-promote the loop")
+    changed_cfg := optimize_mir_program(mir.clone(), policy).unwrap()
+    checked :: function(changed_cfg, "auto").optimization.checked_vector_facts.first().cloned().expect("auto loop checked proof")
+    exit :: function(changed_cfg, "auto").optimization.loop_facts.iter().find(row -> row.header == checked.loop_header).and_then(row -> row.exit).expect("auto loop exit")
+    body :: checked.body_blocks[0]
+    function_mut(&changed_cfg, "auto").blocks.iter_mut().find(block -> block.id == body).expect("auto loop body block").terminator = MirTerminator.Jump{target: exit}
+    function_mut(&changed_cfg, "auto").optimization.pass_ids.clear()
+    cfg_checked :: optimize_mir_program(^changed_cfg, policy).unwrap()
+    assert(function(cfg_checked, "auto").optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()), "CFG mutation must invalidate the checked loop scope")
+    explicit_scalar := optimize_mir_program(^mir, policy).unwrap()
+    function_mut(&explicit_scalar, "auto").is_scalar = true
+    function_mut(&explicit_scalar, "auto").optimization.pass_ids.clear()
+    scalar_checked :: optimize_mir_program(^explicit_scalar, policy).unwrap()
+    assert(function(scalar_checked, "auto").optimization.vector_facts.iter().all(fact -> !fact.decision.is_eligible()), "an explicit scalar fact must stay on the scalar path")
+}
+// Rust: tests/mir_fact_lifecycle.rs:593
+#Test("columnar_field_arithmetic_keeps_packed_direct_layout") {
+    source :: "#Layout(columnar)\nstruct Particle {{\n    x: Float\n    y: Float\n    mass: Float\n}}\nfn energy(ps: [Particle#4]) -> [Float#4] {{\n    output := [Float#4]{{0.0, 0.0, 0.0, 0.0}}\n    loop i in 0..<4 {{ output[i] = ps[i].x * ps[i].y + ps[i].mass }}\n    return output\n}}\nfn run() {{}}\n"
+    optimized :: optimize_mir_program(lower_checked(source), MirOptimizationPolicy.conservative()).unwrap()
+    energy :: function(optimized, "energy")
+    fact :: energy.optimization.vector_facts.iter().find(fact -> fact.layout == MirVectorLayout.ColumnarDirect).unwrap_or_else(() -> panic("missing direct columnar vector fact: {energy.optimization.vector_facts:#?}"))
+    assert(fact.decision.is_eligible(), "columnar arithmetic should be eligible: {fact:#?}")
+    assert(fact.packed, "columnar arithmetic should retain packed lowering: {fact:#?}")
+    assert(fact.no_cross_iteration_dependencies, "independent field reads must not inherit a scalar loop-carried dependency: {fact:#?}")
+    assert(fact.accesses.iter().any(access -> access.layout == MirVectorLayout.ColumnarDirect), "vector fact must retain a direct columnar access: {fact:#?}")
+    assert(energy.optimization.acceleration_facts.iter().all(fact -> fact.proof.source_proven && fact.proof.no_aliasing && fact.proof.no_cross_iteration_dependencies && fact.proof.no_early_exit && fact.proof.effect_free_body && fact.proof.ownership_safe && fact.proof.failure_order_preserved), "columnar acceleration must retain every checked safety guard")
+}
+
+// Rust: tests/mir_typed_error_carriers.rs:72
+#Test("optional_folds_respect_runtime_shadowing_and_reader_invalidation") {
+    TirSupport.assert_tiers_agree("optional_fold_eligibility", OPTIONAL_FOLD_ELIGIBILITY_SOURCE, "Zg==\ninvalid base64 at byte 1: byte 0x3F is not in the standard base64 alphabet\n7\n9\n")
+}
+// Rust: tests/mir_typed_error_carriers.rs:81
+#Test("base64_typed_error_carrier_is_consistent_across_i9_tiers") {
+    TirSupport.assert_tiers_agree("base64_typed_error_carrier", BASE64_TYPED_ERROR_SOURCE, "false\ntrue\n1\n102\ntrue\ninvalid base64 at byte 2: expected 1 padding characters\ninvalid base64 at byte 1: byte 0x3F is not in the standard base64 alphabet\ninvalid base64 at byte 1: non-zero unused bits\ninvalid base64 at byte 0: byte 0x2D is not in the standard base64 alphabet\n1\n251\ntrue\ninvalid base64url at byte 2: padding is not allowed\n")
+}
+
+// Rust: tests/modules.rs:81
+#Test("perf_role_captures_budget_expression_and_spans") {
+    src :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"binary\",\n        scope: .Target(\"cli\"),\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }}]\n}}\n\n"
+    items :: parse_items(src)
+    module :: if items[0] == .Module(value) { value } else { panic("expected perf role module") }
+    assert_eq(module.name, "perf.release")
+    assert_eq(src[module.name_span.start..module.name_span.end], "perf.release")
+    contribution :: module.contributions[0]
+    assert_eq(contribution.namespace, Namespace.Perf)
+    assert_eq(contribution.path, "release")
+    perf :: if contribution.value == .Perf(value) { value } else { panic("expected typed perf role AST") }
+    assert_eq(src[perf.budgets_span.start..perf.budgets_span.end], "budgets")
+    assert_eq(perf.budgets.len(), 1)
+    assert_eq(perf.budgets[0].fields.len(), 4)
+    limit :: perf.budgets[0].fields.iter().find(field -> field.name == "limit").expect("typed limit field")
+    args :: if limit.value == .EnumLit{args, ..} { args } else { panic("typed limit enum") }
+    unit :: if args[0] == .Positional(value) { value } else { panic("typed unit literal") }
+    if unit == .UnitLit{raw, suffix, suffix_span, ..} {
+        assert_eq((raw, suffix), ("2", "MiB"))
+        assert_eq(src[suffix_span.start..suffix_span.end], "MiB")
+    } else { panic("typed unit literal") }
+    expected_span := src[src.find("budgets").unwrap()..].trim_end() // #4303
+    assert_eq(src[perf.span.start..perf.span.end], expected_span)
+}
+// Rust: tests/modules.rs:139
+#Test("perf_budget_sema_elaborates_defaults_and_field_spans") {
+    src :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }}]\n}}\n\n"
+    (tokens, lex_diags) :: jet.Lexer.lex(src)
+    assert(lex_diags.is_empty(), "lex diagnostics: {lex_diags:?}")
+    program :: jet.Parser.parse(tokens).expect("parse")
+    specs :: jet.Sema.collect_budget_specs(program).expect("valid performance budget")
+    assert_eq(specs.len(), 1)
+    spec :: specs[0]
+    assert_eq(spec.role, "release")
+    assert_eq(spec.name, "binary")
+    assert_eq(spec.metric, "BinarySize")
+    assert_eq(spec.comparison, "Absolute")
+    assert_eq(spec.limit, "AtMost")
+    assert_eq(spec.enforcement, "Fail")
+    assert_eq(src[spec.span.start..spec.span.end], "Budget{{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n    }}")
+    loop field in ["name", "metric", "limit"] {
+        span :: spec.field_spans.get(field).expect("field span")
+        assert_eq(src[span.start..span.end], field)
+    }
+}
+// Rust: tests/modules.rs:178
+#Test("perf_budget_sema_rejects_duplicate_identity_and_effective_overlap") {
+    duplicate_name :: "module perf.release {{\n    budgets: [\n        Budget{{ name: \"binary\", metric: .BinarySize, limit: .AtMost(2MiB) }},\n        Budget{{ name: \"binary\", metric: .ArtifactSize, limit: .AtMost(3MiB) }},\n    ]\n}}\n"
+    diagnostics :: collect_perf_specs(duplicate_name).expect_err("duplicate identity")
+    assert_eq(diagnostics.last().expect("diagnostic").code, "E2904")
+    overlap :: "module perf.release {{\n    budgets: [\n        Budget{{ name: \"binary\", metric: .BinarySize, limit: .AtMost(2MiB) }},\n        Budget{{ name: \"shipping\", metric: .BinarySize, limit: .AtMost(3MiB) }},\n    ]\n}}\n"
+    overlapping :: collect_perf_specs(overlap).expect_err("effective overlap")
+    assert_eq(overlapping.last().expect("diagnostic").code, "E2904")
+}
+// Rust: tests/modules.rs:201
+#Test("perf_budget_sema_accepts_disjoint_target_applicability") {
+    src :: """
+module perf.release {{
+    budgets: [
+        Budget{{
+            name: "linux",
+            metric: .BinarySize,
+            limit: .AtMost(2MiB),
+            applies: BudgetApplies{{
+                targets: .Only([.Triple("x86_64-unknown-linux-gnu")]),
+                profiles: .All,
+            }},
+        }},
+        Budget{{
+            name: "windows",
+            metric: .BinarySize,
+            limit: .AtMost(2MiB),
+            applies: BudgetApplies{{
+                targets: .Only([.Triple("x86_64-pc-windows-msvc")]),
+                profiles: .All,
+            }},
+        }},
+    ]
+}}
+"""
+    assert_eq(collect_perf_specs(src).expect("disjoint budgets").len(), 2)
+}
+// Rust: tests/modules.rs:230
+#Test("perf_budget_sema_resolves_service_scope_and_provider") {
+    src :: "module env.dev {{\n    services: {{ api: {{ enable: true }} }}\n}}\nmodule perf.release {{\n    budgets: [Budget{{\n        name: \"ready\",\n        scope: .Service(\"api\"),\n        metric: .ServiceReadiness,\n        provider: .ServiceProbe(\"api\"),\n        comparison: .AbsoluteFrom(\"ci/linux-x64\"),\n        limit: .AtMost(2s),\n        enforcement: .Warn,\n    }}]\n}}\n"
+    specs :: collect_perf_specs(src).expect("resolved service budget")
+    assert_eq(specs[0].scope, "Service(api)")
+    assert_eq(specs[0].provider, "ServiceProbe(api)")
+    assert_eq(specs[0].enforcement, "Warn")
+}
+// Rust: tests/modules.rs:253
+#Test("perf_budget_sema_rejects_statistical_budget_without_provider") {
+    src :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"startup\",\n        scope: .Target(\"cli\"),\n        metric: .StartupTime,\n        comparison: .AbsoluteFrom(\"ci/linux-x64\"),\n        limit: .AtMost(500ms),\n    }}]\n}}\n"
+    diagnostics :: collect_perf_specs(src).expect_err("statistical provider is required")
+    diagnostic :: diagnostics.last().expect("diagnostic")
+    assert_eq(diagnostic.code, "E2903")
+    assert_eq(diagnostic.what, "performance budget startup is not valid")
+    assert(diagnostic.why.contains("provider"), "{diagnostic:?}")
+}
+// Rust: tests/modules.rs:272
+#Test("perf_budget_sema_rejects_closed_metric_baseline_and_selector_shapes") {
+    bad_percentile :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"frame\",\n        scope: .Scene(\"menu\"),\n        metric: .FrameTime(.P42),\n        provider: .SceneProbe(\"menu\"),\n        comparison: .AbsoluteFrom(\"ci/linux-x64\"),\n        limit: .AtMost(16ms),\n    }}]\n}}\n\n"
+    assert_eq(collect_perf_specs(bad_percentile).expect_err("closed percentile")[0].code, "E2903")
+    bad_baseline :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"startup\",\n        scope: .Target(\"cli\"),\n        metric: .StartupTime,\n        provider: .BuildArtifact(\"cli\"),\n        comparison: .AbsoluteFrom(\"CI//linux\"),\n        limit: .AtMost(500ms),\n    }}]\n}}\n"
+    assert_eq(collect_perf_specs(bad_baseline).expect_err("baseline grammar")[0].code, "E2903")
+    wrong_axis :: "module perf.release {{\n    budgets: [Budget{{\n        name: \"binary\",\n        metric: .BinarySize,\n        limit: .AtMost(2MiB),\n        applies: BudgetApplies{{ profiles: .Only([.Triple(\"x86_64-unknown-linux-gnu\")]) }},\n    }}]\n}}\n"
+    assert_eq(collect_perf_specs(wrong_axis).expect_err("profile selector family")[0].code, "E2903")
+}
+// Rust: tests/modules.rs:322
+#Test("perf_budget_sema_normalizes_rate_and_retains_canonical_facts") {
+    source :: (baseline: String, count: String, seconds: I64) -> {
+        return "module env.dev {{\n    services: {{ api: {{ enable: true }} }}\n}}\nmodule perf.release {{\n    budgets: [Budget{{\n        name: \"throughput\",\n        scope: .Service(\"api\"),\n        metric: .Throughput,\n        provider: .ServiceProbe(\"api\"),\n        comparison: .AbsoluteFrom(\"{baseline}\"),\n        limit: .AtLeast(Rate{{ count: {count}, per: {seconds}s }}),\n        enforcement: .Warn,\n    }}]\n}}\n"
+    }
+    first :: collect_perf_specs(source("ci/linux-x64", "100", 2)).expect("valid Rate").remove(0)
+    assert_eq(first.comparison, "AbsoluteFrom")
+    assert_eq(first.comparison_fact.baseline, Some("ci/linux-x64"))
+    assert_eq(first.limit_fact.quantity, BudgetQuantity.Rate{numerator: 1, denominator_ns: 20_000_000})
+    assert_eq(first.limit_fact.raw, BudgetRawQuantity.Rate{count_digits: "100", per_digits: "2", per_suffix: "s"})
+    second :: collect_perf_specs(source("ci/macos-arm64", "75", 1)).expect("second valid Rate").remove(0)
+    assert_ne(first.comparison_fact, second.comparison_fact)
+    assert_ne(first.limit_fact, second.limit_fact)
+    hostile :: collect_perf_specs(source("ci/linux-x64", "000_100", 2)).expect("Rate with legal leading zeroes and separators").remove(0)
+    assert_eq(hostile.limit_fact.quantity, BudgetQuantity.Rate{numerator: 1, denominator_ns: 20_000_000})
+    assert_eq(hostile.limit_fact.raw, BudgetRawQuantity.Rate{count_digits: "000_100", per_digits: "2", per_suffix: "s"})
+}
+// Rust: tests/modules.rs:392
+#Test("perf_budget_sema_rejects_named_and_extra_limit_arguments") {
+    cases :: [
+        ("BinarySize", "", "", "Absolute", "AtMost", "2MiB"),
+        ("StartupTime", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "RegressionAtMost", "3pct"),
+        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "RelativeTo(\"ci/linux-x64\")", "ImprovementAtLeast", "3pct"),
+        ("Throughput", "scope: .Service(\"api\"),", "provider: .ServiceProbe(\"api\"),", "AbsoluteFrom(\"ci/linux-x64\")", "AtLeast", "Rate{{ count: 100, per: 1s }}")
+    ]
+    loop (metric, scope, provider, comparison, constructor, value) in cases {
+        loop limit_expr in [".{constructor}{{ value: {value} }}", ".{constructor}({value}, {value})"] {
+            src :: "module env.dev {{ services: {{ api: {{ enable: true }} }} }}\nmodule perf.release {{\n    budgets: [Budget{{\n        name: \"hostile\",\n        {scope}\n        metric: .{metric},\n        {provider}\n        comparison: .{comparison},\n        limit: {limit_expr},\n        enforcement: .Fail,\n    }}]\n}}\n"
+            diagnostics :: collect_perf_specs(src).expect_err("limit constructor arity must reject")
+            assert_eq(diagnostics[0].code, "E2903", limit_expr)
+            assert(diagnostics[0].why.contains("exactly one positional"), "{diagnostics[0]:?}")
+        }
+    }
+}
+// Rust: tests/modules.rs:453
+#Test("parses_module_shell_with_contribution") {
+    src :: "module dev {{\n    env.dev: Env{{\n        prompt: \"wordstats\",\n    }}\n}}\n"
+    items :: parse_items(src)
+    assert_eq(items.len(), 1)
+    m :: if items[0] == .Module(value) { value } else { panic("expected a module item, got {items[0]:?}") }
+    assert_eq(m.name, "dev")
+    assert(m.is_auto_discovered())
+    assert_eq(m.contributions.len(), 1)
+    assert_eq(m.contributions[0].namespace, Namespace.Env)
+    assert_eq(m.contributions[0].path, "dev")
+}
+// Rust: tests/modules.rs:477
+#Test("parses_nested_sources_and_imports") {
+    src :: "module dev {{\n    sources: {{ default: NixOS/nixpkgs/nixos-24.05@github }}\n    imports: find(\"./modules\")\n    env.dev: Env{{\n        prompt: \"wordstats\",\n    }}\n}}\n"
+    items :: parse_items(src)
+    m :: if items[0] == .Module(value) { value } else { panic("expected a module item, got {items[0]:?}") }
+    assert_eq(m.sources.len(), 1)
+    assert_eq(m.sources[0].name, "default")
+    assert_eq(src[m.sources[0].ref_span.start..m.sources[0].ref_span.end], "NixOS/nixpkgs/nixos-24.05@github")
+    assert_eq(m.imports.len(), 1)
+    call :: if m.imports[0] == .Call(value) { value } else { panic("expected a call expression, got {m.imports[0]:?}") }
+    assert_eq(call.name, "find")
+    assert_eq(call.args.len(), 1)
+    parts :: if call.args[0].expr == .Str(value, _) { value } else { panic("expected a string argument, got {call.args[0].expr:?}") }
+    assert_eq(parts.len(), 1, "expected a single literal string part, got {parts:?}")
+    path :: if parts[0] == .Lit(value) { value } else { panic("expected a single literal string part, got {parts:?}") }
+    assert_eq(path, "./modules")
+    assert_eq(m.contributions.len(), 1)
+    assert_eq(m.contributions[0].namespace, Namespace.Env)
+    assert_eq(m.contributions[0].path, "dev")
+}
+// Rust: tests/modules.rs:526
+#Test("module_without_sources_or_imports_has_empty_fields") {
+    src :: "module dev {{\n    env.dev: Env{{ prompt: \"x\" }}\n}}\n"
+    items :: parse_items(src)
+    m :: if items[0] == .Module(value) { value } else { panic("expected a module item") }
+    assert(m.sources.is_empty())
+    assert(m.imports.is_empty())
+    assert_eq(m.contributions.len(), 1)
+}
+// Rust: tests/modules.rs:542
+#Test("leading_underscore_opts_module_out_of_auto_discovery") {
+    src :: "module _gaming {{\n    system.gaming: System{{\n        target: linux.x64,\n    }}\n}}\n"
+    items :: parse_items(src)
+    m :: if items[0] == .Module(value) { value } else { panic("expected a module item") }
+    assert_eq(m.name, "_gaming")
+    assert(!m.is_auto_discovered())
+    assert_eq(m.contributions[0].namespace, Namespace.System)
+}
+// Rust: tests/modules.rs:560
+#Test("many_modules_per_file") {
+    src :: "module laptop {{\n    system.laptop: System{{ target: linux.x64 }}\n}}\nmodule installer {{\n    image.installer: Image{{ from: system.laptop, target: linux.arm64 }}\n}}\n"
+    items :: parse_items(src)
+    assert_eq(items.len(), 2)
+    a :: if items[0] == .Module(value) { value } else { panic("expected two module items") }
+    b :: if items[1] == .Module(value) { value } else { panic("expected two module items") }
+    assert_eq(a.name, "laptop")
+    assert_eq(a.contributions[0].namespace, Namespace.System)
+    assert_eq(b.name, "installer")
+    assert_eq(b.contributions[0].namespace, Namespace.Image)
+}
+// Rust: tests/modules.rs:581
+#Test("bodyless_public_module_is_visible_through_selective_import") {
+    assert_bodyless_module_runs("bodyless_public_module", "pub")
+}
+// Rust: tests/modules.rs:586
+#Test("bodyless_package_module_is_visible_inside_package") {
+    assert_bodyless_module_runs("bodyless_package_module", "pub(package)")
+}
+// Rust: tests/modules.rs:591
+#Test("bodyless_private_module_stays_hidden_outside_owner_file") {
+    scratch :: Common.Scratch.new("bodyless_private_module")
+    write_files(scratch.path, [
+        ("main.jet", "module lib\nuse lib.[helper]\nfn run() {{ print(helper.value()) }}\n"),
+        ("lib.jet", "module helper;\n"),
+        ("helper.jet", "pub fn value() -> String {{ return \"private\" }}\n")
+    ])
+    entry :: scratch.join("main.jet")
+    diagnostics :: jet.check_with_path(entry.to_str().unwrap())
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0609"), "private bodyless module unexpectedly visible: {diagnostics:?}")
+}
+// Rust: tests/modules.rs:619
+#Test("bodyless_package_module_stays_hidden_across_packages") {
+    scratch :: Common.Scratch.new("bodyless_package_module_external")
+    write_files(scratch.path, [
+        ("app/package.jet", "name: \"app\"\nversion: \"0.1.0\"\ndeps: {{ dep: ../dep }}\n"),
+        ("app/main.jet", "use dep\nuse dep.[helper]\nfn run() {{ print(helper.value()) }}\n"),
+        ("dep/package.jet", "name: \"dep\"\nversion: \"0.1.0\"\n"),
+        ("dep/dep.jet", "pub(package) module helper;\n"),
+        ("dep/helper.jet", "pub fn value() -> String {{ return \"hidden\" }}\n")
+    ])
+    entry :: scratch.join("app/main.jet")
+    diagnostics :: jet.check_with_path(entry.to_str().unwrap())
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0609" || diagnostic.code == "E0611"), "package-private bodyless module unexpectedly crossed package boundary: {diagnostics:?}")
+}

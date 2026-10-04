@@ -1,0 +1,16 @@
+// D-DATAFLOW1=A: bounded DataStream pull and typed error policy.
+use std.fs
+use std.process.Command
+use jet_foundation.Tests.Integration.Common as common
+// GATE #4494: native compiler/linker subprocess and real filesystem.
+// Rust: tests/dataflow_stream.rs:8
+pub fn build_and_run(dir: &OSPath, name: String, src: String) -> (I32, String, String) {
+    path :: dir.join("{name}.jet")
+    fs.write(&path, src).unwrap()
+    bin :: dir.join(name)
+    // The native driver owns checked frontend diagnostics, FFI and dependency linking.
+    built :: Command.new(common.jet_bin()).args(["build", path.to_str().unwrap(), "--profile=debug", "-o", bin.to_str().unwrap()]).current_dir(dir).output().unwrap()
+    assert(built.status.success(), "native compiler rejected fixture:\n{String.from_utf8_lossy(&built.stderr)}")
+    output :: Command.new(&bin).current_dir(dir).output().unwrap()
+    (output.status.code().unwrap_or(0), String.from_utf8_lossy(&output.stdout).into_owned(), String.from_utf8_lossy(&output.stderr).into_owned())
+}

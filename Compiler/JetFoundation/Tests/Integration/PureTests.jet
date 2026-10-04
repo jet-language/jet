@@ -1,0 +1,249 @@
+use Pure.*
+use jet
+use jet.[AST, CtValue]
+use std.env
+
+// Rust: tests/pure.rs:41
+#Test("pure_fn_compiles") {
+    src :: """
+fn add(a: Int, b: Int) -[]> Int { return a + b }
+fn run() -> { print("{add(1, 2)}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_ok(), "#Pure fn should compile: {res.err():?}")
+}
+// Rust: tests/pure.rs:56
+#Test("pure_fn_impure_call_is_e3401") {
+    src :: """
+fn bad() -[]> Int {
+    print("side effect")
+    return 42
+}
+fn run() -> { print("{bad()}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_err(), "impure call in #Pure fn should fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any(fn(d) { d.code == "E3401" }), "expected E3401, got: {diags.iter().map(fn(d) { d.code }).collect():?}")
+}
+// Rust: tests/pure.rs:81
+#Test("pure_fn_impure_gate_still_fires_e3401") {
+    src :: """
+fn bad() -[]> Int {
+    #Impure("side effect") { print("ambient") }
+    return 42
+}
+fn run() -> { print("{bad()}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_err(), "#Impure-gated ambient call in a `-[]>` fn should still fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any(fn(d) { d.code == "E3401" }), "expected E3401, got: {diags.iter().map(fn(d) { d.code }).collect():?}")
+}
+// Rust: tests/pure.rs:114
+#Test("pure_fn_comptime_block_is_excluded_from_runtime_check") {
+    src :: """
+fn good() -[]> Int {
+    prep { print("build-time only") }
+    return 42
+}
+fn run() -> { print("{good()}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_err(), "print() inside `prep {{ }}` is still build-time invalid")
+    diags :: res.unwrap_err()
+    e3401s :: diags.iter().filter(fn(d) { d.code == "E3401" }).collect()
+    assert_eq(e3401s.len(), 1, "expected exactly one E3401 (the build-time one), got: {e3401s:?}")
+    assert(e3401s[0].what.contains("not allowed in comptime code"), "the surviving E3401 should be the build-time one, got: {e3401s[0]:?}")
+}
+// Rust: tests/pure.rs:149
+#Test("comptime_named_authority_scope_compiles") {
+    src :: """
+ANSWER :: prep { 42 }
+fn run() -> {
+    prep { #FX(authority: IO) {} }
+    print("{ANSWER}")
+}
+"""
+    output :: jet.compile(src).expect("comptime should accept named #FX")
+    // Original generated source is a peer reference comparator for constant folding.
+    assert(output.rust.contains("42"), "comptime binding was not emitted")
+}
+// Rust: tests/pure.rs:168
+#Test("pure_fn_calling_pure_fn_is_ok") {
+    src :: """
+fn square(n: Int) -[]> Int { return n * n }
+fn cube(n: Int) -[]> Int { return n * square(n) }
+fn run() -> { print("{cube(3)}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_ok(), "pure calling pure should compile: {res.err():?}")
+}
+// Rust: tests/pure.rs:190
+#Test("pub_pure_fn_compiles") {
+    src :: """
+pub fn double(n: Int) -[]> Int { return n * 2 }
+fn run() -> { print("{double(5)}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_ok(), "public pure fn should compile: {res.err():?}")
+}
+// Rust: tests/pure.rs:209
+#Test("pure_fn_calling_impure_user_fn_is_e3401") {
+    src :: """
+fn read_value() -> Int { print("side effect"); return 1 }
+fn compute() -[]> Int { return read_value() }
+fn run() -> { print("{compute()}") }
+"""
+    res :: jet.compile(src)
+    assert(res.is_err(), "#Pure fn calling impure user fn should fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any(fn(d) { d.code == "E3401" }), "expected E3401, got: {diags.iter().map(fn(d) { d.code }).collect():?}")
+}
+// Rust: tests/pure.rs:233
+#Test("pure_fn_checks_calls_in_range_bounds") {
+    src :: """
+fn read_bound() -> Int { print("side effect"); return 2 }
+fn bad() -[]> Range { return 0..read_bound() }
+fn run() -> { print(bad()) }
+"""
+    diags :: jet.compile(src).expect_err("an impure range bound must fail")
+    assert(diags.iter().any(fn(d) { d.code == "E3401" }), "expected E3401, got {diags:?}")
+}
+// Rust: tests/pure.rs:258
+#Test("transitive_chain_3_levels") {
+    src :: """
+fn b() -> { print("side effect") }
+fn a() -> { b() }
+fn run() -> { a() }
+"""
+    diags :: purity_diagnostics(src)
+    assert(!diags.is_empty(), "expected E3401 for transitive impurity")
+    d :: &diags[0]
+    assert_eq(d.code, "E3401", "should be E3401")
+    why :: &d.why
+    assert(why.contains("run") && why.contains("a") && why.contains("b"), "transitive chain missing from why: {why:?}")
+    assert(why.contains("→"), "chain separator `→` missing from why: {why:?}")
+}
+// Rust: tests/pure.rs:360
+#Test("transitive_range_bound_is_e3401") {
+    src :: """
+fn impure_bound() -> Int { print("oops"); return 2 }
+fn helper() -> { band :: 0..impure_bound() }
+fn run() -> { helper() }
+"""
+    diags :: purity_diagnostics(src)
+    assert(!diags.is_empty(), "expected E3401")
+    why :: &diags[0].why
+    assert(why.contains("run") && why.contains("helper") && why.contains("impure_bound"), "chain missing in why: {why:?}")
+}
+// Rust: tests/pure.rs:454
+#Test("transitive_clean_program_no_error") {
+    src :: """
+fn square(n: Int) -[]> Int { return n * n }
+fn run() -> { x :: square(5) }
+"""
+    diags :: purity_diagnostics(src)
+    assert(diags.is_empty(), "expected no diagnostics, got: {diags:?}")
+}
+// Rust: tests/pure.rs:544
+#Test("ctvalue_render_pretty_struct") {
+    v :: CtValue.Struct{ type_name: "Point", fields: [("x", CtValue.Int(3)), ("y", CtValue.Int(4))] }
+    rendered :: v.render_pretty()
+    assert(rendered.contains("Point"), "missing type name")
+    assert(rendered.contains("x:"), "missing field x")
+    assert(rendered.contains("y:"), "missing field y")
+    assert(rendered.contains("3"), "missing value 3")
+    assert(rendered.contains("4"), "missing value 4")
+}
+// Rust: tests/pure.rs:563
+#Test("ctvalue_render_pretty_list") {
+    v :: CtValue.List([CtValue.Int(1), CtValue.Int(2), CtValue.Int(3)])
+    rendered :: v.render_pretty()
+    assert(rendered.starts_with('['), "should start with [")
+    assert(rendered.contains("1,"), "missing 1")
+    assert(rendered.contains("2,"), "missing 2")
+}
+// Rust: tests/pure.rs:574
+#Test("ctvalue_render_pretty_nested") {
+    v :: CtValue.Struct{ type_name: "Report", fields: [("total", CtValue.Int(42)), ("items", CtValue.List([CtValue.Str("a"), CtValue.Str("b")]))] }
+    rendered :: v.render_pretty()
+    assert(rendered.contains("Report"), "missing type name")
+    assert(rendered.contains("total:"), "missing total field")
+    assert(rendered.contains("items:"), "missing items field")
+    assert(rendered.contains("\"a\""), "missing item a")
+    assert(rendered.contains("\"b\""), "missing item b")
+}
+// Rust: tests/pure.rs:599
+#Test("ctvalue_to_json_struct") {
+    v :: CtValue.Struct{ type_name: "Point", fields: [("x", CtValue.Int(3)), ("y", CtValue.Int(4))] }
+    json :: v.to_json()
+    assert_eq(json, "{\"x\":3,\"y\":4}")
+}
+// Rust: tests/pure.rs:614
+#Test("ctvalue_to_json_list") {
+    v :: CtValue.List([CtValue.Int(1), CtValue.Int(2)])
+    assert_eq(v.to_json(), "[1,2]")
+}
+// Rust: tests/pure.rs:624
+#Test("store_generations_empty") {
+    dir :: env.temp_dir().join("jet_pure_test_gen_empty")
+    with_store(&dir, fn() { _ :: jet.Store.list_generations() })
+}
+// Rust: tests/pure.rs:634
+#Test("store_record_generation") {
+    dir :: env.temp_dir().join("jet_pure_test_gen_record")
+    with_store(&dir, fn() {
+        gen :: jet.Store.record_generation()
+        assert(gen >= 1, "generation should be at least 1")
+        gens :: jet.Store.list_generations()
+        assert(!gens.is_empty(), "should have at least one generation recorded")
+    })
+}
+// Rust: tests/pure.rs:649
+#Test("store_rollback_invalid_gen") {
+    dir :: env.temp_dir().join("jet_pure_test_gen_rollback_inv")
+    with_store(&dir, fn() {
+        result :: jet.Store.rollback_to(9999)
+        assert(result.is_err(), "rollback to non-existent gen should fail")
+    })
+}
+// Rust: tests/pure.rs:664
+#Test("eval_type_error_gives_precise_diagnostic_not_e0956") {
+    src :: "fn run() -[]> Int { return \"string\" + 5 }"
+    diags :: jet.check_for_eval(src, "test_eval_type.jet")
+    assert(!diags.is_empty(), "type error should produce diagnostics, got none")
+    assert(diags.iter().all(fn(d) { d.code != "E0956" }), "must not see E0956 for a type error; got: {diags.iter().map(fn(d) { d.code }).collect():?}")
+    codes :: diags.iter().map(fn(d) { d.code }).collect()
+    assert(codes.iter().any(fn(c) { c != "E0956" }), "expected a type/operator error code, got: {codes:?}")
+}
+// Rust: tests/pure.rs:688
+#Test("eval_valid_typed_run_passes_sema") {
+    src :: "fn run() -[]> Int { return 2 + 3 }"
+    diags :: jet.check_for_eval(src, "test_eval_valid.jet")
+    assert(diags.is_empty(), "`fn run() -[]> Int` with correct body should pass sema, got: {diags:?}")
+}
+// Rust: tests/pure.rs:700
+#Test("eval_normal_void_run_passes_sema") {
+    src :: "fn run() -[]> { }"
+    diags :: jet.check_for_eval(src, "test_eval_void.jet")
+    assert(diags.is_empty(), "`fn run() -[]>` should pass eval sema, got: {diags:?}")
+}
+// Rust: tests/pure.rs:712
+#Test("parse_reactive_block_stmt") {
+    src :: """
+fn run() -> {
+    #Reactive { print(1) }
+}
+"""
+    (toks, lex_diags) :: jet.Lexer.lex(src)
+    assert(lex_diags.is_empty(), "lex: {lex_diags:?}")
+    prog :: jet.Parser.parse(&toks).expect("parse ok")
+    run :: prog.items.iter().find_map(fn(i) {
+        match i {
+            AST.Item.Func(f) -> if f.name == "run" -> Some(f) else -> None
+            _ -> None
+        }
+    }).expect("run")
+    assert(run.body.iter().any(fn(s) { match s { AST.Stmt.Reactive{..} -> true; _ -> false } }), "expected Stmt.Reactive in run body, got {run.body:?}")
+}

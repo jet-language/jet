@@ -1,0 +1,261 @@
+use jet_codegen.MIREval.[evaluate_mir_function_with_config, MirEvalConfig, MirExecutionStatus, MirValue]
+use jet_diagnostics.[Diagnostic, Severity]
+use jet_ast.[ProgramBundle]
+use jet_lexer as Lexer
+use jet_lexer.[RawTokenFact, StrTokPart, TerminatorDriver, TerminatorEvent, TokKind, Token]
+use jet_foundation.MIR.[MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram]
+use jet_sema as Sema
+use jet_codegen.TIR as TIR
+use jet_loader as Loader
+use jet_driver.[run_compiler_work, compile]
+use Common as common
+use TirSupport as tir_support
+// GATE #4494: real native files, shared callback ownership and panic payload unwinding.
+use std.fs
+use std.panic.[catch_unwind, AssertUnwindSafe]
+use std.sync.[Shared, OnceLock]
+
+// Rust: tests/selfhost_terminators.rs:14
+PASS_SOURCE :: Lexer.TERMINATOR_PASS_SOURCE
+// Rust: tests/selfhost_terminators.rs:15
+BOOT_ENTRY :: "\nfn bootstrap_probe(source: [U8], facts: [Int]) -> {\n    print(terminator_events(source, facts).len())\n}\nfn run() -> { bootstrap_probe([U8]{}, [Int]{}) }\n"
+// Rust: tests/selfhost_terminators.rs:17
+struct Pass { mir: MirProgram; function: MirFunctionId }
+// Rust: tests/selfhost_terminators.rs:22
+fn lower_bundle(bundle: &ProgramBundle, context: String) -> MirProgram {
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors :: diagnostics.filter(fn(row) { row.severity == Severity.Error })
+    assert(errors.is_empty(), "{context}: checked terminator fixture: {errors:?}")
+    request :: MirArtifactRequest.new(MirArtifactTarget.Cranelift, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)
+    TIR.lower_checked_mir_program_for(bundle, request).unwrap_or_else(fn(error) { panic("{context}: canonical optimized terminator MIR: {error}") }).0
+}
+// Rust: tests/selfhost_terminators.rs:34
+fn bootstrap(context: String, source: String) -> Shared<Pass> {
+    assert(Lexer.terminator_driver().is_none(), "bootstrap must precede candidate installation")
+    run_compiler_work(fn() {
+        scratch :: common.Scratch.new("selfhost_terminator_bootstrap")
+        tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+        path :: scratch.path.join("terminators.jet")
+        fs.write(path, "{source}{BOOT_ENTRY}").unwrap()
+        bundle := Loader.load_entry(path.to_str().unwrap()).expect("Rust reference bootstraps the Jet pass")
+        mir :: lower_bundle(&bundle, context)
+        function :: mir.functions.find(fn(row) { row.name == "terminator_events" }).expect("checked Jet pass entry").id
+        Shared.new(Pass{mir: mir, function: function})
+    })
+}
+// Rust: tests/selfhost_terminators.rs:50
+PASS :: OnceLock<Shared<Pass>>.new()
+fn pass() -> Shared<Pass> { PASS.get_or_init(fn() { bootstrap("canonical terminator pass", PASS_SOURCE) }).clone() }
+// Rust: tests/selfhost_terminators.rs:55
+fn input_values(source: [U8], facts: [RawTokenFact]) -> [MirValue] Err! {
+    bytes := [MirValue]{}
+    loop byte in source { &bytes.push(MirValue.Int(I64.from_u8(byte))) }
+    rows := [MirValue].with_capacity(facts.len() * 4)
+    loop fact in facts {
+        &rows.push(MirValue.Int(I64.from_u16(fact.kind)))
+        &rows.push(MirValue.Int(I64.try_from(fact.span.start).map_err(fn(error) { error.to_string() })?))
+        &rows.push(MirValue.Int(I64.try_from(fact.span.end).map_err(fn(error) { error.to_string() })?))
+        &rows.push(MirValue.Int(if fact.uppercase -> 1 else -> 0))
+    }
+    [MirValue.List(^bytes), MirValue.List(^rows)]
+}
+// Rust: tests/selfhost_terminators.rs:67
+fn decode_events(value: MirValue) -> [TerminatorEvent] Err! {
+    carrier := ^value
+    if carrier == { .Present(inner) -> carrier = ^inner; else -> {} }
+    if carrier == {
+        .List(values) -> {
+            if values.len() % 3 != 0 { return Err("terminator event carrier has an incomplete row") }
+            events := [TerminatorEvent].with_capacity(values.len() / 3)
+            index := 0
+            loop index < values.len() {
+                if (values[index], values[index + 1], values[index + 2]) == {
+                    (.Int(kind), .Int(before), .Int(at)) -> {
+                        before_index :: Int.try_from(before).map_err(fn(error) { error.to_string() })?
+                        at_index :: Int.try_from(at).map_err(fn(error) { error.to_string() })?
+                        // Rust usize conversions reject negatives, even on a signed Jet index carrier.
+                        if before_index < 0 || at_index < 0 { return Err("out of range integral type conversion attempted") }
+                        if kind == {
+                            1 -> &events.push(TerminatorEvent.InsertSemi{before: before_index, at: at_index})
+                            2 -> &events.push(TerminatorEvent.SplitHeader{before: before_index, at: at_index})
+                            else -> return Err("unknown terminator event tag {kind}")
+                        }
+                    }
+                    else -> return Err("terminator event fields must be integers")
+                }
+                index += 3
+            }
+            events
+        }
+        else -> Err("terminator entry returned a non-list carrier: {carrier:?}")
+    }
+}
+// Rust: tests/selfhost_terminators.rs:94
+impl Pass {
+    fn evaluate(self: &Pass, source: [U8], facts: [RawTokenFact], fuel: U64) -> [TerminatorEvent] Err! {
+        args :: input_values(source, facts)?
+        config := MirEvalConfig.default()
+        config.fuel = Val(fuel)
+        result :: evaluate_mir_function_with_config(self.mir, self.function, args, config).map_err(fn(error) { "{error.diagnostic:?}" })?
+        if result.status != MirExecutionStatus.Completed || result.exit_code != 0 || !result.stdout.is_empty() || !result.stderr.is_empty() {
+            return Err("terminator evaluator did not complete silently and successfully")
+        }
+        decode_events(^result.value)
+    }
+    // Rust: tests/selfhost_terminators.rs:108
+    fn driver(self: &Shared<Pass>) -> TerminatorDriver {
+        compiled :: self.clone()
+        Shared.new(fn(source, facts) { compiled.evaluate(source, facts, U64{50000000}) })
+    }
+}
+// Rust: tests/selfhost_terminators.rs:114
+struct Witness { name: String; source: String; parses: Bool }
+// Rust: tests/selfhost_terminators.rs:122
+// Bounded differential manifest; invalid fragments still compare the entire parser result.
+WITNESSES :: [
+    Witness{name: "empty", source: "", parses: true},
+    Witness{name: "eof-expression", source: "x", parses: false},
+    Witness{name: "no-final-newline", source: "fn run() {\n    value :: 1\n}", parses: true},
+    Witness{name: "leading-minus", source: "x\n-y", parses: false},
+    Witness{name: "line-comment-last-code", source: "x // c\ny", parses: false},
+    Witness{name: "nested-block-comment", source: "x /* outer\n/* inner */ end */\ny", parses: false},
+    Witness{name: "comment-at-eof", source: "x // final", parses: false},
+    Witness{name: "unary-not", source: "x\n!y", parses: false},
+    Witness{name: "compact-failure", source: "x\n! problem -> recover", parses: false},
+    Witness{name: "scope-member", source: "x\n.member {}", parses: false},
+    Witness{name: "scope-member-nested-args", source: "x\n.member(f(1), g(2)) {}", parses: false},
+    Witness{name: "scope-member-comment-adjacency", source: "x\n. /* trivia */ member {}", parses: false},
+    Witness{name: "fluent-chain", source: "x\n.member(1)\n?.field", parses: false},
+    Witness{name: "dispatch-group", source: "x\n.Group.Leaf(payload) -> 1", parses: false},
+    Witness{name: "dispatch-null", source: "x\n.null -> 1", parses: false},
+    Witness{name: "dispatch-unicode", source: "x\n.Étage -> 1", parses: false},
+    Witness{name: "dispatch-record", source: "x\n.{ outer: { inner } } -> 1", parses: false},
+    Witness{name: "guard-same-line", source: "x\n.Key && ready -> 1", parses: false},
+    Witness{name: "guard-later-arrow", source: "x\n.Key && ready\n-> 1", parses: false},
+    Witness{name: "guard-nested-delimiters", source: "x\n.Key(v) && f([v], {x: v}) -> 1", parses: false},
+    Witness{name: "unclosed-lookahead", source: "x\n.Member((1\n", parses: false},
+    Witness{name: "split-arrow", source: "fn run()\n-> Int { return 1 }", parses: false},
+    Witness{name: "split-block-crlf", source: "fn run()\r\n{\r\n}\r\n", parses: false},
+    Witness{name: "split-retired-arrow", source: "g()\n=> 1", parses: false},
+    Witness{name: "fence-close-continuation", source: "fn run() {\n    <: a,\n        b\n    :> :: 1\n    print(<: a, b :>)\n}\n", parses: true},
+    Witness{name: "split-effect-spellings", source: "f()\n= x\ng()\n-- x", parses: false},
+    Witness{name: "multi-line-delimiters", source: "fn run() {\n    xs :: [1,\n        2\n    ]\n    print(\n        xs\n    )\n}\n", parses: true},
+    Witness{name: "utf8-crlf-payloads", source: "fn run() {\r\n    café :: \"héllo\"\r\n    print(café)\r\n}\r\n", parses: true},
+    Witness{name: "all-literal-payloads", source: "x :: 0x0F\ny :: 1_024\nz :: 1.25e-3\nu :: 12.50usd\nc :: 'é'\ns :: \"a{1.25 + 2.0}b\"\nr :: `raw`\n", parses: false},
+    Witness{name: "all-continuations", source: "x\n+ y\n- y\n* y\n/ y\n/% y\n% y\n%% y\n== y\n!= y\n< y\n> y\n<= y\n>= y\n<=> y\n& y\n| y\n^ y\n~| y\n<< y\n>> y\n?? y\n&& y\n|| y", parses: false},
+    Witness{name: "place-mark-statements", source: "fn run() {\n    buf := [1]\n    total := 3\n    &buf.push(2)\n    ^buf.len()\n    &self.items.push(1)\n    mask := total\n        & 1\n    power := total\n        ^ 2\n    &(total)\n}\n", parses: false},
+    Witness{name: "end-token-families", source: "true\nfalse\nself\nnull\nbreak\nreturn\na?\na++\na--\nT>\nT>>", parses: false},
+    Witness{name: "invalid-raw-source", source: "fn run() {\n    value :: \"unfinished\n", parses: false},
+    Witness{name: "keyword-and-assignment-transport", source: "fn pub priv if else in mutate move copy struct enum impl trait tag effect derive it const comptime loop yield use extern module\n: :: := , ; .. ..< ... @ ~ ~|= ~~ += -= *= /= /%= %= %%= &= |= ^= <<= >>= # $", parses: false}
+]
+// Rust: tests/selfhost_terminators.rs:159
+fn float_bits(tokens: [Token], output: &[U64]) -> {
+    loop token in tokens {
+        if token.kind == {
+            .Float(value, _) -> &output.push(value.to_bits())
+            .UnitNumber(_, Val(value), _) -> &output.push(value.to_bits())
+            .Str(parts) -> {
+                loop part in parts { if part == { .Interp(nested) -> float_bits(nested, &output); else -> {} } }
+            }
+            else -> {}
+        }
+    }
+}
+// Rust: tests/selfhost_terminators.rs:176
+fn assert_lex_equal(name: String, actual: ([Token], [Diagnostic]), expected: ([Token], [Diagnostic])) -> {
+    assert_eq(actual.0, expected.0, "{name}: full token payloads, trees and byte spans")
+    actual_bits := [U64]{}
+    expected_bits := [U64]{}
+    float_bits(actual.0, &actual_bits)
+    float_bits(expected.0, &expected_bits)
+    assert_eq(actual_bits, expected_bits, "{name}: floating-point payload bits")
+    assert_eq("{actual.1:?}", "{expected.1:?}", "{name}: ordered diagnostics")
+}
+// Rust: tests/selfhost_terminators.rs:256
+fn compiler_must_fail(driver: TerminatorDriver, expected: String) -> {
+    failure :: catch_unwind(AssertUnwindSafe(fn() {
+        Lexer.with_terminator_driver(Val(driver), fn() { _ :: compile("fn run() {}\n") })
+    })).expect_err("candidate failure must not succeed through the Rust reference")
+    message :: failure.downcast_ref<String>().or_else(fn() { failure.downcast_ref<str>() }).expect("ICE message")
+    assert(message.contains("internal compiler error") && message.contains(expected), "{message}")
+    assert(Lexer.terminator_driver().is_none(), "failed candidate leaked scoped driver")
+}
+// Rust: tests/selfhost_terminators.rs:324
+fn golden_program() -> (String, String) {
+    cases :: [
+        ("x", [I64]{1, 1, 1}),
+        ("x\n-y", [I64]{1, 3, 4}),
+        ("x // c\ny", [I64]{1, 2, 1, 1, 3, 8}),
+        ("x\n!y", [I64]{1, 1, 1, 1, 3, 4}),
+        ("f()\n{}", [I64]{2, 3, 4}),
+        ("x\n.Key && ready\n-> 1", [I64]{1, 5, 15, 1, 7, 20}),
+        ("x\n.Key && ready -> 1", [I64]{1, 1, 1, 1, 7, 20}),
+        ("x\n.member(1) {}", [I64]{1, 1, 1})
+    ]
+    // Keep the pure pass inside an unfolder printing wrapper with dynamic parameters.
+    source := "{PASS_SOURCE}\nfn emit_events(source: [U8], facts: [Int]) -> {{\n    events :: terminator_events_scanned(source, false)\n    loop value in events {{ print(value) }}\n}}\nfn run() -> {{\n"
+    expected := ""
+    loop (input, events) in cases {
+        (tokens, diagnostics) :: Lexer.lex_raw(input)
+        assert(diagnostics.is_empty(), "golden raw input: {diagnostics:?}")
+        bytes := [String]{}
+        loop byte in input.bytes() { &bytes.push(byte.to_string()) }
+        rows := [String]{}
+        loop token in tokens {
+            fact :: Lexer.raw_token_fact(token)
+            &rows.push(fact.kind.to_string())
+            &rows.push(fact.span.start.to_string())
+            &rows.push(fact.span.end.to_string())
+            &rows.push(if fact.uppercase -> "1" else -> "0")
+        }
+        &source.push_str("    emit_events([U8]{{{bytes.join(", ")}}}, [Int]{{{rows.join(", ")}}})\n")
+        loop event in events { &expected.push_str("{event}\n") }
+    }
+    &source.push_str("}\n")
+    (source, expected)
+}
+// Rust: tests/selfhost_terminators.rs:375
+fn lexer_payload_golden_program() -> (String, String) {
+    input :: "\t\u{000B}\u{000C}\r\n  1_2.5e-1 1.25e+1 3.5E-1 3.25E+1 \"prefix {1.25e-2} suffix\""
+    (tokens, diagnostics) :: Lexer.lex_raw(input)
+    assert(diagnostics.is_empty(), "payload golden raw input: {diagnostics:?}")
+    assert_eq(tokens.len(), 6, "payload golden token count changed")
+    loop index in 0..<4 {
+        if tokens[index].kind == { .Float(_, _) -> {}; else -> assert(false) }
+    }
+    nested :: if tokens[4].kind == {
+        .Str(parts) -> {
+            if parts.get(1) == {
+                .Val(.Interp(inner)) -> inner.first().expect("interpolation token")
+                else -> panic("payload golden string parts lost its interpolation")
+            }
+        }
+        else -> panic("payload golden string token changed: {tokens[4].kind:?}")
+    }
+    if nested.kind == { .Float(_, _) -> {}; else -> assert(false) }
+    bytes := [String]{}
+    loop byte in input.bytes() { &bytes.push(byte.to_string()) }
+    source := "{PASS_SOURCE}\nfn run() -> {{\n    result :: lex_payload([U8]{{{bytes.join(", ")}}}, false)\n    index := 0\n    loop index < result.tokens.len() {{\n        print(result.tokens[index].span.start)\n        print(result.tokens[index].span.end)\n        print(result.tokens[index].kind)\n        print(result.tokens[index].payload.text)\n        print(result.tokens[index].payload.integer ?? -1)\n        print(result.tokens[index].payload.decimal ?? Float{{0}})\n        print(result.tokens[index].payload.suffix)\n        index += 1\n    }}\n    print(result.diagnostics.len())\n    nested :: result.tokens[4].payload.string_parts[1].tokens[0]\n    print(nested.span.start)\n    print(nested.span.end)\n    print(nested.kind)\n    print(nested.payload.text)\n    print(nested.payload.decimal ?? Float{{0}})\n}}\n"
+    expected := ""
+    loop token in tokens {
+        raw := input[token.span.start..<token.span.end] // #4303
+        &expected.push_str("{token.span.start}\n{token.span.end}\n{Lexer.raw_token_fact(token).kind}\n")
+        &expected.push_str("{raw}\n")
+        if token.kind == {
+            .Float(value, _) -> &expected.push_str("-1\n{value}\n\n")
+            .Str(_) -> &expected.push_str("-1\n0\n\n")
+            .Eof -> &expected.push_str("-1\n0\n\n")
+            else -> panic("payload golden token kind changed: {token.kind:?}")
+        }
+    }
+    &expected.push_str("0\n")
+    if nested.kind == {
+        .Float(value, _) -> {
+            raw := input[nested.span.start..<nested.span.end] // #4303
+            fact :: Lexer.raw_token_fact(nested)
+            &expected.push_str("{nested.span.start}\n{nested.span.end}\n{fact.kind}\n{raw}\n{value}\n")
+        }
+        else -> panic("payload golden interpolation is not a float")
+    }
+    (source, expected)
+}

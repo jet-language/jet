@@ -1,0 +1,9 @@
+use jet_driver.Driver.build_execution_diagnostic
+use jet_driver.Comptime.Build.BuildExecutionError
+use jet_foundation.BuildEffect.GPU
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:8752
+#Test("e3504_fix_text_snapshot_uses_canonical_effect_flag") {
+    diagnostic :: build_execution_diagnostic(BuildExecutionError.MissingGrant(action: "compile", capability: GPU))
+    assert_eq(diagnostic.fix, "Pass `--allow-gpu` for this run, or grant it in package/workspace policy")
+}

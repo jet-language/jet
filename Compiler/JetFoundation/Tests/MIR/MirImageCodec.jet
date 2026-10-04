@@ -1,0 +1,50 @@
+use jet_foundation.MIR.MirImageCodec.*
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1718
+#Test("grouped_imports_use_alias_or_final_path_component") {
+    imports: [String:String] = [:]
+    insert_use_tree("crate::Mir::{{Value, Instruction as Op, nested::Block, *}}", "crate::Image", &imports)
+    assert_eq(imports, ["Value":"crate::Mir::Value", "Op":"crate::Mir::Instruction", "Block":"crate::Mir::nested::Block"])
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1736
+#Test("character_mask_preserves_lifetimes_and_nested_field_delimiters") {
+    source := "pub struct Rows {{ pub rows: &'static [(&'static str, Kind)], pub next: u64 }}"
+    masked := mask_comments_and_literals(&source)
+    assert_eq(masked, source)
+    definitions := parse_definitions(&masked, "crate::Rows", &[:]).unwrap()
+    fields := definitions[0].body == { Body.Struct(fields) -> fields; _ -> { panic("expected struct") } }
+    assert_eq(fields.len(), 2)
+    assert_eq(fields[0].name, "rows")
+    assert_eq(fields[1].name, "next")
+    assert_eq(mask_comments_and_literals("&'a str, &'b str"), "&'a str, &'b str")
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1751
+#Test("character_mask_handles_unicode_and_escapes_without_hiding_following_code") {
+    for literal in ["'a'", "'é'", "'中'", "'𐐀'", "'\\n'", "'\\''", "'\\\\'", "'\\x7f'", "'\\u{{10400}}'"] {
+        source := "{literal}, following"
+        expected := "{" ".repeat(literal.len())}, following"
+        assert_eq(mask_comments_and_literals(&source), expected, literal)
+    }
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1760
+#Test("function_arrows_do_not_close_generic_delimiters") {
+    ty := "Option<Arc<dyn Fn(u8) -> Result<(u8, u8), String>>>"
+    assert_eq(matching_byte(ty.as_bytes(), 6, b'<', b'>'), Val(ty.len() - 1))
+    fields := "pub callback: {ty}, pub next: u64"
+    assert_eq(split_top_level(&fields, ',').len(), 2)
+    assert_eq(parse_fields(&fields).unwrap().len(), 2)
+    suffix := "{ty}, following"
+    assert_eq(top_level_byte(&suffix, b','), Val(ty.len()))
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1771
+#Test("recursive_self_type_resolves_to_its_declaring_definition") {
+    definitions := parse_definitions("pub enum Node {{ Leaf, Child(Box<Self>) }}", "crate::Graph", &[:]).unwrap()
+    schema := Schema.default()
+    definition := definitions[0].clone()
+    schema.definitions.insert(definition.key.clone(), definition.clone())
+    assert_eq(resolve_type_name(&schema, &definition, "Self").unwrap(), "crate::Graph::Node")
+}

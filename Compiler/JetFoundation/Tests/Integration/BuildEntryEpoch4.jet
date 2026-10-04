@@ -1,0 +1,44 @@
+use jet_comptime.Comptime.Build.[BuildCapability, BuildPolicy]
+use jet_driver.Driver.[BuildRunOptions]
+use jet_driver.Policy.[GateSet, PolicyKey]
+use std.[fs, env, process]
+use std.sync.atomic.[AtomicU64, Ordering]
+// GATE #4494: real filesystem/tempdir/process-id/atomic counter.
+// Rust: tests/build_entry_epoch4.rs:12
+static NEXT: AtomicU64 = AtomicU64.new(0)
+// Rust: tests/build_entry_epoch4.rs:14
+const LEGACY_TEMPLATE: String = """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("exercise the typed legacy bridge") {
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
+        imported :: b.legacy(
+            "cargo", "legacy", __INPUTS__, __OUTPUTS__, __ARGV__,
+            ["Exec", "FS"], tc, [], identity, "generic", [], [], [], [], [], "cached", "Cargo.toml"
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() -> {}
+"""
+// Rust: tests/build_entry_epoch4.rs:46
+fn project(name: String) -> OSPath {
+    root :: env.temp_dir().join("jet-build-entry-epoch4-{name}-{process.id()}-{NEXT.fetch_add(1, Ordering.Relaxed)}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    root
+}
+// Rust: tests/build_entry_epoch4.rs:57
+fn source(inputs: String, outputs: String, argv: String) -> String { LEGACY_TEMPLATE.replace("__INPUTS__", inputs).replace("__OUTPUTS__", outputs).replace("__ARGV__", argv) }
+// Rust: tests/build_entry_epoch4.rs:64
+fn options(policy: BuildPolicy) -> BuildRunOptions {
+    BuildRunOptions{grants: Set<BuildCapability>{BuildCapability.Exec, BuildCapability.FS}, policy: policy, execute: false, gates: GateSet.allow(PolicyKey.Impure), inspect_only: false, emit_generated: false, locked: false, no_os: false, web_target: false, plugin_target: false, cross_target: None, profile: "dev", artifact_build: false, application_authority: None, setting_overrides: [String:String]{}, remote: None, package_scope: true, build_override: true, entry_fn: None}
+}
+// Rust: tests/build_entry_epoch4.rs:88
+fn write_entry(root: &OSPath, text: String) -> OSPath {
+    entry :: root.join("main.jet")
+    fs.write(&entry, text).unwrap()
+    entry
+}

@@ -1,1964 +1,1096 @@
-// PORT-PENDING 1159 tests-support-corpus-policy-slice-1: tests/support/corpus_policy.rs:1-1960
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Semantic ratchet for the maintained Jet corpus.
-//RS //!
-//RS //! This is deliberately a test-support adapter. It is not a compiler lint and
-//RS //! it is never consulted for source outside the checked-in corpus manifest.
-//RS //! The manifest owns classification and provenance; the AST pass owns the
-//RS //! recurrence rules; the domain tests decide when to call this adapter.
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS use jet::Diagnostics::Span;
-//RS use jet::Lexer::{TokKind, Token};
-//RS use jet::AST::{
-//RS     AccessConvention, BinOp, BindPattern, CallArg, Expr, ForKind, Item, LambdaBody, OrFallback,
-//RS     Pattern, Program, Stmt, StrFormat, StrPart, StructPatField, Type, UnOp,
-//RS };
-//RS 
-//RS pub const MANIFEST_PATH: &str = "tests/corpus_policy.tsv";
-//RS const MANIFEST: &str = include_str!("../corpus_policy.tsv");
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-//RS pub enum SourceRole {
-//RS     CanonicalTeaching,
-//RS     ExpertLesson,
-//RS     NegativeDiagnostic,
-//RS     RawProtocol,
-//RS     FixtureHarnessBoundary,
-//RS     GeneratedOutput,
-//RS     NonTeachingTestData,
-//RS }
-//RS 
-//RS impl SourceRole {
-//RS     fn parse(value: &str) -> Result<Self, String> {
-//RS         match value {
-//RS             "canonical-teaching" => Ok(Self::CanonicalTeaching),
-//RS             "expert-lesson" => Ok(Self::ExpertLesson),
-//RS             "negative-diagnostic" => Ok(Self::NegativeDiagnostic),
-//RS             "raw-protocol" => Ok(Self::RawProtocol),
-//RS             "fixture-harness-boundary" => Ok(Self::FixtureHarnessBoundary),
-//RS             "generated-output" => Ok(Self::GeneratedOutput),
-//RS             "non-teaching-test-data" => Ok(Self::NonTeachingTestData),
-//RS             _ => Err(format!("unknown corpus source role `{value}`")),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SourceRow {
-//RS     pub selector: String,
-//RS     pub role: SourceRole,
-//RS     pub profile: String,
-//RS     pub decision: String,
-//RS     pub proof: String,
-//RS     pub owner: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProducerRow {
-//RS     pub selector: String,
-//RS     pub artifact: String,
-//RS     pub protocol: String,
-//RS     pub owner: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ArtifactRow {
-//RS     pub selector: String,
-//RS     pub producer: String,
-//RS     pub kind: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct FindingRow {
-//RS     pub id: String,
-//RS     pub rule: String,
-//RS     pub owner: String,
-//RS     pub proof: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ExceptionRow {
-//RS     pub rule: String,
-//RS     pub selector: String,
-//RS     pub site: String,
-//RS     pub expected: usize,
-//RS     pub protocol: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct RuleScopeRow {
-//RS     pub rule: String,
-//RS     pub selector: String,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
-//RS pub struct CorpusManifest {
-//RS     pub sources: Vec<SourceRow>,
-//RS     pub scopes: Vec<RuleScopeRow>,
-//RS     pub producers: Vec<ProducerRow>,
-//RS     pub artifacts: Vec<ArtifactRow>,
-//RS     pub findings: Vec<FindingRow>,
-//RS     pub exceptions: Vec<ExceptionRow>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct RuleSpec {
-//RS     pub name: &'static str,
-//RS     pub why: &'static str,
-//RS     pub replacement: &'static str,
-//RS }
-//RS 
-//RS /// The complete recurrence vocabulary. Every finding row must point at one of
-//RS /// these entries. Product-owned rules remain here even when their primary
-//RS /// executable proof lives in a compiler or domain test; this keeps the 38-row
-//RS /// audit ledger total and prevents an audit-only finding.
-//RS pub fn rule_registry() -> &'static [RuleSpec] {
-//RS     &[
-//RS         RuleSpec { name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)" },
-//RS         RuleSpec { name: "raw-cli-builder-shape", why: "a maintained CLI recipe must not rebuild the parser beside its typed entry", replacement: "use the resolved typed #CLI entry or the one approved args builder" },
-//RS         RuleSpec { name: "fixture-cli-role", why: "a diagnostic fixture may retain parser syntax only as an explicitly classified fixture", replacement: "keep the exact negative or fixture role and do not copy its shape into teaching code" },
-//RS         RuleSpec { name: "dogfood-stdlib-recipes", why: "the maintained dogfood recipe must use the canonical typed helper", replacement: "call the resolved Core helper instead of a local reimplementation" },
-//RS         RuleSpec { name: "dogfood-path-containment", why: "path containment must use the typed path relation", replacement: "call Path.is_within for the normalized path values" },
-//RS         RuleSpec { name: "dogfood-json", why: "dogfood wire values must use the typed JSON seam", replacement: "encode the typed report with the resolved JSON helper" },
-//RS         RuleSpec { name: "dogfood-url-query", why: "URL query semantics must stay in the URL parser", replacement: "use the resolved URL query API" },
-//RS         RuleSpec { name: "dogfood-list-equality", why: "typed lists already provide the canonical equality operation", replacement: "compare the lists with the resolved equality operation" },
-//RS         RuleSpec { name: "dogfood-directory-setup", why: "directory creation must be idempotent", replacement: "use the idempotent directory setup helper" },
-//RS         RuleSpec { name: "dogfood-ascii", why: "ASCII case folding must use the canonical ASCII helper", replacement: "call the resolved ASCII case-fold helper" },
-//RS         RuleSpec { name: "datatree-domain-policy", why: "Tower must not duplicate generic DataTree equality or truthiness machinery", replacement: "use DataTree.equal_unordered for mechanical equality and keep named Tower policy helpers" },
-//RS         RuleSpec { name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API" },
-//RS         RuleSpec { name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary" },
-//RS         RuleSpec { name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion" },
-//RS         RuleSpec { name: "entry-implicit", why: "the first-contact program should be its top-level body", replacement: "move the ordinary first-contact body to top level" },
-//RS         RuleSpec { name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()" },
-//RS         RuleSpec { name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()" },
-//RS         RuleSpec { name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup" },
-//RS         RuleSpec { name: "unit-scalar-rewrap", why: "a scalar conversion must not unwrap and immediately rewrap the same unit", replacement: "use the linear unit operation directly" },
-//RS         RuleSpec { name: "unit_scalar_rewrap", why: "the maintained corpus should use direct scalar unit arithmetic", replacement: "use unit * scalar, scalar * unit, or unit / scalar" },
-//RS         RuleSpec { name: "path_containment_string_prefix", why: "the maintained corpus should use typed path containment", replacement: "replace the string prefix guard with Path.is_within()" },
-//RS         RuleSpec { name: "complete_ascii_case_ladder", why: "the maintained corpus should use the direct ASCII case conversion", replacement: "replace the complete ladder with to_ascii_lower() or to_ascii_upper()" },
-//RS         RuleSpec { name: "compiler-loop-fact", why: "the compiler-owned loop fact must be proved by sema", replacement: "retain the typed positive and negative loop fixtures" },
-//RS         RuleSpec { name: "first-hour-doc-recipe", why: "the onboarding command must use the canonical runner", replacement: "run the example with `jet run`" },
-//RS         RuleSpec { name: "build-root-fact", why: "the selected build entry is a liveness root", replacement: "retain the build-root and neighboring-lint proof" },
-//RS         RuleSpec { name: "error-identity", why: "an unchanged fallible error should propagate through the entry", replacement: "use the bare fallible call" },
-//RS         RuleSpec { name: "readonly-copy", why: "a proven read-only argument does not need an explicit copy sigil", replacement: "pass the read-only expression without the copy sigil" },
-//RS         RuleSpec { name: "task-one-child", why: "one-child task groups add no scheduling policy", replacement: "call task.race or task.any directly" },
-//RS         RuleSpec { name: "effect-row-inference", why: "positive effects already inferred by the body are redundant", replacement: "remove the redundant positive effect row" },
-//RS         RuleSpec { name: "codable-structural", why: "structurally eligible records receive the canonical Codable behavior", replacement: "remove the bare #Codable marker" },
-//RS         RuleSpec { name: "duration-constant-safe", why: "constant durations should use the checked unit literal", replacement: "write the constant as a duration literal such as `2h`" },
-//RS         RuleSpec { name: "http-wrapper-json", why: "the maintained HTTP recipe should use the typed message and JSON seams", replacement: "use the message-text, typed-JSON, and request-free wrapper" },
-//RS         RuleSpec { name: "http-message-text", why: "reading an HTTP response as text should use the message-level default", replacement: "call the response message text projection" },
-//RS         RuleSpec { name: "http-typed-json", why: "HTTP JSON requests should use the typed request body seam", replacement: "call the typed JSON request helper" },
-//RS         RuleSpec { name: "http-unused-request", why: "a request parameter unused by a route should not be carried through the wrapper", replacement: "use the request-free route form" },
-//RS         RuleSpec { name: "crypto-naming-fact", why: "digest names must use the canonical typed surface", replacement: "use the typed digest API and its explicit projection" },
-//RS         RuleSpec { name: "indexed-sequence", why: "sequence loops can carry the index as a fact", replacement: "write `loop (index, item) in items`" },
-//RS         RuleSpec { name: "delimited-reader-config", why: "configured delimited input owns row boundaries and line numbers", replacement: "use the configured delimited reader" },
-//RS         RuleSpec { name: "walk_files_filter", why: "the maintained corpus should use file-only traversal", replacement: "replace fs.walk with fs.walk_files" },
-//RS         RuleSpec { name: "walk-files-filter", why: "file-only traversal should use the configured walk filter", replacement: "use the file-only walk helper or configured traversal" },
-//RS         RuleSpec { name: "plain-format-fact", why: "plain fixed formatting must not be followed by grouping cleanup", replacement: "use the plain Fixed format projection" },
-//RS         RuleSpec { name: "regex-capture-recipe", why: "the maintained filename recipe needs one anchored match and one capture", replacement: "match once with an anchored capture and use the captured value" },
-//RS         RuleSpec { name: "bindgen-one-decoder", why: "one binding renderer emits one response decoder per protocol", replacement: "route all generated response calls through the single decoder" },
-//RS         RuleSpec { name: "generated-protocol-override", why: "a generated protocol exception must be named and structurally distinct from the ordinary envelope", replacement: "declare an override identity with differs-from-ordinary-envelope proof" },
-//RS         RuleSpec { name: "fixture-role-classification", why: "fixture semantics are classified before teaching-surface rules run", replacement: "add the exact fixture role and occurrence exception to the manifest" },
-//RS         RuleSpec { name: "corpus-inventory", why: "every maintained source and generated producer needs an explicit manifest boundary", replacement: "add one exact manifest row with its role, owner, reason, and provenance" },
-//RS     ]
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct SemanticViolation {
-//RS     pub file: String,
-//RS     pub rule: String,
-//RS     pub site: String,
-//RS     pub why: String,
-//RS     pub replacement: String,
-//RS }
-//RS 
-//RS impl SemanticViolation {
-//RS     pub fn new(file: &str, rule: &str, site: String) -> Self {
-//RS         let spec = rule_registry()
-//RS             .iter()
-//RS             .find(|spec| spec.name == rule)
-//RS             .unwrap_or_else(|| panic!("unregistered corpus rule: {rule}"));
-//RS         Self {
-//RS             file: file.to_string(),
-//RS             rule: rule.to_string(),
-//RS             site,
-//RS             why: spec.why.to_string(),
-//RS             replacement: spec.replacement.to_string(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Display for SemanticViolation {
-//RS     fn fmt(&self, out: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         write!(
-//RS             out,
-//RS             "file={}; rule={}; site={}; why={}; replacement={}",
-//RS             self.file, self.rule, self.site, self.why, self.replacement
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct InventoryEntry {
-//RS     pub path: String,
-//RS     pub role: SourceRole,
-//RS     pub producer: Option<String>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Default, PartialEq, Eq)]
-//RS pub struct ArtifactInventory {
-//RS     pub files: Vec<InventoryEntry>,
-//RS     pub producers: Vec<String>,
-//RS     pub artifacts: Vec<String>,
-//RS     pub provenance: Vec<ProvenanceEntry>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ProvenanceEntry {
-//RS     pub producer: String,
-//RS     pub artifact: String,
-//RS     pub protocol: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct CorpusPolicy {
-//RS     root: PathBuf,
-//RS     manifest: CorpusManifest,
-//RS }
-//RS 
-//RS impl CorpusPolicy {
-//RS     pub fn load() -> Result<Self, String> {
-//RS         Self::from_manifest(MANIFEST, PathBuf::from(env!("CARGO_MANIFEST_DIR")))
-//RS     }
-//RS 
-//RS     pub fn from_manifest(text: &str, root: impl Into<PathBuf>) -> Result<Self, String> {
-//RS         let manifest = CorpusManifest::parse(text)?;
-//RS         manifest.validate()?;
-//RS         let root = root.into();
-//RS         validate_manifest_paths(&manifest, &root)?;
-//RS         Ok(Self { root, manifest })
-//RS     }
-//RS 
-//RS     pub fn manifest(&self) -> &CorpusManifest {
-//RS         &self.manifest
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         self.manifest.validate()
-//RS     }
-//RS 
-//RS     /// Discover every checked-in Jet source and every checked-in generated Jet
-//RS     /// artifact. A new path is not silently outside the policy: it must match
-//RS     /// one exact file or the most-specific manifest root.
-//RS     pub fn inventory(&self) -> Result<ArtifactInventory, String> {
-//RS         let mut paths = Vec::new();
-//RS         discover_manifest_files(&self.root, &self.manifest, &mut paths)?;
-//RS         paths.sort();
-//RS         paths.dedup();
-//RS 
-//RS         let mut errors = Vec::new();
-//RS         let mut files = Vec::new();
-//RS         for path in paths {
-//RS             let Some(row) = self.source_row(&path) else {
-//RS                 errors.push(inventory_error(
-//RS                     "unclassified eligible source",
-//RS                     &path,
-//RS                     "inventory:source",
-//RS                 ));
-//RS                 continue;
-//RS             };
-//RS             let producer = self
-//RS                 .manifest
-//RS                 .artifacts
-//RS                 .iter()
-//RS                 .find(|artifact| artifact.selector == format!("path:{path}"))
-//RS                 .map(|artifact| artifact.producer.clone());
-//RS             if row.role == SourceRole::GeneratedOutput && producer.is_none() {
-//RS                 errors.push(inventory_error(
-//RS                     "generated source has no producer artifact provenance",
-//RS                     &path,
-//RS                     "inventory:provenance",
-//RS                 ));
-//RS             }
-//RS             files.push(InventoryEntry {
-//RS                 path,
-//RS                 role: row.role,
-//RS                 producer,
-//RS             });
-//RS         }
-//RS 
-//RS         for artifact in &self.manifest.artifacts {
-//RS             if let Some(path) = artifact.selector.strip_prefix("path:") {
-//RS                 if !self.root.join(path).is_file() {
-//RS                     errors.push(format!("manifest artifact is missing: {path}"));
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         for artifact in &self.manifest.artifacts {
-//RS             let Some(path) = artifact.selector.strip_prefix("path:") else {
-//RS                 continue;
-//RS             };
-//RS             if Path::new(path).extension().and_then(|ext| ext.to_str()) != Some("jet") {
-//RS                 continue;
-//RS             }
-//RS             match self.source_row(path) {
-//RS                 Some(row) if row.role == SourceRole::GeneratedOutput => {}
-//RS                 Some(row) => errors.push(format!(
-//RS                     "generated artifact {path} is classified as {:?}, not generated-output",
-//RS                     row.role
-//RS                 )),
-//RS                 None => errors.push(format!(
-//RS                     "generated artifact has no source classification: {path}"
-//RS                 )),
-//RS             }
-//RS         }
-//RS 
-//RS         let producers = self
-//RS             .manifest
-//RS             .producers
-//RS             .iter()
-//RS             .map(|producer| producer.selector.clone())
-//RS             .collect::<Vec<_>>();
-//RS         let artifacts = self
-//RS             .manifest
-//RS             .artifacts
-//RS             .iter()
-//RS             .map(|artifact| artifact.selector.clone())
-//RS             .collect::<Vec<_>>();
-//RS         let provenance = self
-//RS             .manifest
-//RS             .artifacts
-//RS             .iter()
-//RS             .filter_map(|artifact| {
-//RS                 self.manifest
-//RS                     .producers
-//RS                     .iter()
-//RS                     .find(|producer| producer.selector == artifact.producer)
-//RS                     .map(|producer| ProvenanceEntry {
-//RS                         producer: producer.selector.clone(),
-//RS                         artifact: artifact.selector.clone(),
-//RS                         protocol: producer.protocol.clone(),
-//RS                     })
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         if errors.is_empty() {
-//RS             Ok(ArtifactInventory {
-//RS                 files,
-//RS                 producers,
-//RS                 artifacts,
-//RS                 provenance,
-//RS             })
-//RS         } else {
-//RS             Err(errors.join("\n"))
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check an externally discovered inventory. Domain gates use this for
-//RS     /// producer families and tests use it to prove a synthetic path cannot
-//RS     /// enter the corpus without a manifest row.
-//RS     pub fn audit_inventory(&self, files: &[&str], producers: &[&str]) -> Result<(), String> {
-//RS         let mut errors = Vec::new();
-//RS         for &file in files {
-//RS             if self.source_row(file).is_none() {
-//RS                 errors.push(inventory_error(
-//RS                     "unclassified eligible source",
-//RS                     file,
-//RS                     "inventory:source",
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let declared = self
-//RS             .manifest
-//RS             .producers
-//RS             .iter()
-//RS             .map(|producer| producer.selector.as_str())
-//RS             .collect::<BTreeSet<_>>();
-//RS         for &producer in producers {
-//RS             if !declared.contains(producer) {
-//RS                 errors.push(inventory_error(
-//RS                     "unclassified generated-source producer",
-//RS                     producer,
-//RS                     "inventory:producer",
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if errors.is_empty() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(errors.join("\n"))
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check the ratified CLI recipe inventory. This is a closed-corpus gate:
-//RS     /// only manifest rows with an explicit CLI profile participate. It never
-//RS     /// diagnoses arbitrary user programs or changes compiler behavior.
-//RS     pub fn check_cli_recipe_inventory(&self) -> Result<(), String> {
-//RS         self.validate()?;
-//RS         self.check_fixture_inventory()?;
-//RS         let inventory = self.inventory()?;
-//RS         let mut errors = Vec::new();
-//RS         let mut checked = BTreeSet::new();
-//RS 
-//RS         for entry in &inventory.files {
-//RS             let Some(row) = self.source_row(&entry.path) else {
-//RS                 continue;
-//RS             };
-//RS             let Some(recipe) = cli_recipe_profile(&row.profile) else {
-//RS                 continue;
-//RS             };
-//RS             let path = self.root.join(&entry.path);
-//RS             if !is_jet_program(&path) && recipe != CliRecipe::TypedDoc {
-//RS                 continue;
-//RS             }
-//RS             let source = fs::read_to_string(&path)
-//RS                 .map_err(|error| format!("read {}: {error}", path.display()))?;
-//RS             let has_run_command = has_jet_run_command(&source);
-//RS             let sources = if Path::new(&entry.path)
-//RS                 .extension()
-//RS                 .and_then(|ext| ext.to_str())
-//RS                 == Some("md")
-//RS             {
-//RS                 jet_fences(&source)
-//RS             } else {
-//RS                 vec![source]
-//RS             };
-//RS             let programs = sources
-//RS                 .iter()
-//RS                 .map(|source| parse_program(&entry.path, source))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             let valid = match recipe {
-//RS                 CliRecipe::Typed => {
-//RS                     !programs.is_empty() && programs.iter().all(has_typed_cli_entry)
-//RS                 }
-//RS                 CliRecipe::TypedDoc => programs.iter().any(has_typed_cli_entry) && has_run_command,
-//RS                 CliRecipe::Builder => programs.iter().any(has_args_builder),
-//RS                 CliRecipe::Raw => programs.iter().any(has_raw_process_boundary),
-//RS             };
-//RS             if !valid {
-//RS                 errors.push(format!(
-//RS                     "CLI recipe profile `{}` is not proved by the AST for {}",
-//RS                     row.profile, entry.path
-//RS                 ));
-//RS             }
-//RS             checked.insert(entry.path.clone());
-//RS         }
-//RS 
-//RS         if checked.is_empty() {
-//RS             errors.push("manifest has no checked CLI recipe profiles".to_string());
-//RS         }
-//RS         if errors.is_empty() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(errors.join("\n"))
-//RS         }
-//RS     }
-//RS 
-//RS     /// Check the role boundary before any teaching-surface rule runs. Fixture
-//RS     /// roots are intentionally allowed to contain syntax that teaching code
-//RS     /// must not copy, but the allowance is only valid when the manifest says
-//RS     /// so and the profile agrees with the role.
-//RS     pub fn check_fixture_inventory(&self) -> Result<(), String> {
-//RS         self.validate()?;
-//RS         let inventory = self.inventory()?;
-//RS         let mut errors = Vec::new();
-//RS 
-//RS         for entry in &inventory.files {
-//RS             let Some(expected) = fixture_role_for_path(&entry.path) else {
-//RS                 continue;
-//RS             };
-//RS             if entry.role != expected {
-//RS                 errors.push(
-//RS                     SemanticViolation::new(
-//RS                         &entry.path,
-//RS                         "fixture-role-classification",
-//RS                         site("inventory:fixture-role", Span::new(0, 0)),
-//RS                     )
-//RS                     .to_string(),
-//RS                 );
-//RS             }
-//RS         }
-//RS 
-//RS         for row in &self.manifest.sources {
-//RS             let Some(expected) = profile_fixture_role(&row.profile) else {
-//RS                 continue;
-//RS             };
-//RS             let compatible = match expected {
-//RS                 ProfileFixtureRole::One(role) => row.role == role,
-//RS                 ProfileFixtureRole::Generated => {
-//RS                     matches!(
-//RS                         row.role,
-//RS                         SourceRole::RawProtocol | SourceRole::GeneratedOutput
-//RS                     )
-//RS                 }
-//RS             };
-//RS             if !compatible {
-//RS                 let path = selector_path(&row.selector);
-//RS                 errors.push(
-//RS                     SemanticViolation::new(
-//RS                         path,
-//RS                         "fixture-cli-role",
-//RS                         site("manifest:fixture-profile", Span::new(0, 0)),
-//RS                     )
-//RS                     .to_string(),
-//RS                 );
-//RS             }
-//RS         }
-//RS 
-//RS         if errors.is_empty() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(errors.join("\n"))
-//RS         }
-//RS     }
-//RS 
-//RS     /// Run the adapter after one domain gate. The domain gate remains the
-//RS     /// owner of execution, snapshots, or generator assertions; this call owns
-//RS     /// classification, semantic recurrence, and artifact provenance.
-//RS     pub fn check_gate(&self, gate: &str) -> Result<(), String> {
-//RS         self.validate()?;
-//RS         self.check_cli_recipe_inventory()?;
-//RS         let inventory = self.inventory()?;
-//RS         let mut violations = Vec::new();
-//RS         for entry in &inventory.files {
-//RS             let Some(row) = self.source_row(&entry.path) else {
-//RS                 continue;
-//RS             };
-//RS             if row.role == SourceRole::GeneratedOutput
-//RS                 || !proof_matches(&row.proof, gate)
-//RS                 || !semantic_role(row.role)
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let path = self.root.join(&entry.path);
-//RS             if path.file_name().and_then(|name| name.to_str()) == Some("package.jet") {
-//RS                 continue;
-//RS             }
-//RS             let source = fs::read_to_string(&path)
-//RS                 .map_err(|error| format!("read {}: {error}", path.display()))?;
-//RS             violations.extend(self.evaluate_source(&entry.path, &source)?);
-//RS         }
-//RS         if gate == "all" || gate == "bindgen" {
-//RS             for artifact in &self.manifest.artifacts {
-//RS                 let Some(path) = artifact.selector.strip_prefix("path:") else {
-//RS                     continue;
-//RS                 };
-//RS                 let Some(producer) = self
-//RS                     .manifest
-//RS                     .producers
-//RS                     .iter()
-//RS                     .find(|producer| producer.selector == artifact.producer)
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 if is_no_response_protocol(&producer.protocol)
-//RS                     || Path::new(path).extension().and_then(|ext| ext.to_str()) != Some("jet")
-//RS                 {
-//RS                     continue;
-//RS                 }
-//RS                 let source = fs::read_to_string(self.root.join(path))
-//RS                     .map_err(|error| format!("read generated artifact {path}: {error}"))?;
-//RS                 violations.extend(self.evaluate_generated(&producer.selector, &source)?);
-//RS             }
-//RS         }
-//RS         if violations.is_empty() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(violations
-//RS                 .iter()
-//RS                 .map(ToString::to_string)
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("\n"))
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn evaluate_source(
-//RS         &self,
-//RS         path: &str,
-//RS         source: &str,
-//RS     ) -> Result<Vec<SemanticViolation>, String> {
-//RS         let Some(row) = self.source_row(path) else {
-//RS             return Err(inventory_error(
-//RS                 "unclassified eligible source",
-//RS                 path,
-//RS                 "inventory:source",
-//RS             ));
-//RS         };
-//RS         if !semantic_role(row.role) {
-//RS             return Ok(Vec::new());
-//RS         }
-//RS         let programs = if Path::new(path).extension().and_then(|ext| ext.to_str()) == Some("md") {
-//RS             jet_fences(source)
-//RS         } else {
-//RS             vec![source.to_string()]
-//RS         };
-//RS         let mut all = Vec::new();
-//RS         for program_source in programs {
-//RS             let program = parse_program(path, &program_source)?;
-//RS             self.validate_maintained_lint_allows(path, row, &program)?;
-//RS             all.extend(evaluate_program(&self.manifest, path, row, &program));
-//RS         }
-//RS         if applies(&self.manifest, path, row, "first-hour-doc-recipe")
-//RS             && path == "Docs/spec/guides/first-hour.md"
-//RS         {
-//RS             let typed = jet_fences(source).iter().any(|fence| {
-//RS                 parse_program(path, fence)
-//RS                     .map(|program| has_typed_cli_entry(&program))
-//RS                     .unwrap_or(false)
-//RS             });
-//RS             if !typed || !has_jet_run_command(source) {
-//RS                 let kind = if typed {
-//RS                     "document:jet-run"
-//RS                 } else {
-//RS                     "document:typed-cli"
-//RS                 };
-//RS                 all.push(SemanticViolation::new(
-//RS                     path,
-//RS                     "first-hour-doc-recipe",
-//RS                     site(kind, Span::new(0, 0)),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         self.apply_exceptions(path, all)
-//RS     }
-//RS 
-//RS     /// A maintained source may suppress one of the seven shipped semantic
-//RS     /// guidance rules only with an exact, occurrence-scoped manifest row. The
-//RS     /// compiler's ordinary statement-local `#allow` remains unchanged for
-//RS     /// user code and for negative diagnostic fixtures.
-//RS     fn validate_maintained_lint_allows(
-//RS         &self,
-//RS         path: &str,
-//RS         row: &SourceRow,
-//RS         program: &Program,
-//RS     ) -> Result<(), String> {
-//RS         if !matches!(
-//RS             row.role,
-//RS             SourceRole::CanonicalTeaching | SourceRole::ExpertLesson
-//RS         ) {
-//RS             return Ok(());
-//RS         }
-//RS         let mut occurrences: BTreeMap<(String, String), usize> = BTreeMap::new();
-//RS         for application in &program.rule_facts {
-//RS             if application.marker.name != jet::Syntax::MARKER_ALLOW {
-//RS                 continue;
-//RS             }
-//RS             let Some(target) = application.target else {
-//RS                 continue;
-//RS             };
-//RS             for argument in application.marker.expr_args() {
-//RS                 let Expr::Ident(rule, _) = argument else {
-//RS                     continue;
-//RS                 };
-//RS                 if !maintained_guidance_lint(rule) {
-//RS                     continue;
-//RS                 }
-//RS                 let site = format!("allow:{rule}@{}..{}", target.start, target.end);
-//RS                 *occurrences.entry((rule.clone(), site)).or_default() += 1;
-//RS             }
-//RS         }
-//RS 
-//RS         for ((rule, site), count) in &occurrences {
-//RS             let matches = self
-//RS                 .manifest
-//RS                 .exceptions
-//RS                 .iter()
-//RS                 .filter(|exception| {
-//RS                     exception.rule == *rule
-//RS                         && exception.selector == format!("file:{path}")
-//RS                         && exception.site == *site
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             if matches.len() != 1 {
-//RS                 return Err(format!(
-//RS                     "file={path}; rule={rule}; site={site}; why=maintained #allow needs one occurrence-scoped manifest reason; replacement=add one exact [exception] row"
-//RS                 ));
-//RS             }
-//RS             if matches[0].expected != *count {
-//RS                 return Err(format!(
-//RS                     "file={path}; rule={rule}; site={site}; why=manifest expects {} occurrence(s), found {count}; replacement=keep one reviewed #allow occurrence per manifest row",
-//RS                     matches[0].expected
-//RS                 ));
-//RS             }
-//RS         }
-//RS 
-//RS         for exception in self.manifest.exceptions.iter().filter(|exception| {
-//RS             exception.selector == format!("file:{path}") && exception.site.starts_with("allow:")
-//RS         }) {
-//RS             let count = occurrences
-//RS                 .get(&(exception.rule.clone(), exception.site.clone()))
-//RS                 .copied()
-//RS                 .unwrap_or(0);
-//RS             if count != exception.expected {
-//RS                 return Err(format!(
-//RS                     "file={path}; rule={}; site={}; why=manifest expects {} occurrence(s), found {count}; replacement=remove the stale allowance or update its exact reviewed site",
-//RS                     exception.rule, exception.site, exception.expected
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn evaluate_generated(
-//RS         &self,
-//RS         producer: &str,
-//RS         source: &str,
-//RS     ) -> Result<Vec<SemanticViolation>, String> {
-//RS         let Some(row) = self
-//RS             .manifest
-//RS             .producers
-//RS             .iter()
-//RS             .find(|row| row.selector == producer)
-//RS         else {
-//RS             return Err(inventory_error(
-//RS                 "unclassified generated-source producer",
-//RS                 producer,
-//RS                 "inventory:producer",
-//RS             ));
-//RS         };
-//RS         let program = parse_program(producer, source)?;
-//RS         let decoders = program
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 Item::Func(function) if is_response_decoder(function) => Some(function),
-//RS                 _ => None,
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         if is_no_response_protocol(&row.protocol) {
-//RS             return Ok(Vec::new());
-//RS         }
-//RS         let mut violations = if decoders.is_empty() {
-//RS             vec![SemanticViolation::new(
-//RS                 producer,
-//RS                 "bindgen-one-decoder",
-//RS                 format!("producer:{}#decode_response@0..0", producer),
-//RS             )]
-//RS         } else {
-//RS             decoders
-//RS                 .iter()
-//RS                 .skip(1)
-//RS                 .map(|function| {
-//RS                     SemanticViolation::new(
-//RS                         producer,
-//RS                         "bindgen-one-decoder",
-//RS                         format!(
-//RS                             "producer:{}#response-decoder@{}..{}",
-//RS                             producer, function.span.start, function.span.end
-//RS                         ),
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS         };
-//RS         if decoders.len() == 1
-//RS             && protocol_override_identity(&row.protocol).is_some()
-//RS             && ordinary_envelope_decoder(decoders[0])
-//RS         {
-//RS             let identity = protocol_override_identity(&row.protocol).unwrap_or("unknown");
-//RS             violations.push(SemanticViolation::new(
-//RS                 producer,
-//RS                 "generated-protocol-override",
-//RS                 format!(
-//RS                     "producer:{}#protocol:{}@{}..{}",
-//RS                     producer, identity, decoders[0].span.start, decoders[0].span.end
-//RS                 ),
-//RS             ));
-//RS         }
-//RS         Ok(violations)
-//RS     }
-//RS 
-//RS     /// Validate candidate occurrences supplied by a domain gate. The matching
-//RS     /// key is rule + exact manifest selector + stable semantic site. One
-//RS     /// exception cannot absorb a second occurrence.
-//RS     pub fn validate_occurrences(
-//RS         &self,
-//RS         selector: &str,
-//RS         candidates: &[SemanticViolation],
-//RS     ) -> Result<(), String> {
-//RS         let mut counts: BTreeMap<(String, String), usize> = BTreeMap::new();
-//RS         for candidate in candidates {
-//RS             if candidate.file != selector {
-//RS                 return Err(format!(
-//RS                     "candidate file {} does not match {selector}",
-//RS                     candidate.file
-//RS                 ));
-//RS             }
-//RS             let key = (candidate.rule.clone(), candidate.site.clone());
-//RS             *counts.entry(key).or_default() += 1;
-//RS         }
-//RS         for ((rule, site), count) in counts {
-//RS             let matches = self
-//RS                 .manifest
-//RS                 .exceptions
-//RS                 .iter()
-//RS                 .filter(|exception| {
-//RS                     exception.rule == rule
-//RS                         && exception.selector == format!("file:{selector}")
-//RS                         && exception.site == site
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             if matches.len() != 1 {
-//RS                 return Err(format!(
-//RS                     "file={selector}; rule={rule}; site={site}; why=occurrence has no unique exception; replacement=add one exact exception"
-//RS                 ));
-//RS             }
-//RS             let expected = matches[0].expected;
-//RS             if count != expected {
-//RS                 return Err(format!(
-//RS                     "file={selector}; rule={rule}; site={site}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site"
-//RS                 ));
-//RS             }
-//RS         }
-//RS         for exception in self
-//RS             .manifest
-//RS             .exceptions
-//RS             .iter()
-//RS             .filter(|exception| exception.selector == format!("file:{selector}"))
-//RS         {
-//RS             let count = candidates
-//RS                 .iter()
-//RS                 .filter(|candidate| {
-//RS                     candidate.rule == exception.rule && candidate.site == exception.site
-//RS                 })
-//RS                 .count();
-//RS             if count != exception.expected {
-//RS                 return Err(format!(
-//RS                     "file={selector}; rule={}; site={}; why=expected {} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site",
-//RS                     exception.rule, exception.site, exception.expected
-//RS                 ));
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn apply_exceptions(
-//RS         &self,
-//RS         path: &str,
-//RS         candidates: Vec<SemanticViolation>,
-//RS     ) -> Result<Vec<SemanticViolation>, String> {
-//RS         let mut remaining = Vec::new();
-//RS         let mut matched: BTreeMap<(String, String), usize> = BTreeMap::new();
-//RS         let mut errors = Vec::new();
-//RS         for candidate in &candidates {
-//RS             let key = (candidate.rule.clone(), candidate.site.clone());
-//RS             let exception = self.manifest.exceptions.iter().find(|exception| {
-//RS                 exception.rule == candidate.rule
-//RS                     && exception.selector == format!("file:{path}")
-//RS                     && exception.site == candidate.site
-//RS             });
-//RS             if exception.is_some() {
-//RS                 *matched.entry(key).or_default() += 1;
-//RS             }
-//RS         }
-//RS         for exception in self
-//RS             .manifest
-//RS             .exceptions
-//RS             .iter()
-//RS             .filter(|exception| exception.selector == format!("file:{path}"))
-//RS         {
-//RS             let actual = matched
-//RS                 .get(&(exception.rule.clone(), exception.site.clone()))
-//RS                 .copied()
-//RS                 .unwrap_or(0);
-//RS             if actual != exception.expected {
-//RS                 errors.push(format!(
-//RS                     "file={path}; rule={}; site={}; why=expected {} occurrence(s), found {}; replacement=remove the additional occurrence or update the exact reviewed site",
-//RS                     exception.rule, exception.site, exception.expected, actual
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let mut consumed: BTreeMap<(String, String), usize> = BTreeMap::new();
-//RS         for candidate in candidates {
-//RS             let key = (candidate.rule.clone(), candidate.site.clone());
-//RS             let exception = self.manifest.exceptions.iter().find(|exception| {
-//RS                 exception.rule == candidate.rule
-//RS                     && exception.selector == format!("file:{path}")
-//RS                     && exception.site == candidate.site
-//RS             });
-//RS             if let Some(exception) = exception {
-//RS                 let seen = consumed.entry(key).or_default();
-//RS                 *seen += 1;
-//RS                 if *seen > exception.expected {
-//RS                     remaining.push(candidate);
-//RS                 }
-//RS             } else {
-//RS                 remaining.push(candidate);
-//RS             }
-//RS         }
-//RS         if errors.is_empty() {
-//RS             Ok(remaining)
-//RS         } else {
-//RS             Err(errors.join("\n"))
-//RS         }
-//RS     }
-//RS 
-//RS     fn source_row(&self, path: &str) -> Option<&SourceRow> {
-//RS         self.manifest
-//RS             .sources
-//RS             .iter()
-//RS             .filter(|row| selector_matches(&row.selector, path))
-//RS             .max_by_key(|row| selector_specificity(&row.selector))
-//RS     }
-//RS }
-//RS 
-//RS fn is_response_decoder(function: &jet::AST::Func) -> bool {
-//RS     function.name == "decode_response"
-//RS         && function.params.len() == 2
-//RS         && named_type(&function.params[0].ty, "String")
-//RS         && named_type(&function.params[1].ty, "Int")
-//RS         && matches!(
-//RS                 function.return_type.as_ref(),
-//RS                 Some(Type::Result { ok, .. }) if named_type(ok, "DataTree")
-//RS         )
-//RS }
-//RS 
-//RS fn protocol_override_identity(protocol: &str) -> Option<&str> {
-//RS     protocol
-//RS         .strip_prefix("override:")
-//RS         .and_then(|body| body.split_once(':').map(|(identity, _)| identity))
-//RS }
-//RS 
-//RS fn ordinary_envelope_decoder(function: &jet::AST::Func) -> bool {
-//RS     let mut has_status_field = false;
-//RS     for_each_statement_expr(&function.body, |expr| {
-//RS         if let Expr::MethodCall { method, args, .. } = expr.without_parens() {
-//RS             if method == "field"
-//RS                 && args
-//RS                     .first()
-//RS                     .is_some_and(|arg| is_literal_string(&arg.expr, "ok"))
-//RS             {
-//RS                 has_status_field = true;
-//RS             }
-//RS         }
-//RS     });
-//RS     has_status_field
-//RS }
-//RS 
-//RS impl CorpusManifest {
-//RS     pub fn parse(text: &str) -> Result<Self, String> {
-//RS         let mut manifest = Self::default();
-//RS         let mut section = String::new();
-//RS         for (line_number, raw) in text.lines().enumerate() {
-//RS             let line = raw.trim_end_matches('\r');
-//RS             if line.is_empty() || line.starts_with('#') {
-//RS                 continue;
-//RS             }
-//RS             if line.starts_with('[') && line.ends_with(']') {
-//RS                 section = line[1..line.len() - 1].to_string();
-//RS                 if !matches!(
-//RS                     section.as_str(),
-//RS                     "source" | "scope" | "producer" | "artifact" | "finding" | "exception"
-//RS                 ) {
-//RS                     return Err(format!(
-//RS                         "manifest line {}: unknown section [{}]",
-//RS                         line_number + 1,
-//RS                         section
-//RS                     ));
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             let fields = line.split('\t').collect::<Vec<_>>();
-//RS             let error = |message: &str| format!("manifest line {}: {message}", line_number + 1);
-//RS             match section.as_str() {
-//RS                 "source" if fields.len() == 8 => manifest.sources.push(SourceRow {
-//RS                     selector: parse_selector(fields[1]).map_err(|message| error(&message))?,
-//RS                     role: SourceRole::parse(fields[2]).map_err(|message| error(&message))?,
-//RS                     profile: nonempty(fields[3], &error("source profile is empty"))?,
-//RS                     decision: nonempty(fields[4], &error("source decision is empty"))?,
-//RS                     proof: nonempty(fields[5], &error("source proof is empty"))?,
-//RS                     owner: nonempty(fields[6], &error("source owner is empty"))?,
-//RS                     reason: nonempty(fields[7], &error("source reason is empty"))?,
-//RS                 }),
-//RS                 "scope" if fields.len() == 4 => manifest.scopes.push(RuleScopeRow {
-//RS                     rule: nonempty(fields[1], &error("scope rule is empty"))?,
-//RS                     selector: parse_selector(fields[2]).map_err(|message| error(&message))?,
-//RS                     reason: nonempty(fields[3], &error("scope reason is empty"))?,
-//RS                 }),
-//RS                 "producer" if fields.len() == 6 => manifest.producers.push(ProducerRow {
-//RS                     selector: parse_producer(fields[1]).map_err(|message| error(&message))?,
-//RS                     artifact: parse_artifact(fields[2]).map_err(|message| error(&message))?,
-//RS                     protocol: nonempty(fields[3], &error("producer protocol is empty"))?,
-//RS                     owner: nonempty(fields[4], &error("producer owner is empty"))?,
-//RS                     reason: nonempty(fields[5], &error("producer reason is empty"))?,
-//RS                 }),
-//RS                 "artifact" if fields.len() == 5 => manifest.artifacts.push(ArtifactRow {
-//RS                     selector: parse_artifact(fields[1]).map_err(|message| error(&message))?,
-//RS                     producer: parse_producer(fields[2]).map_err(|message| error(&message))?,
-//RS                     kind: nonempty(fields[3], &error("artifact kind is empty"))?,
-//RS                     reason: nonempty(fields[4], &error("artifact reason is empty"))?,
-//RS                 }),
-//RS                 "finding" if fields.len() == 5 => manifest.findings.push(FindingRow {
-//RS                     id: nonempty(fields[1], &error("finding id is empty"))?,
-//RS                     rule: nonempty(fields[2], &error("finding rule is empty"))?,
-//RS                     owner: nonempty(fields[3], &error("finding owner is empty"))?,
-//RS                     proof: nonempty(fields[4], &error("finding proof is empty"))?,
-//RS                 }),
-//RS                 "exception" if fields.len() == 7 => manifest.exceptions.push(ExceptionRow {
-//RS                     rule: nonempty(fields[1], &error("exception rule is empty"))?,
-//RS                     selector: parse_selector(fields[2]).map_err(|message| error(&message))?,
-//RS                     site: parse_site(fields[3]).map_err(|message| error(&message))?,
-//RS                     expected: fields[4]
-//RS                         .parse()
-//RS                         .map_err(|_| error("exception occurrence is not a positive integer"))?,
-//RS                     protocol: nonempty(fields[5], &error("exception protocol is empty"))?,
-//RS                     reason: nonempty(fields[6], &error("exception reason is empty"))?,
-//RS                 }),
-//RS                 _ => return Err(error("wrong field count or row outside a section")),
-//RS             }
-//RS             if fields.first() != Some(&"1") {
-//RS                 return Err(error("unsupported manifest version"));
-//RS             }
-//RS         }
-//RS         Ok(manifest)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         let mut errors = Vec::new();
-//RS         unique_selectors(
-//RS             &self
-//RS                 .sources
-//RS                 .iter()
-//RS                 .map(|row| row.selector.as_str())
-//RS                 .collect::<Vec<_>>(),
-//RS             "source",
-//RS             &mut errors,
-//RS         );
-//RS         let mut scope_keys = BTreeSet::new();
-//RS         for scope in &self.scopes {
-//RS             if !scope_keys.insert((&scope.rule, &scope.selector)) {
-//RS                 errors.push(format!("duplicate scope {} {}", scope.rule, scope.selector));
-//RS             }
-//RS         }
-//RS         unique_selectors(
-//RS             &self
-//RS                 .producers
-//RS                 .iter()
-//RS                 .map(|row| row.selector.as_str())
-//RS                 .collect::<Vec<_>>(),
-//RS             "producer",
-//RS             &mut errors,
-//RS         );
-//RS         unique_selectors(
-//RS             &self
-//RS                 .artifacts
-//RS                 .iter()
-//RS                 .map(|row| row.selector.as_str())
-//RS                 .collect::<Vec<_>>(),
-//RS             "artifact",
-//RS             &mut errors,
-//RS         );
-//RS         unique_selectors(
-//RS             &self
-//RS                 .findings
-//RS                 .iter()
-//RS                 .map(|row| row.id.as_str())
-//RS                 .collect::<Vec<_>>(),
-//RS             "finding",
-//RS             &mut errors,
-//RS         );
-//RS         let rule_names = rule_registry()
-//RS             .iter()
-//RS             .map(|spec| spec.name)
-//RS             .collect::<BTreeSet<_>>();
-//RS         let producer_names = self
-//RS             .producers
-//RS             .iter()
-//RS             .map(|row| row.selector.as_str())
-//RS             .collect::<BTreeSet<_>>();
-//RS         for finding in &self.findings {
-//RS             if !rule_names.contains(finding.rule.as_str()) {
-//RS                 errors.push(format!(
-//RS                     "finding {} names unknown rule {}",
-//RS                     finding.id, finding.rule
-//RS                 ));
-//RS             }
-//RS             if finding.owner.is_empty() || finding.proof.is_empty() {
-//RS                 errors.push(format!(
-//RS                     "finding {} has no owner or executable proof",
-//RS                     finding.id
-//RS                 ));
-//RS             }
-//RS             if !self.scopes.iter().any(|scope| scope.rule == finding.rule)
-//RS                 && !domain_guard_rule(finding.rule.as_str())
-//RS             {
-//RS                 errors.push(format!(
-//RS                     "finding {} rule {} has no executable corpus or domain guard",
-//RS                     finding.id, finding.rule
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if self.findings.len() != 38 {
-//RS             errors.push(format!(
-//RS                 "manifest must retain all 38 audited findings, found {}",
-//RS                 self.findings.len()
-//RS             ));
-//RS         }
-//RS         for scope in &self.scopes {
-//RS             if !rule_names.contains(scope.rule.as_str()) {
-//RS                 errors.push(format!("scope names unknown rule {}", scope.rule));
-//RS             }
-//RS             let path = selector_path(&scope.selector);
-//RS             if !self
-//RS                 .sources
-//RS                 .iter()
-//RS                 .any(|source| selector_matches(&source.selector, path))
-//RS             {
-//RS                 errors.push(format!(
-//RS                     "scope {} names an unclassified source selector {}",
-//RS                     scope.rule, scope.selector
-//RS                 ));
-//RS             }
-//RS             if scope.reason.is_empty() {
-//RS                 errors.push(format!(
-//RS                     "scope {} {} has no reason",
-//RS                     scope.rule, scope.selector
-//RS                 ));
-//RS             }
-//RS         }
-//RS         for producer in &self.producers {
-//RS             if let Err(error) = validate_protocol(&producer.protocol) {
-//RS                 errors.push(format!(
-//RS                     "{} ({error})",
-//RS                     SemanticViolation::new(
-//RS                         producer_path(&producer.selector),
-//RS                         "generated-protocol-override",
-//RS                         site("manifest:generated-protocol", Span::new(0, 0)),
-//RS                     )
-//RS                 ));
-//RS             }
-//RS             if !self.artifacts.iter().any(|artifact| {
-//RS                 artifact.selector == producer.artifact && artifact.producer == producer.selector
-//RS             }) {
-//RS                 errors.push(format!(
-//RS                     "producer {} family has no artifact row",
-//RS                     producer.selector
-//RS                 ));
-//RS             }
-//RS         }
-//RS         for artifact in &self.artifacts {
-//RS             if !producer_names.contains(artifact.producer.as_str()) {
-//RS                 errors.push(format!(
-//RS                     "artifact {} names unknown producer {}",
-//RS                     artifact.selector, artifact.producer
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let mut exception_keys = BTreeSet::new();
-//RS         for exception in &self.exceptions {
-//RS             if !rule_names.contains(exception.rule.as_str()) {
-//RS                 errors.push(format!("exception names unknown rule {}", exception.rule));
-//RS             }
-//RS             let key = (&exception.rule, &exception.selector, &exception.site);
-//RS             if !exception_keys.insert(key) {
-//RS                 errors.push(format!(
-//RS                     "duplicate occurrence exception {} {} {}",
-//RS                     exception.rule, exception.selector, exception.site
-//RS                 ));
-//RS             }
-//RS             if exception.expected == 0 {
-//RS                 errors.push(format!(
-//RS                     "exception {} {} has zero expected occurrences",
-//RS                     exception.rule, exception.site
-//RS                 ));
-//RS             }
-//RS             if !exception.selector.starts_with("file:") {
-//RS                 errors.push(format!(
-//RS                     "exception {} {} is not occurrence-scoped to one file",
-//RS                     exception.rule, exception.site
-//RS                 ));
-//RS             } else {
-//RS                 let path = selector_path(&exception.selector);
-//RS                 match self
-//RS                     .sources
-//RS                     .iter()
-//RS                     .filter(|source| selector_matches(&source.selector, path))
-//RS                     .max_by_key(|source| selector_specificity(&source.selector))
-//RS                 {
-//RS                     None => errors.push(format!(
-//RS                         "exception {} names an unclassified source {}",
-//RS                         exception.rule, exception.selector
-//RS                     )),
-//RS                     Some(source)
-//RS                         if !exception.site.starts_with("allow:")
-//RS                             && !matches!(
-//RS                                 source.role,
-//RS                                 SourceRole::ExpertLesson | SourceRole::NegativeDiagnostic
-//RS                             ) =>
-//RS                     {
-//RS                         errors.push(format!(
-//RS                             "exception {} {} requires an expert-lesson or negative-diagnostic source, found {:?}",
-//RS                             exception.rule, exception.selector, source.role
-//RS                         ));
-//RS                     }
-//RS                     Some(_) => {}
-//RS                 }
-//RS             }
-//RS             if exception.protocol.is_empty() || exception.reason.is_empty() {
-//RS                 errors.push(format!(
-//RS                     "exception {} {} has no protocol or reason",
-//RS                     exception.rule, exception.site
-//RS                 ));
-//RS             } else if let Err(error) = validate_exception_protocol(&exception.protocol) {
-//RS                 errors.push(format!(
-//RS                     "exception {} {}: {error}",
-//RS                     exception.rule, exception.site
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if errors.is_empty() {
-//RS             Ok(())
-//RS         } else {
-//RS             Err(errors.join("\n"))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn validate_manifest_paths(manifest: &CorpusManifest, root: &Path) -> Result<(), String> {
-//RS     let mut errors = Vec::new();
-//RS     for source in &manifest.sources {
-//RS         let path = selector_path(&source.selector);
-//RS         let exists = match source.selector.strip_prefix("root:") {
-//RS             Some(_) => root.join(path).is_dir(),
-//RS             None => root.join(path).is_file(),
-//RS         };
-//RS         if !exists {
-//RS             errors.push(format!(
-//RS                 "manifest source selector does not exist: {}",
-//RS                 source.selector
-//RS             ));
-//RS         }
-//RS     }
-//RS     for producer in &manifest.producers {
-//RS         let path = producer_path(&producer.selector);
-//RS         if !root.join(path).is_file() {
-//RS             errors.push(format!(
-//RS                 "manifest producer source does not exist: {}",
-//RS                 producer.selector
-//RS             ));
-//RS         }
-//RS     }
-//RS     for exception in &manifest.exceptions {
-//RS         let Some(path) = exception.selector.strip_prefix("file:") else {
-//RS             continue;
-//RS         };
-//RS         if !root.join(path).is_file() {
-//RS             errors.push(format!(
-//RS                 "manifest exception source does not exist: {}",
-//RS                 exception.selector
-//RS             ));
-//RS         }
-//RS     }
-//RS     if errors.is_empty() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(errors.join("\n"))
-//RS     }
-//RS }
-//RS 
-//RS fn selector_path(selector: &str) -> &str {
-//RS     selector
-//RS         .strip_prefix("root:")
-//RS         .or_else(|| selector.strip_prefix("file:"))
-//RS         .unwrap_or(selector)
-//RS }
-//RS 
-//RS fn producer_path(selector: &str) -> &str {
-//RS     selector
-//RS         .strip_prefix("producer:")
-//RS         .and_then(|body| body.split_once('#').map(|(path, _)| path))
-//RS         .unwrap_or(selector)
-//RS }
-//RS 
-//RS fn parse_selector(value: &str) -> Result<String, String> {
-//RS     let path = value
-//RS         .strip_prefix("root:")
-//RS         .or_else(|| value.strip_prefix("file:"))
-//RS         .ok_or_else(|| format!("selector must start with root: or file: ({value})"))?;
-//RS     validate_relative_path(path)?;
-//RS     Ok(value.to_string())
-//RS }
-//RS 
-//RS fn parse_producer(value: &str) -> Result<String, String> {
-//RS     let body = value
-//RS         .strip_prefix("producer:")
-//RS         .ok_or_else(|| format!("producer selector must start with producer: ({value})"))?;
-//RS     let Some((path, symbol)) = body.split_once('#') else {
-//RS         return Err(format!("producer selector must name a symbol ({value})"));
-//RS     };
-//RS     validate_relative_path(path)?;
-//RS     if symbol.is_empty() || symbol.contains('#') {
-//RS         return Err(format!(
-//RS             "producer selector must name one non-empty symbol ({value})"
-//RS         ));
-//RS     }
-//RS     Ok(value.to_string())
-//RS }
-//RS 
-//RS fn parse_artifact(value: &str) -> Result<String, String> {
-//RS     if let Some(path) = value.strip_prefix("path:") {
-//RS         validate_relative_path(path)?;
-//RS     } else if let Some(family) = value.strip_prefix("family:") {
-//RS         if family.is_empty() || family.contains('/') {
-//RS             return Err(format!(
-//RS                 "artifact family is not a stable identifier ({value})"
-//RS             ));
-//RS         }
-//RS     } else {
-//RS         return Err(format!(
-//RS             "artifact selector must start with path: or family: ({value})"
-//RS         ));
-//RS     }
-//RS     Ok(value.to_string())
-//RS }
-//RS 
-//RS fn parse_site(value: &str) -> Result<String, String> {
-//RS     let (kind, span) = value
-//RS         .rsplit_once('@')
-//RS         .ok_or_else(|| format!("semantic site must carry a span ({value})"))?;
-//RS     if kind.is_empty() || kind.contains('@') {
-//RS         return Err(format!(
-//RS             "semantic site kind is empty or malformed ({value})"
-//RS         ));
-//RS     }
-//RS     let (start, end) = span
-//RS         .split_once("..")
-//RS         .ok_or_else(|| format!("semantic site span must use start..end ({value})"))?;
-//RS     let start = start
-//RS         .parse::<usize>()
-//RS         .map_err(|_| format!("bad site start ({value})"))?;
-//RS     let end = end
-//RS         .parse::<usize>()
-//RS         .map_err(|_| format!("bad site end ({value})"))?;
-//RS     if end < start {
-//RS         return Err(format!("site end precedes start ({value})"));
-//RS     }
-//RS     Ok(value.to_string())
-//RS }
-//RS 
-//RS fn validate_relative_path(path: &str) -> Result<(), String> {
-//RS     if path.is_empty()
-//RS         || Path::new(path).is_absolute()
-//RS         || path.split('/').any(|part| part == ".." || part.is_empty())
-//RS     {
-//RS         return Err(format!(
-//RS             "manifest path is not a normalized relative path ({path})"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn nonempty(value: &str, error: &str) -> Result<String, String> {
-//RS     if value.is_empty() {
-//RS         Err(error.to_string())
-//RS     } else {
-//RS         Ok(value.to_string())
-//RS     }
-//RS }
-//RS 
-//RS fn unique_selectors(values: &[&str], kind: &str, errors: &mut Vec<String>) {
-//RS     let mut seen = BTreeSet::new();
-//RS     for value in values {
-//RS         if !seen.insert(*value) {
-//RS             errors.push(format!("duplicate {kind} selector {value}"));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn selector_matches(selector: &str, path: &str) -> bool {
-//RS     if let Some(file) = selector.strip_prefix("file:") {
-//RS         return file == path;
-//RS     }
-//RS     let Some(root) = selector.strip_prefix("root:") else {
-//RS         return false;
-//RS     };
-//RS     path == root
-//RS         || path
-//RS             .strip_prefix(root)
-//RS             .is_some_and(|rest| rest.starts_with('/'))
-//RS }
-//RS 
-//RS fn selector_specificity(selector: &str) -> usize {
-//RS     selector
-//RS         .strip_prefix("file:")
-//RS         .map_or(0, |file| 100_000 + file.len())
-//RS         + selector.strip_prefix("root:").map_or(0, str::len)
-//RS }
-//RS 
-//RS fn is_no_response_protocol(protocol: &str) -> bool {
-//RS     protocol == "no-response-protocol"
-//RS }
-//RS 
-//RS fn validate_protocol(protocol: &str) -> Result<(), String> {
-//RS     if protocol == "ordinary-envelope" || is_no_response_protocol(protocol) {
-//RS         return Ok(());
-//RS     }
-//RS     let Some(override_body) = protocol.strip_prefix("override:") else {
-//RS         return Err(format!(
-//RS             "generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})"
-//RS         ));
-//RS     };
-//RS     let Some((identity, proof)) = override_body.split_once(':') else {
-//RS         return Err(format!(
-//RS             "generated protocol override must name identity and proof ({protocol})"
-//RS         ));
-//RS     };
-//RS     if identity.is_empty()
-//RS         || proof != "differs-from-ordinary-envelope"
-//RS         || identity == "ordinary-envelope"
-//RS     {
-//RS         return Err(format!(
-//RS             "generated protocol override must prove a distinct protocol identity ({protocol})"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_exception_protocol(protocol: &str) -> Result<(), String> {
-//RS     if matches!(
-//RS         protocol,
-//RS         "fixture"
-//RS             | "expert-lesson"
-//RS             | "negative-diagnostic"
-//RS             | "canonical-teaching"
-//RS             | "raw-protocol"
-//RS             | "fixture-harness-boundary"
-//RS     ) {
-//RS         return Ok(());
-//RS     }
-//RS     if protocol.starts_with("override:") {
-//RS         return validate_protocol(protocol);
-//RS     }
-//RS     Err(format!(
-//RS         "exception protocol must name its source boundary or a generated override ({protocol})"
-//RS     ))
-//RS }
-//RS 
-//RS fn domain_guard_rule(rule: &str) -> bool {
-//RS     matches!(
-//RS         rule,
-//RS         "product-parser-regression"
-//RS             | "compiler-loop-fact"
-//RS             | "build-root-fact"
-//RS             | "fixture-role-classification"
-//RS             | "fixture-cli-role"
-//RS             | "bindgen-one-decoder"
-//RS     )
-//RS }
-//RS 
-//RS fn semantic_role(role: SourceRole) -> bool {
-//RS     matches!(
-//RS         role,
-//RS         SourceRole::CanonicalTeaching | SourceRole::ExpertLesson | SourceRole::GeneratedOutput
-//RS     )
-//RS }
-//RS 
-//RS fn fixture_role_for_path(path: &str) -> Option<SourceRole> {
-//RS     if path.starts_with("tests/ui/") || path.starts_with("tests/ui_lint/") {
-//RS         Some(SourceRole::NegativeDiagnostic)
-//RS     } else if path.starts_with("tests/fuzz/")
-//RS         || path.starts_with("tests/conformance/corpus/")
-//RS         || path.starts_with("Tools/adoption/fixtures/")
-//RS     {
-//RS         Some(SourceRole::FixtureHarnessBoundary)
-//RS     } else {
-//RS         None
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy)]
-//RS enum ProfileFixtureRole {
-//RS     One(SourceRole),
-//RS     Generated,
-//RS }
-//RS 
-//RS fn profile_fixture_role(profile: &str) -> Option<ProfileFixtureRole> {
-//RS     match profile {
-//RS         "negative" => Some(ProfileFixtureRole::One(SourceRole::NegativeDiagnostic)),
-//RS         "fixture" | "canonical-test" | "package-template" => {
-//RS             Some(ProfileFixtureRole::One(SourceRole::FixtureHarnessBoundary))
-//RS         }
-//RS         "protocol" => Some(ProfileFixtureRole::One(SourceRole::RawProtocol)),
-//RS         "generated" => Some(ProfileFixtureRole::Generated),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS enum CliRecipe {
-//RS     Typed,
-//RS     Builder,
-//RS     Raw,
-//RS     TypedDoc,
-//RS }
-//RS 
-//RS fn cli_recipe_profile(profile: &str) -> Option<CliRecipe> {
-//RS     match profile {
-//RS         "typed-cli" => Some(CliRecipe::Typed),
-//RS         "typed-cli-doc" => Some(CliRecipe::TypedDoc),
-//RS         "builder-cli" => Some(CliRecipe::Builder),
-//RS         "raw-cli" => Some(CliRecipe::Raw),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn has_typed_cli_entry(program: &Program) -> bool {
-//RS     jet_foundation::CLISchema::entry_schema(&program.items).is_some()
-//RS }
-//RS 
-//RS fn has_args_builder(program: &Program) -> bool {
-//RS     let aliases = module_aliases(program);
-//RS     let expressions = program_expressions(program);
-//RS     let has_spec = expressions.iter().copied().any(|expr| {
-//RS         matches!(
-//RS             expr.without_parens(),
-//RS             Expr::MethodCall { receiver, method, .. }
-//RS                 if method == "spec" && receiver_is(receiver, "args", &aliases)
-//RS         )
-//RS     });
-//RS     let has_parse = expressions.iter().copied().any(|expr| {
-//RS         matches!(
-//RS             expr.without_parens(),
-//RS             Expr::MethodCall { method, .. } if method == "parse" || method == "parse_or_exit"
-//RS         )
-//RS     });
-//RS     has_spec && has_parse
-//RS }
-//RS 
-//RS fn has_raw_process_boundary(program: &Program) -> bool {
-//RS     let aliases = module_aliases(program);
-//RS     program_expressions(program)
-//RS         .iter()
-//RS         .copied()
-//RS         .any(|expr| is_process_input(expr, &aliases))
-//RS }
-//RS 
-//RS enum CorpusWalkNode<'a> {
-//RS     Expr(&'a Expr),
-//RS     Stmt(&'a Stmt),
-//RS     LValue(&'a jet::AST::LValue),
-//RS     ForKind(&'a ForKind),
-//RS     BindPattern(&'a BindPattern),
-//RS     Pattern(&'a Pattern),
-//RS     Fallback(&'a OrFallback),
-//RS }
-//RS 
-//RS fn push_corpus_statements<'a>(stack: &mut Vec<CorpusWalkNode<'a>>, body: &'a [Stmt]) {
-//RS     for statement in body.iter().rev() {
-//RS         stack.push(CorpusWalkNode::Stmt(statement));
-//RS     }
-//RS }
-//RS 
-//RS fn push_corpus_args<'a>(stack: &mut Vec<CorpusWalkNode<'a>>, args: &'a [CallArg]) {
-//RS     for argument in args.iter().rev() {
-//RS         stack.push(CorpusWalkNode::Expr(&argument.expr));
-//RS     }
-//RS }
-//RS 
-//RS /// Visit corpus expressions with an explicit work stack. The AST's shared
-//RS /// read-only visitor clones each root and recursively descends it; a source
-//RS /// corpus entry can be deeper than the test thread's stack even when it is a
-//RS /// valid program. Keeping references also avoids cloning every ancestor once
-//RS /// per visited expression.
-//RS fn for_each_statement_expr<'a>(body: &'a [Stmt], mut f: impl FnMut(&'a Expr)) {
-//RS     let mut stack = Vec::with_capacity(body.len());
-//RS     push_corpus_statements(&mut stack, body);
-//RS 
-//RS     while let Some(node) = stack.pop() {
-//RS         match node {
-//RS             CorpusWalkNode::Stmt(statement) => match statement {
-//RS                 Stmt::Expr(expr) => stack.push(CorpusWalkNode::Expr(expr)),
-//RS                 Stmt::DeferClose { close, .. } => stack.push(CorpusWalkNode::Expr(close)),
-//RS                 Stmt::Val(binding) => {
-//RS                     if let Some(pattern) = binding.pattern.as_ref() {
-//RS                         stack.push(CorpusWalkNode::BindPattern(pattern));
-//RS                     }
-//RS                     stack.push(CorpusWalkNode::Expr(&binding.init));
-//RS                 }
-//RS                 Stmt::Assign { target, value, .. } => {
-//RS                     stack.push(CorpusWalkNode::Expr(value));
-//RS                     stack.push(CorpusWalkNode::LValue(target));
-//RS                 }
-//RS                 Stmt::Return(value, _) => {
-//RS                     if let Some(value) = value {
-//RS                         stack.push(CorpusWalkNode::Expr(value));
-//RS                     }
-//RS                 }
-//RS                 Stmt::While { cond, body, .. } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     stack.push(CorpusWalkNode::Expr(cond));
-//RS                 }
-//RS                 Stmt::For { kind, body, .. } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     stack.push(CorpusWalkNode::ForKind(kind));
-//RS                 }
-//RS                 Stmt::Switch {
-//RS                     subject,
-//RS                     arms,
-//RS                     else_body,
-//RS                     ..
-//RS                 }
-//RS                 | Stmt::ComptimeSwitch {
-//RS                     subject,
-//RS                     arms,
-//RS                     else_body,
-//RS                     ..
-//RS                 } => {
-//RS                     if let Some(body) = else_body {
-//RS                         push_corpus_statements(&mut stack, body);
-//RS                     }
-//RS                     for arm in arms.iter().rev() {
-//RS                         push_corpus_statements(&mut stack, &arm.body);
-//RS                         stack.push(CorpusWalkNode::Expr(&arm.cond));
-//RS                     }
-//RS                     stack.push(CorpusWalkNode::Expr(subject));
-//RS                 }
-//RS                 Stmt::BreakValue(value, _) | Stmt::Yield(value, _) => {
-//RS                     stack.push(CorpusWalkNode::Expr(value));
-//RS                 }
-//RS                 Stmt::BreakLabelValue(_, _, value, _) => {
-//RS                     stack.push(CorpusWalkNode::Expr(value));
-//RS                 }
-//RS                 Stmt::Loop { body, .. }
-//RS                 | Stmt::Reactive { body, .. }
-//RS                 | Stmt::Shield { body, .. }
-//RS                 | Stmt::Switched { body, .. }
-//RS                 | Stmt::Region { body, .. }
-//RS                 | Stmt::Policy { body, .. }
-//RS                 | Stmt::AuthorityScope { body, .. }
-//RS                 | Stmt::ComptimeBlock { body, .. }
-//RS                 | Stmt::Live { body, .. }
-//RS                 | Stmt::Transact { body, .. }
-//RS                 | Stmt::Layout { body, .. } => push_corpus_statements(&mut stack, body),
-//RS                 Stmt::Unsafe {
-//RS                     audit_expr, body, ..
-//RS                 } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     if let Some(expr) = audit_expr {
-//RS                         stack.push(CorpusWalkNode::Expr(expr));
-//RS                     }
-//RS                 }
-//RS                 Stmt::Impure {
-//RS                     reason_expr, body, ..
-//RS                 } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     if let Some(expr) = reason_expr {
-//RS                         stack.push(CorpusWalkNode::Expr(expr));
-//RS                     }
-//RS                 }
-//RS                 Stmt::CountedLoop {
-//RS                     init,
-//RS                     cond,
-//RS                     step,
-//RS                     body,
-//RS                     ..
-//RS                 } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     if let Some(step) = step {
-//RS                         stack.push(CorpusWalkNode::Stmt(step.as_ref()));
-//RS                     }
-//RS                     stack.push(CorpusWalkNode::Expr(cond));
-//RS                     stack.push(CorpusWalkNode::Expr(&init.init));
-//RS                 }
-//RS                 Stmt::TaskGroup { limit, body, .. } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     if let Some(limit) = limit {
-//RS                         stack.push(CorpusWalkNode::Expr(limit));
-//RS                     }
-//RS                 }
-//RS                 Stmt::ContextBlock { fields, body, .. } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     for (_, value, _) in fields.iter().rev() {
-//RS                         stack.push(CorpusWalkNode::Expr(value));
-//RS                     }
-//RS                 }
-//RS                 Stmt::AssumeDet {
-//RS                     reason_expr, body, ..
-//RS                 } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     stack.push(CorpusWalkNode::Expr(reason_expr));
-//RS                 }
-//RS                 Stmt::ComptimeIf {
-//RS                     cond,
-//RS                     then_body,
-//RS                     else_body,
-//RS                     ..
-//RS                 } => {
-//RS                     if let Some(body) = else_body {
-//RS                         push_corpus_statements(&mut stack, body);
-//RS                     }
-//RS                     push_corpus_statements(&mut stack, then_body);
-//RS                     stack.push(CorpusWalkNode::Expr(cond));
-//RS                 }
-//RS                 Stmt::ScopeMember { args, body, .. } => {
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                     for arg in args.iter().rev() {
-//RS                         stack.push(CorpusWalkNode::Expr(arg));
-//RS                     }
-//RS                 }
-//RS                 Stmt::Break(_)
-//RS                 | Stmt::Continue(_)
-//RS                 | Stmt::BreakLabel(..)
-//RS                 | Stmt::ContinueLabel(..) => {}
-//RS             },
-//RS             CorpusWalkNode::Expr(expr) => {
-//RS                 f(expr);
-//RS                 match expr {
-//RS                     Expr::Str(parts, _) => {
-//RS                         for part in parts.iter().rev() {
-//RS                             if let StrPart::Interp(inner, _) = part {
-//RS                                 stack.push(CorpusWalkNode::Expr(inner));
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     Expr::ListLit(items, _) => {
-//RS                         for item in items.iter().rev() {
-//RS                             stack.push(CorpusWalkNode::Expr(item));
-//RS                         }
-//RS                     }
-//RS                     Expr::MemberSpread { base, .. }
-//RS                     | Expr::Spread(base, _)
-//RS                     | Expr::Deref(base, _)
-//RS                     | Expr::RawOf(base, _)
-//RS                     | Expr::Copy(base, _)
-//RS                     | Expr::Place(base, _, _)
-//RS                     | Expr::Field(base, _, _)
-//RS                     | Expr::Present(base, _)
-//RS                     | Expr::Ok(base, _)
-//RS                     | Expr::Err(base, _)
-//RS                     | Expr::Paren(base, _) => {
-//RS                         stack.push(CorpusWalkNode::Expr(base));
-//RS                     }
-//RS                     Expr::Try(base, _, _, note) => {
-//RS                         if let Some(note) = note {
-//RS                             stack.push(CorpusWalkNode::Expr(note));
-//RS                         }
-//RS                         stack.push(CorpusWalkNode::Expr(base));
-//RS                     }
-//RS                     Expr::MapLit(entries, _) => {
-//RS                         for (key, value) in entries.iter().rev() {
-//RS                             stack.push(CorpusWalkNode::Expr(value));
-//RS                             stack.push(CorpusWalkNode::Expr(key));
-//RS                         }
-//RS                     }
-//RS                     Expr::Index { base, index, .. } => {
-//RS                         stack.push(CorpusWalkNode::Expr(index));
-//RS                         stack.push(CorpusWalkNode::Expr(base));
-//RS                     }
-//RS                     Expr::Slice {
-//RS                         base,
-//RS                         start,
-//RS                         end,
-//RS                         range,
-//RS                         ..
-//RS                     } => {
-//RS                         if let Some(range) = range {
-//RS                             stack.push(CorpusWalkNode::Expr(range));
-//RS                         }
-//RS                         stack.push(CorpusWalkNode::Expr(end));
-//RS                         stack.push(CorpusWalkNode::Expr(start));
-//RS                         stack.push(CorpusWalkNode::Expr(base));
-//RS                     }
-//RS                     Expr::Range { start, end, .. } => {
-//RS                         stack.push(CorpusWalkNode::Expr(end));
-//RS                         stack.push(CorpusWalkNode::Expr(start));
-//RS                     }
-//RS                     Expr::Call(call) => push_corpus_args(&mut stack, &call.args),
-//RS                     Expr::Unary(_, inner, _) => stack.push(CorpusWalkNode::Expr(inner)),
-//RS                     Expr::Binary(_, lhs, rhs, _) => {
-//RS                         stack.push(CorpusWalkNode::Expr(rhs));
-//RS                         stack.push(CorpusWalkNode::Expr(lhs));
-//RS                     }
-//RS                     Expr::CompareChain { operands, .. } => {
-//RS                         for operand in operands.iter().rev() {
-//RS                             stack.push(CorpusWalkNode::Expr(operand));
-//RS                         }
-//RS                     }
-//RS                     Expr::OptField { base, .. } => stack.push(CorpusWalkNode::Expr(base)),
-//RS                     Expr::MethodCall { receiver, args, .. } => {
-//RS                         push_corpus_args(&mut stack, args);
-//RS                         stack.push(CorpusWalkNode::Expr(receiver));
-//RS                     }
-//RS                     Expr::StructLit { fields, .. } => {
-//RS                         for (_, _, value) in fields.iter().rev() {
-//RS                             stack.push(CorpusWalkNode::Expr(value));
-//RS                         }
-//RS                     }
-//RS                     Expr::TypedLit { body, .. } => match body {
-//RS                         jet::AST::TypedLitBody::Fields(fields) => {
-//RS                             for (_, _, value) in fields.iter().rev() {
-//RS                                 stack.push(CorpusWalkNode::Expr(value));
-//RS                             }
-//RS                         }
-//RS                         jet::AST::TypedLitBody::Elements(elements) => {
-//RS                             for element in elements.iter().rev() {
-//RS                                 stack.push(CorpusWalkNode::Expr(element));
-//RS                             }
-//RS                         }
-//RS                         jet::AST::TypedLitBody::Entries(entries) => {
-//RS                             for (key, value) in entries.iter().rev() {
-//RS                                 stack.push(CorpusWalkNode::Expr(value));
-//RS                                 stack.push(CorpusWalkNode::Expr(key));
-//RS                             }
-//RS                         }
-//RS                         jet::AST::TypedLitBody::Value(value) => {
-//RS                             stack.push(CorpusWalkNode::Expr(value));
-//RS                         }
-//RS                         jet::AST::TypedLitBody::ByteText(_) | jet::AST::TypedLitBody::Empty => {}
-//RS                     },
-//RS                     Expr::EnumLit { args, .. } => {
-//RS                         for arg in args.iter().rev() {
-//RS                             let value = match arg {
-//RS                                 jet::AST::EnumLitArg::Positional(value)
-//RS                                 | jet::AST::EnumLitArg::Named { expr: value, .. } => value,
-//RS                             };
-//RS                             stack.push(CorpusWalkNode::Expr(value));
-//RS                         }
-//RS                     }
-//RS                     Expr::Tainted(inner, _, _) => stack.push(CorpusWalkNode::Expr(inner)),
-//RS                     Expr::PatternTest {
-//RS                         subject, pattern, ..
-//RS                     } => {
-//RS                         stack.push(CorpusWalkNode::Pattern(pattern));
-//RS                         stack.push(CorpusWalkNode::Expr(subject));
-//RS                     }
-//RS                     Expr::OrFallback {
-//RS                         value, fallback, ..
-//RS                     } => {
-//RS                         stack.push(CorpusWalkNode::Fallback(fallback));
-//RS                         stack.push(CorpusWalkNode::Expr(value));
-//RS                     }
-//RS                     Expr::If {
-//RS                         cond,
-//RS                         then_body,
-//RS                         then_value,
-//RS                         else_body,
-//RS                         else_value,
-//RS                         ..
-//RS                     } => {
-//RS                         stack.push(CorpusWalkNode::Expr(else_value));
-//RS                         push_corpus_statements(&mut stack, else_body);
-//RS                         stack.push(CorpusWalkNode::Expr(then_value));
-//RS                         push_corpus_statements(&mut stack, then_body);
-//RS                         stack.push(CorpusWalkNode::Expr(cond));
-//RS                     }
-//RS                     Expr::TupleLit(fields, _, _) => {
-//RS                         for (_, value) in fields.iter().rev() {
-//RS                             stack.push(CorpusWalkNode::Expr(value));
-//RS                         }
-//RS                     }
-//RS                     Expr::Lambda(lambda) => match &lambda.body {
-//RS                         LambdaBody::Expr(value) => stack.push(CorpusWalkNode::Expr(value)),
-//RS                         LambdaBody::Block(body) => push_corpus_statements(&mut stack, body),
-//RS                     },
-//RS                     Expr::CallValue { callee, args, .. } => {
-//RS                         push_corpus_args(&mut stack, args);
-//RS                         stack.push(CorpusWalkNode::Expr(callee));
-//RS                     }
-//RS                     Expr::PtrFromAddr { addr, .. } => stack.push(CorpusWalkNode::Expr(addr)),
-//RS                     Expr::StrMatchLit(..)
-//RS                     | Expr::BinMatchLit(..)
-//RS                     | Expr::Int(..)
-//RS                     | Expr::Float(..)
-//RS                     | Expr::Bool(..)
-//RS                     | Expr::Unit(..)
-//RS                     | Expr::Char(..)
-//RS                     | Expr::Ident(..)
-//RS                     | Expr::UnitLit { .. }
-//RS                     | Expr::Absent(..)
-//RS                     | Expr::Todo { .. }
-//RS                     | Expr::NoElse(..)
-//RS                     | Expr::ReduceMarker(..)
-//RS                     | Expr::ComptimeName { .. } => {}
-//RS                 }
-//RS             }
-//RS             CorpusWalkNode::LValue(lvalue) => match lvalue {
-//RS                 jet::AST::LValue::Local { .. } => {}
-//RS                 jet::AST::LValue::Index { base, index, .. } => {
-//RS                     stack.push(CorpusWalkNode::Expr(index));
-//RS                     stack.push(CorpusWalkNode::Expr(base));
-//RS                 }
-//RS                 jet::AST::LValue::Field { base, .. } => {
-//RS                     stack.push(CorpusWalkNode::Expr(base));
-//RS                 }
-//RS             },
-//RS             CorpusWalkNode::ForKind(kind) => match kind {
-//RS                 ForKind::Range {
-//RS                     start, end, step, ..
-//RS                 } => {
-//RS                     if let Some(step) = step {
-//RS                         stack.push(CorpusWalkNode::Expr(step));
-//RS                     }
-//RS                     stack.push(CorpusWalkNode::Expr(end));
-//RS                     stack.push(CorpusWalkNode::Expr(start));
-//RS                 }
-//RS                 ForKind::In { collection, step } => {
-//RS                     if let Some(step) = step {
-//RS                         stack.push(CorpusWalkNode::Expr(step));
-//RS                     }
-//RS                     stack.push(CorpusWalkNode::Expr(collection));
-//RS                 }
-//RS             },
-//RS             CorpusWalkNode::BindPattern(pattern) => {
-//RS                 if let BindPattern::Refutable {
-//RS                     pattern, fallback, ..
-//RS                 } = pattern
-//RS                 {
-//RS                     stack.push(CorpusWalkNode::Fallback(fallback));
-//RS                     stack.push(CorpusWalkNode::Pattern(pattern));
-//RS                 }
-//RS             }
-//RS             CorpusWalkNode::Pattern(pattern) => match pattern {
-//RS                 Pattern::Or(alternatives, _) => {
-//RS                     for alternative in alternatives.iter().rev() {
-//RS                         stack.push(CorpusWalkNode::Pattern(alternative));
-//RS                     }
-//RS                 }
-//RS                 Pattern::Struct { fields, .. } => {
-//RS                     for field in fields.iter().rev() {
-//RS                         if let StructPatField::Value { value, .. } = field {
-//RS                             stack.push(CorpusWalkNode::Expr(value));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 Pattern::Variant { .. }
-//RS                 | Pattern::Present { .. }
-//RS                 | Pattern::Absent(..)
-//RS                 | Pattern::Ok { .. }
-//RS                 | Pattern::Err { .. }
-//RS                 | Pattern::Range { .. }
-//RS                 | Pattern::StrMatch { .. }
-//RS                 | Pattern::BinMatch { .. } => {}
-//RS             },
-//RS             CorpusWalkNode::Fallback(fallback) => match fallback {
-//RS                 OrFallback::Value(value) => stack.push(CorpusWalkNode::Expr(value)),
-//RS                 OrFallback::Block { body, value, .. } => {
-//RS                     if let Some(value) = value {
-//RS                         stack.push(CorpusWalkNode::Expr(value));
-//RS                     }
-//RS                     push_corpus_statements(&mut stack, body);
-//RS                 }
-//RS                 OrFallback::Return(Some(value), _) => {
-//RS                     stack.push(CorpusWalkNode::Expr(value));
-//RS                 }
-//RS                 OrFallback::Panic { args, .. } => push_corpus_args(&mut stack, args),
-//RS                 OrFallback::Return(None, _)
-//RS                 | OrFallback::Break(_)
-//RS                 | OrFallback::Continue(_)
-//RS                 | OrFallback::BreakLabel(..)
-//RS                 | OrFallback::ContinueLabel(..) => {}
-//RS             },
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 1159 tests/support/corpus_policy.rs:1-1960
+// Semantic ratchet for the maintained Jet corpus. Test-support only: the
+// manifest owns classification/provenance; AST rules own recurrence.
+// Rust: tests/support/corpus_policy.rs:8
+use std.fs as fs
+use std.env as env
+use jet.Diagnostics.Span
+use jet.Lexer.[TokKind, Token]
+use jet.AST.[AccessConvention, BinOp, BindPattern, CallArg, Expr, ForKind, Item, LambdaBody, OrFallback, Pattern, Program, Stmt, StrFormat, StrPart, StructPatField, Type, UnOp, Func]
+use jet.Syntax.MARKER_ALLOW
+use jet_foundation.Tests.Integration.Support.CorpusPolicy02.[discover_manifest_files, inventory_error, is_jet_program, has_jet_run_command, jet_fences, parse_program, proof_matches, evaluate_program, applies, maintained_guidance_lint, named_type, is_literal_string, module_aliases, program_expressions, receiver_is, is_process_input, site]
+// GATE #4494: actual native filesystem and build environment.
+// Rust: tests/support/corpus_policy.rs:19
+pub const MANIFEST_PATH: String = "tests/corpus_policy.tsv"
+// Rust: tests/support/corpus_policy.rs:20
+const MANIFEST: String = include_str("tests/corpus_policy.tsv")
+
+// Rust: tests/support/corpus_policy.rs:23
+pub enum SourceRole {
+    CanonicalTeaching, ExpertLesson, NegativeDiagnostic, RawProtocol,
+    FixtureHarnessBoundary, GeneratedOutput, NonTeachingTestData
+
+    // Rust: tests/support/corpus_policy.rs:34
+    fn parse(value: String) -> SourceRole Err! {
+        if value == {
+            "canonical-teaching" -> .CanonicalTeaching
+            "expert-lesson" -> .ExpertLesson
+            "negative-diagnostic" -> .NegativeDiagnostic
+            "raw-protocol" -> .RawProtocol
+            "fixture-harness-boundary" -> .FixtureHarnessBoundary
+            "generated-output" -> .GeneratedOutput
+            "non-teaching-test-data" -> .NonTeachingTestData
+            _ -> fail "unknown corpus source role `{value}`"
+        }
+    }
+}
+// Rust: tests/support/corpus_policy.rs:48
+pub struct SourceRow {
+    pub selector: String
+    pub role: SourceRole
+    pub profile: String
+    pub decision: String
+    pub proof: String
+    pub owner: String
+    pub reason: String
+}
+// Rust: tests/support/corpus_policy.rs:60
+pub struct ProducerRow {
+    pub selector: String
+    pub artifact: String
+    pub protocol: String
+    pub owner: String
+    pub reason: String
+}
+// Rust: tests/support/corpus_policy.rs:69
+pub struct ArtifactRow {
+    pub selector: String
+    pub producer: String
+    pub kind: String
+    pub reason: String
+}
+// Rust: tests/support/corpus_policy.rs:77
+pub struct FindingRow {
+    pub id: String
+    pub rule: String
+    pub owner: String
+    pub proof: String
+}
+// Rust: tests/support/corpus_policy.rs:85
+pub struct ExceptionRow {
+    pub rule: String
+    pub selector: String
+    pub site: String
+    pub expected: USize
+    pub protocol: String
+    pub reason: String
+}
+// Rust: tests/support/corpus_policy.rs:95
+pub struct RuleScopeRow {
+    pub rule: String
+    pub selector: String
+    pub reason: String
+}
+// Rust: tests/support/corpus_policy.rs:102
+pub struct CorpusManifest {
+    pub sources: [SourceRow] = []
+    pub scopes: [RuleScopeRow] = []
+    pub producers: [ProducerRow] = []
+    pub artifacts: [ArtifactRow] = []
+    pub findings: [FindingRow] = []
+    pub exceptions: [ExceptionRow] = []
+}
+// Rust: tests/support/corpus_policy.rs:112
+pub struct RuleSpec {
+    pub name: String
+    pub why: String
+    pub replacement: String
+}
+// Rust: tests/support/corpus_policy.rs:122
+const RULE_REGISTRY: [RuleSpec] = [
+        RuleSpec{name: "raw-cli-fixed-shape", why: "maintained beginner programs must use the typed entry shape", replacement: "declare a typed #CLI entry struct and fn run(args: Args)"},
+        RuleSpec{name: "raw-cli-builder-shape", why: "a maintained CLI recipe must not rebuild the parser beside its typed entry", replacement: "use the resolved typed #CLI entry or the one approved args builder"},
+        RuleSpec{name: "fixture-cli-role", why: "a diagnostic fixture may retain parser syntax only as an explicitly classified fixture", replacement: "keep the exact negative or fixture role and do not copy its shape into teaching code"},
+        RuleSpec{name: "dogfood-stdlib-recipes", why: "the maintained dogfood recipe must use the canonical typed helper", replacement: "call the resolved Core helper instead of a local reimplementation"},
+        RuleSpec{name: "dogfood-path-containment", why: "path containment must use the typed path relation", replacement: "call Path.is_within for the normalized path values"},
+        RuleSpec{name: "dogfood-json", why: "dogfood wire values must use the typed JSON seam", replacement: "encode the typed report with the resolved JSON helper"},
+        RuleSpec{name: "dogfood-url-query", why: "URL query semantics must stay in the URL parser", replacement: "use the resolved URL query API"},
+        RuleSpec{name: "dogfood-list-equality", why: "typed lists already provide the canonical equality operation", replacement: "compare the lists with the resolved equality operation"},
+        RuleSpec{name: "dogfood-directory-setup", why: "directory creation must be idempotent", replacement: "use the idempotent directory setup helper"},
+        RuleSpec{name: "dogfood-ascii", why: "ASCII case folding must use the canonical ASCII helper", replacement: "call the resolved ASCII case-fold helper"},
+        RuleSpec{name: "datatree-domain-policy", why: "Tower must not duplicate generic DataTree equality or truthiness machinery", replacement: "use DataTree.equal_unordered for mechanical equality and keep named Tower policy helpers"},
+        RuleSpec{name: "dogfood-json-url-list", why: "dogfood JSON, URL, and list operations have one typed path", replacement: "use the typed JSON, URL, or list API"},
+        RuleSpec{name: "raw-cli-process-boundary", why: "a canonical program must not repeatedly reconstruct the process boundary", replacement: "use the one typed entry boundary or one explicit expert boundary"},
+        RuleSpec{name: "product-parser-regression", why: "the parser boundary must reject the recorded invalid shape", replacement: "keep the shared parser regression fixture and assertion"},
+        RuleSpec{name: "entry-implicit", why: "the first-contact program should be its top-level body", replacement: "move the ordinary first-contact body to top level"},
+        RuleSpec{name: "process_args_view", why: "the maintained corpus should use the canonical process argument view", replacement: "replace process.argv().skip(1) with process.args()"},
+        RuleSpec{name: "message_text", why: "the maintained corpus should use the message-level HTTP text default", replacement: "replace body().text(default_limit) with text()"},
+        RuleSpec{name: "redundant_fixed_cleanup", why: "the maintained corpus should keep plain Fixed output free of grouping cleanup", replacement: "delete the grouping-separator cleanup"},
+        RuleSpec{name: "unit-scalar-rewrap", why: "a scalar conversion must not unwrap and immediately rewrap the same unit", replacement: "use the linear unit operation directly"},
+        RuleSpec{name: "unit_scalar_rewrap", why: "the maintained corpus should use direct scalar unit arithmetic", replacement: "use unit * scalar, scalar * unit, or unit / scalar"},
+        RuleSpec{name: "path_containment_string_prefix", why: "the maintained corpus should use typed path containment", replacement: "replace the string prefix guard with Path.is_within()"},
+        RuleSpec{name: "complete_ascii_case_ladder", why: "the maintained corpus should use the direct ASCII case conversion", replacement: "replace the complete ladder with to_ascii_lower() or to_ascii_upper()"},
+        RuleSpec{name: "compiler-loop-fact", why: "the compiler-owned loop fact must be proved by sema", replacement: "retain the typed positive and negative loop fixtures"},
+        RuleSpec{name: "first-hour-doc-recipe", why: "the onboarding command must use the canonical runner", replacement: "run the example with `jet run`"},
+        RuleSpec{name: "build-root-fact", why: "the selected build entry is a liveness root", replacement: "retain the build-root and neighboring-lint proof"},
+        RuleSpec{name: "error-identity", why: "an unchanged fallible error should propagate through the entry", replacement: "use the bare fallible call"},
+        RuleSpec{name: "readonly-copy", why: "a proven read-only argument does not need an explicit copy sigil", replacement: "pass the read-only expression without the copy sigil"},
+        RuleSpec{name: "task-one-child", why: "one-child task groups add no scheduling policy", replacement: "call task.race or task.any directly"},
+        RuleSpec{name: "effect-row-inference", why: "positive effects already inferred by the body are redundant", replacement: "remove the redundant positive effect row"},
+        RuleSpec{name: "codable-structural", why: "structurally eligible records receive the canonical Codable behavior", replacement: "remove the bare #Codable marker"},
+        RuleSpec{name: "duration-constant-safe", why: "constant durations should use the checked unit literal", replacement: "write the constant as a duration literal such as `2h`"},
+        RuleSpec{name: "http-wrapper-json", why: "the maintained HTTP recipe should use the typed message and JSON seams", replacement: "use the message-text, typed-JSON, and request-free wrapper"},
+        RuleSpec{name: "http-message-text", why: "reading an HTTP response as text should use the message-level default", replacement: "call the response message text projection"},
+        RuleSpec{name: "http-typed-json", why: "HTTP JSON requests should use the typed request body seam", replacement: "call the typed JSON request helper"},
+        RuleSpec{name: "http-unused-request", why: "a request parameter unused by a route should not be carried through the wrapper", replacement: "use the request-free route form"},
+        RuleSpec{name: "crypto-naming-fact", why: "digest names must use the canonical typed surface", replacement: "use the typed digest API and its explicit projection"},
+        RuleSpec{name: "indexed-sequence", why: "sequence loops can carry the index as a fact", replacement: "write `loop (index, item) in items`"},
+        RuleSpec{name: "delimited-reader-config", why: "configured delimited input owns row boundaries and line numbers", replacement: "use the configured delimited reader"},
+        RuleSpec{name: "walk_files_filter", why: "the maintained corpus should use file-only traversal", replacement: "replace fs.walk with fs.walk_files"},
+        RuleSpec{name: "walk-files-filter", why: "file-only traversal should use the configured walk filter", replacement: "use the file-only walk helper or configured traversal"},
+        RuleSpec{name: "plain-format-fact", why: "plain fixed formatting must not be followed by grouping cleanup", replacement: "use the plain Fixed format projection"},
+        RuleSpec{name: "regex-capture-recipe", why: "the maintained filename recipe needs one anchored match and one capture", replacement: "match once with an anchored capture and use the captured value"},
+        RuleSpec{name: "bindgen-one-decoder", why: "one binding renderer emits one response decoder per protocol", replacement: "route all generated response calls through the single decoder"},
+        RuleSpec{name: "generated-protocol-override", why: "a generated protocol exception must be named and structurally distinct from the ordinary envelope", replacement: "declare an override identity with differs-from-ordinary-envelope proof"},
+        RuleSpec{name: "fixture-role-classification", why: "fixture semantics are classified before teaching-surface rules run", replacement: "add the exact fixture role and occurrence exception to the manifest"},
+        RuleSpec{name: "corpus-inventory", why: "every maintained source and generated producer needs an explicit manifest boundary", replacement: "add one exact manifest row with its role, owner, reason, and provenance"}
+]
+// Rust: tests/support/corpus_policy.rs:122
+pub fn rule_registry() -> &[RuleSpec] { &RULE_REGISTRY }
+// Rust: tests/support/corpus_policy.rs:174
+pub struct SemanticViolation {
+    pub file: String
+    pub rule: String
+    pub site: String
+    pub why: String
+    pub replacement: String
+    // Rust: tests/support/corpus_policy.rs:183
+    pub fn new(file: String, rule: String, site: String) -> SemanticViolation {
+        spec :: rule_registry().iter().find(fn(spec) -> spec.name == rule)
+            .unwrap_or_else(fn() { panic("unregistered corpus rule: {rule}") })
+        SemanticViolation{file: file, rule: rule, site: ^site, why: spec.why, replacement: spec.replacement}
+    }
+}
+impl std.fmt.Display for SemanticViolation {
+    // Rust: tests/support/corpus_policy.rs:199
+    pub fn fmt(self, out: &std.fmt.Formatter) -> Unit Err! {
+        out.write("file={self.file}; rule={self.rule}; site={self.site}; why={self.why}; replacement={self.replacement}")
+    }
+}
+// Rust: tests/support/corpus_policy.rs:209
+pub struct InventoryEntry {
+    pub path: String
+    pub role: SourceRole
+    pub producer: String?
+}
+// Rust: tests/support/corpus_policy.rs:216
+pub struct ArtifactInventory {
+    pub files: [InventoryEntry] = []
+    pub producers: [String] = []
+    pub artifacts: [String] = []
+    pub provenance: [ProvenanceEntry] = []
+}
+// Rust: tests/support/corpus_policy.rs:224
+pub struct ProvenanceEntry {
+    pub producer: String
+    pub artifact: String
+    pub protocol: String
+}
+// Rust: tests/support/corpus_policy.rs:231
+pub struct CorpusPolicy {
+    root: OSPath
+    corpus_manifest: CorpusManifest
+    // Rust: tests/support/corpus_policy.rs:237
+    pub fn load() -> CorpusPolicy Err! {
+        CorpusPolicy.from_manifest(MANIFEST, OSPath.from(env.build_var("CARGO_MANIFEST_DIR")))
+    }
+    // Rust: tests/support/corpus_policy.rs:241
+    pub fn from_manifest(text: String, root: OSPath) -> CorpusPolicy Err! {
+        manifest :: CorpusManifest.parse(text)
+        manifest.validate()
+        validate_manifest_paths(&manifest, &root)
+        CorpusPolicy{root: ^root, corpus_manifest: ^manifest}
+    }
+    // Rust: tests/support/corpus_policy.rs:249
+    pub fn manifest(self) -> &CorpusManifest { &self.corpus_manifest }
+    // Rust: tests/support/corpus_policy.rs:253
+    pub fn validate(self) -> Unit Err! { self.corpus_manifest.validate() }
+    // Rust: tests/support/corpus_policy.rs:260
+    pub fn inventory(self) -> ArtifactInventory Err! {
+        paths := [String]{}
+        discover_manifest_files(&self.root, &self.corpus_manifest, &paths)
+        paths.sort()
+        paths.dedup()
+        errors := [String]{}
+        files := [InventoryEntry]{}
+        loop path in paths {
+            row :: self.source_row(path) else {
+                errors.push(inventory_error("unclassified eligible source", path, "inventory:source"))
+                continue
+            }
+            producer :: self.corpus_manifest.artifacts.iter()
+                .find(fn(artifact) -> artifact.selector == "path:{path}").map(fn(artifact) -> artifact.producer)
+            if row.role == .GeneratedOutput && producer.is_none() {
+                errors.push(inventory_error("generated source has no producer artifact provenance", path, "inventory:provenance"))
+            }
+            files.push(InventoryEntry{path: ^path, role: row.role, producer: ^producer})
+        }
+        loop artifact in self.corpus_manifest.artifacts {
+            if path :: artifact.selector.strip_prefix("path:") {
+                if !self.root.join(path).is_file() -> errors.push("manifest artifact is missing: {path}")
+            }
+        }
+        loop artifact in self.corpus_manifest.artifacts {
+            path := artifact.selector.strip_prefix("path:") else { continue }
+            if OSPath.new(path).extension().and_then(fn(ext) -> ext.to_str()) != .Some("jet") -> continue
+            if self.source_row(path) == {
+                .Some(row) -> {
+                    if row.role != .GeneratedOutput -> errors.push("generated artifact {path} is classified as {row.role:?}, not generated-output")
+                }
+                .None -> errors.push("generated artifact has no source classification: {path}")
+            }
+        }
+        producers :: self.corpus_manifest.producers.iter().map(fn(producer) -> producer.selector).collect()
+        artifacts :: self.corpus_manifest.artifacts.iter().map(fn(artifact) -> artifact.selector).collect()
+        provenance :: self.corpus_manifest.artifacts.iter().filter_map(fn(artifact) ->
+            self.corpus_manifest.producers.iter().find(fn(producer) -> producer.selector == artifact.producer)
+                .map(fn(producer) -> ProvenanceEntry{producer: producer.selector, artifact: artifact.selector, protocol: producer.protocol})
+        ).collect()
+        if !errors.is_empty() -> fail errors.join("\n")
+        ArtifactInventory{files: ^files, producers: ^producers, artifacts: ^artifacts, provenance: ^provenance}
+    }
+    // Rust: tests/support/corpus_policy.rs:367
+    pub fn audit_inventory(self, files: [String], producers: [String]) -> Unit Err! {
+        errors := [String]{}
+        loop file in files {
+            if self.source_row(file).is_none() -> errors.push(inventory_error("unclassified eligible source", file, "inventory:source"))
+        }
+        declared := [String: Bool]{}
+        loop producer in self.corpus_manifest.producers -> declared[producer.selector] = true
+        loop producer in producers {
+            if !declared.contains_key(producer) -> errors.push(inventory_error("unclassified generated-source producer", producer, "inventory:producer"))
+        }
+        if !errors.is_empty() -> fail errors.join("\n")
+    }
+    // Rust: tests/support/corpus_policy.rs:403
+    pub fn check_cli_recipe_inventory(self) -> Unit Err! {
+        self.validate()
+        self.check_fixture_inventory()
+        inventory :: self.inventory()
+        errors := [String]{}
+        checked := [String: Bool]{}
+        loop entry in inventory.files {
+            row :: self.source_row(entry.path) else { continue }
+            recipe :: cli_recipe_profile(row.profile) else { continue }
+            path :: self.root.join(entry.path)
+            if !is_jet_program(&path) && recipe != .TypedDoc -> continue
+            source :: fs.read_to_string(&path).map_err(fn(error) -> "read {path.display()}: {error}")
+            has_run_command :: has_jet_run_command(source)
+            sources :: if OSPath.new(entry.path).extension().and_then(fn(ext) -> ext.to_str()) == .Some("md") {
+                jet_fences(source)
+            } else { [source] }
+            programs := [Program]{}
+            loop source in sources -> programs.push(parse_program(entry.path, source))
+            valid :: if recipe == {
+                .Typed -> !programs.is_empty() && programs.iter().all(has_typed_cli_entry)
+                .TypedDoc -> programs.iter().any(has_typed_cli_entry) && has_run_command
+                .Builder -> programs.iter().any(has_args_builder)
+                .Raw -> programs.iter().any(has_raw_process_boundary)
+            }
+            if !valid -> errors.push("CLI recipe profile `{row.profile}` is not proved by the AST for {entry.path}")
+            checked[entry.path] = true
+        }
+        if checked.is_empty() -> errors.push("manifest has no checked CLI recipe profiles")
+        if !errors.is_empty() -> fail errors.join("\n")
+    }
+    // Rust: tests/support/corpus_policy.rs:468
+    pub fn check_fixture_inventory(self) -> Unit Err! {
+        self.validate()
+        inventory :: self.inventory()
+        errors := [String]{}
+        loop entry in inventory.files {
+            expected :: fixture_role_for_path(entry.path) else { continue }
+            if entry.role != expected {
+                errors.push(SemanticViolation.new(entry.path, "fixture-role-classification", site("inventory:fixture-role", Span.new(0, 0))).to_string())
+            }
+        }
+        loop row in self.corpus_manifest.sources {
+            expected :: profile_fixture_role(row.profile) else { continue }
+            compatible :: if expected == {
+                .One(role) -> row.role == role
+                .Generated -> row.role == .RawProtocol || row.role == .GeneratedOutput
+            }
+            if !compatible {
+                errors.push(SemanticViolation.new(selector_path(row.selector), "fixture-cli-role", site("manifest:fixture-profile", Span.new(0, 0))).to_string())
+            }
+        }
+        if !errors.is_empty() -> fail errors.join("\n")
+    }
+    // Rust: tests/support/corpus_policy.rs:525
+    pub fn check_gate(self, gate: String) -> Unit Err! {
+        self.validate()
+        self.check_cli_recipe_inventory()
+        inventory :: self.inventory()
+        violations := [SemanticViolation]{}
+        loop entry in inventory.files {
+            row :: self.source_row(entry.path) else { continue }
+            if row.role == .GeneratedOutput || !proof_matches(row.proof, gate) || !semantic_role(row.role) -> continue
+            path :: self.root.join(entry.path)
+            if path.file_name().and_then(fn(name) -> name.to_str()) == .Some("package.jet") -> continue
+            source :: fs.read_to_string(&path).map_err(fn(error) -> "read {path.display()}: {error}")
+            violations.extend(self.evaluate_source(entry.path, source))
+        }
+        if gate == "all" || gate == "bindgen" {
+            loop artifact in self.corpus_manifest.artifacts {
+                path := artifact.selector.strip_prefix("path:") else { continue }
+                producer :: self.corpus_manifest.producers.iter().find(fn(producer) -> producer.selector == artifact.producer) else { continue }
+                if is_no_response_protocol(producer.protocol) || OSPath.new(path).extension().and_then(fn(ext) -> ext.to_str()) != .Some("jet") -> continue
+                source :: fs.read_to_string(self.root.join(path)).map_err(fn(error) -> "read generated artifact {path}: {error}")
+                violations.extend(self.evaluate_generated(producer.selector, source))
+            }
+        }
+        if !violations.is_empty() -> fail violations.iter().map(fn(v) -> v.to_string()).collect<[String]>().join("\n")
+    }
+    // Rust: tests/support/corpus_policy.rs:582
+    pub fn evaluate_source(self, path: String, source: String) -> [SemanticViolation] Err! {
+        row :: self.source_row(path) else { fail inventory_error("unclassified eligible source", path, "inventory:source") }
+        if !semantic_role(row.role) -> return []
+        programs :: if OSPath.new(path).extension().and_then(fn(ext) -> ext.to_str()) == .Some("md") {
+            jet_fences(source)
+        } else { [source] }
+        all := [SemanticViolation]{}
+        loop program_source in programs {
+            program :: parse_program(path, program_source)
+            self.validate_maintained_lint_allows(path, row, &program)
+            all.extend(evaluate_program(&self.corpus_manifest, path, row, &program))
+        }
+        if applies(&self.corpus_manifest, path, row, "first-hour-doc-recipe") && path == "Docs/spec/guides/first-hour.md" {
+            typed :: jet_fences(source).iter().any(fn(fence) ->
+                parse_program(path, fence).map(fn(program) -> has_typed_cli_entry(&program)).unwrap_or(false)
+            )
+            if !typed || !has_jet_run_command(source) {
+                kind :: if typed { "document:jet-run" } else { "document:typed-cli" }
+                all.push(SemanticViolation.new(path, "first-hour-doc-recipe", site(kind, Span.new(0, 0))))
+            }
+        }
+        self.apply_exceptions(path, ^all)
+    }
+    // Rust: tests/support/corpus_policy.rs:636
+    fn validate_maintained_lint_allows(self, path: String, row: &SourceRow, program: &Program) -> Unit Err! {
+        if row.role != .CanonicalTeaching && row.role != .ExpertLesson -> return
+        occurrences := [(String, String): USize]{}
+        loop application in program.rule_facts {
+            if application.marker.name != MARKER_ALLOW -> continue
+            target :: application.target else { continue }
+            loop argument in application.marker.expr_args() {
+                if argument == {
+                    .Ident(rule, _) -> {
+                        if !maintained_guidance_lint(rule) -> continue
+                        location :: "allow:{rule}@{target.start}..{target.end}"
+                        key :: (rule, location)
+                        occurrences[key] = occurrences.get(key).copied().unwrap_or(0) + 1
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        keys := occurrences.keys().collect<[(String, String)]>()
+        keys.sort()
+        loop (rule, location) in keys {
+            count :: occurrences[(rule, location)]
+            matches :: self.corpus_manifest.exceptions.iter().filter(fn(exception) ->
+                exception.rule == rule && exception.selector == "file:{path}" && exception.site == location
+            ).collect<[&ExceptionRow]>()
+            if matches.len() != 1 {
+                fail "file={path}; rule={rule}; site={location}; why=maintained #allow needs one occurrence-scoped manifest reason; replacement=add one exact [exception] row"
+            }
+            if matches[0].expected != count {
+                fail "file={path}; rule={rule}; site={location}; why=manifest expects {matches[0].expected} occurrence(s), found {count}; replacement=keep one reviewed #allow occurrence per manifest row"
+            }
+        }
+        loop exception in self.corpus_manifest.exceptions.iter().filter(fn(exception) ->
+            exception.selector == "file:{path}" && exception.site.starts_with("allow:")
+        ) {
+            count :: occurrences.get((exception.rule, exception.site)).copied().unwrap_or(0)
+            if count != exception.expected {
+                fail "file={path}; rule={exception.rule}; site={exception.site}; why=manifest expects {exception.expected} occurrence(s), found {count}; replacement=remove the stale allowance or update its exact reviewed site"
+            }
+        }
+    }
+    // Rust: tests/support/corpus_policy.rs:709
+    pub fn evaluate_generated(self, producer: String, source: String) -> [SemanticViolation] Err! {
+        row :: self.corpus_manifest.producers.iter().find(fn(row) -> row.selector == producer) else {
+            fail inventory_error("unclassified generated-source producer", producer, "inventory:producer")
+        }
+        program :: parse_program(producer, source)
+        decoders := [&Func]{}
+        loop item in program.items {
+            if item == {
+                .Func(function) -> { if is_response_decoder(function) -> decoders.push(function) }
+                _ -> {}
+            }
+        }
+        if is_no_response_protocol(row.protocol) -> return []
+        violations := [SemanticViolation]{}
+        if decoders.is_empty() {
+            violations.push(SemanticViolation.new(producer, "bindgen-one-decoder", "producer:{producer}#decode_response@0..0"))
+        } else {
+            loop function in decoders.iter().skip(1) {
+                violations.push(SemanticViolation.new(producer, "bindgen-one-decoder", "producer:{producer}#response-decoder@{function.span.start}..{function.span.end}"))
+            }
+        }
+        if decoders.len() == 1 && protocol_override_identity(row.protocol).is_some() && ordinary_envelope_decoder(decoders[0]) {
+            identity :: protocol_override_identity(row.protocol).unwrap_or("unknown")
+            violations.push(SemanticViolation.new(producer, "generated-protocol-override", "producer:{producer}#protocol:{identity}@{decoders[0].span.start}..{decoders[0].span.end}"))
+        }
+        violations
+    }
+    // Rust: tests/support/corpus_policy.rs:780
+    pub fn validate_occurrences(self, selector: String, candidates: [SemanticViolation]) -> Unit Err! {
+        counts := [(String, String): USize]{}
+        loop candidate in candidates {
+            if candidate.file != selector -> fail "candidate file {candidate.file} does not match {selector}"
+            key :: (candidate.rule, candidate.site)
+            counts[key] = counts.get(key).copied().unwrap_or(0) + 1
+        }
+        keys := counts.keys().collect<[(String, String)]>()
+        keys.sort()
+        loop (rule, location) in keys {
+            count :: counts[(rule, location)]
+            matches :: self.corpus_manifest.exceptions.iter().filter(fn(exception) ->
+                exception.rule == rule && exception.selector == "file:{selector}" && exception.site == location
+            ).collect<[&ExceptionRow]>()
+            if matches.len() != 1 -> fail "file={selector}; rule={rule}; site={location}; why=occurrence has no unique exception; replacement=add one exact exception"
+            expected :: matches[0].expected
+            if count != expected -> fail "file={selector}; rule={rule}; site={location}; why=expected {expected} occurrence(s), found {count}; replacement=remove the additional occurrence or add a distinct reviewed site"
+        }
+        loop exception in self.corpus_manifest.exceptions.iter().filter(fn(exception) -> exception.selector == "file:{selector}") {
+            count :: candidates.iter().filter(fn(candidate) -> candidate.rule == exception.rule && candidate.site == exception.site).count()
+            if count != exception.expected {
+                fail "file={selector}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {count}; replacement=remove the additional occurrence or update the exact reviewed site"
+            }
+        }
+    }
+    // Rust: tests/support/corpus_policy.rs:841
+    fn apply_exceptions(self, path: String, candidates: [SemanticViolation]) -> [SemanticViolation] Err! {
+        remaining := [SemanticViolation]{}
+        matched := [(String, String): USize]{}
+        errors := [String]{}
+        loop candidate in candidates {
+            key :: (candidate.rule, candidate.site)
+            exception :: self.corpus_manifest.exceptions.iter().find(fn(exception) ->
+                exception.rule == candidate.rule && exception.selector == "file:{path}" && exception.site == candidate.site
+            )
+            if exception.is_some() -> matched[key] = matched.get(key).copied().unwrap_or(0) + 1
+        }
+        loop exception in self.corpus_manifest.exceptions.iter().filter(fn(exception) -> exception.selector == "file:{path}") {
+            actual :: matched.get((exception.rule, exception.site)).copied().unwrap_or(0)
+            if actual != exception.expected {
+                errors.push("file={path}; rule={exception.rule}; site={exception.site}; why=expected {exception.expected} occurrence(s), found {actual}; replacement=remove the additional occurrence or update the exact reviewed site")
+            }
+        }
+        consumed := [(String, String): USize]{}
+        loop candidate in ^candidates {
+            key :: (candidate.rule, candidate.site)
+            exception :: self.corpus_manifest.exceptions.iter().find(fn(exception) ->
+                exception.rule == candidate.rule && exception.selector == "file:{path}" && exception.site == candidate.site
+            )
+            if exception :: exception {
+                seen :: consumed.get(key).copied().unwrap_or(0) + 1
+                consumed[key] = seen
+                if seen > exception.expected -> remaining.push(^candidate)
+            } else { remaining.push(^candidate) }
+        }
+        if !errors.is_empty() -> fail errors.join("\n")
+        remaining
+    }
+    // Rust: tests/support/corpus_policy.rs:902
+    fn source_row(self, path: String) -> &SourceRow? {
+        self.corpus_manifest.sources.iter().filter(fn(row) -> selector_matches(row.selector, path))
+            .max_by_key(fn(row) -> selector_specificity(row.selector))
+    }
+}
+// Rust: tests/support/corpus_policy.rs:911
+fn is_response_decoder(function: &Func) -> Bool {
+    function.name == "decode_response" && function.params.len() == 2
+        && named_type(&function.params[0].ty, "String") && named_type(&function.params[1].ty, "Int")
+        && if function.return_type.as_ref() == {
+            .Some(.Result{ok, ..}) -> named_type(ok, "DataTree")
+            _ -> false
+        }
+}
+// Rust: tests/support/corpus_policy.rs:922
+fn protocol_override_identity(protocol: String) -> String? {
+    protocol.strip_prefix("override:").and_then(fn(body) -> body.split_once(':').map(fn(pair) -> pair.0))
+}
+// Rust: tests/support/corpus_policy.rs:928
+fn ordinary_envelope_decoder(function: &Func) -> Bool {
+    has_status_field := false
+    for_each_statement_expr(function.body, fn(expr) {
+        if expr.without_parens() == {
+            .MethodCall{method, args, ..} -> {
+                if method == "field" && args.first().is_some_and(fn(arg) -> is_literal_string(&arg.expr, "ok")) -> has_status_field = true
+            }
+            _ -> {}
+        }
+    })
+    has_status_field
+}
+
+impl CorpusManifest {
+    // Rust: tests/support/corpus_policy.rs:945
+    pub fn parse(text: String) -> CorpusManifest Err! {
+        manifest := CorpusManifest{}
+        section := ""
+        loop (line_number, raw) in text.lines().enumerate() {
+            line := raw.trim_end_matches('\r') // #4303
+            if line.is_empty() || line.starts_with('#') -> continue
+            if line.starts_with('[') && line.ends_with(']') {
+                section = line[1..<line.len() - 1].to_string()
+                if !["source", "scope", "producer", "artifact", "finding", "exception"].contains(section) {
+                    fail "manifest line {line_number + 1}: unknown section [{section}]"
+                }
+                continue
+            }
+            fields :: line.split('\t').collect<[String]>()
+            error :: fn(message: String) -> "manifest line {line_number + 1}: {message}"
+            if section == {
+                "source" if fields.len() == 8 -> manifest.sources.push(SourceRow{
+                    selector: parse_selector(fields[1]).map_err(fn(message) -> error(message)),
+                    role: SourceRole.parse(fields[2]).map_err(fn(message) -> error(message)),
+                    profile: nonempty(fields[3], error("source profile is empty")),
+                    decision: nonempty(fields[4], error("source decision is empty")),
+                    proof: nonempty(fields[5], error("source proof is empty")),
+                    owner: nonempty(fields[6], error("source owner is empty")),
+                    reason: nonempty(fields[7], error("source reason is empty"))
+                })
+                "scope" if fields.len() == 4 -> manifest.scopes.push(RuleScopeRow{
+                    rule: nonempty(fields[1], error("scope rule is empty")),
+                    selector: parse_selector(fields[2]).map_err(fn(message) -> error(message)),
+                    reason: nonempty(fields[3], error("scope reason is empty"))
+                })
+                "producer" if fields.len() == 6 -> manifest.producers.push(ProducerRow{
+                    selector: parse_producer(fields[1]).map_err(fn(message) -> error(message)),
+                    artifact: parse_artifact(fields[2]).map_err(fn(message) -> error(message)),
+                    protocol: nonempty(fields[3], error("producer protocol is empty")),
+                    owner: nonempty(fields[4], error("producer owner is empty")),
+                    reason: nonempty(fields[5], error("producer reason is empty"))
+                })
+                "artifact" if fields.len() == 5 -> manifest.artifacts.push(ArtifactRow{
+                    selector: parse_artifact(fields[1]).map_err(fn(message) -> error(message)),
+                    producer: parse_producer(fields[2]).map_err(fn(message) -> error(message)),
+                    kind: nonempty(fields[3], error("artifact kind is empty")),
+                    reason: nonempty(fields[4], error("artifact reason is empty"))
+                })
+                "finding" if fields.len() == 5 -> manifest.findings.push(FindingRow{
+                    id: nonempty(fields[1], error("finding id is empty")),
+                    rule: nonempty(fields[2], error("finding rule is empty")),
+                    owner: nonempty(fields[3], error("finding owner is empty")),
+                    proof: nonempty(fields[4], error("finding proof is empty"))
+                })
+                "exception" if fields.len() == 7 -> manifest.exceptions.push(ExceptionRow{
+                    rule: nonempty(fields[1], error("exception rule is empty")),
+                    selector: parse_selector(fields[2]).map_err(fn(message) -> error(message)),
+                    site: parse_site(fields[3]).map_err(fn(message) -> error(message)),
+                    expected: fields[4].parse<USize>().map_err(fn(_) -> error("exception occurrence is not a positive integer")),
+                    protocol: nonempty(fields[5], error("exception protocol is empty")),
+                    reason: nonempty(fields[6], error("exception reason is empty"))
+                })
+                _ -> fail error("wrong field count or row outside a section")
+            }
+            if fields.first() != .Some("1") -> fail error("unsupported manifest version")
+        }
+        manifest
+    }
+    // Rust: tests/support/corpus_policy.rs:1022
+    pub fn validate(self) -> Unit Err! {
+        errors := [String]{}
+        unique_selectors(self.sources.iter().map(fn(row) -> row.selector).collect(), "source", &errors)
+        scope_keys := [(String, String): Bool]{}
+        loop scope in self.scopes {
+            key :: (scope.rule, scope.selector)
+            if scope_keys.contains_key(key) -> errors.push("duplicate scope {scope.rule} {scope.selector}")
+            scope_keys[key] = true
+        }
+        unique_selectors(self.producers.iter().map(fn(row) -> row.selector).collect(), "producer", &errors)
+        unique_selectors(self.artifacts.iter().map(fn(row) -> row.selector).collect(), "artifact", &errors)
+        unique_selectors(self.findings.iter().map(fn(row) -> row.id).collect(), "finding", &errors)
+        rule_names := [String: Bool]{}
+        loop spec in rule_registry() -> rule_names[spec.name] = true
+        producer_names := [String: Bool]{}
+        loop row in self.producers -> producer_names[row.selector] = true
+        loop finding in self.findings {
+            if !rule_names.contains_key(finding.rule) -> errors.push("finding {finding.id} names unknown rule {finding.rule}")
+            if finding.owner.is_empty() || finding.proof.is_empty() -> errors.push("finding {finding.id} has no owner or executable proof")
+            if !self.scopes.iter().any(fn(scope) -> scope.rule == finding.rule) && !domain_guard_rule(finding.rule) {
+                errors.push("finding {finding.id} rule {finding.rule} has no executable corpus or domain guard")
+            }
+        }
+        if self.findings.len() != 38 -> errors.push("manifest must retain all 38 audited findings, found {self.findings.len()}")
+        loop scope in self.scopes {
+            if !rule_names.contains_key(scope.rule) -> errors.push("scope names unknown rule {scope.rule}")
+            path := selector_path(scope.selector)
+            if !self.sources.iter().any(fn(source) -> selector_matches(source.selector, path)) {
+                errors.push("scope {scope.rule} names an unclassified source selector {scope.selector}")
+            }
+            if scope.reason.is_empty() -> errors.push("scope {scope.rule} {scope.selector} has no reason")
+        }
+        loop producer in self.producers {
+            if validate_protocol(producer.protocol) == {
+                .Err(error) -> {
+                    violation :: SemanticViolation.new(producer_path(producer.selector), "generated-protocol-override", site("manifest:generated-protocol", Span.new(0, 0)))
+                    errors.push("{violation} ({error})")
+                }
+                .Ok(_) -> {}
+            }
+            if !self.artifacts.iter().any(fn(artifact) -> artifact.selector == producer.artifact && artifact.producer == producer.selector) {
+                errors.push("producer {producer.selector} family has no artifact row")
+            }
+        }
+        loop artifact in self.artifacts {
+            if !producer_names.contains_key(artifact.producer) -> errors.push("artifact {artifact.selector} names unknown producer {artifact.producer}")
+        }
+        exception_keys := [(String, String, String): Bool]{}
+        loop exception in self.exceptions {
+            if !rule_names.contains_key(exception.rule) -> errors.push("exception names unknown rule {exception.rule}")
+            key :: (exception.rule, exception.selector, exception.site)
+            if exception_keys.contains_key(key) -> errors.push("duplicate occurrence exception {exception.rule} {exception.selector} {exception.site}")
+            exception_keys[key] = true
+            if exception.expected == 0 -> errors.push("exception {exception.rule} {exception.site} has zero expected occurrences")
+            if !exception.selector.starts_with("file:") {
+                errors.push("exception {exception.rule} {exception.site} is not occurrence-scoped to one file")
+            } else {
+                path := selector_path(exception.selector)
+                source :: self.sources.iter().filter(fn(source) -> selector_matches(source.selector, path))
+                    .max_by_key(fn(source) -> selector_specificity(source.selector))
+                if source == {
+                    .None -> errors.push("exception {exception.rule} names an unclassified source {exception.selector}")
+                    .Some(source) -> {
+                        if !exception.site.starts_with("allow:") && source.role != .ExpertLesson && source.role != .NegativeDiagnostic {
+                            errors.push("exception {exception.rule} {exception.selector} requires an expert-lesson or negative-diagnostic source, found {source.role:?}")
+                        }
+                    }
+                }
+            }
+            if exception.protocol.is_empty() || exception.reason.is_empty() {
+                errors.push("exception {exception.rule} {exception.site} has no protocol or reason")
+            } else {
+                if validate_exception_protocol(exception.protocol) == {
+                    .Err(error) -> errors.push("exception {exception.rule} {exception.site}: {error}")
+                    .Ok(_) -> {}
+                }
+            }
+        }
+        if !errors.is_empty() -> fail errors.join("\n")
+    }
+}
+// Rust: tests/support/corpus_policy.rs:1223
+fn validate_manifest_paths(manifest: &CorpusManifest, root: &OSPath) -> Unit Err! {
+    errors := [String]{}
+    loop source in manifest.sources {
+        path := selector_path(source.selector)
+        exists :: if source.selector.strip_prefix("root:").is_some() { root.join(path).is_dir() } else { root.join(path).is_file() }
+        if !exists -> errors.push("manifest source selector does not exist: {source.selector}")
+    }
+    loop producer in manifest.producers {
+        path := producer_path(producer.selector)
+        if !root.join(path).is_file() -> errors.push("manifest producer source does not exist: {producer.selector}")
+    }
+    loop exception in manifest.exceptions {
+        path := exception.selector.strip_prefix("file:") else { continue }
+        if !root.join(path).is_file() -> errors.push("manifest exception source does not exist: {exception.selector}")
+    }
+    if !errors.is_empty() -> fail errors.join("\n")
+}
+// Rust: tests/support/corpus_policy.rs:1265
+fn selector_path(selector: String) -> String {
+    selector.strip_prefix("root:").or_else(fn() -> selector.strip_prefix("file:")).unwrap_or(selector)
+}
+// Rust: tests/support/corpus_policy.rs:1272
+fn producer_path(selector: String) -> String {
+    selector.strip_prefix("producer:").and_then(fn(body) -> body.split_once('#').map(fn(pair) -> pair.0)).unwrap_or(selector)
+}
+// Rust: tests/support/corpus_policy.rs:1279
+fn parse_selector(value: String) -> String Err! {
+    path := value.strip_prefix("root:").or_else(fn() -> value.strip_prefix("file:")) else {
+        fail "selector must start with root: or file: ({value})"
+    }
+    validate_relative_path(path)
+    value
+}
+// Rust: tests/support/corpus_policy.rs:1288
+fn parse_producer(value: String) -> String Err! {
+    body := value.strip_prefix("producer:") else { fail "producer selector must start with producer: ({value})" }
+    (path, symbol) := body.split_once('#') else { fail "producer selector must name a symbol ({value})" }
+    validate_relative_path(path)
+    if symbol.is_empty() || symbol.contains('#') -> fail "producer selector must name one non-empty symbol ({value})"
+    value
+}
+// Rust: tests/support/corpus_policy.rs:1304
+fn parse_artifact(value: String) -> String Err! {
+    if path := value.strip_prefix("path:") { validate_relative_path(path) }
+    else if family := value.strip_prefix("family:") {
+        if family.is_empty() || family.contains('/') -> fail "artifact family is not a stable identifier ({value})"
+    } else { fail "artifact selector must start with path: or family: ({value})" }
+    value
+}
+// Rust: tests/support/corpus_policy.rs:1321
+fn parse_site(value: String) -> String Err! {
+    (kind, span) := value.rsplit_once('@') else { fail "semantic site must carry a span ({value})" }
+    if kind.is_empty() || kind.contains('@') -> fail "semantic site kind is empty or malformed ({value})"
+    (start_text, end_text) := span.split_once("..") else { fail "semantic site span must use start..end ({value})" }
+    start :: start_text.parse<USize>().map_err(fn(_) -> "bad site start ({value})")
+    end :: end_text.parse<USize>().map_err(fn(_) -> "bad site end ({value})")
+    if end < start -> fail "site end precedes start ({value})"
+    value
+}
+// Rust: tests/support/corpus_policy.rs:1345
+fn validate_relative_path(path: String) -> Unit Err! {
+    if path.is_empty() || OSPath.new(path).is_absolute() || path.split('/').any(fn(part) -> part == ".." || part.is_empty()) {
+        fail "manifest path is not a normalized relative path ({path})"
+    }
+}
+// Rust: tests/support/corpus_policy.rs:1357
+fn nonempty(value: String, error: String) -> String Err! {
+    if value.is_empty() -> fail error
+    value
+}
+// Rust: tests/support/corpus_policy.rs:1365
+fn unique_selectors(values: [String], kind: String, errors: &[String]) -> Unit {
+    seen := [String: Bool]{}
+    loop value in values {
+        if seen.contains_key(value) -> errors.push("duplicate {kind} selector {value}")
+        seen[value] = true
+    }
+}
+// Rust: tests/support/corpus_policy.rs:1374
+pub fn selector_matches(selector: String, path: String) -> Bool {
+    if file := selector.strip_prefix("file:") -> return file == path
+    root := selector.strip_prefix("root:") else { return false }
+    path == root || path.strip_prefix(root).is_some_and(fn(rest) -> rest.starts_with('/'))
+}
+// Rust: tests/support/corpus_policy.rs:1387
+fn selector_specificity(selector: String) -> USize {
+    selector.strip_prefix("file:").map_or(0, fn(file) -> 100_000 + file.len())
+        + selector.strip_prefix("root:").map_or(0, fn(root) -> root.len())
+}
+// Rust: tests/support/corpus_policy.rs:1394
+fn is_no_response_protocol(protocol: String) -> Bool { protocol == "no-response-protocol" }
+// Rust: tests/support/corpus_policy.rs:1398
+fn validate_protocol(protocol: String) -> Unit Err! {
+    if protocol == "ordinary-envelope" || is_no_response_protocol(protocol) -> return
+    override_body := protocol.strip_prefix("override:") else {
+        fail "generated protocol must be ordinary-envelope, no-response-protocol, or an override ({protocol})"
+    }
+    (identity, proof) := override_body.split_once(':') else {
+        fail "generated protocol override must name identity and proof ({protocol})"
+    }
+    if identity.is_empty() || proof != "differs-from-ordinary-envelope" || identity == "ordinary-envelope" {
+        fail "generated protocol override must prove a distinct protocol identity ({protocol})"
+    }
+}
+// Rust: tests/support/corpus_policy.rs:1423
+fn validate_exception_protocol(protocol: String) -> Unit Err! {
+    if ["fixture", "expert-lesson", "negative-diagnostic", "canonical-teaching", "raw-protocol", "fixture-harness-boundary"].contains(protocol) -> return
+    if protocol.starts_with("override:") -> return validate_protocol(protocol)
+    fail "exception protocol must name its source boundary or a generated override ({protocol})"
+}
+// Rust: tests/support/corpus_policy.rs:1443
+fn domain_guard_rule(rule: String) -> Bool {
+    ["product-parser-regression", "compiler-loop-fact", "build-root-fact", "fixture-role-classification", "fixture-cli-role", "bindgen-one-decoder"].contains(rule)
+}
+// Rust: tests/support/corpus_policy.rs:1455
+pub fn semantic_role(role: SourceRole) -> Bool {
+    role == .CanonicalTeaching || role == .ExpertLesson || role == .GeneratedOutput
+}
+// Rust: tests/support/corpus_policy.rs:1462
+fn fixture_role_for_path(path: String) -> SourceRole? {
+    if path.starts_with("tests/ui/") || path.starts_with("tests/ui_lint/") { .Some(.NegativeDiagnostic) }
+    else if path.starts_with("tests/fuzz/") || path.starts_with("tests/conformance/corpus/") || path.starts_with("Tools/adoption/fixtures/") {
+        .Some(.FixtureHarnessBoundary)
+    } else { .None }
+}
+// Rust: tests/support/corpus_policy.rs:1476
+enum ProfileFixtureRole { One(SourceRole), Generated }
+// Rust: tests/support/corpus_policy.rs:1481
+fn profile_fixture_role(profile: String) -> ProfileFixtureRole? {
+    if profile == {
+        "negative" -> .Some(.One(.NegativeDiagnostic))
+        "fixture" | "canonical-test" | "package-template" -> .Some(.One(.FixtureHarnessBoundary))
+        "protocol" -> .Some(.One(.RawProtocol))
+        "generated" -> .Some(.Generated)
+        _ -> .None
+    }
+}
+// Rust: tests/support/corpus_policy.rs:1494
+enum CliRecipe { Typed, Builder, Raw, TypedDoc }
+// Rust: tests/support/corpus_policy.rs:1501
+fn cli_recipe_profile(profile: String) -> CliRecipe? {
+    if profile == {
+        "typed-cli" -> .Some(.Typed)
+        "typed-cli-doc" -> .Some(.TypedDoc)
+        "builder-cli" -> .Some(.Builder)
+        "raw-cli" -> .Some(.Raw)
+        _ -> .None
+    }
+}
+// Rust: tests/support/corpus_policy.rs:1511
+fn has_typed_cli_entry(program: &Program) -> Bool { jet_foundation.CLISchema.entry_schema(program.items).is_some() }
+// Rust: tests/support/corpus_policy.rs:1515
+fn has_args_builder(program: &Program) -> Bool {
+    aliases :: module_aliases(program)
+    expressions :: program_expressions(program)
+    has_spec :: expressions.iter().any(fn(expr) ->
+        if expr.without_parens() == {
+            .MethodCall{receiver, method, ..} -> method == "spec" && receiver_is(receiver, "args", &aliases)
+            _ -> false
+        }
+    )
+    has_parse :: expressions.iter().any(fn(expr) ->
+        if expr.without_parens() == {
+            .MethodCall{method, ..} -> method == "parse" || method == "parse_or_exit"
+            _ -> false
+        }
+    )
+    has_spec && has_parse
+}
+// Rust: tests/support/corpus_policy.rs:1534
+fn has_raw_process_boundary(program: &Program) -> Bool {
+    aliases :: module_aliases(program)
+    program_expressions(program).iter().any(fn(expr) -> is_process_input(expr, &aliases))
+}
+// Rust: tests/support/corpus_policy.rs:1543
+enum CorpusWalkNode {
+    Expr(&Expr), Stmt(&Stmt), LValue(&jet.AST.LValue), ForKind(&ForKind),
+    BindPattern(&BindPattern), Pattern(&Pattern), Fallback(&OrFallback)
+}
+// Rust: tests/support/corpus_policy.rs:1552
+fn push_corpus_statements(stack: &[CorpusWalkNode], body: &[Stmt]) -> Unit {
+    loop statement in body.iter().rev() -> stack.push(.Stmt(statement))
+}
+// Rust: tests/support/corpus_policy.rs:1558
+fn push_corpus_args(stack: &[CorpusWalkNode], args: &[CallArg]) -> Unit {
+    loop argument in args.iter().rev() -> stack.push(.Expr(&argument.expr))
+}
+
+// Visit borrowed corpus expressions iteratively; neither clone ancestors nor
+// consume call-stack depth proportional to source shape.
+// Rust: tests/support/corpus_policy.rs:1569
+pub fn for_each_statement_expr(body: &[Stmt], f: fn(&Expr) -> Unit) -> Unit {
+    stack := [CorpusWalkNode].with_capacity(body.len())
+    push_corpus_statements(&stack, body)
+    loop {
+        node :: stack.pop() else { break }
+        if node == {
+            .Stmt(statement) -> if statement == {
+                .Expr(expr) -> stack.push(.Expr(expr))
+                .DeferClose{close, ..} -> stack.push(.Expr(close))
+                .Val(binding) -> {
+                    if pattern :: binding.pattern.as_ref() -> stack.push(.BindPattern(pattern))
+                    stack.push(.Expr(&binding.init))
+                }
+                .Assign{target, value, ..} -> {
+                    stack.push(.Expr(value))
+                    stack.push(.LValue(target))
+                }
+                .Return(value, _) -> { if value :: value -> stack.push(.Expr(value)) }
+                .While{cond, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    stack.push(.Expr(cond))
+                }
+                .For{kind, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    stack.push(.ForKind(kind))
+                }
+                .Switch{subject, arms, else_body, ..} | .ComptimeSwitch{subject, arms, else_body, ..} -> {
+                    if body :: else_body -> push_corpus_statements(&stack, body)
+                    loop arm in arms.iter().rev() {
+                        push_corpus_statements(&stack, &arm.body)
+                        stack.push(.Expr(&arm.cond))
+                    }
+                    stack.push(.Expr(subject))
+                }
+                .BreakValue(value, _) | .Yield(value, _) -> stack.push(.Expr(value))
+                .BreakLabelValue(_, _, value, _) -> stack.push(.Expr(value))
+                .Loop{body, ..} | .Reactive{body, ..} | .Shield{body, ..}
+                    | .Switched{body, ..} | .Region{body, ..} | .Policy{body, ..}
+                    | .AuthorityScope{body, ..} | .ComptimeBlock{body, ..}
+                    | .Live{body, ..} | .Transact{body, ..} | .Layout{body, ..} -> push_corpus_statements(&stack, body)
+                .Unsafe{audit_expr, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    if expr :: audit_expr -> stack.push(.Expr(expr))
+                }
+                .Impure{reason_expr, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    if expr :: reason_expr -> stack.push(.Expr(expr))
+                }
+                .CountedLoop{init, cond, step, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    if step :: step -> stack.push(.Stmt(step.as_ref()))
+                    stack.push(.Expr(cond))
+                    stack.push(.Expr(&init.init))
+                }
+                .TaskGroup{limit, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    if limit :: limit -> stack.push(.Expr(limit))
+                }
+                .ContextBlock{fields, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    loop (_, value, _) in fields.iter().rev() -> stack.push(.Expr(value))
+                }
+                .AssumeDet{reason_expr, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    stack.push(.Expr(reason_expr))
+                }
+                .ComptimeIf{cond, then_body, else_body, ..} -> {
+                    if body :: else_body -> push_corpus_statements(&stack, body)
+                    push_corpus_statements(&stack, then_body)
+                    stack.push(.Expr(cond))
+                }
+                .ScopeMember{args, body, ..} -> {
+                    push_corpus_statements(&stack, body)
+                    loop arg in args.iter().rev() -> stack.push(.Expr(arg))
+                }
+                .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> {}
+            }
+            .Expr(expr) -> {
+                f(expr)
+                if expr == {
+                    .Str(parts, _) -> {
+                        loop part in parts.iter().rev() {
+                            if part == { .Interp(inner, _) -> stack.push(.Expr(inner)) _ -> {} }
+                        }
+                    }
+                    .ListLit(items, _) -> { loop item in items.iter().rev() -> stack.push(.Expr(item)) }
+                    .MemberSpread{base, ..} | .Spread(base, _) | .Deref(base, _)
+                        | .RawOf(base, _) | .Copy(base, _) | .Place(base, _, _)
+                        | .Field(base, _, _) | .Present(base, _) | .Ok(base, _)
+                        | .Err(base, _) | .Paren(base, _) -> stack.push(.Expr(base))
+                    .Try(base, _, _, note) -> {
+                        if note :: note -> stack.push(.Expr(note))
+                        stack.push(.Expr(base))
+                    }
+                    .MapLit(entries, _) -> {
+                        loop (key, value) in entries.iter().rev() {
+                            stack.push(.Expr(value))
+                            stack.push(.Expr(key))
+                        }
+                    }
+                    .Index{base, index, ..} -> {
+                        stack.push(.Expr(index))
+                        stack.push(.Expr(base))
+                    }
+                    .Slice{base, start, end, range, ..} -> {
+                        if range :: range -> stack.push(.Expr(range))
+                        stack.push(.Expr(end))
+                        stack.push(.Expr(start))
+                        stack.push(.Expr(base))
+                    }
+                    .Range{start, end, ..} -> {
+                        stack.push(.Expr(end))
+                        stack.push(.Expr(start))
+                    }
+                    .Call(call) -> push_corpus_args(&stack, &call.args)
+                    .Unary(_, inner, _) -> stack.push(.Expr(inner))
+                    .Binary(_, lhs, rhs, _) -> {
+                        stack.push(.Expr(rhs))
+                        stack.push(.Expr(lhs))
+                    }
+                    .CompareChain{operands, ..} -> { loop operand in operands.iter().rev() -> stack.push(.Expr(operand)) }
+                    .OptField{base, ..} -> stack.push(.Expr(base))
+                    .MethodCall{receiver, args, ..} -> {
+                        push_corpus_args(&stack, args)
+                        stack.push(.Expr(receiver))
+                    }
+                    .StructLit{fields, ..} -> { loop (_, _, value) in fields.iter().rev() -> stack.push(.Expr(value)) }
+                    .TypedLit{body, ..} -> if body == {
+                        .Fields(fields) -> { loop (_, _, value) in fields.iter().rev() -> stack.push(.Expr(value)) }
+                        .Elements(elements) -> { loop element in elements.iter().rev() -> stack.push(.Expr(element)) }
+                        .Entries(entries) -> {
+                            loop (key, value) in entries.iter().rev() {
+                                stack.push(.Expr(value))
+                                stack.push(.Expr(key))
+                            }
+                        }
+                        .Value(value) -> stack.push(.Expr(value))
+                        .ByteText(_) | .Empty -> {}
+                    }
+                    .EnumLit{args, ..} -> {
+                        loop arg in args.iter().rev() {
+                            value :: if arg == {
+                                .Positional(value) | .Named{expr: value, ..} -> value
+                            }
+                            stack.push(.Expr(value))
+                        }
+                    }
+                    .Tainted(inner, _, _) -> stack.push(.Expr(inner))
+                    .PatternTest{subject, pattern, ..} -> {
+                        stack.push(.Pattern(pattern))
+                        stack.push(.Expr(subject))
+                    }
+                    .OrFallback{value, fallback, ..} -> {
+                        stack.push(.Fallback(fallback))
+                        stack.push(.Expr(value))
+                    }
+                    .If{cond, then_body, then_value, else_body, else_value, ..} -> {
+                        stack.push(.Expr(else_value))
+                        push_corpus_statements(&stack, else_body)
+                        stack.push(.Expr(then_value))
+                        push_corpus_statements(&stack, then_body)
+                        stack.push(.Expr(cond))
+                    }
+                    .TupleLit(fields, _, _) -> { loop (_, value) in fields.iter().rev() -> stack.push(.Expr(value)) }
+                    .Lambda(lambda) -> if lambda.body == {
+                        .Expr(value) -> stack.push(.Expr(value))
+                        .Block(body) -> push_corpus_statements(&stack, body)
+                    }
+                    .CallValue{callee, args, ..} -> {
+                        push_corpus_args(&stack, args)
+                        stack.push(.Expr(callee))
+                    }
+                    .PtrFromAddr{addr, ..} -> stack.push(.Expr(addr))
+                    .StrMatchLit(..) | .BinMatchLit(..) | .Int(..) | .Float(..)
+                        | .Bool(..) | .Unit(..) | .Char(..) | .Ident(..) | .UnitLit{..}
+                        | .Absent(..) | .Todo{..} | .NoElse(..) | .ReduceMarker(..)
+                        | .ComptimeName{..} -> {}
+                }
+            }
+            .LValue(lvalue) -> if lvalue == {
+                .Local{..} -> {}
+                .Index{base, index, ..} -> {
+                    stack.push(.Expr(index))
+                    stack.push(.Expr(base))
+                }
+                .Field{base, ..} -> stack.push(.Expr(base))
+            }
+            .ForKind(kind) -> if kind == {
+                .Range{start, end, step, ..} -> {
+                    if step :: step -> stack.push(.Expr(step))
+                    stack.push(.Expr(end))
+                    stack.push(.Expr(start))
+                }
+                .In{collection, step} -> {
+                    if step :: step -> stack.push(.Expr(step))
+                    stack.push(.Expr(collection))
+                }
+            }
+            .BindPattern(pattern) -> if pattern == {
+                .Refutable{pattern, fallback, ..} -> {
+                    stack.push(.Fallback(fallback))
+                    stack.push(.Pattern(pattern))
+                }
+                _ -> {}
+            }
+            .Pattern(pattern) -> if pattern == {
+                .Or(alternatives, _) -> { loop alternative in alternatives.iter().rev() -> stack.push(.Pattern(alternative)) }
+                .Struct{fields, ..} -> {
+                    loop field in fields.iter().rev() {
+                        if field == { .Value{value, ..} -> stack.push(.Expr(value)) _ -> {} }
+                    }
+                }
+                .Variant{..} | .Present{..} | .Absent(..) | .Ok{..}
+                    | .Err{..} | .Range{..} | .StrMatch{..} | .BinMatch{..} -> {}
+            }
+            .Fallback(fallback) -> if fallback == {
+                .Value(value) -> stack.push(.Expr(value))
+                .Block{body, value, ..} -> {
+                    if value :: value -> stack.push(.Expr(value))
+                    push_corpus_statements(&stack, body)
+                }
+                .Return(.Some(value), _) -> stack.push(.Expr(value))
+                .Panic{args, ..} -> push_corpus_args(&stack, args)
+                .Return(.None, _) | .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> {}
+            }
+        }
+    }
+}
 

@@ -1,0 +1,26 @@
+use jet
+
+// Rust: tests/single_use.rs:11
+LOCK :: """
+#SingleUse struct Lock {
+    resource: String,
+}
+fn acquire(resource: String) -> Lock {
+    return Lock.{ resource: resource }
+}
+fn release(lock: ^Lock) {
+    print(lock.resource)
+}
+"""
+// Rust: tests/single_use.rs:23
+fn err_codes(src: String) -> [String] {
+    full :: "{LOCK}\n{src}"
+    codes_of(&full)
+}
+// Rust: tests/single_use.rs:28
+fn codes_of(src: String) -> [String] {
+    if jet.compile(src) == {
+        .Ok(_) -> []
+        .Err(diags) -> diags.into_iter().map((d) -> d.code.to_string()).collect()
+    }
+}

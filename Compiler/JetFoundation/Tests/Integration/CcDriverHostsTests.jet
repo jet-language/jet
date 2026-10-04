@@ -1,0 +1,28 @@
+use jet_foundation.Tests.Integration.CcDriverHosts.*
+// Rust: tests/cc_driver_hosts.rs:20
+#Test("make_driver_fixture_requires_explicit_tool_aliases_and_scopes_paths") {
+    root :: repo_root().join("tests/fixtures/foreign_build_hosts/make-cc")
+    makefile :: read(&root.join("Makefile"))
+    loop declaration in [String]{"ifeq ($(origin CC),command line)", "ifeq ($(origin CXX),command line)", "--project-root=\"$(PROJECT_ROOT)\"", "--build-root=\"$(BUILD_ROOT)\"", "@flags.rsp", "-MMD", "-MP", "-MF \"$(C_DEPFILE)\"", "-MT \"$(C_OBJECT)\"", "-MF \"$(CXX_DEPFILE)\"", "-MT \"$(CXX_OBJECT)\""} { assert(makefile.contains(declaration), "Make fixture omits {declaration}") }
+    loop fallback in [String]{"CC ?=", "CXX ?=", "CC := cc", "CXX := c++"} { assert(!makefile.contains(fallback), "Make fixture retains {fallback}") }
+    loop file in [String]{"main.c", "main.cpp", "flags.rsp", "include/config.h"} { assert(root.join(file).is_file(), "Make fixture omits {file}") }
+}
+// Rust: tests/cc_driver_hosts.rs:47
+#Test("cmake_driver_fixture_builds_both_languages_through_standard_compiler_slots") {
+    root :: repo_root().join("tests/fixtures/foreign_build_hosts/cmake-cc")
+    cmake :: read(&root.join("CMakeLists.txt"))
+    loop declaration in [String]{"project(jet_cc_cmake_fixture LANGUAGES C CXX)", "add_executable(cc-driver main.c)", "add_executable(cxx-driver main.cpp)", "target_include_directories", "@${CMAKE_CURRENT_SOURCE_DIR}/flags.rsp", "C_STANDARD 11", "CXX_STANDARD 17"} { assert(cmake.contains(declaration), "CMake fixture omits {declaration}") }
+    assert(!cmake.contains("find_program"))
+    assert(!cmake.contains("/usr/bin/cc"))
+    loop file in [String]{"main.c", "main.cpp", "flags.rsp", "include/config.h"} { assert(root.join(file).is_file(), "CMake fixture omits {file}") }
+}
+// Rust: tests/cc_driver_hosts.rs:69
+#Test("aliases_are_real_installed_bins_and_docs_cover_the_driver_matrix") {
+    cargo :: read(&repo_root().join("Cargo.toml"))
+    loop bin in [String]{"name = \"jet-cc\"", "name = \"jet-cxx\""} { assert(cargo.contains(bin), "Cargo does not build {bin}") }
+    main :: read(&repo_root().join("Source/main.rs"))
+    assert(main.contains("\"jet-cc\" => Some(\"cc\")"))
+    assert(main.contains("\"jet-cxx\" | \"jet-c++\" => Some(\"c++\")"))
+    docs :: read(&repo_root().join("Docs/spec/reference/cc-driver.md"))
+    loop term in [String]{"signed Nix index", "offline", "Make", "CMake", "no PATH fallback", "cross-target", "clean", "no-op", "edit", "error"} { assert(docs.to_ascii_lowercase().contains(term.to_ascii_lowercase()), "driver docs omit {term}") }
+}

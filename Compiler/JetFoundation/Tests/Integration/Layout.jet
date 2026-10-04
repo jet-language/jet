@@ -1,0 +1,46 @@
+use std.[fs, env]
+use std.process.Command
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet_foundation.Tests.Integration.Common
+// GATE #4494: atomic sequence, native subprocesses and filesystem.
+// Rust: tests/layout.rs:16
+SEQ :: AtomicU64.new(0)
+// Rust: tests/layout.rs:17
+fn unique_tmp() -> OSPath {
+    n :: SEQ.fetch_add(1, Ordering.Relaxed)
+    env.temp_dir().join("jet_layout_{std.process.id()}_{n}")
+}
+// Rust: tests/layout.rs:22
+fn error_codes(src: String) -> [String] {
+    dir :: unique_tmp()
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("fixture.jet")
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    match jet.compile_with_path(src, &shown) {
+        Ok(_) -> []
+        Err(diags) -> diags.into_iter().map(|d| d.code.to_string()).collect()
+    }
+}
+// Rust: tests/layout.rs:38
+fn build_and_run(name: String, src: String) -> String? {
+    dir0 :: unique_tmp()
+    fs.create_dir_all(&dir0).unwrap()
+    fpath :: dir0.join("fixture.jet")
+    fs.write(&fpath, src).unwrap()
+    out :: jet.compile_with_path(src, &fpath.to_string_lossy()).unwrap_or_else(|d| panic("front end rejected a should-compile layout fixture: {d.iter().map(|x| x.code.as_str()).collect():?}"))
+    assert(!Common.strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "`unsafe` leaked from the layout solver prelude (I1) — jet_layout must stay plain safe Rust")
+    if !Common.have_rustc() {
+        eprintln("note: rustc not found; compiled front end only")
+        return None
+    }
+    dir :: env.temp_dir()
+    rs :: dir.join("jet_layout_{name}.rs")
+    bin :: dir.join("jet_layout_{name}")
+    fs.write(&rs, &out.rust).unwrap()
+    c :: Command.new("rustc").args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).output().unwrap()
+    assert(c.status.success(), "I2 violated: rustc rejected generated layout code:\n{String.from_utf8_lossy(&c.stderr)}")
+    r :: Command.new(&bin).output().unwrap()
+    assert(r.status.success(), "generated layout program panicked/exited non-zero:\nstdout: {String.from_utf8_lossy(&r.stdout)}\nstderr :: {String.from_utf8_lossy(&r.stderr)}")
+    Some(String.from_utf8_lossy(&r.stdout).to_string())
+}

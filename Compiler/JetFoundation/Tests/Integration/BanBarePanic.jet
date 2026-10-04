@@ -1,0 +1,229 @@
+// Bare Rust compiler panic ratchet and Jet feature-example panic budget.
+// The original Rust corpus remains the peer source under examination.
+use std.[fs, env]
+// GATE #4494: filesystem traversal and build-environment paths.
+
+// Rust: tests/ban_bare_panic.rs:32
+fn root() -> OSPath { OSPath.from(env.build_var("CARGO_MANIFEST_DIR")) }
+
+// Rust: tests/ban_bare_panic.rs:37
+@ALLOWLIST :: [(String, Int, String)]{
+    ("crates/jet-foundation/src/Diagnostics.rs", 2, "the ice! macro's own panic! implementation"),
+    ("crates/jet-foundation/src/Outcome.rs", 2, "one #[test] assertion fixture plus one generated diagnostic-template guard"),
+    ("crates/jet-foundation/src/XmlPull.rs", 32, "#[cfg(test)] XML parser/event/tree assertion fixtures; exact audited count"),
+    ("crates/jet-foundation/src/Terminal.rs", 1, "#[cfg(test)] isolated child-process case assertion fixture"),
+    ("crates/jet-codegen/src/Prelude/Core.rs", 4, "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/Core/FSWalk.rs", 8, "include_str! filesystem-walk runtime template — user-program failure path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/CoreLib/Top/FakeData.rs", 1, "include_str! fake-data runtime template — user-program failure path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/CoreLib/Top/Interrupt.rs", 2, "#[cfg(test)] interrupt-queue assertion fixtures"),
+    ("crates/jet-codegen/src/Prelude/Layout.rs", 1, "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/Scheduler.rs", 1, "include_str! runtime template — user-program RUNTIME_PANIC path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/Mem.rs", 3, "include_str! allocator runtime template — user-program RUNTIME_PANIC path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/LocalCell.rs", 4, "include_str! local-cell runtime template — user-program borrow-conflict panic path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs", 1, "include_str! task runtime template — user-program already-joined-task panic path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/CoreLib/Top/HTTPServer.rs", 3, "include_str! HTTP server runtime template — user-program serving panic path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/App.rs", 1, "include_str! web-app runtime template — user-program serving panic path, not compiler code"),
+    ("crates/jet-codegen/src/Prelude/TaskGroup.rs", 4, "#[cfg(test)] task-group assertion fixtures; exact audited count"),
+    ("crates/jet-codegen/src/Prelude/SharedProtocol.rs", 1, "#[cfg(test)] shared-protocol panic waiter fixture"),
+    ("crates/jet-codegen/src/Prelude/CoreLib/Top/EncodingCodecs.rs", 1, "include_str! runtime template — cbor.encode user-program runtime panic, not compiler code"),
+    ("crates/jet-codegen/src/SchedulerHost.rs", 6, "one runtime-stop panic! matching AOT Prelude/Core.rs RUNTIME_PANIC, plus five #[cfg(test)] scheduler fixtures"),
+    ("crates/jet-codegen/src/Codegen/TIR/tests.rs", 9, "test file — every panic! here is inside a #[test] fn"),
+    ("crates/jet-codegen/src/Codegen/TIR/lower/expressions.rs", 4, "#[cfg(test)] argument-reorder lowering assertion fixtures"),
+    ("crates/jet-codegen/src/Codegen/mod.rs", 2, "#[test] prelude-fragment inventory read helpers"),
+    ("crates/jet-comptime/src/Comptime/EncodingLite.rs", 7, "#[cfg(test)] XML conversion shape assertion fixtures"),
+    ("crates/jet-comptime/src/Comptime/Reflect.rs", 12, "#[cfg(test)] reflection shape assertion fixtures"),
+    ("crates/jet-comptime/src/Comptime/CollectionEval.rs", 1, "include-style collection_semantics jet_panic adapter — user-program RUNTIME_PANIC path, not compiler ICE"),
+    ("crates/jet-comptime/src/Comptime/Build/execution_helpers.rs", 1, "#[test] target-cycle error-shape assertion fixture"),
+    ("crates/jet-comptime/src/Comptime/Build/execution_runtime.rs", 4, "#[cfg(test)] hostile-executor assertion fixtures"),
+    ("crates/jet-lexer/src/lib.rs", 2, "#[cfg(test)] string-token assertion fixtures"),
+    ("crates/jet-parser/src/Parser/mod.rs", 7, "#[cfg(test)] mod s61_tests assertion fixtures; exact audited count"),
+    ("crates/jet-parser/src/lib.rs", 12, "#[cfg(test)] generic-module parser assertion fixtures"),
+    ("crates/jet-sema/tests/generic_module_body.rs", 1, "integration-test assertion fixture"),
+    ("crates/jet-cli/src/Help/mod.rs", 1, "#[test]-only assertion fixture"),
+    ("crates/jet-cli/src/Help/Render.rs", 1, "#[test]-only help-result shape assertion fixture"),
+    ("crates/jet-repl/src/lib.rs", 3, "three #[cfg(test)] REPL statement-classifier assertion fixtures"),
+    ("crates/jet-repl/src/HistoryPlatform.rs", 1, "#[cfg(test)] Unix ABI-table assertion helper"),
+    ("crates/jet-repl/src/History.rs", 1, "#[test] history lock assertion fixture"),
+    ("crates/jet-repl/src/Notebook/trust.rs", 1, "#[cfg(test)] notebook render-decision assertion fixture"),
+    ("Source/BudgetProviders.rs", 2, "#[cfg(test)] deliberately panicking hostile provider fixture plus workload-object assertion"),
+    ("crates/jet-jit/build.rs", 3, "build.rs inventory of Prelude enums — no ice! (build script is not the compiler front end)"),
+    ("crates/jet-jit/src/jit/runtime_host.rs", 1, "#[test] Core-row presence assertion for host_fns audit"),
+    ("crates/jet-jit/src/jit/resident.rs", 1, "#[test] host-helper fault outcome assertion fixture"),
+    ("crates/jet-jit/src/Compute.rs", 1, "include-style compute semantics jet_panic adapter — user-program RUNTIME_PANIC path, not compiler ICE"),
+    ("crates/jet-cli/src/CLI.rs", 1, "#[cfg(test)] nested-command registry assertion fixture"),
+    ("Source/Interpreter.rs", 1, "#[test]-only assertion fixture"),
+    ("Source/CmdPerf.rs", 5, "#[test] Chrome trace projection assertion fixtures"),
+    ("Source/LSP/mod.rs", 2, "#[cfg(test)] isolated-project and bundle-presence assertion fixtures"),
+    ("crates/jet-driver/src/CompilerExtensionHook.rs", 8, "#[cfg(test)] compiler-extension assertion fixtures"),
+    ("Source/ProveSolver.rs", 1, "#[test]-only solver assertion fixture")
+}
+
+// Rust: tests/ban_bare_panic.rs:280
+@SCAN_ROOTS :: [String]{"crates/jet-foundation", "crates/jet-lexer", "crates/jet-parser", "crates/jet-comptime", "crates/jet-sema", "crates/jet-codegen", "crates/jet-driver", "crates/jet-semindex", "crates/jet-jit", "crates/jet-net", "crates/jet-queries", "crates/jet-rt", "crates/jet-impact", "crates/jet-repl", "crates/jet-debug", "crates/jet-cli", "Source"}
+
+// Rust: tests/ban_bare_panic.rs:300
+fn collect_rs_files(dir: OSPath, out: &[OSPath]) -> {
+    entries :: fs.read_dir(dir) ?? return
+    loop result in entries {
+        entry :: result ?? next
+        path :: entry.path()
+        if path.is_dir() { collect_rs_files(path, out) }
+        else if path.extension() == Val("rs") { &out.push(path) }
+    }
+}
+
+// Rust: tests/ban_bare_panic.rs:316
+fn count_bare_panics(text: String) -> Int {
+    count := 0
+    loop line in text.lines() {
+        trimmed := line.trim_start() // #4303
+        if !trimmed.starts_with("//") && line.contains("panic!(") -> count += 1
+    }
+    count
+}
+
+// Rust: tests/ban_bare_panic.rs:326
+struct ExamplePanicBudgetEntry { path: String, baseline: Int, reason: String }
+// Rust: tests/ban_bare_panic.rs:332
+// EXAMPLES_PANIC_BUDGET: canonical tests/fixtures/examples_panic_budget.txt asset.
+
+// Rust: tests/ban_bare_panic.rs:334
+fn parse_examples_panic_budget() -> [ExamplePanicBudgetEntry] {
+    contents :: fs.read_to_string(root().join("tests/fixtures/examples_panic_budget.txt")).expect("read examples panic budget")
+    entries := [ExamplePanicBudgetEntry]{}
+    previous_path := None as String?
+    loop (line_index, source_line) in contents.lines() {
+        line := source_line.trim() // #4303
+        if line.is_empty() || line.starts_with("#") -> next
+        fields :: line.splitn(3, '\t').collect()
+        path := (fields.get(0) ?? "").trim() // #4303
+        baseline_text := (fields.get(1) ?? "").trim() // #4303
+        baseline :: baseline_text.parse::<USize>() ?? panic("invalid panic budget count on line {line_index + 1}") // GATE #4483 selected usize.
+        reason := (fields.get(2) ?? "").trim() // #4303
+        assert(path.starts_with("Examples/features/"), "panic budget path must be a feature-corpus source: {path}")
+        assert(baseline > 0, "panic budget count must be positive: {path}")
+        assert(!reason.is_empty(), "panic budget entry needs a teaching reason: {path}")
+        if previous_path == .Val(previous) -> assert(previous < path, "panic budget paths must be sorted and unique: {path}")
+        previous_path = Val(path.to_string())
+        &entries.push(ExamplePanicBudgetEntry{path: path.to_string(), baseline: Int.from(baseline), reason: reason.to_string()})
+    }
+    assert(!entries.is_empty(), "examples panic budget must contain at least one entry")
+    entries
+}
+
+// Rust: tests/ban_bare_panic.rs:384
+fn collect_feature_example_files(dir: OSPath, out: &[OSPath]) -> {
+    loop result in fs.read_dir(dir).expect("read feature example directory") {
+        path :: result.expect("read feature example entry").path()
+        if path.is_dir() {
+            if path.file_name().and_then(|name| name.to_str()) == Val("expected") -> next
+            collect_feature_example_files(path, out)
+        } else if path.file_name().and_then(|name| name.to_str()) != Val("package.jet") && path.extension() == Val("jet") {
+            &out.push(path)
+        }
+    }
+}
+
+// Rust: tests/ban_bare_panic.rs:402
+fn collect_feature_example_sources(repo: OSPath) -> [OSPath] {
+    files := [OSPath]{}
+    collect_feature_example_files(repo.join("Examples/features"), &files)
+    &files.sort()
+    files
+}
+
+// Rust: tests/ban_bare_panic.rs:410
+fn is_identifier_byte(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == U8{95} }
+
+// Rust: tests/ban_bare_panic.rs:414
+fn is_jet_panic_call(bytes: [U8], index: Int) -> Bool {
+    if index + 5 > bytes.len() || (index > 0 && is_identifier_byte(bytes[index - 1])) -> return false
+    if bytes[index] != U8{112} || bytes[index + 1] != U8{97} || bytes[index + 2] != U8{110} || bytes[index + 3] != U8{105} || bytes[index + 4] != U8{99} -> return false
+    after_name := index + 5
+    loop after_name < bytes.len() && bytes[after_name].is_ascii_whitespace() -> after_name += 1
+    after_name < bytes.len() && bytes[after_name] == U8{40}
+}
+
+// Rust: tests/ban_bare_panic.rs:433
+fn count_jet_panic_calls(text: String) -> Int {
+    bytes :: text.bytes()
+    count := 0
+    index := 0
+    in_block_comment := false
+    in_string := false
+    escaped := false
+    loop index < bytes.len() {
+        if in_block_comment {
+            if bytes[index] == U8{42} && bytes.get(index + 1) == Val(U8{47}) {
+                in_block_comment = false
+                index += 2
+            } else { index += 1 }
+            next
+        }
+        if in_string {
+            if escaped { escaped = false; index += 1; next }
+            if bytes[index] == U8{92} { escaped = true; index += 1; next }
+            if bytes[index] == U8{34} { in_string = false; index += 1; next }
+            if is_jet_panic_call(bytes, index) { count += 1; index += 5 }
+            else { index += 1 }
+            next
+        }
+        if bytes[index] == U8{34} { in_string = true; index += 1; next }
+        if bytes[index] == U8{47} && bytes.get(index + 1) == Val(U8{47}) {
+            index += 2
+            loop index < bytes.len() && bytes[index] != U8{10} -> index += 1
+            next
+        }
+        if bytes[index] == U8{47} && bytes.get(index + 1) == Val(U8{42}) {
+            in_block_comment = true
+            index += 2
+            next
+        }
+        if is_jet_panic_call(bytes, index) { count += 1; index += 5 }
+        else { index += 1 }
+    }
+    count
+}
+
+// Rust: tests/ban_bare_panic.rs:505
+fn example_panic_counts(repo: OSPath) -> [(String, Int)] {
+    out := [(String, Int)]{}
+    loop file in collect_feature_example_sources(repo) {
+        path :: file.strip_prefix(repo).expect("example must be below repository root").to_string_lossy().replace('\\', "/")
+        text :: fs.read_to_string(file).expect("read feature example source")
+        &out.push((path, count_jet_panic_calls(text)))
+    }
+    out
+}
+
+// Rust: tests/ban_bare_panic.rs:521
+fn example_panic_budget_violations(current: [(String, Int)], budget: [ExamplePanicBudgetEntry]) -> [String] {
+    // Exact baselines are retired on reduction, never reusable ceilings.
+    allowed := [String: ExamplePanicBudgetEntry]{}
+    baseline_total := 0
+    loop entry in budget {
+        baseline_total += entry.baseline
+        allowed[entry.path] = entry
+    }
+    current_paths := [String: Bool]{}
+    current_total := 0
+    violations := [String]{}
+    loop (path, count) in current {
+        current_paths[path] = true
+        current_total += count
+        if allowed.get(path) == {
+            .None -> {
+                if count > 0 -> &violations.push("{path}: {count} panic( calls are unbudgeted; add a real teaching reason before keeping this path")
+            }
+            .Val(entry) -> {
+                if count > entry.baseline -> &violations.push("{path}: {count} panic( calls grew past its baseline of {entry.baseline} ({entry.reason}); migrate the failure instead")
+                if count < entry.baseline -> &violations.push("{path}: panic baseline is stale at {entry.baseline}; current source has {count}, lower the baseline or remove the path")
+            }
+        }
+    }
+    loop entry in budget {
+        if !current_paths.contains_key(entry.path) -> &violations.push("{entry.path}: budget path no longer exists in the feature corpus; remove the stale entry")
+    }
+    if current_total > baseline_total -> &violations.push("feature corpus total grew to {current_total} panic( calls; baseline is {baseline_total}")
+    violations
+}

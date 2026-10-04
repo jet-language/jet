@@ -1,0 +1,32 @@
+use SelfhostParser.[pass, CASES, diagnostic_texts, native_facts, expected_tier_stdout]
+use jet_driver.[run_compiler_work]
+use TirSupport as tir_support
+// GATE #4494: actual Node process invocation.
+use std.process.[Command]
+
+// Rust: tests/selfhost_parser.rs:649
+#Test("generated_jet_call_arguments_match_native_parser_contract") {
+    compiled :: pass()
+    assert_eq(compiled.source_file_count, 35, "source slice is 1 foundation-diagnostics + 4 lexer + 1 foundation-types + 2 diagnostic-registry + 5 AST + 22 parser files")
+    candidate_facts :: run_compiler_work(fn() {
+        results := [[I64]]{}
+        loop (_, source) in CASES { &results.push(compiled.evaluate(source)) }
+        results
+    })
+    loop (index, (name, source)) in CASES.enumerate() {
+        actual :: candidate_facts[index]
+        // #3719: never name a synthetic terminator as a source semicolon.
+        if !source.contains(";") {
+            loop text in diagnostic_texts(actual) {
+                assert(!text.contains("`;`"), "{name}: Jet parser diagnostic names the synthetic terminator: {text}")
+            }
+        }
+        assert_eq(actual, native_facts(source), "{name}: generated Jet parser parity")
+    }
+    assert(tir_support.have_rustc(), "AOT and awaited-Wasm proof is required, never skipped")
+    node :: Command.new("node").arg("--version").output().expect("awaited-Wasm proof requires Node; absence is not a pass")
+    assert(node.status.success(), "awaited-Wasm proof requires working Node")
+    expected :: expected_tier_stdout()
+    tir_support.assert_tiers_agree("selfhost_parser_call_args", compiled.source, expected)
+    tir_support.assert_awaited_web_tier("selfhost_parser_call_args_web", compiled.source, expected)
+}

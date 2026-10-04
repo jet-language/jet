@@ -1,123 +1,145 @@
-// PORT-PENDING 2170 crates-jet-foundation-src-syntax-markers: crates/jet-foundation/src/Syntax/markers.rs:1-119
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-VERDICT-732-1: the sole prefix for applying a typed rule. A rule may target a
-//RS /// declaration, expression, or brace scope when that rule declares the target
-//RS /// legal. D-ONCE-AT1=D supersedes the former marker-plane reservation: prefix
-//RS /// `@` marks compile-time names and facts, while infix `@` remains the
-//RS /// package-source reference.
-//RS ///
-//RS /// `#` has two other jobs, told apart by parser position only (no lookahead
-//RS /// heuristics): inside a bracketed type, `[T#N]`, it is the fixed-size-list
-//RS /// separator (S76/D-FIXARR1, `TYPE_FIXED_SIZE_SEP` in `package_files.rs`);
-//RS /// after a package name it is the version-pin separator (`pkg#1.2.0`, same
-//RS /// constant). D-ONCE-HASH1=B keeps all three jobs on one token.
-//RS pub const RULE_PREFIX: &str = "#"; // D-VERDICT-732-1
-//RS 
-//RS /// D-PREPOST1 / D-CONTRACTCASE1: precondition contract on a function
-//RS /// signature — `#Pre(cond, "msg")`. The condition is a pure expression (same
-//RS /// checker as `#Pure`). Checked in every build by default; per-module
-//RS /// build-policy strip is the explicit opt-out.
-//RS pub const MARKER_PRE: &str = "Pre"; // D-PREPOST1
-//RS /// D-PREPOST1 / D-CONTRACTCASE1: postcondition contract — `#Post(cond,
-//RS /// "msg")`; `result` names the return value inside `cond`.
-//RS pub const MARKER_POST: &str = "Post"; // D-PREPOST1
-//RS 
-//RS /// D-MEMO1=A / D-FIELDMEMO1=A: stores a pure function result or a computed
-//RS /// field result until its checked inputs change. Functions use the bounded
-//RS /// default or `bound: none`; the field form is bare `#Memo` before
-//RS /// `name: T -> expr`.
-//RS pub const MARKER_MEMO: &str = "Memo"; // D-MEMO1=A, D-FIELDMEMO1=A
-//RS 
-//RS /// D-COMPUTE-KERNEL-SURFACE1=B: explicit safe kernel declaration —
-//RS /// `#Kernel(.parallel) fn …`. The mode is intentionally a closed marker
-//RS /// argument, so adding another execution mode needs a new owner ruling.
-//RS pub const MARKER_KERNEL: &str = "Kernel"; // D-COMPUTE-KERNEL-SURFACE1
-//RS 
-//RS /// D-PERSIST1 / D-CONTRACTCASE1: dev-tier contract on a module-level
-//RS /// binding — the value survives `jet dev` hot reloads (identity = module
-//RS /// path + binding name). Inert in release builds.
-//RS pub const MARKER_PERSIST: &str = "Persist"; // D-PERSIST1
-//RS 
-//RS /// D-METHODMACRO1=A / D-CONTRACTCASE1: `#Inline fn` / `#Inline` method — a
-//RS /// soft hint that this function/method should be inlined (`#[inline]` in
-//RS /// codegen). Never rejected by sema; the compiler is free to ignore it.
-//RS /// Methods stay ordinary functions — no macro-rewrite hooks (D-METHODMACRO1).
-//RS pub const MARKER_INLINE: &str = "Inline"; // D-METHODMACRO1
-//RS /// D-SIMD3=B: native auto-vectorization is the default for native AOT builds;
-//RS /// `#Scalar` is the explicit per-function/method opt-out.
-//RS pub const MARKER_SCALAR: &str = "Scalar"; // D-SIMD3
-//RS /// D-FOUND-OPMIX1=A: derives the reverse lookup for a typed Add/Mul impl.
-//RS pub const MARKER_COMMUTATIVE: &str = "Commutative"; // D-FOUND-OPMIX1
-//RS pub const MARKER_STATIC: &str = "Static"; // D-META-STAGE1
-//RS /// D-CAPBUNDLE1 / D-CONTRACTCASE1: operation bundles on a nominal distinct
-//RS /// type — each re-exposes a curated slice of the base type's operations
-//RS /// while keeping nominal identity. Stackable. The `numeric` bundle merged
-//RS /// into `MARKER_NUMERIC` (`#Numeric`, D-VERDICT-732-1, formerly
-//RS /// D-MARKERMOVE1) — there is no `MARKER_BUNDLE_NUMERIC` constant.
-//RS pub const MARKER_BUNDLE_COMPARABLE: &str = "Comparable"; // D-CAPBUNDLE1
-//RS pub const MARKER_BUNDLE_PRINTABLE: &str = "Printable"; // D-CAPBUNDLE1
-//RS pub const MARKER_BUNDLE_CODABLE_AS_BASE: &str = "CodableAsBase"; // D-CAPBUNDLE1
-//RS 
-//RS /// D-CLIFLAG1 / D-SHAPE-CLI1 / D-CLI-GLOBAL1=E (rides
-//RS /// D-CONTRACTCASE1/D-VERDICT-732-1, formerly D-MARKERMOVE1):
-//RS /// struct-level CLI derive marker — `#CLI`. A resolved `fn run(args: T)`
-//RS /// parameter type owns parsing, defaults, help, completion, validation, and
-//RS /// audit facts. In E, one marked program struct also owns root flags and
-//RS /// callable-member commands. The marker is optional because plain `fn run()`
-//RS /// remains a complete entry.
-//RS pub const MARKER_CLI: &str = "CLI"; // D-CLIFLAG1, D-SHAPE-CLI1, D-CLI-GLOBAL1=E
-//RS /// D-PATCH1 (card #181): struct-level derive — generates nested `T.Patch` with
-//RS /// `apply`/`diff`/`merge`, Codable by construction (Encode+Decode on Patch).
-//RS pub const MARKER_PATCHABLE: &str = "Patchable"; // D-PATCH1
-//RS /// D-CLIFLAG1 / D-CLI-GLOBAL1=E: field and command help for CLI-derived
-//RS /// arguments. D-TASKS-LIST1=A reuses
-//RS /// it only when the function marker group also contains `#Job`.
-//RS pub const MARKER_DOC: &str = "Doc"; // D-CLIFLAG1, D-CLI-GLOBAL1=E
-//RS /// D-CLI-POS1=A: field-level opt-out from positional filling on a `#[CLI]`
-//RS /// required value field — `#[Flag]`. Without it, required scalars fill from
-//RS /// bare argv in declaration order; with it, only `--field` is accepted.
-//RS pub const MARKER_FLAG: &str = "Flag"; // D-CLI-POS1
-//RS /// D-CLI-FIELD-MARKERS1=A: one-letter alias for a `#[CLI]` field.
-//RS pub const MARKER_SHORT: &str = "Short"; // D-CLI-FIELD-MARKERS1
-//RS /// D-CLI-FIELD-MARKERS1=A: environment fallback for a value `#[CLI]` field.
-//RS pub const MARKER_ENV: &str = "Env"; // D-CLI-FIELD-MARKERS1
-//RS /// D-CALLDUAL1=E: marks the first bare-read parameter of a free function as
-//RS /// the receiver for the equivalent `value.function(…)` spelling.
-//RS pub const MARKER_ROOT: &str = "Root";
-//RS 
-//RS /// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
-//RS /// declarations. C remains the implicit default; alternate ABIs never inherit.
-//RS pub const MARKER_ABI: &str = "ABI"; // D-CABI-PLATFORM1
-//RS 
-//RS /// D-BOUND-UNDO1=A: `#Undo(inverse)` names the compensating function a
-//RS /// foreign binding registers on the enclosing transaction's rollback path.
-//RS pub const MARKER_UNDO: &str = "Undo"; // D-BOUND-UNDO1
-//RS 
-//RS /// D-FFI-CAP1=A: `#Close(close)` joins a returned foreign handle to the
-//RS /// consuming `close(^handle)` protocol. The named foreign function is checked
-//RS /// against the returned handle before the binding is registered.
-//RS pub const MARKER_CLOSE: &str = "Close"; // D-FFI-CAP1
-//RS 
-//RS /// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
-//RS /// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
-//RS /// silences the default-on `float_money` lint). Deliberately lowercase: it
-//RS /// names a lint, not a declaration-shaped feature, so it does not
-//RS /// follow the PascalCase marker convention. Struct/field site collection:
-//RS /// `collect_allow_markers` in `crates/jet-semindex/src/Build.rs`; the
-//RS /// float-money check itself: `allows_float_money` in
-//RS /// `crates/jet-foundation/src/Numeric.rs`.
-//RS pub const MARKER_ALLOW: &str = "allow"; // D-LINTPOLICY1
-//RS 
-//RS /// D-STRUCT-LIFE1=A (ratified 2026-08-19): any package may mark a public item
-//RS /// as retiring with `#Deprecated(since: ..., use: ..., removed_in: ...)`.
-//RS pub const MARKER_DEPRECATED: &str = "Deprecated";
-//RS 
-//RS /// D-FAILURE-FOUNDATION1=A: marks a named type as an allowed explicit error
-//RS /// domain for a `!Error` callable contract.
-//RS pub const MARKER_ERROR: &str = "Error";
-//RS 
-//RS // D-MARKSIG1=A: marker rows live in `Policy::APPLIED_RULES`. Keep marker
-//RS // spelling constants here; do not add a second name/site/signature table.
-//RS 
-// END-PORT-PENDING 2170 crates/jet-foundation/src/Syntax/markers.rs:1-119
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:1
+// D-VERDICT-732-1: the sole prefix for applying a typed rule. A rule may target a
+// declaration, expression, or brace scope when that rule declares the target
+// legal. D-ONCE-AT1=D supersedes the former marker-plane reservation: prefix
+// `@` marks compile-time names and facts, while infix `@` remains the
+// package-source reference.
+//
+// `#` has two other jobs, told apart by parser position only (no lookahead
+// heuristics): inside a bracketed type, `[T#N]`, it is the fixed-size-list
+// separator (S76/D-FIXARR1, `TYPE_FIXED_SIZE_SEP` in `package_files.rs`);
+// after a package name it is the version-pin separator (`pkg#1.2.0`, same
+// constant). D-ONCE-HASH1=B keeps all three jobs on one token.
+pub RULE_PREFIX :: "#" // D-VERDICT-732-1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:14
+// D-PREPOST1 / D-CONTRACTCASE1: precondition contract on a function
+// signature — `#Pre(cond, "msg")`. The condition is a pure expression (same
+// checker as `#Pure`). Checked in every build by default; per-module
+// build-policy strip is the explicit opt-out.
+pub MARKER_PRE :: "Pre" // D-PREPOST1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:19
+// D-PREPOST1 / D-CONTRACTCASE1: postcondition contract — `#Post(cond,
+// "msg")`; `result` names the return value inside `cond`.
+pub MARKER_POST :: "Post" // D-PREPOST1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:23
+// D-MEMO1=A / D-FIELDMEMO1=A: stores a pure function result or a computed
+// field result until its checked inputs change. Functions use the bounded
+// default or `bound: none`; the field form is bare `#Memo` before
+// `name: T -> expr`.
+pub MARKER_MEMO :: "Memo" // D-MEMO1=A, D-FIELDMEMO1=A
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:29
+// D-COMPUTE-KERNEL-SURFACE1=B: explicit safe kernel declaration —
+// `#Kernel(.parallel) fn …`. The mode is intentionally a closed marker
+// argument, so adding another execution mode needs a new owner ruling.
+pub MARKER_KERNEL :: "Kernel" // D-COMPUTE-KERNEL-SURFACE1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:34
+// D-PERSIST1 / D-CONTRACTCASE1: dev-tier contract on a module-level
+// binding — the value survives `jet dev` hot reloads (identity = module
+// path + binding name). Inert in release builds.
+pub MARKER_PERSIST :: "Persist" // D-PERSIST1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:39
+// D-METHODMACRO1=A / D-CONTRACTCASE1: `#Inline fn` / `#Inline` method — a
+// soft hint that this function/method should be inlined (`#[inline]` in
+// codegen). Never rejected by sema; the compiler is free to ignore it.
+// Methods stay ordinary functions — no macro-rewrite hooks (D-METHODMACRO1).
+pub MARKER_INLINE :: "Inline" // D-METHODMACRO1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:44
+// D-SIMD3=B: native auto-vectorization is the default for native AOT builds;
+// `#Scalar` is the explicit per-function/method opt-out.
+pub MARKER_SCALAR :: "Scalar" // D-SIMD3
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:47
+// D-FOUND-OPMIX1=A: derives the reverse lookup for a typed Add/Mul impl.
+pub MARKER_COMMUTATIVE :: "Commutative" // D-FOUND-OPMIX1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:49
+pub MARKER_STATIC :: "Static" // D-META-STAGE1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:50
+// D-CAPBUNDLE1 / D-CONTRACTCASE1: operation bundles on a nominal distinct
+// type — each re-exposes a curated slice of the base type's operations
+// while keeping nominal identity. Stackable. The `numeric` bundle merged
+// into `MARKER_NUMERIC` (`#Numeric`, D-VERDICT-732-1, formerly
+// D-MARKERMOVE1) — there is no `MARKER_BUNDLE_NUMERIC` constant.
+pub MARKER_BUNDLE_COMPARABLE :: "Comparable" // D-CAPBUNDLE1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:56
+pub MARKER_BUNDLE_PRINTABLE :: "Printable" // D-CAPBUNDLE1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:57
+pub MARKER_BUNDLE_CODABLE_AS_BASE :: "CodableAsBase" // D-CAPBUNDLE1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:59
+// D-CLIFLAG1 / D-SHAPE-CLI1 / D-CLI-GLOBAL1=E (rides
+// D-CONTRACTCASE1/D-VERDICT-732-1, formerly D-MARKERMOVE1):
+// struct-level CLI derive marker — `#CLI`. A resolved `fn run(args: T)`
+// parameter type owns parsing, defaults, help, completion, validation, and
+// audit facts. In E, one marked program struct also owns root flags and
+// callable-member commands. The marker is optional because plain `fn run()`
+// remains a complete entry.
+pub MARKER_CLI :: "CLI" // D-CLIFLAG1, D-SHAPE-CLI1, D-CLI-GLOBAL1=E
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:67
+// D-PATCH1 (card #181): struct-level derive — generates nested `T.Patch` with
+// `apply`/`diff`/`merge`, Codable by construction (Encode+Decode on Patch).
+pub MARKER_PATCHABLE :: "Patchable" // D-PATCH1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:70
+// D-CLIFLAG1 / D-CLI-GLOBAL1=E: field and command help for CLI-derived
+// arguments. D-TASKS-LIST1=A reuses
+// it only when the function marker group also contains `#Job`.
+pub MARKER_DOC :: "Doc" // D-CLIFLAG1, D-CLI-GLOBAL1=E
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:74
+// D-CLI-POS1=A: field-level opt-out from positional filling on a `#[CLI]`
+// required value field — `#[Flag]`. Without it, required scalars fill from
+// bare argv in declaration order; with it, only `--field` is accepted.
+pub MARKER_FLAG :: "Flag" // D-CLI-POS1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:78
+// D-CLI-FIELD-MARKERS1=A: one-letter alias for a `#[CLI]` field.
+pub MARKER_SHORT :: "Short" // D-CLI-FIELD-MARKERS1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:80
+// D-CLI-FIELD-MARKERS1=A: environment fallback for a value `#[CLI]` field.
+pub MARKER_ENV :: "Env" // D-CLI-FIELD-MARKERS1
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:82
+// D-CALLDUAL1=E: marks the first bare-read parameter of a free function as
+// the receiver for the equivalent `value.function(…)` spelling.
+pub MARKER_ROOT :: "Root"
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:86
+// D-CABI-PLATFORM1=A: per-function native calling-convention marker for C
+// declarations. C remains the implicit default; alternate ABIs never inherit.
+pub MARKER_ABI :: "ABI" // D-CABI-PLATFORM1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:90
+// D-BOUND-UNDO1=A: `#Undo(inverse)` names the compensating function a
+// foreign binding registers on the enclosing transaction's rollback path.
+pub MARKER_UNDO :: "Undo" // D-BOUND-UNDO1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:94
+// D-FFI-CAP1=A: `#Close(close)` joins a returned foreign handle to the
+// consuming `close(^handle)` protocol. The named foreign function is checked
+// against the returned handle before the binding is registered.
+pub MARKER_CLOSE :: "Close" // D-FFI-CAP1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:99
+// D-LINTPOLICY1=A / D-DECIMAL1: per-site lint-suppression marker —
+// `#[allow(lint_name)]` on a struct or field (e.g. `#[allow(float_money)]`
+// silences the default-on `float_money` lint). Deliberately lowercase: it
+// names a lint, not a declaration-shaped feature, so it does not
+// follow the PascalCase marker convention. Struct/field site collection:
+// `collect_allow_markers` in `crates/jet-semindex/src/Build.rs`; the
+// float-money check itself: `allows_float_money` in
+// `crates/jet-foundation/src/Numeric.rs`.
+pub MARKER_ALLOW :: "allow" // D-LINTPOLICY1
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:109
+// D-STRUCT-LIFE1=A (ratified 2026-08-19): any package may mark a public item
+// as retiring with `#Deprecated(since: ..., use: ..., removed_in: ...)`.
+pub MARKER_DEPRECATED :: "Deprecated"
+
+// Rust: crates/jet-foundation/src/Syntax/markers.rs:113
+// D-FAILURE-FOUNDATION1=A: marks a named type as an allowed explicit error
+// domain for a `!Error` callable contract.
+pub MARKER_ERROR :: "Error"
+
+// D-MARKSIG1=A: marker rows live in `Policy::APPLIED_RULES`. Keep marker
+// spelling constants here; do not add a second name/site/signature table.
 

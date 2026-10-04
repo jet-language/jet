@@ -1,0 +1,185 @@
+use StructureLiveness.[repo, example, run_jet, assert_liveness_warnings, assert_liveness_policy_denied, Scratch, SUITE_ORDER, HOST_GATED, TEST_TARGET_FLOOR, UNASSIGNED_CEILING, OVER_DEFAULT_BUDGET_CEILING, HOST_GATED_HELD_OUT, SuiteRow, repo_root, discover_test_targets, parse_suite_ledger, audit_suite_ledger, audit_suite_budgets]
+use jet_foundation.Names.StructureFactKind
+use jet.Loader.[load_entry]
+use jet.[build_project_root]
+use jet.Sema.[check_bundle, CompileMode]
+use jet.Diagnostics.Severity
+use std.fs
+use std.env
+use std.process.[Command, id]
+use core.sys.target.[selected_os]
+use common
+
+// GATE #4494: real filesystem, CLI subprocess and output capture throughout.
+// Rust: tests/structure_liveness.rs:51
+#Test("liveness_facts_and_fixes_are_one_checked_result") {
+    source := fs.read_to_string(repo().join(example())).expect("liveness example source")
+    bundle := load_entry(example()).expect("liveness example loads")
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    codes := diagnostics.iter().map(diagnostic -> diagnostic.code).collect()
+    codes.sort()
+    assert_eq(codes, ["L0101", "L0103", "L0104", "L0105"])
+    assert(diagnostics.iter().all(diagnostic -> diagnostic.severity == Severity.Lint && diagnostic.edit.is_some_and(edit -> edit.new_text.is_empty() || edit.new_text.starts_with('_'))))
+    facts := bundle.name_ledger.structure_facts().iter().filter(fact -> fact.kind == StructureFactKind.Liveness).collect()
+    assert_eq(facts.len(), 4)
+    assert(facts.iter().all(fact -> fact.kind == StructureFactKind.Liveness && fact.gate == Some("_name") && fact.source == example()))
+    assert(facts.iter().any(fact -> fact.subject == "support"))
+    assert(facts.iter().any(fact -> fact.subject == "unused_binding"))
+    assert(facts.iter().any(fact -> fact.subject == "unused_private"))
+    assert(facts.iter().any(fact -> fact.subject == "package_export"))
+    assert(!facts.iter().any(fact -> fact.subject == "library_pub"))
+    loop diagnostic in diagnostics {
+        span := diagnostic.span.expect("liveness diagnostic span")
+        edit := diagnostic.edit.expect("liveness source edit")
+        if edit.new_text.is_empty() {
+            assert(diagnostic.code == "L0101" || diagnostic.code == "L0104")
+            assert(edit.span.start <= span.start && edit.span.end >= span.end)
+        } else {
+            assert_eq(edit.span, span)
+            assert_eq(edit.new_text, "_{source[span.start..span.end]}")
+        }
+    }
+    text_output := run_jet(["inspect", "structure", example()])
+    assert(text_output.status.success(), "structure inspect failed: {text_output:?}")
+    text := String.from_utf8(text_output.stdout).expect("structure text is utf8")
+    expected_text := fs.read_to_string(repo().join("Examples/features/expected/tooling/structure_liveness.structure.out")).expect("structure text golden")
+    assert_eq(text, expected_text)
+    loop subject in ["support", "unused_binding", "unused_private", "package_export"] { assert(text.contains(subject), "missing {subject} in {text}") }
+    assert(text.contains("Structure.Liveness"))
+    assert(text.contains("gates=_name"))
+    json_output := run_jet(["inspect", "structure", "--json", example()])
+    assert(json_output.status.success(), "JSON structure inspect failed: {json_output:?}")
+    json := String.from_utf8(json_output.stdout).expect("structure JSON is utf8")
+    expected_json := fs.read_to_string(repo().join("Examples/features/expected/tooling/structure_liveness.structure.json")).expect("structure JSON golden")
+    assert_eq(json, expected_json)
+    assert(json.contains("\"registry\":\"Structure.Liveness\""))
+    assert(json.contains("\"gate\":\"_name\""))
+    cache := env.temp_dir().join("jet_structure_liveness_tiers_{id()}")
+    _ :: fs.remove_dir_all(cache)
+    // Retired engine-specific checks become the shared O0/O1/O2 contract.
+    loop (mode, args) in [("O2", ["run", "--release", example()]), ("O0", ["run", example()]), ("O1", ["build", example()])] {
+        output := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).current_dir(repo()).env("NO_COLOR", "1").env("JET_RUN_CACHE_DIR", cache.join(mode).join("run")).env("JET_STORE_DIR", cache.join(mode).join("build")).args(args).output().expect("run liveness example tier")
+        assert(output.status.success(), "{mode} failed: stdout={String.from_utf8_lossy(output.stdout)} stderr={String.from_utf8_lossy(output.stderr)}")
+        if mode == "O1" {
+            // GATE #4483: executable suffix belongs to the selected target.
+            suffix := if selected_os() == "windows" -> ".exe" else -> ""
+            binary := build_project_root(example()).unwrap().join(".jet/build").join("structure_liveness{suffix}")
+            executed := Command.new(binary).current_dir(repo()).env("NO_COLOR", "1").output().expect("run O1 liveness binary")
+            assert(executed.status.success(), "O1 execution failed: {String.from_utf8_lossy(executed.stderr)}")
+            assert_eq(executed.stdout, "structure liveness\n".bytes(), "{mode} output")
+        } else { assert_eq(output.stdout, "structure liveness\n".bytes(), "{mode} output") }
+        assert_liveness_warnings(mode, output)
+    }
+    dev := run_jet(["dev", example(), "--watch=off"])
+    assert(dev.status.success(), "dev failed: stdout={String.from_utf8_lossy(dev.stdout)} stderr={String.from_utf8_lossy(dev.stderr)}")
+    assert_eq(dev.stdout, "structure liveness\n".bytes(), "dev output")
+    assert_liveness_warnings("dev", dev)
+    loop (mode, args) in [
+        ("policy-O2", ["run", "--release", "tests/ui/lint_policy_liveness/run.jet"]),
+        ("policy-O0", ["run", "tests/ui/lint_policy_liveness/run.jet"]),
+        ("policy-O1", ["build", "tests/ui/lint_policy_liveness/run.jet"]),
+        ("policy-dev", ["dev", "tests/ui/lint_policy_liveness/run.jet", "--watch=off"])
+    ] {
+        output := run_jet(args)
+        assert_liveness_policy_denied(mode, output)
+    }
+    _ :: fs.remove_dir_all(cache)
+}
+// Rust: tests/structure_liveness.rs:204
+#Test("liveness_web_compile_keeps_the_same_front_end_result") {
+    rustc := Command.new("rustc").args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"]).output().expect("probe wasm target")
+    if !rustc.status.success() {
+        eprint("note: skipping liveness web tier proof (wasm target unavailable)\n")
+        return
+    }
+    output := run_jet(["build", "--target=web", example()])
+    assert(output.status.success(), "web build failed: stdout={String.from_utf8_lossy(output.stdout)} stderr={String.from_utf8_lossy(output.stderr)}")
+    assert_liveness_warnings("web", output)
+}
+// Rust: tests/suite_goldens.rs:21
+#Test("user_story_suite_matches_expected_output") {
+    root := OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap())
+    suite := root.join("Examples/suites")
+    programs := fs.read_dir(suite).expect("user-story suite exists").flatten().map(entry -> entry.path()).filter(path -> path.extension().and_then(extension -> extension.to_str()) == Some("jet") && path.file_name().and_then(name -> name.to_str()) != Some("package.jet")).collect()
+    programs.sort()
+    assert_eq(programs.len(), 8, "the suite must keep eight user stories")
+    cache := env.temp_dir().join("jet-user-story-golden-{id()}")
+    scratch := Scratch{path: cache}
+    fs.create_dir_all(cache).expect("create golden cache")
+    loop program in programs {
+        stem := program.file_stem().and_then(name -> name.to_str()).expect("program has a utf8 stem")
+        expected := suite.join("expected").join("{stem}.out")
+        expected_output := fs.read_to_string(expected).unwrap_or_else(error -> panic("read {expected.display()}: {error}"))
+        output := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", program.to_str().expect("program path is utf8")]).current_dir(root).env("JETPACK_ENV", "1").env_remove("JETPACK_ENV_DIR").env("JET_STORE_DIR", cache).env("NO_COLOR", "1").output().unwrap_or_else(error -> panic("run {program.display()}: {error}"))
+        assert(output.status.success(), "{program.display()} failed:\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected_output, "golden mismatch for {program.display()}")
+    }
+}
+// Rust: tests/suite_goldens.rs:76
+#Test("semantic_corpus_policy_runs_with_suite_goldens") {
+    common.corpus_policy.CorpusPolicy.load().expect("corpus manifest").check_gate("suite").expect("suite corpus semantic policy")
+}
+// Rust: tests/suite_membership.rs:278
+#Test("every_test_target_belongs_to_a_named_set") {
+    ledger := parse_suite_ledger(fs.read_to_string(repo_root().join("tests/suites.txt")).unwrap())
+    discovered := discover_test_targets()
+    audit := audit_suite_ledger(ledger, discovered)
+    eprint("suite membership: {audit.assigned} of {discovered.len()} declared test target(s) in a named set; {audit.unassigned.len()} in none:\n")
+    loop target in audit.unassigned { eprint("  {target}\n") }
+    assert(audit.ghosts.is_empty(), "tests/suites.txt names {audit.ghosts.len()} target(s) with no matching `.rs` file: {audit.ghosts:?}. A nonexistent target is a stale row to delete, never a set that failed.")
+    assert(audit.duplicated.is_empty(), "{audit.duplicated.len()} target(s) appear in more than one section of tests/suites.txt, breaking that file's own invariant that every target belongs to exactly one set:\n{audit.duplicated.join("\n")}")
+    assert(audit.reasonless.is_empty(), "{audit.reasonless.len()} target(s) are parked in `{HOST_GATED}:` without saying what gates them:\n{audit.reasonless.join("\n")}\nA target held out states its gate, or it is not held out — it is hidden, which is the whole defect (#2025).")
+    assert(audit.empty_sets.is_empty(), "these named sets have no members: {audit.empty_sets:?}. An empty set is a name that will be cited as coverage it does not have — delete the name or give it members.")
+    assert_eq(audit.assigned + audit.unassigned.len(), discovered.len(), "suite accounting is broken: {audit.assigned} assigned + {audit.unassigned.len()} unassigned != {discovered.len()} discovered target(s).")
+    assert(audit.unassigned.len() <= UNASSIGNED_CEILING, "{audit.unassigned.len()} declared test target(s) belong to NO verification set (ceiling {UNASSIGNED_CEILING}):\n  {audit.unassigned.join("\n  ")}\nThat is how `golden`, `ban_bare_panic` and `jit_run` were each found red long after they broke. Put the target in the set it belongs to, or park it in `{HOST_GATED}:` with the observed gate AND a row in HOST_GATED_HELD_OUT.")
+    assert(audit.assigned >= TEST_TARGET_FLOOR, "tests/suites.txt assigns {audit.assigned} target(s) but the ratchet floor is {TEST_TARGET_FLOOR}; rows may only GROW. A target that lost its row did not change set — it left the sets and went back to being unwatched. Lower the floor only in the same diff as a deleted test file.")
+    held_out := HOST_GATED_HELD_OUT.iter().map((target, observed, _) -> (target.to_string(), observed.to_string())).collect()
+    held_out_description := HOST_GATED_HELD_OUT.iter().map((target, observed, why) -> "{target} ({observed}) — {why}").collect().join("; ")
+    assert_eq(audit.host_gated, held_out, "the `{HOST_GATED}:` section of tests/suites.txt and HOST_GATED_HELD_OUT disagree. A new entry is a target that stopped being routine; a vanished entry is one that can run again and must leave both places in the same diff. Held out: {held_out_description}")
+}
+// Rust: tests/suite_membership.rs:384
+#Test("suite_ledger_audit_fires_on_a_target_in_no_set") {
+    row := (target: String, set: String, observed: String) -> SuiteRow{target: target, set: set, observed: observed}
+    ledger := [row("tests/golden", "guards", ""), row("tests/dev", "dev_loop", ""), row("tests/dev", "language", ""), row("tests/gone_yesterday", "guards", ""), row("tests/os_interrupt_windows", HOST_GATED, "")]
+    discovered := ["tests/dev", "tests/golden", "tests/jit_run", "tests/os_interrupt_windows"]
+    audit := audit_suite_ledger(ledger, discovered)
+    assert_eq(audit.unassigned, ["tests/jit_run"], "a target in no set must be named, not counted away")
+    assert_eq(audit.ghosts, ["tests/gone_yesterday"], "a row with no file must read as a stale row, never as a set change")
+    assert_eq(audit.duplicated.len(), 1, "{audit.duplicated:?}")
+    assert(audit.duplicated[0].contains("tests/dev") && audit.duplicated[0].contains("dev_loop") && audit.duplicated[0].contains("language"), "the duplicate must name both claiming sets: {audit.duplicated:?}")
+    assert_eq(audit.reasonless.len(), 1, "{audit.reasonless:?}")
+    assert(audit.reasonless[0].contains("tests/os_interrupt_windows"), "a parked row with no gate must be named: {audit.reasonless:?}")
+    assert_eq(audit.empty_sets, ["runtime", "tooling", "surface"], "a named set with no members must be named too")
+    assert_eq(audit.assigned, 3, "only targets that exist count toward the floor")
+    assert_eq(audit.assigned + audit.unassigned.len(), discovered.len(), "the identity the pins rest on must hold on synthetic input too")
+    assert_eq(audit.host_gated, [("tests/os_interrupt_windows", "")], "the parked section is reported for the exact compare")
+}
+// Rust: tests/suite_membership.rs:500
+#Test("suite_budget_rows_stay_a_named_minority") {
+    rows := common.parse_suite_budgets(common.SUITE_BUDGET_LEDGER).unwrap_or_else(err -> panic("{common.SUITE_BUDGET_LEDGER_PATH} does not parse, so the guard silently falls back to the 900s default for every listed suite: {err}"))
+    discovered := discover_test_targets()
+    violations := audit_suite_budgets(rows, discovered)
+    eprint("suite budgets: {rows.len()} of {discovered.len()} declared test target(s) exceed the 900s default (ceiling {OVER_DEFAULT_BUDGET_CEILING}):\n")
+    loop row in rows { eprint("  {row.suite} {row.secs}s — {row.reason}\n") }
+    assert(violations.is_empty(), "{common.SUITE_BUDGET_LEDGER_PATH} is {violations.len()} row(s) wrong:\n  {violations.join("\n  ")}")
+    description := rows.iter().map(row -> "{row.suite} {row.secs}s — {row.reason}").collect().join("\n  ")
+    assert(rows.len() <= OVER_DEFAULT_BUDGET_CEILING, "{rows.len()} suite(s) now exceed the 900s guard default, over the ceiling of {OVER_DEFAULT_BUDGET_CEILING}:\n  {description}\nThe guard is flexible for a NAMED minority, not for the majority: a suite that outruns 900s is normally defective and gets split or sped up. If this row genuinely belongs, raise OVER_DEFAULT_BUDGET_CEILING in the same reviewed diff and say why here (#677).")
+}
+// Rust: tests/suite_membership.rs:552
+#Test("suite_budget_audit_fires_on_a_row_that_should_not_exist") {
+    discovered := ["tests/cli_compile_latency", "tests/some_unit_suite"]
+    rows := [common.SuiteBudgetRow{suite: "cli_compile_latency", secs: 5400, reason: "ratified sample policy"}, common.SuiteBudgetRow{suite: "cli_compile_latency", secs: 4000, reason: "a second row for the same suite"}, common.SuiteBudgetRow{suite: "some_unit_suite", secs: 900, reason: "at the default, so it buys nothing"}, common.SuiteBudgetRow{suite: "deleted_suite", secs: 1200, reason: "target no longer exists"}]
+    violations := audit_suite_budgets(rows, discovered)
+    assert_eq(violations.len(), 3, "one row at the default, one naming no target, one duplicated: {violations:?}")
+    assert(violations.iter().any(v -> v.contains("some_unit_suite") && v.contains("900s default")), "a row at the default must be named: {violations:?}")
+    assert(violations.iter().any(v -> v.contains("deleted_suite") && v.contains("no test target")), "a row naming no target must be named: {violations:?}")
+    assert(violations.iter().any(v -> v.contains("cli_compile_latency") && v.contains("2 rows")), "a duplicated row must be named: {violations:?}")
+    reasonless := common.parse_suite_budgets("some_unit_suite 5400\n").expect_err("a reasonless row must be refused")
+    assert(reasonless.contains("states no reason"), "{reasonless}")
+    nonnumeric := common.parse_suite_budgets("some_unit_suite ninety minutes, please\n").expect_err("a non-numeric budget must be refused")
+    assert(nonnumeric.contains("not a budget in whole seconds"), "{nonnumeric}")
+}
+// Rust: tests/suite_membership.rs:615
+#Test("semantic_corpus_policy_runs_with_suite_membership") {
+    common.corpus_policy.CorpusPolicy.load().expect("corpus manifest").check_gate("suite").expect("suite corpus semantic policy")
+}

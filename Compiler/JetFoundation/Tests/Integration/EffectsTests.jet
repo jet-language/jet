@@ -1,0 +1,732 @@
+use Compiler.JetFoundation.Tests.Integration.Effects.[codes]
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use jet.Driver as Driver
+use jet.EffectBudget as EffectBudget
+use jet.Diagnostics.[Severity]
+use jet.Sema.[MemoryFact, MemoryProjection]
+use jet.Interpreter.[dev_iteration, RunOutcome]
+use core.fs as fs
+use std.process.[Command]
+
+// Rust: tests/effects.rs:17
+#Test("callbacks_entry_effects_are_only_io") {
+    entry :: OSPath.from(std.env.compile_time_var("CARGO_MANIFEST_DIR")).join("Examples/features/basics/callbacks.jet")
+    (diagnostics, bundle, facts) :: Driver.check_file_with_effect_facts(entry.to_str().unwrap(), .None, false)
+    assert(!diagnostics.iter().any((diagnostic) -> diagnostic.severity == Severity.Error), "{diagnostics:#?}")
+    assert_eq(EffectBudget.summary_line_for_program(bundle.expect("callbacks bundle"), facts.summaries, "run"), "effects: IO")
+}
+// Rust: tests/effects.rs:39
+#Test("selected_output_effects_follow_the_selected_callable") {
+    entry :: OSPath.from(std.env.compile_time_var("CARGO_MANIFEST_DIR")).join("Examples/features/tooling/output_callable.jet")
+    (diagnostics, maybe_bundle, facts) :: Driver.check_file_with_effect_facts_for_output(entry.to_str().unwrap(), "app", "dev", [:])
+    assert(!diagnostics.iter().any((diagnostic) -> diagnostic.severity == Severity.Error), "{diagnostics:#?}")
+    bundle :: maybe_bundle.expect("selected output bundle")
+    selected :: bundle.modules.iter().flat_map((module) -> module.items).find_map((item) -> if item == {
+        .Const(constant) -> constant.resolved_output.as_ref().filter((output) -> output.selected)
+        _ -> .None
+    })
+    assert_eq(EffectBudget.summary_line_for_program(bundle, facts.summaries, "run"), "effects: IO", "selected={selected:#?}\nsummaries={facts.summaries:#?}")
+}
+// Rust: tests/effects.rs:79
+#Test("sqlite_style_fail_nth_effect_loop_is_deterministic") {
+    root :: common.unique_tmp("jet_test_fault_loop")
+    fs.create_dir_all(root).unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, """
+use core.files as fs
+
+#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() -> {
+    fs.write("fault-loop.txt", "x") ?? return
+    values := List.try_with_capacity(1) ?? return
+    &values.try_push(1) ?? return
+    assert(values.len() == 1)
+    assert(true)
+}
+
+fn run() -> {}
+""").unwrap()
+    (first, _) :: jet.compile_tests_with_path("", entry.to_str().unwrap()).expect("fault-configured test should compile")
+    (second, _) :: jet.compile_tests_with_path("", entry.to_str().unwrap()).expect("fault-configured test should compile twice")
+    assert_eq(first, second, "fault schedules must be deterministic")
+    assert(first.contains("jet_fault_test_loop(&[\"FS.Write\"]"), "test harness must carry the sema-canonical selector:\n{first}")
+    assert(first.contains("while fail_nth <= max_counts[selector_index]"), "test harness must enumerate each reachable fail-nth call:\n{first}")
+    assert(first.contains("jet_list_try_with_capacity") && first.contains("jet_list_try_push"), "the SQLite-style body must use the fallible allocation rail:\n{first}")
+}
+// Rust: tests/effects.rs:120
+#Test("cross_module_same_name_effects_keep_qualified_rows") {
+    root :: common.unique_tmp("jet_effect_collision")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("left.jet"), "fn helper() -> { print(\"left\") }\npub fn same() -> { helper() }\n").unwrap()
+    fs.write(root.join("right.jet"), "fn helper() -> {}\npub fn same() -> { helper() }\n").unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, "use \"./left\" as left\nuse \"./right\" as right\nfn clean() -[]> { right.same() }\nfn run() -> {\n    clean()\n    left.same()\n}\n").unwrap()
+    (diagnostics, _, facts) :: Driver.check_file_with_effect_facts(entry.to_str().unwrap(), .None, false)
+    assert(!diagnostics.iter().any((diagnostic) -> diagnostic.severity == Severity.Error), "{diagnostics:#?}")
+    assert(facts.solved["left::same"].contains("IO"))
+    assert(facts.solved["right::same"].is_empty())
+    assert(!facts.solved.contains_key("same"))
+}
+// Rust: tests/effects.rs:154
+#Test("dynamic_trait_calls_use_the_declared_dispatch_row") {
+    source :: "\ntrait Shape { fn area(self) -[IO]> Int }\nfn clean(shape: Shape) -[]> Int { return shape.area() }\nfn run() -> {}\n"
+    root :: common.unique_tmp("jet_trait_dispatch_effect")
+    fs.create_dir_all(root).unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, source).unwrap()
+    (diagnostics, _, facts) :: Driver.check_file_with_effect_facts(entry.to_str().unwrap(), .None, false)
+    assert(facts.summaries["clean"].edges.contains("main::Shape::area"), "{facts.summaries["clean"].edges:#?}")
+    assert(facts.solved["Shape::area"].contains("IO"), "{facts.solved:#?}")
+    assert(facts.solved["clean"].contains("IO"), "{facts.solved:#?}")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3401"))
+}
+// Rust: tests/effects.rs:183
+#Test("strided_source_loop_projects_exact_arena_audit_multiplicity") {
+    check :: (tag: String, source: String) -> {
+        root :: common.unique_tmp(tag)
+        fs.create_dir_all(root).unwrap()
+        entry :: root.join("main.jet")
+        fs.write(entry, source).unwrap()
+        (diagnostics, _, facts) :: Driver.check_file_with_effect_facts(entry.to_str().unwrap(), .None, false)
+        (diagnostics, facts)
+    }
+    source :: (bound: U64, stride: String) -> format("""use core.mem as mem
+
+fn reserve() -> {{
+    arena :: mem.Arena.new(capacity: 4)
+    close(^arena)
+}}
+
+fn run() -[!Mem.Alloc(above: {bound})]> {{
+    loop item in [1, 2, 3, 4, 5], {stride} {{
+        print(item)
+        reserve()
+    }}
+}}
+""")
+    (diagnostics, facts) :: check("jet_stride_arena_exact", source(12, "2"))
+    assert(!diagnostics.iter().any((diagnostic) -> diagnostic.severity == Severity.Error), "five items at stride two execute three 4-byte calls:\n{diagnostics:#?}")
+    run_12 :: ("main::run", MemoryFact.MemAllocBounded(12))
+    assert_eq(facts.memory_projections.get(run_12), .Some(MemoryProjection.Proven)) // GATE #4499 composite map key
+    assert(facts.solved["run"].contains("IO"))
+    (tight_diagnostics, tight_facts) :: check("jet_stride_arena_tight", source(11, "2"))
+    assert(tight_diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0921"))
+    assert(if tight_facts.memory_projections.get(("main::run", MemoryFact.MemAllocBounded(11))) == { .Some(.Violated { .. }) -> true; _ -> false })
+    dynamic :: source(12, "stride").replace("fn run() -[!Mem.Alloc(above: 12)]> {", "fn run() -[!Mem.Alloc(above: 12)]> {\n    stride := 2")
+    (dynamic_diagnostics, dynamic_facts) :: check("jet_stride_arena_dynamic", dynamic)
+    assert(dynamic_diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0921"))
+    assert(if dynamic_facts.memory_projections.get(run_12) == { .Some(.OpenWorld { reason, .. }) -> reason.contains("loop iteration count"); _ -> false })
+    assert(dynamic_facts.solved["run"].contains("IO"))
+}
+// Rust: tests/effects.rs:261
+#Test("authority_region_erases_to_plain_block") {
+    src :: "\nfn run() -> {\n    #FX(IO) {\n        print(\"inside\")\n    }\n    print(\"outside\")\n}\n"
+    rust :: jet.compile(src).expect("compiles").rust
+    assert(!rust.contains("AuthorityScope"), "generated Rust must not mention AuthorityScope:\n{rust}")
+    assert(!rust.contains("#("), "generated Rust must carry no effect annotation:\n{rust}")
+    assert(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}")
+}
+// Rust: tests/effects.rs:287
+#Test("erased_scope_restores_refinement_and_effect_facts") {
+    src :: """
+use core.files as fs
+
+fn need(value: Int) -> {
+    print(value)
+}
+
+fn erased_refinement(value: Int?) -> {
+    #Off {
+        if value == .None {
+            return
+        }
+        need(value)
+    }
+    need(value)
+}
+
+fn erased_effect() -[IO]> {
+    #Off {
+        #FX(authority: FS) {
+            _text :: fs.read("missing") ?? ""
+        }
+    }
+    print("erased")
+}
+
+fn active_effect() -[IO]> {
+    #FX(authority: FS) {
+        _text :: fs.read("missing") ?? ""
+    }
+    print("active")
+}
+
+fn run() -> {}
+"""
+    diagnostics :: codes(src)
+    assert_eq(diagnostics.iter().filter((code) -> code == "E0310").count(), 1, "the erased optional refinement must not escape: {diagnostics:?}")
+    assert_eq(diagnostics.iter().filter((code) -> code == "E0740").count(), 1, "the erased effect grant must not reach the caller, while the active control remains: {diagnostics:?}")
+    assert_eq(diagnostics.len(), 2, "unexpected diagnostics: {diagnostics:?}")
+}
+// Rust: tests/effects.rs:341
+#Test("erased_authority_delegations_do_not_enter_effect_facts") {
+    source :: """
+use core.process as process
+
+fn delegation_witness() -> {
+    #FX(authority: Exec, IO, Time.Wait) {
+        #Off {
+            _erased :: process.run(["echo", "erased"], authority)
+        }
+        _active :: process.run(["echo", "active"], authority)
+    }
+}
+
+fn run() -> {
+    delegation_witness()
+}
+"""
+    root :: common.unique_tmp("jet_erased_authority_delegations")
+    fs.create_dir_all(root).unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, source).unwrap()
+    (diagnostics, _, facts) :: Driver.check_file_with_effect_facts(entry.to_str().unwrap(), .None, false)
+    assert(diagnostics.is_empty(), "authority delegation witness must compile: {diagnostics:#?}")
+    delegations :: facts.summaries["delegation_witness"].authority_delegations
+    assert_eq(delegations.len(), 1, "only the active process.run may publish an authority delegation: {delegations:#?}")
+    assert_eq(delegations[0].operation, "run")
+}
+// Rust: tests/effects.rs:378
+#Test("erased_panic_does_not_cross_into_active_tier_output") {
+    source :: "\nfn run() -> {\n    #Off {\n        panic(\"erased\")\n    }\n    print(\"active\")\n}\n"
+    tir_support.assert_tiers_agree("erased_panic_output", source, "active\n")
+}
+// Rust: tests/effects.rs:391
+#Test("active_panic_remains_a_tier_stop") {
+    source :: "\nfn run() -> {\n    panic(\"active\")\n}\n"
+    tiers := [("jit", tir_support.jit_run("active_panic", source)), ("interpreter", tir_support.interpreter_run("active_panic", source))]
+    if tir_support.have_rustc() { &tiers.push(("release", tir_support.build_and_run_full("active_panic", "active_panic", source))) }
+    loop (tier, (code, stdout, stderr)) in tiers {
+        assert_eq(code, 70, "{tier} active panic exit code")
+        assert(stdout.is_empty(), "{tier} active panic stdout: {stdout:?}")
+        assert(stderr.contains("panic: active"), "{tier} lost active panic diagnostic: {stderr:?}")
+    }
+}
+// Rust: tests/effects.rs:423
+#Test("effect_annotations_are_erased") {
+    annotated :: """
+trait Shape { fn area(self) -[]> Int }
+struct Square { side: Int }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side } }
+fn sq(n: Int) -[]> Int { return n * n }
+fn load(p: String) -[IO]> { print(p) }
+fn invoke(n: Int) -[IO]> { load("{sq(n)}") }
+fn run() -> {
+    s :: Square{ side: 3 }
+    print("{s.area()}")
+    invoke(2)
+}
+"""
+    plain :: """
+trait Shape { fn area(self) -> Int }
+struct Square { side: Int }
+impl Square.Shape { fn area(self) -> Int { return self.side * self.side } }
+fn sq(n: Int) -> Int { return n * n }
+fn load(p: String) -> { print(p) }
+fn invoke(n: Int) -> { load("{sq(n)}") }
+fn run() -> {
+    s :: Square{ side: 3 }
+    print("{s.area()}")
+    invoke(2)
+}
+"""
+    a :: jet.compile(annotated).expect("annotated compiles").rust
+    b :: jet.compile(plain).expect("plain compiles").rust
+    assert_eq(a, b, "effect annotations must leave no trace in generated Rust (I3)")
+}
+// Rust: tests/effects.rs:461
+#Test("panic_prohibition_is_e0749_with_three_exits") {
+    src :: "\nfn parse_port(raw: String) -[!Panic]> Int {\n    return Int.parse(raw) ?? panic(\"bad port\")\n}\nfn run() -> { print(parse_port(\"8080\")) }\n"
+    diagnostics :: jet.compile(src).expect_err("a denied panic must fail sema")
+    diagnostic :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E0749").expect("expected E0749")
+    assert(diagnostic.what.contains("parse_port"), "{diagnostic:#?}")
+    assert(diagnostic.why.contains("parse_port"), "{diagnostic:#?}")
+    assert(diagnostic.fix.contains("fallible result"), "{diagnostic:#?}")
+    assert(diagnostic.fix.contains("facts"), "{diagnostic:#?}")
+    assert(diagnostic.fix.contains("#Pre"), "{diagnostic:#?}")
+}
+// Rust: tests/effects.rs:486
+#Test("panic_effect_propagates_transitively") {
+    src :: "\nfn leaf() -> { panic(\"bad input\") }\nfn middle() -> { leaf() }\nfn top() -[!Panic]> { middle() }\nfn run() -> { top() }\n"
+    root :: common.unique_tmp("jet_panic_effect")
+    fs.create_dir_all(root).unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, src).unwrap()
+    (diagnostics, _, facts) :: Driver.check_file_with_effect_facts(entry.to_str().unwrap(), .None, false)
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0749"))
+    assert(facts.solved["leaf"].contains("Panic"))
+    assert(facts.solved["middle"].contains("Panic"))
+    assert(facts.solved["top"].contains("Panic"))
+    assert(facts.reachability.nodes_with("panic", "panic").contains("main::top"))
+}
+// Rust: tests/effects.rs:514
+#Test("fixed_list_refinement_discharges_panic_denial") {
+    src :: "\nDie :: distinct Int(1..6)\nfn pick(faces: [String#6], roll: Die) -[!Panic]> String { ~faces[roll.raw() - 1] }\nfn run() -> {}\n"
+    assert(codes(src).is_empty(), "refined fixed-list read should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:529
+#Test("unknown_panic_effect_name_is_e0119_only") {
+    src :: "fn work() -[!Panics]> {}\nfn run() -> {}\n"
+    c :: codes(src)
+    assert(c.iter().any((code) -> code == "E0119"), "expected E0119, got {c:?}")
+    assert(!c.iter().any((code) -> code == "E0749"), "unknown root must not deny: {c:?}")
+}
+// Rust: tests/effects.rs:544
+#Test("declared_bound_matching_body_ok") {
+    src :: "\nuse core.files as fs\nfn load(path: String) -[FS]> String {\n    return fs.read(~path) ?? \"\"\n}\nfn run() -> { print(load(\"x\")) }\n"
+    assert(codes(src).is_empty(), "matching bound should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:561
+#Test("out_of_set_effect_is_e0740") {
+    src :: "\nuse core.files as fs\nfn load(path: String) -[Net]> String {\n    return fs.read(path) ?? \"\"\n}\nfn run() -> { print(load(\"x\")) }\n"
+    assert(codes(src).iter().any((c) -> c == "E0740"), "expected E0740, got {codes(src):?}")
+}
+// Rust: tests/effects.rs:579
+#Test("effects_propagate_transitively") {
+    src :: "\nuse core.files as fs\nfn helper(p: String) -> String { return fs.read(p) ?? \"\" }\nfn load(path: String) -[Net]> String { return helper(path) }\nfn run() -> { print(load(\"x\")) }\n"
+    assert(codes(src).iter().any((c) -> c == "E0740"), "transitive FS should trip E0740: {codes(src):?}")
+}
+// Rust: tests/effects.rs:595
+#Test("wider_bound_than_body_ok") {
+    src :: "\nuse core.files as fs\nfn load(path: String) -[FS, Net]> String {\n    return fs.read(~path) ?? \"\"\n}\nfn run() -> { print(load(\"x\")) }\n"
+    assert(codes(src).is_empty(), "a wider ceiling should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:612
+#Test("io_effect_from_print_ok") {
+    src :: "\nfn announce(n: Int) -[IO]> { print(\"{n}\") }\nfn run() -> { announce(1) }\n"
+    assert(codes(src).is_empty(), "IO bound should cover print: {codes(src):?}")
+}
+// Rust: tests/effects.rs:626
+#Test("unannotated_function_never_trips_e0740") {
+    src :: "\nuse core.files as fs\nfn load(path: String) -> String { return fs.read(path) ?? \"\" }\nfn run() -> { print(load(\"x\")) }\n"
+    assert(!codes(src).iter().any((c) -> c == "E0740"), "unannotated fn must not trip E0740: {codes(src):?}")
+}
+// Rust: tests/effects.rs:641
+#Test("retired_effect_marker_is_e0066") {
+    src :: "\nfn calc() #(FS) -> Int { return 1 }\nfn run() -> { print(calc()) }\n"
+    assert_eq(codes(src), ["E0066"])
+}
+// Rust: tests/effects.rs:651
+#Test("trait_impl_exceeding_bound_is_e0742") {
+    src :: """
+use core.files as fs
+trait Hasher { fn hash(self) -[]> Int }
+struct Doc { path: String }
+impl Doc.Hasher {
+    fn hash(self) -> Int {
+        body :: fs.read(self.path) ?? ""
+        return body.len()
+    }
+}
+fn run() -> {
+    d :: Doc{ path: "x" }
+    print(d.hash())
+}
+"""
+    assert(codes(src).iter().any((c) -> c == "E0742"), "impl exceeding #Pure bound should be E0742: {codes(src):?}")
+}
+// Rust: tests/effects.rs:676
+#Test("trait_impl_within_bound_ok") {
+    src :: "\ntrait Shape { fn area(self) -[]> Int }\nstruct Square { side: Int }\nimpl Square.Shape {\n    fn area(self) -> Int { return self.side * self.side }\n}\nfn run() -> {\n    s :: Square{ side: 5 }\n    print(\"{s.area()}\")\n}\n"
+    assert(codes(src).is_empty(), "conformant impl should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:698
+#Test("named_callback_flows_through_to_caller") {
+    src :: "\nuse core.files as fs\nfn readit() -> String { return fs.read(\"x\") ?? \"\" }\nfn apply(f: fn() -> String) -> String { return f() }\nfn caller() -[Net]> String { return apply(readit) }\nfn run() -> { print(caller()) }\n"
+    assert(codes(src).iter().any((c) -> c == "E0740"), "callback FS should flow to caller: {codes(src):?}")
+}
+// Rust: tests/effects.rs:716
+#Test("lambda_callback_flows_into_region") {
+    src :: "\nuse core.files as fs\nfn apply(f: fn() -> String) -> String { return f() }\nfn run() -> {\n    #FX(Net) {\n        r :: apply(() -> fs.read(\"x\") ?? \"\")\n        print(r)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0712"), "lambda FS should surface in region: {codes(src):?}")
+}
+// Rust: tests/effects.rs:736
+#Test("pure_callback_flows_nothing") {
+    src :: "\nfn inc(n: Int) -> Int { return n + 1 }\nfn apply(f: fn(Int) -> Int, x: Int) -> Int { return f(x) }\nfn caller() -[IO]> { print(\"{apply(inc, 1)}\") }\nfn run() -> { caller() }\n"
+    assert(codes(src).is_empty(), "pure callback must not trip a bound: {codes(src):?}")
+}
+// Rust: tests/effects.rs:754
+#Test("pure_fn_with_core_effect_is_e3401") {
+    src :: "\nuse core.files as fs\nfn readit(p: String) -[]> String { return fs.read(p) ?? \"\" }\nfn run() -> { print(readit(\"x\")) }\n"
+    assert(codes(src).iter().any((c) -> c == "E3401"), "FS in #Pure fn should be E3401: {codes(src):?}")
+}
+// Rust: tests/effects.rs:769
+#Test("authority_region_within_set_ok") {
+    src :: "\nfn announce(n: Int) -[IO]> { print(\"{n}\") }\nfn run() -> {\n    #FX(IO) {\n        announce(1)\n    }\n}\n"
+    assert(codes(src).is_empty(), "in-set authority region should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:787
+#Test("authority_region_out_of_set_is_e0712") {
+    src :: "\nuse core.files as fs\nfn run() -> {\n    #FX(Net) {\n        text :: fs.read(\"x\") ?? \"\"\n        print(text)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0712"), "expected E0712, got {codes(src):?}")
+}
+// Rust: tests/effects.rs:807
+#Test("authority_region_transitive_is_e0712") {
+    src :: "\nuse core.files as fs\nfn helper(p: String) -> String { return fs.read(p) ?? \"\" }\nfn run() -> {\n    #FX(IO) {\n        text :: helper(\"x\")\n        print(text)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0712"), "transitive FS should trip E0712: {codes(src):?}")
+}
+// Rust: tests/effects.rs:827
+#Test("unknown_effect_name_is_e0119_only") {
+    src :: "\nfn work() -[Bogus]> { print(\"hi\") }\nfn run() -> { work() }\n"
+    c :: codes(src)
+    assert(c.iter().any((c) -> c == "E0119"), "expected E0119, got {c:?}")
+    assert(!c.iter().any((c) -> c == "E0740"), "unknown name should suppress E0740: {c:?}")
+}
+// Rust: tests/effects.rs:846
+#Test("declared_effect_leaf_is_checked_everywhere") {
+    valid :: "\neffect Log.Audit\nfn audit() -[Log.Audit]> {}\nfn run() -> {\n    #FX(Log.Audit) { audit() }\n    #FX(authority: Log.Audit) { audit() }\n}\n"
+    assert(codes(valid).is_empty(), "declared leaves should work in rows and authority: {codes(valid):?}")
+    loop source in ["effect Log.Audit\nfn audit() -[Log.Aduut]> {}\nfn run() -> {}\n", "effect Log.Audit\nfn run() -> { #FX(Log.Aduut) {} }\n", "effect Log.Audit\nfn run() -> { #FX(authority: Log.Aduut) {} }\n"] {
+        diagnostics :: jet.compile(source).expect_err("typo under a checked root must fail")
+        error :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E0750").unwrap_or_else(() -> panic("expected E0750, got {diagnostics:#?}"))
+        assert(error.fix.contains("Log.Audit"), "nearest declared leaf should be suggested: {error:#?}")
+    }
+}
+// Rust: tests/effects.rs:879
+#Test("undeclared_effect_root_remains_open") {
+    source :: "fn network() -[Net.Custom]> {}\nfn run() -> { network() }\n"
+    assert(codes(source).is_empty(), "a root with no declared leaves remains open: {codes(source):?}")
+}
+// Rust: tests/effects.rs:889
+#Test("effect_declaration_requires_a_leaf") {
+    diagnostics :: jet.compile("effect Log\nfn run() -> {}\n").expect_err("a root alone declares no leaf")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0750" && diagnostic.fix.contains("effect Log.Name")), "{diagnostics:#?}")
+}
+// Rust: tests/effects.rs:901
+#Test("declared_effect_leaf_checks_enum_and_trait_type_surfaces") {
+    loop source in ["effect Log.Audit\nenum Callback { One(fn() -[Log.Aduut]>) }\nfn run() -> {}\n", "effect Log.Audit\ntrait Callback { fn get(self) -> fn() -[Log.Aduut]> }\nfn run() -> {}\n"] {
+        diagnostics :: jet.compile(source).expect_err("an effect typo in a nested type must fail")
+        assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0750"), "{diagnostics:#?}")
+    }
+}
+// Rust: tests/effects.rs:918
+#Test("dependency_effect_declaration_joins_the_package_view") {
+    root :: common.unique_tmp("jet_effect_leaf_dependency")
+    dependency :: root.join("audit")
+    app :: root.join("app")
+    fs.create_dir_all(dependency).unwrap()
+    fs.create_dir_all(app).unwrap()
+    fs.write(dependency.join("package.jet"), "name: \"audit\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dependency.join("audit.jet"), "effect Log.Audit\npub fn record() -[Log.Audit]> {}\n").unwrap()
+    fs.write(app.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { audit: ../audit }\n").unwrap()
+    entry :: app.join("main.jet")
+    fs.write(entry, "use audit\nfn run() -> { audit.record() }\n").unwrap()
+    checked :: Command.new(std.env.compile_time_var("CARGO_BIN_EXE_jet")).args(["check", "main.jet"]).current_dir(app).env("NO_COLOR", "1").output().unwrap() // GATE #4494
+    assert(checked.status.success(), "{String.from_utf8_lossy(checked.stderr)}")
+    fs.write(entry, "use audit\nfn typo() -[Log.Aduut]> {}\nfn run() -> { audit.record() }\n").unwrap()
+    checked_typo :: Command.new(std.env.compile_time_var("CARGO_BIN_EXE_jet")).args(["check", "main.jet"]).current_dir(app).env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(checked_typo.stderr)
+    assert(!checked_typo.status.success(), "{stderr}")
+    assert(stderr.contains("E0750"), "{stderr}")
+    assert(stderr.contains("Log.Audit"), "{stderr}")
+}
+// Rust: tests/effects.rs:976
+#Test("grant_within_set_ok") {
+    src :: "\nuse core.files as fs\nfn run() -> {\n    #FX(authority: FS, IO) {\n        text :: fs.read(\"x\") ?? \"\"\n        print(text)\n    }\n}\n"
+    assert(codes(src).is_empty(), "in-set grant should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:996
+#Test("nested_grant_cannot_widen_outer_authority") {
+    src :: "\nfn run() -> {\n    #FX(grant: FS) {\n        #FX(inner: Net) {}\n    }\n}\n"
+    assert(codes(src).iter().any((code) -> code == "E0712"), "nested authority widening should be rejected: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1014
+#Test("grant_out_of_set_is_e0712") {
+    src :: "\nuse core.files as fs\nfn run() -> {\n    #FX(authority: Net) {\n        text :: fs.read(\"x\") ?? \"\"\n        print(text)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0712"), "expected E0712, got {codes(src):?}")
+}
+// Rust: tests/effects.rs:1034
+#Test("grant_transitive_is_e0712") {
+    src :: "\nuse core.files as fs\nfn helper(p: String) -> String { return fs.read(p) ?? \"\" }\nfn run() -> {\n    #FX(authority: IO) {\n        text :: helper(\"x\")\n        print(text)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0712"), "transitive FS should trip E0712: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1055
+#Test("grant_handle_alias_is_e0711") {
+    src :: "\nfn run() -> {\n    #FX(authority: IO) {\n        alias :: authority\n        print(\"hi\")\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0711"), "aliasing the handle should be E0711: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1074
+#Test("grant_unused_handle_ok") {
+    src :: "\nfn run() -> {\n    #FX(authority: IO) {\n        print(\"granted\")\n    }\n}\n"
+    assert(codes(src).is_empty(), "an unused grant handle should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1092
+#Test("grant_unknown_effect_is_e0119") {
+    src :: "\nfn run() -> {\n    #FX(authority: Bogus) {\n        print(\"hi\")\n    }\n}\n"
+    c :: codes(src)
+    assert(c.iter().any((c) -> c == "E0119"), "expected E0119, got {c:?}")
+    assert(!c.iter().any((c) -> c == "E0712"), "unknown name should suppress E0712: {c:?}")
+}
+// Rust: tests/effects.rs:1117
+#Test("grant_region_erases_to_plain_block") {
+    src :: "\nfn run() -> {\n    #FX(authority: IO) {\n        print(\"inside\")\n    }\n    print(\"outside\")\n}\n"
+    rust :: jet.compile(src).expect("compiles").rust
+    assert(!rust.contains("grant"), "generated Rust must not mention grant:\n{rust}")
+    assert(!rust.contains("Authority"), "generated Rust must not mention the handle type:\n{rust}")
+    assert(!rust.contains("#("), "generated Rust must carry no effect annotation:\n{rust}")
+    assert(!common.strip_vetted_prelude_modules(rust).contains("unsafe"), "grant codegen must contain no `unsafe`:\n{rust}")
+    assert(rust.contains("inside") && rust.contains("outside"), "region body must survive:\n{rust}")
+}
+// Rust: tests/effects.rs:1153
+#Test("grant_lowers_like_authority_region") {
+    granted :: "\nfn run() -> {\n    #FX(authority: IO) {\n        print(\"a\")\n        print(\"b\")\n    }\n}\n"
+    bare :: "\nfn run() -> {\n    #FX(IO) {\n        print(\"a\")\n        print(\"b\")\n    }\n}\n"
+    a :: jet.compile(granted).expect("granted compiles").rust
+    b :: jet.compile(bare).expect("bare effect scope compiles").rust
+    assert_eq(a, b, "named #FX region must lower identically to the erased #FX region (I3)")
+}
+// Rust: tests/effects.rs:1183
+#Test("transact_irreversible_fs_is_e0746") {
+    src :: "\nuse core.files as fs\nfn run() -> {\n    #Transact(tx) {\n        text :: fs.read(\"x\") ?? \"\"\n        print(text)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0746"), "FS in #Transact should be E0746: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1202
+#Test("transact_irreversible_net_is_e0746") {
+    src :: "\nuse core.http as http\nuse core.http.server as server\nfn run() -> {\n    #Transact(tx) {\n        r :: http.get(\"http://x\") ?? server.response(200, \"\")\n        print(r)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0746"), "Net in #Transact should be E0746: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1223
+#Test("transact_ffi_without_undo_is_e0746") {
+    src :: "\nextern rust \"std\" {\n    fn mutate(left: Int, right: Int) -> Int = \"std::cmp::max\"\n}\nfn run() -> {\n    #Transact(tx) {\n        mutate(1, 2)\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0746"), "FFI in #Transact should be E0746: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1244
+#Test("transact_ffi_with_undo_registers_rollback_hook") {
+    src :: "\nextern rust \"std\" {\n    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = \"std::cmp::max\"\n}\nfn undo_mutate(left: Int, right: Int) -> { print(left + right) }\nfn run() -> {\n    #Transact(tx) {\n        mutate(1, 2)\n    }\n}\n"
+    output :: jet.compile(src).expect("FFI with #Undo should compile")
+    assert(output.rust.contains(".on_rollback(Box::new("), "#Undo must lower to the existing rollback hook: {output.rust}")
+    assert(output.rust.contains("__jet_undo_arg_"), "#Undo must capture the foreign arguments before the bridge call: {output.rust}")
+}
+// Rust: tests/effects.rs:1270
+#Test("transact_ffi_undo_rejects_parameter_type_mismatch") {
+    src :: "\nextern rust \"std\" {\n    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = \"std::cmp::max\"\n}\nfn undo_mutate(left: String, right: Int) -> {}\nfn run() -> {}\n"
+    assert(codes(src).iter().any((code) -> code == "E0112"))
+}
+// Rust: tests/effects.rs:1282
+#Test("transact_ffi_undo_rejects_non_unit_return") {
+    src :: "\nextern rust \"std\" {\n    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = \"std::cmp::max\"\n}\nfn undo_mutate(left: Int, right: Int) -> Int { return 0 }\nfn run() -> {}\n"
+    assert(codes(src).iter().any((code) -> code == "E0113"))
+}
+// Rust: tests/effects.rs:1297
+#Test("transact_inline_ffi_undo_runs_and_unwinds_lifo") {
+    if !common.have_rustc() { return }
+    // GATE #4494: audited scalar native C ABI remains real fixture code.
+    src :: "\nenum Failed { Bad }\n\n#[Unsafe(\"the scalar ABI contract matches the C definition\"), FFI(c), Undo(undo_first)]\nfn mutate_first(value: Int) -> Int {\n    \"\"\"int64_t mutate_first(int64_t value) { return value; }\"\"\"\n}\n\n#[Unsafe(\"the scalar ABI contract matches the C definition\"), FFI(c), Undo(undo_second)]\nfn mutate_second(value: Int) -> Int {\n    \"\"\"int64_t mutate_second(int64_t value) { return value; }\"\"\"\n}\n\nfn undo_first(value: Int) -> { print(\"first\") }\nfn undo_second(value: Int) -> { print(\"second\") }\n\nfn change() -> Int !Failed {\n    #Transact(tx) {\n        #Unsafe(\"call the audited inline C contract\") {\n            mutate_first(1)\n        }\n        tx.on_rollback(() -> { print(\"manual\") })\n        #Unsafe(\"call the audited inline C contract\") {\n            mutate_second(2)\n        }\n        return Err(Failed.Bad)\n    }\n    return Ok(0)\n}\n\nfn run() -> {\n    _ :: change() ?? 0\n    print(\"done\")\n}\n"
+    (code, stdout, stderr) :: common.build_and_run("jet_effects_ffi", "undo", src)
+    assert_eq(code, 0, "inline FFI rollback run failed: {stderr}")
+    assert_eq(stdout, "second\nmanual\nfirst\ndone\n")
+    (jit_code, jit_stdout, jit_stderr) :: tir_support.jit_run_traced("jet_effects_ffi_jit", src)
+    assert_eq(jit_code, 0, "inline FFI JIT rollback run failed: {jit_stderr}")
+    assert_eq(jit_stdout, "second\nmanual\nfirst\ndone\n")
+    assert(jit_stderr.lines().any((line) -> line.starts_with("run") && line.contains("tier1 native")), "declared FFI undo must stay on the native JIT tier: {jit_stderr}")
+    assert(!jit_stderr.contains("tier0 interp"), "{jit_stderr}")
+}
+// Rust: tests/effects.rs:1358
+#Test("cross_module_foreign_undo_bindings_keep_distinct_identities") {
+    if !common.have_rustc() { return }
+    root :: common.unique_tmp("jet_effects_cross_module_undo")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("left.jet"), """
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
+}
+fn undo_mutate(value: Int) -> { print("left") }
+pub fn exercise() -> {
+    #Transact(tx) {
+        mutate(1)
+        return
+    }
+}
+""").unwrap()
+    fs.write(root.join("right.jet"), """
+extern rust "std" {
+    #Undo(undo_mutate) fn mutate(value: Int) -> Int = "std::convert::identity"
+}
+fn undo_mutate(value: Int) -> { print("right") }
+pub fn exercise() -> {
+    #Transact(tx) {
+        mutate(2)
+        return
+    }
+}
+""").unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, "\nuse \"./left\" as left\nuse \"./right\" as right\nfn run() -> {\n    left.exercise()\n    right.exercise()\n    print(\"done\")\n}\n").unwrap()
+    output :: Command.new(std.env.compile_time_var("CARGO_BIN_EXE_jet")).arg("run").arg("--release").arg(entry).current_dir(root).env("JET_STORE_DIR", root.join("cache")).env("NO_COLOR", "1").output().unwrap() // GATE #4494
+    assert_eq(output.status.code(), .Some(0), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "left\nright\ndone\n")
+    assert(output.stderr.is_empty(), "{String.from_utf8_lossy(output.stderr)}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/effects.rs:1441
+#Test("shared_foreign_undo_rejects_ambiguous_owners") {
+    root :: common.unique_tmp("jet_effects_ambiguous_undo")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("left.jet"), "\nuse c.shared as ffi\n#Import module c.shared {\n    #Undo(undo_mutate) fn mutate(value: Int) -> Int = \"mutate\"\n}\nfn undo_mutate(value: Int) -> { print(value) }\n").unwrap()
+    fs.write(root.join("right.jet"), "\nuse c.shared as ffi\nfn undo_mutate(value: Int) -> { print(value) }\n").unwrap()
+    entry :: root.join("main.jet")
+    fs.write(entry, "\nuse \"./left\" as left\nuse \"./right\" as right\nfn run() -> {}\n").unwrap()
+    diagnostics :: jet.check_with_path(entry.to_str().unwrap())
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0105" && diagnostic.what.contains("ambiguous")), "shared foreign undo ambiguity was not rejected: {diagnostics:?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/effects.rs:1487
+#Test("transact_ffi_interpreter_reports_unsupported_diagnostic") {
+    dir :: common.unique_tmp("jet_effects_ffi_interpreter")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("main.jet")
+    src :: "\nextern rust \"std\" {\n    #Undo(undo_mutate) fn mutate(left: Int, right: Int) -> Int = \"std::cmp::max\"\n}\nfn undo_mutate(left: Int, right: Int) -> { print(left + right) }\nfn run() -> {\n    #Transact(tx) {\n        mutate(1, 2)\n    }\n}\n"
+    fs.write(path, src).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    outcome :: dev_iteration(shown, false, true)
+    if outcome == {
+        .Problems(diagnostics) -> assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0956"), "native FFI must use the canonical unsupported diagnostic: {diagnostics:?}")
+        other -> panic("interpreter ran native FFI: {other:?}")
+    }
+}
+// Rust: tests/effects.rs:1519
+#Test("transact_reversible_io_ok") {
+    src :: "\nfn run() -> {\n    #Transact(tx) {\n        print(\"reversible work\")\n    }\n}\n"
+    assert(codes(src).is_empty(), "IO in #Transact should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1537
+#Test("transact_fs_in_on_commit_ok") {
+    src :: "\nuse core.files as fs\nfn run() -> {\n    #Transact(tx) {\n        print(\"reversible work\")\n        tx.on_commit(() -> {\n            fs.write(\"x\", \"done\") ?? panic(\"write failed\")\n        })\n    }\n}\n"
+    assert(codes(src).is_empty(), "FS inside on_commit should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1558
+#Test("transact_on_commit_needs_zero_param_lambda") {
+    src :: "\nfn run() -> {\n    #Transact(tx) {\n        tx.on_commit((n: Int) -> { print(\"{n}\") })\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0104"), "on_commit with a param should be E0104: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1576
+#Test("transact_generates_no_unsafe") {
+    src :: "\nfn run() -> {\n    #Transact(tx) {\n        print(\"work\")\n        tx.on_commit(() -> { print(\"hook\") })\n    }\n}\n"
+    rust :: jet.compile(src).expect("compiles").rust
+    assert(rust.contains("jet_transaction()"), "expected the transaction guard: {rust}")
+    assert(rust.contains(".on_commit(Box::new("), "expected a boxed commit hook: {rust}")
+    assert(!common.strip_vetted_prelude_modules(rust).contains("unsafe"), "transaction codegen must contain no `unsafe`")
+}
+// Rust: tests/effects.rs:1608
+#Test("transact_on_rollback_ok") {
+    src :: "\nfn run() -> {\n    #Transact(tx) {\n        print(\"work\")\n        tx.on_rollback(() -> { print(\"undo\") })\n    }\n}\n"
+    assert(codes(src).is_empty(), "on_rollback should compile: {codes(src):?}")
+    rust :: jet.compile(src).expect("compiles").rust
+    assert(rust.contains(".on_rollback(Box::new("), "expected a boxed rollback hook: {rust}")
+}
+// Rust: tests/effects.rs:1633
+#Test("transact_on_rollback_needs_zero_param_lambda") {
+    src :: "\nfn run() -> {\n    #Transact(tx) {\n        tx.on_rollback((n: Int) -> { print(\"{n}\") })\n    }\n}\n"
+    assert(codes(src).iter().any((c) -> c == "E0104"), "on_rollback with a param should be E0104: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1652
+#Test("transact_auto_snapshot_mutated_value") {
+    src :: """
+enum Fail { Bad }
+fn transfer(from: &Int, to: &Int, amount: Int) -> Int Fail! {
+    #Transact(tx) {
+        from -= amount
+        to += amount
+        if amount > 100 {
+            return Err(Fail.Bad)
+        }
+    }
+    return Ok(amount)
+}
+fn run() -> {
+    a := 100
+    b := 0
+    n :: transfer(&a, &b, 40) ?? (-1)
+    print("{n}")
+}
+"""
+    assert(codes(src).is_empty(), "auto-snapshot transfer should compile: {codes(src):?}")
+    rust :: jet.compile(src).expect("compiles").rust
+    assert(rust.contains("jet_txn::snapshot(&mut __jet_tx, &mut (*__jet_from))"), "expected an auto-snapshot of the mutated `from`: {rust}")
+    assert(rust.contains("jet_txn::snapshot(&mut __jet_tx, &mut (*__jet_to))"), "expected an auto-snapshot of the mutated `to`: {rust}")
+}
+// Rust: tests/effects.rs:1693
+#Test("transact_auto_snapshot_unsafe_only_in_prelude") {
+    src :: "\nenum Fail { Bad }\nfn bump(x: &Int) -> Int Fail! {\n    #Transact(tx) {\n        x += 1\n        return Err(Fail.Bad)\n    }\n    return Ok(0)\n}\nfn run() -> {\n    a := 0\n    n :: bump(&a) ?? (-1)\n    print(\"{n}\")\n}\n"
+    rust :: jet.compile(src).expect("compiles").rust
+    assert(rust.contains("mod jet_txn"), "jet_txn module present (snapshot used)")
+    stripped :: common.strip_vetted_prelude_modules(rust)
+    assert(!stripped.contains("unsafe"), "auto-snapshot `unsafe` must be confined to `mod jet_txn`: {stripped}")
+}
+// Rust: tests/effects.rs:1726
+#Test("transact_bare_no_handle_ok") {
+    src :: "\nfn run() -> {\n    #Transact {\n        print(\"bare transaction\")\n    }\n}\n"
+    assert(codes(src).is_empty(), "bare #Transact should compile: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1747
+#Test("callback_pure_bound_pure_arg_ok") {
+    src :: "\nfn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {\n    return items.map((x) -> f(x)).to_list()\n}\nfn inc(n: Int) -[]> Int { return n + 1 }\nfn run() -> { print(\"{transform([1, 2], inc)}\") }\n"
+    assert(codes(src).is_empty(), "pure callback to a #Pure bound is clean: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1764
+#Test("callback_pure_bound_impure_arg_is_e0747") {
+    src :: "\nfn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {\n    return items.map((x) -> f(x)).to_list()\n}\nfn noisy(n: Int) -> Int {\n    print(\"{n}\")\n    return n\n}\nfn run() -> { print(\"{transform([1, 2], noisy)}\") }\n"
+    assert_eq(codes(src), ["E0747"], "impure callback to a #Pure bound is E0747")
+}
+// Rust: tests/effects.rs:1784
+#Test("callback_set_bound_within_ok") {
+    src :: "\nfn invoke(n: Int, act: fn(Int) -[IO]>) -> {\n    act(n)\n}\nfn show(n: Int) -> { print(\"{n}\") }\nfn run() -> { invoke(5, show) }\n"
+    assert(codes(src).is_empty(), "IO callback within an #(IO) bound is clean: {codes(src):?}")
+}
+// Rust: tests/effects.rs:1802
+#Test("callback_set_bound_exceeded_is_e0747") {
+    src :: "\nuse core.files as fs\nfn invoke(p: String, act: fn(String) -[IO]>) -> {\n    act(p)\n}\nfn read_it(p: String) -> {\n    x :: fs.read(~p) ?? \"\"\n    print(\"{x}\")\n}\nfn run() -> { invoke(\"f.txt\", read_it) }\n"
+    assert_eq(codes(src), ["E0747"], "FS callback to an #(IO) bound is E0747")
+}
+// Rust: tests/effects.rs:1823
+#Test("callback_bound_unknown_effect_is_e0119") {
+    src :: "\nfn invoke(n: Int, act: fn(Int) -[Nope]>) -> { act(n) }\nfn show(n: Int) -> { print(\"{n}\") }\nfn run() -> { invoke(5, show) }\n"
+    assert_eq(codes(src), ["E0119"], "unknown effect in a callback bound is E0119")
+}
+// Rust: tests/effects.rs:1839
+#Test("open_effect_row_parses_checks_and_erases") {
+    src :: "\nfn invoke<E>(marker: E, act: fn() -[..E]> Int) -[Log, ..E]> Int {\n    return act()\n}\nfn value() -[]> Int { return 1 }\nfn pure_caller() -[]> Int { return invoke(0, value) }\nfn run() -> { print(\"{invoke(0, value)}\") }\n"
+    rust :: jet.compile(src).expect("generic open effect row compiles").rust
+    assert(!rust.contains("..E"), "effect rows erase before codegen")
+}
+// Rust: tests/effects.rs:1858
+#Test("effect_via_publishes_callback_effect") {
+    src :: "\nfn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> {\n    act(n)\n}\nfn show(n: Int) -> { print(\"{n}\") }\nfn caller() -[]> Int {\n    invoke(5, show)\n    return 0\n}\nfn run() -> { print(\"{caller()}\") }\n"
+    assert_eq(codes(src), ["E3401"], "#(via act) must publish the IO effect to callers")
+}
+// Rust: tests/effects.rs:1879
+#Test("effect_via_unknown_param_is_e0748") {
+    src :: "\nfn invoke(n: Int, act: fn(Int) -[IO]>) -[via missing]> { act(n) }\nfn show(n: Int) -> { print(\"{n}\") }\nfn run() -> { invoke(5, show) }\n"
+    assert_eq(codes(src), ["E0748"], "#(via missing) is E0748")
+}
+// Rust: tests/effects.rs:1890
+#Test("effect_via_non_callback_param_is_e0748") {
+    src :: "\nfn invoke(n: Int) -[via n]> { print(\"{n}\") }\nfn run() -> { invoke(5) }\n"
+    assert_eq(codes(src), ["E0748"], "#(via n) on a non-fn param is E0748")
+}
+// Rust: tests/effects.rs:1905
+#Test("eff2_levers_are_erased") {
+    annotated :: "\nfn transform(items: [Int], f: fn(Int) -[]> Int) -> [Int] {\n    return items.map((x) -> f(x)).to_list()\n}\nfn invoke(n: Int, act: fn(Int) -[IO]>) -[via act]> { act(n) }\nfn inc(n: Int) -[]> Int { return n + 1 }\nfn show(n: Int) -> { print(\"{n}\") }\nfn run() -> {\n    print(\"{transform([1], inc)}\")\n    invoke(5, show)\n}\n"
+    plain :: "\nfn transform(items: [Int], f: fn(Int) -> Int) -> [Int] {\n    return items.map((x) -> f(x)).to_list()\n}\nfn invoke(n: Int, act: fn(Int) ->) -> { act(n) }\nfn inc(n: Int) -> Int { return n + 1 }\nfn show(n: Int) -> { print(\"{n}\") }\nfn run() -> {\n    print(\"{transform([1], inc)}\")\n    invoke(5, show)\n}\n"
+    a :: jet.compile(annotated).expect("annotated compiles").rust
+    b :: jet.compile(plain).expect("plain compiles").rust
+    assert_eq(a, b, "D-EFF2 levers must leave no trace in generated Rust (I3)")
+}
+// Rust: tests/effects.rs:1939
+#Test("rights_denials_keep_the_semantic_frame") {
+    src :: "\nuse core.files as fs\n\nfn load(path: String) -[]> String {\n    return fs.read(path) ?? \"\"\n}\n\nfn run() -> {}\n"
+    diagnostics :: jet.compile(src).expect_err("pure filesystem access is rejected")
+    diagnostic :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E3401").expect("pure access should produce E3401")
+    assert_eq(diagnostic.denial_kind.as_deref(), .Some("pure"))
+    assert_eq(diagnostic.call_chain, ["load", "fs.read"])
+}

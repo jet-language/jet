@@ -1,0 +1,187 @@
+use jet_foundation.Tests.Integration.JitNoUnwindBoundary.*
+use jet_foundation.Tests.Integration.Common as common
+use common.ABORT_MARKERS
+use std.[fs, env, process]
+
+// Rust: tests/jit_no_unwind_boundary.rs:310
+#Test("no_unguardable_extern_c_seam_is_defined_in_the_jit_crate") {
+    offenders :: unguardable_seam_definitions(&jit_crate_sources())
+    assert(offenders.is_empty(), "an `extern \"C\"` frame this crate compiles cannot be guarded from outside: rustc aborts an escaping unwind at the body's own edge (`thread caused non-unwinding panic`), before the shim `host_seam::guarded` builds could catch it. Both directions are bugs, so say which rail the new definition belongs on:\n  - generated code calls it -> make it a plain `fn` and let `host_fns!` generate its boundary;\n  - foreign code calls it -> make it a plain `fn` and hand out `host_seam::guarded(f)`, as `Ffi.rs` does for the bridge reporter;\n  - the kernel calls it -> it is a signal handler, and there is exactly one, in `SIGNAL_HANDLER_OWNER`; marshal to it instead of re-forking it here (#2027).\n(crates/jet-jit/src/host_seam.rs, Docs/spec/architecture.md R13.) Offending definitions:\n{offenders.join("\n")}")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:337
+#Test("the_os_signal_handler_stays_panic_free_without_a_catch") {
+    sources :: signal_handler_owner_source()
+    handlers :: extern_fn_definitions(&sources).into_iter().filter(|(_, _, name, _)| -> name == SIGNAL_HANDLER).collect()
+    assert_eq(handlers.len(), 2, "the one signal handler has exactly two platform arms — `extern \"C\"` for unix and `extern \"system\"` for windows, both named `{SIGNAL_HANDLER}` under mutually exclusive `cfg`s. Found {handlers.iter().map(|(_, number, name, _)| -> "{name}:{number}").collect():?} in {SIGNAL_HANDLER_OWNER}. A third arm, or a missing one, means the mark was renamed or re-forked and this proof stopped covering it.")
+    for (label, number, name, _) in handlers {
+        for statement in definition_body(&sources[0].1, number) {
+            assert(SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str()), "{label}:{number}: `{name}` gained the statement `{statement}`, which is not one of {SIGNAL_HANDLER_STATEMENTS:?}. A signal handler runs on a borrowed stack that may have a JIT frame under it: anything that allocates, locks, formats or reports can panic there, and `guard_seam` cannot be used to catch it. Move the work to the drain (`jet_interrupt_dispatch`) instead of widening this list.")
+        }
+    }
+}
+// Rust: tests/jit_no_unwind_boundary.rs:381
+#Test("exactly_one_signal_mechanism_owns_the_interrupt_count") {
+    sources: [(String, String)] := []
+    for root in [repo_root().join("crates"), repo_root().join("Source")] {
+        assert(root.is_dir(), "scan root moved: {root:?}")
+        files: [OSPath] := []
+        collect_rs_files(&root, &files)
+        files.sort()
+        for path in files {
+            label :: path.strip_prefix(repo_root()).unwrap_or(path.as_path()).to_string_lossy().into_owned()
+            text :: fs.read_to_string(&path).unwrap_or_else(|error| -> panic("read {path:?}: {error}"))
+            sources.push((label, text))
+        }
+    }
+    owner_label :: SIGNAL_HANDLER_OWNER.to_string()
+    assert(sources.iter().any(|(label, _)| -> label == owner_label), "the scan did not reach the owner {SIGNAL_HANDLER_OWNER}")
+    mark_definition :: "fn {SIGNAL_HANDLER}("
+    for (fact, expected) in [("static JET_INTERRUPT_PENDING", 1), ("static JET_INTERRUPT_ARMED", 1), (mark_definition.as_str(), 2)] {
+        declarers :: code_lines(&sources).into_iter().filter(|(_, _, line)| -> line.contains(fact))
+            .map(|(label, number, line)| -> {
+                trimmed := line.trim() // #4303
+                "{label}:{number}: {trimmed}"
+            }).collect()
+        assert(declarers.len() == expected && declarers.iter().all(|entry| -> entry.starts_with(&owner_label)), "`{fact}` belongs to the one signal mechanism in {SIGNAL_HANDLER_OWNER} (#2027), {expected} time(s) — the mark has one `cfg`-exclusive arm per platform, everything else is single. A second declaration elsewhere is a second interrupt count, and `signal(SIGINT, …)` REPLACES the process handler, so the two would not merely duplicate: the later arm would silently disarm the earlier one's count. Marshal to `jet_interrupt_arm`/`jet_interrupt_dispatch` instead. Found:\n{declarers.join("\n")}")
+    }
+    includers :: code_lines(&sources).into_iter().filter(|(_, _, line)| -> line.contains("include!(") && line.contains("Top/Interrupt.rs"))
+        .map(|(label, number, line)| -> {
+            trimmed := line.trim() // #4303
+            "{label}:{number}: {trimmed}"
+        }).collect()
+    assert_eq(includers.len(), 1, "the owner must be compiled exactly once per binary — `jet_codegen::interrupt_runtime`. Each extra `include!` is another `JET_INTERRUPT_PENDING` static in the same process (#2027). Found:\n{includers.join("\n")}")
+    assert(includers[0].starts_with("crates/jet-codegen/src/lib.rs:"), "the one in-binary instance lives in `jet-codegen/src/lib.rs` as `pub mod interrupt_runtime`; found {includers[0]}")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:477
+#Test("the_interrupt_drain_cannot_consult_shield_or_task_state") {
+    owner :: signal_handler_owner_source()
+    leaks :: code_lines(&owner).into_iter().filter(|(_, _, line)| -> ["shield", "SHIELD", "task_cancelled", "current_task", "panicking"].iter().any(|probe| -> line.contains(probe)))
+        .map(|(label, number, line)| -> {
+            trimmed := line.trim() // #4303
+            "{label}:{number}: {trimmed}"
+        }).collect()
+    assert(leaks.is_empty(), "the one interrupt drain read shield or task state. That is how the three tiers stop agreeing: a signal delivered inside `#Shield` would then be deferred on whichever tier happened to be executing, and counted on the others. Shield policy belongs to cooperative wait points (`Prelude/Scheduler.rs`), not to the signal count (#2027). Offending lines:\n{leaks.join("\n")}")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:507
+#Test("no_jit_host_address_escapes_the_generated_boundary") {
+    offenders :: host_address_escapes(&jit_crate_sources())
+    assert(offenders.is_empty(), "a `jet_*` host function reached an address without the no-unwind boundary. Generated code that calls it would have an unguarded seam below it. Use `host_seam::guarded_addr(...)` (#1997). Offending casts:\n{offenders.join("\n")}")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:526
+#Test("concurrency_host_bodies_have_no_bare_panic_sites") {
+    path :: repo_root().join("crates/jet-jit/src/Concurrency.rs")
+    source :: fs.read_to_string(&path).unwrap_or_else(|error| -> panic("read {path:?}: {error}"))
+    marker :: "\n#[cfg(test)]\nmod tests {{"
+    (production, _) :: source.split_once(marker).unwrap_or_else(|| -> panic("{path:?} lost its cfg(test) boundary; the panic-site check would scan the wrong scope"))
+    offenders :: production.lines().enumerate().filter_map(|(index, line)| -> {
+        trimmed := line.trim_start() // #4303
+        if trimmed.starts_with("//") { return None }
+        if line.contains("panic!(") || line.contains(".expect(") || line.contains(".unwrap(") {
+            content := line.trim() // #4303
+            Some("Concurrency.rs:{index + 1}: {content}")
+        } else { None }
+    }).collect()
+    assert(offenders.is_empty(), "a Concurrency host body gained a bare panic site below a JIT frame; route the outcome through `wait_status`, `contain_seam_unwind`, or the generated `host_seam` boundary:\n{offenders.join("\n")}")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:557
+#Test("the_host_fns_macro_still_generates_the_boundary") {
+    sources :: jit_crate_sources()
+    registrations :: symbol_registrations(&sources)
+    assert_eq(registrations.len(), 1, "JIT host symbol registration must stay in the one `host_fns!` expansion that generates the no-unwind boundary; found:\n{registrations.join("\n")}")
+    lib :: sources.iter().find(|(label, _)| -> label.as_str() == "lib.rs").map(|(_, text)| -> text.as_str()).expect("crates/jet-jit/src/lib.rs")
+    assert(lib.contains("builder.symbol($symbol, $crate::host_seam::guarded($host_fn));"), "`host_fns!` must register the generated guard. Registering the seam address directly silently unguards every host symbol at once and no other test can see it (#1997).")
+    assert(!lib.contains("builder.symbol($symbol, $host_fn as *const u8)"), "the pre-#1997 unguarded registration is back in `host_fns!`")
+    seam :: sources.iter().find(|(label, _)| -> label.as_str() == "host_seam.rs").map(|(_, text)| -> text.as_str()).expect("crates/jet-jit/src/host_seam.rs")
+    assert(seam.contains("guard_seam(move || zero_sized_callee::<F>()"), "the generated shim must still run the seam inside `guard_seam`; without it every `extern \"C\"` shim is a bare unguarded seam again and check 1's `host_seam.rs` exemption hides it (#1997).")
+    assert(seam.contains("jet_scheduler_catch_foreign_boundary"), "`guard_seam` must keep converting through the shared Prelude boundary rather than a second engine-local catch (I8/I9).")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:609
+#Test("the_boundary_scan_trips_on_seeded_violations") {
+    seeded_seam :: [("Seeded.rs", "extern \"C\" fn jet_jit_seeded(a: i64) -> i64 {{ a }}\n")]
+    assert_eq(unguardable_seam_definitions(&seeded_seam).len(), 1, "the seam scan must catch a hand-written `extern \"C\" fn jet_*`")
+    seeded_macro_seam :: [("Seeded.rs", "        extern \"C\" fn $name(handle: i64) -> i64 {{ handle }}\n")]
+    assert_eq(unguardable_seam_definitions(&seeded_macro_seam).len(), 1, "the seam scan must catch a macro-generated `extern \"C\"` seam")
+    seeded_foreign_callback :: [("Seeded.rs", "extern \"C\" fn jit_ffi_seeded(m: *const u8, n: usize) {{ report(m, n) }}\n")]
+    assert_eq(unguardable_seam_definitions(&seeded_foreign_callback).len(), 1, "the seam scan must catch an `extern \"C\"` callback handed to a foreign library, whatever it is called (#1995)")
+    seeded_other_abis :: [("Seeded.rs", "    unsafe extern \"system\" fn seeded_mark(kind: u32) -> i32 {{ 0 }}\n    extern \"C-unwind\" fn seeded_unwinding(a: i64) -> i64 {{ a }}\n")]
+    assert_eq(unguardable_seam_definitions(&seeded_other_abis).len(), 2, "the seam scan must not be ABI-specific")
+    type_only :: [("Seeded.rs", "type SpawnFn2 = extern \"C\" fn(i64, i64) -> i64;\n    let f: unsafe extern \"C\" fn(i64) -> i8 = std::mem::transmute(ptr);\n")]
+    assert(unguardable_seam_definitions(&type_only).is_empty(), "the seam scan must not fire on a `fn`-pointer type: {unguardable_seam_definitions(&type_only):?}")
+    grown_handler :: [(SIGNAL_HANDLER_OWNER.to_string(), "    extern \"C\" fn jet_interrupt_mark(_: i32) {{\n        eprintln!(\"interrupt\");\n        JET_INTERRUPT_PENDING.fetch_add(1, std::sync::atomic::Ordering::Relaxed);\n    }}\n")]
+    (_, number, _, _) :: extern_fn_definitions(&grown_handler).into_iter().find(|(_, _, name, _)| -> name == SIGNAL_HANDLER).expect("the seeded handler")
+    assert(definition_body(&grown_handler[0].1, number).iter().any(|statement| -> !SIGNAL_HANDLER_STATEMENTS.contains(&statement.as_str())), "the handler body scan must catch a statement that can panic")
+    seeded_escape :: [("Seeded.rs", "    let ptr = jet_jit_seeded as usize as i64;\n")]
+    assert_eq(host_address_escapes(&seeded_escape).len(), 1, "the escape scan must catch a raw host address handed to generated code")
+    allowed :: [("Seeded.rs", "    let a = crate::host_seam::guarded_addr(jet_jit_seeded) as i64;\n    let b = cb.fn_ptr as usize as *const u8;\n    let c = table[idx] as *const u8;\n")]
+    assert(host_address_escapes(&allowed).is_empty(), "the escape scan must not fire on the guarded form or on host->JIT pointer reads: {host_address_escapes(&allowed):?}")
+    seeded_comment :: [("Seeded.rs", "//! an `extern \"C\" fn jet_jit_example` in prose is documentation\n")]
+    assert(unguardable_seam_definitions(&seeded_comment).is_empty(), "the seam scan must ignore prose that names the banned form")
+}
+// Rust: tests/jit_no_unwind_boundary.rs:743
+#Test("the_abort_markers_name_every_abort_and_no_report") {
+    for stderr in [
+        "fatal runtime error: failed to initiate panic, error 5, aborting\n",
+        "thread caused non-unwinding panic. aborting.\n",
+        "panicked at library/core/src/panicking.rs: panic in a function that cannot unwind\n",
+        "panicked at library/core/src/panicking.rs:233:5:\npanic in a destructor during cleanup\n",
+        "thread 'main' has overflowed its stack\nfatal runtime error: stack overflow\n",
+        "   2: core::panicking::panic_fmt\n"
+    ] {
+        assert(common.abort_marker(stderr).is_some(), "an abort went unrecognised, so it could be filed as an outcome instead of failing: {stderr:?}")
+    }
+    for stderr in [
+        "", "Stop [E3001]: `panic: expected the answer, got none`\n",
+        "Error: file not found\n Trail [E3002] (2 hops via ?, origin first):\n  1. load (app.jet:7) — reading config\n  2. run (app.jet:12)\n",
+        "Error [E3003]: deadline exceeded while waiting in task join\n",
+        "Runtime fault [E3010]: the list has 2 items\n", "panic: can't view 1 items from 2 to 2 (inclusive)\n"
+    ] { assert_eq(common.abort_marker(stderr), None, "a Jet report was read as an abort: {stderr:?}") }
+}
+// Rust: tests/jit_no_unwind_boundary.rs:815
+#Test("a_cancelled_task_reaches_an_exit_code_on_every_tier_never_a_signal") {
+    example :: repo_root().join("Examples/features/concurrency/task_controls.jet")
+    golden :: repo_root().join("Examples/features/expected/concurrency/task_controls.out")
+    expected :: fs.read_to_string(&golden).expect("task_controls golden")
+    shown :: example.to_string_lossy().into_owned()
+    cache_root :: env.temp_dir().join("jet_no_unwind_{process.id()}")
+    observed: [(String, String, Int)] := []
+    for (tier, args) in [("default jet run", ["run", shown.as_str()]), ("forced interpreter", ["run", "--interpret", shown.as_str()])] {
+        cache :: cache_root.join(tier.replace(' ', "_"))
+        fs.create_dir_all(&cache).expect("cache dir")
+        output :: jet_run(&args, &cache)
+        stdout :: String.from_utf8_lossy(&output.stdout).into_owned()
+        stderr :: String.from_utf8_lossy(&output.stderr).into_owned()
+        assert(terminating_signal(&output.status).is_none(), "{tier}: a cancelled task killed the process with signal {terminating_signal(&output.status):?} instead of producing a report. An abort is never an outcome (#1995/#1997, Docs/spec/architecture.md R13).\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        for marker in ABORT_MARKERS {
+            assert(!stderr.contains(marker), "{tier}: stderr carries the abort marker `{marker}`, so a control transfer escaped a host boundary instead of being converted.\nstderr:\n{stderr}")
+        }
+        code :: output.status.code().expect("a non-signalled process always has a code")
+        assert_eq(code, 0, "{tier}: task_controls must complete.\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        assert_eq(stdout, expected, "{tier}: stdout drifted from the shipped golden")
+        observed.push((tier, stdout, code))
+    }
+    (first_tier, first_stdout, first_code) :: &observed[0]
+    for (tier, stdout, code) in &observed[1..] {
+        assert_eq(stdout, first_stdout, "{tier} disagreed with {first_tier} on stdout")
+        assert_eq(code, first_code, "{tier} disagreed with {first_tier} on the exit code")
+    }
+    _ :: fs.remove_dir_all(&cache_root)
+}
+// Rust: tests/jit_no_unwind_boundary.rs:889
+#Test("cancelled_interpreter_wait_inside_deopt_is_a_diagnostic_not_a_signal") {
+    root :: env.temp_dir().join("jet_no_unwind_deopt_cancel_{process.id()}")
+    fs.create_dir_all(&root).expect("deopt cancellation fixture dir")
+    file :: root.join("cancel_deopt.jet")
+    fs.write(&file, "use core.text as text\nuse core.time as time\n\nfn slow_deopt() -> String {{\n    time.sleep(200ms)\n    return \"{{text.casefold(\"Straße\")}}\"\n}}\n\nfn run() {{\n    task_handle :: task slow_deopt()\n    time.sleep(20ms)\n    task_handle.cancel()\n    print(task_handle.join() ?? panic(\"cancelled deopt task\"))\n}}\n").expect("write deopt cancellation fixture")
+    shown :: file.to_string_lossy().into_owned()
+    cache :: root.join("cache")
+    fs.create_dir_all(&cache).expect("deopt cancellation cache dir")
+    output :: jet_run(&["run", "--trace-tiers", shown.as_str()], &cache)
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(terminating_signal(&output.status).is_none(), "deopt cancellation terminated with signal {terminating_signal(&output.status):?}; stdout:\n{stdout}\nstderr:\n{stderr}")
+    for marker in ABORT_MARKERS { assert(!stderr.contains(marker), "deopt cancellation escaped its boundary through `{marker}`:\n{stderr}") }
+    assert_eq(output.status.code(), Some(70), "cancelled deopt child must reach the runtime diagnostic rail:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    assert(stderr.contains("Stop [E3001]") && stderr.contains("task cancelled"), "missing cancellation runtime diagnostic:\n{stderr}")
+    assert(stderr.contains("slow_deopt") && stderr.contains("tier0 interp"), "fixture did not prove the cancelled wait ran through named deopt:\n{stderr}")
+    _ :: fs.remove_dir_all(&root)
+}

@@ -1,0 +1,383 @@
+// Rust: tests/cli_parts/support.rs:1
+use std.fs as fs
+use std.io as io
+use std.env as env
+use std.process.[Child, Command, Output, Stdio]
+use std.time.Duration
+use std.thread as thread
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet_foundation.PerformanceBudget.[CanonicalJson, stable_id, verify_budget_report]
+// GATE #4494: native processes, filesystem, atomics, environment and PTY handles.
+// GATE #4409: preserve native IO error kinds and raw errno.
+
+// Rust: tests/cli_parts/support.rs:12
+pub fn jet() -> OSPath { OSPath.from(env!("CARGO_BIN_EXE_jet")) }
+// Rust: tests/cli_parts/support.rs:18
+// Explicit debug profile selects native AOT without optimized-release costs.
+pub fn run_debug_aot(file: String) -> Command {
+    command := Command.new(jet())
+    command.args(["run", "--profile=debug", file])
+    command
+}
+// Rust: tests/cli_parts/support.rs:51
+pub fn output_with_retry(cmd: &Command) -> Output {
+    last := .None
+    loop attempt in 0..<8 {
+        if attempt > 0 -> thread.sleep(Duration.from_millis(20 * attempt))
+        if cmd.output() == {
+            .Ok(out) -> return out
+            .Err(e) -> {
+                if e.kind() == io.ErrorKind.ExecutableFileBusy -> last = .Some(e)
+                else -> panic("CLI command failed: {e}")
+            }
+        }
+    }
+    panic("CLI command stayed busy: {last.unwrap()}")
+}
+// Rust: tests/cli_parts/support.rs:66
+pub fn spawn_with_retry(cmd: &Command) -> Child {
+    last := .None
+    loop attempt in 0..<8 {
+        if attempt > 0 -> thread.sleep(Duration.from_millis(20 * attempt))
+        if cmd.spawn() == {
+            .Ok(child) -> return child
+            .Err(e) -> {
+                if e.kind() == io.ErrorKind.ExecutableFileBusy -> last = .Some(e)
+                else -> panic("CLI command failed: {e}")
+            }
+        }
+    }
+    panic("CLI command stayed busy: {last.unwrap()}")
+}
+// Rust: tests/cli_parts/support.rs:89
+pub fn cli_dir() -> OSPath { OSPath.from(env!("CARGO_MANIFEST_DIR")).join("tests/cli") }
+// Rust: tests/cli_parts/support.rs:94
+pub fn check_snapshot(name: String, actual: String) -> Unit {
+    path :: cli_dir().join(name)
+    if env.var("UPDATE_EXPECT").is_ok() {
+        fs.create_dir_all(cli_dir()).unwrap()
+        fs.write(&path, actual).unwrap()
+        return
+    }
+    expected :: fs.read_to_string(&path).unwrap_or_else(fn(_) { panic("missing snapshot {path.display()}; run UPDATE_EXPECT=1 cargo test") })
+    assert_eq(actual, expected, "snapshot mismatch for {name}")
+}
+// Rust: tests/cli_parts/support.rs:114
+// Private authority roots prevent concurrent sibling fixtures changing snapshots.
+pub fn bad_file(tag: String) -> OSPath {
+    dir :: isolated_cwd("bad_{tag}")
+    p :: dir.join("bad.jet")
+    fs.write(&p, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap()
+    p
+}
+// Rust: tests/cli_parts/support.rs:131
+pub fn scrub(s: String, file: &OSPath) -> String {
+    scrubbed := s.replace(file.display().to_string(), "BAD.jet")
+    temp_dir :: env.temp_dir()
+    if temp_dir.parent() == {
+        .Some(temp_root) -> {
+            if file.strip_prefix(temp_root) == { .Ok(relative) -> scrubbed = scrubbed.replace(relative.display().to_string(), "BAD.jet"); .Err(_) -> {} }
+        }
+        .None -> {}
+    }
+    if file.file_name().and_then(fn(n) { n.to_str() }) == { .Some(name) -> scrubbed = scrubbed.replace(name, "BAD.jet"); .None -> {} }
+    scrubbed
+}
+// Rust: tests/cli_parts/support.rs:155
+NEXT_FIXTURE := AtomicU64.new(0)
+// Rust: tests/cli_parts/support.rs:154
+// Per-process cwd isolates stem-keyed compiled output across concurrent CLI tests.
+pub fn isolated_cwd(tag: String) -> OSPath {
+    loop {
+        sequence :: NEXT_FIXTURE.fetch_add(1, Ordering.Relaxed)
+        dir :: env.temp_dir().join("jet_cli_cwd_{tag}_{std.process.id()}_{sequence}")
+        if fs.create_dir(&dir) == {
+            .Ok(_) -> return dir
+            .Err(error) -> {
+                if error.kind() == io.ErrorKind.AlreadyExists -> continue
+                panic("cannot create isolated CLI fixture {dir.display()}: {error}")
+            }
+        }
+    }
+}
+// Rust: tests/cli_parts/support.rs:179
+// Bare budget discovery uses canonical run.jet, never main.jet fallback.
+pub fn budget_project(tag: String, limit: U64) -> OSPath {
+    dir :: isolated_cwd(tag)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("src/run.jet"), """module perf.package {
+    budgets: [Budget{
+        name: "public-api",
+        scope: .Package,
+        metric: .PublicApiItems,
+        comparison: .Absolute,
+        limit: .AtMost(__LIMIT__),
+    }],
+}
+pub fn api() {}
+fn run() {}
+""".replace("__LIMIT__", limit.to_string())).unwrap()
+    dir
+}
+// Rust: tests/cli_parts/support.rs:204
+pub fn compile_latency_budget_project(tag: String) -> OSPath {
+    dir :: isolated_cwd(tag)
+    copy_dir_all(&OSPath.from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compile_latency"), &dir)
+    dir
+}
+// Rust: tests/cli_parts/support.rs:210
+pub fn artifact_budget_project(tag: String, limit: U64) -> OSPath {
+    dir :: isolated_cwd(tag)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("src/run.jet"), """module perf.package {
+    budgets: [Budget{
+        name: "binary",
+        scope: .Package,
+        metric: .BinarySize,
+        comparison: .Absolute,
+        limit: .AtMost(__LIMIT__B),
+    }],
+}
+fn run() {
+    print("tiny")
+}
+""".replace("__LIMIT__", limit.to_string())).unwrap()
+    dir
+}
+// Rust: tests/cli_parts/support.rs:236
+pub fn mixed_budget_project(tag: String) -> OSPath {
+    dir :: isolated_cwd(tag)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("src/run.jet"), """module perf.package {
+    budgets: [
+        Budget{
+            name: "binary",
+            scope: .Package,
+            metric: .BinarySize,
+            comparison: .Absolute,
+            limit: .AtMost(100000000B),
+        },
+        Budget{
+            name: "public-api",
+            scope: .Package,
+            metric: .PublicApiItems,
+            comparison: .Absolute,
+            limit: .AtMost(10),
+        },
+    ],
+}
+pub fn api() {}
+fn run() {}
+""").unwrap()
+    dir
+}
+// Rust: tests/cli_parts/support.rs:271
+pub fn benchmark_budget_project(tag: String) -> OSPath {
+    dir :: isolated_cwd(tag)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("src/run.jet"), """module perf.package {
+    budgets: [Budget{
+        name: "parse",
+        scope: .Test("parse"),
+        metric: .BenchTime(.P50),
+        provider: .BenchMeasurement("parse"),
+        comparison: .RelativeTo("ci/linux"),
+        limit: .RegressionAtMost(100pct),
+        enforcement: .Warn,
+    }],
+}
+#Test("parse") { .measure {
+    total := 0
+    loop value in 0..100 { total = total + value }
+    assert_eq(total, 5050)
+} }
+fn run() {}
+""").unwrap()
+    dir
+}
+// Rust: tests/cli_parts/support.rs:296
+pub fn allocation_budget_project(tag: String) -> OSPath {
+    dir :: isolated_cwd(tag)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("src/run.jet"), """use core.mem
+module perf.package {
+    budgets: [
+        Budget{
+            name: "arena-count",
+            scope: .Test("arena"),
+            metric: .AllocationCount,
+            provider: .AllocationProbe("arena"),
+            comparison: .AbsoluteFrom("local/arena"),
+            limit: .AtMost(2),
+            enforcement: .Warn,
+        },
+        Budget{
+            name: "arena-bytes",
+            scope: .Test("arena"),
+            metric: .AllocationBytes,
+            provider: .AllocationProbe("arena"),
+            comparison: .AbsoluteFrom("local/arena"),
+            limit: .AtMost(16B),
+            enforcement: .Warn,
+        },
+    ],
+}
+#Test("arena") { .measure {
+    arena :: mem.Arena.new()
+    value :: arena.alloc(42)
+    assert_eq(value, 42)
+} }
+fn run() {}
+""").unwrap()
+    dir
+}
+// Rust: tests/cli_parts/support.rs:342
+pub fn age_budget_baseline(dir: &OSPath, baseline: String) -> (String, String) {
+    path :: dir.join(".jet/perf/baselines/names/{baseline}.json")
+    manifest := CanonicalJson.parse_canonical(&fs.read(&path).unwrap()).unwrap()
+    wrapper := if &manifest == { .Object(wrapper) -> wrapper; else -> panic("manifest") }
+    report_id :: {
+        content :: if &wrapper["content"] == { .Object(content) -> content; else -> panic("content") }
+        id :: if &content["head_report_id"] == { .String(id) -> id; else -> panic("head") }
+        id.clone()
+    }
+    {
+        content := if wrapper.get_mut("content").unwrap() == { .Object(content) -> content; else -> panic("content") }
+        generations := if content.get_mut("generations").unwrap() == { .Array(generations) -> generations; else -> panic("generations") }
+        generation := if &generations[0] == { .Object(generation) -> generation; else -> panic("generation") }
+        audit := if generation.get_mut("audit").unwrap() == { .Object(audit) -> audit; else -> panic("audit") }
+        audit.insert("accepted_at", .String("2000-01-01T00:00:00.000000000Z"))
+        body := audit.clone()
+        _ :: body.remove("audit_id").unwrap()
+        audit.insert("audit_id", .String(stable_id(&CanonicalJson.Object(body))))
+    }
+    state_id :: stable_id(&wrapper["content"])
+    wrapper.insert("manifest_id", .String(state_id.clone()))
+    fs.write(path, manifest.bytes()).unwrap()
+    (report_id, state_id)
+}
+// Rust: tests/cli_parts/support.rs:385
+#FFI(c)
+fn openpty(master: *I32, slave: *I32, name: *I8, termp: *U8, winp: *U8) -> I32
+// Rust: tests/cli_parts/support.rs:380
+pub fn run_budget_update_pty(dir: &OSPath, answer: &[U8]) -> (I32, String) {
+    assert(core.sys.target.selected_family() == "unix", "openpty requires Unix")
+    master_fd := -1
+    slave_fd := -1
+    #Unsafe("openpty initializes two owned descriptors; each is transferred once to File") {
+        assert_eq(openpty(&master_fd, &slave_fd, std.ptr.null_mut(), std.ptr.null(), std.ptr.null()), 0)
+    }
+    master := #Unsafe("take unique ownership of the PTY master returned by openpty") { fs.File.from_raw_fd(master_fd) }
+    slave :: #Unsafe("take unique ownership of the PTY slave returned by openpty") { fs.File.from_raw_fd(slave_fd) }
+    child := Command.new(jet()).args(["budget", "update", "--baseline", "ci/linux", "--bootstrap", "--reason", "initial evidence"])
+        .current_dir(dir).stdin(Stdio.from(slave.try_clone().unwrap())).stdout(Stdio.from(slave.try_clone().unwrap())).stderr(Stdio.from(slave)).spawn().unwrap()
+    master.write_all(answer).unwrap()
+    status :: child.wait().unwrap()
+    bytes := [U8].new()
+    buffer := [U8].filled(4096, 0)
+    loop {
+        if master.read(&buffer) == {
+            .Ok(0) -> break
+            .Ok(n) -> bytes.extend_from_slice(&buffer[..<n])
+            .Err(error) -> {
+                if error.raw_os_error() == .Some(5) -> break
+                panic("PTY read: {error}")
+            }
+        }
+    }
+    (status.code().unwrap(), String.from_utf8_lossy(&bytes).replace("\r\n", "\n"))
+}
+// Rust: tests/cli_parts/support.rs:457
+pub fn is_code(s: String) -> Bool {
+    b :: s.as_bytes()
+    b.len() == 5 && (b[0] == b'E' || b[0] == b'L') && b[1..].iter().all(fn(c) { c.is_ascii_digit() })
+}
+// Rust: tests/cli_parts/support.rs:533
+pub fn args_fixture(tag: String) -> OSPath {
+    p :: env.temp_dir().join("jet_cli_args_{tag}.jet")
+    fs.write(&p, "use core.process as process\nfn run() {\n    args :: process.argv()\n    print(args.len())\n}\n").unwrap()
+    p
+}
+// Rust: tests/cli_parts/support.rs:557
+pub fn expand_fixture() -> OSPath { OSPath.from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_facts.jet") }
+// Rust: tests/cli_parts/support.rs:562
+pub fn scrub_fixture(s: String, fixture: &OSPath) -> String { s.replace(fixture.display().to_string(), "FIXTURE.jet") }
+// Rust: tests/cli_parts/support.rs:568
+pub fn expand_layout_fixture() -> OSPath { OSPath.from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_layout_facts.jet") }
+// Rust: tests/cli_parts/support.rs:573
+pub fn expand_effects_layout_fixture() -> OSPath { OSPath.from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/expand_effects_layout.jet") }
+// Rust: tests/cli_parts/support.rs:609
+pub fn copy_dir_all(src: &OSPath, dst: &OSPath) -> Unit {
+    fs.create_dir_all(dst).unwrap()
+    loop entry in fs.read_dir(src).unwrap() {
+        entry :: entry.unwrap()
+        dest_path :: dst.join(entry.file_name())
+        if entry.file_type().unwrap().is_dir() -> copy_dir_all(&entry.path(), &dest_path)
+        else -> { _ :: fs.copy(entry.path(), &dest_path).unwrap() }
+    }
+}
+// Rust: tests/cli_parts/support.rs:625
+pub fn scene_probe_project(tag: String, budget: String) -> OSPath {
+    dir :: isolated_cwd(tag)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    source :: """use core.game as game
+module perf.game {
+    budgets: [
+        __SCENE_BUDGET__,
+    ]
+}
+fn run() {
+    scene := game.Scene.new("main")
+    counter := 0
+    scene.on_frame((frame) -> {
+        counter = counter + 1
+    })
+    transcript :: game.run(scene)
+    print(transcript)
+}
+""".replace("__SCENE_BUDGET__", budget)
+    fs.write(dir.join("src/main.jet"), source).unwrap()
+    dir
+}
+// Rust: tests/cli_parts/support.rs:652
+pub fn scene_probe_run(dir: &OSPath) -> Output { Command.new(jet()).args(["self", "devtools", "probe", "src/main.jet"]).current_dir(dir).output().unwrap() }
+// Rust: tests/cli_parts/support.rs:660
+pub fn scene_probe_once(tag: String, budget: String) -> (OSPath, CanonicalJson) {
+    dir :: scene_probe_project(tag, budget)
+    output :: scene_probe_run(&dir)
+    assert_eq(output.status.code(), .Some(0), "stdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    reports :: dir.join(".jet/perf/reports")
+    paths :: fs.read_dir(&reports).unwrap().map(fn(entry) { entry.unwrap().path() }).collect::<[OSPath]>()
+    assert_eq(paths.len(), 1, "expected exactly one report; got {paths:?}")
+    bytes :: fs.read(&paths[0]).unwrap()
+    verify_budget_report(&bytes).unwrap()
+    (dir, CanonicalJson.parse_canonical(&bytes).unwrap())
+}
+// Rust: tests/cli_parts/support.rs:681
+pub fn assert_scene_probe_measurement(report: &CanonicalJson, expected_metric: String) -> Unit {
+    report :: if report == { .Object(report) -> report; else -> panic("report") }
+    content :: if &report["content"] == { .Object(content) -> content; else -> panic("content") }
+    measurements :: if &content["measurements"] == { .Array(measurements) -> measurements; else -> panic("measurements") }
+    assert_eq(measurements.len(), 1, "expected one SceneProbe measurement")
+    measurement :: if &measurements[0] == { .Object(measurement) -> measurement; else -> panic("measurement") }
+    provider :: if &measurement["provider"] == { .Object(provider) -> provider; else -> panic("provider") }
+    assert_eq(provider["kind"], CanonicalJson.String("SceneProbe"))
+    assert_eq(provider["identity"], CanonicalJson.String("main"))
+    metric :: if &measurement["metric"] == { .Object(metric) -> metric; else -> panic("metric") }
+    assert_eq(metric["name"], CanonicalJson.String(expected_metric))
+    samples :: if &measurement["samples"] == { .Array(samples) -> samples; else -> panic("samples") }
+    assert_eq(samples.len(), 600, "SceneProbe must produce exactly 600 measured samples")
+}
+// Rust: tests/cli_parts/support.rs:698
+pub fn canonical_field(value: &CanonicalJson, key: String) -> &CanonicalJson {
+    if value == {
+        .Object(fields) -> fields.get(key).unwrap_or_else(fn() { panic("canonical JSON has no field `{key}`") })
+        else -> panic("canonical JSON parent of `{key}` is not an object")
+    }
+}

@@ -1,0 +1,726 @@
+use jet_foundation.Tests.Integration.JetTest.*
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.DataTree.DataTree
+use jet_foundation.JSON.parse_json
+use std.[fs, env, process]
+// GATE #4494: these journeys use the real native CLI, scoped scratch, filesystem,
+// pipes and process isolation. Native compilation no longer depends on rustc.
+
+// Rust: tests/jet_test.rs:27
+#Test("jet_test_example_output") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    assert(jet.exists(), "build the jet binary first")
+    example := root.join("Examples/features/tooling/tests.jet")
+    cwd := isolated_test_package("jet_test_example")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert(out.status.success(), "jet test Examples/features/tooling/tests.jet failed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    expected := fs.read_to_string(root.join("Examples/features/expected/tooling/tests.test.out")).expect("Examples/features/expected/tooling/tests.test.out")
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+}
+// Rust: tests/jet_test.rs:58
+#Test("jet_test_inline_c_comparison_preserves_checked_int_declaration") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/lowlevel/inline_c.jet")
+    cwd := isolated_test_package("jet_test_inline_c")
+    matching := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--serial"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert(matching.status.success(), "bounded inline C comparisons failed:\nstdout: {String.from_utf8_lossy(&matching.stdout)}\nstderr: {String.from_utf8_lossy(&matching.stderr)}")
+    matching_stdout := String.from_utf8_lossy(&matching.stdout)
+    assert(matching_stdout.contains("inline C Int comparisons: pass"), "matching inline C test did not report a pass:\n{matching_stdout}")
+    assert(!matching_stdout.contains("FAIL"), "matching inline C test reported a failure:\n{matching_stdout}")
+    wrong := cwd.path.join("wrong_inline_c.jet")
+    fs.write(&wrong, "fn jet_add(n: Int) -> Int { (n * 2) }\n\n#[Unsafe(\"deliberately wrong scalar C result\"), FFI(c)] fn c_wrong(n: Int) -> Int {\n    \"\"\"int64_t c_wrong(int64_t n) { return n * 2 + 1; }\"\"\"\n}\n\n#Test(\"wrong inline C result\") {\n    #Unsafe(\"audited scalar C call\") {\n        assert_eq(jet_add(3), c_wrong(3))\n    }\n}\n").unwrap()
+    failed := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--serial"]).arg(&wrong).current_dir(&cwd.path).output().unwrap()
+    assert_eq(failed.status.code(), Some(1), "wrong inline C result must be an ordinary failed test:\nstdout: {String.from_utf8_lossy(&failed.stdout)}\nstderr: {String.from_utf8_lossy(&failed.stderr)}")
+    failed_stdout := String.from_utf8_lossy(&failed.stdout)
+    assert(failed_stdout.contains("wrong inline C result: FAIL"), "wrong inline C test did not report an ordinary failure:\n{failed_stdout}")
+    failed_stderr := String.from_utf8_lossy(&failed.stderr)
+    assert(failed_stderr.contains("E3001"), "wrong inline C test did not report its runtime assertion:\n{failed_stderr}")
+}
+// Rust: tests/jet_test.rs:132
+#Test("jet_test_expected_fail_tracks_failure_and_unexpected_pass") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/expected_fail.jet")
+    expected := fs.read_to_string(root.join("Examples/features/expected/tooling/expected_fail.test.out")).expect("expected_fail.test.out")
+    cwd := isolated_test_package("jet_test_expected_fail")
+    green := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--serial", "--filter=known"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert(green.status.success(), "expected failure should stay green:\n{String.from_utf8_lossy(&green.stdout)}")
+    assert_eq(String.from_utf8_lossy(&green.stdout), "known bug remains expected-fail: expected-fail\n0 passed, 0 failed, 0 skipped, 1 expected-fail\n")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--serial"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert_eq(out.status.code(), Some(1), "unexpected pass must fail the run")
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+    json_output := process.Command.new(&jet).args(["test", "--json", "--serial"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert_eq(json_output.status.code(), Some(1), "JSON run must preserve unexpected-pass failure")
+    json := String.from_utf8_lossy(&json_output.stdout)
+    assert(json.contains("\"expectedFailures\":1"), "missing expected-failure count: {json}")
+    assert(json.contains("\"unexpectedPasses\":1"), "missing unexpected-pass count: {json}")
+    status := parse_json(json).expect("JSON test status")
+    evidence := report_object(&status, "evidence")
+    evidence_identity := report_object(evidence, "identity")
+    assert_eq(report_text(report_field(evidence_identity, "claim")), "", "aggregate evidence identity must not inherit the first runtime stop")
+    assert_eq(report_text(report_field(evidence_identity, "evidence")), "", "aggregate evidence identity must not inherit one terminal record")
+    records := report_array(evidence, "evidence")
+    terminal_expected_failure := records.iter().find(|record| -> report_text(report_field(record, "claim")) == "known bug remains expected-fail" && report_text(report_field(record, "kind")) == "unit").expect("normalized harness terminal outcome")
+    assert_eq(report_text(report_field(terminal_expected_failure, "outcome")), "failed")
+    assert_eq(report_text(report_field(terminal_expected_failure, "expectation")), "expected_failure")
+    raw_expected_failure := records.iter().find(|record| -> report_text(report_field(record, "claim")) == "E3001" && report_text(report_field(record, "kind")) == "runtime").expect("raw expected-failure diagnostic")
+    assert_eq(report_text(report_field(raw_expected_failure, "expectation")), "expected_failure")
+}
+// Rust: tests/jet_test.rs:232
+#Test("jet_test_package_collects_imported_module_tests") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    package := root.join("Examples/features/tooling/test_package_modules")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&package).current_dir(&package).output().unwrap()
+    assert(out.status.success(), "package test failed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    expected := fs.read_to_string(root.join("Examples/features/expected/tooling/test_package_modules.test.out")).expect("test_package_modules.test.out")
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+}
+// Rust: tests/jet_test.rs:259
+#Test("concurrent_jet_test_same_file_is_process_isolated") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/tests.jet")
+    sandboxes := (0..4).map(|index| -> isolated_test_package("jet_test_concurrent_{index}")).collect()
+    mut children = []
+    for sandbox in &sandboxes {
+        children.push(process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&example).current_dir(&sandbox.path).stdout(process.Stdio.piped()).stderr(process.Stdio.piped()).spawn().expect("spawn concurrent jet test"))
+    }
+    for child in children {
+        out := child.wait_with_output().expect("wait for concurrent jet test")
+        assert(out.status.success(), "concurrent jet test failed: {out.status}\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    }
+}
+// Rust: tests/jet_test.rs:297
+#Test("jet_test_members_example_output") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/test_members.jet")
+    cwd := isolated_test_package("jet_test_members")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert(out.status.success(), "scope-member example failed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    expected := fs.read_to_string(root.join("Examples/features/expected/tooling/test_members.test.out")).expect("test_members.test.out")
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+}
+// Rust: tests/jet_test.rs:328
+#Test("jet_scope_expect_fail_passing_region_fails") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/scope_expect_fail_passes.jet")
+    cwd := isolated_test_package("jet_scope_expect_fail_passes")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "a passing expect_fail region must fail")
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("FAIL"), "expected a FAIL line:\n{stdout}")
+    assert(stderr.contains("[E3001]"), "expected a registered test failure:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:355
+#Test("jet_scope_expect_fail_asserts_runtime_code") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/scope_expect_fail_code.jet")
+    cwd := isolated_test_package("jet_scope_expect_fail_code")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(out.status.success(), "specific expect_fail test failed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(String.from_utf8_lossy(&out.stdout).contains("expect a specific runtime stop: pass"), "missing passing test output: {String.from_utf8_lossy(&out.stdout)}")
+}
+// Rust: tests/jet_test.rs:383
+#Test("jet_scope_setup_failure_fails_test") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/scope_setup_fail.jet")
+    cwd := isolated_test_package("jet_scope_setup_fail")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "a failing setup must fail the test")
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("FAIL"), "expected a FAIL line:\n{stdout}")
+    assert(stderr.contains("setup blew up"), "expected the setup failure message:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:411
+#Test("jet_scope_timeout_exceeded_fails") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/scope_timeout_exceeded.jet")
+    cwd := isolated_test_package("jet_scope_timeout")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "an over-budget timeout must fail")
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("FAIL"), "expected a FAIL line:\n{stdout}")
+    assert(stderr.contains("[E3001]"), "expected a registered timeout failure:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:436
+#Test("jet_test_fail_then_fixed") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fail := root.join("tests/fixtures/test_fail.jet")
+    fixed := root.join("tests/fixtures/test_fail.fixed.jet")
+    cwd := isolated_test_package("jet_test_fail_fixed")
+    bad := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fail).current_dir(&cwd.path).output().unwrap()
+    assert_eq(bad.status.code(), Some(1), "a test failure is not a compiler ICE")
+    assert(String.from_utf8_lossy(&bad.stdout).contains("FAIL"), "expected a FAIL line, got: {String.from_utf8_lossy(&bad.stdout)}")
+    assert(String.from_utf8_lossy(&bad.stderr).contains("Stop [E3001]"), "assert_eq should print the registered test report")
+    json := process.Command.new(&jet).args(["test", "--json", "--serial", "--fresh"]).arg(&fail).current_dir(&cwd.path).output().unwrap()
+    assert_eq(json.status.code(), Some(1), "ordinary assertion failure must fail the JSON run")
+    status := parse_json(String.from_utf8_lossy(&json.stdout)).expect("JSON ordinary-failure status")
+    test := report_object(&status, "test")
+    assert_eq(report_int(report_field(test, "failed")), 1)
+    assert_eq(report_int(report_field(test, "expectedFailures")), 0)
+    assert_eq(report_int(report_field(test, "unexpectedPasses")), 0)
+    evidence := report_object(&status, "evidence")
+    ordinary_failure := report_array(evidence, "evidence").iter().find(|record| -> report_text(report_field(record, "claim")) == "addition works" && report_text(report_field(record, "kind")) == "unit").expect("ordinary assertion terminal evidence")
+    assert_eq(report_text(report_field(ordinary_failure, "outcome")), "failed")
+    assert_eq(report_text(report_field(ordinary_failure, "expectation")), "ordinary")
+    good := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixed).current_dir(&cwd.path).output().unwrap()
+    assert(good.status.success())
+    assert(String.from_utf8_lossy(&good.stdout).contains("pass"), "fixed tests should pass")
+}
+// Rust: tests/jet_test.rs:506
+#Test("criterion_1_2_3_4_6_testing_file_failures_are_typed_and_path_bearing") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    failing := root.join("tests/fixtures/testing_failure_reports.jet")
+    fixed := root.join("tests/fixtures/testing_failure_reports.fixed.jet")
+    cwd := isolated_test_package("jet_test_typed_failures")
+    fixture_dir := cwd.path.join("tests/fixtures")
+    fs.create_dir_all(&fixture_dir).unwrap()
+    _ :: fs.copy(root.join("tests/fixtures/testing_failure_reports.golden"), fixture_dir.join("testing_failure_reports.golden")).unwrap()
+    bad := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&failing).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&bad.stdout)
+    stderr := String.from_utf8_lossy(&bad.stderr)
+    assert(!bad.status.success())
+    assert_eq(stdout.matches(": FAIL").count(), 4, "stdout: {stdout}")
+    assert(stderr.contains("golden file is missing: tests/fixtures/testing_failure_reports.missing"))
+    assert(stderr.contains("golden file cannot be read: tests/fixtures"))
+    assert(stderr.contains("golden file differs: tests/fixtures/testing_failure_reports.golden"))
+    assert(stderr.contains("fixture is missing: tests/fixtures/testing_failure_reports.missing"))
+    assert(stderr.contains("--- expected tests/fixtures/testing_failure_reports.golden"))
+    assert(stderr.contains("+++ actual tests/fixtures/testing_failure_reports.golden"))
+    removal := stderr.find("-expected\n").expect("mismatch report must show expected removal")
+    addition := stderr.find("+actual\n").expect("mismatch report must show actual addition")
+    assert(removal < addition, "diff order must be deterministic: {stderr}")
+    assert_eq(stderr.matches("Stop [E3001]").count(), 4, "stderr: {stderr}")
+    assert_eq(stderr.matches("-->").count(), 4, "stderr: {stderr}")
+    snapshot := fs.read_to_string(root.join("tests/fixtures/testing_failure_reports.stderr")).expect("testing_failure_reports.stderr")
+    normalized_stderr := stderr.replace(root.to_str().expect("manifest path"), "<repo>")
+    assert_eq(normalized_stderr, snapshot, "typed testing report snapshot drifted")
+    good := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixed).current_dir(&cwd.path).output().unwrap()
+    assert(good.status.success(), "fixed testing helpers failed:\nstdout: {String.from_utf8_lossy(&good.stdout)}\nstderr: {String.from_utf8_lossy(&good.stderr)}")
+}
+// Rust: tests/jet_test.rs:581
+#Test("release_test_uses_aot_tier_marker") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/property_tests.jet")
+    cwd := isolated_test_package("jet_release_property")
+    out := process.Command.new(&jet).args(["test", "--release", "--trace-tiers", "--show-default", "--capture=all"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(out.status.success(), "release property test failed:\nstdout: {stdout}\nstderr: {stderr}")
+    assert(stdout.contains("tier aot profile=release"), "release test did not report its AOT tier:\n{stdout}")
+    assert_eq(stdout.matches("tier aot profile=release").count(), 1, "release test must report exactly one AOT tier marker:\n{stdout}")
+    combined := "{stdout}{stderr}".to_ascii_lowercase()
+    assert(!combined.contains("tier jit"), "release test reported a JIT tier:\n{combined}")
+    assert(!combined.contains("tier interpreter"), "release test reported an interpreter tier:\n{combined}")
+}
+// Rust: tests/jet_test.rs:759
+#Test("property_generator_distribution_report_is_reproducible") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    report_path := root.join("tests/fixtures/property-generator-distribution.json")
+    report_source := fs.read_to_string(&report_path).expect("property distribution report")
+    report := parse_json(report_source).expect("valid property report JSON")
+    if report.as_object().is_err() { panic("property report must be an object") }
+    assert_eq(report_int(report_field(&report, "schema")), 1)
+    predicates := report_array(&report, "predicates")
+    predicate_ids := predicates.iter().map(|predicate| -> report_text(report_field(predicate, "id"))).collect()
+    assert_eq(predicate_ids, ["int_eq_42", "int_small_anchor", "int_extreme", "int_random_fallback"])
+    predicate_expressions := predicates.iter().map(|predicate| -> report_text(report_field(predicate, "expression"))).collect()
+    assert_eq(predicate_expressions, ["x == 42", "x == 0 || x == 1 || x == -1", "x == Int.MIN || x == Int.MAX", "x is outside the 15 explicit i64 landmarks"])
+    engines := report_array(&report, "engines")
+    assert(engines.iter().any(|engine| -> report_text(engine) == "jet_test"))
+    assert(engines.iter().any(|engine| -> report_text(engine) == "jet_fuzz"))
+    comparison := report_object(&report, "comparison")
+    for field in ["predicates", "seeds", "sample_counts", "hit_rates", "sample_stream"] { assert_eq(report_text(report_field(comparison, field)), "identical") }
+    seeds := report_object(&report, "seeds")
+    sample_counts := report_object(&report, "sample_counts")
+    test_seed := report_int(report_field(seeds, "jet_test"))
+    fuzz_seed := report_int(report_field(seeds, "jet_fuzz"))
+    assert_eq(test_seed, fuzz_seed, "engines use different base seeds")
+    seed := U64.try_from(test_seed).expect("property seed must fit u64")
+    test_count := report_int(report_field(sample_counts, "jet_test"))
+    fuzz_count := report_int(report_field(sample_counts, "jet_fuzz"))
+    assert_eq(test_count, fuzz_count, "engines use different sample counts")
+    sample_count := USize.try_from(test_count).expect("sample count must fit usize")
+    hit_rates := report_object(&report, "hit_rates")
+    test_rates := report_object(hit_rates, "jet_test")
+    fuzz_rates := report_object(hit_rates, "jet_fuzz")
+    predicate_names := ["int_eq_42", "int_small_anchor", "int_extreme", "int_random_fallback"]
+    for id in predicate_names {
+        test_rate := report_float(report_field(test_rates, id))
+        fuzz_rate := report_float(report_field(fuzz_rates, id))
+        assert_eq(test_rate, fuzz_rate, "engines disagree for {id}")
+    }
+    expected_hit_counts := report_object(&report, "hit_counts")
+    expected_digests := report_object(&report, "sample_digests")
+    card_ids := report_array(&report, "finding_card_ids")
+    assert(card_ids.iter().any(|id| -> report_text(id) == "#1905"))
+    findings := report_array(&report, "findings")
+    assert(!findings.is_empty(), "distribution findings must be carded")
+    for finding in findings {
+        ids := report_array(finding, "finding_card_ids")
+        assert(ids.iter().any(|id| -> report_text(id) == "#1905"))
+    }
+    fixture := root.join("tests/fixtures/property-generator-distribution.jet")
+    seed_arg := seed.to_string()
+    cwd := isolated_test_package("jet_property_distribution")
+    test_out := process.Command.new(&jet).args(["test", "--serial", "--show-default", "--capture=all"]).arg(&fixture).env("JET_PROP_SEED", seed_arg).env("JET_PROP_TRACE", "1").current_dir(&cwd.path).output().expect("run jet test property distribution")
+    assert(test_out.status.success(), "jet test property distribution failed:\nstdout: {String.from_utf8_lossy(&test_out.stdout)}\nstderr: {String.from_utf8_lossy(&test_out.stderr)}")
+    corpus := common.unique_tmp("jet_property_generator_distribution")
+    _ :: fs.remove_dir_all(&corpus)
+    fs.create_dir_all(&corpus).expect("create empty fuzz corpus")
+    iterations_arg := "--iterations={sample_count}"
+    corpus_arg := "--corpus={corpus.display()}"
+    fuzz_out := process.Command.new(&jet).args(["test", "--grade=generated"]).arg(iterations_arg).arg("--seed={seed}").arg(corpus_arg).arg(&fixture).arg("generator_contract").env("JET_PROP_TRACE", "1").current_dir(&cwd.path).output().expect("run generated property distribution")
+    _ :: fs.remove_dir_all(&corpus)
+    assert(fuzz_out.status.success(), "generated property distribution failed:\nstdout: {String.from_utf8_lossy(&fuzz_out.stdout)}\nstderr: {String.from_utf8_lossy(&fuzz_out.stderr)}")
+    test_samples := parse_property_samples(&test_out.stdout, "jet_test")
+    fuzz_samples := parse_property_samples(&fuzz_out.stdout, "jet_fuzz")
+    assert_eq(test_samples.len(), sample_count)
+    assert_eq(fuzz_samples.len(), sample_count)
+    for (expected_case, sample) in test_samples.iter().enumerate() { assert_eq(sample.case_index, U64(expected_case)) }
+    for (expected_case, sample) in fuzz_samples.iter().enumerate() { assert_eq(sample.case_index, U64(expected_case)) }
+    assert_eq(test_samples, fuzz_samples, "jet test and generated tests produced different case seeds or inputs")
+    test_counts := property_distribution(&test_samples)
+    fuzz_counts := property_distribution(&fuzz_samples)
+    assert_eq(test_counts, fuzz_counts, "engines disagree on predicate hits")
+    for (index, id) in predicate_names.iter().enumerate() {
+        test_counts_by_id := report_object(expected_hit_counts, "jet_test")
+        expected_test_count := report_int(report_field(test_counts_by_id, id))
+        assert_eq(USize.try_from(expected_test_count).expect("test hit count must fit usize"), test_counts[index], "wrong hit count for {id}")
+        fuzz_counts_by_id := report_object(expected_hit_counts, "jet_fuzz")
+        expected_fuzz_count := report_int(report_field(fuzz_counts_by_id, id))
+        assert_eq(USize.try_from(expected_fuzz_count).expect("fuzz hit count must fit usize"), fuzz_counts[index], "wrong fuzz hit count for {id}")
+        expected_test_rate := report_float(report_field(test_rates, id))
+        expected_fuzz_rate := report_float(report_field(fuzz_rates, id))
+        observed_rate := F64(test_counts[index]) / F64(sample_count)
+        assert((observed_rate - expected_test_rate).abs() < 1e-12, "wrong test rate for {id}")
+        assert((observed_rate - expected_fuzz_rate).abs() < 1e-12, "wrong fuzz rate for {id}")
+    }
+    for (engine, samples) in [("jet_test", &test_samples), ("jet_fuzz", &fuzz_samples)] {
+        expected_digest := report_text(report_field(expected_digests, engine))
+        assert_eq(property_sample_digest(samples), expected_digest, "generator contract drifted for {engine}")
+    }
+}
+// Rust: tests/jet_test.rs:959
+#Test("jet_property_test_passes") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/property_tests.jet")
+    cwd := isolated_test_package("jet_property_pass")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "property test example failed:\nstdout: {stdout}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    for needle in ["reverse_twice_is_identity: pass", "reverse_keeps_length: pass", "reverse of a known list: pass", "3 passed, 0 failed"] { assert(stdout.contains(needle), "missing `{needle}`:\n{stdout}") }
+}
+// Rust: tests/jet_test.rs:994
+#Test("jet_property_test_shrinks_failure") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/prop_shrink.jet")
+    cwd := isolated_test_package("jet_property_shrink")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "a failing property must exit nonzero")
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("always_small: FAIL"), "expected a FAIL line:\n{stdout}")
+    assert(stderr.contains("n = 50"), "expected the shrunk counterexample `n = 50`:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:1030
+#Test("jet_property_test_rejects_ungeneratable_param") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/prop_bad_type.jet")
+    cwd := isolated_test_package("jet_property_bad_type")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "an ungeneratable param must be rejected")
+    combined := "{String.from_utf8_lossy(&out.stdout)}{String.from_utf8_lossy(&out.stderr)}"
+    assert(combined.contains("E0613"), "expected E0613:\n{combined}")
+}
+// Rust: tests/jet_test.rs:1058
+#Test("jet_doctest_passes") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/comptime/doctests.jet")
+    cwd := isolated_test_package("jet_doctests")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    combined := "{stdout}{stderr}"
+    assert(out.status.success(), "doctest example failed:\nstdout: {stdout}\nstderr: {stderr}")
+    assert(combined.contains("doctest at") && combined.contains("pass"), "no doctest pass line:\n{combined}")
+}
+// Rust: tests/jet_test.rs:1089
+#Test("jet_doctest_mismatch_fires_e2901") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/doctest_fail.jet")
+    cwd := isolated_test_package("jet_doctest_failure")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "a wrong doctest must exit nonzero")
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E2901"), "expected E2901:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:1112
+#Test("jet_test_coverage_reports_hit_and_miss") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/coverage.jet")
+    cwd := isolated_test_package("jet_coverage_hit_miss")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--coverage"]).arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "coverage run failed:\n{stdout}")
+    assert(stdout.contains("HIT") && stdout.contains("used"), "missing HIT used:\n{stdout}")
+    assert(stdout.contains("MISS") && stdout.contains("unused"), "missing MISS unused:\n{stdout}")
+    assert(stdout.contains("1/2 functions covered"), "wrong summary:\n{stdout}")
+}
+// Rust: tests/jet_test.rs:1151
+#Test("jet_test_coverage_reports_branch_taken_and_not_taken_in_text_and_json") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/coverage.jet")
+    cwd := isolated_test_package("jet_coverage_branch")
+    run := |json: Bool| -> {
+        mut command := process.Command.new(&jet)
+        command.arg("test").arg("--coverage")
+        if json { command.arg("--json") }
+        command.arg(&fixture).current_dir(&cwd.path)
+        command.output().unwrap()
+    }
+    text_output := run(false)
+    assert(text_output.status.success(), "coverage text run failed:\n{String.from_utf8_lossy(&text_output.stdout)}\n{String.from_utf8_lossy(&text_output.stderr)}")
+    fixture_path := fixture.to_string_lossy().into_owned()
+    qualified_fixture_path := "{root.join("tests/fixtures").display()}::coverage.jet::"
+    text_source := String.from_utf8_lossy(&text_output.stdout).replace(fixture_path, "tests/fixtures/coverage.jet").replace(qualified_fixture_path, "main::")
+    compact := |value: String| -> value.split_whitespace().collect().join(" ")
+    text := compact(text_source)
+    assert(text.contains("1/2 branches covered (50%)"), "missing branch coverage summary:\n{text}")
+    json_output := run(true)
+    assert(json_output.status.success(), "coverage JSON run failed:\n{String.from_utf8_lossy(&json_output.stdout)}\n{String.from_utf8_lossy(&json_output.stderr)}")
+    json := String.from_utf8_lossy(&json_output.stdout).replace(fixture_path, "tests/fixtures/coverage.jet").replace(qualified_fixture_path, "main::")
+    report := json.lines().filter(|line| -> !line.trim().is_empty()).map(|line| -> parse_json(line).expect("coverage command emits valid JSON records")).find(|report| -> report.get("coverage").is_ok()).expect("coverage status record")
+    coverage := report_object(&report, "coverage")
+    branches := report_array(coverage, "branches")
+    functions := report_array(coverage, "functions")
+    function_state := |name: String| -> functions.iter().find(|function| -> report_text(report_field(function, "name")) == name).unwrap_or_else(|| -> panic("missing function coverage row {name}: {functions:?}"))
+    assert_eq(report_field(function_state("used"), "covered"), &DataTree.Bool(true))
+    assert_eq(report_field(function_state("unused"), "covered"), &DataTree.Bool(false))
+    assert_eq(branches.len(), 2, "test-harness branches must not count as source coverage")
+    outcome := |name: String| -> branches.iter().find(|branch| -> report_text(report_field(branch, "outcome")) == name).unwrap_or_else(|| -> panic("missing branch outcome {name}: {branches:?}"))
+    taken := outcome("taken")
+    not_taken := outcome("not-taken")
+    id := report_text(report_field(taken, "id"))
+    assert_eq(id, report_text(report_field(not_taken, "id")))
+    for (branch, outcome_name, hits, state) in [(taken, "taken", 1, "HIT"), (not_taken, "not-taken", 0, "MISS")] {
+        assert_eq(report_text(report_field(branch, "function")), "used")
+        assert_eq(report_int(report_field(branch, "hits")), hits)
+        row := "BRANCH {id} {outcome_name} {state} hits={hits}"
+        assert(text.contains(compact(row)), "text and JSON coverage differ:\n{row}\n{text}")
+    }
+}
+// Rust: tests/jet_test.rs:1248
+#Test("test_target_does_not_reintroduce_retired_command") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    example := root.join("Examples/features/tooling/test_target/run.jet")
+    cwd := isolated_test_package("jet_test_target")
+    out := process.Command.new(&jet).args(["bench", example.to_str().unwrap()]).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success())
+    assert(String.from_utf8_lossy(&out.stderr).contains("jet test --measure"))
+}
+// Rust: tests/jet_test.rs:1284
+#Test("jet_new_creates_project") {
+    jet := jet_bin()
+    parent_scratch := common.Scratch.new("jet_new_test_parent")
+    parent := &parent_scratch.path
+    tir_support.write_test_package(parent, tir_support.TIR_TEST_PACKAGE)
+    name := "hello"
+    dir := parent.join(name)
+    _ :: jet_ok_outside_core(&jet, parent, &["new", name])
+    mut created := fs.read_dir(&dir).unwrap().map(|entry| -> entry.unwrap().file_name().to_string_lossy().into_owned()).collect()
+    created.sort()
+    assert_eq(created, [".gitignore", ".jet", "package.jet", "run.jet"], "plain `jet new` writes only the print-only project")
+    source := fs.read_to_string(dir.join("run.jet")).unwrap()
+    assert(!source.contains("#CLI") && !source.contains("core.ui") && source.contains("fn run()"), "plain `jet new` must emit the print-only starter: {source}")
+    assert_eq(jet_ok_outside_core(&jet, &dir, &["run"]), "hello, world\n")
+    assert_eq(jet_ok_outside_core(&jet, &dir, &["run", "run.jet"]), "hello, world\n")
+    assert_eq(jet_ok_outside_core(&jet, &dir, &["run", "--profile=debug"]), "hello, world\n")
+    tested := jet_ok_outside_core(&jet, &dir, &["test", "--capture=all"])
+    assert(tested.contains("the greeting stays stable: pass") && tested.contains("1 passed"), "the starter test must pass:\n{tested}")
+    _ :: jet_ok_outside_core(&jet, &dir, &["build"])
+    binary := process.Command.new(dir.join(".jet/build/run")).output().unwrap()
+    assert(binary.status.success())
+    assert_eq(String.from_utf8_lossy(&binary.stdout), "hello, world\n")
+    duplicate := process.Command.new(&jet).args(["new", name]).current_dir(parent).output().unwrap()
+    assert(!duplicate.status.success(), "jet new must reject an existing project")
+    unknown := process.Command.new(&jet).args(["new", "other", "--template", "gui"]).current_dir(parent).output().unwrap()
+    unknown_stderr := String.from_utf8_lossy(&unknown.stderr)
+    assert(!unknown.status.success() && unknown_stderr.contains("E2104") && unknown_stderr.contains("cli, ui, web, overrides"), "an unknown template must name the valid ones:\n{unknown_stderr}")
+    assert(!parent.join("other").exists(), "an unknown template must create nothing")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/jet_test.rs:1355
+#Test("jet_new_every_template_runs_and_tests") {
+    jet := jet_bin()
+    parent_scratch := common.Scratch.new("jet_new_templates_parent")
+    parent := &parent_scratch.path
+    tir_support.write_test_package(parent, tir_support.TIR_TEST_PACKAGE)
+    homes := ["@run.jet", "@build.jet", "@dev.jet", "@test.jet"]
+    for template in ["cli", "ui", "web", "overrides"] {
+        name := "starter_{template}"
+        dir := parent.join(name)
+        _ :: jet_ok_outside_core(&jet, parent, &["new", name, "--template", template])
+        for home in homes { assert_eq(dir.join(home).exists(), template == "overrides", "only `--template overrides` writes `{home}`") }
+        tested := jet_ok_outside_core(&jet, &dir, &["test", "--capture=all"])
+        assert(tested.contains("1 passed"), "{template} starter test:\n{tested}")
+        if template == "web" {
+            _ :: jet_ok_outside_core(&jet, &dir, &["build", "--target", "web"])
+            assert(dir.join(".jet/build/app.wasm").is_file(), "web starter built no wasm")
+        } else {
+            stdout := jet_ok_outside_core(&jet, &dir, &["run"])
+            assert(stdout.starts_with("hello, world\n"), "{template} starter output:\n{stdout}")
+        }
+    }
+}
+// Rust: tests/jet_test.rs:1394
+#Test("jet_test_dir_recurses_into_subdirectories") {
+    jet := jet_bin()
+    if !jet.exists() { return }
+    scratch := common.Scratch.new("jet_test_recurse")
+    dir := &scratch.path
+    fs.create_dir_all(dir.join("nested/deeper")).unwrap()
+    tir_support.write_test_package(dir, tir_support.TIR_TEST_PACKAGE)
+    fs.write(dir.join("a.jet"), "#Test(\"top level\") { assert(true) }\n").unwrap()
+    fs.write(dir.join("nested/b.jet"), "#Test(\"one level down\") { assert(true) }\n").unwrap()
+    fs.write(dir.join("nested/deeper/c.jet"), "#Test(\"two levels down\") { assert(true) }\n").unwrap()
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).arg(dir).current_dir(dir).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "recursive test dir run failed:\nstdout: {stdout}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    for needle in ["top level: pass", "one level down: pass", "two levels down: pass"] { assert(stdout.contains(needle), "missing `{needle}`:\n{stdout}") }
+}
+// Rust: tests/jet_test.rs:1488
+#Test("bare_jet_test_discovers_tests_in_every_package_module") {
+    jet := jet_bin()
+    if !jet.exists() { return }
+    dir := bare_package_project("bare_package", &jet)
+    fs.write(dir.path.join("math.jet"), "fn double(n: Int) -> Int { (n * 2) }\n\n#Test(\"double returns twice the input\") {\n    assert_eq(double(3), 6)\n}\n").unwrap()
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all"]).current_dir(&dir.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "bare jet test failed in a fresh project:\nstdout: {stdout}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(stdout.contains("double returns twice the input: pass"), "the sibling module's test never ran:\n{stdout}")
+    _ :: fs.remove_dir_all(&dir.path)
+}
+// Rust: tests/jet_test.rs:1523
+#Test("jet_test_package_directory_aggregates_mixed_modules") {
+    jet := jet_bin()
+    if !jet.exists() { return }
+    dir := bare_package_project("package_directory", &jet)
+    fs.write(dir.path.join("helper.jet"), "fn helper() -> Int { 1 }\n").unwrap()
+    fs.write(dir.path.join("math.jet"), "#Test(\"mixed package test\") {\n    assert(true)\n}\n").unwrap()
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", dir.path.to_str().unwrap()]).env("NO_COLOR", "1").current_dir(&dir.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(out.status.success(), "mixed package directory failed:\nstdout: {stdout}\nstderr: {stderr}")
+    assert(stdout.contains("mixed package test: pass"), "test-bearing module never ran:\n{stdout}")
+    assert(!stderr.contains("E0601"), "test-free package modules must not emit E0601:\n{stderr}")
+    _ :: fs.remove_dir_all(&dir.path)
+}
+// Rust: tests/jet_test.rs:1564
+#Test("jet_test_package_directory_reports_no_tests_once") {
+    jet := jet_bin()
+    if !jet.exists() { return }
+    dir := bare_package_project("bare_testless", &jet)
+    fs.write(dir.path.join("math.jet"), "fn double(n: Int) -> Int { (n * 2) }\n").unwrap()
+    out := process.Command.new(&jet).args(["test", dir.path.to_str().unwrap()]).current_dir(&dir.path).env("NO_COLOR", "1").output().unwrap()
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(!out.status.success(), "a package with no tests must fail:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {stderr}")
+    assert_eq(stderr.matches("[E0601]").count(), 1, "expected exactly one E0601 report for the package:\n{stderr}")
+    _ :: fs.remove_dir_all(&dir.path)
+}
+// Rust: tests/jet_test.rs:1598
+#Test("bare_jet_test_surfaces_a_broken_package_member") {
+    jet := jet_bin()
+    if !jet.exists() { return }
+    dir := bare_package_project("bare_broken", &jet)
+    fs.write(dir.path.join("good.jet"), "#Test(\"good member passes\") {\n    assert(true)\n}\n").unwrap()
+    fs.write(dir.path.join("broken.jet"), "fn oops( {\n").unwrap()
+    out := process.Command.new(&jet).arg("test").current_dir(&dir.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(!out.status.success(), "a broken package member must fail the run:\nstdout: {stdout}\nstderr: {stderr}")
+    assert(stderr.contains("broken.jet"), "the broken member's error never surfaced:\nstdout: {stdout}\nstderr: {stderr}")
+    _ :: fs.remove_dir_all(&dir.path)
+}
+// Rust: tests/jet_test.rs:1635
+#Test("jet_test_filter_keeps_only_matching_names") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    cwd := isolated_test_package("jet_test_filter")
+    example := root.join("Examples/features/tooling/tests.jet")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--filter=consistent"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "filtered run failed:\n{stdout}")
+    assert(stdout.contains("double is consistent: pass"), "missing the matching test:\n{stdout}")
+    assert(!stdout.contains("twice the input"), "filter should have excluded the non-matching test:\n{stdout}")
+    assert(stdout.contains("1 passed, 0 failed"), "summary should count only the filtered-in test:\n{stdout}")
+}
+// Rust: tests/jet_test.rs:1672
+#Test("jet_test_shuffle_prints_the_seed_used") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/tests.jet")
+    cwd := isolated_test_package("jet_test_shuffle")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--shuffle=42"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "shuffled run failed:\n{stdout}")
+    assert(stdout.contains("shuffle: seed=42"), "expected the seed line:\n{stdout}")
+    assert(stdout.contains("2 passed, 0 failed"), "shuffling must not change which tests ran:\n{stdout}")
+}
+// Rust: tests/jet_test.rs:1705
+#Test("jet_test_serial_flag_still_passes") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/property_tests.jet")
+    cwd := isolated_test_package("jet_test_serial")
+    out := process.Command.new(&jet).args(["test", "--show-default", "--capture=all", "--serial"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    assert(out.status.success(), "serial run failed:\n{stdout}")
+    assert(stdout.contains("3 passed, 0 failed"), "serial run should behave like the parallel default:\n{stdout}")
+}
+// Rust: tests/jet_test.rs:1739
+#Test("jet_fuzz_example_clean_run_output") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/fuzz_demo.jet")
+    cwd := isolated_test_package("jet_fuzz_example")
+    corpus := fuzz_corpus_dir("example_demo")
+    out := process.Command.new(&jet).args(["test", "--grade=generated", "--iterations=500", "--seed=1"]).arg("--corpus={corpus.display()}").arg(&example).arg("reverse_twice_is_identity").current_dir(&cwd.path).output().unwrap()
+    assert(out.status.success(), "fuzz_demo.jet generated tests must pass:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    expected := fs.read_to_string(root.join("Examples/features/expected/tooling/fuzz_demo.fuzz.out")).expect("Examples/features/expected/tooling/fuzz_demo.fuzz.out")
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+    _ :: fs.remove_dir_all(&corpus)
+}
+// Rust: tests/jet_test.rs:1776
+#Test("jet_fuzz_ambiguous_target_names_candidates") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/property_tests.jet")
+    cwd := isolated_test_package("jet_fuzz_ambiguous")
+    out := process.Command.new(&jet).args(["test", "--grade=generated"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "ambiguous target must fail")
+    stderr := String.from_utf8_lossy(&out.stderr)
+    normalized := stderr.to_ascii_lowercase()
+    assert(normalized.contains("multiple property tests") && stderr.contains("jet test --grade=generated <file> <name>"), "expected the ambiguous-target message:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:1806
+#Test("jet_fuzz_no_property_test_errors") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    example := root.join("Examples/features/tooling/tests.jet")
+    cwd := isolated_test_package("jet_fuzz_no_property")
+    out := process.Command.new(&jet).args(["test", "--grade=generated"]).arg(&example).current_dir(&cwd.path).output().unwrap()
+    assert(!out.status.success(), "no property test must fail")
+    stderr := String.from_utf8_lossy(&out.stderr)
+    normalized := stderr.to_ascii_lowercase()
+    assert(normalized.contains("no property `#test fn`"), "expected the no-property-test message:\n{stderr}")
+}
+// Rust: tests/jet_test.rs:1833
+#Test("jet_fuzz_deterministic_same_seed_same_corpus") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/prop_shrink.jet")
+    cwd_a := isolated_test_package("jet_fuzz_deterministic_a")
+    corpus_a := fuzz_corpus_dir("det_a")
+    out_a := process.Command.new(&jet).args(["test", "--grade=generated", "--seed=7"]).arg("--corpus={corpus_a.display()}").arg(&fixture).current_dir(&cwd_a.path).output().unwrap()
+    corpus_b := fuzz_corpus_dir("det_b")
+    cwd_b := isolated_test_package("jet_fuzz_deterministic_b")
+    out_b := process.Command.new(&jet).args(["test", "--grade=generated", "--seed=7"]).arg("--corpus={corpus_b.display()}").arg(&fixture).current_dir(&cwd_b.path).output().unwrap()
+    assert(!out_a.status.success(), "the fixture's property always fails")
+    assert_eq(out_a.status.code(), out_b.status.code(), "same seed must reproduce the same exit code")
+    strip_saved := |s: String| -> s.lines().filter(|line| -> !line.trim_start().starts_with("saved:")).collect().join("\n")
+    assert_eq(strip_saved(String.from_utf8_lossy(&out_a.stdout)), strip_saved(String.from_utf8_lossy(&out_b.stdout)), "same seed must reproduce the same stdout (minimized input, iteration count)")
+    stdout_a := String.from_utf8_lossy(&out_a.stdout)
+    assert(stdout_a.contains("minimized input: n = 50"), "expected the shrunk boundary value:\n{stdout_a}")
+    entries_a := fs.read_dir(&corpus_a).map(|rd| -> rd.filter_map(|e| -> e.ok().map(|entry| -> entry.file_name().to_string_lossy().into_owned())).collect<[String]>()).unwrap_or_default()
+    entries_b := fs.read_dir(&corpus_b).map(|rd| -> rd.filter_map(|e| -> e.ok().map(|entry| -> entry.file_name().to_string_lossy().into_owned())).collect<[String]>()).unwrap_or_default()
+    assert_eq(entries_a.len(), 1, "expected exactly one saved corpus entry")
+    assert_eq(entries_a, entries_b, "same seed must save the same corpus file name")
+    _ :: fs.remove_dir_all(&corpus_a)
+    _ :: fs.remove_dir_all(&corpus_b)
+}
+// Rust: tests/jet_test.rs:1921
+#Test("jet_fuzz_replays_corpus_before_generating_fresh_cases") {
+    root := OSPath(env.manifest_dir())
+    jet := jet_bin()
+    if !jet.exists() { return }
+    fixture := root.join("tests/fixtures/prop_shrink.jet")
+    cwd := isolated_test_package("jet_fuzz_replay")
+    corpus := fuzz_corpus_dir("replay")
+    first := process.Command.new(&jet).args(["test", "--grade=generated", "--seed=7"]).arg("--corpus={corpus.display()}").arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!first.status.success())
+    assert(fs.read_dir(&corpus).map(|rd| -> rd.count() == 1).unwrap_or(false), "expected one saved corpus entry after the first run")
+    second := process.Command.new(&jet).args(["test", "--grade=generated", "--seed=999"]).arg("--corpus={corpus.display()}").arg(&fixture).current_dir(&cwd.path).output().unwrap()
+    assert(!second.status.success())
+    stdout := String.from_utf8_lossy(&second.stdout)
+    assert(stdout.contains("corpus replay"), "expected the second run to fail on corpus replay, not a fresh case:\n{stdout}")
+    _ :: fs.remove_dir_all(&corpus)
+}
+// Rust: tests/jet_test.rs:1971
+#Test("jet_test_harness_keeps_helper_functions_on_their_own_error_family") {
+    jet := jet_bin()
+    if !jet.exists() { return }
+    scratch := common.Scratch.new("jet_test_helper_family")
+    dir := &scratch.path
+    fs.create_dir_all(dir).unwrap()
+    tir_support.write_test_package(dir, tir_support.TIR_TEST_PACKAGE)
+    source := dir.join("helpers.jet")
+    fs.write(&source, "#Error\nstruct HelperError {\n    message: String\n}\n\nfn first(values: [Int]) -> Int {\n    return values.get(0) ?? panic(\"empty list\")\n}\n\nfn checked(flag: Bool) -> Bool {\n    assert(flag, \"flag must hold\")\n    assert_eq(flag, true)\n    return true\n}\n\nfn port(text: String) -> Int HelperError! {\n    number :: text.trim().to_int() ?? panic(\"not a port number\")\n    if number < 0 -> return Err(HelperError{message: \"negative port\"})\n    return Ok(number)\n}\n\nstruct Recorded {\n    argv: [String]\n}\n\n// #2350 part 2: both operands are read windows into borrowed non-scalar\n// parameters. Binding them by value moved out of a shared reference (E0507),\n// so the generated Rust never compiled.\nfn same_argv(expected: Recorded, oracle_argv: [String]) -> Bool {\n    assert_eq(expected.argv, oracle_argv)\n    return true\n}\n\n#Test(\"helpers with assert and ?? panic build inside a test harness\") {\n    assert(checked(true))\n    assert_eq(first([7]), 7)\n    resolved :: port(\"  8080  \") ?? -1\n    assert_eq(resolved, 8080)\n    recorded :: Recorded{argv: [\"jet\", \"run\"]}\n    assert(same_argv(recorded, [\"jet\", \"run\"]))\n}\n\n#Test(\"a failing harness assertion is still a caught failure\") {\n    assert_eq(first([1]), 2)\n}\n").unwrap()
+    out := process.Command.new(&jet).args(["test", "--show-default", "--serial"]).arg(&source).current_dir(dir).output().unwrap()
+    stdout := String.from_utf8_lossy(&out.stdout)
+    stderr := String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("helpers with assert and ?? panic build inside a test harness: pass"), "helper functions must not borrow the harness String failure ABI:\nstdout: {stdout}\nstderr: {stderr}")
+    assert(stdout.contains("a failing harness assertion is still a caught failure: FAIL"), "the `#Test` body assertion must still report as a caught failure:\nstdout: {stdout}\nstderr: {stderr}")
+    assert(!out.status.success(), "a failing test must fail the run:\nstdout: {stdout}\nstderr: {stderr}")
+}

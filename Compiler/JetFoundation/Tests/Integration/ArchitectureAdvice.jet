@@ -1,0 +1,65 @@
+// Rust: tests/architecture_advice.rs:1
+// Local complexity remains separate from bounded, source-linked advice.
+use jet_foundation.Tests.Integration.Common as common
+use std.fs as fs
+use std.process.Command
+
+// Rust: tests/architecture_advice.rs:13
+const ORDERING_POLICY_SOURCE: String = "fn optimistic_rank(after: Int) -> Int { return after + 1 }\nfn persisted_rank(after: Int) -> Int { return after + 2 }\nfn run() { print(optimistic_rank(10) == persisted_rank(10)) }\n"
+
+// Rust: tests/architecture_advice.rs:17
+fn run_complexity_lint(file: &OSPath, json: Bool) -> String {
+    // GATE #4494: native CLI subprocess.
+    command := Command.new(env!("CARGO_BIN_EXE_jet"))
+    command.args(["lint", "--complexity"]).arg(file)
+        .current_dir(file.parent().expect("ordering-policy fixture parent")).env("NO_COLOR", "1")
+    if json -> command.arg("--json")
+    output :: command.output().expect("run architecture-advice complexity lint")
+    assert(output.status.success(), "complexity lint failed:\nstdout={String.from_utf8_lossy(&output.stdout)}\nstderr={String.from_utf8_lossy(&output.stderr)}")
+    String.from_utf8(output.stdout).expect("complexity lint stdout is UTF-8")
+}
+
+// Rust: tests/architecture_advice.rs:39
+fn assert_architecture_contract(json: String, file: &OSPath) -> Unit {
+    assert(json.contains("\"contract\":\"jet.architecture-advice/v1\""), "JSON must carry the versioned architecture-advice contract:\n{json}")
+    assert(json.contains("\"architecture_advice\""), "JSON must expose the architecture-advice projection:\n{json}")
+    source_name :: file.file_name().and_then(fn(name) { name.to_str() }).expect("ordering-policy fixture filename")
+    evidence_start :: json.find("\"source_evidence\"").expect("source evidence field")
+    evidence_end :: json[evidence_start..].find("\"affected_boundaries\"").map(fn(offset) { evidence_start + offset }).expect("affected boundaries after source evidence")
+    evidence := json[evidence_start..<evidence_end] // #4303
+    assert(evidence.contains(source_name), "source evidence must identify the concrete fixture source:\n{evidence}")
+    loop item in ["\"role\":\"caller-definition\"", "\"role\":\"callee-definition\"", "\"role\":\"checked-call-site\"", "\"span\":{\"start\":"] {
+        assert(json.contains(item), "JSON must carry concrete source evidence {item}:\n{json}")
+    }
+    assert(json.contains("\"affected_boundaries\"") && json.contains(" -> "), "JSON must carry a concrete module boundary:\n{json}")
+    assert(json.contains("\"name\":\"checked_reference_resolution\",\"status\":\"passed\""), "checked-reference behavior must pass:\n{json}")
+    assert(json.contains("\"name\":\"consumer_behavior\",\"status\":\"not_run\"") && json.contains("\"name\":\"cross_mode_agreement\",\"status\":\"unknown\""), "runtime uncertainty must remain explicit:\n{json}")
+    local_start :: json.find("\"local_complexity\"").expect("local complexity field")
+    advice_start :: json.find("\"architecture_advice\"").expect("architecture advice field")
+    assert(local_start < advice_start, "local complexity and architecture advice must be separate fields:\n{json}")
+    advice_end :: json[advice_start..].find("\"measurement\"").map(fn(offset) { advice_start + offset }).expect("measurement after architecture advice")
+    advice := json[advice_start..<advice_end] // #4303
+    assert(!advice.contains("\"score\"") && !advice.contains("equivalence"), "architecture advice must not present complexity as an equivalence score:\n{advice}")
+    assert(json.contains("\"kind\":\"consumer-agreement\"") && json.contains("\"operator_action\":\"review_or_reject\""), "the candidate must remain advisory rather than an equivalence policy:\n{json}")
+}
+
+// Rust: tests/architecture_advice.rs:116
+#Test("complexity_lint_reports_ordering_policy_advice_without_equivalence_claim") {
+    scratch :: common.Scratch.new("architecture-advice-ordering-policy")
+    file :: scratch.join("ordering_policy.jet")
+    fs.write(&file, ORDERING_POLICY_SOURCE).expect("write ordering-policy fixture")
+    json :: run_complexity_lint(&file, true)
+    assert_architecture_contract(json, &file)
+    loop function in ["optimistic_rank", "persisted_rank"] {
+        assert(json.contains("\"fn\":\"{function}\""), "local complexity must retain {function}'s score row:\n{json}")
+    }
+    assert(json.contains("\"score\":0"), "the simple ordering helpers must retain their local complexity score:\n{json}")
+    text :: run_complexity_lint(&file, false)
+    assert(text.contains("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):"), "text output must identify the advisory architecture surface:\n{text}")
+    loop evidence in ["evidence: caller-definition", "evidence: callee-definition", "evidence: checked-call-site", "boundary: ", " -> ", "check: checked_reference_resolution=passed", "check: consumer_behavior=not_run", "check: cross_mode_agreement=unknown"] {
+        assert(text.contains(evidence), "text output must carry architecture evidence {evidence}:\n{text}")
+    }
+    advice_start :: text.find("architecture advice (D-ARCH-ADVICE1; advisory, operator may reject):").expect("text architecture advice heading")
+    advice := text[advice_start..] // #4303
+    assert(!advice.contains("score") && !advice.contains("equivalence"), "text architecture advice must not present complexity as an equivalence score:\n{advice}")
+}

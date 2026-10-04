@@ -1,0 +1,16 @@
+use jet_codegen.Codegen.Embedding.[ExportScalar]
+
+// Rust: crates/jet-codegen/src/Codegen/Embedding.rs:349
+#Test("scalar_lowering_table_covers_both_boundaries") {
+    rows :: [(ExportScalar, String, String, String)]{
+        (ExportScalar.Int, "i64", "s64", "int64_t"),
+        (ExportScalar.Float, "f64", "f64", "double"),
+        (ExportScalar.Bool, "bool", "bool", "bool"),
+        (ExportScalar.Text, "String", "string", "JetText")
+    }
+    loop (scalar, rust, wit, c) in rows {
+        assert_eq(scalar.rust_ty(), rust)
+        assert_eq(scalar.wit_ty(), wit)
+        assert_eq(scalar.c_ty(), c)
+    }
+}

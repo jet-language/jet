@@ -1,1173 +1,144 @@
-// PORT-PENDING 1177 tests-tir-place-window-lifetimes-module-group: tests/tir_place_window_lifetimes.rs:1-173
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Place-window address provenance must follow the referent's storage.
-//RS 
-//RS mod common;
-//RS 
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS use tir_support::{assert_tiers_agree, build_and_run, compile, interpreter_run};
-//RS 
-//RS const STACK_SOURCE: &str = r###"
-//RS use core.mem
-//RS fn run() {
-//RS     value :: 17
-//RS     cell :: value
-//RS     #Unsafe("cell is live on this stack frame") {
-//RS         addr :: mem.address_of(cell)
-//RS         pointer :: mem.Ptr<Int>.from_addr(addr)
-//RS         print(pointer.*)
-//RS         via_volatile :: mem.volatile_read(pointer)
-//RS         print(via_volatile)
-//RS     }
-//RS }
-//RS "###;
-//RS 
-//RS const BORROWED_SOURCE: &str = r###"
-//RS use core.mem
-//RS fn read(value: &Int) -> Int {
-//RS     cell :: value
-//RS     #Unsafe("the borrowed value is live in the caller") {
-//RS         addr :: mem.address_of(cell)
-//RS         pointer :: mem.Ptr<Int>.from_addr(addr)
-//RS         print(pointer.*)
-//RS         via_volatile :: mem.volatile_read(pointer)
-//RS         return via_volatile
-//RS     }
-//RS }
-//RS fn run() {
-//RS     value := 23
-//RS     print(read(&value))
-//RS }
-//RS "###;
-//RS 
-//RS const HEAP_SOURCE: &str = r###"
-//RS use core.mem
-//RS fn run() {
-//RS     values := [31, 47]
-//RS     cell :: values[0]
-//RS     #Unsafe("the list element remains heap-owned") {
-//RS         addr :: mem.address_of(cell)
-//RS         pointer :: mem.Ptr<Int>.from_addr(addr)
-//RS         print(pointer.*)
-//RS         via_volatile :: mem.volatile_read(pointer)
-//RS         print(via_volatile)
-//RS     }
-//RS }
-//RS "###;
-//RS 
-//RS const CARD_2822_SOURCE: &str = r###"
-//RS fn run() {
-//RS     rows := [[1, 2]]
-//RS     if true {
-//RS         view :: &rows[0]
-//RS         view[0] = 9
-//RS         print(view[0])
-//RS     }
-//RS     print(rows[0][0])
-//RS }
-//RS "###;
-//RS 
-//RS const CARD_2823_SOURCE: &str = r###"
-//RS struct Parcel { score: Int }
-//RS fn run() {
-//RS     parcels := [Parcel{score: 2}]
-//RS     if true {
-//RS         edit :: &parcels[0].score
-//RS         edit = 12
-//RS         print(edit)
-//RS     }
-//RS     print(parcels[0].score)
-//RS }
-//RS "###;
-//RS 
-//RS const CARD_2826_SOURCE: &str = r###"
-//RS fn run() {
-//RS     rows := [[2]]
-//RS     if true {
-//RS         edit :: &rows[0][0]
-//RS         edit = 12
-//RS         print(edit)
-//RS     }
-//RS     print(rows[0][0])
-//RS }
-//RS "###;
-//RS 
-//RS #[test]
-//RS fn stack_window_uses_expiring_sentry_address() {
-//RS     let rust = compile("tir_place_window_stack", STACK_SOURCE);
-//RS     assert!(
-//RS         rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of"),
-//RS         "stack place window lost stack sentry registration:\n{rust}"
-//RS     );
-//RS     assert_tiers_agree("tir_place_window_stack_runtime", STACK_SOURCE, "17\n17\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn borrowed_window_stays_caller_owned() {
-//RS     let rust = compile("tir_place_window_borrowed", BORROWED_SOURCE);
-//RS     assert!(
-//RS         rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_address_of"),
-//RS         "borrowed place window was promoted to stack sentry registration:\n{rust}"
-//RS     );
-//RS     assert!(!rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of"));
-//RS     let (interpreter_code, interpreter_out, interpreter_err) =
-//RS         interpreter_run("tir_place_window_borrowed_runtime", BORROWED_SOURCE);
-//RS     assert_eq!(interpreter_code, 0, "interpreter stderr: {interpreter_err}");
-//RS     assert_eq!(interpreter_out, "23\n23\n");
-//RS     let (aot_code, aot_out) =
-//RS         build_and_run("tir_place_window_borrowed_runtime_aot", BORROWED_SOURCE);
-//RS     assert_eq!(aot_code, 0);
-//RS     assert_eq!(aot_out, "23\n23\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn heap_element_window_stays_allocator_owned() {
-//RS     let rust = compile("tir_place_window_heap", HEAP_SOURCE);
-//RS     assert!(
-//RS         rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_address_of"),
-//RS         "heap element place window was promoted to stack sentry registration:\n{rust}"
-//RS     );
-//RS     assert!(!rust.contains("let __jet_addr: i64 = jet_mem::jet_sentry_stack_address_of"));
-//RS     assert_tiers_agree("tir_place_window_heap_runtime", HEAP_SOURCE, "31\n31\n");
-//RS }
-//RS 
-//RS /// Hardening finding lane-1/nested-write-window-jit-tier-gap (card #2822): tier-parity regression fixture.
-//RS #[test]
-//RS fn card_2822_nested_write_view() {
-//RS     assert_tiers_agree("tir_card_2822_nested_write_view", CARD_2822_SOURCE, "9\n9\n");
-//RS }
-//RS 
-//RS /// Hardening finding lane-1/indexed-field-write-window-detaches (card #2823): tier-parity regression fixture.
-//RS #[test]
-//RS fn card_2823_scalar_field_write_view() {
-//RS     assert_tiers_agree(
-//RS         "tir_card_2823_scalar_field_write_view",
-//RS         CARD_2823_SOURCE,
-//RS         "12\n12\n",
-//RS     );
-//RS }
-//RS 
-//RS /// Hardening finding lane-1/nested-scalar-window-shape-drift (card #2826): tier-parity regression fixture.
-//RS #[test]
-//RS fn card_2826_nested_scalar_write_view() {
-//RS     assert_tiers_agree(
-//RS         "tir_card_2826_nested_scalar_write_view",
-//RS         CARD_2826_SOURCE,
-//RS         "12\n12\n",
-//RS     );
-//RS }
-//RS 
-//RS /// Hardening finding lane-1/nested-place-copy-jet-run-alias (card #2821): tier-parity regression fixture.
-//RS #[test]
-//RS fn card_2821_nested_copy_binding_tier_parity() {
-//RS     let src = r###"
-//RS fn run() {
-//RS     rows := [[1, 2]]
-//RS     alias := rows[0]
-//RS     alias[0] = 9
-//RS     print(alias[0])
-//RS     print(rows[0][0])
-//RS }
-//RS "###;
-//RS     assert_tiers_agree("tir_card_2821_nested_copy_binding", src, "9\n1\n");
-//RS }
-// END-PORT-PENDING 1177 tests/tir_place_window_lifetimes.rs:1-173
+// Rust: tests/tir_place_window_lifetimes.rs:1
+use std.[fs, env, process, time]
+use std.process.[Command, Output]
+use jet_driver.Driver.[compile_with_path, render_diagnostics]
+use jet_foundation.Tests.Integration.TirSupport.Mod as tir_support
+// GATE #4494: real filesystem/process/time and native compiler execution.
 
-// PORT-PENDING 1177 tests-tir-place-window-lifetimes-module-group: tests/tir_target_structure.rs:1-40
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Structural guard for the independently compiled TIR feature-family targets.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::Path;
-//RS 
-//RS #[test]
-//RS fn tir_integration_target_stays_split_by_feature_family() {
-//RS     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
-//RS     assert!(
-//RS         !root.join("tests/tir.rs").exists(),
-//RS         "tests/tir.rs must not recreate one giant TIR integration target"
-//RS     );
-//RS 
-//RS     for target in [
-//RS         "tir_collections_and_methods",
-//RS         "tir_control_and_data",
-//RS         "tir_core_and_closures",
-//RS         "tir_data_math_reactive",
-//RS         "tir_io_and_ownership",
-//RS         "tir_language_features",
-//RS         "tir_modules_and_enums",
-//RS         "tir_operators_and_runtime",
-//RS         "tir_patterns_and_fields",
-//RS         "tir_unsafe_and_runtime",
-//RS     ] {
-//RS         let path = root.join(format!("tests/{target}.rs"));
-//RS         let source = fs::read_to_string(&path)
-//RS             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-//RS         assert!(
-//RS             source.lines().count() <= 800,
-//RS             "{target}.rs grew past its feature-family boundary"
-//RS         );
-//RS         assert!(
-//RS             !source.contains("include!(") && !source.contains("#[path = \"tir/"),
-//RS             "{target}.rs must remain an independent Cargo target, not a module shell"
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 1177 tests/tir_target_structure.rs:1-40
-
-// PORT-PENDING 1177 tests-tir-place-window-lifetimes-module-group: tests/todo_fill.rs:1-52
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::path::PathBuf;
-//RS use std::process::Command;
-//RS 
-//RS fn todo_example() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/tooling/todo_hole.jet")
-//RS }
-//RS 
-//RS #[test]
-//RS fn check_reports_goal_and_fill_only_offers_checked_candidates() {
-//RS     let file = todo_example();
-//RS     let check = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["check", file.to_str().unwrap()])
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(check.status.success(), "check failed: {:?}", check);
-//RS     let check_text = format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&check.stdout),
-//RS         String::from_utf8_lossy(&check.stderr)
-//RS     );
-//RS     assert!(check_text.contains("expected type: Int"), "{check_text}");
-//RS     assert!(
-//RS         check_text.contains("required effects: none"),
-//RS         "{check_text}"
-//RS     );
-//RS     assert!(
-//RS         check_text.contains("required effects: [IO]"),
-//RS         "{check_text}"
-//RS     );
-//RS 
-//RS     let fill = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fill", file.to_str().unwrap()])
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(fill.status.success(), "fill failed: {:?}", fill);
-//RS     let fill_text = String::from_utf8_lossy(&fill.stdout);
-//RS     assert!(fill_text.contains("candidates:"), "{fill_text}");
-//RS     assert!(fill_text.contains("n (checked)"), "{fill_text}");
-//RS     assert!(fill_text.contains("0 (checked)"), "{fill_text}");
-//RS     for line in fill_text.lines() {
-//RS         if line
-//RS             .trim_start()
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(|character| character.is_ascii_digit())
-//RS         {
-//RS             assert!(line.contains("(checked)"), "unchecked proposal: {line}");
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 1177 tests/todo_fill.rs:1-52
-
-// PORT-PENDING 1177 tests-tir-place-window-lifetimes-module-group: tests/toolchain_pin.rs:1-171
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! End-to-end coverage for the `jet:` self-toolchain pin (D-JPK-TOOLCHAIN1=A,
-//RS //! card #179, U30). Drives the real `jet` binary through the verbs
-//RS //! (`init` / `toolchain` / `update jet`) and the version-dispatch guard on
-//RS //! `jet build`, exercising the E1249–E1252 diagnostics.
-//RS //!
-//RS //! DISTINCT from the Rust bridge build toolchain (D-JPK-BUILDTOOL1); this is
-//RS //! the Jet compiler pin.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS 
-//RS fn jet_bin() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-//RS }
-//RS 
-//RS fn scratch(tag: &str) -> PathBuf {
-//RS     let base = std::env::temp_dir().join(format!(
-//RS         "jet_toolchain_pin_{tag}_{}_{:?}",
-//RS         std::process::id(),
-//RS         std::time::SystemTime::now()
-//RS             .duration_since(std::time::UNIX_EPOCH)
-//RS             .unwrap()
-//RS             .as_nanos()
-//RS     ));
-//RS     std::fs::create_dir_all(&base).unwrap();
-//RS     base
-//RS }
-//RS 
-//RS fn run(args: &[&str], cwd: &Path) -> std::process::Output {
-//RS     Command::new(jet_bin())
-//RS         .args(args)
-//RS         .current_dir(cwd)
-//RS         .output()
-//RS         .expect("jet binary should run")
-//RS }
-//RS 
-//RS fn write(dir: &Path, name: &str, body: &str) {
-//RS     std::fs::write(dir.join(name), body).unwrap();
-//RS }
-//RS 
-//RS /// `jet init` writes a `jet:` pin; `jet self toolchain` reports it; `jet update jet`
-//RS /// moves the lock's `[[toolchain]]` record.
-//RS #[test]
-//RS fn init_report_and_update_roundtrip() {
-//RS     let dir = scratch("roundtrip");
-//RS 
-//RS     let out = run(&["init"], &dir);
-//RS     assert!(out.status.success(), "init failed: {out:?}");
-//RS     let manifest = std::fs::read_to_string(dir.join("package.jet")).unwrap();
-//RS     assert!(manifest.contains("jet:"), "init wrote no pin:\n{manifest}");
-//RS 
-//RS     let out = run(&["self", "toolchain"], &dir);
-//RS     let text = String::from_utf8_lossy(&out.stdout);
-//RS     assert!(text.contains("pin:"), "toolchain report:\n{text}");
-//RS 
-//RS     let out = run(&["update", "jet", "0.4"], &dir);
-//RS     assert!(out.status.success(), "update jet failed: {out:?}");
-//RS     let lock = std::fs::read_to_string(dir.join(".jet/lock")).unwrap();
-//RS     assert!(
-//RS         lock.contains("[[toolchain]]"),
-//RS         "lock has no toolchain:\n{lock}"
-//RS     );
-//RS     assert!(lock.contains("channel = \"0.4\""), "lock channel:\n{lock}");
-//RS     assert!(
-//RS         lock.contains("version = \"0.4.0\""),
-//RS         "lock version:\n{lock}"
-//RS     );
-//RS 
-//RS     // `jet self toolchain` now reports the locked exact version + object id.
-//RS     let out = run(&["self", "toolchain"], &dir);
-//RS     let text = String::from_utf8_lossy(&out.stdout);
-//RS     assert!(text.contains("locked:   0.4.0"), "locked report:\n{text}");
-//RS     assert!(text.contains("object:   jet-0.4.0-"), "object id:\n{text}");
-//RS 
-//RS     std::fs::remove_dir_all(&dir).ok();
-//RS }
-//RS 
-//RS /// A malformed `jet:` pin (a version range, not a channel) is `E1249`, caught
-//RS /// by the dispatch guard before the build runs.
-//RS #[test]
-//RS fn bad_pin_reports_e1249() {
-//RS     let dir = scratch("badpin");
-//RS     // A malformed channel ref (not a version series, not a named channel). A
-//RS     // range form like `>=9` is instead the legacy E1208 compat constraint.
-//RS     write(
-//RS         &dir,
-//RS         "package.jet",
-//RS         "name: \"x\"\nversion: \"1\"\njet: 1.x\n",
-//RS     );
-//RS     write(&dir, "main.jet", "module x { fn run() { } }\n");
-//RS     let out = run(&["build", "main.jet"], &dir);
-//RS     let err = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(err.contains("E1249"), "expected E1249:\n{err}");
-//RS     assert!(!out.status.success());
-//RS     std::fs::remove_dir_all(&dir).ok();
-//RS }
-//RS 
-//RS /// An unlocked channel pin under `--offline` is `E1250` — offline can't resolve
-//RS /// a channel with no lock entry.
-//RS #[test]
-//RS fn offline_unlocked_channel_reports_e1250() {
-//RS     let dir = scratch("offline");
-//RS     // pin a channel other than the running toolchain's, with no lock present
-//RS     write(
-//RS         &dir,
-//RS         "package.jet",
-//RS         "name: \"x\"\nversion: \"1\"\njet: 0.9\n",
-//RS     );
-//RS     write(&dir, "main.jet", "module x { fn run() { } }\n");
-//RS     let out = run(&["build", "main.jet", "--offline"], &dir);
-//RS     let err = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(err.contains("E1250"), "expected E1250:\n{err}");
-//RS     std::fs::remove_dir_all(&dir).ok();
-//RS }
-//RS 
-//RS /// A version-mismatched pin whose prebuilt object isn't available for this
-//RS /// platform is `E1251` — never a source build, never a silent wrong `jet`.
-//RS #[test]
-//RS fn platform_miss_reports_e1251() {
-//RS     let dir = scratch("miss");
-//RS     // 0.9 differs from the running 1.x channel; online, no fixture object.
-//RS     write(
-//RS         &dir,
-//RS         "package.jet",
-//RS         "name: \"x\"\nversion: \"1\"\njet: 0.9\n",
-//RS     );
-//RS     write(&dir, "main.jet", "module x { fn run() { } }\n");
-//RS     let out = run(&["build", "main.jet"], &dir);
-//RS     let err = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(err.contains("E1251"), "expected E1251:\n{err}");
-//RS     std::fs::remove_dir_all(&dir).ok();
-//RS }
-//RS 
-//RS /// `jet init` refuses to clobber an existing manifest — `E1252`.
-//RS #[test]
-//RS fn init_refuses_to_clobber_reports_e1252() {
-//RS     let dir = scratch("clobber");
-//RS     write(&dir, "package.jet", "name: \"x\"\nversion: \"1\"\n");
-//RS     let out = run(&["init"], &dir);
-//RS     let err = String::from_utf8_lossy(&out.stderr);
-//RS     assert!(err.contains("E1252"), "expected E1252:\n{err}");
-//RS     assert!(!out.status.success());
-//RS     std::fs::remove_dir_all(&dir).ok();
-//RS }
-//RS 
-//RS /// A project pinned to the running toolchain's own channel builds natively —
-//RS /// no handoff, and no `.jet/lock` written into the tree by a plain build.
-//RS #[test]
-//RS fn in_channel_pin_runs_native_without_writing_lock() {
-//RS     let dir = scratch("native");
-//RS     let running_channel = {
-//RS         let v = env!("CARGO_PKG_VERSION");
-//RS         let mut it = v.split('.');
-//RS         format!("{}.{}", it.next().unwrap(), it.next().unwrap())
-//RS     };
-//RS     write(
-//RS         &dir,
-//RS         "package.jet",
-//RS         &format!("name: \"x\"\nversion: \"1\"\njet: {running_channel}\n"),
-//RS     );
-//RS     write(&dir, "main.jet", "fn run() { print(\"ok\") }\n");
-//RS     let out = run(&["build", "main.jet"], &dir);
-//RS     assert!(out.status.success(), "native build failed: {out:?}");
-//RS     assert!(
-//RS         !dir.join(".jet/lock").exists(),
-//RS         "a plain build must not write a toolchain lock into the tree"
-//RS     );
-//RS     std::fs::remove_dir_all(&dir).ok();
-//RS }
-// END-PORT-PENDING 1177 tests/toolchain_pin.rs:1-171
-
-// PORT-PENDING 1177 tests-tir-place-window-lifetimes-module-group: tests/ui_backend.rs:1-187
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-RENDERTGT2=A (c133 M1): null backend measure→layout→paint conformance.
-//RS 
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS use std::process::Command;
-//RS 
-//RS mod common;
-//RS mod tir_support;
-//RS 
-//RS fn build_and_run(dir: &PathBuf, name: &str, src: &str) -> (i32, String, String) {
-//RS     tir_support::write_test_package(dir, tir_support::TIR_TEST_PACKAGE);
-//RS     let path = dir.join(name);
-//RS     fs::write(&path, src).unwrap();
-//RS     let shown = path.to_string_lossy();
-//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     });
-//RS     let rs = dir.join(format!("{name}.rs"));
-//RS     let bin = dir.join(name);
-//RS     fs::write(&rs, &out.rust).unwrap();
-//RS     let rustc = Command::new("rustc")
-//RS         .args([
-//RS             "--edition",
-//RS             "2021",
-//RS             rs.to_str().unwrap(),
-//RS             "-o",
-//RS             bin.to_str().unwrap(),
-//RS         ])
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         rustc.status.success(),
-//RS         "rustc rejected generated code:\n{}",
-//RS         String::from_utf8_lossy(&rustc.stderr)
-//RS     );
-//RS     let run = Command::new(&bin).output().unwrap();
-//RS     (
-//RS         run.status.code().unwrap_or(0),
-//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS #[test]
-//RS fn null_backend_measure_layout_paint_roundtrip() {
-//RS     let have_rustc = common::have_rustc();
-//RS     if !have_rustc {
-//RS         eprintln!("note: skipping ui backend test (need rustc)");
-//RS         return;
-//RS     }
-//RS     let dir = std::env::temp_dir().join(format!("jet_ui_backend_{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let (code, stdout, stderr) = build_and_run(
-//RS         &dir,
-//RS         "ui_null_backend",
-//RS         include_str!("../Examples/features/ui/ui_null_backend.jet"),
-//RS     );
-//RS     assert_eq!(code, 0, "ui backend roundtrip failed: {stderr}");
-//RS     let expected = include_str!("../Examples/features/expected/ui/ui_null_backend.out");
-//RS     assert_eq!(stdout, expected);
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn tui_backend_reactive_render_loop() {
-//RS     tir_support::assert_example_cli_tiers_agree_with_package(
-//RS         "ui/ui_tui_reactive",
-//RS         Some(tir_support::TIR_TEST_PACKAGE),
-//RS         |actual| assert_eq!(actual, include_str!("../Examples/features/expected/ui/ui_tui_reactive.out")),
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn tui_backend_reactive_conditional_capture() {
-//RS     tir_support::assert_tiers_agree_with_application_policy(
-//RS         "ui_reactive_conditional_capture",
-//RS         r#"
-//RS use core.ui as ui
-//RS use core.reactive as reactive
-//RS 
-//RS fn view(title: String) -> UINode -> ui.box([
-//RS     ui.text(title),
-//RS     ui.node_role("notes", 30.0, 3.0, ui.aria_role_text_input())
-//RS ])
-//RS 
-//RS fn run() {
-//RS     selected := reactive.signal(0)
-//RS     backend := ui.tui_backend()
-//RS     render_backend :: ~backend
-//RS     ui.reactive_render(() -> {
-//RS         marker :: if selected.get() == 0 -> "* " else -> "  "
-//RS         ui.mount(render_backend, view("{marker}Meeting"))
-//RS     })
-//RS     print("initial: {backend.render_count()}")
-//RS     &selected.set(1)
-//RS     print("updated: {backend.render_count()}")
-//RS     &selected.set(0)
-//RS     print("reset: {backend.render_count()}")
-//RS }
-//RS "#,
-//RS         "initial: 1\nupdated: 2\nreset: 3\n",
-//RS         tir_support::TIR_TEST_PACKAGE,
-//RS     );
-//RS }
-//RS 
-//RS /// D-UI-MOUNT1=A: mount twice yields the same paint transcript as one mount.
-//RS #[test]
-//RS fn mount_twice_is_idempotent() {
-//RS     let have_rustc = common::have_rustc();
-//RS     if !have_rustc {
-//RS         eprintln!("note: skipping ui mount idempotence test (need rustc)");
-//RS         return;
-//RS     }
-//RS     let dir = std::env::temp_dir().join(format!("jet_ui_mount_{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let src = r#"use core.ui as ui
-//RS fn run() {
-//RS     tree := ui.box([ui.text("Title"), ui.button("Save")])
-//RS     null := ui.null_backend()
-//RS     ui.mount(null, tree)
-//RS     loop command in null.commands() { print(command) }
-//RS     print("---")
-//RS     ui.mount(null, tree)
-//RS     loop command in null.commands() { print(command) }
-//RS }
-//RS "#;
-//RS     let (code, stdout, stderr) = build_and_run(&dir, "ui_mount_twice", src);
-//RS     assert_eq!(code, 0, "mount twice failed: {stderr}");
-//RS     let expected = "\
-//RS text({x:0,y:0,w:8,h:1}, Title)
-//RS fill({x:0,y:1,w:8,h:1}, #000000)
-//RS text({x:0,y:1,w:8,h:1}, Save)
-//RS ---
-//RS text({x:0,y:0,w:8,h:1}, Title)
-//RS fill({x:0,y:1,w:8,h:1}, #000000)
-//RS text({x:0,y:1,w:8,h:1}, Save)
-//RS ";
-//RS     assert_eq!(stdout, expected);
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS /// D-UITREE1: typed constructors form one tree consumed unchanged by null and
-//RS /// TUI backends. Painting the tree also derives one shared focus order.
-//RS #[test]
-//RS fn typed_component_tree_has_backend_parity() {
-//RS     let have_rustc = common::have_rustc();
-//RS     if !have_rustc {
-//RS         eprintln!("note: skipping typed UI tree test (need rustc)");
-//RS         return;
-//RS     }
-//RS     let dir = std::env::temp_dir().join(format!("jet_ui_tree_{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let src = r#"use core.ui as ui
-//RS fn run() {
-//RS     tree := ui.box([ui.text("Title"), ui.button("Save")])
-//RS     limit := ui.constraint(0.0, 0.0, 80.0, 24.0)
-//RS 
-//RS     null := ui.null_backend()
-//RS     size := null.measure(tree, limit)
-//RS     null.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
-//RS     null.paint(tree)
-//RS     print(null.focused_label())
-//RS     null.on_event(ui.key_event("Tab"))
-//RS     print(null.focused_label())
-//RS     loop command in null.commands() { print(command) }
-//RS 
-//RS     tui := ui.tui_backend()
-//RS     tui.layout(tree, ui.rect(0.0, 0.0, size.width, size.height))
-//RS     tui.paint(tree)
-//RS     print(tui.focused_label())
-//RS     loop line in tui.frame_lines() { print(line) }
-//RS }
-//RS "#;
-//RS     let (code, stdout, stderr) = build_and_run(&dir, "ui_typed_tree", src);
-//RS     assert_eq!(code, 0, "typed tree failed: {stderr}");
-//RS     assert_eq!(
-//RS         stdout,
-//RS         "Save\nSave\ntext({x:0,y:0,w:8,h:1}, Title)\nfill({x:0,y:1,w:8,h:1}, #000000)\ntext({x:0,y:1,w:8,h:1}, Save)\nSave\nTitle\nSave\n"
-//RS     );
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-// END-PORT-PENDING 1177 tests/ui_backend.rs:1-187
-
-// PORT-PENDING 1177 tests-tir-place-window-lifetimes-module-group: tests/ui_fixes.rs:1-526
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! M2 exit criterion: every ownership ui fixture's Fix compiles.
-//RS //!
-//RS //! Each failing tests/ui/NAME.jet may have a sibling NAME.fixed.jet that
-//RS //! applies the diagnostic's Fix line. Those companions must pass the front
-//RS //! end; when rustc is available, generated Rust must build too (I2).
-//RS 
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicUsize, Ordering};
-//RS use std::sync::{Arc, Mutex};
-//RS 
-//RS mod common;
-//RS use common::{panic_message, test_worker_count, Scratch};
-//RS 
-//RS #[test]
-//RS fn ownership_ui_fixes_compile() {
-//RS     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/ui");
-//RS     let ext = jet::Syntax::FILE_EXT;
-//RS     let have_rustc = common::have_rustc();
-//RS     let have_cargo = Command::new("cargo").arg("--version").output().is_ok();
-//RS 
-//RS     let mut entries: Vec<_> = fs::read_dir(&dir)
-//RS         .unwrap()
-//RS         .map(|e| e.unwrap().path())
-//RS         .filter(|p| {
-//RS             p.file_name()
-//RS                 .and_then(|n| n.to_str())
-//RS                 .is_some_and(|n| n.ends_with(&format!(".fixed.{}", ext)))
-//RS         })
-//RS         .collect();
-//RS     entries.sort();
-//RS 
-//RS     assert!(
-//RS         entries.len() >= 10,
-//RS         "expected M2 ownership .fixed.jet companions, found {}",
-//RS         entries.len()
-//RS     );
-//RS 
-//RS     let entries = Arc::new(entries);
-//RS     let next = Arc::new(AtomicUsize::new(0));
-//RS     let failures = Arc::new(Mutex::new(Vec::new()));
-//RS     let workers = test_worker_count(16).min(entries.len().max(1));
-//RS     let mut handles = Vec::new();
-//RS     for _ in 0..workers {
-//RS         let entries = Arc::clone(&entries);
-//RS         let next = Arc::clone(&next);
-//RS         let failures = Arc::clone(&failures);
-//RS         handles.push(std::thread::spawn(move || loop {
-//RS             let i = next.fetch_add(1, Ordering::Relaxed);
-//RS             if i >= entries.len() {
-//RS                 break;
-//RS             }
-//RS             let path = entries[i].clone();
-//RS             if let Err(payload) =
-//RS                 std::panic::catch_unwind(|| check_fixed_companion(i, &path, have_rustc, have_cargo))
-//RS             {
-//RS                 failures.lock().unwrap().push(panic_message(payload));
-//RS             }
-//RS         }));
-//RS     }
-//RS     for handle in handles {
-//RS         handle.join().unwrap();
-//RS     }
-//RS     let failures = failures.lock().unwrap();
-//RS     if !failures.is_empty() {
-//RS         panic!("{}", failures.join("\n\n"));
-//RS     }
-//RS }
-//RS 
-//RS fn check_fixed_companion(i: usize, path: &PathBuf, have_rustc: bool, have_cargo: bool) {
-//RS     let name = path.file_name().unwrap().to_string_lossy();
-//RS     let src = fs::read_to_string(path).unwrap();
-//RS     let shown = format!("tests/ui/{}", name);
-//RS 
-//RS     let stem_name = path.file_stem().and_then(|s| s.to_str()).unwrap_or("");
-//RS     if stem_name.starts_with("ffi_") && !have_cargo {
-//RS         return;
-//RS     }
-//RS 
-//RS     let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "fixed companion {} should compile:\n{}",
-//RS             name,
-//RS             jet::render_diagnostics(&shown, &src, &diags)
-//RS         );
-//RS     });
-//RS 
-//RS     // Until M3 struct literals, `take_required.fixed` proves the sema
-//RS     // fix only (Int passed to `take NoClone` is not valid Rust yet).
-//RS     let rustc_skip = stem_name == "take_required.fixed";
-//RS 
-//RS     if have_rustc && !rustc_skip {
-//RS         let stem = stem_name.replace('.', "_");
-//RS         let tmp = std::env::temp_dir();
-//RS         let rs = tmp.join(format!(
-//RS             "jet_ui_fix_{}_{}_{}.rs",
-//RS             std::process::id(),
-//RS             i,
-//RS             stem
-//RS         ));
-//RS         let bin = tmp.join(format!("jet_ui_fix_{}_{}_{}", std::process::id(), i, stem));
-//RS         fs::write(&rs, &out.rust).unwrap();
-//RS         let mut cmd = Command::new("rustc");
-//RS         cmd.args(["--edition", "2021", "-o"]).arg(&bin).arg(&rs);
-//RS         if let Some(link) = &out.ffi {
-//RS             cmd.arg("--extern")
-//RS                 .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS             for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS                 cmd.arg("-L")
-//RS                     .arg(format!("dependency={}", deps_dir.display()));
-//RS             }
-//RS         }
-//RS         let status = cmd.status().unwrap();
-//RS         assert!(
-//RS             status.success(),
-//RS             "rustc rejected fixed companion {} (I2)",
-//RS             name
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn liveness_fix_renames_to_existing_underscore_form() {
-//RS     let scratch = Scratch::new("liveness_fix");
-//RS     let path = scratch.join("liveness.jet");
-//RS     fs::write(
-//RS         &path,
-//RS         "use core.files as files\nuse core.math.random as random\n\n\
-//RS          pub(package) fn package_export() {}\n\n\
-//RS          fn unused_private(value: Int) { print(value) }\n\n\
-//RS          fn run() {\n    unused_binding :: random.normal(0.0, 1.0)\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap()])
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         output.status.code(),
-//RS         Some(0),
-//RS         "jet fix failed: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         "use core.files as _files\nuse core.math.random as random\n\n\
-//RS          pub(package) fn _package_export() {}\n\n\
-//RS          fn _unused_private(value: Int) { print(value) }\n\n\
-//RS          fn run() {\n    _unused_binding :: random.normal(0.0, 1.0)\n}\n"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn liveness_fix_removes_only_literal_locals_and_empty_private_functions() {
-//RS     let scratch = Scratch::new("liveness_fix_removal");
-//RS     let path = scratch.join("liveness.jet");
-//RS     let original = "use core.math.random as random\n\n\
-//RS                     pub fn public_api() {}\n\n\
-//RS                     fn empty_private() {}\n\n\
-//RS                     fn run() {\n    pure_local :: 42\n    effectful :: random.normal(0.0, 1.0)\n    print(\"done\")\n}\n";
-//RS     fs::write(&path, original).unwrap();
-//RS 
-//RS     let dry_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap(), "--dry-run"])
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         dry_run.status.code(),
-//RS         Some(0),
-//RS         "dry-run failed: {}",
-//RS         String::from_utf8_lossy(&dry_run.stderr)
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), original);
-//RS 
-//RS     let fixed = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap()])
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         fixed.status.code(),
-//RS         Some(0),
-//RS         "jet fix failed: {}",
-//RS         String::from_utf8_lossy(&fixed.stderr)
-//RS     );
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     assert!(source.contains("pub fn public_api() {}"));
-//RS     assert!(!source.contains("empty_private"));
-//RS     assert!(!source.contains("pure_local"));
-//RS     assert!(source.contains("_effectful :: random.normal(0.0, 1.0)"));
-//RS 
-//RS     let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["check", path.to_str().unwrap()])
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         checked.status.success(),
-//RS         "fixed source does not check: {}",
-//RS         String::from_utf8_lossy(&checked.stderr)
-//RS     );
-//RS     assert!(!String::from_utf8_lossy(&checked.stderr).contains("L0101"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn shared_busy_wait_fix_rewrites_empty_plain_field_loop() {
-//RS     let scratch = Scratch::new("shared_busy_wait_fix");
-//RS     let path = scratch.join("busy_spin.jet");
-//RS     fs::write(&path, include_str!("ui_lint/busy_spin.jet")).unwrap();
-//RS 
-//RS     let fixed = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap()])
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         fixed.status.code(),
-//RS         Some(0),
-//RS         "jet fix failed: {}",
-//RS         String::from_utf8_lossy(&fixed.stderr)
-//RS     );
-//RS     let source = fs::read_to_string(&path).unwrap();
-//RS     assert!(
-//RS         source.contains(
-//RS             "flag.guard_edit().wait(_changed, value -> value.ready) ?? panic(\"wait failed\")"
-//RS         ),
-//RS         "safe busy-loop fix missing:\n{source}"
-//RS     );
-//RS     assert_eq!(
-//RS         source.matches("loop flag.ready == false {}").count(),
-//RS         1,
-//RS         "safe busy-loop fix changed the deliberate allow:\n{source}"
-//RS     );
-//RS     assert!(
-//RS         source.contains("#allow(shared_busy_wait) loop flag.ready == false {}"),
-//RS         "safe busy-loop fix removed the deliberate allow:\n{source}"
-//RS     );
-//RS 
-//RS     let checked = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["check", path.to_str().unwrap()])
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         checked.status.success(),
-//RS         "fixed busy-loop source does not check:\n{}",
-//RS         String::from_utf8_lossy(&checked.stderr)
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn repeated_list_head_fix_preserves_behavior() {
-//RS     let scratch = Scratch::new("repeated_list_head_fix");
-//RS     let path = scratch.join("main.jet");
-//RS     let original = r#"struct LineItem {
-//RS     label: String
-//RS     cents: Int
-//RS }
-//RS 
-//RS fn run() {
-//RS     items :: [
-//RS         LineItem{
-//RS             label: "coffee", // field comment stays with the first item
-//RS             cents: 450
-//RS         },
-//RS         // The second item keeps its position and evaluation order.
-//RS         LineItem{label: "tea", cents: 325}
-//RS     ]
-//RS     print("{items[0].label}:{items[0].cents}")
-//RS     print("{items[1].label}:{items[1].cents}")
-//RS }
-//RS "#;
-//RS     fs::write(&path, original).unwrap();
-//RS     fs::write(
-//RS         scratch.join("package.jet"),
-//RS         "name: \"repeated_list_head_fix\"\n\
-//RS          version: \"0.1.0\"\n\
-//RS          edition: \"2026\"\n\
-//RS          authority: { holds: { allow: [IO, Mem.Alloc] } }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let shown = path.to_string_lossy().into_owned();
-//RS 
-//RS     let lint_output = jet::compile_with_path(original, &shown).unwrap();
-//RS     let lint = lint_output
-//RS         .lints
-//RS         .iter()
-//RS         .find(|diagnostic| diagnostic.code == "L0523")
-//RS         .expect("LineItem list must produce L0523");
-//RS     assert_eq!(lint.applicability.map(|value| value.as_str()), Some("safe"));
-//RS     assert!(
-//RS         lint.safety.is_some_and(|value| value.auto_apply()),
-//RS         "L0523 must carry an auto-applicable safety grade"
-//RS     );
-//RS     let edit = lint.edit.clone().expect("L0523 must carry its source edit");
-//RS     let expected_fixed = jet::FixEngine::apply_edits(original, std::slice::from_ref(&edit))
-//RS         .expect("L0523 edit must apply without overlap");
-//RS 
-//RS     let dry_run = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap(), "--dry-run"])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         dry_run.status.code(),
-//RS         Some(0),
-//RS         "L0523 dry-run failed: {}",
-//RS         String::from_utf8_lossy(&dry_run.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         original,
-//RS         "L0523 dry-run changed the source"
-//RS     );
-//RS 
-//RS     let before_outputs = ["default", "interpret", "release"]
-//RS         .into_iter()
-//RS         .map(|mode| {
-//RS             let args: Vec<&str> = match mode {
-//RS                 "default" => vec!["run", "main.jet"],
-//RS                 "interpret" => vec!["run", "--interpret", "main.jet"],
-//RS                 "release" => vec!["run", "--release", "main.jet"],
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS                 .args(&args)
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap();
-//RS             assert_eq!(
-//RS                 output.status.code(),
-//RS                 Some(0),
-//RS                 "L0523 source failed in {mode}: {}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             (mode, output.stdout)
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS 
-//RS     let applied = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap()])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         applied.status.code(),
-//RS         Some(0),
-//RS         "L0523 fix failed: {}",
-//RS         String::from_utf8_lossy(&applied.stderr)
-//RS     );
-//RS     assert_eq!(fs::read_to_string(&path).unwrap(), expected_fixed);
-//RS     assert!(expected_fixed.contains("[LineItem]{"));
-//RS     assert!(expected_fixed.contains("// field comment stays with the first item"));
-//RS     assert!(expected_fixed.contains("// The second item keeps its position"));
-//RS 
-//RS     let fixed = fs::read_to_string(&path).unwrap();
-//RS     let checked = jet::compile_with_path(&fixed, &shown).unwrap();
-//RS     assert!(
-//RS         !checked.lints.iter().any(|diagnostic| diagnostic.code == "L0523"),
-//RS         "L0523 remained after its explicit fix"
-//RS     );
-//RS     let second_fix = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fix", path.to_str().unwrap()])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         second_fix.status.code(),
-//RS         Some(0),
-//RS         "second L0523 fix failed: {}",
-//RS         String::from_utf8_lossy(&second_fix.stderr)
-//RS     );
-//RS     assert_eq!(
-//RS         fs::read_to_string(&path).unwrap(),
-//RS         fixed,
-//RS         "L0523 fix is not idempotent"
-//RS     );
-//RS 
-//RS     let after_outputs = ["default", "interpret", "release"]
-//RS         .into_iter()
-//RS         .map(|mode| {
-//RS             let args: Vec<&str> = match mode {
-//RS                 "default" => vec!["run", "main.jet"],
-//RS                 "interpret" => vec!["run", "--interpret", "main.jet"],
-//RS                 "release" => vec!["run", "--release", "main.jet"],
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS                 .args(&args)
-//RS                 .current_dir(&scratch.path)
-//RS                 .env("NO_COLOR", "1")
-//RS                 .output()
-//RS                 .unwrap();
-//RS             assert_eq!(
-//RS                 output.status.code(),
-//RS                 Some(0),
-//RS                 "fixed L0523 source failed in {mode}: {}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             (mode, output.stdout)
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     assert_eq!(before_outputs, after_outputs);
-//RS 
-//RS     let fmt_path = scratch.join("fmt.jet");
-//RS     fs::write(&fmt_path, original).unwrap();
-//RS     let fmt = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["fmt", fmt_path.to_str().unwrap()])
-//RS         .current_dir(&scratch.path)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert_eq!(
-//RS         fmt.status.code(),
-//RS         Some(0),
-//RS         "fmt failed on repeated heads: {}",
-//RS         String::from_utf8_lossy(&fmt.stderr)
-//RS     );
-//RS     let formatted = fs::read_to_string(&fmt_path).unwrap();
-//RS     assert!(
-//RS         !formatted.contains("[LineItem]{"),
-//RS         "ordinary fmt must not apply the L0523 source fix: {formatted}"
-//RS     );
-//RS     assert!(formatted.contains("// field comment stays with the first item"));
-//RS     assert!(formatted.contains("// The second item keeps its position"));
-//RS 
-//RS     let generic_path = scratch.join("generic.jet");
-//RS     let generic = r#"struct Box<T> {
-//RS     value: T
-//RS }
-//RS 
-//RS fn run() {
-//RS     boxes := [Box<Int>{value: 1}, Box<Int>{value: 2}]
-//RS     print(boxes[0].value + boxes[1].value)
-//RS }
-//RS "#;
-//RS     fs::write(&generic_path, generic).unwrap();
-//RS     let generic_output =
-//RS         jet::compile_with_path(generic, &generic_path.to_string_lossy()).unwrap();
-//RS     let generic_lint = generic_output
-//RS         .lints
-//RS         .iter()
-//RS         .find(|diagnostic| diagnostic.code == "L0523")
-//RS         .expect("generic repeated heads must produce L0523");
-//RS     let generic_edit = generic_lint
-//RS         .edit
-//RS         .clone()
-//RS         .expect("generic L0523 edit must be safe");
-//RS     let generic_fixed =
-//RS         jet::FixEngine::apply_edits(generic, std::slice::from_ref(&generic_edit)).unwrap();
-//RS     assert!(generic_fixed.contains("[Box<Int>]{"));
-//RS     fs::write(&generic_path, &generic_fixed).unwrap();
-//RS     let generic_checked =
-//RS         jet::compile_with_path(&generic_fixed, &generic_path.to_string_lossy()).unwrap();
-//RS     assert!(
-//RS         !generic_checked
-//RS             .lints
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "L0523")
-//RS     );
-//RS 
-//RS     let fixed_shape_path = scratch.join("fixed_shape.jet");
-//RS     let fixed_shape = r#"struct LineItem {
-//RS     label: String
-//RS     cents: Int
-//RS }
-//RS 
-//RS fn fixed() -> [LineItem#2] {
-//RS     [LineItem{label: "coffee", cents: 450}, LineItem{label: "tea", cents: 325}]
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(fixed()[0].cents)
-//RS }
-//RS "#;
-//RS     fs::write(&fixed_shape_path, fixed_shape).unwrap();
-//RS     let fixed_shape_output =
-//RS         jet::compile_with_path(fixed_shape, &fixed_shape_path.to_string_lossy()).unwrap();
-//RS     assert!(
-//RS         fixed_shape_output
-//RS             .lints
-//RS             .iter()
-//RS             .filter(|diagnostic| diagnostic.code == "L0523")
-//RS             .all(|diagnostic| diagnostic.edit.is_none()),
-//RS         "L0523 must not offer a growable-list edit for a fixed-length expected type"
-//RS     );
-//RS 
-//RS     let commented = r#"struct LineItem {
-//RS     label: String
-//RS     cents: Int
-//RS }
-//RS 
-//RS fn run() {
-//RS     items :: [
-//RS         LineItem /* keep this constructor spelling */ {label: "coffee", cents: 450},
-//RS         LineItem{label: "tea", cents: 325}
-//RS     ]
-//RS }
-//RS "#;
-//RS     fs::write(scratch.join("commented.jet"), commented).unwrap();
-//RS     let commented_output =
-//RS         jet::compile_with_path(commented, &scratch.join("commented.jet").to_string_lossy())
-//RS             .unwrap();
-//RS     assert!(
-//RS         commented_output
-//RS             .lints
-//RS             .iter()
-//RS             .filter(|diagnostic| diagnostic.code == "L0523")
-//RS             .all(|diagnostic| diagnostic.edit.is_none()),
-//RS         "L0523 must not offer an edit when constructor comments make the head ambiguous"
-//RS     );
-//RS }
-// END-PORT-PENDING 1177 tests/ui_fixes.rs:1-526
-
+// Rust: tests/tir_place_window_lifetimes.rs:10
+pub const STACK_SOURCE: String = """
+use core.mem
+fn run() -> {{
+    value :: 17
+    cell :: value
+    #Unsafe("cell is live on this stack frame") {{
+        addr :: mem.address_of(cell)
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+        via_volatile :: mem.volatile_read(pointer)
+        print(via_volatile)
+    }}
+}}
+"""
+// Rust: tests/tir_place_window_lifetimes.rs:25
+pub const BORROWED_SOURCE: String = """
+use core.mem
+fn read(value: &Int) -> Int {{
+    cell :: value
+    #Unsafe("the borrowed value is live in the caller") {{
+        addr :: mem.address_of(cell)
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+        via_volatile :: mem.volatile_read(pointer)
+        return via_volatile
+    }}
+}}
+fn run() -> {{
+    value := 23
+    print(read(&value))
+}}
+"""
+// Rust: tests/tir_place_window_lifetimes.rs:43
+pub const HEAP_SOURCE: String = """
+use core.mem
+fn run() -> {{
+    values := [31, 47]
+    cell :: values[0]
+    #Unsafe("the list element remains heap-owned") {{
+        addr :: mem.address_of(cell)
+        pointer :: mem.Ptr<Int>.from_addr(addr)
+        print(pointer.*)
+        via_volatile :: mem.volatile_read(pointer)
+        print(via_volatile)
+    }}
+}}
+"""
+// Rust: tests/tir_place_window_lifetimes.rs:58
+pub const CARD_2822_SOURCE: String = """
+fn run() -> {{
+    rows := [[1, 2]]
+    if true {{
+        view :: &rows[0]
+        view[0] = 9
+        print(view[0])
+    }}
+    print(rows[0][0])
+}}
+"""
+// Rust: tests/tir_place_window_lifetimes.rs:70
+pub const CARD_2823_SOURCE: String = """
+struct Parcel {{ score: Int }}
+fn run() -> {{
+    parcels := [Parcel{{score: 2}}]
+    if true {{
+        edit :: &parcels[0].score
+        edit = 12
+        print(edit)
+    }}
+    print(parcels[0].score)
+}}
+"""
+// Rust: tests/tir_place_window_lifetimes.rs:83
+pub const CARD_2826_SOURCE: String = """
+fn run() -> {{
+    rows := [[2]]
+    if true {{
+        edit :: &rows[0][0]
+        edit = 12
+        print(edit)
+    }}
+    print(rows[0][0])
+}}
+"""
+// Rust: tests/todo_fill.rs:4
+pub fn todo_example() -> OSPath {
+    OSPath.from(env.build_var("CARGO_MANIFEST_DIR")).join("Examples/features/tooling/todo_hole.jet")
+}
+// Rust: tests/toolchain_pin.rs:14
+pub fn jet_bin() -> OSPath { OSPath.from(env.build_var("CARGO_BIN_EXE_jet")) }
+// Rust: tests/toolchain_pin.rs:18
+pub fn scratch(tag: String) -> OSPath {
+    base :: env.temp_dir().join("jet_toolchain_pin_{tag}_{process.id()}_{time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos():?}")
+    fs.create_dir_all(&base).unwrap()
+    base
+}
+// Rust: tests/toolchain_pin.rs:31
+pub fn run(args: [String], cwd: &OSPath) -> Output {
+    Command.new(jet_bin()).args(args).current_dir(cwd).output().expect("jet binary should run")
+}
+// Rust: tests/toolchain_pin.rs:39
+pub fn write(dir: &OSPath, name: String, body: String) -> Unit { fs.write(dir.join(name), body).unwrap() }
+// Rust: tests/ui_backend.rs:10
+pub fn build_and_run(dir: &OSPath, name: String, src: String) -> (I32, String, String) {
+    tir_support.write_test_package(dir, tir_support.TIR_TEST_PACKAGE)
+    path :: dir.join(name)
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    _ :: compile_with_path(src, shown).unwrap_or_else(fn(diags) {
+        panic("front end rejected fixture:\n{render_diagnostics(shown, src, &diags)}")
+    })
+    // Native O0 replaces the retired generated-Rust/rustc representation journey.
+    output :: Command.new(jet_bin()).args(["run", "--profile=debug", path.to_str().unwrap()])
+        .current_dir(dir).output().unwrap()
+    (output.status.code().unwrap_or(0), String.from_utf8_lossy(&output.stdout).into_owned(), String.from_utf8_lossy(&output.stderr).into_owned())
+}
+// Rust: tests/ui_fixes.rs:71
+pub fn check_fixed_companion(i: USize, path: &OSPath, have_native: Bool, have_cargo: Bool) -> Unit {
+    name :: path.file_name().unwrap().to_string_lossy()
+    src :: fs.read_to_string(path).unwrap()
+    shown :: "tests/ui/{name}"
+    stem_name :: path.file_stem().and_then(fn(s) -> s.to_str()).unwrap_or("")
+    if stem_name.starts_with("ffi_") && !have_cargo -> return
+    _ :: compile_with_path(src, shown).unwrap_or_else(fn(diags) {
+        panic("fixed companion {name} should compile:\n{render_diagnostics(shown, src, &diags)}")
+    })
+    // take_required.fixed retains the original sema-only fixture boundary.
+    if have_native && stem_name != "take_required.fixed" {
+        stem :: stem_name.replace('.', "_")
+        bin :: env.temp_dir().join("jet_ui_fix_{process.id()}_{i}_{stem}")
+        // The native driver owns FFI extern/dependency linking; no Rust bridge.
+        status :: Command.new(jet_bin()).args(["build", "--profile=debug", "-o"])
+            .arg(&bin).arg(path).status().unwrap()
+        assert(status.success(), "native compiler rejected fixed companion {name} (I2)")
+    }
+}

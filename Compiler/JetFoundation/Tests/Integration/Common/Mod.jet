@@ -1,2427 +1,990 @@
-// PORT-PENDING 1002 tests-common-mod: tests/common/mod.rs:1-2423
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Shared helpers for the integration-test suites (`mod common;`).
-//RS //!
-//RS //! Each tests/*.rs binary compiles its own copy of this module, so not every
-//RS //! suite uses every item — hence the file-level `allow(dead_code)`.
-//RS 
-//RS #![allow(dead_code)]
-//RS 
-//RS #[path = "../support/corpus_policy.rs"]
-//RS pub mod corpus_policy;
-//RS 
-//RS use std::fs;
-//RS use std::io::Write as _;
-//RS use std::path::{Component, Path, PathBuf};
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
-//RS use std::sync::OnceLock;
-//RS const TEST_PACKAGE_MANIFEST: &str = "name: \"test-fixture\"\nversion: \"0.1.0\"\n";
-//RS 
-//RS /// Create a fixture root that cannot inherit authority from a sibling or
-//RS /// parent scratch tree. Keep an explicit manifest if the caller supplied one.
-//RS fn prepare_test_fixture_root(path: &Path) {
-//RS     fs::create_dir_all(path)
-//RS         .unwrap_or_else(|error| panic!("create test fixture root `{}`: {error}", path.display()));
-//RS     #[cfg(unix)]
-//RS     {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS         fs::set_permissions(path, fs::Permissions::from_mode(0o700)).unwrap_or_else(|error| {
-//RS             panic!(
-//RS                 "make test fixture root private `{}`: {error}",
-//RS                 path.display()
-//RS             )
-//RS         });
-//RS     }
-//RS     let manifest = path.join("package.jet");
-//RS     match fs::symlink_metadata(&manifest) {
-//RS         Ok(_) => {}
-//RS         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS             fs::write(&manifest, TEST_PACKAGE_MANIFEST).unwrap_or_else(|error| {
-//RS                 panic!("write test fixture manifest `{}`: {error}", manifest.display())
-//RS             });
-//RS         }
-//RS         Err(error) => panic!("inspect test fixture manifest `{}`: {error}", manifest.display()),
-//RS     }
-//RS }
-//RS 
-//RS /// Lower a checked bundle through the canonical MIR/artifact seam used by
-//RS /// resident JIT tests.  Keep the target and artifact identity together so
-//RS /// callers cannot accidentally invoke a backend with a bundle or mismatched
-//RS /// artifact.
-//RS pub fn lower_cranelift_bundle(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS ) -> Result<
-//RS     (
-//RS         jet_foundation::MIR::MirProgram,
-//RS         jet_foundation::MIR::MirArtifactId,
-//RS     ),
-//RS     String,
-//RS > {
-//RS     jet::Codegen::TIR::lower_checked_mir_program_for(
-//RS         bundle,
-//RS         jet_foundation::MIR::MirArtifactRequest::new(
-//RS             jet_foundation::MIR::MirArtifactTarget::Cranelift,
-//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS         ),
-//RS     )
-//RS     .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS /// Lower a checked bundle for the interpreter backend while preserving the
-//RS /// same canonical artifact contract as the resident JIT path.
-//RS pub fn lower_interpreter_bundle(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS ) -> Result<
-//RS     (
-//RS         jet_foundation::MIR::MirProgram,
-//RS         jet_foundation::MIR::MirArtifactId,
-//RS     ),
-//RS     String,
-//RS > {
-//RS     jet::Codegen::TIR::lower_checked_mir_program_for(
-//RS         bundle,
-//RS         jet_foundation::MIR::MirArtifactRequest::new(
-//RS             jet_foundation::MIR::MirArtifactTarget::Interpreter,
-//RS             jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS         ),
-//RS     )
-//RS     .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS pub fn development_policy() -> jet_pkg_model::Package::ReleaseDevtoolsPolicy {
-//RS     jet_pkg_model::Package::ReleaseDevtoolsPolicy::development()
-//RS }
-//RS 
-//RS pub fn cranelift_resident_safe(bundle: &jet::AST::ProgramBundle) -> bool {
-//RS     lower_cranelift_bundle(bundle)
-//RS         .map(|(program, _)| jet_jit::resident_jit_safe_program(&program))
-//RS         .unwrap_or(false)
-//RS }
-//RS 
-//RS pub fn cranelift_resident_safe_detail(bundle: &jet::AST::ProgramBundle) -> String {
-//RS     match lower_cranelift_bundle(bundle) {
-//RS         Ok((program, _)) => jet_jit::resident_jit_safe_program_detail(&program),
-//RS         Err(error) => error,
-//RS     }
-//RS }
-//RS 
-//RS pub fn compile_cranelift_bundle(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> Result<(), String> {
-//RS     let (program, artifact) = lower_cranelift_bundle(bundle)?;
-//RS     jet_jit::try_compile_program(&program, artifact, policy)
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct CraneliftTierPlan {
-//RS     pub whole_interp: bool,
-//RS     pub native: std::collections::BTreeSet<String>,
-//RS     pub deopt: Vec<(String, String)>,
-//RS     pub gap: Option<String>,
-//RS     pub rows: Vec<jet_jit::TierRow>,
-//RS }
-//RS 
-//RS pub fn cranelift_tier_plan(bundle: &jet::AST::ProgramBundle) -> CraneliftTierPlan {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     let plan = jet_jit::plan_mir_tiers(&program, artifact);
-//RS     let rows = plan.rows;
-//RS     let function_name = |id| {
-//RS         rows.iter()
-//RS             .find(|row| row.function == id)
-//RS             .map(|row| row.function_name.clone())
-//RS             .unwrap_or_else(|| format!("function#{:?}", id))
-//RS     };
-//RS     CraneliftTierPlan {
-//RS         whole_interp: plan.whole_program_deopt,
-//RS         native: plan.native.into_iter().map(function_name).collect(),
-//RS         deopt: plan
-//RS             .deopt
-//RS             .into_iter()
-//RS             .map(|(id, reason)| (function_name(id), reason))
-//RS             .collect(),
-//RS         gap: plan.gap.map(|gap| format!("{gap:?}")),
-//RS         rows,
-//RS     }
-//RS }
-//RS 
-//RS pub fn cranelift_strict_run(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> Result<jet::Interpreter::RunOutcome, String> {
-//RS     let (program, artifact) = lower_cranelift_bundle(bundle)?;
-//RS     jet_jit::run_resident_strict_for_test(&program, artifact, policy)
-//RS }
-//RS 
-//RS pub fn cranelift_func_safety(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     name: &str,
-//RS ) -> jet_jit::ResidentJitSafety {
-//RS     let (program, _) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::resident_jit_func_safety_detail(&program, name)
-//RS }
-//RS 
-//RS pub fn cranelift_main_ops(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::jit_dump_main_ops(&program, artifact)
-//RS }
-//RS pub fn cranelift_main_stmts(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::jit_dump_main_stmts(&program, artifact)
-//RS }
-//RS 
-//RS pub fn cranelift_func_names(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-//RS     let (program, _) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::jit_program_func_names(&program)
-//RS }
-//RS 
-//RS pub fn cranelift_spawn_stats(bundle: &jet::AST::ProgramBundle) -> (usize, usize) {
-//RS     let (program, _) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::jit_spawn_stats(&program)
-//RS }
-//RS 
-//RS pub fn cranelift_uncovered_detail(bundle: &jet::AST::ProgramBundle) -> Option<String> {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::jit_main_uncovered_detail(&program, artifact)
-//RS }
-//RS 
-//RS pub fn cranelift_mixed_switch_conds(bundle: &jet::AST::ProgramBundle) -> Vec<String> {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet_jit::jit_dump_mixed_switch_conds(&program, artifact)
-//RS }
-//RS 
-//RS pub fn run_cranelift_bundle(
-//RS     backend: &mut jet_jit::CraneliftBackend,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> jet::Interpreter::RunOutcome {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet::JitBackend::JitBackend::run(backend, &program, artifact, try_anyway, policy)
-//RS }
-//RS 
-//RS pub fn hot_swap_cranelift_bundle(
-//RS     backend: &mut jet_jit::CraneliftBackend,
-//RS     module_name: &str,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet::JitBackend::JitBackend::hot_swap(
-//RS         backend,
-//RS         module_name,
-//RS         &program,
-//RS         artifact,
-//RS         try_anyway,
-//RS         policy,
-//RS     )
-//RS }
-//RS 
-//RS pub fn run_interpreter_checked_bundle(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     invocation: jet::Interpreter::InterpreterInvocation,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> jet::Interpreter::RunOutcome {
-//RS     let (program, artifact) =
-//RS         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-//RS     jet::Interpreter::run_checked(&program, artifact, try_anyway, invocation, policy)
-//RS }
-//RS 
-//RS pub fn run_interpreter_named_job(
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     file: &str,
-//RS     name: &str,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> jet::Interpreter::RunOutcome {
-//RS     let (program, artifact) =
-//RS         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-//RS     let args = vec![
-//RS         file.to_owned(),
-//RS         jet_jit::Job::JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(),
-//RS         name.to_owned(),
-//RS     ];
-//RS     jet_jit::with_program_args(&args, || {
-//RS         jet::Interpreter::dev_run_snapshot(
-//RS             &program,
-//RS             artifact,
-//RS             try_anyway,
-//RS             jet::Interpreter::InterpreterInvocation::DevInterpret,
-//RS             policy,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn restart_cranelift_bundle(
-//RS     backend: &mut jet_jit::CraneliftBackend,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> jet::Interpreter::RunOutcome {
-//RS     let (program, artifact) =
-//RS         lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR");
-//RS     jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
-//RS }
-//RS 
-//RS pub fn run_interpreter_bundle(
-//RS     backend: &mut jet::JitBackend::InterpreterBackend,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> jet::Interpreter::RunOutcome {
-//RS     let (program, artifact) =
-//RS         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-//RS     jet::JitBackend::JitBackend::run(backend, &program, artifact, try_anyway, policy)
-//RS }
-//RS pub fn hot_swap_interpreter_bundle(
-//RS     backend: &mut jet::JitBackend::InterpreterBackend,
-//RS     module_name: &str,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> Result<jet::Interpreter::RunOutcome, Vec<jet::Diagnostics::Diagnostic>> {
-//RS     let (program, artifact) =
-//RS         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-//RS     jet::JitBackend::JitBackend::hot_swap(
-//RS         backend,
-//RS         module_name,
-//RS         &program,
-//RS         artifact,
-//RS         try_anyway,
-//RS         policy,
-//RS     )
-//RS }
-//RS 
-//RS pub fn restart_interpreter_bundle(
-//RS     backend: &mut jet::JitBackend::InterpreterBackend,
-//RS     bundle: &jet::AST::ProgramBundle,
-//RS     try_anyway: bool,
-//RS     policy: &jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS ) -> jet::Interpreter::RunOutcome {
-//RS     let (program, artifact) =
-//RS         lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR");
-//RS     jet::JitBackend::JitBackend::restart(backend, &program, artifact, try_anyway, policy)
-//RS }
-//RS pub fn cranelift_lowers(bundle: &jet::AST::ProgramBundle) -> bool {
-//RS     lower_cranelift_bundle(bundle).is_ok()
-//RS }
-//RS 
-//RS pub fn cranelift_lower_error(bundle: &jet::AST::ProgramBundle) -> String {
-//RS     lower_cranelift_bundle(bundle)
-//RS         .err()
-//RS         .unwrap_or_else(|| "canonical Cranelift MIR lowering succeeded".to_owned())
-//RS }
-//RS 
-//RS // --- runaway-test guard rails -----------------------------------------------
-//RS //
-//RS // A runaway test binary (unbounded allocation loop, or a hang) can eat all
-//RS // RAM/swap and get the kernel to OOM-kill the whole agent session. Every
-//RS // tests/*.rs binary installs this as its global allocator (via `mod
-//RS // common;`), which caps live allocation and starts a wall-clock watchdog on
-//RS // first use. Plain atomics only: no locks, no deps, nothing allocated on the
-//RS // failure path beyond the one stderr line.
-//RS 
-//RS struct GuardedAlloc;
-//RS 
-//RS /// Cap in bytes; -1 means "not read from env yet". i64 (not u64) so the tiny,
-//RS /// unavoidable unaccounted allocation from the lazy env read below (see
-//RS /// `guard_on_alloc`) can dip `GUARD_LIVE_BYTES` negative without wrapping.
-//RS static GUARD_CAP_BYTES: AtomicI64 = AtomicI64::new(-1);
-//RS static GUARD_CAP_INIT_STARTED: AtomicBool = AtomicBool::new(false);
-//RS static GUARD_LIVE_BYTES: AtomicI64 = AtomicI64::new(0);
-//RS static GUARD_WATCHDOG_STARTED: AtomicBool = AtomicBool::new(false);
-//RS /// One-shot: only the first tripper prints. A re-entrant trip (e.g. an
-//RS /// allocation made while formatting the message below) or a concurrent
-//RS /// tripper on another thread skips straight to `abort()` instead of
-//RS /// recursing into a second print.
-//RS static GUARD_ABORTING: AtomicBool = AtomicBool::new(false);
-//RS 
-//RS /// A cap this large is already indistinguishable from "unbounded" for any
-//RS /// real machine; it exists only so a garbage env value (typo, dropped digit)
-//RS /// can't overflow the `* 1 GiB` multiply below and wrap into a negative or
-//RS /// tiny cap. Real caps are single-digit GB.
-//RS const GUARD_CAP_CEILING_GB: i64 = 1 << 20; // ~1 PB
-//RS 
-//RS /// Parse + clamp the raw `JET_TEST_ALLOC_CAP_GB` value. Pure and
-//RS /// env-independent so it's directly unit-testable — see
-//RS /// `garbage_alloc_cap_env_value_clamps_to_a_sane_cap` below.
-//RS fn parsed_cap_gb(raw: Option<&str>) -> i64 {
-//RS     raw.and_then(|s| s.parse::<i64>().ok())
-//RS         .unwrap_or(10)
-//RS         .clamp(1, GUARD_CAP_CEILING_GB)
-//RS }
-//RS 
-//RS unsafe impl std::alloc::GlobalAlloc for GuardedAlloc {
-//RS     unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
-//RS         let ptr = std::alloc::System.alloc(layout);
-//RS         if !ptr.is_null() {
-//RS             guard_on_alloc(layout.size() as i64);
-//RS         }
-//RS         ptr
-//RS     }
-//RS 
-//RS     unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
-//RS         std::alloc::System.dealloc(ptr, layout);
-//RS         GUARD_LIVE_BYTES.fetch_sub(layout.size() as i64, Ordering::Relaxed);
-//RS     }
-//RS }
-//RS 
-//RS fn guard_on_alloc(size: i64) {
-//RS     let cap = GUARD_CAP_BYTES.load(Ordering::Relaxed);
-//RS     if cap < 0 {
-//RS         // Cap not read yet. Claim the read exactly once; std::env::var itself
-//RS         // allocates, so the nested alloc() call this triggers re-enters here,
-//RS         // sees the flag already set, and just falls through uncounted — a
-//RS         // one-time, few-byte startup blind spot the i64 counter absorbs.
-//RS         if !GUARD_CAP_INIT_STARTED.swap(true, Ordering::AcqRel) {
-//RS             let gb = parsed_cap_gb(std::env::var("JET_TEST_ALLOC_CAP_GB").ok().as_deref());
-//RS             // Both factors are positive and gb is clamped well below any
-//RS             // overflow threshold, but saturating_mul is the boring choice
-//RS             // over "trust the clamp" — it can never produce a negative or
-//RS             // wrapped cap, which would otherwise silently disarm the guard
-//RS             // (see the `cap < 0` branch above).
-//RS             GUARD_CAP_BYTES.store(gb.saturating_mul(1 << 30), Ordering::Relaxed);
-//RS         }
-//RS         return;
-//RS     }
-//RS     let total = GUARD_LIVE_BYTES.fetch_add(size, Ordering::Relaxed) + size;
-//RS     if total > cap {
-//RS         guard_abort(|out| {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "jet test guard: allocation cap {} GB exceeded — aborting; raise JET_TEST_ALLOC_CAP_GB if legitimate",
-//RS                 cap / (1 << 30)
-//RS             );
-//RS         });
-//RS     }
-//RS     guard_start_watchdog();
-//RS }
-//RS 
-//RS /// Print (first tripper only) then abort. `print` is a closure so each call
-//RS /// site can format its own message without heap-allocating a `String` first
-//RS /// — `write!` to `Stderr` formats straight into the underlying `write()`
-//RS /// syscall.
-//RS fn guard_abort(print: impl FnOnce(&mut std::io::Stderr)) -> ! {
-//RS     if !GUARD_ABORTING.swap(true, Ordering::AcqRel) {
-//RS         print(&mut std::io::stderr());
-//RS     }
-//RS     std::process::abort();
-//RS }
-//RS 
-//RS /// Lazily spawned on first (accounted) allocation, guarded by a one-shot
-//RS /// flag: a plain relaxed load short-circuits the common case (already
-//RS /// started) before paying for the atomic swap.
-//RS fn guard_start_watchdog() {
-//RS     if GUARD_WATCHDOG_STARTED.load(Ordering::Relaxed) {
-//RS         return;
-//RS     }
-//RS     if GUARD_WATCHDOG_STARTED.swap(true, Ordering::AcqRel) {
-//RS         return;
-//RS     }
-//RS     let spawned = std::thread::Builder::new()
-//RS         .name("jet-test-watchdog".into())
-//RS         .spawn(guard_watchdog_main);
-//RS     if spawned.is_err() {
-//RS         // Too early in process startup to spawn a thread (rare) — let a
-//RS         // later allocation retry.
-//RS         GUARD_WATCHDOG_STARTED.store(false, Ordering::Release);
-//RS     }
-//RS }
-//RS 
-//RS /// The wall-clock budget for one test binary when nothing names it. #677: this
-//RS /// number does not move. A suite that outruns it is normally defective — split
-//RS /// it or speed it up — and the rare suite that genuinely cannot fit (a
-//RS /// measurement suite whose sample count is ratified policy) earns a NAMED row
-//RS /// in the table below instead of a bigger number here.
-//RS const DEFAULT_SUITE_BUDGET_SECS: u64 = 900;
-//RS 
-//RS /// The committed exemption table, embedded rather than read at run time: the
-//RS /// guard must not depend on a cwd, and a deleted table becomes a compile error
-//RS /// instead of a silently restored default. `tests/suite_membership.rs` reads
-//RS /// this same text through this module — never a second copy — and pins how many
-//RS /// rows may exceed the default (AGENTS.md I8).
-//RS pub const SUITE_BUDGET_LEDGER: &str = include_str!("../suite_budgets.txt");
-//RS 
-//RS /// Named once so the abort message, the ledger checks and the runner all cite
-//RS /// the same path.
-//RS pub const SUITE_BUDGET_LEDGER_PATH: &str = "tests/suite_budgets.txt";
-//RS 
-//RS /// One table row: the test target name (`--test <name>`), its budget in
-//RS /// seconds, and the one-line reason it is not the default. Borrowed from the
-//RS /// ledger text, so resolving a budget allocates nothing but the message.
-//RS #[derive(Debug)]
-//RS pub struct SuiteBudgetRow<'a> {
-//RS     pub suite: &'a str,
-//RS     pub secs: u64,
-//RS     pub reason: &'a str,
-//RS }
-//RS 
-//RS /// Parse the table. Strict on purpose: a malformed row is an error naming the
-//RS /// line, never a skipped row, because a row nobody parses is an exemption
-//RS /// nobody voted for. The guard below treats an unparseable table as "no rows"
-//RS /// and so falls back to the strict default; `tests/suite_membership.rs` fails
-//RS /// on the same input, which is where the drift gets reported.
-//RS pub fn parse_suite_budgets(text: &str) -> Result<Vec<SuiteBudgetRow<'_>>, String> {
-//RS     let mut rows = Vec::new();
-//RS     for (index, raw) in text.lines().enumerate() {
-//RS         let line = raw.trim();
-//RS         if line.is_empty() || line.starts_with('#') {
-//RS             continue;
-//RS         }
-//RS         let number = index + 1;
-//RS         let mut fields = line.splitn(3, char::is_whitespace);
-//RS         let suite = fields.next().unwrap_or_default();
-//RS         let secs = fields.next().unwrap_or_default();
-//RS         let reason = fields.next().unwrap_or_default().trim();
-//RS         let secs: u64 = secs.parse().map_err(|_| {
-//RS             format!(
-//RS                 "{SUITE_BUDGET_LEDGER_PATH}:{number}: `{secs}` is not a budget in whole seconds. \
-//RS                  Row shape: <test target name> <seconds> <reason, one line>"
-//RS             )
-//RS         })?;
-//RS         if reason.is_empty() {
-//RS             return Err(format!(
-//RS                 "{SUITE_BUDGET_LEDGER_PATH}:{number}: the `{suite}` row states no reason. An \
-//RS                  exemption without a reason is one nobody can review or retire (#677)"
-//RS             ));
-//RS         }
-//RS         rows.push(SuiteBudgetRow {
-//RS             suite,
-//RS             secs,
-//RS             reason,
-//RS         });
-//RS     }
-//RS     Ok(rows)
-//RS }
-//RS 
-//RS /// The suite a running test binary belongs to. Cargo names the binary
-//RS /// `<target>-<metadata hash>`, so the stem minus that hash is the target name —
-//RS /// exactly the spelling `tests/suites.txt` and the budget table use.
-//RS pub fn suite_name_from_exe_stem(stem: &str) -> &str {
-//RS     match stem.rsplit_once('-') {
-//RS         Some((head, hash))
-//RS             if !head.is_empty()
-//RS                 && hash.len() >= 8
-//RS                 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) =>
-//RS         {
-//RS             head
-//RS         }
-//RS         _ => stem,
-//RS     }
-//RS }
-//RS 
-//RS /// Resolve one suite's budget and say where it came from, so the abort can name
-//RS /// the rule that bit the reader instead of only the number (#677).
-//RS ///
-//RS /// `JET_TEST_DEADLINE_SECS` may only TIGHTEN: an env var that could loosen is a
-//RS /// deadline handed to every target at once by whoever exported it, which is the
-//RS /// opposite of a committed, named, reviewable minority. Pure, so the unit tests
-//RS /// below drive it with synthetic input instead of the real environment.
-//RS fn resolve_suite_budget(suite: &str, ledger: &str, env_raw: Option<&str>) -> (u64, String) {
-//RS     let row = parse_suite_budgets(ledger).ok().and_then(|rows| {
-//RS         rows.into_iter()
-//RS             .find(|row| row.suite == suite)
-//RS             .map(|row| (row.secs, row.reason.to_string()))
-//RS     });
-//RS     let (mut secs, mut source) = match row {
-//RS         Some((secs, reason)) => (
-//RS             secs,
-//RS             format!("the committed `{suite}` row in {SUITE_BUDGET_LEDGER_PATH} — {reason}"),
-//RS         ),
-//RS         None => (
-//RS             DEFAULT_SUITE_BUDGET_SECS,
-//RS             format!(
-//RS                 "the {DEFAULT_SUITE_BUDGET_SECS}s default (no `{suite}` row in \
-//RS                  {SUITE_BUDGET_LEDGER_PATH})"
-//RS             ),
-//RS         ),
-//RS     };
-//RS     // 1..secs, both ends meaningful: 0 would abort instantly (garbage, not a
-//RS     // tightening) and anything at or above the resolved budget is the loosening
-//RS     // this law refuses.
-//RS     if let Some(requested) = env_raw
-//RS         .and_then(|raw| raw.trim().parse::<u64>().ok())
-//RS         .filter(|requested| (1..secs).contains(requested))
-//RS     {
-//RS         source = format!("JET_TEST_DEADLINE_SECS={requested}, tightening {source}");
-//RS         secs = requested;
-//RS     }
-//RS     (secs, source)
-//RS }
-//RS 
-//RS fn guard_watchdog_main() {
-//RS     // Backstop, not an accommodation: a suite that hits this is itself
-//RS     // defective — split or speed it up. The one exception is a measurement
-//RS     // suite whose sample count is ratified policy, and that exception is a
-//RS     // committed row in the table, naming itself and its reason (#677).
-//RS     let stem = std::env::current_exe()
-//RS         .ok()
-//RS         .and_then(|exe| {
-//RS             exe.file_stem()
-//RS                 .map(|stem| stem.to_string_lossy().into_owned())
-//RS         })
-//RS         .unwrap_or_default();
-//RS     let suite = suite_name_from_exe_stem(&stem);
-//RS     let (secs, source) = resolve_suite_budget(
-//RS         suite,
-//RS         SUITE_BUDGET_LEDGER,
-//RS         std::env::var("JET_TEST_DEADLINE_SECS").ok().as_deref(),
-//RS     );
-//RS     let started = std::time::Instant::now();
-//RS     std::thread::sleep(std::time::Duration::from_secs(secs));
-//RS     let elapsed = started.elapsed().as_secs();
-//RS     guard_abort(|out| {
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "jet test guard: suite `{suite}` exceeded its {secs}s budget after {elapsed}s — \
-//RS              aborting. Budget source: {source}. Split the suite or speed it up; a longer deadline \
-//RS              is a committed row in {SUITE_BUDGET_LEDGER_PATH} with its reason, never a raised \
-//RS              default (#677)."
-//RS         );
-//RS     });
-//RS }
-//RS 
-//RS #[global_allocator]
-//RS static JET_TEST_GUARD: GuardedAlloc = GuardedAlloc;
-//RS 
-//RS static SEQ: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS /// Reject a test path on the system temp filesystem. On this machine `/tmp` is
-//RS /// RAM-backed, so crate scratch and Cargo artifacts there can OOM the agent.
-//RS pub fn assert_test_path_on_disk(path: &Path, label: &str) {
-//RS     let absolute = |path: &Path| {
-//RS         if path.is_absolute() {
-//RS             path.to_path_buf()
-//RS         } else {
-//RS             std::env::current_dir().unwrap().join(path)
-//RS         }
-//RS     };
-//RS     let path = absolute(path);
-//RS     // TMPDIR may point at the configured disk-backed scratch root.
-//RS     let temp = absolute(Path::new("/tmp"));
-//RS     let path = fs::canonicalize(&path).unwrap_or(path);
-//RS     let temp = fs::canonicalize(&temp).unwrap_or(temp);
-//RS     assert!(
-//RS         !path.starts_with(&temp),
-//RS         "jet test harness refuses {label}={} on RAM-backed temp storage; use a disk path",
-//RS         path.display()
-//RS     );
-//RS }
-//RS 
-//RS /// Guard process-wide artifact locations before a battery writes.
-//RS pub fn assert_test_environment_is_safe() {
-//RS     for (name, value) in [
-//RS         ("CARGO_TARGET_DIR", std::env::var_os("CARGO_TARGET_DIR")),
-//RS         (
-//RS             "JET_TEST_SCRATCH_DIR",
-//RS             std::env::var_os("JET_TEST_SCRATCH_DIR"),
-//RS         ),
-//RS         (
-//RS             "JET_DEV_ORACLE_CACHE_DIR",
-//RS             std::env::var_os("JET_DEV_ORACLE_CACHE_DIR"),
-//RS         ),
-//RS     ] {
-//RS         if let Some(value) = value {
-//RS             assert_test_path_on_disk(&PathBuf::from(value), name);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Persistent, disk-backed test scratch root. `JET_TEST_SCRATCH_DIR` is an
-//RS /// explicit override for CI or a local measurement, but it must stay off `/tmp`.
-//RS pub fn test_scratch_root(scope: &str) -> PathBuf {
-//RS     assert_test_environment_is_safe();
-//RS     let root = std::env::var_os("JET_TEST_SCRATCH_DIR")
-//RS         .map(PathBuf::from)
-//RS         .unwrap_or_else(|| {
-//RS             PathBuf::from(std::env::var_os("HOME").expect("HOME is required for test scratch"))
-//RS                 .join(".cache/jet-test-scratch")
-//RS         });
-//RS     assert_test_path_on_disk(&root, "JET_TEST_SCRATCH_DIR");
-//RS     let path = root.join(scope);
-//RS     fs::create_dir_all(&path)
-//RS         .unwrap_or_else(|error| panic!("create test scratch root `{}`: {error}", path.display()));
-//RS     path
-//RS }
-//RS 
-//RS /// An external copy of a checked-in project, with canonical fixture state
-//RS /// materialized as `.jet` only inside the copy.
-//RS pub struct ProjectScratch {
-//RS     pub path: PathBuf,
-//RS }
-//RS 
-//RS impl ProjectScratch {
-//RS     pub fn for_project(source: &Path, tag: &str) -> ProjectScratch {
-//RS         let nanos = std::time::SystemTime::now()
-//RS             .duration_since(std::time::UNIX_EPOCH)
-//RS             .expect("system clock before Unix epoch")
-//RS             .as_nanos();
-//RS         let sequence = SEQ.fetch_add(1, Ordering::Relaxed);
-//RS         let path = test_scratch_root("projects").join(format!(
-//RS             "jet-project-{tag}-{}-{nanos}-{sequence}",
-//RS             std::process::id()
-//RS         ));
-//RS         fs::create_dir(&path)
-//RS             .unwrap_or_else(|error| panic!("create staged project `{}`: {error}", path.display()));
-//RS         let path = fs::canonicalize(&path)
-//RS             .unwrap_or_else(|error| panic!("canonicalize staged project: {error}"));
-//RS         let repo = fs::canonicalize(env!("CARGO_MANIFEST_DIR"))
-//RS             .expect("canonicalize repository root");
-//RS         assert!(
-//RS             !path.starts_with(&repo),
-//RS             "staged project scratch must be outside the repository: {}",
-//RS             path.display()
-//RS         );
-//RS         copy_staged_project(source, &path);
-//RS         ProjectScratch { path }
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for ProjectScratch {
-//RS     fn drop(&mut self) {
-//RS         make_tree_writable(&self.path);
-//RS         let _ = fs::remove_dir_all(&self.path);
-//RS     }
-//RS }
-//RS 
-//RS fn copy_staged_project(source: &Path, destination: &Path) {
-//RS     for item in fs::read_dir(source)
-//RS         .unwrap_or_else(|error| panic!("read project {}: {error}", source.display()))
-//RS         .flatten()
-//RS     {
-//RS         let name = item.file_name();
-//RS         let kind = item.file_type().expect("read project entry type");
-//RS         let from = item.path();
-//RS         if kind.is_dir() && name == ".jet" {
-//RS             continue;
-//RS         }
-//RS         if kind.is_dir() {
-//RS             let is_fixture_state = name == "fixture-state";
-//RS             let to = if is_fixture_state {
-//RS                 destination.join(".jet")
-//RS             } else {
-//RS                 destination.join(&name)
-//RS             };
-//RS             fs::create_dir_all(&to).expect("create staged project directory");
-//RS             if is_fixture_state {
-//RS                 copy_fixture_state(&from, &to);
-//RS             } else {
-//RS                 copy_staged_project(&from, &to);
-//RS             }
-//RS         } else if kind.is_file() {
-//RS             fs::copy(&from, destination.join(&name)).unwrap_or_else(|error| {
-//RS                 panic!(
-//RS                     "copy project file {} into {}: {error}",
-//RS                     from.display(),
-//RS                     destination.display()
-//RS                 )
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn copy_fixture_state(source: &Path, destination: &Path) {
-//RS     for item in fs::read_dir(source)
-//RS         .unwrap_or_else(|error| panic!("read fixture state {}: {error}", source.display()))
-//RS         .flatten()
-//RS     {
-//RS         let from = item.path();
-//RS         let to = destination.join(item.file_name());
-//RS         let kind = item.file_type().expect("read fixture-state entry type");
-//RS         if kind.is_dir() {
-//RS             fs::create_dir_all(&to).expect("create staged fixture-state directory");
-//RS             copy_fixture_state(&from, &to);
-//RS         } else if kind.is_file() {
-//RS             fs::copy(&from, &to).unwrap_or_else(|error| {
-//RS                 panic!(
-//RS                     "copy fixture state {} into {}: {error}",
-//RS                     from.display(),
-//RS                     destination.display()
-//RS                 )
-//RS             });
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Collision-safe throwaway dir under the configured Jet scratch root: prefix
-//RS /// + pid + per-process counter, so concurrent tests in one binary never share
-//RS /// a dir.
-//RS pub fn unique_tmp(prefix: &str) -> PathBuf {
-//RS     let n = SEQ.fetch_add(1, Ordering::Relaxed);
-//RS     let path = test_scratch_root("scratch").join(format!("{prefix}_{}_{}", std::process::id(), n));
-//RS     prepare_test_fixture_root(&path);
-//RS     path
-//RS }
-//RS 
-//RS // --- interactive example stdin ----------------------------------------------
-//RS //
-//RS // An interactive example's checked-in golden is only reproducible against the
-//RS // answers it was recorded with, and five suites feed those answers
-//RS // (`tests/golden.rs`, `tests/terminal.rs`, `tests/jit_run.rs`,
-//RS // `tests/corelib_parts/http_data.rs`, and the `tests/dev*.rs` batteries). They
-//RS // live here once. A second copy is how a golden and a harness drift apart while
-//RS // neither one looks wrong on its own — and a harness that feeds nothing at all
-//RS // silently compares a no-input run against a fed-input golden.
-//RS //
-//RS // #2017 recorded the mechanism as well as the bytes: a harness feeds a CHILD
-//RS // process, never an injected reader. The in-process entry points read the test
-//RS // binary's own fd 0, shared by every thread of a parallel suite, and an
-//RS // injected reader would exercise an input path no user has.
-//RS 
-//RS /// The answers one example needs on stdin.
-//RS pub struct ExampleStdin {
-//RS     /// Answers for a run whose stdin is a pipe or a file. This is what the
-//RS     /// checked-in `Examples/features/expected/<stem>.out` golden was recorded
-//RS     /// against, so it is also what any harness comparing against that golden
-//RS     /// owes the program.
-//RS     pub piped: &'static str,
-//RS     /// The extra answers a run on a real terminal reaches and a piped run does
-//RS     /// not. Empty when a terminal run reads exactly what a piped run reads.
-//RS     pub tty_only: &'static str,
-//RS }
-//RS 
-//RS impl ExampleStdin {
-//RS     /// Answers for a run on a real terminal.
-//RS     pub fn tty(&self) -> String {
-//RS         format!("{}{}", self.piped, self.tty_only)
-//RS     }
-//RS }
-//RS 
-//RS /// `io/terminal_parity` answers, in program order:
-//RS ///   `io.confirm`      — an empty line takes the `[y/N]` default, so `false`;
-//RS ///   `io.choose`       — `not-a-number` and `3` are both rejected (the golden's
-//RS ///                       two `Enter a number from 1 to 2.` lines), then `2`
-//RS ///                       selects `production`;
-//RS ///   `io.input_secret` — reached only on a terminal. Off a terminal it answers
-//RS ///                       `Err(InvalidInput)` without consuming a line, which is
-//RS ///                       the golden's `secret: non-tty`; on a terminal it reads
-//RS ///                       six characters, which is `secret length: 6`.
-//RS const TERMINAL_PARITY_STDIN: ExampleStdin = ExampleStdin {
-//RS     piped: "\nnot-a-number\n3\n2\n",
-//RS     tty_only: "secret\n",
-//RS };
-//RS 
-//RS /// `io/terminal` answers: one keystroke for the single `term.read_key()` call
-//RS /// inside the example's `live { … }` block.
-//RS ///
-//RS /// Exactly one key, with no trailing newline, on purpose. `read_key` takes up
-//RS /// to six bytes per call, so a piped script of several keys would be split by
-//RS /// pipe buffering instead of by keystroke and the transcript would depend on
-//RS /// the writer's chunking. One key is the same on a pipe and on a terminal, and
-//RS /// the example never reads a second time, so a terminal run cannot block on an
-//RS /// answer a piped run does not need — `tty_only` is therefore empty.
-//RS const TERMINAL_STDIN: ExampleStdin = ExampleStdin {
-//RS     piped: "h",
-//RS     tty_only: "",
-//RS };
-//RS 
-//RS const STDIN_INPUT_STDIN: ExampleStdin = ExampleStdin {
-//RS     piped: "alpha\nbeta\n",
-//RS     tty_only: "",
-//RS };
-//RS 
-//RS const STDIN_READ_ALL_STDIN: ExampleStdin = ExampleStdin {
-//RS     piped: "alpha\nbeta\n",
-//RS     tty_only: "",
-//RS };
-//RS 
-//RS const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin {
-//RS     piped: "alpha\nbeta\n",
-//RS     tty_only: "",
-//RS };
-//RS 
-//RS /// The stdin an example needs, or `None` for the examples that read nothing.
-//RS ///
-//RS /// Keyed by example stem (`<topic>/<name>`) so a harness that already walks
-//RS /// stems asks for the answers instead of naming the interactive examples
-//RS /// again. Only an example whose checked-in golden was recorded WITH these
-//RS /// answers belongs here: a harness that walks every stem uses this table to
-//RS /// decide what to feed, so an entry whose golden is a no-input transcript
-//RS /// would make that harness feed the wrong thing.
-//RS pub fn example_stdin(stem: &str) -> Option<&'static ExampleStdin> {
-//RS     match stem {
-//RS         "io/terminal_parity" => Some(&TERMINAL_PARITY_STDIN),
-//RS         "io/terminal" => Some(&TERMINAL_STDIN),
-//RS         "io/stdin_input" => Some(&STDIN_INPUT_STDIN),
-//RS         "io/stdin_read_all" => Some(&STDIN_READ_ALL_STDIN),
-//RS         "io/stdin_readline" => Some(&STDIN_READLINE_STDIN),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Run the built `jet` binary with `answers` on stdin and collect its output.
-//RS ///
-//RS /// A program that reads stdin needs a child process to read from. The
-//RS /// in-process entry points (`dev_iteration`, `CraneliftBackend::run`) read the
-//RS /// test binary's own fd 0, which every other test on every other thread
-//RS /// shares, so there is nothing per-run to redirect there.
-//RS pub fn jet_cli_output_with_stdin(args: &[&str], answers: &str) -> std::process::Output {
-//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(args)
-//RS         .env("NO_COLOR", "1")
-//RS         .stdin(std::process::Stdio::piped())
-//RS         .stdout(std::process::Stdio::piped())
-//RS         .stderr(std::process::Stdio::piped())
-//RS         .spawn()
-//RS         .expect("jet CLI must start");
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .expect("piped jet stdin")
-//RS         .write_all(answers.as_bytes())
-//RS         .expect("write jet stdin answers");
-//RS     child.wait_with_output().expect("collect jet CLI output")
-//RS }
-//RS 
-//RS /// Whether `rustc` is on PATH. Honors `JET_REQUIRE_RUSTC=1` (D-CI3): CI sets
-//RS /// this so a missing rustc is a loud failure — never a quiet self-skip that
-//RS /// silently drops I2 (rustc-must-accept) coverage.
-//RS pub fn have_rustc() -> bool {
-//RS     static PRESENT: OnceLock<bool> = OnceLock::new();
-//RS     let present = *PRESENT.get_or_init(|| Command::new("rustc").arg("--version").output().is_ok());
-//RS     if !present && std::env::var("JET_REQUIRE_RUSTC").as_deref() == Ok("1") {
-//RS         panic!(
-//RS             "JET_REQUIRE_RUSTC=1 but rustc not found on PATH — refusing to \
-//RS              silently skip I2 (rustc-must-accept) coverage. Fix the CI \
-//RS              environment; do not unset JET_REQUIRE_RUSTC to paper over this."
-//RS         );
-//RS     }
-//RS     present
-//RS }
-//RS 
-//RS /// Write generated Rust and add the one canonical cached-runtime dependency to
-//RS /// a raw rustc command. Keep the returned lease alive until that command exits.
-//RS pub fn add_generated_rust(
-//RS     command: &mut Command,
-//RS     path: &Path,
-//RS     generated: &str,
-//RS     has_rust_ffi: bool,
-//RS     rustc_flags: &[&str],
-//RS ) -> jet_store::runtime::PreparedRuntime {
-//RS     let flags = rustc_flags
-//RS         .iter()
-//RS         .map(|flag| std::ffi::OsString::from(*flag))
-//RS         .collect::<Vec<_>>();
-//RS     // #2004 — DECISION: a raw `rustc --test` build of generated Jet output is
-//RS     // NOT a supported mode, so this helper refuses it by name instead of
-//RS     // letting it fail 10,000 lines deep in someone else's fragment.
-//RS     //
-//RS     // `--test` asks rustc to synthesize a harness from every `#[cfg(test)]`
-//RS     // module in the crate. The generated crate is one flat splice of the
-//RS     // Prelude, so that switch activates the COMPILER's private fragment unit
-//RS     // tests inside a user program — a set that is not the program's tests, is
-//RS     // not shipped, and whose only shared namespace is the generated crate root.
-//RS     // The supported way to run Jet tests is `jet test`, which builds its own
-//RS     // harness (TEST_PRELUDE / `jet_test_print`). A probe that needs to observe
-//RS     // generated internals hooks the generated `main` instead — see
-//RS     // `tests/dev.rs::io_style_raw_nonunicode_no_color_uses_presence_semantics`.
-//RS     assert!(
-//RS         !rustc_flags.contains(&"--test"),
-//RS         "`rustc --test` over generated Jet output is not a supported build mode: it \
-//RS          synthesizes a harness from the Prelude's own `#[cfg(test)]` modules inside a \
-//RS          user program. Run Jet tests with `jet test`, or hook the generated `main` for \
-//RS          an inspection probe."
-//RS     );
-//RS     let store_root = path
-//RS         .parent()
-//RS         .unwrap_or_else(|| Path::new("."))
-//RS         .join(".jet-store");
-//RS     let store = jet_store::Store::open(
-//RS         jet_store::StoreConfig::new(store_root)
-//RS             .with_cap_bytes(20 * 1024 * 1024 * 1024)
-//RS             .with_reserve_bytes(0),
-//RS     )
-//RS     .expect("open isolated jet store");
-//RS     let prepared = if has_rust_ffi {
-//RS         jet_store::runtime::PreparedRuntime::inline(generated)
-//RS     } else {
-//RS         match jet_store::runtime::prepare(
-//RS             &store,
-//RS             std::ffi::OsStr::new("rustc"),
-//RS             generated,
-//RS             &flags,
-//RS             &[],
-//RS         ) {
-//RS             Ok(prepared) => prepared,
-//RS             Err(jet_store::runtime::RuntimeError::Cache(_)) => {
-//RS                 jet_store::runtime::PreparedRuntime::inline(generated)
-//RS             }
-//RS             Err(error) => panic!("cached runtime build failed: {error}"),
-//RS         }
-//RS     };
-//RS     fs::write(path, prepared.rust()).unwrap();
-//RS     command
-//RS         .arg("--edition")
-//RS         .arg("2021")
-//RS         .args(rustc_flags.iter().copied())
-//RS         .arg("--crate-name")
-//RS         .arg(jet::Syntax::sanitize_crate_name(
-//RS             path.file_stem()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .unwrap_or("out"),
-//RS         ))
-//RS         .arg(path);
-//RS     prepared.add_rustc_args(command);
-//RS     prepared
-//RS }
-//RS 
-//RS /// A throwaway directory under the shared disk-backed test scratch root,
-//RS /// removed on drop.
-//RS ///
-//RS /// `tag` names the case. The path also carries the pid, a nanosecond stamp and
-//RS /// the thread id, so concurrent tests never share a directory — in one binary
-//RS /// or across binaries.
-//RS pub struct Scratch {
-//RS     pub path: PathBuf,
-//RS }
-//RS 
-//RS impl Scratch {
-//RS     pub fn new(tag: &str) -> Scratch {
-//RS         let nanos = std::time::SystemTime::now()
-//RS             .duration_since(std::time::UNIX_EPOCH)
-//RS             .unwrap()
-//RS             .as_nanos();
-//RS         let path = test_scratch_root("scratch").join(format!(
-//RS             "jet-it-{tag}-{}-{nanos}-{:?}",
-//RS             std::process::id(),
-//RS             std::thread::current().id()
-//RS         ));
-//RS         prepare_test_fixture_root(&path);
-//RS         Scratch { path }
-//RS     }
-//RS 
-//RS     pub fn join(&self, p: &str) -> PathBuf {
-//RS         self.path.join(p)
-//RS     }
-//RS }
-//RS impl AsRef<Path> for Scratch {
-//RS     fn as_ref(&self) -> &Path {
-//RS         &self.path
-//RS     }
-//RS }
-//RS 
-//RS /// One deterministic prebuilt used by a local native-catalog fixture.
-//RS ///
-//RS /// The helper owns the exact artifact bytes and writes the same `recipes-v1`
-//RS /// shape used by the catalog tests. Keeping this writer here prevents suites
-//RS /// from quietly growing incompatible recipe fixtures.
-//RS pub struct NativeCatalogRecipe {
-//RS     pub name: String,
-//RS     pub version: String,
-//RS     pub bin: String,
-//RS     pub artifact_name: String,
-//RS     pub contents: Vec<u8>,
-//RS }
-//RS 
-//RS /// Write a local native catalog and its file-backed artifacts.
-//RS pub fn write_native_catalog(catalog: &Path, artifact_root: &Path, recipes: &[NativeCatalogRecipe]) {
-//RS     fs::create_dir_all(catalog).expect("create native catalog directory");
-//RS     fs::create_dir_all(artifact_root).expect("create native catalog artifact directory");
-//RS     let mut records = Vec::with_capacity(recipes.len());
-//RS     for recipe in recipes {
-//RS         assert!(
-//RS             !recipe.artifact_name.is_empty()
-//RS                 && !recipe.artifact_name.contains('/')
-//RS                 && !recipe.artifact_name.contains('\\'),
-//RS             "native catalog artifact name must be one path component"
-//RS         );
-//RS         let artifact = artifact_root.join(&recipe.artifact_name);
-//RS         fs::write(&artifact, &recipe.contents).expect("write native catalog artifact");
-//RS         #[cfg(unix)]
-//RS         {
-//RS             use std::os::unix::fs::PermissionsExt as _;
-//RS             let mut permissions = fs::metadata(&artifact)
-//RS                 .expect("stat native catalog artifact")
-//RS                 .permissions();
-//RS             permissions.set_mode(0o755);
-//RS             fs::set_permissions(&artifact, permissions)
-//RS                 .expect("make native catalog artifact executable");
-//RS         }
-//RS         let digest =
-//RS             jetpack::SHA256::sha256_file_hex(&artifact).expect("hash native catalog artifact");
-//RS         let url = format!("file://{}", artifact.display());
-//RS         records.push(format!(
-//RS             "{{\"name\":\"{}\",\"version\":\"{}\",\"kind\":\"prebuilt\",\"url\":\"{}\",\"sha256\":\"{}\",\"bin\":\"{}\"}}",
-//RS             jet_foundation::JSON::json_escape(&recipe.name),
-//RS             jet_foundation::JSON::json_escape(&recipe.version),
-//RS             jet_foundation::JSON::json_escape(&url),
-//RS             digest,
-//RS             jet_foundation::JSON::json_escape(&recipe.bin),
-//RS         ));
-//RS     }
-//RS     records.sort_unstable();
-//RS     fs::write(
-//RS         catalog.join("recipes-v1.json"),
-//RS         format!("{{\"schema\":1,\"recipes\":[{}]}}", records.join(",")),
-//RS     )
-//RS     .expect("write native catalog recipes");
-//RS }
-//RS 
-//RS impl Drop for Scratch {
-//RS     fn drop(&mut self) {
-//RS         // Store trees are realized read-only; chmod first or the directory
-//RS         // leaks in the test scratch root.
-//RS         make_tree_writable(&self.path);
-//RS         let _ = fs::remove_dir_all(&self.path);
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS pub fn make_tree_writable(path: &Path) {
-//RS     use std::os::unix::fs::PermissionsExt as _;
-//RS     let Ok(meta) = fs::symlink_metadata(path) else {
-//RS         return;
-//RS     };
-//RS     // Runs inside Drop for every suite: a file the tested daemon removes
-//RS     // mid-walk, or a dir we cannot read yet, must not panic during unwind
-//RS     // and bury the original assertion.
-//RS     if !meta.file_type().is_symlink() {
-//RS         let mode = if meta.is_dir() {
-//RS             0o755
-//RS         } else {
-//RS             meta.permissions().mode() | 0o600
-//RS         };
-//RS         let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode));
-//RS     }
-//RS     if meta.is_dir() {
-//RS         let Ok(entries) = fs::read_dir(path) else {
-//RS             return;
-//RS         };
-//RS         for entry in entries {
-//RS             let Ok(entry) = entry else { continue };
-//RS             make_tree_writable(&entry.path());
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS pub fn make_tree_writable(path: &Path) {
-//RS     let Ok(meta) = fs::metadata(path) else {
-//RS         return;
-//RS     };
-//RS     let mut permissions = meta.permissions();
-//RS     permissions.set_readonly(false);
-//RS     let _ = fs::set_permissions(path, permissions);
-//RS }
-//RS 
-//RS pub fn test_worker_count(cap: usize) -> usize {
-//RS     let requested = std::env::var("JET_TEST_JOBS")
-//RS         .ok()
-//RS         .and_then(|s| s.parse::<usize>().ok())
-//RS         .filter(|n| *n > 0);
-//RS     let available = std::thread::available_parallelism()
-//RS         .map(|n| n.get())
-//RS         .unwrap_or(2);
-//RS     requested.unwrap_or(available).clamp(1, cap.max(1))
-//RS }
-//RS 
-//RS /// Locate the `jetpack` binary for integration tests.
-//RS ///
-//RS /// `jetpack` moved to its own binary workspace package (`crates/jetpack-bin`,
-//RS /// card #367 / D-PRODUCT-SPLIT1=C), so Cargo no longer sets
-//RS /// `CARGO_BIN_EXE_jetpack` for tests compiled under the root `jet` package.
-//RS /// Fall back to the freshly built debug binary next to `target/debug/jet`,
-//RS /// building it on demand if it isn't there yet.
-//RS pub fn jetpack_bin() -> &'static PathBuf {
-//RS     static BIN: OnceLock<PathBuf> = OnceLock::new();
-//RS     BIN.get_or_init(|| resolve_or_build_bin("jetpack", "jetpack-bin", "jetpack"))
-//RS }
-//RS 
-//RS /// Locate the `jetos` binary for integration tests. Same story as
-//RS /// [`jetpack_bin`]: `jetos` is its own workspace package now.
-//RS pub fn jetos_bin() -> &'static PathBuf {
-//RS     static BIN: OnceLock<PathBuf> = OnceLock::new();
-//RS     BIN.get_or_init(|| resolve_or_build_bin("jetos", "jetos", "jetos"))
-//RS }
-//RS 
-//RS fn resolve_or_build_bin(env_suffix: &str, package: &str, bin_name: &str) -> PathBuf {
-//RS     if let Some(path) = std::env::var_os(format!("CARGO_BIN_EXE_{env_suffix}")) {
-//RS         return PathBuf::from(path);
-//RS     }
-//RS     let target_dir = std::env::var_os("CARGO_TARGET_DIR")
-//RS         .map(PathBuf::from)
-//RS         .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
-//RS     let bin = target_dir
-//RS         .join("debug")
-//RS         .join(format!("{bin_name}{}", std::env::consts::EXE_SUFFIX));
-//RS     if !bin.is_file() {
-//RS         let status = Command::new(env!("CARGO"))
-//RS             .args(["build", "-p", package, "--bin", bin_name])
-//RS             .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS             .status()
-//RS             .unwrap();
-//RS         assert!(status.success(), "building {bin_name} test binary failed");
-//RS     }
-//RS     bin
-//RS }
-//RS 
-//RS pub fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
-//RS     if let Some(s) = payload.downcast_ref::<String>() {
-//RS         s.clone()
-//RS     } else if let Some(s) = payload.downcast_ref::<&'static str>() {
-//RS         (*s).to_string()
-//RS     } else {
-//RS         "panic with non-string payload".to_string()
-//RS     }
-//RS }
-//RS 
-//RS /// Text that only appears when a Rust control transfer killed a process instead
-//RS /// of becoming a Jet report (R13 / D-JITUNWIND1, #1995 / #1997).
-//RS ///
-//RS /// One list, because the two checks that need it must not drift: the JIT
-//RS /// boundary suite (`tests/jit_no_unwind_boundary.rs`) asserts a cancelled task
-//RS /// never aborts, and the example-corpus gate refuses to *classify* an abort at
-//RS /// all. `streams/generators` is why the second one exists — it died with
-//RS /// `panic in a destructor during cleanup` and the gate filed it as the benign
-//RS /// row `AOT exit 1`, so an abort became a shrink-only ledger entry instead of a
-//RS /// failure.
-//RS ///
-//RS /// The four families, which are four different defects:
-//RS ///
-//RS /// * `failed to initiate panic` is `_URC_END_OF_STACK`: phase 1 walked off the
-//RS ///   top of the stack without finding a handler, because `cranelift-jit`
-//RS ///   registers no unwind information for the code it emits.
-//RS /// * `non-unwinding panic` / `panic in a function that cannot unwind` is an
-//RS ///   `extern "C"` body's own abort-on-unwind shim.
-//RS /// * `panic in a destructor during cleanup` is a second raise from drop glue
-//RS ///   while an unwind is already in flight (#2007).
-//RS /// * `fatal runtime error: stack overflow` is real stack exhaustion — the only
-//RS ///   one `jet_foundation::CompilerStack::COMPILER_STACK_SIZE` can answer for.
-//RS ///   Listed so a failure names which abort it saw rather than guessing.
-//RS pub const ABORT_MARKERS: &[&str] = &[
-//RS     "failed to initiate panic",
-//RS     "non-unwinding panic",
-//RS     "panic in a function that cannot unwind",
-//RS     "panic in a destructor during cleanup",
-//RS     "core::panicking",
-//RS     "fatal runtime error: stack overflow",
-//RS ];
-//RS 
-//RS /// The abort marker `stderr` carries, if any.
-//RS pub fn abort_marker(stderr: &str) -> Option<&'static str> {
-//RS     ABORT_MARKERS
-//RS         .iter()
-//RS         .copied()
-//RS         .find(|marker| stderr.contains(marker))
-//RS }
-//RS 
-//RS /// Read a fixture substring filter and normalize it to a repository-relative,
-//RS /// forward-slash path. Absolute paths and parent traversal are rejected so a
-//RS /// copied CI command behaves the same from every checkout.
-//RS pub fn fixture_filter(var: &str) -> Option<String> {
-//RS     let raw = std::env::var(var).ok()?;
-//RS     Some(normalize_fixture_selector(var, &raw))
-//RS }
-//RS 
-//RS pub fn normalize_fixture_selector(var: &str, raw: &str) -> String {
-//RS     let normalized_separators = raw.trim().replace('\\', "/");
-//RS     let raw = normalized_separators.as_str();
-//RS     assert!(!raw.is_empty(), "{var} must not be empty");
-//RS     let path = Path::new(raw);
-//RS     assert!(
-//RS         !path.is_absolute(),
-//RS         "{var} must be repository-relative: {raw}"
-//RS     );
-//RS     let mut parts = Vec::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             Component::CurDir => {}
-//RS             Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
-//RS             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-//RS                 panic!("{var} must not escape the repository: {raw}")
-//RS             }
-//RS         }
-//RS     }
-//RS     assert!(!parts.is_empty(), "{var} must name a fixture");
-//RS     parts.join("/")
-//RS }
-//RS 
-//RS pub fn fixture_matches(filter: Option<&str>, canonical_relative: &str) -> bool {
-//RS     filter.map_or(true, |needle| canonical_relative.contains(needle))
-//RS }
-//RS 
-//RS pub const UNIFIED_DIFF_MAX_INPUT_BYTES: usize = 64 * 1024;
-//RS pub const UNIFIED_DIFF_MAX_INPUT_LINES: usize = 256;
-//RS pub const UNIFIED_DIFF_MAX_OUTPUT_BYTES: usize = 32 * 1024;
-//RS 
-//RS const DIFF_OUTPUT_TRUNCATED: &str =
-//RS     "\n... diff output truncated; remaining compared edits omitted ...\n";
-//RS 
-//RS /// Small std-only line diff for fixture failures. Hostile compiler output is
-//RS /// bounded before the dynamic-programming LCS and while rendering, keeping
-//RS /// memory and failure-message size fixed. Every discarded input or edit is
-//RS /// named explicitly in the output.
-//RS pub fn unified_diff(
-//RS     expected_name: &str,
-//RS     actual_name: &str,
-//RS     expected: &str,
-//RS     actual: &str,
-//RS ) -> String {
-//RS     let expected_lines = bounded_diff_lines(expected);
-//RS     let actual_lines = bounded_diff_lines(actual);
-//RS     let columns = actual_lines.lines.len() + 1;
-//RS     let mut lcs = vec![0usize; (expected_lines.lines.len() + 1) * columns];
-//RS     for i in (0..expected_lines.len()).rev() {
-//RS         for j in (0..actual_lines.lines.len()).rev() {
-//RS             let here = i * columns + j;
-//RS             lcs[here] = if expected_lines.lines[i] == actual_lines.lines[j] {
-//RS                 lcs[(i + 1) * columns + j + 1] + 1
-//RS             } else {
-//RS                 lcs[(i + 1) * columns + j].max(lcs[i * columns + j + 1])
-//RS             };
-//RS         }
-//RS     }
-//RS 
-//RS     let mut out = BoundedDiffOutput::new();
-//RS     out.push(&format!("--- {expected_name}\n+++ {actual_name}\n"));
-//RS     push_input_truncation(&mut out, "expected", expected, &expected_lines);
-//RS     push_input_truncation(&mut out, "actual", actual, &actual_lines);
-//RS     out.push(&format!(
-//RS         "@@ -1,{} +1,{} @@\n",
-//RS         expected_lines.lines.len(),
-//RS         actual_lines.lines.len()
-//RS     ));
-//RS     let (mut i, mut j) = (0, 0);
-//RS     while i < expected_lines.lines.len() || j < actual_lines.lines.len() {
-//RS         if i < expected_lines.lines.len()
-//RS             && j < actual_lines.lines.len()
-//RS             && expected_lines.lines[i] == actual_lines.lines[j]
-//RS         {
-//RS             push_diff_line(
-//RS                 &mut out,
-//RS                 ' ',
-//RS                 expected_lines.lines[i],
-//RS                 expected_lines.cut_mid_line && i + 1 == expected_lines.lines.len(),
-//RS             );
-//RS             i += 1;
-//RS             j += 1;
-//RS         } else if j < actual_lines.lines.len()
-//RS             && (i == expected_lines.lines.len()
-//RS                 || lcs[i * columns + j + 1] >= lcs[(i + 1) * columns + j])
-//RS         {
-//RS             push_diff_line(
-//RS                 &mut out,
-//RS                 '+',
-//RS                 actual_lines.lines[j],
-//RS                 actual_lines.cut_mid_line && j + 1 == actual_lines.lines.len(),
-//RS             );
-//RS             j += 1;
-//RS         } else {
-//RS             push_diff_line(
-//RS                 &mut out,
-//RS                 '-',
-//RS                 expected_lines.lines[i],
-//RS                 expected_lines.cut_mid_line && i + 1 == expected_lines.lines.len(),
-//RS             );
-//RS             i += 1;
-//RS         }
-//RS     }
-//RS     out.finish()
-//RS }
-//RS 
-//RS struct BoundedDiffLines<'a> {
-//RS     lines: Vec<&'a str>,
-//RS     compared_bytes: usize,
-//RS     cut_mid_line: bool,
-//RS }
-//RS 
-//RS impl BoundedDiffLines<'_> {
-//RS     fn len(&self) -> usize {
-//RS         self.lines.len()
-//RS     }
-//RS }
-//RS 
-//RS fn bounded_diff_lines(input: &str) -> BoundedDiffLines<'_> {
-//RS     let mut byte_end = input.len().min(UNIFIED_DIFF_MAX_INPUT_BYTES);
-//RS     while !input.is_char_boundary(byte_end) {
-//RS         byte_end -= 1;
-//RS     }
-//RS     let prefix = &input[..byte_end];
-//RS     let mut lines = Vec::new();
-//RS     let mut compared_bytes = 0;
-//RS     for line in prefix
-//RS         .split_inclusive('\n')
-//RS         .take(UNIFIED_DIFF_MAX_INPUT_LINES)
-//RS     {
-//RS         compared_bytes += line.len();
-//RS         lines.push(line);
-//RS     }
-//RS     BoundedDiffLines {
-//RS         lines,
-//RS         compared_bytes,
-//RS         cut_mid_line: compared_bytes < input.len()
-//RS             && compared_bytes > 0
-//RS             && input.as_bytes()[compared_bytes - 1] != b'\n',
-//RS     }
-//RS }
-//RS 
-//RS fn push_input_truncation(
-//RS     out: &mut BoundedDiffOutput,
-//RS     side: &str,
-//RS     input: &str,
-//RS     bounded: &BoundedDiffLines<'_>,
-//RS ) {
-//RS     if bounded.compared_bytes < input.len() {
-//RS         out.push(&format!(
-//RS             "# diff input truncated: {side} compares first {} of {} bytes across {} lines; limits are {} bytes/{} lines\n",
-//RS             bounded.compared_bytes,
-//RS             input.len(),
-//RS             bounded.lines.len(),
-//RS             UNIFIED_DIFF_MAX_INPUT_BYTES,
-//RS             UNIFIED_DIFF_MAX_INPUT_LINES,
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS struct BoundedDiffOutput {
-//RS     text: String,
-//RS     truncated: bool,
-//RS }
-//RS 
-//RS impl BoundedDiffOutput {
-//RS     fn new() -> Self {
-//RS         Self {
-//RS             text: String::new(),
-//RS             truncated: false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn push(&mut self, text: &str) {
-//RS         if self.truncated {
-//RS             return;
-//RS         }
-//RS         let content_limit = UNIFIED_DIFF_MAX_OUTPUT_BYTES - DIFF_OUTPUT_TRUNCATED.len();
-//RS         let remaining = content_limit.saturating_sub(self.text.len());
-//RS         if text.len() <= remaining {
-//RS             self.text.push_str(text);
-//RS             return;
-//RS         }
-//RS         let mut take = remaining.min(text.len());
-//RS         while !text.is_char_boundary(take) {
-//RS             take -= 1;
-//RS         }
-//RS         self.text.push_str(&text[..take]);
-//RS         self.truncated = true;
-//RS     }
-//RS 
-//RS     fn finish(mut self) -> String {
-//RS         if self.truncated {
-//RS             self.text.push_str(DIFF_OUTPUT_TRUNCATED);
-//RS         }
-//RS         debug_assert!(self.text.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES);
-//RS         self.text
-//RS     }
-//RS }
-//RS 
-//RS fn push_diff_line(out: &mut BoundedDiffOutput, marker: char, line: &str, cut_mid_line: bool) {
-//RS     let mut marker_bytes = [0; 4];
-//RS     out.push(marker.encode_utf8(&mut marker_bytes));
-//RS     out.push(line);
-//RS     if !line.ends_with('\n') && !cut_mid_line {
-//RS         out.push("\n\\ No newline at end of file\n");
-//RS     }
-//RS }
-//RS 
-//RS /// #2075: the bridge cache key in an FFI artifact's file name
-//RS /// (`jet-crypto-helper-<key>`, `libjet_ffi_<key>.rlib`, `jet_ffi_<key>.sha256`).
-//RS ///
-//RS /// Every key's outputs now live in ONE Cargo target dir shared per (toolchain,
-//RS /// target, profile), so "this bridge's files" is a name filter, not a directory
-//RS /// listing.
-//RS pub fn ffi_bridge_key(artifact: &Path) -> String {
-//RS     let name = artifact
-//RS         .file_name()
-//RS         .and_then(|name| name.to_str())
-//RS         .unwrap_or_default();
-//RS     name.split(|c: char| !c.is_ascii_hexdigit())
-//RS         .find(|part| part.len() == 16)
-//RS         .unwrap_or_else(|| panic!("no 16-hex FFI bridge key in `{name}`"))
-//RS         .to_string()
-//RS }
-//RS 
-//RS /// The per-key input dir (`<ffi cache>/<key>/`, holding the generated
-//RS /// `Cargo.toml` and `src/`) of the bridge that produced `artifact`.
-//RS pub fn ffi_bridge_cache_root(artifact: &Path) -> PathBuf {
-//RS     artifact
-//RS         .ancestors()
-//RS         .find(|dir| dir.ends_with("ffi"))
-//RS         .unwrap_or_else(|| panic!("`{}` is not under an FFI cache root", artifact.display()))
-//RS         .join(ffi_bridge_key(artifact))
-//RS }
-//RS 
-//RS /// Compile `src` through the real front end, build it with rustc (linking the
-//RS /// FFI bridge when the compile produces one), run the binary, and return
-//RS /// (exit code, stdout, stderr).
-//RS ///
-//RS /// Panics if the front end rejects the source or rustc rejects the generated
-//RS /// code (I2). `prefix` names the scratch dir (e.g. "jet_tir_test") so suites
-//RS /// stay distinguishable. Callers must gate on `have_rustc()` first.
-//RS pub fn build_and_run(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
-//RS     build_and_run_with_cwd(prefix, name, src, false)
-//RS }
-//RS 
-//RS /// `build_and_run`, with the generated binary's working directory isolated to
-//RS /// its unique scratch directory.
-//RS pub fn build_and_run_in_scratch(prefix: &str, name: &str, src: &str) -> (i32, String, String) {
-//RS     build_and_run_with_cwd(prefix, name, src, true)
-//RS }
-//RS 
-//RS fn build_and_run_with_cwd(
-//RS     prefix: &str,
-//RS     name: &str,
-//RS     src: &str,
-//RS     run_in_scratch: bool,
-//RS ) -> (i32, String, String) {
-//RS     let scratch = Scratch::new(prefix);
-//RS     let dir = &scratch.path;
-//RS     // A manifest makes this directory the loader's authority boundary.
-//RS     // Without it, a path-only fixture can inherit an ambient ancestor
-//RS     // project and scan unrelated files in the shared temp tree.
-//RS     fs::write(
-//RS         dir.join("package.jet"),
-//RS         "name: \"test-fixture\"\nversion: \"0.1.0\"\n",
-//RS     )
-//RS     .unwrap();
-//RS     // `compile_with_path` loads the entry from disk, so write the .jet first.
-//RS     let jet_path = dir.join(format!("{name}.jet"));
-//RS     fs::write(&jet_path, src).unwrap();
-//RS     let shown = jet_path.to_string_lossy().into_owned();
-//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     });
-//RS     let rs = dir.join(format!("{name}.rs"));
-//RS     let bin = dir.join(name);
-//RS     let mut rustc_cmd = Command::new("rustc");
-//RS     let _runtime_lease = add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
-//RS     rustc_cmd.arg("-o").arg(&bin);
-//RS     if let Some(link) = &out.ffi {
-//RS         rustc_cmd
-//RS             .arg("--extern")
-//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS             rustc_cmd
-//RS                 .arg("-L")
-//RS                 .arg(format!("dependency={}", deps_dir.display()));
-//RS         }
-//RS     }
-//RS     let rustc = rustc_cmd.output().unwrap();
-//RS     assert!(
-//RS         rustc.status.success(),
-//RS         "rustc rejected generated code (I2 violation):\n{}",
-//RS         String::from_utf8_lossy(&rustc.stderr)
-//RS     );
-//RS     let mut run_cmd = Command::new(&bin);
-//RS     if run_in_scratch {
-//RS         run_cmd.current_dir(&dir);
-//RS     }
-//RS     let run = run_cmd.output().unwrap();
-//RS     (
-//RS         run.status.code().unwrap_or(0),
-//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS /// Remove every audited generated-prelude module (jet_mem, jet_txn, the
-//RS /// per-platform jet_term/jet_os/jet_atomic shims, jet_gtk, and any
-//RS /// __jet___c_* CFFI overlay module) before checking generated Rust for I1
-//RS /// violations. This shared structural helper is used by golden and sema/TIR
-//RS /// checks so every I1 scan removes the same vetted source.
-//RS pub fn strip_vetted_prelude_modules(rust_code: &str) -> String {
-//RS     fn strip_named_mod(src: &str, matches_name: impl Fn(&str) -> bool) -> String {
-//RS         fn ident_continue(byte: u8) -> bool {
-//RS             byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80
-//RS         }
-//RS 
-//RS         fn raw_string_start(bytes: &[u8], at: usize) -> Option<(usize, usize)> {
-//RS             let mut i = at;
-//RS             if bytes.get(i) == Some(&b'b') {
-//RS                 if bytes.get(i + 1) != Some(&b'r') {
-//RS                     return None;
-//RS                 }
-//RS                 i += 1;
-//RS             } else if bytes.get(i) != Some(&b'r') {
-//RS                 return None;
-//RS             }
-//RS             i += 1;
-//RS             let mut hashes = 0;
-//RS             while bytes.get(i) == Some(&b'#') {
-//RS                 hashes += 1;
-//RS                 i += 1;
-//RS             }
-//RS             (bytes.get(i) == Some(&b'"')).then_some((i + 1, hashes))
-//RS         }
-//RS 
-//RS         fn starts_char_literal(bytes: &[u8], at: usize) -> bool {
-//RS             let Some(next) = bytes.get(at + 1).copied() else {
-//RS                 return false;
-//RS             };
-//RS             next == b'\\' || !ident_continue(next) || bytes.get(at + 2) == Some(&b'\'')
-//RS         }
-//RS 
-//RS         fn matching_brace_end(bytes: &[u8], opening: usize) -> Option<usize> {
-//RS             #[derive(Clone, Copy)]
-//RS             enum State {
-//RS                 Normal,
-//RS                 LineComment,
-//RS                 BlockComment(usize),
-//RS                 String,
-//RS                 Char,
-//RS                 Raw(usize),
-//RS             }
-//RS 
-//RS             let mut state = State::Normal;
-//RS             let mut depth = 0usize;
-//RS             let mut i = opening;
-//RS             while i < bytes.len() {
-//RS                 match state {
-//RS                     State::Normal => match bytes[i] {
-//RS                         b'/' if bytes.get(i + 1) == Some(&b'/') => {
-//RS                             state = State::LineComment;
-//RS                             i += 2;
-//RS                         }
-//RS                         b'/' if bytes.get(i + 1) == Some(&b'*') => {
-//RS                             state = State::BlockComment(1);
-//RS                             i += 2;
-//RS                         }
-//RS                         _ if raw_string_start(bytes, i).is_some() => {
-//RS                             let (after_open, hashes) = raw_string_start(bytes, i).unwrap();
-//RS                             state = State::Raw(hashes);
-//RS                             i = after_open;
-//RS                         }
-//RS                         b'"' => {
-//RS                             state = State::String;
-//RS                             i += 1;
-//RS                         }
-//RS                         b'\'' if starts_char_literal(bytes, i) => {
-//RS                             state = State::Char;
-//RS                             i += 1;
-//RS                         }
-//RS                         b'{' => {
-//RS                             depth += 1;
-//RS                             i += 1;
-//RS                         }
-//RS                         b'}' => {
-//RS                             depth = depth.checked_sub(1)?;
-//RS                             i += 1;
-//RS                             if depth == 0 {
-//RS                                 return Some(i);
-//RS                             }
-//RS                         }
-//RS                         _ => i += 1,
-//RS                     },
-//RS                     State::LineComment => {
-//RS                         if bytes[i] == b'\n' {
-//RS                             state = State::Normal;
-//RS                         }
-//RS                         i += 1;
-//RS                     }
-//RS                     State::BlockComment(mut nested) => {
-//RS                         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-//RS                             nested += 1;
-//RS                             state = State::BlockComment(nested);
-//RS                             i += 2;
-//RS                         } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
-//RS                             nested -= 1;
-//RS                             i += 2;
-//RS                             if nested == 0 {
-//RS                                 state = State::Normal;
-//RS                             } else {
-//RS                                 state = State::BlockComment(nested);
-//RS                             }
-//RS                         } else {
-//RS                             i += 1;
-//RS                         }
-//RS                     }
-//RS                     State::String | State::Char => {
-//RS                         if bytes[i] == b'\\' {
-//RS                             i = (i + 2).min(bytes.len());
-//RS                         } else {
-//RS                             let closing = matches!(state, State::String) && bytes[i] == b'"'
-//RS                                 || matches!(state, State::Char) && bytes[i] == b'\'';
-//RS                             i += 1;
-//RS                             if closing {
-//RS                                 state = State::Normal;
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     State::Raw(hashes) => {
-//RS                         if bytes[i] == b'"'
-//RS                             && bytes
-//RS                                 .get(i + 1..i + 1 + hashes)
-//RS                                 .is_some_and(|tail| tail.iter().all(|&byte| byte == b'#'))
-//RS                         {
-//RS                             i += hashes + 1;
-//RS                             state = State::Normal;
-//RS                         } else {
-//RS                             i += 1;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             None
-//RS         }
-//RS 
-//RS         fn item_start(src: &str, module_start: usize) -> usize {
-//RS             let line_start = |at: usize| src[..at].rfind('\n').map_or(0, |pos| pos + 1);
-//RS             let current_line = line_start(module_start);
-//RS             let prefix = src[current_line..module_start].trim_start();
-//RS             let mut start =
-//RS                 if prefix.is_empty() || prefix.starts_with("pub") || prefix.starts_with("#[") {
-//RS                     current_line
-//RS                 } else {
-//RS                     module_start
-//RS                 };
-//RS             while start > 0 {
-//RS                 let previous_line = line_start(start.saturating_sub(1));
-//RS                 let previous = src[previous_line..start].trim();
-//RS                 if previous.starts_with("#[")
-//RS                     || previous.starts_with("///")
-//RS                     || previous.starts_with("//!")
-//RS                 {
-//RS                     start = previous_line;
-//RS                 } else if previous.ends_with(']') {
-//RS                     // An outer attribute may span several lines. Walk back to
-//RS                     // its `#[` line before deciding where the item starts.
-//RS                     let mut candidate_end = start;
-//RS                     let mut attribute_start = None;
-//RS                     while candidate_end > 0 {
-//RS                         let candidate_line = line_start(candidate_end.saturating_sub(1));
-//RS                         let text = src[candidate_line..candidate_end].trim();
-//RS                         if text.starts_with("#[") {
-//RS                             attribute_start = Some(candidate_line);
-//RS                             break;
-//RS                         }
-//RS                         if text.is_empty() {
-//RS                             break;
-//RS                         }
-//RS                         candidate_end = candidate_line;
-//RS                     }
-//RS                     if let Some(attribute_start) = attribute_start {
-//RS                         start = attribute_start;
-//RS                     } else {
-//RS                         break;
-//RS                     }
-//RS                 } else if previous.ends_with("*/") {
-//RS                     // Preserve a preceding block documentation comment with
-//RS                     // the item it documents.
-//RS                     let mut candidate_end = start;
-//RS                     let mut doc_start = None;
-//RS                     while candidate_end > 0 {
-//RS                         let candidate_line = line_start(candidate_end.saturating_sub(1));
-//RS                         let text = src[candidate_line..candidate_end].trim();
-//RS                         if text.starts_with("/**") || text.starts_with("/*!") {
-//RS                             doc_start = Some(candidate_line);
-//RS                             break;
-//RS                         }
-//RS                         if text.is_empty() {
-//RS                             break;
-//RS                         }
-//RS                         candidate_end = candidate_line;
-//RS                     }
-//RS                     if let Some(doc_start) = doc_start {
-//RS                         start = doc_start;
-//RS                     } else {
-//RS                         break;
-//RS                     }
-//RS                 } else {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             start
-//RS         }
-//RS 
-//RS         fn skip_trivia(bytes: &[u8], mut at: usize) -> usize {
-//RS             loop {
-//RS                 while bytes.get(at).is_some_and(|byte| byte.is_ascii_whitespace()) {
-//RS                     at += 1;
-//RS                 }
-//RS                 if bytes.get(at) == Some(&b'/') && bytes.get(at + 1) == Some(&b'/') {
-//RS                     at += 2;
-//RS                     while bytes.get(at).is_some_and(|byte| *byte != b'\n') {
-//RS                         at += 1;
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 if bytes.get(at) == Some(&b'/') && bytes.get(at + 1) == Some(&b'*') {
-//RS                     let mut nested = 1usize;
-//RS                     at += 2;
-//RS                     while at < bytes.len() && nested > 0 {
-//RS                         if bytes[at] == b'/' && bytes.get(at + 1) == Some(&b'*') {
-//RS                             nested += 1;
-//RS                             at += 2;
-//RS                         } else if bytes[at] == b'*' && bytes.get(at + 1) == Some(&b'/') {
-//RS                             nested -= 1;
-//RS                             at += 2;
-//RS                         } else {
-//RS                             at += 1;
-//RS                         }
-//RS                     }
-//RS                     continue;
-//RS                 }
-//RS                 return at;
-//RS             }
-//RS         }
-//RS 
-//RS         #[derive(Clone, Copy)]
-//RS         enum State {
-//RS             Normal,
-//RS             LineComment,
-//RS             BlockComment(usize),
-//RS             String,
-//RS             Char,
-//RS             Raw(usize),
-//RS         }
-//RS 
-//RS         let bytes = src.as_bytes();
-//RS         let mut state = State::Normal;
-//RS         let mut i = 0usize;
-//RS         let mut brace_depth = 0usize;
-//RS         let mut paren_depth = 0usize;
-//RS         let mut bracket_depth = 0usize;
-//RS         let mut module = None;
-//RS         while i < bytes.len() {
-//RS             match state {
-//RS                 State::Normal => match bytes[i] {
-//RS                     b'/' if bytes.get(i + 1) == Some(&b'/') => {
-//RS                         state = State::LineComment;
-//RS                         i += 2;
-//RS                     }
-//RS                     b'/' if bytes.get(i + 1) == Some(&b'*') => {
-//RS                         state = State::BlockComment(1);
-//RS                         i += 2;
-//RS                     }
-//RS                     _ if raw_string_start(bytes, i).is_some() => {
-//RS                         let (after_open, hashes) = raw_string_start(bytes, i).unwrap();
-//RS                         state = State::Raw(hashes);
-//RS                         i = after_open;
-//RS                     }
-//RS                     b'"' => {
-//RS                         state = State::String;
-//RS                         i += 1;
-//RS                     }
-//RS                     b'\'' if starts_char_literal(bytes, i) => {
-//RS                         state = State::Char;
-//RS                         i += 1;
-//RS                     }
-//RS                     b'{' => {
-//RS                         brace_depth += 1;
-//RS                         i += 1;
-//RS                     }
-//RS                     b'}' => {
-//RS                         brace_depth = brace_depth.saturating_sub(1);
-//RS                         i += 1;
-//RS                     }
-//RS                     b'(' => {
-//RS                         paren_depth += 1;
-//RS                         i += 1;
-//RS                     }
-//RS                     b')' => {
-//RS                         paren_depth = paren_depth.saturating_sub(1);
-//RS                         i += 1;
-//RS                     }
-//RS                     b'[' => {
-//RS                         bracket_depth += 1;
-//RS                         i += 1;
-//RS                     }
-//RS                     b']' => {
-//RS                         bracket_depth = bracket_depth.saturating_sub(1);
-//RS                         i += 1;
-//RS                     }
-//RS                     b'm' if paren_depth == 0
-//RS                         && bracket_depth == 0
-//RS                         && bytes.get(i + 1..i + 3) == Some(b"od")
-//RS                         && (i == 0 || !ident_continue(bytes[i - 1]))
-//RS                         && bytes.get(i + 3).is_none_or(|byte| !ident_continue(*byte)) =>
-//RS                     {
-//RS                         let mut j = i + 3;
-//RS                         while bytes.get(j).is_some_and(|byte| byte.is_ascii_whitespace()) {
-//RS                             j += 1;
-//RS                         }
-//RS                         let name_start = j;
-//RS                         while bytes.get(j).is_some_and(|byte| ident_continue(*byte)) {
-//RS                             j += 1;
-//RS                         }
-//RS                         if matches_name(&src[name_start..j]) {
-//RS                             j = skip_trivia(bytes, j);
-//RS                             if bytes.get(j) == Some(&b'{') {
-//RS                                 module = Some((item_start(src, i), j, true));
-//RS                                 break;
-//RS                             }
-//RS                             if bytes.get(j) == Some(&b';') {
-//RS                                 module = Some((item_start(src, i), j + 1, false));
-//RS                                 break;
-//RS                             }
-//RS                         }
-//RS                         i += 1;
-//RS                     }
-//RS                     _ => i += 1,
-//RS                 },
-//RS                 State::LineComment => {
-//RS                     if bytes[i] == b'\n' {
-//RS                         state = State::Normal;
-//RS                     }
-//RS                     i += 1;
-//RS                 }
-//RS                 State::BlockComment(mut nested) => {
-//RS                     if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-//RS                         nested += 1;
-//RS                         state = State::BlockComment(nested);
-//RS                         i += 2;
-//RS                     } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
-//RS                         nested -= 1;
-//RS                         i += 2;
-//RS                         if nested == 0 {
-//RS                             state = State::Normal;
-//RS                         } else {
-//RS                             state = State::BlockComment(nested);
-//RS                         }
-//RS                     } else {
-//RS                         i += 1;
-//RS                     }
-//RS                 }
-//RS                 State::String | State::Char => {
-//RS                     if bytes[i] == b'\\' {
-//RS                         i = (i + 2).min(bytes.len());
-//RS                     } else {
-//RS                         let closing = matches!(state, State::String) && bytes[i] == b'"'
-//RS                             || matches!(state, State::Char) && bytes[i] == b'\'';
-//RS                         i += 1;
-//RS                         if closing {
-//RS                             state = State::Normal;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 State::Raw(hashes) => {
-//RS                     if bytes[i] == b'"'
-//RS                         && bytes
-//RS                             .get(i + 1..i + 1 + hashes)
-//RS                             .is_some_and(|tail| tail.iter().all(|&byte| byte == b'#'))
-//RS                     {
-//RS                         i += hashes + 1;
-//RS                         state = State::Normal;
-//RS                     } else {
-//RS                         i += 1;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         let Some((start, end_or_opening, has_body)) = module else {
-//RS             return src.to_string();
-//RS         };
-//RS         let end = if has_body {
-//RS             let Some(end) = matching_brace_end(bytes, end_or_opening) else {
-//RS                 return src.to_string();
-//RS             };
-//RS             end
-//RS         } else {
-//RS             end_or_opening
-//RS         };
-//RS         format!("{}{}", &src[..start], &src[end..])
-//RS     }
-//RS 
-//RS     fn strip_mod(src: &str, name: &str) -> String {
-//RS         let mut stripped = strip_named_mod(src, |candidate| candidate == name);
-//RS         loop {
-//RS             let next = strip_named_mod(&stripped, |candidate| candidate == name);
-//RS             if next == stripped {
-//RS                 return stripped;
-//RS             }
-//RS             stripped = next;
-//RS         }
-//RS     }
-//RS 
-//RS     fn strip_mod_prefix(src: &str, prefix: &str) -> String {
-//RS         strip_named_mod(src, |candidate| candidate.starts_with(prefix))
-//RS     }
-//RS     let s = strip_mod(rust_code, "jet_uninit_semantics");
-//RS     let s = strip_mod(&s, "jet_mem");
-//RS     let s = strip_vetted_module(&s, "jet_cell");
-//RS     // I1 audited generated internals. Each marker's source carries the
-//RS     // operation, why safe Rust cannot express it, caller invariant, and
-//RS     // violation mode; the gate removes only those exact spans.
-//RS     let s = strip_vetted_module(&s, "jet_fixed_kernel");
-//RS     let s = strip_vetted_module(&s, "jet_arrow_data");
-//RS     let s = strip_vetted_module(&s, "jet_foundation_sha256");
-//RS     let s = strip_vetted_module(&s, "jet_arrow_file_reader");
-//RS     let s = strip_vetted_module(&s, "jet_foundation_numeric");
-//RS     let s = strip_vetted_module(&s, "jet_term_kernel");
-//RS     let s = strip_vetted_module(&s, "jet_atomic_carrier");
-//RS     let s = strip_vetted_module(&s, "jet_mapped_file");
-//RS     let s = strip_vetted_module(&s, "jet_shared_cell");
-//RS     let s = strip_vetted_module(&s, "jet_harfbuzz_unix");
-//RS     let s = strip_vetted_module(&s, "jet_harfbuzz_wasm");
-//RS     let s = strip_vetted_module(&s, "jet_ui_host_scope");
-//RS     let s = strip_mod(&s, "jet_txn");
-//RS     let s = strip_mod(&s, "jet_term_unix");
-//RS     let s = strip_mod(&s, "jet_term_windows");
-//RS     let s = strip_mod(&s, "jet_term_mode");
-//RS     let s = strip_vetted_module(&s, "jet_process_pty");
-//RS     let s = strip_vetted_module(&s, "jet_process_sandbox");
-//RS     let s = strip_mod(&s, "jet_os_unix");
-//RS     let s = strip_mod(&s, "jet_atomic_windows");
-//RS     let s = strip_mod(&s, "jet_gtk");
-//RS     let mut s = strip_vetted_module(&s, "jet_crypto_entropy");
-//RS     s = strip_scheduler_native(&s);
-//RS     s = strip_shared_guard_internals(&s);
-//RS     s = strip_vetted_module(&s, "jet_os_extra");
-//RS     s = strip_vetted_module(&s, "jet_conpty_control");
-//RS     s = strip_vetted_module(&s, "jet_env_windows");
-//RS     s = strip_vetted_module(&s, "jet_watch_process_probe");
-//RS     s = strip_vetted_module(&s, "jet_atomic_windows");
-//RS     s = strip_vetted_module(&s, "jet_ws_upgrade");
-//RS     s = strip_vetted_module(&s, "jet_devserver_unix_output");
-//RS     s = strip_vetted_module(&s, "jet_devserver_windows_output");
-//RS     // D-TASKBORROW1=A: canonical task-group lifetime erasure (mirrors golden.rs).
-//RS     s = strip_vetted_module(&s, "jet_taskgroup_borrowed_spawn");
-//RS     s = strip_vetted_module(&s, "jet_std_common_types");
-//RS     s = strip_vetted_module(&s, "jet_fs_chown");
-//RS     s = strip_vetted_module(&s, "jet_std_math_task_mem");
-//RS     s = strip_vetted_module(&s, "jet_std_reactive_event_watch");
-//RS     s = strip_vetted_module(&s, "jet_std_ffi_callbacks");
-//RS     s = strip_vetted_module(&s, "jet_testing_history_foundation");
-//RS     s = strip_vetted_module(&s, "jet_testing_history_top");
-//RS     s = strip_vetted_module(&s, "jet_data_flow");
-//RS     s = strip_vetted_module(&s, "jet_compute");
-//RS     s = strip_vetted_module(&s, "jet_compute_metal");
-//RS     s = strip_vetted_module(&s, "jet_compute_cuda");
-//RS     s = strip_vetted_module(&s, "jet_compute_vulkan");
-//RS     s = strip_vetted_module(&s, "jet_compute_cpu_simd");
-//RS     s = strip_vetted_module(&s, "jet_regex_cpu_simd_dispatch");
-//RS     s = strip_vetted_module(&s, "jet_regex_cpu_simd");
-//RS     // D-SIMD1/2: native F64x4 AVX lane kernels and their dispatch callsite.
-//RS     s = strip_vetted_module(&s, "jet_simd_x86");
-//RS     s = strip_vetted_module(&s, "jet_simd_f64x4_avx");
-//RS     s = strip_vetted_module(&s, "ffi_reporter");
-//RS     s = strip_vetted_module(&s, "jet_program_allocator");
-//RS     s = strip_vetted_module(&s, "jet_mod_native");
-//RS     // D-EXEC1: the Jet-native backend's runtime C ABI (Prelude/Core/CAbi.rs).
-//RS     s = strip_vetted_module(&s, "jet_c_abi");
-//RS     loop {
-//RS         let next = strip_vetted_module(&s, "jet_mod_native");
-//RS         if next == s {
-//RS             break;
-//RS         }
-//RS         s = next;
-//RS     }
-//RS     s = strip_vetted_module(&s, "jet_os_interrupt_ffi");
-//RS     s = strip_mod(&s, "jet_os_interrupt");
-//RS     s = strip_raylib_bridge(&s);
-//RS     while s.contains("mod __jet___c_") {
-//RS         let before = s.clone();
-//RS         s = strip_mod_prefix(&s, "__jet___c_");
-//RS         if s == before {
-//RS             break;
-//RS         }
-//RS     }
-//RS     s
-//RS }
-//RS 
-//RS /// Byte columns of every real `unsafe` KEYWORD on one line of generated Rust.
-//RS ///
-//RS /// #2025: the I1 scans used to ask `line.contains("unsafe")`, which reads DATA
-//RS /// as CODE. Generated Rust embeds the program's own source path and its string
-//RS /// literals verbatim — `crate::jet_stack_enter("Examples/features/memory/
-//RS /// unsafe_sentries.jet", …)`, `jet_mem::jet_sentry_scope(true, "…/
-//RS /// unsafe_obligations.jet", …)`, `print("unsafe gate")` — so four examples were
-//RS /// permanently red for owning the word `unsafe` in their FILE NAME, and
-//RS /// `tests/sema_soundness_parts/provenance.rs` had to keep its scratch-dir prefix
-//RS /// free of the substring to avoid false-tripping every case. The property being
-//RS /// checked is about the `unsafe` keyword, so scan for the keyword: skip `//`
-//RS /// comments, string and char literals, and identifiers that merely contain the
-//RS /// word (`unsafe_sentries`, `jet_unsafe_probe`).
-//RS ///
-//RS /// Line-scoped, like the checks it serves: a generated statement is one line.
-//RS pub fn unsafe_keyword_columns(line: &str) -> Vec<usize> {
-//RS     let bytes = line.as_bytes();
-//RS     let ident_byte = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_' || byte >= 0x80;
-//RS     let mut columns = Vec::new();
-//RS     let mut i = 0;
-//RS     while i < bytes.len() {
-//RS         match bytes[i] {
-//RS             b'/' if bytes.get(i + 1) == Some(&b'/') => return columns,
-//RS             b'"' => {
-//RS                 i += 1;
-//RS                 while i < bytes.len() && bytes[i] != b'"' {
-//RS                     i += if bytes[i] == b'\\' { 2 } else { 1 };
-//RS                 }
-//RS                 i += 1;
-//RS             }
-//RS             // A char literal, not a lifetime (`'a`) and not an apostrophe inside
-//RS             // one: `'x'`, `'\n'`. Anything else advances one byte.
-//RS             b'\'' if bytes.get(i + 2) == Some(&b'\'') || bytes.get(i + 1) == Some(&b'\\') => {
-//RS                 i += 1;
-//RS                 while i < bytes.len() && bytes[i] != b'\'' {
-//RS                     i += if bytes[i] == b'\\' { 2 } else { 1 };
-//RS                 }
-//RS                 i += 1;
-//RS             }
-//RS             b'u' if bytes[i..].starts_with(b"unsafe")
-//RS                 && (i == 0 || !ident_byte(bytes[i - 1]))
-//RS                 && bytes.get(i + 6).is_none_or(|byte| !ident_byte(*byte)) =>
-//RS             {
-//RS                 columns.push(i);
-//RS                 i += 6;
-//RS             }
-//RS             _ => i += 1,
-//RS         }
-//RS     }
-//RS     columns
-//RS }
-//RS 
-//RS /// #2025 negative control: the keyword scan tells generated CODE from generated
-//RS /// DATA. Every string below is a real line from `jet emit --rust` output.
-//RS #[test]
-//RS fn unsafe_keyword_scan_reads_code_not_data() {
-//RS     let path_argument = "    let __jet_stack_frame = crate::jet_stack_enter(\"Examples/features/memory/unsafe_sentries.jet\", 5, \"run\", \"fn run() {\");";
-//RS     assert!(
-//RS         unsafe_keyword_columns(path_argument).is_empty(),
-//RS         "an example's own path in a stack-frame argument is data, not an `unsafe` block"
-//RS     );
-//RS     let sentry = "        let _jet_sentry = jet_mem::jet_sentry_scope(true, \"Examples/features/lowlevel/unsafe_obligations.jet\", 5, \"cell stays live\");";
-//RS     assert!(
-//RS         unsafe_keyword_columns(sentry).is_empty(),
-//RS         "sentry reason strings are data"
-//RS     );
-//RS     let user_string = "        { let _ = jet_term_write_stdout_line(&((\"unsafe gate\".to_string()).jet_show()), false); };";
-//RS     assert!(
-//RS         unsafe_keyword_columns(user_string).is_empty(),
-//RS         "a printed string is data"
-//RS     );
-//RS     assert!(unsafe_keyword_columns("// unsafe { … } in a comment").is_empty());
-//RS     assert!(
-//RS         unsafe_keyword_columns("    let unsafe_flag = 1;").is_empty(),
-//RS         "identifier, not keyword"
-//RS     );
-//RS 
-//RS     assert_eq!(
-//RS         unsafe_keyword_columns("    unsafe {").len(),
-//RS         1,
-//RS         "the gated block form must count"
-//RS     );
-//RS     assert_eq!(
-//RS         unsafe_keyword_columns("unsafe extern \"C\" fn InitWindow() {}").len(),
-//RS         1,
-//RS         "an `unsafe extern` item must count even though the line also holds a string"
-//RS     );
-//RS     assert_eq!(
-//RS         unsafe_keyword_columns("    let p = unsafe { *raw }; // unsafe read").len(),
-//RS         1,
-//RS         "code counts once; the trailing comment does not add a second"
-//RS     );
-//RS }
-//RS 
-//RS /// Remove the vetted `jet:scheduler-native` region (raw epoll/kqueue syscalls,
-//RS /// the only `unsafe` in the emitted scheduler — Tower #126) before an I1 scan,
-//RS /// exactly as `golden.rs::strip_vetted_prelude_modules` does.
-//RS pub fn strip_scheduler_native(src: &str) -> String {
-//RS     let begin = "// jet:scheduler-native-begin";
-//RS     let end = "// jet:scheduler-native-end";
-//RS     let mut src = src.to_string();
-//RS     loop {
-//RS         match (src.find(begin), src.find(end)) {
-//RS             (Some(b), Some(e)) if e >= b => {
-//RS                 let mut s = src[..b].to_string();
-//RS                 s.push_str(&src[e + end.len()..]);
-//RS                 src = s;
-//RS             }
-//RS             _ => return src,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-RAYLIB1: drop the always-emitted kernel raylib FFI region. Bridge unsafe
-//RS /// lives between `jet:raylib-begin` / `jet:raylib-end`; user functions stay
-//RS /// in the scan.
-//RS pub fn strip_raylib_bridge(src: &str) -> String {
-//RS     let begin = "// jet:raylib-begin";
-//RS     let end = "// jet:raylib-end";
-//RS     match (src.find(begin), src.find(end)) {
-//RS         (Some(b), Some(e)) if e >= b => {
-//RS             let mut out = src[..b].to_string();
-//RS             out.push_str(&src[e + end.len()..]);
-//RS             out
-//RS         }
-//RS         _ => src.to_string(),
-//RS     }
-//RS }
-//RS 
-//RS /// D-SHAREDGUARD1: drop every vetted `jet:shared-guard-internal` region. A
-//RS /// guard's lease holds the matching lock while its sema-proved projection is
-//RS /// dereferenced; those casts are runtime internals, not user-reachable unsafe.
-//RS pub fn strip_shared_guard_internals(src: &str) -> String {
-//RS     let begin = "// jet:shared-guard-internal-begin";
-//RS     let end = "// jet:shared-guard-internal-end";
-//RS     let mut out = src.to_string();
-//RS     loop {
-//RS         let (Some(b), Some(e)) = (out.find(begin), out.find(end)) else {
-//RS             return out;
-//RS         };
-//RS         if e < b {
-//RS             return out;
-//RS         }
-//RS         let mut next = out[..b].to_string();
-//RS         next.push_str(&out[e + end.len()..]);
-//RS         out = next;
-//RS     }
-//RS }
-//RS 
-//RS /// Remove one audited generated-prelude module before checking user code for
-//RS /// I1 violations. Generated runtime internals may contain vetted unsafe FFI;
-//RS /// user-authored lowering may not.
-//RS pub fn strip_vetted_module(src: &str, name: &str) -> String {
-//RS     let begin = format!("// JET_VETTED_UNSAFE_BEGIN: {name}");
-//RS     let end = format!("// JET_VETTED_UNSAFE_END: {name}");
-//RS     let mut src = src.to_string();
-//RS     loop {
-//RS         // Markers may be indented inside cfg blocks.
-//RS         let Some(start) = src.find(&begin).or_else(|| {
-//RS             src.lines().enumerate().find_map(|(i, line)| {
-//RS                 line.trim_start()
-//RS                     .starts_with(&begin)
-//RS                     .then(|| src.lines().take(i).map(|l| l.len() + 1).sum::<usize>())
-//RS             })
-//RS         }) else {
-//RS             return src;
-//RS         };
-//RS         let Some(relative_end) = src[start..].find(&end) else {
-//RS             return src;
-//RS         };
-//RS         let end_offset = start + relative_end + end.len();
-//RS         src = format!("{}{}", &src[..start], &src[end_offset..]);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn vetted_module_stripping_cannot_swallow_following_user_unsafe() {
-//RS     let generated = r##"before
-//RS // JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe
-//RS #[cfg(windows)]
-//RS mod audited { const TEXT: &str = r#"{ comment-like }"#; unsafe { ffi() } }
-//RS // JET_VETTED_UNSAFE_END: jet_watch_process_probe
-//RS fn user() { unsafe { user_pointer() } }
-//RS "##;
-//RS     let stripped = strip_vetted_prelude_modules(generated);
-//RS     assert!(!stripped.contains("ffi()"));
-//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn vetted_module_stripping_tracks_nested_block_comments() {
-//RS     let generated = r#"
-//RS mod jet_mem {
-//RS     /* outer comment /* nested comment with } */ still outer */
-//RS     const VALUE: i32 = 1;
-//RS }
-//RS unsafe { user_pointer() }
-//RS "#;
-//RS     let stripped = strip_vetted_prelude_modules(generated);
-//RS     assert!(!stripped.contains("mod jet_mem"));
-//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn term_mode_stripping_removes_all_platform_variants_without_hiding_user_unsafe() {
-//RS     let generated = r#"
-//RS #[cfg(unix)]
-//RS mod jet_term_mode { unsafe { unix_ffi() } }
-//RS #[cfg(windows)]
-//RS mod jet_term_mode { unsafe { windows_ffi() } }
-//RS #[cfg(not(any(unix, windows)))]
-//RS mod jet_term_mode { unsafe { other_ffi() } }
-//RS unsafe { user_pointer() }
-//RS "#;
-//RS     let stripped = strip_vetted_prelude_modules(generated);
-//RS     assert!(!stripped.contains("unix_ffi()"));
-//RS     assert!(!stripped.contains("windows_ffi()"));
-//RS     assert!(!stripped.contains("other_ffi()"));
-//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn raylib_bridge_stripping_cannot_swallow_following_user_unsafe() {
-//RS     let generated = "// jet:raylib-begin\nunsafe extern \"C\" fn InitWindow() {}\n// jet:raylib-end\nunsafe { user_pointer() }";
-//RS     let stripped = strip_vetted_prelude_modules(generated);
-//RS     assert!(!stripped.contains("InitWindow"));
-//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn audited_source_markers_strip_only_registered_regions() {
-//RS     let names = [
-//RS         "jet_foundation_sha256",
-//RS         "jet_foundation_numeric",
-//RS         "jet_term_kernel",
-//RS         "jet_atomic_carrier",
-//RS         "jet_std_common_types",
-//RS         "jet_std_math_task_mem",
-//RS         "jet_std_reactive_event_watch",
-//RS         "jet_std_ffi_callbacks",
-//RS         "jet_testing_history_foundation",
-//RS         "jet_testing_history_top",
-//RS         "jet_data_flow",
-//RS     ];
-//RS     let mut generated = String::new();
-//RS     for name in names {
-//RS         generated.push_str(&format!(
-//RS             "// JET_VETTED_UNSAFE_BEGIN: {name}\nunsafe {{ {name}() }}\n// JET_VETTED_UNSAFE_END: {name}\n"
-//RS         ));
-//RS     }
-//RS     generated.push_str(
-//RS         "// JET_VETTED_UNSAFE_BEGIN: unregistered\n\
-//RS          unsafe { unregistered() }\n\
-//RS          // JET_VETTED_UNSAFE_END: unregistered\n\
-//RS          unsafe { user_pointer() }",
-//RS     );
-//RS     let stripped = strip_vetted_prelude_modules(&generated);
-//RS     for name in names {
-//RS         assert!(!stripped.contains(&format!("{name}()")));
-//RS     }
-//RS     assert!(stripped.contains("unsafe { unregistered() }"));
-//RS     assert!(stripped.contains("unsafe { user_pointer() }"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn garbage_alloc_cap_env_value_clamps_to_a_sane_cap() {
-//RS     // Before the fix: `gb * (1 << 30)` on a raw value this large overflows
-//RS     // i64 (panics in debug, wraps toward negative in release) and the
-//RS     // resulting negative cap satisfies `cap < 0` forever, silently disarming
-//RS     // accounting for the rest of the process. It must clamp instead.
-//RS     let gb = parsed_cap_gb(Some("999999999999999999"));
-//RS     assert!(
-//RS         (1..=GUARD_CAP_CEILING_GB).contains(&gb),
-//RS         "gb={gb} not clamped"
-//RS     );
-//RS     let bytes = gb.saturating_mul(1 << 30);
-//RS     assert!(bytes > 0, "cap bytes must stay positive, got {bytes}");
-//RS 
-//RS     // A missing/unparseable value still gets the documented default.
-//RS     assert_eq!(parsed_cap_gb(None), 10);
-//RS     assert_eq!(parsed_cap_gb(Some("not a number")), 10);
-//RS     assert_eq!(
-//RS         parsed_cap_gb(Some("0")),
-//RS         1,
-//RS         "0 GB must clamp up to the 1 GB floor"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn suite_budget_defaults_to_900s_and_env_can_only_tighten() {
-//RS     // #677: the table is the only way up. Everything unlisted keeps the flat
-//RS     // default, and the abort names which of the two rules applied.
-//RS     let ledger = "# comment\nslow_measurement 5400 ratified sample policy\n";
-//RS 
-//RS     let (secs, source) = resolve_suite_budget("some_unit_suite", ledger, None);
-//RS     assert_eq!(secs, 900, "an unlisted suite keeps the 900s default");
-//RS     assert!(source.contains("900s default"), "source: {source}");
-//RS     assert!(
-//RS         source.contains("no `some_unit_suite` row"),
-//RS         "source: {source}"
-//RS     );
-//RS 
-//RS     let (secs, source) = resolve_suite_budget("slow_measurement", ledger, None);
-//RS     assert_eq!(secs, 5400, "a named row is the suite's budget");
-//RS     assert!(
-//RS         source.contains("committed `slow_measurement` row"),
-//RS         "source: {source}"
-//RS     );
-//RS     assert!(
-//RS         source.contains("ratified sample policy"),
-//RS         "the reason travels: {source}"
-//RS     );
-//RS 
-//RS     // Tightening is the env var's whole job — the guard self-test runs on it.
-//RS     let (secs, source) = resolve_suite_budget("some_unit_suite", ledger, Some("3"));
-//RS     assert_eq!(secs, 3);
-//RS     assert!(
-//RS         source.starts_with("JET_TEST_DEADLINE_SECS=3, tightening"),
-//RS         "source: {source}"
-//RS     );
-//RS 
-//RS     // Loosening is not. An exported deadline is granted to every target at
-//RS     // once, which is exactly the drift the committed table exists to stop.
-//RS     assert_eq!(
-//RS         resolve_suite_budget("some_unit_suite", ledger, Some("36000")).0,
-//RS         900
-//RS     );
-//RS     assert_eq!(
-//RS         resolve_suite_budget("slow_measurement", ledger, Some("36000")).0,
-//RS         5400
-//RS     );
-//RS     assert_eq!(
-//RS         resolve_suite_budget("some_unit_suite", ledger, Some("0")).0,
-//RS         900,
-//RS         "a zero deadline would abort instantly; it is garbage, not a tightening"
-//RS     );
-//RS 
-//RS     // A malformed table falls back to the strict default rather than to the
-//RS     // last row that happened to parse. tests/suite_membership.rs is what turns
-//RS     // that fallback into a reported failure.
-//RS     assert_eq!(
-//RS         resolve_suite_budget("slow_measurement", "slow_measurement lots", None).0,
-//RS         900
-//RS     );
-//RS     assert_eq!(
-//RS         resolve_suite_budget("slow_measurement", "slow_measurement 5400", None).0,
-//RS         900
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn suite_name_comes_from_the_test_binary_cargo_built() {
-//RS     // Cargo runs `target/debug/deps/<target>-<metadata hash>`; the budget table
-//RS     // and tests/suites.txt both spell the target name, so the hash comes off.
-//RS     assert_eq!(
-//RS         suite_name_from_exe_stem("cli_compile_latency-1a2b3c4d5e6f7a8b"),
-//RS         "cli_compile_latency"
-//RS     );
-//RS     // Run by hand, or by a runner that copied the binary: no hash to strip.
-//RS     assert_eq!(
-//RS         suite_name_from_exe_stem("cli_compile_latency"),
-//RS         "cli_compile_latency"
-//RS     );
-//RS     // A trailing word that is not a metadata hash is part of the name.
-//RS     assert_eq!(suite_name_from_exe_stem("cli-runtime"), "cli-runtime");
-//RS     assert_eq!(
-//RS         suite_name_from_exe_stem("-1a2b3c4d5e6f7a8b"),
-//RS         "-1a2b3c4d5e6f7a8b"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn the_committed_suite_budget_table_parses() {
-//RS     // The guard reads this table in a watchdog thread and falls back to the
-//RS     // default when it cannot parse it, so a typo would otherwise cost a suite
-//RS     // its exemption silently. Every suite binary carries this check.
-//RS     let rows = parse_suite_budgets(SUITE_BUDGET_LEDGER)
-//RS         .unwrap_or_else(|err| panic!("{SUITE_BUDGET_LEDGER_PATH} does not parse: {err}"));
-//RS     for row in &rows {
-//RS         assert!(
-//RS             row.secs > DEFAULT_SUITE_BUDGET_SECS,
-//RS             "{SUITE_BUDGET_LEDGER_PATH}: `{}` asks for {}s, at or under the \
-//RS              {DEFAULT_SUITE_BUDGET_SECS}s default. A row that buys nothing is a row to delete.",
-//RS             row.suite,
-//RS             row.secs
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 1002 tests/common/mod.rs:1-2423
-
+// Rust: tests/common/mod.rs:1
+// Shared integration-test helpers. Each suite owns its fixture state.
+use std.[fs, env, process, thread, time, io, alloc]
+use std.process.[Command, Stdio, Output]
+use std.path.Component
+use std.sync.OnceLock
+use std.sync.atomic.[AtomicBool, AtomicI64, AtomicU64, Ordering]
+use std.alloc.[Layout, GlobalAlloc, System]
+use core.mem.Ptr
+use core.sys.target.[selected_family, selected_os]
+use jet.AST.ProgramBundle
+use jet_foundation.MIR.[MirProgram, MirArtifactId, MirArtifactRequest, MirArtifactTarget, MirArtifactKind, MirArtifactBuildMode]
+use jet_pkg_model.Package.ReleaseDevtoolsPolicy
+use jet.Interpreter.[RunOutcome, InterpreterInvocation]
+use jet.Diagnostics.Diagnostic
+use jet.JitBackend.[JitBackend, InterpreterBackend]
+use jet_jit.[CraneliftBackend, TierRow, ResidentJitSafety]
+use jet_store.runtime.[PreparedRuntime, RuntimeError]
+use jet_foundation.Tests.Integration.Support.CorpusPolicy as corpus_policy
+// GATE #4494: native atomics, allocator hooks, process, filesystem and thread primitives.
+// GATE #4483: selected target family / OS dispatch.
+// Rust: tests/common/mod.rs:17
+const TEST_PACKAGE_MANIFEST: String = "name: \"test-fixture\"\nversion: \"0.1.0\"\n"
+// Rust: tests/common/mod.rs:21
+fn prepare_test_fixture_root(path: &OSPath) -> {
+    fs.create_dir_all(path).unwrap_or_else(fn(error) { panic("create test fixture root `{path.display()}`: {error}") })
+    if selected_family() == "unix" {
+        fs.set_permissions(path, fs.Permissions.from_mode(0o700)).unwrap_or_else(fn(error) { panic("make test fixture root private `{path.display()}`: {error}") })
+    }
+    manifest :: path.join("package.jet")
+    if fs.symlink_metadata(&manifest) == {
+        .Ok(_) -> {}
+        .Err(error) -> {
+            if error.kind() == io.ErrorKind.NotFound {
+                fs.write(&manifest, TEST_PACKAGE_MANIFEST).unwrap_or_else(fn(error) { panic("write test fixture manifest `{manifest.display()}`: {error}") })
+            } else { panic("inspect test fixture manifest `{manifest.display()}`: {error}") }
+        }
+    }
+}
+// Rust: tests/common/mod.rs:50
+fn lower_cranelift_bundle(bundle: &ProgramBundle) -> (MirProgram, MirArtifactId) Err! {
+    jet.Codegen.TIR.lower_checked_mir_program_for(bundle, MirArtifactRequest.new(MirArtifactTarget.Cranelift, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)).map_err(fn(error) { error.to_string() })
+}
+// Rust: tests/common/mod.rs:72
+fn lower_interpreter_bundle(bundle: &ProgramBundle) -> (MirProgram, MirArtifactId) Err! {
+    jet.Codegen.TIR.lower_checked_mir_program_for(bundle, MirArtifactRequest.new(MirArtifactTarget.Interpreter, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)).map_err(fn(error) { error.to_string() })
+}
+// Rust: tests/common/mod.rs:92
+fn development_policy() -> ReleaseDevtoolsPolicy { ReleaseDevtoolsPolicy.development() }
+// Rust: tests/common/mod.rs:96
+fn cranelift_resident_safe(bundle: &ProgramBundle) -> Bool {
+    lower_cranelift_bundle(bundle).map(fn((program, _)) { jet_jit.resident_jit_safe_program(&program) }).unwrap_or(false)
+}
+// Rust: tests/common/mod.rs:102
+fn cranelift_resident_safe_detail(bundle: &ProgramBundle) -> String {
+    if lower_cranelift_bundle(bundle) == {
+        .Ok((program, _)) -> jet_jit.resident_jit_safe_program_detail(&program)
+        .Err(error) -> error
+    }
+}
+// Rust: tests/common/mod.rs:109
+fn compile_cranelift_bundle(bundle: &ProgramBundle, policy: &ReleaseDevtoolsPolicy) -> () Err! {
+    (program, artifact) :: lower_cranelift_bundle(bundle)?
+    jet_jit.try_compile_program(&program, artifact, policy)
+}
+// Rust: tests/common/mod.rs:118
+struct CraneliftTierPlan {
+    whole_interp: Bool
+    native: [String:Bool]
+    deopt: [(String, String)]
+    gap: String?
+    rows: [TierRow]
+}
+// Rust: tests/common/mod.rs:126
+fn cranelift_tier_plan(bundle: &ProgramBundle) -> CraneliftTierPlan {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    plan :: jet_jit.plan_mir_tiers(&program, artifact)
+    rows :: plan.rows
+    function_name :: fn(id) { rows.iter().find(fn(row) { row.function == id }).map(fn(row) { row.function_name.clone() }).unwrap_or_else(fn() { "function#{id:?}" }) }
+    CraneliftTierPlan{whole_interp: plan.whole_program_deopt, native: plan.native.into_iter().map(fn(id) { (function_name(id), true) }).collect(), deopt: plan.deopt.into_iter().map(fn((id, reason)) { (function_name(id), reason) }).collect(), gap: plan.gap.map(fn(gap) { "{gap:?}" }), rows: rows}
+}
+// Rust: tests/common/mod.rs:150
+fn cranelift_strict_run(bundle: &ProgramBundle, policy: &ReleaseDevtoolsPolicy) -> RunOutcome Err! {
+    (program, artifact) :: lower_cranelift_bundle(bundle)?
+    jet_jit.run_resident_strict_for_test(&program, artifact, policy)
+}
+// Rust: tests/common/mod.rs:158
+fn cranelift_func_safety(bundle: &ProgramBundle, name: String) -> ResidentJitSafety {
+    (program, _) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.resident_jit_func_safety_detail(&program, name)
+}
+// Rust: tests/common/mod.rs:167
+fn cranelift_main_ops(bundle: &ProgramBundle) -> [String] {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.jit_dump_main_ops(&program, artifact)
+}
+// Rust: tests/common/mod.rs:172
+fn cranelift_main_stmts(bundle: &ProgramBundle) -> [String] {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.jit_dump_main_stmts(&program, artifact)
+}
+// Rust: tests/common/mod.rs:178
+fn cranelift_func_names(bundle: &ProgramBundle) -> [String] {
+    (program, _) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.jit_program_func_names(&program)
+}
+// Rust: tests/common/mod.rs:184
+fn cranelift_spawn_stats(bundle: &ProgramBundle) -> (Int, Int) {
+    (program, _) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.jit_spawn_stats(&program)
+}
+// Rust: tests/common/mod.rs:190
+fn cranelift_uncovered_detail(bundle: &ProgramBundle) -> String? {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.jit_main_uncovered_detail(&program, artifact)
+}
+// Rust: tests/common/mod.rs:196
+fn cranelift_mixed_switch_conds(bundle: &ProgramBundle) -> [String] {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    jet_jit.jit_dump_mixed_switch_conds(&program, artifact)
+}
+// Rust: tests/common/mod.rs:202
+fn run_cranelift_bundle(backend: &CraneliftBackend, bundle: &ProgramBundle, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    JitBackend.run(backend, &program, artifact, try_anyway, policy)
+}
+// Rust: tests/common/mod.rs:213
+fn hot_swap_cranelift_bundle(backend: &CraneliftBackend, module_name: String, bundle: &ProgramBundle, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome [Diagnostic]! {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    JitBackend.hot_swap(backend, module_name, &program, artifact, try_anyway, policy)
+}
+// Rust: tests/common/mod.rs:232
+fn run_interpreter_checked_bundle(bundle: &ProgramBundle, try_anyway: Bool, invocation: InterpreterInvocation, policy: &ReleaseDevtoolsPolicy) -> RunOutcome {
+    (program, artifact) :: lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR")
+    jet.Interpreter.run_checked(&program, artifact, try_anyway, invocation, policy)
+}
+// Rust: tests/common/mod.rs:243
+fn run_interpreter_named_job(bundle: &ProgramBundle, file: String, name: String, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome {
+    (program, artifact) :: lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR")
+    args :: [file.to_owned(), jet_jit.Job.JET_JOB_PRIVATE_DISPATCH_FLAG.to_owned(), name.to_owned()]
+    jet_jit.with_program_args(&args, fn() { jet.Interpreter.dev_run_snapshot(&program, artifact, try_anyway, InterpreterInvocation.DevInterpret, policy) })
+}
+// Rust: tests/common/mod.rs:268
+fn restart_cranelift_bundle(backend: &CraneliftBackend, bundle: &ProgramBundle, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome {
+    (program, artifact) :: lower_cranelift_bundle(bundle).expect("checked bundle must lower to Cranelift MIR")
+    JitBackend.restart(backend, &program, artifact, try_anyway, policy)
+}
+// Rust: tests/common/mod.rs:279
+fn run_interpreter_bundle(backend: &InterpreterBackend, bundle: &ProgramBundle, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome {
+    (program, artifact) :: lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR")
+    JitBackend.run(backend, &program, artifact, try_anyway, policy)
+}
+// Rust: tests/common/mod.rs:289
+fn hot_swap_interpreter_bundle(backend: &InterpreterBackend, module_name: String, bundle: &ProgramBundle, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome [Diagnostic]! {
+    (program, artifact) :: lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR")
+    JitBackend.hot_swap(backend, module_name, &program, artifact, try_anyway, policy)
+}
+// Rust: tests/common/mod.rs:308
+fn restart_interpreter_bundle(backend: &InterpreterBackend, bundle: &ProgramBundle, try_anyway: Bool, policy: &ReleaseDevtoolsPolicy) -> RunOutcome {
+    (program, artifact) :: lower_interpreter_bundle(bundle).expect("checked bundle must lower to interpreter MIR")
+    JitBackend.restart(backend, &program, artifact, try_anyway, policy)
+}
+// Rust: tests/common/mod.rs:318
+fn cranelift_lowers(bundle: &ProgramBundle) -> Bool { lower_cranelift_bundle(bundle).is_ok() }
+// Rust: tests/common/mod.rs:322
+fn cranelift_lower_error(bundle: &ProgramBundle) -> String { lower_cranelift_bundle(bundle).err().unwrap_or_else(fn() { "canonical Cranelift MIR lowering succeeded" }) }
+// Rust: tests/common/mod.rs:337
+struct GuardedAlloc {}
+// Rust: tests/common/mod.rs:342
+static GUARD_CAP_BYTES: AtomicI64 = AtomicI64.new(-1)
+// Rust: tests/common/mod.rs:343
+static GUARD_CAP_INIT_STARTED: AtomicBool = AtomicBool.new(false)
+// Rust: tests/common/mod.rs:344
+static GUARD_LIVE_BYTES: AtomicI64 = AtomicI64.new(0)
+// Rust: tests/common/mod.rs:345
+static GUARD_WATCHDOG_STARTED: AtomicBool = AtomicBool.new(false)
+// Rust: tests/common/mod.rs:350
+static GUARD_ABORTING: AtomicBool = AtomicBool.new(false)
+// Rust: tests/common/mod.rs:356
+const GUARD_CAP_CEILING_GB: I64 = 1 << 20
+// Rust: tests/common/mod.rs:361
+fn parsed_cap_gb(raw: String?) -> I64 { raw.and_then(fn(s) { s.parse<I64>().ok() }).unwrap_or(10).clamp(1, GUARD_CAP_CEILING_GB) }
+// Rust: tests/common/mod.rs:367
+impl GuardedAlloc.GlobalAlloc {
+    // Rust: tests/common/mod.rs:368
+    fn alloc(self, layout: Layout) -> Ptr<U8> {
+        #Unsafe("system allocator returns the requested live allocation; accounting follows only non-null allocation") {
+            ptr :: System.alloc(layout)
+            if !ptr.is_null() { guard_on_alloc(layout.size() as I64) }
+            ptr
+        }
+    }
+    // Rust: tests/common/mod.rs:376
+    fn dealloc(self, ptr: Ptr<U8>, layout: Layout) -> {
+        #Unsafe("ptr and layout are the pair returned by the allocator; deallocate once then subtract accounting") {
+            System.dealloc(ptr, layout)
+            _ :: GUARD_LIVE_BYTES.fetch_sub(layout.size() as I64, Ordering.Relaxed)
+        }
+    }
+}
+// Rust: tests/common/mod.rs:382
+fn guard_on_alloc(size: I64) -> {
+    cap :: GUARD_CAP_BYTES.load(Ordering.Relaxed)
+    if cap < 0 {
+        // Claim env initialization once: its nested allocation is deliberately unaccounted.
+        if !GUARD_CAP_INIT_STARTED.swap(true, Ordering.AcqRel) {
+            gb :: parsed_cap_gb(env.var("JET_TEST_ALLOC_CAP_GB").ok())
+            GUARD_CAP_BYTES.store(gb.saturating_mul(1 << 30), Ordering.Relaxed)
+        }
+        return
+    }
+    total :: GUARD_LIVE_BYTES.fetch_add(size, Ordering.Relaxed) + size
+    if total > cap {
+        guard_abort(fn(out) { _ :: io.writeln(out, "jet test guard: allocation cap {} GB exceeded — aborting; raise JET_TEST_ALLOC_CAP_GB if legitimate", cap / (1 << 30)) })
+    }
+    guard_start_watchdog()
+}
+// Rust: tests/common/mod.rs:417
+fn guard_abort(print: fn(&io.Stderr) -> ()) -> Never {
+    if !GUARD_ABORTING.swap(true, Ordering.AcqRel) { print(&io.stderr()) }
+    process.abort()
+}
+// Rust: tests/common/mod.rs:427
+fn guard_start_watchdog() -> {
+    if GUARD_WATCHDOG_STARTED.load(Ordering.Relaxed) { return }
+    if GUARD_WATCHDOG_STARTED.swap(true, Ordering.AcqRel) { return }
+    spawned :: thread.Builder.new().name("jet-test-watchdog").spawn(guard_watchdog_main)
+    if spawned.is_err() { GUARD_WATCHDOG_STARTED.store(false, Ordering.Release) }
+}
+// Rust: tests/common/mod.rs:449
+const DEFAULT_SUITE_BUDGET_SECS: U64 = 900
+// Rust: tests/common/mod.rs:456
+const SUITE_BUDGET_LEDGER: String = include_str("tests/suite_budgets.txt")
+// Rust: tests/common/mod.rs:460
+const SUITE_BUDGET_LEDGER_PATH: String = "tests/suite_budgets.txt"
+// Rust: tests/common/mod.rs:466
+struct SuiteBudgetRow { suite: StringView, secs: U64, reason: StringView }
+// Rust: tests/common/mod.rs:477
+fn parse_suite_budgets(text: String) -> [SuiteBudgetRow] Err! {
+    rows := []
+    for (index, raw) in text.lines().enumerate() {
+        line := raw.trim() // #4303
+        if line.is_empty() || line.starts_with('#') { continue }
+        number :: index + 1
+        fields := line.splitn(3, Char.is_whitespace)
+        suite :: fields.next().unwrap_or_default()
+        secs :: fields.next().unwrap_or_default()
+        reason := fields.next().unwrap_or_default().trim() // #4303
+        seconds :: secs.parse<U64>().map_err(fn(_) { "{SUITE_BUDGET_LEDGER_PATH}:{number}: `{secs}` is not a budget in whole seconds. Row shape: <test target name> <seconds> <reason, one line>" })?
+        if reason.is_empty() { return Err("{SUITE_BUDGET_LEDGER_PATH}:{number}: the `{suite}` row states no reason. An exemption without a reason is one nobody can review or retire (#677)") }
+        rows.push(SuiteBudgetRow{suite: suite, secs: seconds, reason: reason})
+    }
+    Ok(rows)
+}
+// Rust: tests/common/mod.rs:513
+fn suite_name_from_exe_stem(stem: String) -> StringView {
+    if pair :: stem.rsplit_once('-') {
+        (head, hash) :: pair
+        if !head.is_empty() && hash.len() >= 8 && hash.bytes().all(fn(byte) { byte.is_ascii_hexdigit() }) { return head }
+    }
+    stem.view()
+}
+// Rust: tests/common/mod.rs:533
+fn resolve_suite_budget(suite: String, ledger: String, env_raw: String?) -> (U64, String) {
+    row :: parse_suite_budgets(ledger).ok().and_then(fn(rows) { rows.into_iter().find(fn(row) { row.suite == suite }).map(fn(row) { (row.secs, row.reason.to_string()) }) })
+    secs := DEFAULT_SUITE_BUDGET_SECS
+    source := "the {DEFAULT_SUITE_BUDGET_SECS}s default (no `{suite}` row in {SUITE_BUDGET_LEDGER_PATH})"
+    if pair :: row {
+        secs = pair.0
+        source = "the committed `{suite}` row in {SUITE_BUDGET_LEDGER_PATH} — {pair.1}"
+    }
+    if requested :: env_raw.and_then(fn(raw) { raw.trim().parse<U64>().ok() }).filter(fn(requested) { requested >= 1 && requested < secs }) {
+        source = "JET_TEST_DEADLINE_SECS={requested}, tightening {source}"
+        secs = requested
+    }
+    (secs, source)
+}
+// Rust: tests/common/mod.rs:565
+fn guard_watchdog_main() -> {
+    stem :: env.current_exe().ok().and_then(fn(exe) { exe.file_stem().map(fn(stem) { stem.to_string_lossy().into_owned() }) }).unwrap_or_default()
+    suite := suite_name_from_exe_stem(&stem) // #4303
+    (secs, source) :: resolve_suite_budget(suite, SUITE_BUDGET_LEDGER, env.var("JET_TEST_DEADLINE_SECS").ok())
+    started :: time.Instant.now()
+    thread.sleep(time.Duration.from_secs(secs))
+    elapsed :: started.elapsed().as_secs()
+    guard_abort(fn(out) { _ :: io.writeln(out, "jet test guard: suite `{}` exceeded its {}s budget after {}s — aborting. Budget source: {}. Split the suite or speed it up; a longer deadline is a committed row in {} with its reason, never a raised default (#677).", suite, secs, elapsed, source, SUITE_BUDGET_LEDGER_PATH) })
+}
+// Rust: tests/common/mod.rs:598
+#GlobalAllocator
+const JET_TEST_GUARD: GuardedAlloc = GuardedAlloc{}
+// Rust: tests/common/mod.rs:600
+static SEQ: AtomicU64 = AtomicU64.new(0)
+// Rust: tests/common/mod.rs:604
+fn assert_test_path_on_disk(path: &OSPath, label: String) -> {
+    absolute :: fn(path: &OSPath) { if path.is_absolute() { path.to_path_buf() } else { env.current_dir().unwrap().join(path) } }
+    resolved :: absolute(path)
+    temp_path :: absolute(&OSPath("/tmp"))
+    canonical :: fs.canonicalize(&resolved).unwrap_or(resolved)
+    temp :: fs.canonicalize(&temp_path).unwrap_or(temp_path)
+    assert(!canonical.starts_with(&temp), "jet test harness refuses {label}={canonical.display()} on RAM-backed temp storage; use a disk path")
+}
+// Rust: tests/common/mod.rs:625
+fn assert_test_environment_is_safe() -> {
+    for name in ["CARGO_TARGET_DIR", "JET_TEST_SCRATCH_DIR", "JET_DEV_ORACLE_CACHE_DIR"] {
+        if value :: env.var_os(name) { assert_test_path_on_disk(&OSPath(value), name) }
+    }
+}
+// Rust: tests/common/mod.rs:645
+fn test_scratch_root(scope: String) -> OSPath {
+    assert_test_environment_is_safe()
+    root :: env.var_os("JET_TEST_SCRATCH_DIR").map(OSPath.from).unwrap_or_else(fn() { OSPath(env.var_os("HOME").expect("HOME is required for test scratch")).join(".cache/jet-test-scratch") })
+    assert_test_path_on_disk(&root, "JET_TEST_SCRATCH_DIR")
+    path :: root.join(scope)
+    fs.create_dir_all(&path).unwrap_or_else(fn(error) { panic("create test scratch root `{path.display()}`: {error}") })
+    path
+}
+// Rust: tests/common/mod.rs:662
+struct ProjectScratch { path: OSPath }
+impl ProjectScratch {
+    // Rust: tests/common/mod.rs:667
+    fn for_project(source: &OSPath, tag: String) -> ProjectScratch {
+        nanos :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("system clock before Unix epoch").as_nanos()
+        sequence :: SEQ.fetch_add(1, Ordering.Relaxed)
+        path :: test_scratch_root("projects").join("jet-project-{tag}-{process.id()}-{nanos}-{sequence}")
+        fs.create_dir(&path).unwrap_or_else(fn(error) { panic("create staged project `{path.display()}`: {error}") })
+        canonical :: fs.canonicalize(&path).unwrap_or_else(fn(error) { panic("canonicalize staged project: {error}") })
+        repo :: fs.canonicalize(env.var("CARGO_MANIFEST_DIR").unwrap()).expect("canonicalize repository root")
+        assert(!canonical.starts_with(&repo), "staged project scratch must be outside the repository: {canonical.display()}")
+        copy_staged_project(source, &canonical)
+        ProjectScratch{path: canonical}
+    }
+}
+impl ProjectScratch.Drop {
+    // Rust: tests/common/mod.rs:694
+    fn drop(self) -> { make_tree_writable(&self.path); _ :: fs.remove_dir_all(&self.path) }
+}
+// Rust: tests/common/mod.rs:700
+fn copy_staged_project(source: &OSPath, destination: &OSPath) -> {
+    for item in fs.read_dir(source).unwrap_or_else(fn(error) { panic("read project {source.display()}: {error}") }).flatten() {
+        name :: item.file_name()
+        kind :: item.file_type().expect("read project entry type")
+        from :: item.path()
+        if kind.is_dir() && name == ".jet" { continue }
+        if kind.is_dir() {
+            is_fixture_state :: name == "fixture-state"
+            to :: if is_fixture_state { destination.join(".jet") } else { destination.join(&name) }
+            fs.create_dir_all(&to).expect("create staged project directory")
+            if is_fixture_state { copy_fixture_state(&from, &to) } else { copy_staged_project(&from, &to) }
+        } else if kind.is_file() {
+            fs.copy(&from, destination.join(&name)).unwrap_or_else(fn(error) { panic("copy project file {from.display()} into {destination.display()}: {error}") })
+        }
+    }
+}
+// Rust: tests/common/mod.rs:736
+fn copy_fixture_state(source: &OSPath, destination: &OSPath) -> {
+    for item in fs.read_dir(source).unwrap_or_else(fn(error) { panic("read fixture state {source.display()}: {error}") }).flatten() {
+        from :: item.path()
+        to :: destination.join(item.file_name())
+        kind :: item.file_type().expect("read fixture-state entry type")
+        if kind.is_dir() {
+            fs.create_dir_all(&to).expect("create staged fixture-state directory")
+            copy_fixture_state(&from, &to)
+        } else if kind.is_file() {
+            fs.copy(&from, &to).unwrap_or_else(fn(error) { panic("copy fixture state {from.display()} into {destination.display()}: {error}") })
+        }
+    }
+}
+// Rust: tests/common/mod.rs:762
+fn unique_tmp(prefix: String) -> OSPath {
+    n :: SEQ.fetch_add(1, Ordering.Relaxed)
+    path :: test_scratch_root("scratch").join("{prefix}_{process.id()}_{n}")
+    prepare_test_fixture_root(&path)
+    path
+}
+// Rust: tests/common/mod.rs:785
+struct ExampleStdin { piped: String, tty_only: String }
+impl ExampleStdin {
+    // Rust: tests/common/mod.rs:798
+    fn tty(self) -> String { "{self.piped}{self.tty_only}" }
+}
+// Rust: tests/common/mod.rs:812
+const TERMINAL_PARITY_STDIN: ExampleStdin = ExampleStdin{piped: "\nnot-a-number\n3\n2\n", tty_only: "secret\n"}
+// Rust: tests/common/mod.rs:826
+const TERMINAL_STDIN: ExampleStdin = ExampleStdin{piped: "h", tty_only: ""}
+// Rust: tests/common/mod.rs:831
+const STDIN_INPUT_STDIN: ExampleStdin = ExampleStdin{piped: "alpha\nbeta\n", tty_only: ""}
+// Rust: tests/common/mod.rs:836
+const STDIN_READ_ALL_STDIN: ExampleStdin = ExampleStdin{piped: "alpha\nbeta\n", tty_only: ""}
+// Rust: tests/common/mod.rs:841
+const STDIN_READLINE_STDIN: ExampleStdin = ExampleStdin{piped: "alpha\nbeta\n", tty_only: ""}
+// Rust: tests/common/mod.rs:854
+fn example_stdin(stem: String) -> ExampleStdin? {
+    if stem == {
+        "io/terminal_parity" -> Val(TERMINAL_PARITY_STDIN)
+        "io/terminal" -> Val(TERMINAL_STDIN)
+        "io/stdin_input" -> Val(STDIN_INPUT_STDIN)
+        "io/stdin_read_all" -> Val(STDIN_READ_ALL_STDIN)
+        "io/stdin_readline" -> Val(STDIN_READLINE_STDIN)
+        _ -> nil
+    }
+}
+// Rust: tests/common/mod.rs:871
+fn jet_cli_output_with_stdin(args: [String], answers: String) -> Output {
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(args).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("jet CLI must start")
+    child.stdin.take().expect("piped jet stdin").write_all(answers.as_bytes()).expect("write jet stdin answers")
+    child.wait_with_output().expect("collect jet CLI output")
+}
+// Rust: tests/common/mod.rs:892
+fn have_rustc() -> Bool {
+    static PRESENT: OnceLock<Bool> = OnceLock.new()
+    present :: PRESENT.get_or_init(fn() { Command.new("rustc").arg("--version").output().is_ok() })
+    if !present && env.var("JET_REQUIRE_RUSTC").ok() == Val("1") { panic("JET_REQUIRE_RUSTC=1 but rustc not found on PATH — refusing to silently skip I2 (rustc-must-accept) coverage. Fix the CI environment; do not unset JET_REQUIRE_RUSTC to paper over this.") }
+    present
+}
+// Rust: tests/common/mod.rs:907
+fn add_generated_rust(command: &Command, path: &OSPath, generated: String, has_rust_ffi: Bool, rustc_flags: [String]) -> PreparedRuntime {
+    flags :: rustc_flags.iter().map(fn(flag) { OSString.from(flag) }).collect()
+    assert(!rustc_flags.contains("--test"), "`rustc --test` over generated Jet output is not a supported build mode: it synthesizes a harness from the Prelude's own `#[cfg(test)]` modules inside a user program. Run Jet tests with `jet test`, or hook the generated `main` for an inspection probe.")
+    store_root :: path.parent().unwrap_or_else(fn() { OSPath(".") }).join(".jet-store")
+    store :: jet_store.Store.open(jet_store.StoreConfig.new(store_root).with_cap_bytes(20 * 1024 * 1024 * 1024).with_reserve_bytes(0)).expect("open isolated jet store")
+    prepared :: if has_rust_ffi { PreparedRuntime.inline(generated) } else {
+        if jet_store.runtime.prepare(&store, OSString("rustc"), generated, &flags, []) == {
+            .Ok(prepared) -> prepared
+            .Err(RuntimeError.Cache(_)) -> PreparedRuntime.inline(generated)
+            .Err(error) -> panic("cached runtime build failed: {error}")
+        }
+    }
+    fs.write(path, prepared.rust()).unwrap()
+    command.arg("--edition").arg("2021").args(rustc_flags.iter().copied()).arg("--crate-name").arg(jet.Syntax.sanitize_crate_name(path.file_stem().and_then(fn(name) { name.to_str() }).unwrap_or("out"))).arg(path)
+    prepared.add_rustc_args(command)
+    prepared
+}
+// Rust: tests/common/mod.rs:987
+struct Scratch { path: OSPath }
+impl Scratch {
+    // Rust: tests/common/mod.rs:992
+    fn new(tag: String) -> Scratch {
+        nanos :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+        path :: test_scratch_root("scratch").join("jet-it-{tag}-{process.id()}-{nanos}-{thread.current().id():?}")
+        prepare_test_fixture_root(&path)
+        Scratch{path: path}
+    }
+    // Rust: tests/common/mod.rs:1006
+    fn join(self, p: String) -> OSPath { self.path.join(p) }
+}
+impl Scratch.AsRef<OSPath> {
+    // Rust: tests/common/mod.rs:1011
+    fn as_ref(self) -> &OSPath { &self.path }
+}
+// Rust: tests/common/mod.rs:1021
+struct NativeCatalogRecipe { name: String, version: String, bin: String, artifact_name: String, contents: [U8] }
+// Rust: tests/common/mod.rs:1030
+fn write_native_catalog(catalog: &OSPath, artifact_root: &OSPath, recipes: &[NativeCatalogRecipe]) -> {
+    fs.create_dir_all(catalog).expect("create native catalog directory")
+    fs.create_dir_all(artifact_root).expect("create native catalog artifact directory")
+    records := [String].with_capacity(recipes.len())
+    for recipe in recipes {
+        assert(!recipe.artifact_name.is_empty() && !recipe.artifact_name.contains('/') && !recipe.artifact_name.contains('\\'), "native catalog artifact name must be one path component")
+        artifact :: artifact_root.join(&recipe.artifact_name)
+        fs.write(&artifact, &recipe.contents).expect("write native catalog artifact")
+        if selected_family() == "unix" {
+            permissions := fs.metadata(&artifact).expect("stat native catalog artifact").permissions()
+            permissions.set_mode(0o755)
+            fs.set_permissions(&artifact, permissions).expect("make native catalog artifact executable")
+        }
+        digest :: jetpack.SHA256.sha256_file_hex(&artifact).expect("hash native catalog artifact")
+        url :: "file://{artifact.display()}"
+        records.push("{{\"name\":\"{jet_foundation.JSON.json_escape(&recipe.name)}\",\"version\":\"{jet_foundation.JSON.json_escape(&recipe.version)}\",\"kind\":\"prebuilt\",\"url\":\"{jet_foundation.JSON.json_escape(&url)}\",\"sha256\":\"{digest}\",\"bin\":\"{jet_foundation.JSON.json_escape(&recipe.bin)}\"}}")
+    }
+    records.sort_unstable()
+    fs.write(catalog.join("recipes-v1.json"), "{{\"schema\":1,\"recipes\":[{records.join(",")}]}}").expect("write native catalog recipes")
+}
+impl Scratch.Drop {
+    // Rust: tests/common/mod.rs:1074
+    fn drop(self) -> { make_tree_writable(&self.path); _ :: fs.remove_dir_all(&self.path) }
+}
+// Rust: tests/common/mod.rs:1083,1111
+fn make_tree_writable(path: &OSPath) -> {
+    if selected_family() == "unix" {
+        meta :: fs.symlink_metadata(path).ok() ?? return
+        if !meta.file_type().is_symlink() {
+            mode :: if meta.is_dir() { 0o755 } else { meta.permissions().mode() | 0o600 }
+            _ :: fs.set_permissions(path, fs.Permissions.from_mode(mode))
+        }
+        if meta.is_dir() {
+            entries :: fs.read_dir(path).ok() ?? return
+            for entry in entries {
+                value :: entry.ok() ?? continue
+                make_tree_writable(&value.path())
+            }
+        }
+    } else {
+        meta :: fs.metadata(path).ok() ?? return
+        permissions := meta.permissions()
+        permissions.set_readonly(false)
+        _ :: fs.set_permissions(path, permissions)
+    }
+}
+// Rust: tests/common/mod.rs:1120
+fn test_worker_count(cap: Int) -> Int {
+    requested :: env.var("JET_TEST_JOBS").ok().and_then(fn(s) { s.parse<Int>().ok() }).filter(fn(n) { n > 0 })
+    available :: thread.available_parallelism().map(fn(n) { n.get() }).unwrap_or(2)
+    requested.unwrap_or(available).clamp(1, cap.max(1))
+}
+// Rust: tests/common/mod.rs:1138
+fn jetpack_bin() -> &OSPath {
+    static BIN: OnceLock<OSPath> = OnceLock.new()
+    BIN.get_or_init(fn() { resolve_or_build_bin("jetpack", "jetpack-bin", "jetpack") })
+}
+// Rust: tests/common/mod.rs:1145
+fn jetos_bin() -> &OSPath {
+    static BIN: OnceLock<OSPath> = OnceLock.new()
+    BIN.get_or_init(fn() { resolve_or_build_bin("jetos", "jetos", "jetos") })
+}
+// Rust: tests/common/mod.rs:1150
+fn resolve_or_build_bin(env_suffix: String, package: String, bin_name: String) -> OSPath {
+    if path :: env.var_os("CARGO_BIN_EXE_{env_suffix}") { return OSPath(path) }
+    target_dir :: env.var_os("CARGO_TARGET_DIR").map(OSPath.from).unwrap_or_else(fn() { OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("target") })
+    suffix :: if selected_os() == "windows" { ".exe" } else { "" }
+    bin :: target_dir.join("debug").join("{bin_name}{suffix}")
+    if !bin.is_file() {
+        status :: Command.new(env.var("CARGO").unwrap()).args(["build", "-p", package, "--bin", bin_name]).current_dir(env.var("CARGO_MANIFEST_DIR").unwrap()).status().unwrap()
+        assert(status.success(), "building {bin_name} test binary failed")
+    }
+    bin
+}
+// Rust: tests/common/mod.rs:1171
+fn panic_message(payload: Box<Any + Send>) -> String {
+    if s :: payload.downcast_ref<String>() { s.clone() }
+    else if s :: payload.downcast_ref<StringView>() { s.to_string() }
+    else { "panic with non-string payload" }
+}
+// Rust: tests/common/mod.rs:1204
+const ABORT_MARKERS: [String] = ["failed to initiate panic", "non-unwinding panic", "panic in a function that cannot unwind", "panic in a destructor during cleanup", "core::panicking", "fatal runtime error: stack overflow"]
+// Rust: tests/common/mod.rs:1214
+fn abort_marker(stderr: String) -> String? { ABORT_MARKERS.iter().copied().find(fn(marker) { stderr.contains(marker) }) }
+// Rust: tests/common/mod.rs:1224
+fn fixture_filter(var: String) -> String? {
+    raw :: env.var(var).ok() ?? return nil
+    Val(normalize_fixture_selector(var, &raw))
+}
+// Rust: tests/common/mod.rs:1229
+fn normalize_fixture_selector(var: String, raw: String) -> String {
+    normalized_separators :: raw.trim().replace('\\', "/")
+    assert(!normalized_separators.is_empty(), "{var} must not be empty")
+    path :: OSPath(normalized_separators)
+    assert(!path.is_absolute(), "{var} must be repository-relative: {normalized_separators}")
+    parts := []
+    for component in path.components() {
+        if component == {
+            .CurDir -> {}
+            .Normal(part) -> parts.push(part.to_string_lossy().into_owned())
+            .ParentDir | .RootDir | .Prefix(_) -> panic("{var} must not escape the repository: {normalized_separators}")
+        }
+    }
+    assert(!parts.is_empty(), "{var} must name a fixture")
+    parts.join("/")
+}
+// Rust: tests/common/mod.rs:1252
+fn fixture_matches(filter: String?, canonical_relative: String) -> Bool { filter.map_or(true, fn(needle) { canonical_relative.contains(needle) }) }
+// Rust: tests/common/mod.rs:1256
+const UNIFIED_DIFF_MAX_INPUT_BYTES: Int = 64 * 1024
+// Rust: tests/common/mod.rs:1257
+const UNIFIED_DIFF_MAX_INPUT_LINES: Int = 256
+// Rust: tests/common/mod.rs:1258
+const UNIFIED_DIFF_MAX_OUTPUT_BYTES: Int = 32 * 1024
+// Rust: tests/common/mod.rs:1260
+const DIFF_OUTPUT_TRUNCATED: String = "\n... diff output truncated; remaining compared edits omitted ...\n"
+// Rust: tests/common/mod.rs:1267
+fn unified_diff(expected_name: String, actual_name: String, expected: String, actual: String) -> String {
+    expected_lines :: bounded_diff_lines(expected)
+    actual_lines :: bounded_diff_lines(actual)
+    columns :: actual_lines.lines.len() + 1
+    lcs := [Int].filled((expected_lines.lines.len() + 1) * columns, 0)
+    for i in (0..expected_lines.len()).rev() {
+        for j in (0..actual_lines.lines.len()).rev() {
+            here :: i * columns + j
+            lcs[here] = if expected_lines.lines[i] == actual_lines.lines[j] { lcs[(i + 1) * columns + j + 1] + 1 } else { lcs[(i + 1) * columns + j].max(lcs[i * columns + j + 1]) }
+        }
+    }
+    out := BoundedDiffOutput.new()
+    out.push("--- {expected_name}\n+++ {actual_name}\n")
+    push_input_truncation(&out, "expected", expected, &expected_lines)
+    push_input_truncation(&out, "actual", actual, &actual_lines)
+    out.push("@@ -1,{expected_lines.lines.len()} +1,{actual_lines.lines.len()} @@\n")
+    i := 0
+    j := 0
+    loop i < expected_lines.lines.len() || j < actual_lines.lines.len() {
+        if i < expected_lines.lines.len() && j < actual_lines.lines.len() && expected_lines.lines[i] == actual_lines.lines[j] {
+            push_diff_line(&out, ' ', expected_lines.lines[i], expected_lines.cut_mid_line && i + 1 == expected_lines.lines.len())
+            i += 1
+            j += 1
+        } else if j < actual_lines.lines.len() && (i == expected_lines.lines.len() || lcs[i * columns + j + 1] >= lcs[(i + 1) * columns + j]) {
+            push_diff_line(&out, '+', actual_lines.lines[j], actual_lines.cut_mid_line && j + 1 == actual_lines.lines.len())
+            j += 1
+        } else {
+            push_diff_line(&out, '-', expected_lines.lines[i], expected_lines.cut_mid_line && i + 1 == expected_lines.lines.len())
+            i += 1
+        }
+    }
+    out.finish()
+}
+// Rust: tests/common/mod.rs:1335
+struct BoundedDiffLines { lines: [StringView], compared_bytes: Int, cut_mid_line: Bool }
+impl BoundedDiffLines {
+    // Rust: tests/common/mod.rs:1342
+    fn len(self) -> Int { self.lines.len() }
+}
+// Rust: tests/common/mod.rs:1347
+fn bounded_diff_lines(input: String) -> BoundedDiffLines {
+    byte_end := input.len().min(UNIFIED_DIFF_MAX_INPUT_BYTES)
+    loop !input.is_char_boundary(byte_end) { byte_end -= 1 }
+    prefix := input[..byte_end] // #4303
+    lines := []
+    compared_bytes := 0
+    for line in prefix.split_inclusive('\n').take(UNIFIED_DIFF_MAX_INPUT_LINES) { compared_bytes += line.len(); lines.push(line) }
+    BoundedDiffLines{lines: lines, compared_bytes: compared_bytes, cut_mid_line: compared_bytes < input.len() && compared_bytes > 0 && input.as_bytes()[compared_bytes - 1] != 10}
+}
+// Rust: tests/common/mod.rs:1371
+fn push_input_truncation(out: &BoundedDiffOutput, side: String, input: String, bounded: &BoundedDiffLines) -> {
+    if bounded.compared_bytes < input.len() { out.push("# diff input truncated: {side} compares first {bounded.compared_bytes} of {input.len()} bytes across {bounded.lines.len()} lines; limits are {UNIFIED_DIFF_MAX_INPUT_BYTES} bytes/{UNIFIED_DIFF_MAX_INPUT_LINES} lines\n") }
+}
+// Rust: tests/common/mod.rs:1389
+struct BoundedDiffOutput { text: String, truncated: Bool }
+impl BoundedDiffOutput {
+    // Rust: tests/common/mod.rs:1395
+    fn new() -> BoundedDiffOutput { BoundedDiffOutput{text: "", truncated: false} }
+    // Rust: tests/common/mod.rs:1402
+    fn push(self, text: String) -> {
+        if self.truncated { return }
+        content_limit :: UNIFIED_DIFF_MAX_OUTPUT_BYTES - DIFF_OUTPUT_TRUNCATED.len()
+        remaining :: content_limit.saturating_sub(self.text.len())
+        if text.len() <= remaining { self.text.push_str(text); return }
+        take := remaining.min(text.len())
+        loop !text.is_char_boundary(take) { take -= 1 }
+        self.text.push_str(&text[..take])
+        self.truncated = true
+    }
+    // Rust: tests/common/mod.rs:1420
+    fn finish(self) -> String {
+        if self.truncated { self.text.push_str(DIFF_OUTPUT_TRUNCATED) }
+        debug_assert(self.text.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES)
+        self.text
+    }
+}
+// Rust: tests/common/mod.rs:1429
+fn push_diff_line(out: &BoundedDiffOutput, marker: Char, line: String, cut_mid_line: Bool) -> {
+    marker_bytes := [U8].filled(4, 0)
+    out.push(marker.encode_utf8(&marker_bytes))
+    out.push(line)
+    if !line.ends_with('\n') && !cut_mid_line { out.push("\n\\ No newline at end of file\n") }
+}
+// Rust: tests/common/mod.rs:1444
+fn ffi_bridge_key(artifact: &OSPath) -> String {
+    name :: artifact.file_name().and_then(fn(name) { name.to_str() }).unwrap_or_default()
+    name.split(fn(c: Char) { !c.is_ascii_hexdigit() }).find(fn(part) { part.len() == 16 }).unwrap_or_else(fn() { panic("no 16-hex FFI bridge key in `{name}`") }).to_string()
+}
+// Rust: tests/common/mod.rs:1457
+fn ffi_bridge_cache_root(artifact: &OSPath) -> OSPath {
+    artifact.ancestors().find(fn(dir) { dir.ends_with("ffi") }).unwrap_or_else(fn() { panic("`{artifact.display()}` is not under an FFI cache root") }).join(ffi_bridge_key(artifact))
+}
+// Rust: tests/common/mod.rs:1472
+fn build_and_run(prefix: String, name: String, src: String) -> (I32, String, String) { build_and_run_with_cwd(prefix, name, src, false) }
+// Rust: tests/common/mod.rs:1478
+fn build_and_run_in_scratch(prefix: String, name: String, src: String) -> (I32, String, String) { build_and_run_with_cwd(prefix, name, src, true) }
+// Rust: tests/common/mod.rs:1482
+fn build_and_run_with_cwd(prefix: String, name: String, src: String, run_in_scratch: Bool) -> (I32, String, String) {
+    scratch :: Scratch.new(prefix)
+    dir :: &scratch.path
+    fs.write(dir.join("package.jet"), TEST_PACKAGE_MANIFEST).unwrap()
+    jet_path :: dir.join("{name}.jet")
+    fs.write(&jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy().into_owned()
+    out :: jet.compile_with_path(src, &shown).unwrap_or_else(fn(diags) { panic("front end rejected:\n{jet.render_diagnostics(&shown, src, &diags)}") })
+    rs :: dir.join("{name}.rs")
+    bin :: dir.join(name)
+    rustc_cmd := Command.new("rustc")
+    runtime_lease :: add_generated_rust(&rustc_cmd, &rs, &out.rust, out.ffi.is_some(), [])
+    rustc_cmd.arg("-o").arg(&bin)
+    if link :: out.ffi {
+        rustc_cmd.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+        for deps_dir in link.dependency_dirs().filter(fn(dir) { dir.is_dir() }) { rustc_cmd.arg("-L").arg("dependency={deps_dir.display()}") }
+    }
+    rustc :: rustc_cmd.output().unwrap()
+    assert(rustc.status.success(), "rustc rejected generated code (I2 violation):\n{String.from_utf8_lossy(&rustc.stderr)}")
+    run_cmd := Command.new(&bin)
+    if run_in_scratch { run_cmd.current_dir(dir) }
+    run :: run_cmd.output().unwrap()
+    (run.status.code().unwrap_or(0), String.from_utf8_lossy(&run.stdout).into_owned(), String.from_utf8_lossy(&run.stderr).into_owned())
+}
+// Rust: tests/common/mod.rs:1546
+fn strip_vetted_prelude_modules(rust_code: String) -> String {
+    // Rust: tests/common/mod.rs:1547
+    fn strip_named_mod(src: String, matches_name: fn(StringView) -> Bool) -> String {
+        // Rust: tests/common/mod.rs:1548
+        fn ident_continue(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == 95 || byte >= 0x80 }
+        // Rust: tests/common/mod.rs:1552
+        fn raw_string_start(bytes: &[U8], at: Int) -> (Int, Int)? {
+            i := at
+            if bytes.get(i) == Val(98) {
+                if bytes.get(i + 1) != Val(114) { return nil }
+                i += 1
+            } else if bytes.get(i) != Val(114) { return nil }
+            i += 1
+            hashes := 0
+            loop bytes.get(i) == Val(35) { hashes += 1; i += 1 }
+            if bytes.get(i) == Val(34) { Val((i + 1, hashes)) } else { nil }
+        }
+        // Rust: tests/common/mod.rs:1571
+        fn starts_char_literal(bytes: &[U8], at: Int) -> Bool {
+            next :: bytes.get(at + 1).copied() ?? return false
+            next == 92 || !ident_continue(next) || bytes.get(at + 2) == Val(39)
+        }
+        // Rust: tests/common/mod.rs:1581,1783
+        enum State { Normal, LineComment, BlockComment(Int), String, Char, Raw(Int) }
+        // Rust: tests/common/mod.rs:1578
+        fn matching_brace_end(bytes: &[U8], opening: Int) -> Int? {
+            state := State.Normal
+            depth := 0
+            i := opening
+            loop i < bytes.len() {
+                if state == {
+                    .Normal -> {
+                        if bytes[i] == 47 && bytes.get(i + 1) == Val(47) { state = .LineComment; i += 2 }
+                        else if bytes[i] == 47 && bytes.get(i + 1) == Val(42) { state = .BlockComment(1); i += 2 }
+                        else if opening :: raw_string_start(bytes, i) { state = .Raw(opening.1); i = opening.0 }
+                        else if bytes[i] == 34 { state = .String; i += 1 }
+                        else if bytes[i] == 39 && starts_char_literal(bytes, i) { state = .Char; i += 1 }
+                        else if bytes[i] == 123 { depth += 1; i += 1 }
+                        else if bytes[i] == 125 { depth = depth.checked_sub(1) ?? return nil; i += 1; if depth == 0 { return Val(i) } }
+                        else { i += 1 }
+                    }
+                    .LineComment -> { if bytes[i] == 10 { state = .Normal }; i += 1 }
+                    .BlockComment(nested) -> {
+                        if bytes[i] == 47 && bytes.get(i + 1) == Val(42) { state = .BlockComment(nested + 1); i += 2 }
+                        else if bytes[i] == 42 && bytes.get(i + 1) == Val(47) { i += 2; state = if nested == 1 { .Normal } else { .BlockComment(nested - 1) } }
+                        else { i += 1 }
+                    }
+                    .String | .Char -> {
+                        if bytes[i] == 92 { i = (i + 2).min(bytes.len()) }
+                        else {
+                            closing :: state == .String && bytes[i] == 34 || state == .Char && bytes[i] == 39
+                            i += 1
+                            if closing { state = .Normal }
+                        }
+                    }
+                    .Raw(hashes) -> {
+                        if bytes[i] == 34 && bytes.get(i + 1..i + 1 + hashes).is_some_and(fn(tail) { tail.iter().all(fn(byte) { byte == 35 }) }) { i += hashes + 1; state = .Normal }
+                        else { i += 1 }
+                    }
+                }
+            }
+            nil
+        }
+        // Rust: tests/common/mod.rs:1681
+        fn item_start(src: String, module_start: Int) -> Int {
+            line_start :: fn(at: Int) { src[..at].rfind('\n').map_or(0, fn(pos) { pos + 1 }) }
+            current_line :: line_start(module_start)
+            prefix := src[current_line..module_start].trim_start() // #4303
+            start := if prefix.is_empty() || prefix.starts_with("pub") || prefix.starts_with("#[") { current_line } else { module_start }
+            loop start > 0 {
+                previous_line :: line_start(start.saturating_sub(1))
+                previous := src[previous_line..start].trim() // #4303
+                if previous.starts_with("#[") || previous.starts_with("///") || previous.starts_with("//!") { start = previous_line }
+                else if previous.ends_with(']') {
+                    candidate_end := start
+                    attribute_start: Int? = nil
+                    loop candidate_end > 0 {
+                        candidate_line :: line_start(candidate_end.saturating_sub(1))
+                        text := src[candidate_line..candidate_end].trim() // #4303
+                        if text.starts_with("#[") { attribute_start = Val(candidate_line); break }
+                        if text.is_empty() { break }
+                        candidate_end = candidate_line
+                    }
+                    start = attribute_start ?? break
+                } else if previous.ends_with("*/") {
+                    candidate_end := start
+                    doc_start: Int? = nil
+                    loop candidate_end > 0 {
+                        candidate_line :: line_start(candidate_end.saturating_sub(1))
+                        text := src[candidate_line..candidate_end].trim() // #4303
+                        if text.starts_with("/**") || text.starts_with("/*!") { doc_start = Val(candidate_line); break }
+                        if text.is_empty() { break }
+                        candidate_end = candidate_line
+                    }
+                    start = doc_start ?? break
+                } else { break }
+            }
+            start
+        }
+        // Rust: tests/common/mod.rs:1750
+        fn skip_trivia(bytes: &[U8], at: Int) -> Int {
+            cursor := at
+            loop {
+                loop bytes.get(cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { cursor += 1 }
+                if bytes.get(cursor) == Val(47) && bytes.get(cursor + 1) == Val(47) {
+                    cursor += 2
+                    loop bytes.get(cursor).is_some_and(fn(byte) { byte != 10 }) { cursor += 1 }
+                    continue
+                }
+                if bytes.get(cursor) == Val(47) && bytes.get(cursor + 1) == Val(42) {
+                    nested := 1
+                    cursor += 2
+                    loop cursor < bytes.len() && nested > 0 {
+                        if bytes[cursor] == 47 && bytes.get(cursor + 1) == Val(42) { nested += 1; cursor += 2 }
+                        else if bytes[cursor] == 42 && bytes.get(cursor + 1) == Val(47) { nested -= 1; cursor += 2 }
+                        else { cursor += 1 }
+                    }
+                    continue
+                }
+                return cursor
+            }
+        }
+        bytes :: src.as_bytes()
+        state := State.Normal
+        i := 0
+        brace_depth := 0
+        paren_depth := 0
+        bracket_depth := 0
+        module: (Int, Int, Bool)? = nil
+        loop i < bytes.len() {
+            if state == {
+                .Normal -> {
+                    if bytes[i] == 47 && bytes.get(i + 1) == Val(47) { state = .LineComment; i += 2 }
+                    else if bytes[i] == 47 && bytes.get(i + 1) == Val(42) { state = .BlockComment(1); i += 2 }
+                    else if opening :: raw_string_start(bytes, i) { state = .Raw(opening.1); i = opening.0 }
+                    else if bytes[i] == 34 { state = .String; i += 1 }
+                    else if bytes[i] == 39 && starts_char_literal(bytes, i) { state = .Char; i += 1 }
+                    else if bytes[i] == 123 { brace_depth += 1; i += 1 }
+                    else if bytes[i] == 125 { brace_depth = brace_depth.saturating_sub(1); i += 1 }
+                    else if bytes[i] == 40 { paren_depth += 1; i += 1 }
+                    else if bytes[i] == 41 { paren_depth = paren_depth.saturating_sub(1); i += 1 }
+                    else if bytes[i] == 91 { bracket_depth += 1; i += 1 }
+                    else if bytes[i] == 93 { bracket_depth = bracket_depth.saturating_sub(1); i += 1 }
+                    else if bytes[i] == 109 && paren_depth == 0 && bracket_depth == 0 && bytes.get(i + 1..i + 3) == Val("od".as_bytes()) && (i == 0 || !ident_continue(bytes[i - 1])) && bytes.get(i + 3).is_none_or(fn(byte) { !ident_continue(byte) }) {
+                        j := i + 3
+                        loop bytes.get(j).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { j += 1 }
+                        name_start :: j
+                        loop bytes.get(j).is_some_and(fn(byte) { ident_continue(byte) }) { j += 1 }
+                        if matches_name(&src[name_start..j]) {
+                            j = skip_trivia(bytes, j)
+                            if bytes.get(j) == Val(123) { module = Val((item_start(src, i), j, true)); break }
+                            if bytes.get(j) == Val(59) { module = Val((item_start(src, i), j + 1, false)); break }
+                        }
+                        i += 1
+                    } else { i += 1 }
+                }
+                .LineComment -> { if bytes[i] == 10 { state = .Normal }; i += 1 }
+                .BlockComment(nested) -> {
+                    if bytes[i] == 47 && bytes.get(i + 1) == Val(42) { state = .BlockComment(nested + 1); i += 2 }
+                    else if bytes[i] == 42 && bytes.get(i + 1) == Val(47) { i += 2; state = if nested == 1 { .Normal } else { .BlockComment(nested - 1) } }
+                    else { i += 1 }
+                }
+                .String | .Char -> {
+                    if bytes[i] == 92 { i = (i + 2).min(bytes.len()) }
+                    else { closing :: state == .String && bytes[i] == 34 || state == .Char && bytes[i] == 39; i += 1; if closing { state = .Normal } }
+                }
+                .Raw(hashes) -> {
+                    if bytes[i] == 34 && bytes.get(i + 1..i + 1 + hashes).is_some_and(fn(tail) { tail.iter().all(fn(byte) { byte == 35 }) }) { i += hashes + 1; state = .Normal }
+                    else { i += 1 }
+                }
+            }
+        }
+        (start, end_or_opening, has_body) :: module ?? return src.to_string()
+        end :: if has_body { matching_brace_end(bytes, end_or_opening) ?? return src.to_string() } else { end_or_opening }
+        "{src[..start]}{src[end..]}"
+    }
+    // Rust: tests/common/mod.rs:1939
+    fn strip_mod(src: String, name: String) -> String {
+        stripped := strip_named_mod(src, fn(candidate) { candidate == name })
+        loop {
+            next :: strip_named_mod(&stripped, fn(candidate) { candidate == name })
+            if next == stripped { return stripped }
+            stripped = next
+        }
+    }
+    // Rust: tests/common/mod.rs:1950
+    fn strip_mod_prefix(src: String, prefix: String) -> String { strip_named_mod(src, fn(candidate) { candidate.starts_with(prefix) }) }
+    s := strip_mod(rust_code, "jet_uninit_semantics")
+    s = strip_mod(&s, "jet_mem")
+    for name in ["jet_cell", "jet_fixed_kernel", "jet_arrow_data", "jet_foundation_sha256", "jet_arrow_file_reader", "jet_foundation_numeric", "jet_term_kernel", "jet_atomic_carrier", "jet_mapped_file", "jet_shared_cell", "jet_harfbuzz_unix", "jet_harfbuzz_wasm", "jet_ui_host_scope"] { s = strip_vetted_module(&s, name) }
+    for name in ["jet_txn", "jet_term_unix", "jet_term_windows", "jet_term_mode"] { s = strip_mod(&s, name) }
+    for name in ["jet_process_pty", "jet_process_sandbox"] { s = strip_vetted_module(&s, name) }
+    for name in ["jet_os_unix", "jet_atomic_windows", "jet_gtk"] { s = strip_mod(&s, name) }
+    s = strip_vetted_module(&s, "jet_crypto_entropy")
+    s = strip_scheduler_native(&s)
+    s = strip_shared_guard_internals(&s)
+    for name in ["jet_os_extra", "jet_conpty_control", "jet_env_windows", "jet_watch_process_probe", "jet_atomic_windows", "jet_ws_upgrade", "jet_devserver_unix_output", "jet_devserver_windows_output", "jet_taskgroup_borrowed_spawn", "jet_std_common_types", "jet_fs_chown", "jet_std_math_task_mem", "jet_std_reactive_event_watch", "jet_std_ffi_callbacks", "jet_testing_history_foundation", "jet_testing_history_top", "jet_data_flow", "jet_compute", "jet_compute_metal", "jet_compute_cuda", "jet_compute_vulkan", "jet_compute_cpu_simd", "jet_regex_cpu_simd_dispatch", "jet_regex_cpu_simd", "jet_simd_x86", "jet_simd_f64x4_avx", "ffi_reporter", "jet_program_allocator", "jet_mod_native", "jet_c_abi"] { s = strip_vetted_module(&s, name) }
+    loop {
+        next :: strip_vetted_module(&s, "jet_mod_native")
+        if next == s { break }
+        s = next
+    }
+    s = strip_vetted_module(&s, "jet_os_interrupt_ffi")
+    s = strip_mod(&s, "jet_os_interrupt")
+    s = strip_raylib_bridge(&s)
+    loop s.contains("mod __jet___c_") {
+        before :: s.clone()
+        s = strip_mod_prefix(&s, "__jet___c_")
+        if s == before { break }
+    }
+    s
+}
+// Rust: tests/common/mod.rs:2051
+fn unsafe_keyword_columns(line: String) -> [Int] {
+    bytes :: line.as_bytes()
+    ident_byte :: fn(byte: U8) { byte.is_ascii_alphanumeric() || byte == 95 || byte >= 0x80 }
+    columns := []
+    i := 0
+    loop i < bytes.len() {
+        if bytes[i] == 47 && bytes.get(i + 1) == Val(47) { return columns }
+        else if bytes[i] == 34 {
+            i += 1
+            loop i < bytes.len() && bytes[i] != 34 { i += if bytes[i] == 92 { 2 } else { 1 } }
+            i += 1
+        } else if bytes[i] == 39 && (bytes.get(i + 2) == Val(39) || bytes.get(i + 1) == Val(92)) {
+            i += 1
+            loop i < bytes.len() && bytes[i] != 39 { i += if bytes[i] == 92 { 2 } else { 1 } }
+            i += 1
+        } else if bytes[i] == 117 && bytes[i..].starts_with("unsafe".as_bytes()) && (i == 0 || !ident_byte(bytes[i - 1])) && bytes.get(i + 6).is_none_or(fn(byte) { !ident_byte(byte) }) {
+            columns.push(i)
+            i += 6
+        } else { i += 1 }
+    }
+    columns
+}
+// Rust: tests/common/mod.rs:2133
+fn strip_scheduler_native(src: String) -> String {
+    begin :: "// jet:scheduler-native-begin"
+    end :: "// jet:scheduler-native-end"
+    text := src.to_string()
+    loop {
+        if (text.find(begin), text.find(end)) == {
+            (.Val(b), .Val(e)) -> {
+                if e < b { return text }
+                next := text[..b].to_string()
+                next.push_str(&text[e + end.len()..])
+                text = next
+            }
+            _ -> return text
+        }
+    }
+}
+// Rust: tests/common/mod.rs:2152
+fn strip_raylib_bridge(src: String) -> String {
+    begin :: "// jet:raylib-begin"
+    end :: "// jet:raylib-end"
+    if (src.find(begin), src.find(end)) == {
+        (.Val(b), .Val(e)) -> {
+            if e < b { return src.to_string() }
+            out := src[..b].to_string()
+            out.push_str(&src[e + end.len()..])
+            out
+        }
+        _ -> src.to_string()
+    }
+}
+// Rust: tests/common/mod.rs:2168
+fn strip_shared_guard_internals(src: String) -> String {
+    begin :: "// jet:shared-guard-internal-begin"
+    end :: "// jet:shared-guard-internal-end"
+    out := src.to_string()
+    loop {
+        b :: out.find(begin) ?? return out
+        e :: out.find(end) ?? return out
+        if e < b { return out }
+        next := out[..b].to_string()
+        next.push_str(&out[e + end.len()..])
+        out = next
+    }
+}
+// Rust: tests/common/mod.rs:2188
+fn strip_vetted_module(src: String, name: String) -> String {
+    begin :: "// JET_VETTED_UNSAFE_BEGIN: {name}"
+    end :: "// JET_VETTED_UNSAFE_END: {name}"
+    text := src.to_string()
+    loop {
+        start :: text.find(&begin).or_else(fn() {
+            offset := 0
+            for line in text.lines() {
+                if line.trim_start().starts_with(&begin) { return Val(offset) }
+                offset += line.len() + 1
+            }
+            nil
+        }) ?? return text
+        relative_end :: text[start..].find(&end) ?? return text
+        end_offset :: start + relative_end + end.len()
+        text = "{text[..start]}{text[end_offset..]}"
+    }
+}

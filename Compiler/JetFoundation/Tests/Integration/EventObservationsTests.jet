@@ -1,0 +1,380 @@
+use jet_foundation.Tests.Integration.EventObservations.[spawn_observed, debugger_events, canvas_runtime]
+use jet_foundation.Tests.Integration.ExampleArtifacts.[artifact_paths]
+use jet_foundation.Tests.Integration.ExplainSyntax.[jet, check_snapshot]
+use jet_foundation.Tests.Integration.FactContributionLaw.[writer]
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Diagnostics.[Span]
+use jet_foundation.Policy
+use jet_foundation.Policy.[ContributionLayer, FactContribution, FactError, FactKey, FactValue, SourceScope]
+use std.fs
+use std.env
+use std.process.[Command]
+use std.collections.[HashSet]
+use jet.Syntax
+use jet.Explain
+
+// Rust: tests/event_observations.rs:121
+#Test("debugger_sees_only_executed_redacted_sync_and_hook_facts") {
+    running :: spawn_observed("sync_hook", """
+use core.event as event
+use core.time as time
+
+fn run() -> {
+    scope :: event.scope()
+    executed :: event.new<String>()
+    executed.on_priority(scope, 17, (secret: String) -> {})
+    never_called :: event.new<String>()
+    if false { &never_called.emit("UNEXECUTED_SECRET") }
+    &executed.emit("SYNC_PAYLOAD_SECRET")
+
+    hook :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    hook.on_priority(scope, 9, (secret: String) -> HookDecision.Fail("HOOK_FAILURE_SECRET"))
+    hook.run("HOOK_PAYLOAD_SECRET")
+
+    direct_scope :: event.scope()
+    direct :: event.new<Int>()
+    direct_sub :: direct.on(direct_scope, (n: Int) -> {})
+    direct_sub.unsubscribe()
+
+    once_scope :: event.scope()
+    once_event :: event.new<Int>()
+    once_event.once(once_scope, (n: Int) -> {})
+    &once_event.emit(1)
+    &once_event.emit(2)
+
+    cancel_scope :: event.scope()
+    cancel_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    cancel_hook.on(cancel_scope, (n: Int) -> HookDecision.Continue)
+    cancel_scope.cancel()
+
+    rejected_scope :: event.scope()
+    rejected_scope.cancel()
+    rejected_event :: event.new<Int>()
+    rejected_event.on(rejected_scope, (n: Int) -> {})
+    rejected_hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    rejected_hook.on(rejected_scope, (n: Int) -> HookDecision.Continue)
+    print("READY")
+    time.sleep(30000ms)
+}
+""") ?? return
+    (snapshot, rendered) :: debugger_events(running.child.id(), "\"terminal\":\"Fail\"")
+    for secret in ["UNEXECUTED_SECRET", "SYNC_PAYLOAD_SECRET", "HOOK_FAILURE_SECRET", "HOOK_PAYLOAD_SECRET"] {
+        assert(!snapshot.contains(secret), "runtime snapshot leaked {secret}")
+        assert(!rendered.contains(secret), "debugger leaked {secret}")
+    }
+    assert(rendered.contains("source=Event"))
+    assert(rendered.contains("priority=17"))
+    assert(rendered.contains("lifecycle=HandlerStarted"))
+    assert(rendered.contains("source=DecisionHook"))
+    assert(rendered.contains("priority=9"))
+    assert(rendered.contains("failure=Handler"))
+    assert(rendered.contains("terminal=Fail"))
+    assert_eq(rendered.matches("lifecycle=Subscribed").count(), 5)
+    assert_eq(rendered.matches("lifecycle=Removed").count(), 3)
+    assert(rendered.lines().any((line) -> line.contains("source=Event") && line.contains("lifecycle=Removed")))
+    assert(rendered.lines().any((line) -> line.contains("source=DecisionHook") && line.contains("lifecycle=Removed")))
+    removed_subscriptions :: rendered.lines().filter((line) -> line.contains("lifecycle=Removed")).filter_map((line) -> line.split_whitespace().find((field) -> field.starts_with("subscription="))).collect<HashSet<String>>()
+    assert_eq(removed_subscriptions.len(), 3, "{rendered}")
+    assert_eq(rendered.matches("lifecycle=DispatchStarted").count(), 4)
+    runtime :: canvas_runtime(&running)
+    for fact in ["\"source_truth\":\"executed_runtime_observations\"", "\"source\":\"Event\"", "\"source\":\"DecisionHook\"", "\"lifecycle\":\"Subscribed\"", "\"lifecycle\":\"Removed\"", "\"priority\":17", "\"priority\":9", "\"failure\":\"Handler\"", "\"terminal\":\"Fail\""] {
+        assert(runtime.contains(fact), "Canvas runtime facts missing {fact}: {runtime}")
+    }
+    assert(!runtime.contains("source_span"), "static source fact leaked: {runtime}")
+    assert(!runtime.contains("UNEXECUTED_SECRET"), "unexecuted payload leaked: {runtime}")
+}
+// Rust: tests/event_observations.rs:236
+#Test("debugger_sees_pressure_drop_failure_close_and_single_terminals") {
+    running :: spawn_observed("async", """
+use core.event as event
+use core.tasks as tasks
+use core.time as time
+
+fn fail_async(n: Int) -> Err! {
+    return Err("ASYNC_FAILURE_SECRET")
+}
+
+fn run() -> {
+    print("READY")
+    drop_scope :: event.scope()
+    dropped :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    (started_tx, started_rx) :: channel<Int>()
+    (release_tx, release_rx) :: channel<Int>()
+    dropped.on_priority(drop_scope, 23, (n: Int) -> {
+        started_tx.send(~n)
+        released :: release_rx.receive() ?? panic("release")
+    })
+    first :: dropped.emit_async(1)
+    started :: started_rx.receive() ?? panic("started")
+    second :: dropped.emit_async(2)
+    newest :: dropped.emit_async(3)
+    release_tx.send(1)
+    started_second :: started_rx.receive() ?? panic("started second")
+    release_tx.send(2)
+    first.join() ?? panic("first")
+    second.join() ?? panic("second")
+    newest.join() ?? panic("newest")
+
+    fail_scope :: event.scope()
+    failing :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    failing.on(fail_scope, (n: Int) -> fail_async(n))
+    failing.emit_async(4).join() ?? panic("failing")
+
+    close_scope :: event.scope()
+    closing :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    (close_started_tx, close_started_rx) :: channel<Int>()
+    (close_release_tx, close_release_rx) :: channel<Int>()
+    closing.on(close_scope, (n: Int) -> {
+        close_started_tx.send(~n)
+        released :: close_release_rx.receive() ?? panic("release")
+    })
+    close_running :: closing.emit_async(5)
+    close_started :: close_started_rx.receive() ?? panic("started")
+    close_queued :: closing.emit_async(6)
+    close_blocked :: closing.emit_async(7)
+    closing.close()
+    close_scope.cancel()
+    close_running.join() ?? panic("close running")
+    close_queued.join() ?? panic("close queued")
+    close_blocked.join() ?? panic("close blocked")
+
+    time.sleep(30000ms)
+}
+""") ?? return
+    (snapshot, rendered) :: debugger_events(running.child.id(), "\"terminal\":\"Closed\"")
+    assert(!snapshot.contains("ASYNC_FAILURE_SECRET"))
+    assert(!rendered.contains("ASYNC_FAILURE_SECRET"))
+    assert(rendered.contains("capacity=1 overflow=DropNewest"))
+    assert(rendered.contains("queued=1"))
+    assert(rendered.contains("blocked=1"))
+    assert(rendered.contains("priority=23"))
+    assert(rendered.contains("failure=Handler terminal=None"))
+    assert(rendered.contains("terminal=DroppedNewest"))
+    assert(rendered.contains("terminal=HandlerFailed"))
+    assert(rendered.contains("terminal=Closed"))
+    assert(rendered.contains("terminal=Cancelled"), "{rendered}")
+    runtime :: canvas_runtime(&running)
+    for fact in ["\"source\":\"AsyncEvent\"", "\"queued\":1", "\"blocked\":1", "\"capacity\":1", "\"overflow\":\"DropNewest\"", "\"priority\":23", "\"failure\":\"Handler\"", "\"terminal\":\"DroppedNewest\"", "\"terminal\":\"HandlerFailed\"", "\"terminal\":\"Closed\"", "\"terminal\":\"Cancelled\""] {
+        assert(runtime.contains(fact), "Canvas runtime facts missing {fact}: {runtime}")
+    }
+    dropped_line :: rendered.lines().find((line) -> line.contains("terminal=DroppedNewest")).expect("dropped dispatch terminal")
+    dispatch :: dropped_line.split_whitespace().find((field) -> field.starts_with("dispatch=")).unwrap()
+    assert_eq(rendered.lines().filter((line) -> line.contains(dispatch) && line.contains("terminal=DroppedNewest")).count(), 1, "drop terminal must publish once")
+}
+// Rust: tests/event_observations.rs:350
+#Test("async_registration_and_once_removal_are_exact") {
+    running :: spawn_observed("async_lifecycle", """
+use core.event as event
+use core.time as time
+
+fn run() -> {
+    rejected_scope :: event.scope()
+    rejected_scope.cancel()
+    rejected :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    rejected.on(rejected_scope, (n: Int) -> {})
+
+    once_scope :: event.scope()
+    once_event :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 1, overflow: .Block }, .Collect) ?? panic("policy")
+    once_sub :: once_event.once(once_scope, (n: Int) -> {})
+    once_event.emit_async(1).join() ?? panic("join")
+    once_sub.unsubscribe()
+    once_scope.cancel()
+
+    print("READY")
+    time.sleep(30000ms)
+}
+""") ?? return
+    (_snapshot, rendered) :: debugger_events(running.child.id(), "\"lifecycle\":\"Removed\"")
+    subscribed :: rendered.lines().filter((line) -> line.contains("source=AsyncEvent") && line.contains("lifecycle=Subscribed")).collect<[String]>()
+    removed :: rendered.lines().filter((line) -> line.contains("source=AsyncEvent") && line.contains("lifecycle=Removed")).collect<[String]>()
+    assert_eq(subscribed.len(), 1, "pre-cancelled registration published: {rendered}")
+    assert_eq(removed.len(), 1, "async once removal duplicated: {rendered}")
+    subscription :: subscribed[0].split_whitespace().find((field) -> field.starts_with("subscription=")).unwrap()
+    assert(removed[0].contains(subscription), "removal did not match once subscription: {rendered}")
+}
+// Rust: tests/event_observations.rs:407
+#Test("runtime_event_sequence_is_bounded_and_debugger_preserves_exact_sequence") {
+    running :: spawn_observed("bounded", """
+use core.event as event
+use core.time as time
+
+fn run() -> {
+    scope :: event.scope()
+    many :: event.new<Int>()
+    many.on(scope, (n: Int) -> {})
+    loop i in 0..<300 { &many.emit(i) }
+    print("READY")
+    time.sleep(30000ms)
+}
+""") ?? return
+    (snapshot, rendered) :: debugger_events(running.child.id(), "\"terminal\":\"Delivered\"")
+    assert_eq(snapshot.matches("\"sequence\":").count(), 256)
+    assert_eq(rendered.lines().count(), 256)
+    first :: rendered.lines().next().unwrap()
+    last :: rendered.lines().last().unwrap()
+    assert(!first.contains("sequence=1 "), "old records were not evicted: {first}")
+    assert(last.contains("terminal=Delivered"))
+}
+// Rust: tests/event_observations.rs:439
+#Test("concurrent_runtime_observations_keep_sequence_in_push_order") {
+    running :: spawn_observed("concurrent_sequence", """
+use core.event as event
+use core.time as time
+
+fn run() -> {
+    scope :: event.scope()
+    concurrent :: event.async_result<Int, Err>(AsyncPolicy{ capacity: 64, overflow: .DropNewest }, .Collect) ?? panic("policy")
+    concurrent.on(scope, (n: Int) -> { time.sleep(1ms) })
+    loop i in 0..<400 { concurrent.emit_async(i) }
+    time.sleep(1500ms)
+    print("READY")
+    time.sleep(30000ms)
+}
+""") ?? return
+    (_snapshot, rendered) :: debugger_events(running.child.id(), "\"source\":\"AsyncEvent\"")
+    assert_eq(rendered.lines().count(), 256)
+    sequences :: rendered.lines().map((line) -> line.split_whitespace().find_map((field) -> field.strip_prefix("sequence=")).unwrap().parse<UInt64>().unwrap()).collect<[UInt64]>()
+    assert(sequences.windows(2).all((pair) -> pair[0] < pair[1]), "concurrent observation order diverged from sequence order")
+}
+// Rust: tests/event_observations.rs:478
+#Test("async_event_jit_callback_result_contract_matches_other_tiers") {
+    source :: """
+use core.event as event
+
+#Error
+enum EventFailure { Explicit }
+
+fn fail(_n: Int) -> EventFailure! {
+    return Err(EventFailure.Explicit)
+}
+
+fn run() -> {
+    scope :: event.scope()
+    async_event :: event.async_result<Int, EventFailure>(
+        AsyncPolicy{ capacity: 2, overflow: .Block },
+        .Collect
+    ) ?? panic("policy")
+    async_event.on(scope, (_n: Int) -> {})
+    async_event.on(scope, (n: Int) -> fail(n))
+
+    report :: async_event.emit_async(1).join() ?? panic("dispatch")
+    print(report.state() == .HandlerFailed)
+    print(report.delivered_handlers())
+    print(report.failures().len())
+}
+"""
+    tir_support.assert_tiers_agree("async_event_jit_callback_result_contract", source, "true\n2\n1\n")
+}
+// Rust: tests/example_artifacts.rs:50
+#Test("examples_contain_no_build_artifacts") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples")
+    found := [] as [OSPath]
+    artifact_paths(&root, &found)
+    found.sort()
+    assert(found.is_empty(), "generated build artifacts under examples:\n{}", found.iter().map((path) -> path.display().to_string()).collect<[String]>().join("\n"))
+}
+// Rust: tests/explain_syntax.rs:31
+#Test("explain_syntax_dictionary_golden") {
+    // GATE #4494: real CLI processes, not simulated dictionary results.
+    for (query, snapshot) in [("@", "explain_syntax_at.txt"), ("::", "explain_syntax_bind.txt"), ("#Live", "explain_syntax_marker.txt"), ("->", "explain_syntax_arrow.txt"), ("loop", "explain_syntax_keyword.txt"), ("^", "explain_syntax_caret.txt"), ("??", "explain_syntax_fallback.txt")] {
+        out :: Command.new(jet()).args(["explain", query]).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "jet explain {query} failed")
+        check_snapshot(snapshot, String.from_utf8_lossy(&out.stdout))
+    }
+    out :: Command.new(jet()).args(["explain", "@@"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), Some(1))
+    check_snapshot("explain_syntax_unknown.txt", String.from_utf8_lossy(&out.stderr))
+}
+// Rust: tests/explain_syntax.rs:65
+// #3723: verbose adds the registry constant and owning decision.
+#Test("explain_syntax_verbose_names_registry_constant_and_decision") {
+    default_output :: Command.new(jet()).args(["explain", "^"]).env("NO_COLOR", "1").output().unwrap()
+    verbose_output :: Command.new(jet()).args(["explain", "^", "--verbose"]).env("NO_COLOR", "1").output().unwrap()
+    assert(verbose_output.status.success(), "jet explain ^ --verbose failed")
+    default_text :: String.from_utf8_lossy(&default_output.stdout)
+    verbose :: String.from_utf8_lossy(&verbose_output.stdout)
+    assert(verbose.starts_with(default_text.as_ref()), "{verbose}")
+    row :: Syntax.lookup("^").expect("`^` row")
+    assert(verbose.contains("Registry name: {row.name}") && verbose.contains("Decision: {row.decision}"), "{verbose}")
+}
+// Rust: tests/explain_syntax.rs:92
+// #3723: all sigils/operators use plain words and examples, without internal names.
+#Test("explain_syntax_rows_are_plain_and_exampled") {
+    checked := 0
+    for row in Syntax.rows().iter().filter((row) -> row.kind == Syntax.SyntaxDictionaryKind.Sigil || row.kind == Syntax.SyntaxDictionaryKind.Operator) {
+        checked += 1
+        shown :: Syntax.display(row)
+        assert(!row.meanings.is_empty() && row.meanings.iter().all((meaning) -> {
+            example := meaning.example.trim() // #4303
+            !meaning.position.is_empty() && !example.is_empty()
+        }), "`{shown}` needs a positioned meaning with an example for each use")
+        explanation :: Explain.lookup(&shown).expect("dictionary row explains")
+        rendered :: Explain.render(&explanation, false)
+        assert(rendered.contains("Example:"), "`{shown}` has no example:\n{rendered}")
+        for word in rendered.split((ch: Char) -> !ch.is_ascii_alphanumeric() && ch != '_' && ch != '-') {
+            assert(!word.starts_with("SIGIL_") && !word.starts_with("OP_") && !word.starts_with("D-"), "`{shown}` default explanation leaks `{word}`:\n{rendered}")
+        }
+        assert(!rendered.contains(&row.name) || row.name == row.token, "`{shown}` default explanation names its constant `{}`", row.name)
+        for meaning in row.meanings {
+            for code in meaning.related_codes {
+                assert(Explain.lookup(code).is_some_and((related) -> !related.retired), "`{shown}` names related code {code}, which is not a live diagnostic")
+            }
+        }
+    }
+    assert(checked > 40, "expected the full sigil/operator ledger, walked {checked}")
+}
+// Rust: tests/fact_contribution_law.rs:24
+#Test("source_scope_and_layer_order_produce_one_explainable_chain") {
+    declarations :: [
+        writer("package", SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        writer("file", SourceScope.File, ContributionLayer.Declaration, "main.jet"),
+        writer("module", SourceScope.Module, ContributionLayer.Declaration, "main.jet"),
+        writer("function", SourceScope.Function, ContributionLayer.Declaration, "main.jet"),
+        writer("block", SourceScope.Block, ContributionLayer.Declaration, "main.jet"),
+        writer("item", SourceScope.Item, ContributionLayer.Declaration, "main.jet"),
+        writer("profile", SourceScope.Package, ContributionLayer.OptimizationBundle, "release"),
+        writer("cli", SourceScope.Package, ContributionLayer.CommandLine, "command line"),
+    ]
+    fact :: Policy.resolve(FactKey.new("Build.Profile"), declarations).expect("the canonical resolver accepts cross-layer overrides").expect("the chain has writers")
+    assert_eq(fact.value, FactValue.Text("cli"))
+    assert_eq(fact.provenance.len(), 8)
+    assert_eq(fact.effective, 7)
+    explanation :: Policy.explain(&fact)
+    assert_eq(explanation.lines().filter((line) -> line.contains('[')).count(), 8)
+    assert(explanation.contains("[effective] command line / package"))
+}
+// Rust: tests/fact_contribution_law.rs:94
+#Test("same_layer_conflict_names_both_sources") {
+    first :: writer("debug", SourceScope.Package, ContributionLayer.Workspace, "workspace-a.jet").at(Span.new(10, 16))
+    second :: writer("release", SourceScope.Package, ContributionLayer.Workspace, "workspace-b.jet").at(Span.new(24, 31))
+    error :: Policy.resolve(FactKey.new("Build.Profile"), [first, second]).expect_err("different same-layer values must stop the build")
+    assert(match error { FactError.Conflict{..} -> true, _ -> false })
+    diagnostic :: error.diagnostic().expect("conflicts have the UI diagnostic")
+    assert_eq(diagnostic.code, "E3521")
+    assert(diagnostic.why.contains("workspace-a.jet"))
+    assert(diagnostic.why.contains("workspace-b.jet"))
+    assert_eq(diagnostic.span, Some(Span.new(24, 31)))
+}
+// Rust: tests/fact_contribution_law.rs:123
+#Test("force_pins_later_layers_and_safety_only_tightens") {
+    force :: writer("release", SourceScope.Package, ContributionLayer.System, "system.jet").force_with_reason("certified profile")
+    fact :: Policy.resolve(FactKey.new("Build.Profile"), [
+        writer("dev", SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        force,
+        writer("debug", SourceScope.Package, ContributionLayer.CommandLine, "command line"),
+    ]).expect("system force is valid").expect("the chain has writers")
+    assert_eq(fact.value, FactValue.Text("release"))
+    explanation :: Policy.explain(&fact)
+    assert(explanation.contains("pin=certified profile"))
+    assert(explanation.contains("[shadowed] command line"))
+    safety :: FactKey.tighten_only("Build.Settings.tls")
+    assert(Policy.resolve(safety.clone(), [
+        FactContribution.new("Build.Settings.tls", FactValue.Bool(true), SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        FactContribution.new("Build.Settings.tls", FactValue.Bool(false), SourceScope.Package, ContributionLayer.Environment, "environment"),
+    ]).is_ok())
+    widened :: Policy.resolve(safety, [
+        FactContribution.new("Build.Settings.tls", FactValue.Bool(false), SourceScope.Package, ContributionLayer.Declaration, "package.jet"),
+        FactContribution.new("Build.Settings.tls", FactValue.Bool(true), SourceScope.Package, ContributionLayer.Environment, "environment"),
+    ])
+    assert(match widened { Err(FactError.SafetyWidening{..}) -> true, _ -> false })
+}

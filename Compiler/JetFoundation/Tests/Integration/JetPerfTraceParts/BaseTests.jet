@@ -1,0 +1,475 @@
+use Base.[jet, run_jet, temp_workspace, unused_local_port, http_request, wait_http, perf_nonce, ChildGuard, SELF_ATTACH_LOCK, profile_row_identity, assert_completed_io_bound_to_tasks, assert_honest_wall_and_alloc, assert_honest_tasks, assert_honest_locks, assert_honest_io, assert_honest_native, assert_honest_spans, profiler_fixture, profiler_fixture_source]
+use std.fs
+use std.process.[Command, Stdio, id]
+use std.io.BufReader
+use std.time.[Instant, Duration]
+use std.thread
+use core.sys.target.[selected_os]
+use jet.[compile_web_with_path, SHA256]
+use jet.DevServer.[BrowserTrace, LiveInspect]
+use jet_foundation.JetTrace.[verify_jettrace, trace_id, jettrace_artifact]
+use jet_foundation.CanonicalJson.CanonicalJson
+use common
+
+// GATE #4494: tests launch actual native processes and use actual file/socket/clock providers.
+// Rust: tests/jet_perf_trace_parts/base.rs:2
+#Test("perf_run_accepts_base_surface_and_writes_jettrace_before_driver") {
+    root := temp_workspace()
+    missing := root.join("missing.jet")
+    out := root.join("missing.jettrace")
+    output := run_jet(root, ["perf", "run", missing.to_str().unwrap(), "--out", out.to_str().unwrap(), "--", "--port", "9"])
+    stderr := String.from_utf8_lossy(output.stderr)
+    assert(stderr.contains("trace:"), "expected jettrace write after base driver: {stderr}")
+    assert(out.is_file(), "trace path missing: {out.display()}")
+    text := fs.read_to_string(out).unwrap()
+    assert(text.contains("\"schema\":\"jet.trace\""), "{text}")
+    assert(text.contains("\"command\":\"run\""), "{text}")
+    assert(text.contains("--port"), "{text}")
+    assert(text.contains("\"samples\":[]"), "{text}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/base.rs:34
+#Test("perf_help_lists_family") {
+    output := run_jet(OSPath.from("."), ["perf", "help"])
+    stdout := String.from_utf8_lossy(output.stdout)
+    assert(output.status.success(), "{stdout}")
+    assert(stdout.contains("jet perf"), "{stdout}")
+    loop verb in ["run", "test", "attach", "view", "compare", "export"] {
+        assert(stdout.contains(verb), "missing {verb} in {stdout}")
+    }
+}
+// Rust: tests/jet_perf_trace_parts/browser.rs:5
+#Test("perf_attach_uses_compiler_browser_map_after_source_changes") {
+    guard := SELF_ATTACH_LOCK.lock().unwrap()
+    root := temp_workspace()
+    source := root.join("browser.jet")
+    original := "#Target(Web)\nuse core.web as web\nmodule handlers {{\n    #Target(JS)\n    pub fn init() {{ web.on(\"#field\", \"input\", (ev) -> {{}}) }}\n}}\n#Target(JS)\nfn run() {{ handlers.init() }}\n"
+    fs.write(source, original).unwrap()
+    compiled := compile_web_with_path(original, source.to_str().unwrap()).unwrap()
+    manifest := compiled.web.unwrap().manifest_json
+    relay := BrowserTrace.Relay.new(manifest).unwrap()
+    fs.write(source, "fn run() {{}}\n").unwrap()
+    relay.record("class=event&symbol=handlers__init%24handler0&start_ns=100&duration_ns=25&clock_ns=125".bytes()).unwrap()
+    out := root.join("browser.jettrace")
+    attach := run_jet(root, ["perf", "attach", id().to_string(), "--out", out.to_str().unwrap()])
+    assert(attach.status.success(), "{String.from_utf8_lossy(attach.stderr)}")
+    bytes := fs.read(out).unwrap()
+    verify_jettrace(bytes).unwrap()
+    text := String.from_utf8(bytes).unwrap()
+    assert(text.contains("\"name\":\"handlers__init$handler0\""), "{text}")
+    assert(text.contains("\"sha256\":\"{SHA256.sha256_hex(original.bytes())}\""), "{text}")
+    assert(!text.contains(SHA256.sha256_hex("fn run() {{}}\n".bytes())), "source was reread: {text}")
+    assert(text.contains("\"source_maps\":[{{"), "missing embedded source maps: {text}")
+    assert(text.contains("\"kind\":\"js\""), "missing js source map: {text}")
+    assert(text.contains("\"domain\":\"wall\"") || text.contains("\"domain\":\"cpu\"") || text.contains("\"native\":[{{"), "browser attach missing host domains: {text}")
+    relay.drop()
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/browser.rs:50
+#Test("perf_run_records_capture_allowlist_and_source_maps") {
+    root := temp_workspace()
+    source := root.join("allow.jet")
+    fs.write(source, "fn run() {{ print(\"ok\\n\") }}\n").unwrap()
+    out := root.join("allow.jettrace")
+    run := run_jet(root, ["perf", "run", "allow.jet", "--capture=urls,values", "--out", out.to_str().unwrap()])
+    assert(run.status.success(), "perf run failed: {String.from_utf8_lossy(run.stderr)}")
+    text := fs.read_to_string(out).unwrap()
+    verify_jettrace(text.bytes()).unwrap()
+    assert(text.contains("\"allowlist\":[\"urls\",\"values\"]"), "allowlist missing from capture_policy: {text}")
+    assert(text.contains("\"source_maps\":[{{"), "{text}")
+    assert(text.contains("\"kind\":\"jet\""), "{text}")
+    assert(text.contains("sourcesContent"), "{text}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/browser.rs:84
+#Test("perf_capture_rejects_unknown_allowlist_field") {
+    root := temp_workspace()
+    source := root.join("bad.jet")
+    fs.write(source, "fn run() {{}}\n").unwrap()
+    run := run_jet(root, ["perf", "run", "bad.jet", "--capture=cookies", "--out", "x.jettrace"])
+    assert_eq(run.status.code(), Some(2))
+    stderr := String.from_utf8_lossy(run.stderr)
+    assert(stderr.contains("cookies"), "{stderr}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/browser.rs:99
+#Test("perf_attach_drives_real_devserver_browser_lifecycle") {
+    if !common.have_rustc() {
+        eprint("note: skipping real browser relay lifecycle (need rustc)\n")
+        return
+    }
+    guard := SELF_ATTACH_LOCK.lock().unwrap()
+    root := temp_workspace()
+    source := root.join("app.jet")
+    original := "#Target(Web)\nuse core.web as web\nmodule handlers {{\n    #Target(JS)\n    pub fn init() {{ web.on(\"#field\", \"input\", (ev) -> {{}}) }}\n}}\n#Target(JS)\nfn run() {{ handlers.init() }}\n"
+    fs.write(source, original).unwrap()
+    port := unused_local_port()
+    child := Command.new(jet()).current_dir(root).args(["dev", "app.jet", "--target=web", "--port={port}"]).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("start real web devserver")
+    dev_pid := child.id()
+    dev := ChildGuard{child: child}
+    initial_html := wait_http(port, "/", _ -> true)
+    assert(!initial_html.contains("__jetPerfNow"), "normal jet dev timed browser work")
+    assert(!initial_html.contains("/__jet_perf_browser"), "normal jet dev emitted perf beacon")
+    initial_version := wait_http(port, "/__jet_dev_version", body -> !body.trim().is_empty())
+    trace := root.join("browser.jettrace")
+    attach := Command.new(jet()).current_dir(root).args(["perf", "attach", dev_pid.to_string(), "--out", trace.to_str().unwrap()]).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("start real jet perf attach")
+    attached_html := wait_http(port, "/", html -> perf_nonce(html).is_some())
+    nonce := perf_nonce(attached_html).unwrap().to_string()
+    assert(attached_html.contains("self.__jetPerfNow"))
+    assert(attached_html.contains("navigator.sendBeacon(\"/__jet_perf_browser?nonce=\""))
+    event := "class=event&symbol=handlers__init%24handler0&start_ns=10&duration_ns=5&clock_ns=15"
+    assert_eq(http_request(port, "POST", "/__jet_perf_browser?nonce={nonce}", event).unwrap().0, 204)
+    output := attach.wait_with_output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    trace_text := fs.read_to_string(trace).unwrap()
+    verify_jettrace(trace_text.bytes()).unwrap()
+    assert(trace_text.contains("\"name\":\"handlers__init$handler0\""), "{trace_text}")
+    active_version := wait_http(port, "/__jet_dev_version", body -> body != initial_version)
+    fs.write(source, "{original}\n// rebuilt\n").unwrap()
+    rebuilt_version := wait_http(port, "/__jet_dev_version", body -> body != active_version)
+    assert_ne(rebuilt_version, active_version)
+    rebuilt_html := wait_http(port, "/", html -> perf_nonce(html).is_some_and(next -> next != nonce))
+    rebuilt_nonce := perf_nonce(rebuilt_html).unwrap().to_string()
+    assert_eq(http_request(port, "POST", "/__jet_perf_browser?nonce={nonce}", event).unwrap().0, 403)
+    assert_eq(http_request(port, "POST", "/__jet_perf_browser?nonce={rebuilt_nonce}", event).unwrap().0, 204)
+    dev.drop()
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/capture_attach.rs:5
+#Test("perf_attach_captures_wall_and_alloc_with_jet_symbol_from_observe") {
+    if !common.have_rustc() { return }
+    root := temp_workspace()
+    fs.create_dir_all(root).unwrap()
+    source := root.join("live.jet")
+    fs.write(source, "use core.mem as mem\nuse core.net as net\nuse core.tasks as tasks\nuse core.time as time\n\nfn probe_work() {{\n    // Present only so source_identity must parse a non-entry function spelling.\n}}\nfn run() {{\n    // Channel setup before arena so spawn panic cannot capture the arena view.\n    (ready_sender, ready) :: channel<Int>()\n    (hold_sender, blocked) :: channel<Int>(1)\n    child :: task {{\n        ready_sender.send(1)\n        blocked.receive() ?? panic(\"closed\")\n    }}\n    child.detach()\n    // Second child blocks on accept with no client — real observe I/O wait.\n    listener :: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"bind\")\n    io_child :: task {{\n        _ :: &listener.accept() ?? panic(\"accept\")\n    }}\n    io_child.detach()\n    ready.receive() ?? panic(\"closed\")\n    // hold_sender stays live so the blocked receive keeps real waiters.\n    arena :: mem.Arena.new()\n    x :: arena.alloc(42)\n    probe_work()\n    print(\"READY\")\n    time.sleep(30000ms)\n}}\n").unwrap()
+    build := run_jet(root, ["build", source.to_str().unwrap()])
+    assert(build.status.success(), "build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    // GATE #4483: selected target executable suffix.
+    suffix := if selected_os() == "windows" -> ".exe" else -> ""
+    binary := root.join(".jet").join("build").join("live{suffix}")
+    child := Command.new(binary).env("JET_OBSERVE", "1").stdout(Stdio.piped()).stderr(Stdio.null()).spawn().unwrap()
+    ready := String.new()
+    BufReader.new(child.stdout.take().unwrap()).read_line(&ready).unwrap()
+    ready_trim := ready.trim() // #4303
+    assert_eq(ready_trim, "READY", "observed program did not become ready: {ready:?}")
+    pid := child.id()
+    guard := ChildGuard{child: child}
+    deadline := Instant.now() + Duration.from_secs(5)
+    loop {
+        snapshot := LiveInspect.read(pid)
+        if snapshot == {
+            .Ok(value) -> {
+                if value.contains("\"arena_allocations\":") && !value.contains("\"arena_allocations\":0") && value.contains("\"parent\":1") && value.contains("\"recv_waiters\":1") && (value.contains("\"wait\":\"tcp accept\"") || value.contains("\"wait\":\"tcp accept readiness\"")) { break }
+            }
+            else -> {}
+        }
+        if Instant.now() < deadline { thread.sleep(Duration.from_millis(25)) }
+        else { panic("observe snapshot never became readable with allocs+child+contention+io: {snapshot:?}") }
+    }
+    thread.sleep(Duration.from_millis(50))
+    out := root.join("capture.jettrace")
+    attach := run_jet(root, ["perf", "attach", pid.to_string(), "--source", source.to_str().unwrap(), "--out", out.to_str().unwrap()])
+    stderr := String.from_utf8_lossy(attach.stderr)
+    assert(attach.status.success(), "attach capture failed: status={attach.status.code():?} stderr={stderr}")
+    assert(out.is_file(), "missing {out.display()}")
+    text := fs.read_to_string(out).unwrap()
+    assert_honest_wall_and_alloc(text)
+    assert_honest_tasks(text)
+    assert_honest_locks(text)
+    assert_honest_io(text)
+    assert_honest_native(text, false, false)
+    assert_honest_spans(text, false)
+    assert(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}")
+    assert(text.contains("\"name\":\"run\""), "{text}")
+    assert(text.contains("live.jet"), "{text}")
+    assert(!text.contains("\"duration_ns\":1,"), "fabricated 1ns wall leaked into trace: {text}")
+    assert(!text.contains("\"count\":0,"), "zero-alloc scrape-success leaked into trace: {text}")
+    view := run_jet(root, ["perf", "view", out.to_str().unwrap()])
+    stdout := String.from_utf8_lossy(view.stdout)
+    assert(view.status.success(), "{String.from_utf8_lossy(view.stderr)}")
+    assert(stdout.contains("sample wall"), "{stdout}")
+    assert(stdout.contains("alloc count="), "{stdout}")
+    assert(!stdout.contains("alloc count=0 "), "zero alloc in view: {stdout}")
+    assert(stdout.contains("tasks count="), "{stdout}")
+    assert(stdout.contains("children="), "{stdout}")
+    assert(!stdout.contains("tasks count=0 "), "zero tasks in view: {stdout}")
+    assert(stdout.contains("locks count="), "{stdout}")
+    assert(stdout.contains("waiters="), "{stdout}")
+    assert(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}")
+    assert(stdout.contains("io count="), "{stdout}")
+    assert(!stdout.contains("io count=0 "), "zero io in view: {stdout}")
+    assert(stdout.contains("native process_cpu="), "{stdout}")
+    assert(stdout.contains("spans unavailable reason="), "{stdout}")
+    assert(stdout.contains("live.jet#run"), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/capture_run.rs:2
+#Test("perf_run_captures_wall_and_alloc_into_jettrace") {
+    if !common.have_rustc() { return }
+    root := temp_workspace()
+    fs.create_dir_all(root).unwrap()
+    source := root.join("session.jet")
+    port := unused_local_port()
+    fixture := "use core.crypto as crypto\nuse core.mem as mem\nuse core.net as net\nuse core.tasks as tasks\nuse core.time as time\n\nfn probe_work() {{\n    // Present only so source_identity must parse a non-entry function spelling.\n}}\n\nfn run() {{\n    // Channel setup before arena so spawn panic cannot capture the arena view.\n    (ready_sender, ready) :: channel<Int>()\n    (hold_sender, blocked) :: channel<Int>(1)\n    child :: task {{\n        ready_sender.send(1)\n        time.sleep(700ms)\n        blocked.receive() ?? panic(\"closed\")\n    }}\n    child.detach()\n    // Both waiters have finite completion paths. The channel waiter wakes after\n    // the observation window; the accept waiter gets a real client after it.\n    listener :: net.tcp_listen(\"127.0.0.1:" + port.to_string() + "\") ?? panic(\"bind\")\n    io_child :: task {{\n        _ :: &listener.accept() ?? panic(\"accept\")\n    }}\n    io_child.detach()\n    ready.receive() ?? panic(\"closed\")\n    // hold_sender stays live so the blocked receive keeps real waiters.\n    arena :: mem.Arena.new()\n    x :: arena.alloc(42)\n    probe_work()\n    digest := crypto.sha256(\"trace-work\".bytes())\n    loop i in 0..16384 {{\n        digest = crypto.sha256(digest.hex().bytes())\n    }}\n    print(\"READY {{digest.hex().len()}}\")\n    time.sleep(1200ms)\n    hold_sender.send(1)\n    _client :: net.tcp_connect(\"127.0.0.1:" + port.to_string() + "\") ?? panic(\"connect\")\n}}\n"
+    fs.write(source, fixture).unwrap()
+    out := root.join("run-capture.jettrace")
+    output := run_jet(root, ["perf", "run", source.to_str().unwrap(), "--out", out.to_str().unwrap()])
+    stderr := String.from_utf8_lossy(output.stderr)
+    assert(output.status.success(), "perf run failed: status={output.status.code():?} stderr={stderr}")
+    assert(stderr.contains("trace:"), "{stderr}")
+    assert(out.is_file(), "missing {out.display()}")
+    text := fs.read_to_string(out).unwrap()
+    assert_honest_wall_and_alloc(text)
+    assert_honest_tasks(text)
+    assert_honest_locks(text)
+    assert_honest_io(text)
+    assert_honest_native(text, true, true)
+    assert_honest_spans(text, true)
+    assert(text.contains("\"name\":\"probe_work\""), "parsed fn missing: {text}")
+    assert(text.contains("\"name\":\"run\""), "{text}")
+    assert(text.contains("session.jet"), "{text}")
+    assert(!text.contains("\"duration_ns\":1,"), "fabricated 1ns wall leaked into trace: {text}")
+    assert(!text.contains("\"count\":0,"), "zero-alloc scrape-success leaked into trace: {text}")
+    view := run_jet(root, ["perf", "view", out.to_str().unwrap()])
+    stdout := String.from_utf8_lossy(view.stdout)
+    assert(view.status.success(), "{String.from_utf8_lossy(view.stderr)}")
+    assert(stdout.contains("sample wall"), "{stdout}")
+    assert(stdout.contains("alloc count="), "{stdout}")
+    assert(!stdout.contains("alloc count=0 "), "zero alloc in view: {stdout}")
+    assert(stdout.contains("tasks count="), "{stdout}")
+    assert(stdout.contains("children="), "{stdout}")
+    assert(!stdout.contains("tasks count=0 "), "zero tasks in view: {stdout}")
+    assert(stdout.contains("locks count="), "{stdout}")
+    assert(stdout.contains("waiters="), "{stdout}")
+    assert(!stdout.contains("locks count=0 "), "zero locks in view: {stdout}")
+    assert(stdout.contains("io count="), "{stdout}")
+    assert(!stdout.contains("io count=0 "), "zero io in view: {stdout}")
+    assert(stdout.contains("native process_cpu="), "{stdout}")
+    assert(stdout.contains("spans count="), "{stdout}")
+    assert(stdout.contains("window="), "{stdout}")
+    assert(stdout.contains("target="), "{stdout}")
+    assert(stdout.contains("session.jet#run"), "{stdout}")
+    assert(stdout.contains("command run"), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/capture_run.rs:159
+#Test("perf_run_short_program_has_repeatable_source_attribution") {
+    // GATE #4483: Linux/Android process observation provider.
+    if selected_os() != "linux" && selected_os() != "android" { return }
+    root := temp_workspace()
+    fs.write(root.join("short.jet"), "// Short program: `fn run` starts here.\nfn run() {{\n    print(\"short\")\n}}\n").unwrap()
+    identities := []
+    loop attempt in 0..<3 {
+        out := root.join("short-{attempt}.jettrace")
+        output := run_jet(root, ["perf", "run", "short.jet", "--out", out.to_str().unwrap()])
+        assert(output.status.success(), "perf run failed: {String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "short\n")
+        identities.push(profile_row_identity(fs.read_to_string(out).unwrap()))
+    }
+    range := [2, 1, 4, 2]
+    expected := ("captured", "exit", [("wall", "run", range), ("cpu", "run", range)])
+    loop identity in identities { assert_eq(identity, expected) }
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/io.rs:2
+#Test("perf_run_keeps_completed_socket_echo_io_span") {
+    if !common.have_rustc() { return }
+    root := temp_workspace()
+    source := root.join("socket_echo.jet")
+    fs.write(source, "use core.net as net\nuse core.tasks as tasks\nuse core.time as time\n\nfn run() {{\n    listener :: net.tcp_listen(\"127.0.0.1:0\") ?? panic(\"bind\")\n    address :: net.socket_to_string(net.listener_local_socket_addr(listener) ?? panic(\"address\"))\n    server :: task {{\n        stream :: &listener.accept() ?? panic(\"accept\")\n        message :: stream.read_text(16) ?? panic(\"read\")\n        stream.write_all(\"echo:{{message}}\".bytes()) ?? panic(\"write\")\n    }}\n    // Cross two 100 ms observe publications before completing the wait.\n    time.sleep(250ms)\n    client :: net.tcp_connect(address) ?? panic(\"connect\")\n    client.write_all(\"ping\".bytes()) ?? panic(\"write\")\n    print(client.read_text(16) ?? panic(\"read\"))\n    server.join() ?? panic(\"server failed\")\n}}\n").unwrap()
+    out := root.join("socket-echo.jettrace")
+    output := run_jet(root, ["perf", "run", source.to_str().unwrap(), "--out", out.to_str().unwrap()])
+    assert(output.status.success(), "socket echo did not complete normally: {String.from_utf8_lossy(output.stderr)}")
+    output_text := String.from_utf8_lossy(output.stdout)
+    trimmed := output_text.trim() // #4303
+    assert_eq(trimmed, "echo:ping")
+    text := fs.read_to_string(out).unwrap()
+    assert_honest_io(text)
+    assert_completed_io_bound_to_tasks(text)
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/views.rs:2
+#Test("perf_attach_view_compare_export_share_one_jettrace_truth") {
+    guard := SELF_ATTACH_LOCK.lock().unwrap()
+    root := temp_workspace()
+    pid := id().to_string()
+    out := root.join("session.jettrace")
+    attach := run_jet(root, ["perf", "attach", pid, "--out", out.to_str().unwrap()])
+    stderr := String.from_utf8_lossy(attach.stderr)
+    assert(attach.status.success(), "attach failed: status={attach.status.code():?} stderr={stderr}")
+    assert(stderr.contains("trace:"), "{stderr}")
+    assert(out.is_file(), "missing {out.display()}")
+    bytes := fs.read(out).unwrap()
+    text := String.from_utf8(bytes).unwrap()
+    assert(text.contains("\"schema\":\"jet.trace\""), "{text}")
+    assert(text.contains("\"version\":1"), "{text}")
+    assert(text.contains("\"trace_id\":"), "{text}")
+    assert(text.contains("\"capture_policy\":"), "{text}")
+    view := run_jet(root, ["perf", "view", out.to_str().unwrap()])
+    stdout := String.from_utf8_lossy(view.stdout)
+    assert(view.status.success(), "view failed: {String.from_utf8_lossy(view.stderr)}")
+    assert(stdout.contains("schema jet.trace v1"), "{stdout}")
+    assert(stdout.contains("command attach"), "{stdout}")
+    view_json := run_jet(root, ["perf", "view", out.to_str().unwrap(), "--json"])
+    view_json_out := String.from_utf8_lossy(view_json.stdout)
+    assert(view_json.status.success(), "{String.from_utf8_lossy(view_json.stderr)}")
+    assert(view_json_out.contains("\"kind\":\"jet.trace.view\""), "{view_json_out}")
+    assert(view_json_out.contains("\"timeline\":"), "{view_json_out}")
+    assert(view_json_out.contains("\"flamegraph\":"), "{view_json_out}")
+    view_html := run_jet(root, ["perf", "view", out.to_str().unwrap(), "--html"])
+    html := String.from_utf8_lossy(view_html.stdout)
+    assert(view_html.status.success(), "{String.from_utf8_lossy(view_html.stderr)}")
+    assert(html.contains("<!doctype html>"), "{html}")
+    assert(html.contains("flamegraph"), "{html}")
+    assert(html.contains("timeline"), "{html}")
+    no_color := Command.new(jet()).current_dir(root).env("NO_COLOR", "1").args(["perf", "view", out.to_str().unwrap(), "--frames=all"]).output().unwrap()
+    no_color_out := String.from_utf8_lossy(no_color.stdout)
+    assert(no_color.status.success(), "{String.from_utf8_lossy(no_color.stderr)}")
+    assert(!no_color_out.contains('\u{1b}'), "NO_COLOR leaked ANSI: {no_color_out}")
+    assert(no_color_out.contains("frames all"), "{no_color_out}")
+    assert(no_color_out.contains("generated-frames:"), "{no_color_out}")
+    compare := run_jet(root, ["perf", "compare", out.to_str().unwrap(), out.to_str().unwrap()])
+    assert(compare.status.success(), "compare failed: {String.from_utf8_lossy(compare.stderr)}")
+    assert(String.from_utf8_lossy(compare.stdout).contains("compare ok"), "{String.from_utf8_lossy(compare.stdout)}")
+    export := run_jet(root, ["perf", "export", out.to_str().unwrap(), "--json"])
+    exported := String.from_utf8_lossy(export.stdout)
+    assert(export.status.success(), "export failed: {String.from_utf8_lossy(export.stderr)}")
+    assert(exported.contains("\"kind\":\"jet.trace.projection\""), "{exported}")
+    assert(exported.contains("\"loss\":"), "{exported}")
+    assert(exported.contains("\"schema\":\"jet.trace\""), "{exported}")
+    assert(exported.contains("--chrome"), "{exported}")
+    assert(!exported.contains("no pprof/otel/chrome payloads"), "{exported}")
+    pprof := run_jet(root, ["perf", "export", out.to_str().unwrap(), "--pprof"])
+    pprof_out := String.from_utf8_lossy(pprof.stdout)
+    assert(pprof.status.success(), "{String.from_utf8_lossy(pprof.stderr)}")
+    assert(pprof_out.contains("\"kind\":\"jet.trace.pprof-projection\""), "{pprof_out}")
+    assert(pprof_out.contains("\"loss\":"), "{pprof_out}")
+    otel := run_jet(root, ["perf", "export", out.to_str().unwrap(), "--otel"])
+    assert(otel.status.success(), "{String.from_utf8_lossy(otel.stderr)}")
+    assert(String.from_utf8_lossy(otel.stdout).contains("otel-projection"), "{String.from_utf8_lossy(otel.stdout)}")
+    chrome := run_jet(root, ["perf", "export", out.to_str().unwrap(), "--chrome"])
+    assert(chrome.status.success(), "{String.from_utf8_lossy(chrome.stderr)}")
+    assert(String.from_utf8_lossy(chrome.stdout).contains("chrome-projection"), "{String.from_utf8_lossy(chrome.stdout)}")
+    assert(String.from_utf8_lossy(chrome.stdout).contains("\"traceEvents\":["), "{String.from_utf8_lossy(chrome.stdout)}")
+    profile_map := run_jet(root, ["perf", "export", out.to_str().unwrap(), "--emit-profile-map"])
+    assert(profile_map.status.success(), "{String.from_utf8_lossy(profile_map.stderr)}")
+    assert(String.from_utf8_lossy(profile_map.stdout).contains("profile-map-projection"), "{String.from_utf8_lossy(profile_map.stdout)}")
+    overridden := run_jet(root, ["perf", "compare", out.to_str().unwrap(), out.to_str().unwrap(), "--override-identity"])
+    assert(overridden.status.success(), "{String.from_utf8_lossy(overridden.stderr)}")
+    assert(String.from_utf8_lossy(overridden.stdout).contains("budgets:"), "{String.from_utf8_lossy(overridden.stdout)}")
+    corrupt := root.join("corrupt.jettrace")
+    fs.write(corrupt, "{{\"schema\":\"jet.trace\"}}\n".bytes()).unwrap()
+    bad := run_jet(root, ["perf", "view", corrupt.to_str().unwrap()])
+    assert_eq(bad.status.code(), Some(2))
+    assert(String.from_utf8_lossy(bad.stderr).contains("jettrace"), "{String.from_utf8_lossy(bad.stderr)}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/views.rs:166
+#Test("perf_view_reads_hash_valid_legacy_capture_policy_v1") {
+    guard := SELF_ATTACH_LOCK.lock().unwrap()
+    root := temp_workspace()
+    modern_path := root.join("modern.jettrace")
+    attach := run_jet(root, ["perf", "attach", id().to_string(), "--out", modern_path.to_str().unwrap()])
+    assert(attach.status.success(), "{String.from_utf8_lossy(attach.stderr)}")
+    modern_bytes := fs.read(modern_path).unwrap()
+    modern := verify_jettrace(modern_bytes).unwrap()
+    modern_id := trace_id(modern).unwrap().to_string()
+    parsed := CanonicalJson.parse_canonical(modern_bytes).unwrap()
+    wrapper := if parsed == {
+        .Object(fields) -> fields
+        else -> panic("modern trace wrapper is not an object")
+    }
+    content := wrapper.remove("content").unwrap()
+    if &content == {
+        .Object(fields) -> {
+            policy_value := fields.get_mut("capture_policy").unwrap()
+            if policy_value == {
+                .Object(policy) -> {
+                    loop key in ["browser_row_limit", "browser_rows_truncated", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"] { _ :: policy.remove(key) }
+                    policy.insert("schema", CanonicalJson.Integer("1"))
+                }
+                else -> panic("modern capture policy is not an object")
+            }
+        }
+        else -> panic("modern trace content is not an object")
+    }
+    legacy_bytes := jettrace_artifact(content).bytes()
+    legacy := verify_jettrace(legacy_bytes).unwrap()
+    assert_ne(trace_id(legacy).unwrap(), modern_id, "legacy trace_id was not recomputed")
+    legacy_path := root.join("legacy-v1.jettrace")
+    fs.write(legacy_path, legacy_bytes).unwrap()
+    view := run_jet(root, ["perf", "view", legacy_path.to_str().unwrap()])
+    stdout := String.from_utf8_lossy(view.stdout)
+    assert(view.status.success(), "{String.from_utf8_lossy(view.stderr)}")
+    assert(stdout.contains("schema jet.trace v1"), "{stdout}")
+    assert(stdout.contains("command attach"), "{stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/jet_perf_trace_parts/views.rs:373
+#Test("perf_source_profile_view_preserves_ranges_and_coverage_states") {
+    root := temp_workspace()
+    source_sha256 := SHA256.sha256_hex(profiler_fixture_source().bytes())
+    captured_path := root.join("captured-profile.jettrace")
+    captured := profiler_fixture("captured")
+    verify_jettrace(captured).unwrap()
+    captured_text := String.from_utf8(captured).unwrap()
+    assert(captured_text.contains("\"method\":\"sampling\""), "{captured_text}")
+    assert(captured_text.contains("\"execution_count\":null"), "{captured_text}")
+    assert(captured_text.contains("\"sample_count\":37"), "{captured_text}")
+    assert(captured_text.contains("\"sample_weight\":37"), "{captured_text}")
+    assert(captured_text.contains("\"sha256\":\"{source_sha256}\""), "{captured_text}")
+    assert(captured_text.contains("\"start_line\":4"), "{captured_text}")
+    assert(captured_text.contains("\"end_column\":7"), "{captured_text}")
+    fs.write(captured_path, captured).unwrap()
+    view := run_jet(root, ["perf", "view", captured_path.to_str().unwrap()])
+    view_out := String.from_utf8_lossy(view.stdout)
+    assert(view.status.success(), "{String.from_utf8_lossy(view.stderr)}")
+    assert(view_out.contains("profile method=sampling status=captured coverage=complete rows=3 clocks=cpu,wall overhead=measured window=exit run_wall=5000000ns run_cpu=4000000ns"), "{view_out}")
+    assert(view_out.contains("profile.jet#hot profile:wall samples=37"), "{view_out}")
+    assert(view_out.contains("profile.jet#cold profile:wall samples=1"), "{view_out}")
+    assert(!view_out.contains("samples=0"), "{view_out}")
+    view_json := run_jet(root, ["perf", "view", captured_path.to_str().unwrap(), "--json"])
+    view_json_out := String.from_utf8_lossy(view_json.stdout)
+    assert(view_json.status.success(), "{String.from_utf8_lossy(view_json.stderr)}")
+    loop marker in ["\"kind\":\"jet.trace.view\"", "\"method\":\"sampling\"", "\"execution_count\":null", "\"sample_count\":37", "\"sample_weight\":37", "\"start_line\":4", "\"end_column\":7", "\"coverage\":\"complete\""] {
+        assert(view_json_out.contains(marker), "{marker}: {view_json_out}")
+    }
+    assert(view_json_out.contains("\"sha256\":\"{source_sha256}\""), "{view_json_out}")
+    profile_map := run_jet(root, ["perf", "export", captured_path.to_str().unwrap(), "--emit-profile-map"])
+    profile_map_out := String.from_utf8_lossy(profile_map.stdout)
+    assert(profile_map.status.success(), "{String.from_utf8_lossy(profile_map.stderr)}")
+    loop marker in ["\"kind\":\"jet.trace.profile-map-projection\"", "\"source_identity\":[{{\"path\":\"profile.jet\"", "\"source_maps\":[{{\"kind\":\"jet\"", "\"method\":\"sampling\"", "\"sample_weight\":37", "\"start_line\":4", "\"coverage\":\"complete\""] {
+        assert(profile_map_out.contains(marker), "{marker}: {profile_map_out}")
+    }
+    loop (state, summary) in [
+        ("no_samples", "status=no_samples coverage=none rows=0 clocks=none overhead=not_measured window=unavailable run_wall=unavailable run_cpu=unavailable"),
+        ("unsupported", "status=unsupported coverage=unsupported rows=0 clocks=none overhead=not_applicable window=unavailable run_wall=unavailable"),
+        ("truncated", "status=truncated coverage=partial rows=1 clocks=wall overhead=not_measured window=live run_wall=9000000ns run_cpu=unavailable"),
+        ("dropped", "status=truncated coverage=partial rows=1 clocks=wall overhead=not_measured window=unavailable run_wall=unavailable")
+    ] {
+        path := root.join("{state}.jettrace")
+        bytes := profiler_fixture(state)
+        verify_jettrace(bytes).unwrap()
+        fs.write(path, bytes).unwrap()
+        state_view := run_jet(root, ["perf", "view", path.to_str().unwrap()])
+        state_out := String.from_utf8_lossy(state_view.stdout)
+        assert(state_view.status.success(), "{state}: {String.from_utf8_lossy(state_view.stderr)}")
+        assert(state_out.contains("profile method=sampling {summary}"), "{state}: {state_out}")
+        assert(!state_out.contains("coverage=complete"), "{state}: {state_out}")
+        assert(!state_out.contains("samples=0"), "{state}: {state_out}")
+        if state == {
+            "no_samples" | "unsupported" -> { assert(!state_out.contains("profile:wall"), "{state}: {state_out}") }
+            "truncated" | "dropped" -> { assert(state_out.contains("profile.jet#hot profile:wall samples=37"), "{state}: {state_out}") }
+            else -> unreachable()
+        }
+        if state == "dropped" {
+            dropped_json := run_jet(root, ["perf", "view", path.to_str().unwrap(), "--json"])
+            dropped_out := String.from_utf8_lossy(dropped_json.stdout)
+            assert(dropped_json.status.success(), "{String.from_utf8_lossy(dropped_json.stderr)}")
+            assert(dropped_out.contains("\"reason\":\"dropped_rows=1 at bounded profile sample limit\""))
+            assert(dropped_out.contains("\"rows_truncated\":true"))
+            assert(!dropped_out.contains("\"coverage\":\"complete\""))
+        }
+    }
+    _ :: fs.remove_dir_all(root)
+}

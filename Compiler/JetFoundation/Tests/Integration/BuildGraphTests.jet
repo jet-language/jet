@@ -1,0 +1,606 @@
+use jet_foundation.Tests.Integration.BuildGraph.*
+use jet_foundation.Tests.Integration.Common as common
+use jet_comptime.Comptime.Build.[ActionCache, ActionCacheProvenance, ActionCacheStatus, ActionInputSnapshot, ActionKey, ActionOutcome, ActionHandle, ActionKind, ActionOutputRecord, ActionResultRecord, ActionSpec, BuildArtifactStore, BuildCapability, BuildContext, BuildError, BuildExecutionEvent, BuildExecutionResult, BuildGraphSubject, BuildPath, BuildPlan, BuildNodeKind, BuildPlanNode, BuildPolicy, BuildProvenance, BuildResourcePool, BuildExecutionError, CacheHitReason, CacheMissReason, CompilerActionRunner, CompilerPackageSpec, ContentDigest, FrontEndCompletion, GeneratedModuleSpec, LegacyWrapperKind, LegacyWrapperSpec, capture_declared_outputs, restore_action_outputs, restore_declared_outputs, snapshot_declared_inputs, LinkerIdentity, LockRecord, PluginContribution, ProbeKind, ProbeSpec, ProvenanceSource, RemoteActionRequest, RemoteBuildBinding, RemoteCacheError, RemoteCachePolicy, RemoteCacheTransport, RemoteDeniedReason, RemoteExecutionRequest, RemoteExecutionResult, RemoteSandboxProof, ReproducibilityClass, SdkIdentity, SigningIdentitySpec, SysrootIdentity, TargetKind, TargetSpec, ToolchainResolution, ToolchainRole, ToolchainSpec, WasmComponentPluginSpec, BUILD_PLUGIN_API_VERSION, read_packaged_file_bounded, remote_execution_identity, remote_policy_digest]
+use core.path.OSPath
+use core.sys.target.[selected_os, selected_family, selected_arch]
+use std.[fs, env, process, thread]
+use std.collections.BTreeSet
+use std.sync.[Arc, Barrier]
+use std.time.[Instant, Duration]
+use std.io.ErrorKind
+
+// Rust: tests/build_graph.rs:81
+#Test("registers_typed_targets_and_default_plan") {
+    b := BuildContext.new()
+    gen :: b.action("generate-assets", ActionSpec.cached(["jet-tool", "pack"]).with_inputs(["assets/sprite.png"]).with_outputs([".jet/generated/assets.jet"]).with_cap(BuildCapability.FS)).unwrap()
+    lib :: b.add_library("engine", TargetSpec.new().with_source("src/engine.jet").with_action(gen)).unwrap()
+    app :: b.add_executable("game", TargetSpec.new().with_source("src/main.jet").with_dep(lib)).unwrap()
+    b.add_test("unit", TargetSpec.new().with_dep(app)).unwrap()
+    b.add_test("frame-time", TargetSpec.new().with_dep(app)).unwrap()
+    b.add_asset_bundle("assets", TargetSpec.new().with_action(gen)).unwrap()
+    b.add_doc("manual", TargetSpec.new().with_source("docs/manual.md")).unwrap()
+    b.add_install("install", TargetSpec.new().with_dep(app)).unwrap()
+    b.add_package("package", TargetSpec.new().with_dep(app)).unwrap()
+    b.add_publish("publish", TargetSpec.new().with_dep(app)).unwrap()
+    plan :: b.plan_with_default(app).unwrap()
+    assert_eq(plan.default_target(), Val(app.into()))
+    assert_eq(plan.target(app).unwrap().kind, TargetKind.Executable)
+    assert_eq(plan.target(app).unwrap().toolchain, b.default_host_toolchain())
+    assert_eq(plan.default_host_toolchain().role, ToolchainRole.Host)
+    assert_eq(plan.default_host_toolchain().provenance.source, ProvenanceSource.InferredHost)
+    assert_eq(plan.target(lib).unwrap().kind, TargetKind.Library)
+    assert_eq(plan.targets_by_kind(TargetKind.AssetBundle).len(), 1)
+    assert_eq(plan.actions().len(), 1)
+    assert_eq(plan.action(gen).unwrap().outputs[0].as_str(), ".jet/generated/assets.jet")
+}
+
+// Rust: tests/build_graph.rs:143
+#Test("selected_default_executes_only_its_target_dependency_closure") {
+    b := BuildContext.new()
+    selected_action :: b.action("selected", ActionSpec.cached(["tool"]).with_outputs(["selected.out"])).unwrap()
+    unrelated_action :: b.action("unrelated", ActionSpec.cached(["tool"]).with_outputs(["unrelated.out"])).unwrap()
+    selected :: b.add_executable("selected", TargetSpec.new().with_source("main.jet").with_action(selected_action)).unwrap()
+    b.add_test("unrelated", TargetSpec.new().with_source("other.jet").with_action(unrelated_action)).unwrap()
+    plan :: b.plan_with_default(selected).unwrap()
+    model :: plan.execution_model().unwrap()
+    assert_eq(model.nodes.len(), 1)
+    assert_eq(model.nodes[0].name, "selected")
+    assert_eq(plan.selected_sources().unwrap()[0].as_str(), "main.jet")
+}
+
+// Rust: tests/build_graph.rs:180
+#Test("records_explicit_toolchains_sdks_linkers_and_signers") {
+    b := BuildContext.new()
+    sdk_lock :: LockRecord.new("sdk:core.embedded-sdk#1.4", "sha256:sdk")
+    linker_lock :: LockRecord.new("linker:lld#18", "sha256:linker")
+    toolchain_lock :: LockRecord.new("toolchain:aarch64-linux-musl", "sha256:toolchain")
+    toolchain :: b.toolchain("arm-musl", ToolchainSpec.target("aarch64-linux-musl", BuildProvenance.jetpack_dependency("toolchain.aarch64-linux-musl#2026.07", toolchain_lock)).with_host_triple("x86_64-linux").with_sdk(SdkIdentity.new("core.embedded-sdk", "1.4", BuildProvenance.jetpack_dependency("core.embedded-sdk#1.4", sdk_lock))).with_linker(LinkerIdentity.new("lld", BuildProvenance.jetpack_dependency("lld#18", linker_lock)))).unwrap()
+    signer :: b.signing_identity("mac-release", SigningIdentitySpec.new("developer-id:ACME", BuildProvenance.user_declared("keychain:mac-release", Val(LockRecord.new("signing:mac-release", "sha256:signer"))))).unwrap()
+    link :: b.action("link-firmware", ActionSpec.cached(["ld.lld", "-o", "build/sensor"]).with_outputs(["build/sensor"]).with_cap(BuildCapability.Exec).with_toolchain(toolchain)).unwrap()
+    app :: b.add_executable("sensor", TargetSpec.new().with_source("src/sensor.jet").with_action(link).with_toolchain(toolchain).with_signing_identity(signer)).unwrap()
+    plan :: b.plan_with_default(app).unwrap()
+    recorded_toolchain :: plan.toolchain(toolchain).unwrap()
+    assert_eq(recorded_toolchain.role, ToolchainRole.Target)
+    assert_eq(recorded_toolchain.host_triple, "x86_64-linux")
+    assert_eq(recorded_toolchain.target_triple, "aarch64-linux-musl")
+    assert_eq(recorded_toolchain.sdk.as_ref().unwrap().provenance.lock.as_ref().unwrap().digest, "sha256:sdk")
+    assert_eq(recorded_toolchain.linker.as_ref().unwrap().provenance.lock.as_ref().unwrap().digest, "sha256:linker")
+    assert_eq(plan.target(app).unwrap().toolchain, toolchain)
+    assert_eq(plan.action(link).unwrap().toolchain, toolchain)
+    assert_eq(plan.target(app).unwrap().signing_identity, Val(signer))
+    assert_eq(plan.signing_identity(signer).unwrap().label, "developer-id:ACME")
+    assert_eq(plan.signing_identity(signer).unwrap().provenance.lock.as_ref().unwrap().digest, "sha256:signer")
+}
+
+// Rust: tests/build_graph.rs:288
+#Test("typed_probes_record_reproducibility_and_provenance") {
+    b := BuildContext.new()
+    cc :: b.find_program("cc", "cc").unwrap()
+    sqlite :: b.probe("sqlite", ProbeSpec.pkg_config("sqlite3").with_min_version("3.42").with_reproducibility(ReproducibilityClass.Reproducible).with_provenance(BuildProvenance.jetpack_dependency("pkg-config:sqlite3#3.42", LockRecord.new("probe:sqlite3", "sha256:sqlite")))).unwrap()
+    header :: b.header_check("sqlite-header", "sqlite3.h").unwrap()
+    compile :: b.compile_check("sqlite-wal", "sqlite-wal", ["sqlite3.h"], "sqlite3_wal_checkpoint_v2").unwrap()
+    lib :: b.add_library("sqlite-bridge", TargetSpec.new().with_probe(cc).with_probe(sqlite).with_probe(header).with_probe(compile)).unwrap()
+    plan :: b.plan_with_default(lib).unwrap()
+    assert_eq(plan.probes().len(), 4)
+    assert_eq(plan.probe(cc).unwrap().reproducibility, ReproducibilityClass.Ambient)
+    assert_eq(plan.probe(sqlite).unwrap().reproducibility, ReproducibilityClass.Reproducible)
+    assert_eq(plan.probe(sqlite).unwrap().provenance.lock.as_ref().unwrap().digest, "sha256:sqlite")
+    assert(match plan.probe(sqlite).unwrap().kind { .PkgConfig { package, .. } => package == "sqlite3"; _ => false })
+    assert(match plan.probe(header).unwrap().kind { .HeaderCheck { header } => header == "sqlite3.h"; _ => false })
+    assert(match plan.probe(compile).unwrap().kind { .CompileCheck { name, .. } => name == "sqlite-wal"; _ => false })
+    assert_eq(plan.target(lib).unwrap().probes, [cc, sqlite, header, compile])
+}
+
+// Rust: tests/build_graph.rs:362
+#Test("declared_target_toolchain_wins_over_ambient_host_tool") {
+    // GATE #4494: native PATH, canonicalization, process execution and file operations.
+    false_path :: env.var_os("PATH").into_iter().flat_map(fn(paths) { env.split_paths(&paths).collect::<[OSPath]>() }).map(fn(directory) { directory.join("false") }).find(fn(path) { path.is_file() }).expect("the test host needs a `false` executable")
+    declared_false :: fs.canonicalize(&false_path).unwrap()
+    b := BuildContext.new()
+    toolchain :: b.toolchain("declared-native", ToolchainSpec.target("x86_64-linux-gnu", BuildProvenance.jetpack_dependency("toolchain.native#1", LockRecord.new("toolchain:native", "sha256:native"))).with_host_triple("x86_64-linux-gnu").with_tool("cc", false_path.to_string_lossy())).unwrap()
+    probe :: b.probe("declared-cc", ProbeSpec.header_check("stddef.h").with_toolchain(toolchain)).unwrap()
+    target :: b.add_library("declared-native-probe", TargetSpec.new().with_toolchain(toolchain).with_probe(probe)).unwrap()
+    plan :: b.plan_with_default(target).unwrap()
+    root :: env.temp_dir().join("jet-declared-toolchain-{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    grants :: [BuildCapability.Exec].into_iter().collect::<BTreeSet<BuildCapability>>()
+    error :: execute_build_plan_with_front_end_and_remote(&plan, &root, &grants, FrontEndCompletion.all_complete(), None).unwrap_err()
+    assert(match error { .ProbeFailed { detail, .. } => detail.contains(declared_false.to_string_lossy().as_ref()); _ => false }, "declared target tool must be used instead of ambient PATH: {error:?}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/build_graph.rs:426
+#Test("foreign_toolchain_probe_and_signer_handles_are_rejected") {
+    a := BuildContext.new()
+    b := BuildContext.new()
+    toolchain :: b.toolchain("other", ToolchainSpec.target("wasm32-wasi", BuildProvenance.jetpack_dependency("toolchain.wasm32-wasi#2026.07", LockRecord.new("toolchain:wasm32-wasi", "sha256:wasm")))).unwrap()
+    signer :: b.signing_identity("other-signer", SigningIdentitySpec.new("developer-id:OTHER", BuildProvenance.user_declared("keychain:other", None))).unwrap()
+    probe :: b.find_program("other-cc", "cc").unwrap()
+    err :: a.add_executable("bad-toolchain", TargetSpec.new().with_toolchain(toolchain)).unwrap_err()
+    assert_eq(err, BuildError.UnknownToolchain(toolchain.id()))
+    err :: a.add_executable("bad-signer", TargetSpec.new().with_signing_identity(signer)).unwrap_err()
+    assert_eq(err, BuildError.UnknownSigningIdentity(signer.id()))
+    err :: a.add_library("bad-probe", TargetSpec.new().with_probe(probe)).unwrap_err()
+    assert_eq(err, BuildError.UnknownProbe(probe.id()))
+}
+
+// Rust: tests/build_graph.rs:470
+#Test("invalid_toolchain_probe_and_signer_specs_do_not_reserve_names") {
+    b := BuildContext.new()
+    bad_toolchain :: b.toolchain("cross", ToolchainSpec.target("", BuildProvenance.inferred_host())).unwrap_err()
+    assert_eq(bad_toolchain, BuildError.EmptyToolchainTriple("cross"))
+    toolchain :: b.toolchain("cross", ToolchainSpec.target("wasm32-wasi", BuildProvenance.jetpack_dependency("toolchain.wasm32-wasi#2026.07", LockRecord.new("toolchain:wasm32-wasi", "sha256:wasm")))).unwrap()
+    bad_signer :: b.signing_identity("release", SigningIdentitySpec.new("", BuildProvenance.user_declared("keychain:release", None))).unwrap_err()
+    assert_eq(bad_signer, BuildError.EmptyIdentityField("release"))
+    b.signing_identity("release", SigningIdentitySpec.new("developer-id:ACME", BuildProvenance.user_declared("keychain:release", None))).unwrap()
+    bad_probe :: b.probe("sqlite", ProbeSpec.pkg_config("")).unwrap_err()
+    assert_eq(bad_probe, BuildError.EmptyProbeField("sqlite"))
+    b.probe("sqlite", ProbeSpec.pkg_config("sqlite3").with_toolchain(toolchain)).unwrap()
+}
+
+// Rust: tests/build_graph.rs:524
+#Test("duplicate_target_or_action_names_are_rejected") {
+    b := BuildContext.new()
+    b.add_executable("app", TargetSpec.new()).unwrap()
+    err :: b.add_library("app", TargetSpec.new()).unwrap_err()
+    assert_eq(err, BuildError.DuplicateTargetName("app"))
+    b.action("codegen", ActionSpec.cached(["tool"]).with_outputs(["out.jet"])).unwrap()
+    err :: b.action("codegen", ActionSpec.cached(["tool"]).with_outputs(["other.jet"])).unwrap_err()
+    assert_eq(err, BuildError.DuplicateActionName("codegen"))
+}
+
+// Rust: tests/build_graph.rs:545
+#Test("cached_actions_need_outputs") {
+    b := BuildContext.new()
+    err :: b.action("probe", ActionSpec.cached(["cc", "--version"])).unwrap_err()
+    assert_eq(err, BuildError.CachedActionWithoutOutputs("probe"))
+}
+
+// Rust: tests/build_graph.rs:557
+#Test("outputless_commands_are_explicit_uncached_phony_actions") {
+    b := BuildContext.new()
+    clean :: b.action("clean-generated", ActionSpec.uncached_phony(["rm", "-rf", ".jet/generated"]).with_cap(BuildCapability.FS)).unwrap()
+    plan :: b.plan().unwrap()
+    action :: plan.action(clean).unwrap()
+    assert_eq(action.cache, ActionCache.UncachedPhony)
+    assert(action.outputs.is_empty())
+    assert_eq(plan.phony_actions(), [action])
+}
+
+// Rust: tests/build_graph.rs:575
+#Test("phony_actions_need_a_declared_capability") {
+    b := BuildContext.new()
+    err :: b.action("clean-generated", ActionSpec.uncached_phony(["rm", "-rf", ".jet/generated"])).unwrap_err()
+    assert_eq(err, BuildError.PhonyActionWithoutCaps("clean-generated"))
+}
+
+// Rust: tests/build_graph.rs:590
+#Test("action_outputs_have_one_owner_in_the_plan") {
+    b := BuildContext.new()
+    b.action("generate-a", ActionSpec.cached(["tool-a"]).with_outputs([".jet/generated/out.jet"])).unwrap()
+    b.action("generate-b", ActionSpec.cached(["tool-b"]).with_outputs([".jet/generated/out.jet"])).unwrap()
+    err :: b.plan().unwrap_err()
+    assert_eq(err, BuildError.DuplicateBuildOutput { output: ".jet/generated/out.jet", first_action: "generate-a", second_action: "generate-b" })
+}
+
+// Rust: tests/build_graph.rs:615
+#Test("action_keys_are_deterministic_and_cover_cache_contract") {
+    // Rust: tests/build_graph.rs:616
+    fn key(argv: &[String], env_value: String, input: String, output: String, cap: BuildCapability, target_triple: String, probe_package: String, signer_label: String, label_value: String) -> String {
+        b := BuildContext.new()
+        toolchain :: b.toolchain("tc", ToolchainSpec.target(target_triple, BuildProvenance.jetpack_dependency("toolchain.{target_triple}#2026.07", LockRecord.new("toolchain:{target_triple}", "sha256:tc")))).unwrap()
+        probe :: b.probe("probe", ProbeSpec.pkg_config(probe_package).with_reproducibility(ReproducibilityClass.Reproducible).with_provenance(BuildProvenance.jetpack_dependency("pkg-config:{probe_package}#1", LockRecord.new("probe:{probe_package}", "sha256:probe")))).unwrap()
+        signer :: b.signing_identity("signer", SigningIdentitySpec.new(signer_label, BuildProvenance.user_declared("keychain:{signer_label}", Val(LockRecord.new("signing:release", "sha256:signer"))))).unwrap()
+        action :: b.action("compile", ActionSpec.cached(argv.iter().copied()).with_inputs([input]).with_outputs([output]).with_env("MODE", env_value).with_cap(cap).with_toolchain(toolchain).with_probe(probe).with_signing_identity(signer).with_label("profile", label_value)).unwrap()
+        plan :: b.plan().unwrap()
+        plan.action_key(action).unwrap().as_str().to_string()
+    }
+    base :: key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "release")
+    assert_eq(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "asm"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "debug", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/lib.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/lib.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.FS, "x86_64-linux", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "aarch64-linux-musl", "sqlite3", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "openssl", "developer-id:ACME", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:OTHER", "release"))
+    assert_ne(base, key(&["jetc", "--emit", "obj"], "release", "src/main.jet", "build/main.o", BuildCapability.Exec, "x86_64-linux", "sqlite3", "developer-id:ACME", "coverage"))
+}
+
+// Rust: tests/build_graph.rs:835
+#Test("artifact_store_round_trips_blobs_and_restores_declared_outputs") {
+    root :: env.temp_dir().join("jet_artifact_store_{process.id()}_restore")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(root.join("work/build")).unwrap()
+    store :: test_artifact_store(&root)
+    digest :: store.put_blob("hello artifact".bytes()).unwrap()
+    assert_eq(store.get_blob(&digest).unwrap().unwrap(), "hello artifact".bytes())
+    b := BuildContext.new()
+    action :: b.action("emit", ActionSpec.cached(["jetc", "src/main.jet"]).with_outputs(["build/out.txt"])).unwrap()
+    plan :: b.plan().unwrap()
+    key :: plan.action_key(action).unwrap()
+    fs.write(root.join("work/build/out.txt"), "compiled bytes").unwrap()
+    record :: capture_declared_outputs(&store, &root.join("work"), plan.action(action).unwrap(), key, ActionOutcome.Succeeded { exit_code: 0 }, ActionCacheProvenance.miss(CacheMissReason.NoLocalActionRecord)).unwrap()
+    fs.write(root.join("work/build/out.txt"), "stale").unwrap()
+    restore_action_outputs(&store, &root.join("work"), plan.action(action).unwrap(), &record).unwrap()
+    assert_eq(fs.read_to_string(root.join("work/build/out.txt")).unwrap(), "compiled bytes")
+    assert_eq(record.outputs[0].byte_len, U64.from("compiled bytes".len()))
+    _ :: fs.remove_dir_all(&root)
+}
+
+// Rust: tests/build_graph.rs:884
+#Test("cas_rejects_malformed_digests_without_panicking") {
+    bad_hex :: "g".repeat(64)
+    loop malformed in ["", "sha256:", "sha256:abc", "md5:0000", "sha256:{bad_hex}"] {
+        assert(ContentDigest.parse(malformed).is_err())
+    }
+}
+
+// Rust: tests/build_graph.rs:898
+#Test("cache_restore_rejects_symlinked_parent_without_outside_write") {
+    // GATE #4483/#4494: retain Unix-only real symlink test by selected family.
+    if selected_family() != "unix" -> return
+    root :: env.temp_dir().join("jet_artifact_store_{process.id()}_parent_symlink")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(root.join("work/real")).unwrap()
+    fs.create_dir_all(root.join("outside")).unwrap()
+    store :: test_artifact_store(&root)
+    b := BuildContext.new()
+    action :: b.action("emit", ActionSpec.cached(["jetc"]).with_outputs(["real/out.txt"])).unwrap()
+    plan :: b.plan().unwrap()
+    fs.write(root.join("work/real/out.txt"), "safe").unwrap()
+    record :: capture_declared_outputs(&store, &root.join("work"), plan.action(action).unwrap(), plan.action_key(action).unwrap(), ActionOutcome.Succeeded { exit_code: 0 }, ActionCacheProvenance.miss(CacheMissReason.NoLocalActionRecord)).unwrap()
+    fs.remove_dir_all(root.join("work/real")).unwrap()
+    std.os.unix.fs.symlink(root.join("outside"), root.join("work/real")).unwrap()
+    assert(restore_action_outputs(&store, &root.join("work"), plan.action(action).unwrap(), &record).is_err())
+    assert(!root.join("outside/out.txt").exists())
+    _ :: fs.remove_dir_all(&root)
+}
+
+// Rust: tests/build_graph.rs:940
+#Test("action_key_changes_when_declared_input_contents_change") {
+    root :: env.temp_dir().join("jet_artifact_store_{process.id()}_inputs")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(root.join("work/src")).unwrap()
+    store :: test_artifact_store(&root)
+    b := BuildContext.new()
+    action :: b.action("compile", ActionSpec.cached(["jetc", "src/main.jet"]).with_inputs(["src/main.jet"]).with_outputs(["build/main.o"])).unwrap()
+    plan :: b.plan().unwrap()
+    action_ref :: plan.action(action).unwrap()
+    fs.write(root.join("work/src/main.jet"), "fn run() { print(1) }").unwrap()
+    first_inputs :: snapshot_declared_inputs(&store, &root.join("work"), action_ref).unwrap()
+    first :: plan.action_key_with_inputs(action, &first_inputs).unwrap()
+    fs.write(root.join("work/src/main.jet"), "fn run() { print(2) }").unwrap()
+    second_inputs :: snapshot_declared_inputs(&store, &root.join("work"), action_ref).unwrap()
+    second :: plan.action_key_with_inputs(action, &second_inputs).unwrap()
+    assert_ne(first, second)
+    assert_eq(first_inputs[0].path.as_str(), "src/main.jet")
+    assert_ne(first_inputs[0].digest, second_inputs[0].digest)
+    _ :: fs.remove_dir_all(&root)
+}
+
+// Rust: tests/build_graph.rs:978
+#Test("cache_restore_replaces_output_symlink_instead_of_following_it") {
+    // GATE #4483/#4494: actual Unix symlink and lstat; no emulated provider.
+    if selected_family() != "unix" -> return
+    root :: env.temp_dir().join("jet_artifact_store_{process.id()}_symlink")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(root.join("work/build")).unwrap()
+    fs.write(root.join("outside.txt"), "outside").unwrap()
+    store :: test_artifact_store(&root)
+    b := BuildContext.new()
+    action :: b.action("emit", ActionSpec.cached(["jetc", "src/main.jet"]).with_outputs(["build/out.txt"])).unwrap()
+    plan :: b.plan().unwrap()
+    key :: plan.action_key(action).unwrap()
+    fs.write(root.join("work/build/out.txt"), "compiled bytes").unwrap()
+    record :: capture_declared_outputs(&store, &root.join("work"), plan.action(action).unwrap(), key, ActionOutcome.Succeeded { exit_code: 0 }, ActionCacheProvenance.miss(CacheMissReason.NoLocalActionRecord)).unwrap()
+    fs.remove_file(root.join("work/build/out.txt")).unwrap()
+    std.os.unix.fs.symlink(root.join("outside.txt"), root.join("work/build/out.txt")).unwrap()
+    restore_declared_outputs(&store, &root.join("work"), &record).unwrap()
+    assert_eq(fs.read_to_string(root.join("outside.txt")).unwrap(), "outside")
+    assert_eq(fs.read_to_string(root.join("work/build/out.txt")).unwrap(), "compiled bytes")
+    assert(!fs.symlink_metadata(root.join("work/build/out.txt")).unwrap().file_type().is_symlink())
+    _ :: fs.remove_dir_all(&root)
+}
+
+// Rust: tests/build_graph.rs:1031
+#Test("cache_provenance_records_hit_miss_and_remote_denial") {
+    hit :: ActionCacheProvenance.hit(CacheHitReason.LocalActionRecordMatched)
+    assert_eq(hit.status, ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched))
+    miss :: ActionCacheProvenance.miss(CacheMissReason.ActionKeyChanged)
+    assert_eq(miss.status, ActionCacheStatus.Miss(CacheMissReason.ActionKeyChanged))
+    policy :: RemoteCachePolicy.disabled_until_grant_and_sandbox_proof()
+    loop request in [RemoteActionRequest.CacheRead, RemoteActionRequest.CacheWrite, RemoteActionRequest.Execute] {
+        denial :: policy.check(request).unwrap_err()
+        assert_eq(denial.request, request)
+        assert_eq(denial.reason, RemoteDeniedReason.MissingGrantAndSandboxProof)
+    }
+}
+
+// Rust: tests/build_graph.rs:1059
+#Test("remote_transport_round_trips_blobs_records_and_execution_provenance") {
+    root :: env.temp_dir().join("jet_remote_transport_{process.id()}_roundtrip")
+    _ :: fs.remove_dir_all(&root)
+    binding :: RemoteBuildBinding.new("builder-roundtrip", &root, "remote-test-key".bytes()).unwrap().with_trust_domain("trusted").with_worker_id("worker-roundtrip").with_platform("linux-x86_64").with_abi("native")
+    transport :: RemoteCacheTransport.for_binding(&binding).unwrap()
+    key :: ActionKey.new("compile:app")
+    provenance_digest :: ContentDigest.from_bytes("provenance".bytes())
+    sandbox :: transport.sandbox_proof("remote:builder-roundtrip:trusted:sandbox-1", "attempt-roundtrip-1", key.as_str(), provenance_digest.clone()).unwrap()
+    policy :: RemoteCachePolicy.granted(sandbox.clone())
+    output_digest :: transport.upload_blob("compiled".bytes(), &policy).unwrap()
+    assert_eq(transport.download_blob(&output_digest, &policy).unwrap(), "compiled".bytes())
+    output :: ActionOutputRecord { path: BuildPath.new("build/app").unwrap(), digest: output_digest.clone(), byte_len: 8 }
+    record :: ActionResultRecord { key: key.clone(), outcome: ActionOutcome.Succeeded { exit_code: 0 }, outputs: [output.clone()], failure_report: None, provenance: ActionCacheProvenance.hit(CacheHitReason.LocalActionRecordMatched) }
+    transport.upload_action_record(&record, &policy).unwrap()
+    assert_eq(transport.download_action_record(&key, &policy).unwrap(), record)
+    wrong_length := record.clone()
+    wrong_length.outputs[0].byte_len = 7
+    assert(match transport.upload_action_record(&wrong_length, &policy) { .Err(.InvalidRecord(_)) => true; _ => false })
+    request :: RemoteExecutionRequest {
+        key: key.clone(), attempt_id: sandbox.attempt_id.clone(), argv: ["jetc", "src/main.jet"],
+        inputs: [ActionInputSnapshot { path: BuildPath.new("src/main.jet").unwrap(), digest: transport.upload_execution_blob("source".bytes(), &policy).unwrap(), byte_len: 6 }],
+        outputs: [output.path.clone()], toolchain_digest: ContentDigest.from_bytes("toolchain".bytes()), sandbox: sandbox.clone()
+    }
+    transport.submit_execution(&request, &policy).unwrap()
+    (stdout_digest, stderr_digest) :: remote_empty_log_digests(&transport, &policy)
+    result :: RemoteExecutionResult { key: key.clone(), attempt_id: request.attempt_id.clone(), execution_id: remote_execution_identity(&request), outcome: ActionOutcome.Succeeded { exit_code: 0 }, outputs: [output], toolchain_digest: request.toolchain_digest.clone(), sandbox: sandbox, stdout_digest: stdout_digest, stderr_digest: stderr_digest, provenance_signer: request.sandbox.worker_id.clone() }
+    transport.publish_execution_result(&result, &policy).unwrap()
+    assert_eq(transport.download_execution_result(&key, &policy).unwrap(), result)
+    disagreement := result.clone()
+    disagreement.outcome = ActionOutcome.Failed { exit_code: 7 }
+    assert(match transport.publish_execution_result(&disagreement, &policy) { .Err(.InvalidRecord(message)) => message.contains("disagrees with the already published result"); _ => false })
+    assert_eq(transport.download_execution_result(&key, &policy).unwrap(), result)
+    wrong_policy :: RemoteCachePolicy.granted(transport.sandbox_proof("remote:builder-roundtrip:trusted:sandbox-other", "attempt-roundtrip-other", "other-action", provenance_digest).unwrap())
+    error :: transport.download_action_record(&key, &wrong_policy).unwrap_err()
+    assert(match error { .Denied(denied) => denied.reason == RemoteDeniedReason.ProofDoesNotMatchAction; _ => false })
+    _ :: fs.remove_dir_all(&root)
+}
+
+// Rust: tests/build_graph.rs:1182
+#Test("remote_worker_identity_and_cancellation_reject_late_or_mismatched_results") {
+    root :: env.temp_dir().join("jet_remote_identity_{process.id()}_proof")
+    _ :: fs.remove_dir_all(&root)
+    binding :: RemoteBuildBinding.new("builder-proof", &root, "identity-key".bytes()).unwrap().with_trust_domain("trusted").with_worker_id("worker-a").with_platform("linux-x86_64").with_abi("native")
+    transport :: RemoteCacheTransport.for_binding(&binding).unwrap()
+    key :: ActionKey.new("proof-action")
+    proof :: transport.sandbox_proof("remote:builder-proof:trusted:sandbox-1", "attempt-proof-1", key.as_str(), ContentDigest.from_bytes("provenance".bytes())).unwrap()
+    policy :: RemoteCachePolicy.with_grants(false, false, true, proof.clone())
+    request :: RemoteExecutionRequest { key: key.clone(), attempt_id: proof.attempt_id.clone(), argv: ["remote-tool"], inputs: [], outputs: [], toolchain_digest: ContentDigest.from_bytes("toolchain".bytes()), sandbox: proof.clone() }
+    mutations: [fn(&RemoteSandboxProof) -> Unit] = [
+        fn(proof: &RemoteSandboxProof) { proof.worker_id = "worker-b" },
+        fn(proof: &RemoteSandboxProof) { proof.platform = "windows-x86_64" },
+        fn(proof: &RemoteSandboxProof) { proof.abi = "foreign" },
+        fn(proof: &RemoteSandboxProof) { proof.worker_receipt = "forged" }
+    ]
+    loop mutate in mutations {
+        wrong_proof := proof.clone()
+        mutate(&wrong_proof)
+        wrong_policy :: RemoteCachePolicy.with_grants(false, false, true, wrong_proof.clone())
+        wrong_request := request.clone()
+        wrong_request.sandbox = wrong_proof
+        assert(match transport.submit_execution(&wrong_request, &wrong_policy) { .Err(.InvalidRecord(_)) => true; _ => false })
+    }
+    transport.submit_execution(&request, &policy).unwrap()
+    transport.cancel_execution(&key, &policy).unwrap()
+    assert(match transport.submit_execution(&request, &policy) { .Err(.InvalidRecord(message)) => message.contains("attempt id was already cancelled"); _ => false })
+    late :: RemoteExecutionResult { key: key.clone(), attempt_id: request.attempt_id.clone(), execution_id: remote_execution_identity(&request), outcome: ActionOutcome.Succeeded { exit_code: 0 }, outputs: [], toolchain_digest: request.toolchain_digest.clone(), sandbox: proof.clone(), stdout_digest: ContentDigest.from_bytes("".bytes()), stderr_digest: ContentDigest.from_bytes("".bytes()), provenance_signer: proof.worker_id.clone() }
+    assert(match transport.publish_execution_result(&late, &policy) { .Err(.InvalidRecord(_)) => true; _ => false })
+    // GATE #4409: distinguish the original NotFound result.
+    assert(match transport.download_execution_result(&key, &policy) { .Err(.Io(error)) => error.kind() == ErrorKind.NotFound; _ => false })
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/build_graph.rs:1266
+#Test("remote_cancelled_attempt_history_rejects_replay_after_later_submission") {
+    root :: env.temp_dir().join("jet_remote_cancel_history_{process.id()}_replay")
+    _ :: fs.remove_dir_all(&root)
+    binding :: RemoteBuildBinding.new("builder-history", &root, "history-key".bytes()).unwrap().with_trust_domain("trusted").with_worker_id("worker-history").with_platform("linux-x86_64").with_abi("native")
+    transport :: RemoteCacheTransport.for_binding(&binding).unwrap()
+    key :: ActionKey.new("history-action")
+    proof_a :: transport.sandbox_proof("remote:builder-history:trusted:sandbox-a", "attempt-history-a", key.as_str(), ContentDigest.from_bytes("history-provenance".bytes())).unwrap()
+    policy_a :: RemoteCachePolicy.with_grants(false, false, true, proof_a.clone())
+    request_a :: RemoteExecutionRequest { key: key.clone(), attempt_id: proof_a.attempt_id.clone(), argv: ["remote-tool"], inputs: [], outputs: [], toolchain_digest: ContentDigest.from_bytes("history-toolchain".bytes()), sandbox: proof_a.clone() }
+    transport.submit_execution(&request_a, &policy_a).unwrap()
+    transport.cancel_execution(&key, &policy_a).unwrap()
+    proof_b :: transport.sandbox_proof("remote:builder-history:trusted:sandbox-b", "attempt-history-b", key.as_str(), ContentDigest.from_bytes("history-provenance".bytes())).unwrap()
+    policy_b :: RemoteCachePolicy.with_grants(false, false, true, proof_b.clone())
+    request_b := request_a.clone()
+    request_b.attempt_id = proof_b.attempt_id.clone()
+    request_b.sandbox = proof_b.clone()
+    transport.submit_execution(&request_b, &policy_b).unwrap()
+    assert(match transport.submit_execution(&request_a, &policy_a) { .Err(.InvalidRecord(message)) => message.contains("attempt id was already cancelled"); _ => false })
+    (stdout_digest, stderr_digest) :: remote_empty_log_digests(&transport, &policy_b)
+    result_b :: RemoteExecutionResult { key: key.clone(), attempt_id: request_b.attempt_id.clone(), execution_id: remote_execution_identity(&request_b), outcome: ActionOutcome.Succeeded { exit_code: 0 }, outputs: [], toolchain_digest: request_b.toolchain_digest.clone(), sandbox: proof_b.clone(), stdout_digest: stdout_digest, stderr_digest: stderr_digest, provenance_signer: proof_b.worker_id.clone() }
+    transport.publish_execution_result(&result_b, &policy_b).unwrap()
+    assert_eq(transport.download_execution_result(&key, &policy_b).unwrap(), result_b)
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/build_graph.rs:1349
+#Test("remote_cancel_and_publish_are_one_commit_race") {
+    root :: env.temp_dir().join("jet_remote_cancel_race_{process.id()}_commit")
+    _ :: fs.remove_dir_all(&root)
+    binding :: RemoteBuildBinding.new("builder-race", &root, "race-key".bytes()).unwrap().with_trust_domain("trusted").with_worker_id("worker-race").with_platform("linux-x86_64").with_abi("native")
+    transport :: RemoteCacheTransport.for_binding(&binding).unwrap()
+    key :: ActionKey.new("race-action")
+    proof :: transport.sandbox_proof("remote:builder-race:trusted:race", "attempt-race-1", key.as_str(), ContentDigest.from_bytes("provenance".bytes())).unwrap()
+    policy :: RemoteCachePolicy.with_grants(false, false, true, proof.clone())
+    request :: RemoteExecutionRequest { key: key.clone(), attempt_id: proof.attempt_id.clone(), argv: ["remote-tool"], inputs: [], outputs: [], toolchain_digest: ContentDigest.from_bytes("toolchain".bytes()), sandbox: proof.clone() }
+    transport.submit_execution(&request, &policy).unwrap()
+    (stdout_digest, stderr_digest) :: remote_empty_log_digests(&transport, &policy)
+    result :: RemoteExecutionResult { key: key.clone(), attempt_id: request.attempt_id.clone(), execution_id: remote_execution_identity(&request), outcome: ActionOutcome.Succeeded { exit_code: 0 }, outputs: [], toolchain_digest: request.toolchain_digest.clone(), sandbox: proof.clone(), stdout_digest: stdout_digest, stderr_digest: stderr_digest, provenance_signer: proof.worker_id.clone() }
+    // GATE #4494: Arc, Barrier and scoped native threads retain the real race.
+    barrier :: Arc.new(Barrier.new(3))
+    publish_transport :: transport.clone()
+    publish_policy :: policy.clone()
+    publish_result :: result.clone()
+    publish_barrier :: barrier.clone()
+    cancel_transport :: transport.clone()
+    cancel_policy :: policy.clone()
+    cancel_key :: key.clone()
+    cancel_barrier :: barrier.clone()
+    (publish, cancel) :: thread.scope(fn(scope) {
+        publish :: scope.spawn(fn() {
+            publish_barrier.wait()
+            publish_transport.publish_execution_result(&publish_result, &publish_policy)
+        })
+        cancel :: scope.spawn(fn() {
+            cancel_barrier.wait()
+            cancel_transport.cancel_execution(&cancel_key, &cancel_policy)
+        })
+        barrier.wait()
+        (publish.join().unwrap(), cancel.join().unwrap())
+    })
+    assert(publish.is_ok() || match publish { .Err(.InvalidRecord(_)) => true; _ => false })
+    assert(cancel.is_ok())
+    assert(match transport.download_execution_result(&key, &policy) { .Err(.Io(error)) => error.kind() == ErrorKind.NotFound; _ => false })
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/build_graph.rs:1429
+#Test("remote_host_binding_registry_round_trips_without_storing_secret") {
+    guard :: REMOTE_HOST_ENV_LOCK.lock().unwrap()
+    root :: env.temp_dir().join("jet_remote_registry_{process.id()}_binding")
+    config :: root.join("config")
+    remote_root :: root.join("remote")
+    credential :: root.join("credential")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&remote_root).unwrap()
+    fs.write(&credential, "registry-secret".bytes()).unwrap()
+    previous_config :: env.var_os("XDG_CONFIG_HOME")
+    env.set_var("XDG_CONFIG_HOME", &config)
+    binding :: RemoteBuildBinding.bind_host("registry-builder", &remote_root, &credential, "trusted", "worker-a", "linux-x86_64", "native", true, true, true, true, 4321).unwrap()
+    record :: config.join("jet").join("remote-bindings").join("registry-builder.conf")
+    record_text :: fs.read_to_string(record).unwrap()
+    assert(!record_text.contains("registry-secret"))
+    assert_eq(RemoteBuildBinding.list_host().unwrap(), ["registry-builder"])
+    assert_eq(RemoteBuildBinding.load_host("registry-builder").unwrap(), binding)
+    RemoteBuildBinding.remove_host("registry-builder").unwrap()
+    assert(RemoteBuildBinding.list_host().unwrap().is_empty())
+    match previous_config { Val(value) => env.set_var("XDG_CONFIG_HOME", value); None => env.remove_var("XDG_CONFIG_HOME") }
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/build_graph.rs:1485
+#Test("remote_driver_consumes_authenticated_worker_result") {
+    project_root :: env.temp_dir().join("jet_remote_driver_{process.id()}_worker")
+    _ :: fs.remove_dir_all(&project_root)
+    fs.create_dir_all(&project_root).unwrap()
+    remote_root :: project_root.join("remote-transport")
+    fs.create_dir_all(project_root.join("src")).unwrap()
+    fs.write(project_root.join("src/remote-input"), "remote input".bytes()).unwrap()
+    b := BuildContext.new()
+    action :: b.action("remote-action", ActionSpec.cached(["remote-tool"]).with_inputs(["src/remote-input"]).with_outputs(["build/remote-app"]).with_cap(BuildCapability.Net)).unwrap()
+    target :: b.add_executable("remote-app", TargetSpec.new().with_action(action)).unwrap()
+    plan :: b.plan_with_default(target).unwrap()
+    // GATE #4499: preserve typed capability-set keys.
+    grants :: [BuildCapability.Net].into_iter().collect::<BTreeSet<BuildCapability>>()
+    store :: test_artifact_store(&project_root)
+    snapshots :: snapshot_declared_inputs(&store, &project_root, plan.action(action).unwrap()).unwrap()
+    key :: plan.effective_action_key(action, &snapshots, &grants, &OSPath.from("remote-tool"), &ContentDigest.from_bytes("remote-tool".bytes()), &[]).unwrap()
+    expected_policy :: remote_policy_digest(plan.action(action).unwrap().caps.iter().cloned())
+    toolchain_identity :: plan.toolchain(plan.action(action).unwrap().toolchain).map(fn(value) { "{value:?}" }).unwrap_or_else(fn() { "missing-toolchain" })
+    toolchain_digest :: ContentDigest.from_bytes(toolchain_identity.bytes())
+    expected_remote_provenance :: ContentDigest.from_bytes("jet.remote-provenance.v1\ntoolchain={toolchain_digest.as_str()}\npolicy={expected_policy.as_str()}\n".bytes())
+    // GATE #4483: platform binds selected target OS/architecture, never ambient host constants.
+    binding :: RemoteBuildBinding.new("builder-a", &remote_root, "driver-worker-key".bytes()).unwrap().with_trust_domain("trusted").with_worker_id("worker-a").with_platform("{selected_os()}-{selected_arch()}").with_abi("native").with_execute(true).with_timeout_ms(2_000)
+    worker_key :: key.clone()
+    worker_binding :: binding.clone()
+    // GATE #4494: real worker thread, deadline and sleep primitives.
+    worker :: thread.spawn(fn() {
+        transport :: RemoteCacheTransport.for_binding(&worker_binding).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(2)
+        loop {
+            match transport.read_execution_request(&worker_key) {
+                .Ok(request) => {
+                    assert_eq(request.sandbox.provenance_digest, expected_remote_provenance, "remote worker proof must bind toolchain and declared capabilities")
+                    policy :: RemoteCachePolicy.with_grants(false, false, true, request.sandbox.clone())
+                    assert_eq(request.inputs.len(), 1)
+                    assert_eq(request.inputs[0].path.as_str(), "src/remote-input")
+                    assert_eq(transport.download_execution_blob(&request.inputs[0].digest, &policy).unwrap(), "remote input".bytes())
+                    assert_eq(request.inputs[0].byte_len, 12)
+                    bytes :: "remote worker output".bytes()
+                    digest :: transport.upload_execution_blob(bytes, &policy).unwrap()
+                    (stdout_digest, stderr_digest) :: remote_empty_log_digests(&transport, &policy)
+                    transport.publish_execution_result(&RemoteExecutionResult {
+                        key: request.key.clone(), attempt_id: request.attempt_id.clone(), execution_id: remote_execution_identity(&request), outcome: ActionOutcome.Succeeded { exit_code: 0 },
+                        outputs: [ActionOutputRecord { path: request.outputs[0].clone(), digest: digest, byte_len: U64.from(bytes.len()) }],
+                        toolchain_digest: request.toolchain_digest.clone(), sandbox: request.sandbox.clone(), stdout_digest: stdout_digest, stderr_digest: stderr_digest, provenance_signer: request.sandbox.worker_id.clone()
+                    }, &policy).unwrap()
+                    return
+                }
+                .Err(.Io(error)) if error.kind() == ErrorKind.NotFound && Instant.now() < deadline => { thread.sleep(Duration.from_millis(2)) }
+                .Err(error) => panic("remote worker could not read request: {error}")
+            }
+        }
+    })
+    execution :: execute_build_plan_with_front_end_and_remote(&plan, &project_root, &grants, FrontEndCompletion.all_complete(), Val(binding)).unwrap()
+    worker.join().unwrap()
+    assert(execution.report.events.iter().any(fn(event) { match event { .Finished { action: finished, outcome: .Succeeded { exit_code: 0 } } => finished == action.id(); _ => false } }))
+    assert_eq(fs.read(project_root.join("build/remote-app")).unwrap(), "remote worker output".bytes())
+    _ :: fs.remove_dir_all(project_root)
+}
+
+// Rust: tests/build_graph.rs:1638
+#Test("build_failure_report_survives_local_remote_cache_and_replay") {
+    // `false` can be a coreutils applet; canonicalization changes argv[0] and
+    // host stderr. `sh -c` preserves the remote fixture's empty stderr.
+    shell_path :: env.var_os("PATH").into_iter().flat_map(fn(paths) { env.split_paths(&paths).collect::<[OSPath]>() }).map(fn(directory) { directory.join("sh") }).find(fn(path) { path.is_file() }).expect("the test host needs a `sh` executable")
+    local_root :: env.temp_dir().join("jet_build_failure_report_{process.id()}_local")
+    _ :: fs.remove_dir_all(&local_root)
+    fs.create_dir_all(&local_root).unwrap()
+    local_context := BuildContext.new()
+    local_action :: local_context.action("parity-failure", ActionSpec.cached([shell_path.to_string_lossy().to_string(), "-c", "exit 1"]).with_outputs(["build/failure"]).with_cap(BuildCapability.Exec)).unwrap()
+    local_target :: local_context.add_executable("local-failure", TargetSpec.new().with_action(local_action)).unwrap()
+    local_plan :: local_context.plan_with_default(local_target).unwrap()
+    exec_grants :: [BuildCapability.Exec].into_iter().collect::<BTreeSet<BuildCapability>>()
+    local_error :: execute_build_plan_with_front_end_and_remote(&local_plan, &local_root, &exec_grants, FrontEndCompletion.all_complete(), None).unwrap_err()
+    local_report :: match local_error { .Reported { report } => report; error => panic("local action did not return its structured report: {error:?}") }
+    local_replay_error :: execute_build_plan_with_front_end_and_remote(&local_plan, &local_root, &exec_grants, FrontEndCompletion.all_complete(), None).unwrap_err()
+    assert_eq(local_replay_error.report(), Val(&local_report))
+    remote_project :: env.temp_dir().join("jet_build_failure_report_{process.id()}_remote")
+    _ :: fs.remove_dir_all(&remote_project)
+    fs.create_dir_all(&remote_project).unwrap()
+    remote_root :: remote_project.join("remote-transport")
+    remote_context := BuildContext.new()
+    remote_action :: remote_context.action("parity-failure", ActionSpec.cached(["remote-tool"]).with_outputs(["build/failure"]).with_cap(BuildCapability.Net)).unwrap()
+    remote_target :: remote_context.add_executable("remote-failure", TargetSpec.new().with_action(remote_action)).unwrap()
+    remote_plan :: remote_context.plan_with_default(remote_target).unwrap()
+    remote_grants :: [BuildCapability.Net].into_iter().collect::<BTreeSet<BuildCapability>>()
+    remote_key :: remote_plan.effective_action_key(remote_action, &[], &remote_grants, &OSPath.from("remote-tool"), &ContentDigest.from_bytes("remote-tool".bytes()), &[]).unwrap()
+    binding :: RemoteBuildBinding.new("builder-failure-report", &remote_root, "failure-report-key".bytes()).unwrap().with_trust_domain("trusted").with_worker_id("worker-failure-report").with_platform("{selected_os()}-{selected_arch()}").with_abi("native").with_cache_read(true).with_cache_write(true).with_execute(true).with_timeout_ms(2_000)
+    worker_binding :: binding.clone()
+    worker_key :: remote_key.clone()
+    worker :: thread.spawn(fn() {
+        transport :: RemoteCacheTransport.for_binding(&worker_binding).unwrap()
+        deadline :: Instant.now() + Duration.from_secs(2)
+        loop {
+            match transport.read_execution_request(&worker_key) {
+                .Ok(request) => {
+                    policy :: RemoteCachePolicy.with_grants(false, false, true, request.sandbox.clone())
+                    output :: "unused".bytes()
+                    output_digest :: transport.upload_execution_blob(output, &policy).unwrap()
+                    (stdout_digest, stderr_digest) :: remote_empty_log_digests(&transport, &policy)
+                    transport.publish_execution_result(&RemoteExecutionResult {
+                        key: request.key.clone(), attempt_id: request.attempt_id.clone(), execution_id: remote_execution_identity(&request), outcome: ActionOutcome.Failed { exit_code: 1 },
+                        outputs: [ActionOutputRecord { path: request.outputs[0].clone(), digest: output_digest, byte_len: U64.from(output.len()) }],
+                        toolchain_digest: request.toolchain_digest.clone(), sandbox: request.sandbox.clone(), stdout_digest: stdout_digest, stderr_digest: stderr_digest, provenance_signer: request.sandbox.worker_id.clone()
+                    }, &policy).unwrap()
+                    return
+                }
+                .Err(.Io(error)) if error.kind() == ErrorKind.NotFound && Instant.now() < deadline => { thread.sleep(Duration.from_millis(2)) }
+                .Err(error) => panic("remote failure worker could not read request: {error}")
+            }
+        }
+    })
+    remote_error :: execute_build_plan_with_front_end_and_remote(&remote_plan, &remote_project, &remote_grants, FrontEndCompletion.all_complete(), Val(binding)).unwrap_err()
+    worker.join().unwrap()
+    remote_report :: match remote_error { .Reported { report } => report; error => panic("remote action did not return its structured report: {error:?}") }
+    assert_eq(remote_report, local_report)
+    remote_replayed_error :: execute_build_plan_with_front_end_and_remote(&remote_plan, &remote_project, &remote_grants, FrontEndCompletion.all_complete(), Val(binding)).unwrap_err()
+    assert_eq(remote_replayed_error.report(), Val(&local_report))
+    _ :: fs.remove_dir_all(local_root)
+    _ :: fs.remove_dir_all(remote_project)
+}

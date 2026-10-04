@@ -1,0 +1,721 @@
+use TirSupport.[assert_tiers_agree, build_and_run, build_and_run_multi, have_rustc, run_default_multi, run_interpret_multi]
+use std.[env, fs, process]
+use jet.[check_with_path, compile_with_path, render_diagnostics]
+use jet.Diagnostics.Severity
+// GATE #4494: actual filesystem and canonical compiler/CLI/native tier providers.
+
+// Rust: tests/tir_modules_and_enums.rs:16
+#Test("grouped_nested_core_import_binds_dotted_leaf") {
+    source := """
+use core.[encoding.json]
+fn run() -> {
+    print(json.to_string(json.parse("[42]") ?? panic("bad")))
+}
+"""
+    assert_tiers_agree("grouped_nested_core_import", source, "[42]\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:28
+#Test("soft_public_imports_warn_once_per_outside_use") {
+    dir := env.temp_dir().join("jet_soft_public_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("note.jet"), "pub struct Note {\n    pub _title: String\n}\nimpl Note {\n    pub fn _length(self) -> Int { return 1 }\n}\npub fn _legacy() -> Int { return 2 }\n").unwrap()
+    source := "use \"note\"\nuse note._legacy\nfn run() -> {\n    n :: note.Note{ _title: \"hi\" }\n    print(n._title)\n    print(n._length())\n    print(note._legacy())\n    print(_legacy())\n}\n"
+    main := dir.join("main.jet")
+    fs.write(main, source).unwrap()
+    diagnostics := check_with_path(main.to_str().unwrap())
+    assert(diagnostics.iter().all(d -> d.severity != Severity.Error), "{diagnostics:#?}")
+    assert_eq(diagnostics.iter().filter(d -> d.code == "L0601").count(), 5, "{diagnostics:#?}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/tir_modules_and_enums.rs:60
+#Test("soft_public_reexports_warn_on_the_exported_spelling_once") {
+    dir := env.temp_dir().join("jet_soft_public_reexport_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir.join("api")).unwrap()
+    fs.write(dir.join("api/module.jet"), "pub use implementation.[_raw as stable, supported as _preview]\nmodule implementation\n").unwrap()
+    fs.write(dir.join("api/implementation.jet"), "pub fn _raw() -> Int { return 1 }\npub fn supported() -> Int { return 2 }\n").unwrap()
+    main := dir.join("main.jet")
+    fs.write(main, "module api\nfn run() -> {\n    print(api.stable())\n    print(api._preview())\n}\n").unwrap()
+    diagnostics := check_with_path(main.to_str().unwrap())
+    lints := diagnostics.iter().filter(d -> d.code == "L0601").collect()
+    assert_eq(lints.len(), 1, "{diagnostics:#?}")
+    assert_eq(lints[0].what, "`_preview` is a soft-public API")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/tir_modules_and_enums.rs:92
+#Test("imported_soft_public_declared_types_warn_once_per_occurrence") {
+    dir := env.temp_dir().join("jet_soft_public_types_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("models.jet"), "pub struct _Cell<T> { pub value: T }\npub trait _Readable { fn read(self) -> Int }\n").unwrap()
+    main := dir.join("main.jet")
+    fs.write(main, "use \"models\"\nfn adapt<T: _Readable>(value: ^models._Cell<Int>) -> models._Cell<Int> { return value }\nfn local(value: ^models._Cell<Int>) -> { cell := value }\nfn run() -> {}\n").unwrap()
+    diagnostics := check_with_path(main.to_str().unwrap())
+    assert(diagnostics.iter().all(d -> d.severity != Severity.Error), "{diagnostics:#?}")
+    assert_eq(diagnostics.iter().filter(d -> d.code == "L0601").count(), 4, "{diagnostics:#?}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/tir_modules_and_enums.rs:127
+#Test("local_soft_public_types_win_over_imported_name_collisions") {
+    dir := env.temp_dir().join("jet_soft_public_type_collision_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("library.jet"), "pub struct _Thing { pub value: Int }\npub trait _Shape { fn size(self) -> Int }\n").unwrap()
+    main := dir.join("main.jet")
+    fs.write(main, "use \"library\"\nstruct _Thing { value: Int }\ntrait _Shape { fn size(self) -> Int }\nfn keep<T: _Shape>(value: ^_Thing) -> _Thing { return value }\nfn run() -> {}\n").unwrap()
+    diagnostics := check_with_path(main.to_str().unwrap())
+    assert(diagnostics.iter().all(d -> d.severity != Severity.Error), "{diagnostics:#?}")
+    assert_eq(diagnostics.iter().filter(d -> d.code == "L0601").count(), 0, "{diagnostics:#?}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/tir_modules_and_enums.rs:168
+#Test("imported_public_table_adapters_stay_in_tir") {
+    if !have_rustc() { return }
+    main_src := """
+module adapter
+fn run() -> {
+    print("ok")
+}
+"""
+    adapter_src := """
+pub fn concrete(table: ^Table<DataTree>) -> Table<DataTree> {
+    return table
+}
+pub fn generic<T>(table: ^Table<T>) -> Table<T> {
+    return table
+}
+"""
+    (code, stdout) := build_and_run_multi("tir_imported_table_adapter", "main.jet", [("main.jet", main_src), ("adapter.jet", adapter_src)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "ok\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:196
+#Test("explicit_internal_project_module_alias_runs") {
+    if !have_rustc() { return }
+    (code, stdout) := build_and_run_multi("tir_internal_project_alias", "main.jet", [
+        ("main.jet", "use project._bench as bench\nfn run() -> { print(bench.fixture()) }\n"),
+        ("arbitrary.jet", "module _bench { }\npub fn fixture() -> Int { return 42 }\n")
+    ])
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:222
+#Test("inline_code_module_qualified_call") {
+    if !have_rustc() { return }
+    src := """
+module math {
+    pub fn double(n: Int) -> Int { return (n * 2) }
+    pub fn add(a: Int, b: Int) -> Int { return (a + b) }
+}
+fn run() -> {
+    print(math.double(5))
+    print(math.add(b: 4, a: 3))
+}
+"""
+    (code, stdout) := build_and_run("tir_inline_mod", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "10\n7\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:249
+#Test("unqualified_inline_module_call") {
+    if !have_rustc() { return }
+    src := """
+use math.double
+module math {
+    pub fn double(n: Int) -> Int { return (n * 2) }
+}
+fn run() -> { print(double(7)) }
+"""
+    (code, stdout) := build_and_run("tir_unqual_inline", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "14\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:273
+#Test("inline_module_use_list_and_pub_reexport_match_all_tiers") {
+    src := """
+module math {
+    pub fn double(n: Int) -> Int { return (n * 2) }
+}
+module api {
+    use math.[double as twice]
+    pub use math.[double as exported]
+    pub fn local(n: Int) -> Int { return twice(n) }
+}
+fn run() -> {
+    print(api.local(4))
+    print(api.exported(5))
+}
+"""
+    if have_rustc() {
+        (code, stdout) := build_and_run("tir_inline_use_list", src)
+        assert_eq(code, 0)
+        assert_eq(stdout, "8\n10\n")
+    }
+    (code, stdout, stderr) := run_default_multi("inline_use_list", "main.jet", [("main.jet", src)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "8\n10\n")
+    // Retired tier1/tier0 trace assertions become actual retained-tier behavior.
+    (code, stdout, stderr) := run_interpret_multi("inline_use_list", "main.jet", [("main.jet", src)])
+    assert_eq(code, 0, "forced execution rejected inline imports: {stderr}")
+    assert_eq(stdout, "8\n10\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:328
+#Test("inline_module_core_use_list_and_pub_reexport_match_all_tiers") {
+    src := """
+use core.math.[abs, min, max, clamp]
+module api {
+    use core.[math.abs]
+    pub use core.[math.abs as exported]
+    pub fn local(n: Int) -> Int { return abs(n) }
+}
+fn run() -> {
+    print(abs(-3))
+    print(min(9, 4))
+    print(max(9, 4))
+    print(clamp(12, 0, 10))
+    print(min(9.0, 4.0))
+    print(max(9.0, 4.0))
+    print(clamp(12.0, 0.0, 10.0))
+    print(api.local(-7))
+    print(api.exported(-5))
+}
+"""
+    expected := "3\n4\n9\n10\n4.0\n9.0\n10.0\n7\n5\n"
+    if have_rustc() {
+        (code, stdout) := build_and_run("tir_inline_core_use_list", src)
+        assert_eq(code, 0)
+        assert_eq(stdout, expected)
+    }
+    (code, stdout, stderr) := run_default_multi("inline_core_use_list", "main.jet", [("main.jet", src)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected)
+    (code, stdout, stderr) := run_interpret_multi("inline_core_use_list", "main.jet", [("main.jet", src)])
+    assert_eq(code, 0, "forced execution rejected inline Core imports: {stderr}")
+    assert_eq(stdout, expected)
+}
+// Rust: tests/tir_modules_and_enums.rs:386
+#Test("inline_module_file_use_list_matches_all_tiers") {
+    main_src := """
+module math
+module api {
+    use math.[label as decorate]
+    pub use math.[label as exported]
+    pub fn local(n: Int) -> String { return decorate("x", n) }
+}
+fn run() -> {
+    print(api.local(7))
+    print(api.exported("y", 8))
+}
+"""
+    math_src := """
+pub fn label(prefix: String, n: Int) -> String { return "{prefix}:{n}" }
+"""
+    files := [("main.jet", main_src), ("math.jet", math_src)]
+    if have_rustc() {
+        (code, stdout) := build_and_run_multi("tir_inline_file_use", "main.jet", files)
+        assert_eq(code, 0)
+        assert_eq(stdout, "x:7\ny:8\n")
+    }
+    (code, stdout, stderr) := run_default_multi("inline_file_use", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "x:7\ny:8\n")
+    (code, stdout, stderr) := run_interpret_multi("inline_file_use", "main.jet", files)
+    assert_eq(code, 0, "forced execution rejected inline file imports: {stderr}")
+    assert_eq(stdout, "x:7\ny:8\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:442
+#Test("file_module_qualified_call") {
+    main_src := """
+module math
+fn run() -> {
+    print(math.clamp(15, 0, 10))
+    print(math.label(n: 5, prefix: "x"))
+    print(math.checked(7) ?? -1)
+    print(math.checked(-1) ?? -2)
+    print(math.ready() ?? false)
+}
+"""
+    math_src := """
+pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {
+    if (x < lo) { return lo }
+    if (x > hi) { return hi }
+    return x
+}
+pub fn label(prefix: String, n: Int) -> String { return "{prefix}:{n}" }
+pub fn checked(value: Int) -> Int Err! {
+    if value < 0 { return Err(message(value)) }
+    return Ok(value)
+}
+fn message(value: Int) -> String { return "bad {value}" }
+pub fn ready() -> Bool { true }
+"""
+    files := [("main.jet", main_src), ("math.jet", math_src)]
+    expected := "10\nx:5\n7\n-2\ntrue\n"
+    if have_rustc() {
+        (code, stdout) := build_and_run_multi("tir_file_mod", "main.jet", files)
+        assert_eq(code, 0)
+        assert_eq(stdout, expected)
+    }
+    (code, stdout, stderr) := run_default_multi("tir_file_mod", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected, "{stderr}")
+    (code, stdout, stderr) := run_interpret_multi("tir_file_mod", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected, "{stderr}")
+}
+// Rust: tests/tir_modules_and_enums.rs:495
+#Test("imported_module_direct_result_match_uses_error_identity") {
+    main_src := """
+module worker
+fn run() -> {
+    if worker.checked(-1) == {
+        .Ok(value) -> print("unexpected:{value}")
+        .Err(error) -> print("failure:{error.message}")
+    }
+    if worker.checked(7) == {
+        .Ok(value) -> print("success:{value}")
+        .Err(error) -> print("unexpected:{error.message}")
+    }
+}
+"""
+    worker_src := """
+#Error
+pub struct WorkerError { pub message: String }
+pub fn checked(value: Int) -> Int WorkerError! {
+    if value < 0 { return Err(WorkerError{message: "negative"}) }
+    return Ok(value)
+}
+"""
+    files := [("main.jet", main_src), ("worker.jet", worker_src)]
+    expected := "failure:negative\nsuccess:7\n"
+    (code, stdout, stderr) := run_default_multi("imported_direct_result_match", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected, "{stderr}")
+    (code, stdout, stderr) := run_interpret_multi("imported_direct_result_match", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected, "{stderr}")
+    if have_rustc() {
+        (code, stdout) := build_and_run_multi("tir_imported_direct_result_match", "main.jet", files)
+        assert_eq(code, 0)
+        assert_eq(stdout, expected)
+    }
+}
+// Rust: tests/tir_modules_and_enums.rs:543
+#Test("imported_fallible_handler_return_flattens_before_result_match") {
+    main_src := """
+module worker
+fn wire(value: worker.Value) -> String { return value.id }
+fn run() -> {
+    if worker.checked() == {
+        .Err(error) -> print("failure:{error.message}")
+        .Ok(value) -> print(wire(value))
+    }
+}
+"""
+    worker_src := """
+#Error
+pub struct WorkerError { pub message: String }
+pub struct Value { pub id: String }
+fn inner() -> Bool WorkerError! { return Err(WorkerError{message: "inner"}) }
+fn fail_after(error: WorkerError) -> Value WorkerError! { return Err(error) }
+pub fn checked() -> Value WorkerError! {
+    inner() ?? { return fail_after(err) }
+    return Ok(Value{id: "unreachable"})
+}
+"""
+    files := [("main.jet", main_src), ("worker.jet", worker_src)]
+    expected := "failure:inner\n"
+    (code, stdout, stderr) := run_default_multi("imported_fallible_handler_return", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected, "{stderr}")
+    (code, stdout, stderr) := run_interpret_multi("imported_fallible_handler_return", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected, "{stderr}")
+    if have_rustc() {
+        (code, stdout) := build_and_run_multi("tir_imported_fallible_handler_return", "main.jet", files)
+        assert_eq(code, 0)
+        assert_eq(stdout, expected)
+    }
+}
+// Rust: tests/tir_modules_and_enums.rs:599
+#Test("imported_module_aot_root_helpers") {
+    if !have_rustc() { return }
+    main_src := """
+module helper
+struct Count { value: Int }
+impl Count.Add {
+    fn add(self, rhs: Count) -> Count {
+        total :: helper.sum(self.value, rhs.value)
+        return Count{value: total}
+    }
+}
+fn run() -> {
+    trimmed :: helper.trimmed("  ok  ")
+    print(trimmed)
+    print(helper.checked(7) ?? -1)
+    print(helper.failed(-1) ?? -2)
+    recovered :: helper.recover()
+    print(recovered)
+    empty :: helper.empty_strings()
+    print(empty.len())
+    reset :: helper.reset_strings()
+    print(reset.len())
+    total :: Count{value: 1} + Count{value: 2}
+    print(total.value)
+}
+"""
+    helper_src := """
+pub fn sum(left: Int, right: Int) -> Int { left + right }
+#Error
+pub enum HelperError { Negative }
+pub fn trimmed(value: String) -> String {
+    return value.trim()
+}
+pub fn checked(value: Int) -> Int HelperError! {
+    assert(value >= 0)
+    return Ok(value)
+}
+pub fn failed(value: Int) -> Int HelperError! {
+    if value < 0 { return Err(HelperError.Negative) }
+    return Ok(value)
+}
+fn fallback_message() -> String { return "recovered" }
+pub fn recover() -> String {
+    values := "".split(",").to_list()
+    return values.get(1) ?? fallback_message()
+}
+pub fn empty_strings() -> [String] { return [String]{} }
+pub fn reset_strings() -> [String] {
+    values := [String]{}
+    values = [String]{}
+    return values
+}
+"""
+    (code, stdout) := build_and_run_multi("tir_imported_module_aot_root_helpers", "main.jet", [("main.jet", main_src), ("helper.jet", helper_src)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "ok\n7\n-2\nrecovered\n0\n0\n3\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:674
+#Test("imported_module_aot_panic_fallback_uses_root_helper") {
+    if !have_rustc() { return }
+    main_src := """
+module helper
+fn run() -> { print(helper.panic_fallback()) }
+"""
+    helper_src := """
+pub fn panic_fallback() -> String {
+    values := "".split(",").to_list()
+    return values.get(1) ?? panic("imported fallback")
+}
+"""
+    (code, stdout) := build_and_run_multi("tir_imported_module_aot_panic_fallback", "main.jet", [("main.jet", main_src), ("helper.jet", helper_src)])
+    assert_eq(code, 70)
+    assert(stdout.is_empty())
+}
+// Rust: tests/tir_modules_and_enums.rs:700
+#Test("fallible_string_call_chain_dispatches_split") {
+    source := """
+fn text() -> String Err! { return Ok("a,b") }
+fn run() -> Err! { print(text().split(",").to_list()) }
+"""
+    assert_tiers_agree("tir_fallible_string_split_chain", source, "[a, b]\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:713
+#Test("fallible_string_explicit_try_chain_dispatches_split") {
+    source := """
+fn text() -> String Err! { return Ok("a,b") }
+fn run() -> Err! { print((text()?).split(",").to_list()) }
+"""
+    assert_tiers_agree("tir_fallible_string_explicit_try_split_chain", source, "[a, b]\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:733
+#Test("unqualified_file_module_call") {
+    if !have_rustc() { return }
+    main_src := """
+use mathlib.clamp
+use mathlib.[lo, hi]
+module mathlib
+fn run() -> { print(clamp(200, lo(), hi())) }
+"""
+    mathlib_src := """
+pub fn clamp(n: Int, lo: Int, hi: Int) -> Int {
+    if (n < lo) { return lo }
+    if (n > hi) { return hi }
+    return n
+}
+pub fn lo() -> Int { return 0 }
+pub fn hi() -> Int { return 100 }
+"""
+    (code, stdout) := build_and_run_multi("tir_unqual_file", "main.jet", [("main.jet", main_src), ("mathlib.jet", mathlib_src)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "100\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:776
+#Test("reexport_module_call") {
+    if !have_rustc() { return }
+    main_src := """
+module text
+fn run() -> { print(text.wrap("hi")) }
+"""
+    module_src := "pub use wrap.wrap\nmodule wrap\n"
+    wrap_src := """
+pub fn wrap(s: String) -> String { return "[{decorate(s)}]" }
+fn decorate(s: String) -> String { return "{s}" }
+"""
+    (code, stdout) := build_and_run_multi("tir_reexport", "main.jet", [("main.jet", main_src), ("text/module.jet", module_src), ("text/wrap.jet", wrap_src)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "[hi]\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:815
+#Test("comptime_if_selected_branch") {
+    if !have_rustc() { return }
+    src := """
+DEBUG :: prep { false }
+fn pick(x: Int) -> Int {
+    prep if DEBUG {
+        return x + 100
+    } else {
+        return x + 1
+    }
+    return 0
+}
+fn run() -> { print("{pick(5)}") }
+"""
+    (code, stdout) := build_and_run("tir_comptime_if", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "6\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:844
+#Test("mixed_comparison_switch") {
+    if !have_rustc() { return }
+    src := """
+fn grade(score: Int) -> String {
+    if score == {
+        100 -> { return "A+" }
+        90..99 -> { return "A" }
+        80..89 -> { return "B" }
+        else -> { return "F" }
+    }
+    return "?"
+}
+fn run() -> {
+    print(grade(85))
+    print(grade(95))
+    print(grade(100))
+    print(grade(50))
+}
+"""
+    (code, stdout) := build_and_run("tir_mixed_switch", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "B\nA\nA+\nF\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:874
+#Test("delegation_trait_method") {
+    if !have_rustc() { return }
+    src := """
+trait Speaker { fn say(self, msg: String) -> String }
+struct Voice { prefix: String }
+impl Voice.Speaker {
+    fn say(self, msg: String) -> String {
+        p :: self.prefix
+        return "{p}: {msg}"
+    }
+}
+struct Megaphone { inner: Voice }
+impl Megaphone.Speaker using inner
+fn run() -> {
+    v := Voice{ prefix: "HEY" }
+    m := Megaphone{ inner: v }
+    print(m.say("go"))
+}
+"""
+    (code, stdout) := build_and_run("tir_delegation", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "HEY: go\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:911
+#Test("or_fallback_panic_form") {
+    if !have_rustc() { return }
+    src := """
+fn maybe(n: Int) -> Int? {
+    if n > 0 { return Val(n) }
+    return None
+}
+fn risky(count: Int, ratio: Float) -> Int {
+    base := count + 1
+    got :: maybe(count) ?? panic("no value at {count}")
+    return got + base
+}
+fn run() -> { print("{risky(5, 1.5)}") }
+"""
+    (code, stdout) := build_and_run("tir_panic_fallback", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "11\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:940
+#Test("string_payload_enum") {
+    if !have_rustc() { return }
+    src := """
+enum Msg {
+    Text(String)
+    Code(Int)
+}
+fn wrap(s: String) -> Msg { return Msg.Text(~s) }
+fn render(m: Msg) -> String {
+    if m == {
+        .Text(s) -> { return s }
+        .Code(n) -> { return "code" }
+    }
+    return "?"
+}
+fn run() -> {
+    m :: wrap("hi")
+    print(render(m))
+}
+"""
+    (code, stdout) := build_and_run("tir_string_payload_enum", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "hi\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:973
+#Test("recursive_boxed_enum") {
+    if !have_rustc() { return }
+    src := """
+enum Tree {
+    Leaf(Int)
+    Node(Tree)
+}
+fn wrap(inner: Tree) -> Tree { return Tree.Node(~inner) }
+fn leaf_val(t: Tree) -> Int {
+    if t == {
+        .Leaf(n) -> { return n }
+        .Node(inner) -> { return 0 }
+    }
+    return 0
+}
+fn run() -> {
+    a :: Tree.Leaf(7)
+    b :: wrap(a)
+    print("{leaf_val(b)}")
+}
+"""
+    (code, stdout) := build_and_run("tir_recursive_boxed_enum", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "0\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:1007
+#Test("recursive_named_payload_enum") {
+    if !have_rustc() { return }
+    src := """
+enum Kind {
+    Leaf
+    Pair(left: Kind, right: Kind)
+}
+fn run() -> {
+    k :: Kind.Pair{ left: Kind.Leaf, right: Kind.Leaf }
+    if k == .Pair(left, right) -> print("yes")
+}
+"""
+    (code, stdout) := build_and_run("tir_recursive_named_payload_enum", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "yes\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:1030
+#Test("struct_payload_enum") {
+    if !have_rustc() { return }
+    src := """
+struct Point {
+    x: Int
+    y: Int
+}
+enum Shape {
+    Dot(Point)
+    Line(Int)
+}
+fn mk(p: Point) -> Shape { return Shape.Dot(~p) }
+fn first(s: Shape) -> Int {
+    if s == {
+        .Dot(p) -> { return p.x }
+        .Line(n) -> { return n }
+    }
+    return 0
+}
+fn run() -> {
+    pt :: Point{ x: 3, y: 4 }
+    sh :: mk(pt)
+    print("{first(sh)}")
+}
+"""
+    (code, stdout) := build_and_run("tir_struct_payload_enum", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:1068
+#Test("collection_field_and_payload") {
+    if !have_rustc() { return }
+    src := """
+struct Crate {
+    items: [Int]
+    label: String
+}
+enum Holder {
+    Nums([Int])
+    One(Int)
+}
+fn mk(xs: [Int]) -> Holder { return Holder.Nums(~xs) }
+fn run() -> {
+    b :: Crate{ items: [1, 2, 3], label: "x" }
+    d :: mk([4, 5])
+    print(b.label)
+}
+"""
+    (code, stdout) := build_and_run("tir_collection_field_payload", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "x\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:1100
+#Test("generic_free_fns") {
+    if !have_rustc() { return }
+    src := """
+fn id<T>(x: ^T) -> T { return x }
+fn pick<T>(a: ^T, b: ^T, first: Bool) -> T {
+    if first { return a }
+    return b
+}
+fn firstof<T>(xs: ^[T]) -> T { return ~xs[0] }
+fn wrap<T>(x: ^T) -> [T] { return [x] }
+fn run() -> {
+    print("{id(5)}")
+    print("{pick(1, 2, true)}")
+    print("{firstof([10, 20, 30])}")
+    ys :: wrap(7)
+    print("{ys[0]}")
+}
+"""
+    (code, stdout) := build_and_run("tir_generic_free_fns", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "5\n1\n10\n7\n")
+}
+// Rust: tests/tir_modules_and_enums.rs:1137
+#Test("prelude_struct_construction") {
+    src := """
+use core.http.client as client
+use core.http.server as server
+fn build_resp(body: String) -> HTTPResponse { return server.response(200, body) }
+fn build_req() -> HTTPRequest { return client.request("GET", "http://localhost/") }
+fn run() -> {
+    r :: build_resp("hi")
+    q :: build_req()
+    print("built")
+}
+"""
+    dir := env.temp_dir().join("jet_tir_prelude_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    jet_path := dir.join("prelude.jet")
+    fs.write(jet_path, src).unwrap()
+    shown := jet_path.to_string_lossy().into_owned()
+    out := compile_with_path(src, shown).unwrap_or_else(diags -> panic("front end rejected:\n{render_diagnostics(shown, src, diags)}"))
+    assert(out.rust.contains("return jet_http_srv_response(200i64, &((*__jet_body)));"), "HTTPResponse constructor helper missing:\n{out.rust}")
+    assert(out.rust.contains("return jet_http_client_request_new(&(\"GET\".to_string()), &(\"http://localhost/\".to_string()));"), "HTTPRequest constructor helper missing:\n{out.rust}")
+}

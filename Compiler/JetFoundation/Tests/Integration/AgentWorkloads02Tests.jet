@@ -1,0 +1,338 @@
+use jet_foundation.Tests.Integration.AgentWorkloads.*
+use jet_foundation.Tests.Integration.AgentWorkloads02.[run_lens, valid_jet_scratch]
+use jet_foundation.Tests.Common.CorpusPolicy.[CorpusPolicy]
+use jet_foundation.SHA256.[sha256_hex]
+use std.[fs, env, thread]
+use std.process.[Command]
+use std.time.[Duration, Instant]
+use core.sys.target
+// GATE #4494: the original harness executes real shipped tools and filesystem providers.
+
+// Rust: tests/agent_workloads.rs:2016
+#Test("repository_and_git_jet_adapters_use_production_paths") {
+    checks :: [(String, [String])]{
+        ("repository_marker_scan.jet", [String]{"core.files", "fs.walk"}),
+        ("repository_semantic_inspection.jet", [String]{"inspect", "semindex"}),
+        ("repository_semantic_edit.jet", [String]{"inspect", "codemod", "--yes"}),
+        ("git_diff_review.jet", [String]{"git", "diff", "--no-index", "--name-status"})
+    }
+    loop (adapter, needles) in checks {
+        source :: fs.read_to_string(corpus_root().join("adapters").join(adapter)).unwrap()
+        loop needle in needles { assert(source.contains(needle), "{adapter} no longer reaches the production path containing {needle}") }
+    }
+}
+// Rust: tests/agent_workloads.rs:2047
+#Test("structured_data_database_http_jet_adapters_use_production_paths") {
+    checks :: [(String, [String])]{
+        ("structured_data.jet", [String]{"use core.encoding.json", "fs.read(input)", "json.decode<Batch>", "json.to_string"}),
+        ("database_access.jet", [String]{"use core.db", "db.open_memory()", "db.migrate", "scoped.execute(", "scoped.query_one(", "scoped.close()"}),
+        ("http_api.jet", [String]{"use core.http.client", "use core.http.server", "net.tcp_listen(", "http_server.serve_once_listener", "http_client.request(", "request.send()"})
+    }
+    loop (adapter, needles) in checks {
+        source :: fs.read_to_string(corpus_root().join("adapters").join(adapter)).unwrap()
+        loop needle in needles { assert(source.contains(needle), "{adapter} no longer reaches the production path containing {needle}") }
+    }
+}
+// Rust: tests/agent_workloads.rs:2096
+#Test("mcp_terminal_service_jet_adapters_use_production_paths") {
+    checks :: [(String, [String])]{
+        ("mcp_resource.jet", [String]{"process.cmd([jet, \"self\", \"lsp\"])", "resources/list", "resources/read", "child.stdin.write", "jet://environment", "-32002", "/agent-secret"}),
+        ("interactive_terminal.jet", [String]{".terminal(TerminalPolicy", ".spawn()", "terminal_session.sh", "session.resize", "child.wait()", "Name: ", "Hello Ada", "Choice blue", "terminal_closed.sh", "interactive-terminal-closed", ".timeout("}),
+        ("service_lifecycle.jet", [String]{"JETPACK_FAKE_SYSTEMD_STATE", "\"services\", \"up\"", "\"services\", \"health\"", "\"services\", \"wait\"", "\"services\", \"logs\"", "\"services\", \"down\"", "E1261", "supervisor.error", "phase=failed", "recovery=startup-failed"})
+    }
+    loop (adapter, needles) in checks {
+        source :: fs.read_to_string(corpus_root().join("adapters").join(adapter)).unwrap()
+        loop needle in needles { assert(source.contains(needle), "{adapter} no longer reaches the production path containing {needle}") }
+    }
+}
+// Rust: tests/agent_workloads.rs:2157
+#Test("structured_data_database_http_production_paths_handle_success_and_hostile_inputs") {
+    jet_cli :: OSPath.from(env.build_var("CARGO_BIN_EXE_jet"))
+    task_ids :: [String]{"structured-data-transform", "structured-data-hostile", "database-access", "database-hostile", "http-api", "http-hostile"}
+    checked := 0
+    loop task in read_tasks() {
+        if !task_ids.contains(task.id) -> continue
+        input :: corpus_root().join(task.input)
+        expected :: fs.read(corpus_root().join(task.expected)).unwrap()
+        before :: input_hashes(&input)
+        scratch :: Scratch.new("jet_agent_1167_production_path")
+        source :: corpus_root().join("adapters").join("{adapter_stem(task.id)}.jet")
+        bounded :: run_bounded(adapter_command("jet", &source, &jet_cli, &input, &scratch.path, task.id), "#1167 production path", PROCESS_DEADLINE)
+        fs.remove_file(scratch.path.join("package.jet")).unwrap()
+        fs.remove_file(scratch.path.join(source.file_name().unwrap())).unwrap()
+        assert(!bounded.timed_out, "{task.id} timed out")
+        assert(!bounded.limit_exceeded, "{task.id} hit output limit")
+        assert_eq(bounded.output.status.code(), Val(0), "{task.id} failed")
+        assert_eq(bounded.output.stdout, expected, "{task.id} output drifted")
+        assert_eq(input_hashes(&input), before, "{task.id} changed input")
+        assert_eq(scratch_output_violations("jet", &scratch.path, source.file_stem().unwrap().to_string_lossy()), [String]{}, "{task.id} left scratch residue")
+        checked += 1
+    }
+    assert_eq(checked, task_ids.len(), "#1167 task set drifted")
+}
+// Rust: tests/agent_workloads.rs:2214
+#Test("delimited_workload_adapters_match_aot_default_run_and_interpreter") {
+    jet_cli :: OSPath.from(env.build_var("CARGO_BIN_EXE_jet"))
+    cases :: [(String, String)]{("browser-automation-preflight", "browser/preflight.tsv"), ("database-access", "database/records.tsv"), ("desktop-interaction-focus", "desktop/focus.tsv"), ("incident-report-success", "incidents/success.tsv"), ("process-batch-success", "processes/success.tsv")}
+    tiers :: [(String, [String])]{("aot", [String]{"--release"}), ("default-run", [String]{}), ("interpreter", [String]{"--interpret"})}
+    loop (task_id, input_relative) in cases {
+        source :: corpus_root().join("adapters").join("{adapter_stem(task_id)}.jet")
+        input :: corpus_root().join("inputs").join(input_relative)
+        expected :: fs.read(corpus_root().join("expected").join("{task_id}.out")).unwrap()
+        loop (tier, tier_args) in tiers {
+            scratch :: Scratch.new("jet_delimited_tier")
+            fs.write(scratch.path.join("package.jet"), "name: \"delimited-workload-adapters\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [Browser, DB, Exec, FS, IO, Mem.Alloc, Net] } }\n").unwrap()
+            tier_source :: scratch.path.join(source.file_name().unwrap())
+            fs.copy(&source, &tier_source).unwrap()
+            run :: run_bounded(jet_tier_command(&jet_cli, &tier_source, &input, &scratch.path, task_id, &tier_args), tier, PROCESS_DEADLINE)
+            fs.remove_file(scratch.path.join("package.jet")).unwrap()
+            fs.remove_file(&tier_source).unwrap()
+            assert(!run.timed_out, "{task_id} {tier} tier timed out")
+            assert(!run.limit_exceeded, "{task_id} {tier} tier hit output limit")
+            assert_eq(run.output.status.code(), Val(0), "{task_id} {tier} failed: {stderr_receipt(&run.output)}")
+            assert_eq(run.output.stdout, expected, "{task_id} {tier} output drifted")
+            assert(run.output.stderr.is_empty(), "{task_id} {tier} wrote stderr: {stderr_receipt(&run.output)}")
+        }
+    }
+}
+// Rust: tests/agent_workloads.rs:2281
+#Test("native_os_matrix_is_frozen_and_names_current_host") {
+    matrix :: read_native_os_matrix()
+    assert_eq(matrix, EXPECTED_NATIVE_OS_MATRIX, "native OS matrix changed without a frozen review")
+    // GATE #4483: selected execution-target facts, never writer-host assumptions.
+    os :: target.selected_os()
+    arch :: target.selected_arch()
+    assert(matrix.iter().any(fn(row) -> row.0 == os), "current host `{os}` is absent from the frozen native OS matrix")
+    current :: matrix.iter().find(fn(row) -> row.0 == os).unwrap()
+    assert(current.1 == "any" || current.1 == arch, "current host architecture `{arch}` is absent from the frozen native OS matrix")
+}
+// Rust: tests/agent_workloads.rs:2316
+#Test("jet_baseline_is_frozen_and_each_loss_has_an_owner") {
+    tasks :: read_tasks()
+    baseline :: read_jet_baseline()
+    assert_eq(baseline.len(), tasks.len(), "Jet baseline must contain one row per corpus task")
+    loop (task, row) in tasks.iter().zip(baseline) {
+        assert_eq(row.0, task.id, "Jet baseline task order drifted")
+        assert_eq(row.1, "pass", "baseline must freeze a passing Jet task")
+        assert_eq(row.2, task.loss_cards, "baseline loss owner drifted")
+        assert(row.2.split(';').all(fn(owner) -> if owner.split_once('=') == { Val((_, dest)) -> dest.starts_with('#') || dest.starts_with("non-goal:") None -> false }), "Jet loss owner must name a card or ratified non-goal: {row.2}")
+    }
+}
+// Rust: tests/agent_workloads.rs:2342
+#Test("checksum_closure_rejects_drift_and_hostile_sums") {
+    scratch :: Scratch.new("jet_agent_checksum_closure")
+    fs.create_dir_all(scratch.path.join("inputs")).unwrap()
+    fs.create_dir_all(scratch.path.join("expected")).unwrap()
+    fs.write(scratch.path.join("inputs/task.txt"), "input").unwrap()
+    fs.write(scratch.path.join("expected/task.out"), "output").unwrap()
+    sums :: "{sha256_hex("input".as_bytes())}  inputs/task.txt\n{sha256_hex("output".as_bytes())}  expected/task.out\n"
+    assert_eq(verify_checksum_closure(&scratch.path, sums), Ok(2))
+    fs.write(scratch.path.join("inputs/unhashed.txt"), "extra").unwrap()
+    error :: verify_checksum_closure(&scratch.path, sums).unwrap_err()
+    assert(error.contains("unhashed") && error.contains("inputs/unhashed.txt"), error)
+    fs.remove_file(scratch.path.join("inputs/unhashed.txt")).unwrap()
+    input_hash :: sha256_hex("input".as_bytes())
+    output_hash :: sha256_hex("output".as_bytes())
+    fs.write(scratch.path.join("inputs/task.txt"), "drifted").unwrap()
+    assert_eq(verify_checksum_closure(&scratch.path, sums).unwrap_err(), "fixture drift: inputs/task.txt")
+    fs.write(scratch.path.join("inputs/task.txt"), "input").unwrap()
+    fs.remove_file(scratch.path.join("expected/task.out")).unwrap()
+    error :: verify_checksum_closure(&scratch.path, sums).unwrap_err()
+    assert(error.contains("missing") && error.contains("expected/task.out"), error)
+    fs.write(scratch.path.join("expected/task.out"), "output").unwrap()
+    assert_eq(verify_checksum_closure(&scratch.path, sums), Ok(2))
+    hostile :: [(String, String)]{
+        ("{input_hash}  /etc/passwd\n{output_hash}  expected/task.out\n", "invalid checksum path: /etc/passwd"),
+        ("{input_hash}  ../outside.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: ../outside.txt"),
+        ("{input_hash}  ..\\outside.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: ..\\outside.txt"),
+        ("{input_hash}  inputs//task.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: inputs//task.txt"),
+        ("{input_hash}  inputs/./task.txt\n{output_hash}  expected/task.out\n", "invalid checksum path: inputs/./task.txt"),
+        ("{input_hash}  inputs/task.txt\n{output_hash}  inputs/task.txt\n{output_hash}  expected/task.out\n", "duplicate checksum path: inputs/task.txt"),
+        ("{input_hash} inputs/task.txt\n{output_hash}  expected/task.out\n", "bad SHA256SUMS row: {input_hash} inputs/task.txt")
+    }
+    loop (text, reason) in hostile { assert_eq(verify_checksum_closure(&scratch.path, text), Err(reason)) }
+}
+// Rust: tests/agent_workloads.rs:2420
+#Test("process_deadline_reaps_and_scratch_drop_cleans") {
+    scratch_path := OSPath.from("")
+    {
+        scratch :: Scratch.new("jet_agent_process_deadline")
+        scratch_path = scratch.path.clone()
+        fs.write(scratch.path.join("sentinel"), "cleanup").unwrap()
+        command := Command.new("python3")
+        command.args([String]{"-c", "import time; time.sleep(10)"})
+        bounded :: run_bounded(^command, "timeout regression", Duration.from_millis(25))
+        assert(bounded.timed_out, "deadline did not stop the process")
+        assert(!bounded.limit_exceeded, "deadline fixture hit output limit")
+        assert(bounded.elapsed < Duration.from_secs(2), "deadline cleanup took too long: {bounded.elapsed.debug()}")
+    }
+    assert(!scratch_path.exists(), "scratch directory survived Drop")
+}
+// Rust: tests/agent_workloads.rs:2442
+#Test("process_output_limit_fails_closed") {
+    if target.selected_family() == "unix" {
+        scratch :: Scratch.new("jet_agent_process_output_limit")
+        command := Command.new("python3")
+        command.args([String]{"-c", "import sys; sys.stdout.write('x' * 2000000)"})
+        command.current_dir(&scratch.path)
+        bounded :: run_bounded(^command, "output limit regression", PROCESS_DEADLINE)
+        assert(bounded.limit_exceeded, "output limit did not stop the process")
+        assert(!bounded.timed_out, "output limit was reported as a timeout")
+        assert(bounded.elapsed < Duration.from_secs(2), "output limit cleanup took too long: {bounded.elapsed.debug()}")
+    }
+}
+// Rust: tests/agent_workloads.rs:2462
+#Test("production_process_limits_authority_and_descendant_cleanup") {
+    if target.selected_os() == "linux" {
+        source :: """use core.process as process
+
+fn limit_blocked() -> Bool {
+    process.cmd(["printf", "12345"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .output_limit(3)
+        .run() ?? return true
+    return false
+}
+
+fn authority_refused() -> Bool {
+    policy :: Authority.from_rights(["Net:example.com"])
+    process.cmd(["printf", "authority"]).under(policy).plan() ?? return true
+    return false
+}
+
+fn run() -> {
+    if limit_blocked() -> print("limit=blocked") else -> print("limit=leaked")
+    if authority_refused() -> print("authority=refused") else -> print("authority=planned")
+
+    child :: process.cmd(["sh", "-c", "sleep 30 & child=$!; echo $child > child.pid; wait"])
+        .stdout(.Capture)
+        .stderr(.Capture)
+        .timeout(Duration.milliseconds(50) ?? panic("bad timeout"))
+        .run() ?? panic("timeout launch failed")
+    if !child.timed_out -> panic("timeout did not fire")
+    print("timeout=cancelled")
+}
+"""
+        loop release in [Bool]{false, true} {
+            scratch :: Scratch.new(if release -> "jet_agent_process_policy_release" else -> "jet_agent_process_policy_default")
+            source_path :: scratch.path.join("process_policy.jet")
+            fs.write(&source_path, source).unwrap()
+            write_agent_workload_package(&scratch.path)
+            output :: run_lens(&source_path, release, &scratch)
+            assert_eq(output.stdout, "limit=blocked\nauthority=refused\ntimeout=cancelled\n".as_bytes())
+            child_text :: fs.read_to_string(scratch.path.join("child.pid")).unwrap()
+            trimmed := child_text.trim() // #4303
+            child_pid :: trimmed.parse<U32>().unwrap()
+            deadline :: Instant.now() + Duration.from_secs(2)
+            loop !process_is_gone_or_zombie(child_pid) {
+                assert(Instant.now() < deadline, "timed-out process left descendant {child_pid}")
+                thread.sleep(Duration.from_millis(10))
+            }
+        }
+    }
+}
+// Rust: tests/agent_workloads.rs:2547
+#Test("scratch_output_shape_rejects_arbitrary_build_residue") {
+    cache_hit :: valid_jet_scratch("jet_agent_scratch_cache_hit")
+    assert_eq(scratch_output_violations("jet", &cache_hit.path, "process_batch"), [String]{})
+    cache_miss :: valid_jet_scratch("jet_agent_scratch_cache_miss")
+    fs.write(cache_miss.path.join(".jet/build/process_batch.rs"), "declared generated Rust").unwrap()
+    assert_eq(scratch_output_violations("jet", &cache_miss.path, "process_batch"), [String]{})
+    build_leak :: valid_jet_scratch("jet_agent_scratch_build_leak")
+    fs.write(build_leak.path.join(".jet/build/leak"), "undeclared residue").unwrap()
+    assert_eq(scratch_output_violations("jet", &build_leak.path, "process_batch"), [String]{"unexpected file: .jet/build/leak"})
+    root_leak :: valid_jet_scratch("jet_agent_scratch_root_leak")
+    fs.write(root_leak.path.join("leak"), "undeclared residue").unwrap()
+    assert_eq(scratch_output_violations("jet", &root_leak.path, "process_batch"), [String]{"unexpected file: leak"})
+    nested_leak :: valid_jet_scratch("jet_agent_scratch_nested_leak")
+    fs.create_dir(nested_leak.path.join(".jet/build/nested")).unwrap()
+    fs.write(nested_leak.path.join(".jet/build/nested/leak"), "undeclared residue").unwrap()
+    assert_eq(scratch_output_violations("jet", &nested_leak.path, "process_batch"), [String]{"unexpected directory: .jet/build/nested", "unexpected file: .jet/build/nested/leak"})
+    wrong_type :: valid_jet_scratch("jet_agent_scratch_wrong_type")
+    fs.create_dir(wrong_type.path.join(".jet/build/process_batch.rs")).unwrap()
+    assert_eq(scratch_output_violations("jet", &wrong_type.path, "process_batch"), [String]{"unexpected directory: .jet/build/process_batch.rs"})
+    if target.selected_family() == "unix" {
+        symlink_leak :: valid_jet_scratch("jet_agent_scratch_symlink")
+        std.os.unix.fs.symlink("missing-target", symlink_leak.path.join(".jet/build/process_batch.rs")).unwrap()
+        assert_eq(scratch_output_violations("jet", &symlink_leak.path, "process_batch"), [String]{"unexpected symlink: .jet/build/process_batch.rs"})
+    }
+}
+// Rust: tests/agent_workloads.rs:2634
+#Test("equivalent_adapters_complete_declared_tasks") {
+    if target.selected_os() == "windows" -> panic("Bash is explicitly unavailable as a native Windows adapter; this task cannot pass")
+    jet_cli :: OSPath.from(env.build_var("CARGO_BIN_EXE_jet"))
+    jet_artifact :: sha256_hex(fs.read(&jet_cli).unwrap())
+    versions :: [String:String]{"jet": command_version(&jet_cli, "--version", "jet"), "bash": command_version(&OSPath.from("bash"), "--version", "bash"), "python": command_version(&OSPath.from("python3"), "--version", "python3"), "node": command_version(&OSPath.from("node"), "--version", "node")}
+    pinned_versions :: pinned_adapter_versions()
+    loop adapter in BASELINE_ADAPTERS { assert_eq(versions[adapter], pinned_versions[adapter], "{adapter} is not the committed pinned shipped tool") }
+    git_version :: command_version(&OSPath.from("git"), "--version", "git")
+    baseline := BaselineCapture.from_env()
+    capture_baselines :: baseline.is_some()
+    run_policy_digest :: policy_digest()
+    println(policy_receipt(run_policy_digest))
+    loop task in read_tasks() {
+        validate_authority(task.authority).unwrap_or_else(fn(error) -> panic(error))
+        input :: corpus_root().join(task.input)
+        expected :: fs.read(corpus_root().join(task.expected)).unwrap()
+        before :: input_hashes(&input)
+        stem :: adapter_stem(task.id)
+        measurements := [Measurement]{}
+        declared_outputs := [[U8]]{}
+        loop (adapter, extension) in ADAPTERS {
+            if capture_baselines && adapter == "jet" -> continue
+            scratch :: Scratch.new("jet_agent_workload")
+            source :: corpus_root().join("adapters").join("{stem}.{extension}")
+            cold :: run_bounded(adapter_command(adapter, &source, &jet_cli, &input, &scratch.path, task.id), adapter, PROCESS_DEADLINE)
+            warm :: run_bounded(adapter_command(adapter, &source, &jet_cli, &input, &scratch.path, task.id), adapter, PROCESS_DEADLINE)
+            if adapter == "jet" {
+                fs.remove_file(scratch.path.join("package.jet")).unwrap()
+                fs.remove_file(scratch.path.join(source.file_name().unwrap())).unwrap()
+            }
+            assert(!cold.timed_out, "{task.id} {adapter} cold run timed out")
+            assert(!warm.timed_out, "{task.id} {adapter} warm run timed out")
+            assert(!cold.limit_exceeded, "{task.id} {adapter} cold output limit exceeded")
+            assert(!warm.limit_exceeded, "{task.id} {adapter} warm output limit exceeded")
+            assert_eq(cold.output.status.code(), Val(0), "{task.id} {adapter} cold exit drifted: {stderr_receipt(&cold.output)}")
+            assert_eq(cold.output.stdout, expected, "{task.id} {adapter} cold stdout drifted")
+            assert_eq(warm.output.status.code(), Val(0), "{task.id} {adapter} warm exit drifted")
+            assert_eq(warm.output.stdout, cold.output.stdout, "{task.id} {adapter} output was unstable")
+            assert_eq(input_hashes(&input), before, "{task.id} {adapter} changed its read-only input authority")
+            jet_artifact_name :: source.file_stem().unwrap().to_string_lossy()
+            // Check before Scratch closes so residue cannot masquerade as successful cleanup.
+            assert_eq(scratch_output_violations(adapter, &scratch.path, jet_artifact_name), [String]{}, "{task.id} {adapter} left undeclared scratch residue")
+            if adapter != "jet" && baseline.as_mut() == Val(capture) { capture.record(&task, adapter, &source, &input, &expected, &cold, &warm, versions[adapter]) }
+            measurements.push(Measurement{adapter: adapter, source_tokens: source_tokens(&source), cold: cold.elapsed, warm: warm.elapsed, version: versions[adapter], cold_stderr_bytes: cold.output.stderr.len(), cold_stderr_sha256: sha256_hex(cold.output.stderr), warm_stderr_bytes: warm.output.stderr.len(), warm_stderr_sha256: sha256_hex(warm.output.stderr)})
+            declared_outputs.push(^cold.output.stdout)
+        }
+        assert(declared_outputs.windows(2).all(fn(pair) -> pair[0] == pair[1]), "{task.id} adapters disagreed on the declared outcome")
+        println("machine\tos={target.selected_os()}\tarch={target.selected_arch()}\tcorpus=1\ttask={task.id}\tevidence={task.evidence}\tcard={task.tower_card}\tlosses=red:{task.loss_cards}\tjet_artifact={jet_cli.display()}\tjet_sha256={jet_artifact}\tgit_version={git_version.replace('\t', " ")}\tpolicy_digest={run_policy_digest}\tauthority={task.authority}")
+        loop result in measurements {
+            println("result\ttask={task.id}\tadapter={result.adapter}\tsuccess=true\tsource_tokens={result.source_tokens}\tcold_ns={result.cold.as_nanos()}\twarm_ns={result.warm.as_nanos()}\toutput_stable=true\tversion={result.version.replace('\t', " ")}\tcold_stderr_bytes={result.cold_stderr_bytes}\tcold_stderr_sha256={result.cold_stderr_sha256}\twarm_stderr_bytes={result.warm_stderr_bytes}\twarm_stderr_sha256={result.warm_stderr_sha256}\tpolicy_digest={run_policy_digest}\tlimits={policy_field("limits")}\tdescendants={policy_field("descendants")}\toutputs={policy_field("outputs")}\treceipt={policy_field("receipt")}\tauthority={task.authority}\tagent_tool_calls=not-recorded:#769\trepair_turns=not-recorded:#769\tpeak_memory=not-recorded:#769\tdiagnostic_quality=not-recorded:#769\torphan_processes=not-recorded:#769\tsandbox_escapes=not-recorded:#769\tnetwork=unmeasured:#769\texternal_writes=unmeasured:#769\tcross_platform=not-run:#769")
+        }
+    }
+}
+// Rust: tests/agent_workloads.rs:2823
+#Test("llm_digest_first_program") {
+    root :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR"))
+    output :: Command.new(env.build_var("CARGO_BIN_EXE_jet")).args([String]{"inspect", "digest", "--topic", "first-program"}).current_dir(&root).output().expect("generate digest first program")
+    assert(output.status.success(), stderr_receipt(&output))
+    digest :: String.from_utf8(^output.stdout).expect("digest is UTF-8")
+    fixture :: corpus_root().join("llm_digest")
+    expected :: fs.read(fixture.join("transcript.txt")).unwrap()
+    program :: digest.split_once("```jet\n").and_then(fn((_, rest)) -> rest.split_once("\n```")).map(fn((program, _)) -> program).expect("first-program topic contains an executable Jet example")
+    scratch :: Scratch.new("jet_llm_digest_first_program")
+    source :: scratch.path.join("first_program.jet")
+    fs.write(&source, program).expect("write generated first program")
+    command := Command.new(env.build_var("CARGO_BIN_EXE_jet"))
+    command.args([String]{"run", "--release"}).arg(&source).current_dir(&scratch.path)
+    bounded :: run_bounded(^command, "llm digest first program", PROCESS_DEADLINE)
+    assert(!bounded.timed_out, "llm digest first program timed out")
+    assert(!bounded.limit_exceeded, "llm digest first program hit output limit")
+    assert(bounded.output.status.success(), "llm digest first program failed: {stderr_receipt(&bounded.output)}")
+    assert_eq(bounded.output.stdout, expected, "first-program transcript drifted")
+}
+// Rust: tests/agent_workloads.rs:2866
+#Test("semantic_corpus_policy_runs_with_agent_workloads") {
+    CorpusPolicy.load().expect("corpus manifest").check_gate("workload").expect("agent workload corpus semantic policy")
+}

@@ -1,0 +1,23 @@
+use std.[fs]
+use jetpack.Provider.Ctx
+use jetpack.RefSpec.[classify_in, ProviderKind, SourceTable]
+use jetpack.Store
+use jetpack.Store.Roots
+// GATE #4494: filesystem and real offline provider journeys.
+// Rust: tests/lib_use.rs:23
+fn jet_bin() -> OSPath { OSPath.from(env("CARGO_BIN_EXE_jet")) }
+// Rust: tests/lib_use.rs:27
+fn write(path: &OSPath, body: String) -> {
+    if parent :: path.parent() { fs.create_dir_all(parent).unwrap() }
+    fs.write(path, body).unwrap()
+}
+// Rust: tests/lib_use.rs:97
+fn realize_into_hangar(roots: &Roots, repo: &OSPath, pkg: String) -> Store.VerifiedRealization {
+    store_dir :: roots.hangar_dir()
+    fs.create_dir_all(&store_dir).unwrap()
+    upstream :: "path:{repo.to_string_lossy()}"
+    table :: SourceTable.from_decls([("mine", upstream, ProviderKind.Core)])
+    spec :: classify_in("{pkg}@mine", &table).unwrap()
+    ctx :: Ctx(fixtures: None, store_dir: &store_dir, offline: true, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false)
+    Store.realize_verified(roots, &ctx, Store.RealizeRequest.Package(spec: &spec, table: &table)).expect("library realizes and records offline")
+}

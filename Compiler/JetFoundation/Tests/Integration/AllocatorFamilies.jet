@@ -1,936 +1,127 @@
-// PORT-PENDING 0965 tests-allocator-families: tests/allocator_families.rs:1-932
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! #648: hostile proofs for the existing allocator families.
-//RS //!
-//RS //! Runtime-internal tests compile the exact generated `jet_mem` prelude with
-//RS //! observation stubs. Language-facing tests keep sema/AOT behavior honest.
-//RS 
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS mod common;
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS fn emit_native_aot(bundle: &jet::AST::ProgramBundle) -> String {
-//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
-//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS         jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Dev,
-//RS     );
-//RS     let (mir, artifact) = jet::Codegen::TIR::lower_checked_mir_program_for(bundle, request)
-//RS         .expect("checked native artifact lowers through MIR");
-//RS     mir.validate()
-//RS         .expect("canonical MIR validates in allocator test");
-//RS     let mir = jet_foundation::MIR::optimize_mir_program(
-//RS         mir,
-//RS         &jet_foundation::MIR::MirOptimizationPolicy::conservative(),
-//RS     )
-//RS     .expect("canonical MIR optimizes in allocator test");
-//RS     jet::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &jet::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::host(),
-//RS             target_kind: jet::Codegen::MIRRust::MirRustTarget::Native,
-//RS             root_prefix: String::new(),
-//RS             execution: jet::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact),
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS static SEQ: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS fn temp_dir(label: &str) -> std::path::PathBuf {
-//RS     let id = SEQ.fetch_add(1, Ordering::Relaxed);
-//RS     common::test_scratch_root("allocator_families").join(format!(
-//RS         "jet_allocator_{label}_{}_{}",
-//RS         std::process::id(),
-//RS         id
-//RS     ))
-//RS }
-//RS fn compile_rust_harness(body: &str) -> std::process::Output {
-//RS     let dir = temp_dir("runtime");
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let source = dir.join("main.rs");
-//RS     let binary = dir.join("main");
-//RS     let observe = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Observe.rs").unwrap();
-//RS     let uninit = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Uninit.rs").unwrap();
-//RS     let encoding_errors =
-//RS         std::fs::read_to_string("crates/jet-foundation/src/EncodingErrors.rs").unwrap();
-//RS     let json_number =
-//RS         std::fs::read_to_string("crates/jet-foundation/src/JSONNumber.rs").unwrap();
-//RS     let encoding_json =
-//RS         std::fs::read_to_string("crates/jet-foundation/src/EncodingJson.rs").unwrap();
-//RS     let outcome = std::fs::read_to_string("crates/jet-foundation/src/Outcome.rs").unwrap();
-//RS     let runtime_diagnostic_core = std::fs::read_to_string("crates/jet-foundation/src/RuntimeDiagnosticCore.rs").unwrap();
-//RS     let fixed_kernel = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs").unwrap();
-//RS     let fault_injection =
-//RS         std::fs::read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap();
-//RS     let sentry = std::fs::read_to_string("crates/jet-foundation/src/MemSentry.rs").unwrap();
-//RS     let prelude = std::fs::read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap();
-//RS     // which this standalone rustc harness intentionally does not embed. Keep
-//RS     // Outcome.rs on its canonical typed seam; these memory tests exercise the
-//RS     // sentry renderer, so no registered generic runtime row is active here.
-//RS     let registry = r#"
-//RS #[allow(non_snake_case)]
-//RS mod Registry {
-//RS     pub fn active_runtime_diagnostic(
-//RS         _code: &str,
-//RS     ) -> Option<&'static super::JetRuntimeDiagnosticRow> {
-//RS         None
-//RS     }
-//RS }
-//RS "#;
-//RS     let runtime_stop = r#"
-//RS fn jet_sentry_runtime_stop(
-//RS     code: &'static str,
-//RS     file: &str,
-//RS     line: u32,
-//RS     gate: &str,
-//RS     operation: &str,
-//RS     obligation: &str,
-//RS     obligation_status: &str,
-//RS     foreign_component: Option<&str>,
-//RS     foreign_fenced: Option<bool>,
-//RS     detail: &str,
-//RS ) -> ! {
-//RS     let report = jet_render_runtime_sentry_with_context(
-//RS         match code {
-//RS             "R0801" => "R0801",
-//RS             "R0802" => "R0802",
-//RS             "R0803" => "R0803",
-//RS             _ => "R0801",
-//RS         },
-//RS         file,
-//RS         line,
-//RS         gate,
-//RS         operation,
-//RS         obligation,
-//RS         detail,
-//RS         obligation_status,
-//RS         foreign_component,
-//RS         foreign_fenced,
-//RS     );
-//RS     panic!("{}", report.rendered);
-//RS }
-//RS "#;
-//RS     let source_text = format!(
-//RS         r#"#![allow(dead_code)]
-//RS {observe}
-//RS mod jet_encoding_errors {{
-//RS {encoding_errors}
-//RS }}
-//RS mod jet_json_number {{
-//RS {json_number}
-//RS }}
-//RS #[allow(non_snake_case)]
-//RS mod EncodingJson {{
-//RS {encoding_json}
-//RS }}
-//RS #[allow(non_snake_case)]
-//RS mod RuntimeDiagnosticCore {{
-//RS {runtime_diagnostic_core}
-//RS }}
-//RS {registry}
-//RS {outcome}
-//RS {fault_injection}
-//RS {runtime_stop}
-//RS mod jet_uninit_semantics {{
-//RS {uninit}
-//RS }}
-//RS mod jet_fixed_kernel {{
-//RS {fixed_kernel}
-//RS }}
-//RS mod jet_mem {{
-//RS     mod jet_sentry {{
-//RS {sentry}
-//RS     }}
-//RS {prelude}
-//RS }}
-//RS {body}
-//RS "#
-//RS     );
-//RS     std::fs::write(&source, source_text).unwrap();
-//RS     let compiled = Command::new("rustc")
-//RS         .args(["--edition", "2021"])
-//RS         .arg(&source)
-//RS         .arg("-o")
-//RS         .arg(&binary)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         compiled.status.success(),
-//RS         "allocator runtime harness failed to compile:\n{}",
-//RS         String::from_utf8_lossy(&compiled.stderr)
-//RS     );
-//RS     Command::new(binary).output().unwrap()
-//RS }
-//RS 
-//RS fn compile_program_allocator_harness(body: &str) -> std::process::Output {
-//RS     let dir = temp_dir("program_allocator");
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let source = dir.join("main.rs");
-//RS     let binary = dir.join("main");
-//RS     let allocator =
-//RS         std::fs::read_to_string("crates/jet-codegen/src/Prelude/ProgramAllocator.rs").unwrap();
-//RS     std::fs::write(
-//RS         &source,
-//RS         format!("#![allow(dead_code)]\nmod allocator {{\n{allocator}\n}}\n{body}\n"),
-//RS     )
-//RS     .unwrap();
-//RS     let compiled = Command::new("rustc")
-//RS         .args(["--edition", "2021"])
-//RS         .arg(&source)
-//RS         .arg("-o")
-//RS         .arg(&binary)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         compiled.status.success(),
-//RS         "program allocator harness failed to compile:\n{}",
-//RS         String::from_utf8_lossy(&compiled.stderr)
-//RS     );
-//RS     Command::new(binary).output().unwrap()
-//RS }
-//RS 
-//RS fn write_program_allocator_project(label: &str, allocator: Option<&str>) -> std::path::PathBuf {
-//RS     let root = temp_dir(label);
-//RS     std::fs::create_dir_all(&root).unwrap();
-//RS     let allocator = allocator
-//RS         .map(|value| format!("allocator: {value}\n"))
-//RS         .unwrap_or_default();
-//RS     std::fs::write(
-//RS         root.join("package.jet"),
-//RS         format!("name: \"{label}\"\nversion: \"0.1.0\"\n{allocator}"),
-//RS     )
-//RS     .unwrap();
-//RS     let entry = root.join("main.jet");
-//RS     std::fs::write(&entry, "fn run() { print(\"ok\") }\n").unwrap();
-//RS     entry
-//RS }
-//RS 
-//RS fn compile_jet(src: &str) -> Result<jet::CompileOutput, Vec<String>> {
-//RS     let dir = temp_dir("jet");
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     tir_support::write_test_package(&dir, tir_support::TIR_TEST_PACKAGE);
-//RS     let path = dir.join("main.jet");
-//RS     std::fs::write(&path, src).unwrap();
-//RS     jet::compile_with_path(src, &path.to_string_lossy())
-//RS         .map_err(|diags| diags.into_iter().map(|diag| diag.code).collect())
-//RS }
-//RS 
-//RS fn run_jet(label: &str, src: &str) -> (i32, String, String) {
-//RS     let output =
-//RS         compile_jet(src).unwrap_or_else(|diags| panic!("{label} front end failed: {:?}", diags));
-//RS     let user = common::strip_vetted_prelude_modules(&output.rust);
-//RS     let unsafe_lines = user
-//RS         .lines()
-//RS         .filter(|line| !common::unsafe_keyword_columns(line).is_empty())
-//RS         .collect::<Vec<_>>();
-//RS     assert!(
-//RS         unsafe_lines.is_empty(),
-//RS         "unsafe escaped the vetted prelude: {unsafe_lines:?}"
-//RS     );
-//RS     let dir = temp_dir(label);
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let source = dir.join("main.rs");
-//RS     let binary = dir.join("main");
-//RS     std::fs::write(&source, output.rust).unwrap();
-//RS     let compiled = Command::new("rustc")
-//RS         .args(["--edition", "2021"])
-//RS         .arg(&source)
-//RS         .arg("-o")
-//RS         .arg(&binary)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         compiled.status.success(),
-//RS         "rustc rejected generated {label} code:\n{}",
-//RS         String::from_utf8_lossy(&compiled.stderr)
-//RS     );
-//RS     let ran = Command::new(binary).output().unwrap();
-//RS     (
-//RS         ran.status.code().unwrap_or(-1),
-//RS         String::from_utf8_lossy(&ran.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&ran.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS #[test]
-//RS fn arena_bump_and_slab_have_distinct_aligned_drop_and_retention_laws() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let ran = compile_rust_harness(
-//RS         r#"
-//RS use std::sync::Mutex;
-//RS static DROPS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-//RS struct Dropped(usize);
-//RS impl Drop for Dropped { fn drop(&mut self) { DROPS.lock().unwrap().push(self.0); } }
-//RS #[repr(align(64))]
-//RS struct Aligned(u8);
-//RS 
-//RS fn main() {
-//RS     let mut arena = jet_mem::JetArena::with_capacity(64);
-//RS     let first_chunk = arena.alloc(1u8) as *mut u8 as usize;
-//RS     let aligned = arena.alloc(Aligned(7)) as *mut Aligned as usize;
-//RS     let _drop1 = arena.alloc(Dropped(1));
-//RS     let _drop2 = arena.alloc(Dropped(2));
-//RS     assert_eq!(aligned % 64, 0);
-//RS     let before = arena.facts();
-//RS     assert!(before.live_bytes >= 1 && before.retained_bytes >= before.live_bytes);
-//RS     arena.reset();
-//RS     assert_eq!(*DROPS.lock().unwrap(), vec![2, 1]);
-//RS     let after = arena.facts();
-//RS     assert_eq!(after.live_bytes, 0);
-//RS     assert_eq!(after.retained_bytes, before.retained_bytes);
-//RS     assert!(after.high_water_bytes >= before.live_bytes);
-//RS     let observed = jet_observe_allocator_memory();
-//RS     assert!(observed.0 >= after.retained_bytes);
-//RS     assert!(observed.1 >= before.live_bytes);
-//RS     let reused_first_chunk = arena.alloc(2u8) as *mut u8 as usize;
-//RS     assert_eq!(reused_first_chunk, first_chunk);
-//RS 
-//RS     let mut bump = jet_mem::JetBump::with_capacity(128);
-//RS     let first = bump.alloc(1u8) as *mut u8 as usize;
-//RS     let second = bump.alloc(2u64) as *mut u64 as usize;
-//RS     assert!(second > first && second - first < 128);
-//RS     let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS         let _ = bump.alloc([0u8; 256]);
-//RS     }));
-//RS     assert!(exhausted.is_err());
-//RS     let bump_before = bump.facts();
-//RS     bump.reset();
-//RS     let bump_after = bump.facts();
-//RS     assert_eq!(bump_after.retained_bytes, bump_before.retained_bytes);
-//RS     assert_eq!(bump_after.high_water_bytes, bump_before.high_water_bytes);
-//RS 
-//RS     let mut pool = jet_mem::JetPool::with_slots(2);
-//RS     let generation = pool.generation();
-//RS     let p0 = pool.alloc(10u64) as *mut u64 as usize;
-//RS     let _p1 = pool.alloc(20u64) as *mut u64 as usize;
-//RS     assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS         let _ = pool.alloc(30u64);
-//RS     })).is_err());
-//RS     pool.reset();
-//RS     assert_ne!(pool.generation(), generation);
-//RS     let reused = pool.alloc(40u64) as *mut u64 as usize;
-//RS     assert_eq!(reused, p0);
-//RS     let large = pool.alloc([7u8; 513]);
-//RS     assert_eq!(large[512], 7);
-//RS     assert!(pool.facts().retained_bytes >= 521);
-//RS 
-//RS     let mut classes = jet_mem::JetPool::with_slots(1);
-//RS     let _small = classes.alloc(1u8);
-//RS     classes.reset();
-//RS     let small_retained = classes.facts().retained_bytes;
-//RS     let wide = classes.alloc([9u64; 80]);
-//RS     assert_eq!(wide[79], 9);
-//RS     assert!(classes.facts().retained_bytes > small_retained);
-//RS     println!("ok");
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         ran.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&ran.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn fixed_uses_one_borrowed_buffer_for_payload_alignment_and_reverse_drop_metadata() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let ran = compile_rust_harness(
-//RS         r#"
-//RS use std::sync::Mutex;
-//RS static DROPS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
-//RS struct Dropped(usize);
-//RS impl Drop for Dropped { fn drop(&mut self) { DROPS.lock().unwrap().push(self.0); } }
-//RS #[repr(align(64))]
-//RS struct Aligned(u8);
-//RS 
-//RS fn main() {
-//RS     let mut bytes = [0u8; 256];
-//RS     let mut fixed = jet_mem::JetFixed::over(&mut bytes);
-//RS     let aligned = fixed.alloc(Aligned(7)) as *mut Aligned as usize;
-//RS     let _first = fixed.alloc(Dropped(1));
-//RS     let _second = fixed.alloc(Dropped(2));
-//RS     assert_eq!(aligned % 64, 0);
-//RS     let before = fixed.facts();
-//RS     assert_eq!(before.retained_bytes, 256);
-//RS     fixed.reset();
-//RS     assert_eq!(*DROPS.lock().unwrap(), vec![2, 1]);
-//RS     assert_eq!(fixed.facts().retained_bytes, 256);
-//RS     assert_eq!(fixed.facts().live_allocations, 0);
-//RS 
-//RS     let mut try_bytes = [0u8; 40];
-//RS     let try_fixed = jet_mem::JetFixed::over(&mut try_bytes);
-//RS     assert_eq!(*try_fixed.try_alloc(7u64).unwrap(), 7);
-//RS     let error = match try_fixed.try_alloc(9u64) {
-//RS         Ok(_) => panic!("fallible Fixed allocation unexpectedly succeeded"),
-//RS         Err(error) => error,
-//RS     };
-//RS     assert_eq!(error.requested_bytes, 8);
-//RS     assert_eq!(error.allocator, "Fixed");
-//RS     drop(try_fixed);
-//RS 
-//RS     let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS         let _ = fixed.alloc([0u8; 233]);
-//RS     }));
-//RS     assert!(exhausted.is_err());
-//RS     assert_eq!(fixed.facts().live_allocations, 0);
-//RS     assert_eq!(jet_observe_allocator_memory().0, 256);
-//RS     drop(fixed);
-//RS     assert_eq!(jet_observe_allocator_memory().0, 0);
-//RS     println!("ok");
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         ran.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&ran.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn fixed_source_synthesizes_inline_backing_and_rejects_dynamic_or_live_reset() {
-//RS     let output = compile_jet(
-//RS         r#"
-//RS use core.mem
-//RS 
-//RS fn run() {
-//RS     fixed :: mem.Fixed.new(size: 128 + 128)
-//RS     value :: fixed.alloc(7)
-//RS     print(value)
-//RS     close(^fixed)
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect("positive comptime Fixed size should compile");
-//RS     let user = common::strip_vetted_prelude_modules(&output.rust);
-//RS     assert!(
-//RS         user.contains("[std::mem::MaybeUninit::<u8>::uninit(); 256]"),
-//RS         "{user}"
-//RS     );
-//RS     assert!(user.contains("JetFixed::over_uninit"), "{user}");
-//RS     assert!(
-//RS         user.contains("impl __jet_Close for jet_mem::JetFixed"),
-//RS         "{user}"
-//RS     );
-//RS 
-//RS     let over_src = r#"
-//RS use core.mem
-//RS fn run() {
-//RS     bytes := [U8#128]{ uninit }
-//RS     fixed :: mem.Fixed.over(&bytes)
-//RS     value :: fixed.alloc(9)
-//RS     print(value)
-//RS     close(^fixed)
-//RS }
-//RS "#;
-//RS     let over =
-//RS         compile_jet(over_src).expect("Fixed.over should accept one mutable inline byte array");
-//RS     let over_user = common::strip_vetted_prelude_modules(&over.rust);
-//RS     assert!(
-//RS         over_user.contains("JetFixed::over_uninit_fixed(&mut __jet_bytes)"),
-//RS         "{over_user}"
-//RS     );
-//RS     if common::have_rustc() {
-//RS         let (code, stdout, stderr) = run_jet("fixed_over", over_src);
-//RS         assert_eq!(code, 0, "{stderr}");
-//RS         assert_eq!(stdout, "9\n");
-//RS     }
-//RS 
-//RS     let dynamic = compile_jet(
-//RS         r#"
-//RS use core.mem
-//RS fn make(size: Int) {
-//RS     fixed :: mem.Fixed.new(size: size)
-//RS     close(^fixed)
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("runtime Fixed sizes cannot synthesize inline backing");
-//RS     assert!(dynamic.iter().any(|code| code == "E0103"), "{dynamic:?}");
-//RS 
-//RS     let live_reset = compile_jet(
-//RS         r#"
-//RS use core.mem
-//RS fn run() {
-//RS     fixed :: mem.Fixed.new(size: 128)
-//RS     value :: fixed.alloc(1)
-//RS     &fixed.reset()
-//RS     print(value)
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("reset cannot invalidate a live Fixed allocation view");
-//RS     assert!(
-//RS         live_reset.iter().any(|code| code == "E0212"),
-//RS         "{live_reset:?}"
-//RS     );
-//RS 
-//RS     let stored = compile_jet(
-//RS         r#"
-//RS use core.mem
-//RS fn run() {
-//RS     fixed :: mem.Fixed.new(size: 128)
-//RS     handles :: [fixed]
-//RS     print(handles.len())
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("Fixed handles cannot be stored in aggregates");
-//RS     assert!(stored.iter().any(|code| code == "E0631"), "{stored:?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn allocator_close_impls_require_resolved_core_constructors() {
-//RS     let output = compile_jet(
-//RS         r#"
-//RS use core.mem as mem
-//RS 
-//RS fn run() {
-//RS     text := "mem.Fixed.new(size: 128); notmem.Fixed.new()"
-//RS     // mem.Fixed.new(size: 128)
-//RS     // notmem.Fixed.new()
-//RS     print(text)
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect("non-Core allocator lookalikes should compile");
-//RS     let user = common::strip_vetted_prelude_modules(&output.rust);
-//RS     assert!(!user.contains("impl __jet_Close for jet_mem::"), "{user}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn fixed_over_exclusively_borrows_one_inline_byte_array() {
-//RS     let borrowed = compile_jet(
-//RS         r#"
-//RS use core.mem
-//RS fn run() {
-//RS     bytes := [U8#8]{ uninit }
-//RS     fixed :: mem.Fixed.over(&bytes)
-//RS     bytes[0] = 1
-//RS     close(^fixed)
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("the backing array stays exclusively borrowed while Fixed is live");
-//RS     assert!(borrowed.iter().any(|code| code == "E0212"), "{borrowed:?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn allocator_handles_are_thread_confined() {
-//RS     let src = r#"
-//RS use core.mem
-//RS fn run() {
-//RS     arena :: mem.Arena.new()
-//RS     handle :: task {
-//RS         value :: arena.alloc(1)
-//RS         print(value)
-//RS     }
-//RS     handle.join() ?? panic("task failed")
-//RS }
-//RS "#;
-//RS     let diags = compile_jet(src).expect_err("allocators must not cross task boundaries");
-//RS     assert!(diags.iter().any(|code| code == "E1102"), "{diags:?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn pool_ids_reuse_slots_without_reviving_stale_generations() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let src = r#"
-//RS struct Item { value: Int }
-//RS 
-//RS fn run() {
-//RS     pool := Pool<Item>.new()
-//RS     first :: pool.add(Item{ value: 10 })
-//RS     stale :: first
-//RS     removed :: pool.remove(first)
-//RS     second :: pool.add(Item{ value: 20 })
-//RS     if removed == Val(item) {
-//RS         print(item.value)
-//RS     } else {
-//RS         print(-1)
-//RS     }
-//RS     print(stale == second)
-//RS     print(pool[second].value)
-//RS }
-//RS "#;
-//RS     let (code, stdout, stderr) = run_jet("pool_generation", src);
-//RS     assert_eq!(code, 0, "{stderr}");
-//RS     assert_eq!(stdout, "10\nfalse\n20\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn stale_pool_id_panics_instead_of_reading_reused_slot() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let src = r#"
-//RS struct Item { value: Int }
-//RS 
-//RS fn run() {
-//RS     pool := Pool<Item>.new()
-//RS     first :: pool.add(Item{ value: 10 })
-//RS     stale :: first
-//RS     _removed :: pool.remove(first)
-//RS     _second :: pool.add(Item{ value: 20 })
-//RS     print(pool[stale].value)
-//RS }
-//RS "#;
-//RS     let (code, _stdout, stderr) = run_jet("pool_stale", src);
-//RS     assert_eq!(code, 70, "{stderr}");
-//RS     assert!(
-//RS         stderr.contains("no longer refers to a live value"),
-//RS         "{stderr}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn default_dev_runs_allocator_constructors_natively() {
-//RS     use jet::Interpreter::RunOutcome;
-//RS     use jet::JitBackend::JitBackend;
-//RS 
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let src = r#"
-//RS use core.mem
-//RS 
-//RS fn run() {
-//RS     arena :: mem.Arena.new(capacity: 32)
-//RS     a :: arena.alloc(1)
-//RS     print(a)
-//RS     &arena.reset()
-//RS     again :: arena.alloc(2)
-//RS     print(again)
-//RS     bump :: mem.Bump.new(capacity: 32)
-//RS     b :: bump.alloc(3)
-//RS     print(b)
-//RS     pool :: mem.Pool.new(slots: 2)
-//RS     p :: pool.alloc(4)
-//RS     print(p)
-//RS     fixed :: mem.Fixed.new(size: 128)
-//RS     f :: fixed.alloc(5)
-//RS     print(f)
-//RS }
-//RS "#;
-//RS     let root = temp_dir("dev");
-//RS     std::fs::create_dir_all(&root).unwrap();
-//RS     let path = root.join("main.jet");
-//RS     std::fs::write(&path, src).unwrap();
-//RS     let mut bundle = jet::Loader::load_entry(path.to_str().unwrap()).unwrap();
-//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "{errors:?}");
-//RS 
-//RS     if jet_jit::cranelift_host_supported() {
-//RS         let policy = common::development_policy();
-//RS         common::compile_cranelift_bundle(&bundle, &policy)
-//RS             .expect("allocator constructors must compile natively in resident JIT");
-//RS     }
-//RS 
-//RS     let policy = common::development_policy();
-//RS     let mut dev = jet_jit::CraneliftBackend::new();
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     match common::run_cranelift_bundle(&mut dev, &bundle, false, &policy) {
-//RS         RunOutcome::Ran { stdout, .. } => {
-//RS             assert!(
-//RS                 !jet_jit::deopt_invoked_for_test(),
-//RS                 "allocator constructors must stay resident-native (no deopt)"
-//RS             );
-//RS             assert_eq!(stdout, "1\n2\n3\n4\n5\n");
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!("resident JIT must run allocator constructors: {diags:?}");
-//RS         }
-//RS     }
-//RS 
-//RS     let (code, stdout, _) = run_jet("pool_generation", src);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, "1\n2\n3\n4\n5\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn try_allocation_example_reports_exhaustion_as_a_value() {
-//RS     let src = include_str!("../Examples/features/memory/try_allocation.jet");
-//RS     let expected = include_str!("../Examples/features/expected/memory/try_allocation.out");
-//RS     if common::have_rustc() {
-//RS         let (code, stdout, stderr) = run_jet("try_allocation", src);
-//RS         assert_eq!(code, 0, "{stderr}");
-//RS         assert_eq!(stdout, expected);
-//RS 
-//RS         let dir = temp_dir("try_allocation_dev");
-//RS         std::fs::create_dir_all(&dir).unwrap();
-//RS         let path = dir.join("main.jet");
-//RS         std::fs::write(&path, src).unwrap();
-//RS         for force_interpreter in [false, true] {
-//RS             let outcome =
-//RS                 jet::Interpreter::dev_iteration(&path.to_string_lossy(), false, force_interpreter);
-//RS             match outcome {
-//RS                 jet::Interpreter::RunOutcome::Ran {
-//RS                     stdout, exit_code, ..
-//RS                 } => {
-//RS                     assert_eq!(exit_code, 0);
-//RS                     assert_eq!(stdout, expected);
-//RS                 }
-//RS                 jet::Interpreter::RunOutcome::Problems(diags) => {
-//RS                     panic!(
-//RS                         "try allocation example failed on {} tier: {diags:?}",
-//RS                         if force_interpreter {
-//RS                             "interpreter"
-//RS                         } else {
-//RS                             "default dev"
-//RS                         }
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         let _ = std::fs::remove_dir_all(&dir);
-//RS     } else {
-//RS         compile_jet(src).expect("try allocation example should pass the front end");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn fault_scheduler_reaches_allocator_try_alloc() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let ran = compile_rust_harness(
-//RS         r#"
-//RS fn main() {
-//RS     let (result, injected, counts) = jet_fault_run_once(
-//RS         &["FS.Write"],
-//RS         Some(1),
-//RS         1,
-//RS         &mut || {
-//RS             let mut bytes = [0u8; 64];
-//RS             let fixed = jet_mem::JetFixed::over(&mut bytes);
-//RS             match fixed.try_alloc(7u64) {
-//RS                 Ok(_) => Err("allocator fault was not injected".to_string()),
-//RS                 Err(_) => Ok(()),
-//RS             }
-//RS         },
-//RS     )
-//RS     .unwrap();
-//RS     assert!(result.is_ok());
-//RS     assert!(injected);
-//RS     assert_eq!(counts[1], 1);
-//RS     println!("ok");
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         ran.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&ran.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn program_allocator_fact_selects_counting_wrapper_for_aot() {
-//RS     let entry = write_program_allocator_project(
-//RS         "program_allocator_counting",
-//RS         Some("mem.Counting.over(mem.Heap, cap: 2.kb)"),
-//RS     );
-//RS     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-//RS     assert!(matches!(
-//RS         bundle.program_allocator,
-//RS         jet::TargetMachine::AllocatorPolicy::Counting {
-//RS             cap: Some(jet::TargetMachine::ByteSize { bytes: 2048 })
-//RS         }
-//RS     ));
-//RS     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS         .into_iter()
-//RS         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
-//RS         .collect::<Vec<_>>();
-//RS     assert!(errors.is_empty(), "{errors:?}");
-//RS     let rust = emit_native_aot(&bundle);
-//RS     assert!(rust.contains(
-//RS         "static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn missing_program_allocator_keeps_hidden_system_heap() {
-//RS     let entry = write_program_allocator_project("program_allocator_default", None);
-//RS     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-//RS     assert_eq!(
-//RS         bundle.program_allocator,
-//RS         jet::TargetMachine::AllocatorPolicy::HostedDefault
-//RS     );
-//RS     let errors = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS         .into_iter()
-//RS         .filter(|diagnostic| diagnostic.severity == jet::Diagnostics::Severity::Error)
-//RS         .collect::<Vec<_>>();
-//RS     assert!(errors.is_empty(), "{errors:?}");
-//RS     let rust = emit_native_aot(&bundle);
-//RS     assert!(!rust.contains("__JET_PROGRAM_ALLOCATOR"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn invalid_program_allocator_fact_is_a_teaching_diagnostic() {
-//RS     let entry = write_program_allocator_project("program_allocator_invalid", Some("mem.Mystery"));
-//RS     let diagnostics = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap_err();
-//RS     let diagnostic = diagnostics
-//RS         .iter()
-//RS         .find(|diagnostic| diagnostic.code == "E1206")
-//RS         .expect("invalid allocator fact must use the registered manifest diagnostic");
-//RS     assert_eq!(diagnostic.what, "Invalid hosted program allocator");
-//RS     assert!(diagnostic.fix.contains("mem.Counting.over"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn program_allocator_kernel_caps_fallible_allocations() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let ran = compile_program_allocator_harness(
-//RS         r#"
-//RS use std::alloc::{GlobalAlloc, Layout};
-//RS 
-//RS fn main() {
-//RS     let allocator = allocator::JetProgramAllocator::counting(64);
-//RS     let first_layout = Layout::from_size_align(48, 16).unwrap();
-//RS     let second_layout = Layout::from_size_align(32, 16).unwrap();
-//RS     let first = unsafe { GlobalAlloc::alloc(&allocator, first_layout) };
-//RS     assert!(!first.is_null());
-//RS     let exhausted = unsafe { GlobalAlloc::alloc(&allocator, second_layout) };
-//RS     assert!(exhausted.is_null());
-//RS     let facts = allocator.facts();
-//RS     assert_eq!(facts.allocations, 1);
-//RS     assert_eq!(facts.requested_bytes, 48);
-//RS     assert_eq!(facts.live_bytes, 48);
-//RS     assert_eq!(facts.high_water_bytes, 48);
-//RS     unsafe { GlobalAlloc::dealloc(&allocator, first, first_layout) };
-//RS     assert_eq!(allocator.facts().live_bytes, 0);
-//RS     println!("ok");
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         ran.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&ran.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn hosted_allocator_reservations_are_cumulative_and_released() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let ran = compile_program_allocator_harness(
-//RS         r#"
-//RS fn main() {
-//RS     let ((), facts) = allocator::jet_with_host_program_allocator(Some(64), || {
-//RS         assert!(allocator::jet_host_program_allocator_try_reserve(48));
-//RS         assert!(!allocator::jet_host_program_allocator_try_reserve(32));
-//RS         assert_eq!(allocator::JET_HOST_PROGRAM_ALLOCATOR.facts().live_bytes, 48);
-//RS     });
-//RS     assert_eq!(facts.live_bytes, 0);
-//RS     assert_eq!(allocator::JET_HOST_PROGRAM_ALLOCATOR.facts().live_bytes, 0);
-//RS     println!("ok");
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         ran.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&ran.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn program_allocator_default_blocks_survive_counting_swap_without_tracking() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let ran = compile_program_allocator_harness(
-//RS         r#"
-//RS use std::alloc::{GlobalAlloc, Layout};
-//RS 
-//RS fn main() {
-//RS     let allocator = allocator::JetProgramAllocator::system();
-//RS     let layout = Layout::from_size_align(32, 16).unwrap();
-//RS     let default_block = unsafe { GlobalAlloc::alloc(&allocator, layout) };
-//RS     assert!(!default_block.is_null());
-//RS     assert_eq!(allocator.facts().allocations, 0);
-//RS 
-//RS     let previous = allocator.configure_counting(64);
-//RS     let counted_block = unsafe { GlobalAlloc::alloc(&allocator, layout) };
-//RS     assert!(!counted_block.is_null());
-//RS     assert_eq!(allocator.facts().live_bytes, 32);
-//RS     unsafe { GlobalAlloc::dealloc(&allocator, default_block, layout) };
-//RS     assert_eq!(allocator.facts().live_bytes, 32);
-//RS 
-//RS     allocator.restore(previous);
-//RS     unsafe { GlobalAlloc::dealloc(&allocator, counted_block, layout) };
-//RS     assert_eq!(allocator.facts().live_bytes, 0);
-//RS     println!("ok");
-//RS }
-//RS "#,
-//RS     );
-//RS     assert!(
-//RS         ran.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&ran.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&ran.stdout), "ok\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn program_allocator_example_matches_aot_jit_and_interpreter() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let source_project =
-//RS         std::fs::canonicalize("Examples/features/memory/program_allocator").unwrap();
-//RS     let staged = common::ProjectScratch::for_project(&source_project, "program-allocator");
-//RS     let expected =
-//RS         std::fs::read_to_string("Examples/features/expected/memory/program_allocator.out").unwrap();
-//RS     for (name, args) in [
-//RS         ("jit", &["run", "run.jet"][..]),
-//RS         ("interpreter", &["run", "--interpret", "run.jet"][..]),
-//RS         ("aot", &["run", "--release", "run.jet"][..]),
-//RS     ] {
-//RS         let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(args)
-//RS             .current_dir(&staged.path)
-//RS             .env("NO_COLOR", "1")
-//RS             .env(
-//RS                 "JET_RUN_CACHE_DIR",
-//RS                 temp_dir(&format!("program_allocator_{name}")),
-//RS             )
-//RS             .output()
-//RS             .unwrap();
-//RS         assert!(
-//RS             output.status.success(),
-//RS             "{name} failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         assert_eq!(String::from_utf8_lossy(&output.stdout), expected, "{name}");
-//RS         assert!(
-//RS             !source_project.join(".jet").exists(),
-//RS             "{name} created `.jet` in the checked-in allocator project"
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 0965 tests/allocator_families.rs:1-932
+// Rust: tests/allocator_families.rs:1
+// Hostile allocator proofs. Rust harnesses are peer comparators over the exact emitted prelude.
+use std.[fs, process]
+use std.process.[Command, Output]
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet.AST.ProgramBundle
+use jet.Codegen.TIR.lower_checked_mir_program_for
+use jet.Codegen.MIRRust.[emit_mir_program, MirRustConfig, MirRustTarget, MirRustExecutionConfig]
+use jet_foundation.MIR.[MirArtifactRequest, MirArtifactTarget, MirArtifactKind, MirArtifactBuildMode, optimize_mir_program, MirOptimizationPolicy]
+use jet_foundation.Layout.TargetLayout
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
 
+// Rust: tests/allocator_families.rs:13
+fn emit_native_aot(bundle: &ProgramBundle) -> String {
+    request :: MirArtifactRequest.new(.RustAot, .NativeExecutable, .Dev)
+    (mir, artifact) :: lower_checked_mir_program_for(bundle, request).expect("checked native artifact lowers through MIR")
+    mir.validate().expect("canonical MIR validates in allocator test")
+    optimized :: optimize_mir_program(^mir, &MirOptimizationPolicy.conservative()).expect("canonical MIR optimizes in allocator test")
+    emit_mir_program(&optimized, &MirRustConfig {
+        target: TargetLayout.host(), target_kind: .Native, root_prefix: "",
+        execution: MirRustExecutionConfig.for_artifact(artifact)
+    })
+}
+// Rust: tests/allocator_families.rs:39
+// GATE #4494: native atomic sequence and process/FS primitives in test harnesses.
+SEQ :: AtomicU64.new(0)
+// Rust: tests/allocator_families.rs:41
+fn temp_dir(label: String) -> OSPath {
+    id :: SEQ.fetch_add(1, Ordering.Relaxed)
+    common.test_scratch_root("allocator_families").join("jet_allocator_{label}_{process.id()}_{id}")
+}
+// Rust: tests/allocator_families.rs:49
+fn compile_rust_harness(body: String) -> Output {
+    dir :: temp_dir("runtime")
+    fs.create_dir_all(&dir).unwrap()
+    source :: dir.join("main.rs")
+    binary :: dir.join("main")
+    observe :: fs.read_to_string("crates/jet-codegen/src/Prelude/Observe.rs").unwrap()
+    uninit :: fs.read_to_string("crates/jet-codegen/src/Prelude/Uninit.rs").unwrap()
+    encoding_errors :: fs.read_to_string("crates/jet-foundation/src/EncodingErrors.rs").unwrap()
+    json_number :: fs.read_to_string("crates/jet-foundation/src/JSONNumber.rs").unwrap()
+    encoding_json :: fs.read_to_string("crates/jet-foundation/src/EncodingJson.rs").unwrap()
+    outcome :: fs.read_to_string("crates/jet-foundation/src/Outcome.rs").unwrap()
+    runtime_diagnostic_core :: fs.read_to_string("crates/jet-foundation/src/RuntimeDiagnosticCore.rs").unwrap()
+    fixed_kernel :: fs.read_to_string("crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs").unwrap()
+    fault_injection :: fs.read_to_string("crates/jet-codegen/src/Prelude/FaultInjection.rs").unwrap()
+    sentry :: fs.read_to_string("crates/jet-foundation/src/MemSentry.rs").unwrap()
+    prelude :: fs.read_to_string("crates/jet-codegen/src/Prelude/Mem.rs").unwrap()
+    // The standalone peer harness has no registered generic runtime row.
+    registry :: """
+#[allow(non_snake_case)]
+mod Registry {
+    pub fn active_runtime_diagnostic(_code: &str) -> Option<&'static super::JetRuntimeDiagnosticRow> { None }
+}
+"""
+    runtime_stop :: """
+fn jet_sentry_runtime_stop(
+    code: &'static str, file: &str, line: u32, gate: &str, operation: &str,
+    obligation: &str, obligation_status: &str, foreign_component: Option<&str>,
+    foreign_fenced: Option<bool>, detail: &str,
+) -> ! {
+    let report = jet_render_runtime_sentry_with_context(
+        match code { "R0801" => "R0801", "R0802" => "R0802", "R0803" => "R0803", _ => "R0801" },
+        file, line, gate, operation, obligation, detail, obligation_status,
+        foreign_component, foreign_fenced,
+    );
+    panic!("{}", report.rendered);
+}
+"""
+    source_text :: "#![allow(dead_code)]\n" + observe + "\nmod jet_encoding_errors {\n" + encoding_errors +
+        "\n}\nmod jet_json_number {\n" + json_number + "\n}\n#[allow(non_snake_case)]\nmod EncodingJson {\n" + encoding_json +
+        "\n}\n#[allow(non_snake_case)]\nmod RuntimeDiagnosticCore {\n" + runtime_diagnostic_core + "\n}\n" + registry + outcome +
+        fault_injection + runtime_stop + "\nmod jet_uninit_semantics {\n" + uninit + "\n}\nmod jet_fixed_kernel {\n" + fixed_kernel +
+        "\n}\nmod jet_mem {\nmod jet_sentry {\n" + sentry + "\n}\n" + prelude + "\n}\n" + body + "\n"
+    fs.write(&source, source_text).unwrap()
+    compiled :: Command.new("rustc").args(["--edition", "2021"]).arg(&source).arg("-o").arg(&binary).output().unwrap()
+    assert(compiled.status.success(), "allocator runtime harness failed to compile:\n{String.from_utf8_lossy(&compiled.stderr)}")
+    Command.new(binary).output().unwrap()
+}
+// Rust: tests/allocator_families.rs:167
+fn compile_program_allocator_harness(body: String) -> Output {
+    dir :: temp_dir("program_allocator")
+    fs.create_dir_all(&dir).unwrap()
+    source :: dir.join("main.rs")
+    binary :: dir.join("main")
+    allocator :: fs.read_to_string("crates/jet-codegen/src/Prelude/ProgramAllocator.rs").unwrap()
+    fs.write(&source, "#![allow(dead_code)]\nmod allocator {\n" + allocator + "\n}\n" + body + "\n").unwrap()
+    compiled :: Command.new("rustc").args(["--edition", "2021"]).arg(&source).arg("-o").arg(&binary).output().unwrap()
+    assert(compiled.status.success(), "program allocator harness failed to compile:\n{String.from_utf8_lossy(&compiled.stderr)}")
+    Command.new(binary).output().unwrap()
+}
+// Rust: tests/allocator_families.rs:194
+fn write_program_allocator_project(label: String, allocator: String?) -> OSPath {
+    root :: temp_dir(label)
+    fs.create_dir_all(&root).unwrap()
+    allocator_line :: allocator.map(fn(value) { "allocator: {value}\n" }).unwrap_or_default()
+    fs.write(root.join("package.jet"), "name: \"{label}\"\nversion: \"0.1.0\"\n{allocator_line}").unwrap()
+    entry :: root.join("main.jet")
+    fs.write(&entry, "fn run() { print(\"ok\") }\n").unwrap()
+    entry
+}
+// Rust: tests/allocator_families.rs:210
+fn compile_jet(src: String) -> Result<jet.CompileOutput, [String]> {
+    dir :: temp_dir("jet")
+    fs.create_dir_all(&dir).unwrap()
+    tir_support.write_test_package(&dir, tir_support.TIR_TEST_PACKAGE)
+    path :: dir.join("main.jet")
+    fs.write(&path, src).unwrap()
+    jet.compile_with_path(src, &path.to_string_lossy()).map_err(fn(diags) { diags.into_iter().map(fn(diag) { diag.code }).collect() })
+}
+// Rust: tests/allocator_families.rs:220
+fn run_jet(label: String, src: String) -> (I32, String, String) {
+    output :: compile_jet(src).unwrap_or_else(fn(diags) { panic("{label} front end failed: {diags:?}") })
+    user :: common.strip_vetted_prelude_modules(&output.rust)
+    unsafe_lines :: user.lines().filter(fn(line) { !common.unsafe_keyword_columns(line).is_empty() }).collect()
+    assert(unsafe_lines.is_empty(), "unsafe escaped the vetted prelude: {unsafe_lines:?}")
+    dir :: temp_dir(label)
+    fs.create_dir_all(&dir).unwrap()
+    source :: dir.join("main.rs")
+    binary :: dir.join("main")
+    fs.write(&source, output.rust).unwrap()
+    compiled :: Command.new("rustc").args(["--edition", "2021"]).arg(&source).arg("-o").arg(&binary).output().unwrap()
+    assert(compiled.status.success(), "rustc rejected generated {label} code:\n{String.from_utf8_lossy(&compiled.stderr)}")
+    ran :: Command.new(binary).output().unwrap()
+    (ran.status.code().unwrap_or(-1), String.from_utf8_lossy(&ran.stdout).into_owned(), String.from_utf8_lossy(&ran.stderr).into_owned())
+}

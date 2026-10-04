@@ -1,0 +1,9 @@
+use std.process.Command
+use jet.FFI.FfiLink
+// Rust: tests/ffi_rust.rs:9
+pub fn add_ffi_bridge_args(rustc: &Command, link: &FfiLink) -> {
+    rustc.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+    loop deps_dir in link.dependency_dirs().filter(|dir| -> dir.is_dir()) {
+        rustc.arg("-L").arg("dependency={deps_dir.display()}")
+    }
+}

@@ -1,0 +1,237 @@
+// Rootless Linux harness for proofs that start without a host Nix store.
+use std.[env, fs, process]
+use std.process.Command
+use std.io.ErrorKind
+use core.sys.target
+
+// Rust: tests/support/no_nix_namespace.rs:11
+#Derive(Debug, Clone, Copy, PartialEq, Eq)
+pub enum NetworkMode { Enabled, Disabled }
+// Rust: tests/support/no_nix_namespace.rs:16
+pub CHILD_MARKER :: "JET_NO_NIX_NAMESPACE_CHILD"
+// Rust: tests/support/no_nix_namespace.rs:17
+pub fn run_in_no_nix_namespace(exact_test_name: String, network_mode: NetworkMode, child_body: fn() -> Unit) -> {
+    // GATE #4494: native process, namespace helpers and executable identity.
+    if env.var_os(CHILD_MARKER).is_some() {
+        assert_no_host_store()
+        child_body()
+        return
+    }
+    if target.selected_os() != "linux" {
+        _ :: (exact_test_name, network_mode)
+        panic("no-host-store namespace proof requires Linux")
+    }
+    unshare :: find_helper("unshare")
+    mount :: find_helper("mount")
+    umount :: find_helper("umount")
+    shell :: find_helper("sh")
+    mkdir :: find_helper("mkdir")
+    ldd :: find_helper("ldd")
+    readlink :: find_helper("readlink")
+    sort :: find_helper("sort")
+    ln :: find_helper("ln")
+    true_binary :: find_helper("true")
+    test_binary :: env.current_exe().expect("current test executable")
+    bootstrap_root :: env.temp_dir().join("jet-no-nix-bootstrap-{process.id()}")
+    fs.create_dir_all(&bootstrap_root).expect("create no-host-store bootstrap")
+    bootstrap_unshare :: patch_interpreter(&unshare, &bootstrap_root.join("unshare"))
+    bootstrap_mount :: patch_interpreter(&mount, &bootstrap_root.join("mount"))
+    bootstrap_shell :: patch_interpreter(&shell, &bootstrap_root.join("sh"))
+    // Derive the subject from the executable, not a test-root-specific common module.
+    subject_binary :: test_binary.parent().and_then(fn(deps) { deps.parent() }).map(fn(profile) { profile.join("jetpack") }).filter(fn(candidate) { candidate.exists() }).expect("jetpack binary beside the test executable")
+    bootstrap_subject :: patch_interpreter(&subject_binary, &bootstrap_root.join("jetpack"))
+    script :: """
+set -eu
+unshare="$1"
+mount="$2"
+umount="$3"
+shell="$4"
+mkdir="$5"
+ldd="$6"
+readlink="$7"
+sort="$8"
+ln="$9"
+test_binary="${{10}}"
+test_name="${{11}}"
+bootstrap_unshare="${{12}}"
+bootstrap_mount="${{13}}"
+bootstrap_shell="${{14}}"
+# The subject's runtime closure must be staged before hiding the store.
+subject_binary="${{15}}"
+subject_image="${{16:-}}"
+true_binary="${{17:-}}"
+scratch_root="${{TMPDIR:-/tmp}}"
+host_nix="$scratch_root/jet-no-nix-host-$$"
+runtime_stage="$scratch_root/jet-no-nix-runtime-$$"
+mount_real="$($readlink -f "$mount")"
+umount_real="$($readlink -f "$umount")"
+mkdir_real="$($readlink -f "$mkdir")"
+set -f
+emit_store_root() {{
+    case "$1" in
+        /nix/store/*)
+            token=${{1#/nix/store/}}
+            printf '/nix/store/%s\n' "${{token%%/*}}"
+            resolved="$($readlink -f "$1" 2>/dev/null || true)"
+            case "$resolved" in
+                /nix/store/*)
+                    token=${{resolved#/nix/store/}}
+                    printf '/nix/store/%s\n' "${{token%%/*}}"
+                    ;;
+            esac
+            ;;
+    esac
+}}
+store_roots() {{
+    if [ -f "$1" ]; then
+        for token in $($ldd "$1"); do
+            emit_store_root "$token"
+        done
+    fi
+    emit_store_root "$($readlink -f "$1")"
+}}
+runtime_roots="$(
+    store_roots "$test_binary"
+    [ -n "$subject_binary" ] && store_roots "$subject_binary"
+    store_roots /bin
+    store_roots /bin/sh
+    store_roots /run/current-system/sw
+    [ -n "$true_binary" ] && store_roots "$true_binary"
+    for helper in "$unshare" "$mount" "$umount" "$shell" "$mkdir" "$ldd" "$readlink" "$sort" "$ln"; do
+        store_roots "$helper"
+    done
+)"
+runtime_roots=$(printf '%s\n' "$runtime_roots" | $sort -u)
+loader=""
+for token in $($ldd "$test_binary"); do
+    case "$token" in
+        */ld-linux*.so*) loader="$token" ;;
+    esac
+done
+[ -n "$loader" ]
+exec 9<"$loader"
+loader=/proc/self/fd/9
+
+stage_path() {{
+    case "$1" in
+        /nix/store/*) printf '%s/store/%s\n' "$runtime_stage" "${{1#/nix/store/}}" ;;
+        *) printf '%s\n' "$1" ;;
+    esac
+}}
+
+library_path=""
+run() {{
+    if [ -n "$library_path" ]; then
+        "$loader" --library-path "$library_path" "$@"
+    else
+        "$loader" "$@"
+    fi
+}}
+
+"$mkdir_real" --coreutils-prog=mkdir -p /nix
+"$mkdir_real" --coreutils-prog=mkdir -p "$host_nix"
+"$mkdir_real" --coreutils-prog=mkdir -p "$runtime_stage/store" "$runtime_stage/usr/bin"
+"$mount_real" --rbind /nix "$host_nix"
+"$mount_real" --make-rslave "$host_nix"
+for runtime in $runtime_roots; do
+    name=${{runtime##*/}}
+    "$mkdir_real" --coreutils-prog=mkdir -p "$runtime_stage/store/$name"
+    "$mount_real" --rbind "$host_nix/store/$name" "$runtime_stage/store/$name"
+    "$mount_real" --make-rslave "$runtime_stage/store/$name"
+done
+for runtime in $runtime_roots; do
+    name=${{runtime##*/}}
+    for libdir in lib lib64; do
+        path="$runtime_stage/store/$name/$libdir"
+        if [ -d "$path" ]; then
+            [ -z "$library_path" ] || library_path="$library_path:"
+            library_path="$library_path$path"
+        fi
+    done
+done
+if [ -n "$subject_image" ]; then
+    "$mount_real" --bind "$subject_image" "$subject_binary"
+fi
+if [ -n "$true_binary" ]; then
+    true_real="$($readlink -f "$true_binary")"
+    "$ln" -s "$(stage_path "$true_real")" "$runtime_stage/usr/bin/true"
+fi
+if [ -n "$bootstrap_unshare" ]; then
+    "$ln" -s "$bootstrap_unshare" "$runtime_stage/usr/bin/unshare"
+fi
+if [ -n "$bootstrap_mount" ]; then
+    "$ln" -s "$bootstrap_mount" "$runtime_stage/usr/bin/mount"
+fi
+if [ -n "$bootstrap_shell" ]; then
+    "$ln" -s "$bootstrap_shell" "$runtime_stage/usr/bin/sh"
+fi
+if [ -n "$bootstrap_unshare$bootstrap_mount$bootstrap_shell" ]; then
+    # Keep absolute interpreter paths on the staged helper set.
+    "$mount_real" --bind "$runtime_stage/usr/bin" /usr/bin
+    "$mount_real" --bind "$runtime_stage/usr/bin" /bin
+fi
+
+mount="$(stage_path "$mount_real")"
+umount="$(stage_path "$umount_real")"
+run "$mount" -t tmpfs -o mode=0755 jet-no-nix /nix
+run "$umount" -l "$host_nix"
+test ! -e /nix/store
+export LD_LIBRARY_PATH="$library_path${{LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}}"
+if [ -n "$library_path" ]; then
+    exec "$loader" --library-path "$library_path" "$test_binary" "$test_name" --exact --include-ignored --nocapture
+else
+    exec "$loader" "$test_binary" "$test_name" --exact --include-ignored --nocapture
+fi
+"""
+    command := Command.new(&unshare)
+    command.args(["--user", "--map-root-user", "--mount", "--propagation", "private"])
+    if network_mode == NetworkMode.Disabled { command.arg("--net") }
+    command.arg(&shell).args(["-c", script, "jet-no-nix-namespace"])
+        .arg(&unshare).arg(mount).arg(umount).arg(&shell).arg(mkdir).arg(ldd).arg(readlink).arg(sort).arg(ln)
+        .arg(test_binary).arg(exact_test_name)
+        .arg(bootstrap_unshare.as_deref().unwrap_or_else(fn() { OSPath.from("") }))
+        .arg(bootstrap_mount.as_deref().unwrap_or_else(fn() { OSPath.from("") }))
+        .arg(bootstrap_shell.as_deref().unwrap_or_else(fn() { OSPath.from("") }))
+        .arg(subject_binary.as_os_str())
+        .arg(bootstrap_subject.as_deref().unwrap_or_else(fn() { OSPath.from("") }))
+        .arg(true_binary.as_os_str()).env(CHILD_MARKER, "1")
+    status :: command.status().unwrap_or_else(fn(error) { panic("starting no-host-store namespace: {error}") })
+    _ :: fs.remove_dir_all(&bootstrap_root)
+    assert(status.success(), "no-host-store namespace proof failed for `{exact_test_name}`: {status}")
+}
+// Rust: tests/support/no_nix_namespace.rs:260
+fn patch_interpreter(source: &OSPath, destination: &OSPath) -> OSPath? {
+    bytes := fs.read(source).ok()?
+    replacement :: "/proc/self/fd/9".as_bytes()
+    marker :: "/nix/store/".as_bytes()
+    search_from := 0
+    loop {
+        offset :: search_from + bytes[search_from..].windows(marker.len()).position(fn(part) { part == marker })?
+        end :: bytes[offset..].iter().position(fn(byte) { byte == 0 }).map_or(bytes.len(), fn(length) { offset + length })
+        value :: &bytes[offset..end]
+        if value.windows(8).any(fn(part) { part == "ld-linux".as_bytes() }) {
+            if replacement.len() >= value.len() { return None }
+            bytes[offset..end].fill(0)
+            bytes[offset..offset + replacement.len()].copy_from_slice(replacement)
+            break
+        }
+        search_from = end.saturating_add(1)
+    }
+    _ :: fs.write(destination, bytes).ok()?
+    _ :: fs.set_permissions(destination, fs.metadata(source).ok()?.permissions()).ok()?
+    Some(destination.to_path_buf())
+}
+// Rust: tests/support/no_nix_namespace.rs:290
+fn assert_no_host_store() -> {
+    // GATE #4409: preserve NotFound versus other I/O failures.
+    match fs.symlink_metadata("/nix/store") {
+        Err(error) if error.kind() == ErrorKind.NotFound -> {}
+        Ok(_) -> { panic("test child started with a visible /nix/store") }
+        Err(error) -> { panic("could not inspect /nix/store before Jetpack: {error}") }
+    }
+}
+// Rust: tests/support/no_nix_namespace.rs:299
+fn find_helper(name: String) -> OSPath {
+    [OSPath.from("/run/current-system/sw/bin/{name}"), OSPath.from("/usr/bin/{name}"), OSPath.from("/bin/{name}")]
+        .into_iter().find(fn(path) { path.is_file() }).unwrap_or_else(fn() { panic("required namespace helper `{name}` is not installed") })
+}

@@ -1,0 +1,45 @@
+// Rust: tests/type_sentinel_guard.rs:1
+// Fake-name sentinels are typed compiler facts smuggled through String fields.
+// Card #1662 retires approximate/quantity/dimension/checked-widen/access sentinels;
+// parser-dispatch tags and binary format magic are deliberately outside this corpus.
+// GATE #4494: original Rust source corpus filesystem inspection.
+use std.fs
+use std.env
+
+// Rust: tests/type_sentinel_guard.rs:31
+ALLOWED_SENTINELS :: [String]{}
+// Rust: tests/type_sentinel_guard.rs:39
+fn foundation_sources() -> [OSPath] {
+    src :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR")).join("crates/jet-foundation/src")
+    out := [src.join("lib.rs"), src.join("Syntax.rs"), src.join("Syntax/core_surface.rs")]
+    stack := [src.join("AST")]
+    loop !stack.is_empty() {
+        dir :: &stack.pop() ?? break
+        loop entry in fs.read_dir(dir).unwrap().flatten() {
+            path :: entry.path()
+            if path.is_dir() { &stack.push(path) }
+            else if path.extension().and_then(fn(e) { e.to_str() }) == Val("rs") { &out.push(path) }
+        }
+    }
+    &out.retain(fn(path) { path.exists() })
+    &out.sort()
+    out
+}
+// Rust: tests/type_sentinel_guard.rs:86
+fn scan(path: OSPath) -> [String] {
+    text :: fs.read_to_string(path).unwrap_or_else(fn(error) { panic("read {path.display()}: {error}") })
+    found := [String]{}
+    loop (line_no, line) in text.lines().enumerate() {
+        rest := line // #4303
+        loop {
+            at :: rest.find("\"\\0") ?? break
+            tail := rest[(at + 1)..] // #4303
+            end :: tail.find("\"") ?? break
+            literal := tail[..<end] // #4303
+            suffix := literal[2..] // #4303
+            &found.push("{path.display()}:{line_no + 1}: \\0{suffix}")
+            rest = tail[(end + 1)..]
+        }
+    }
+    found
+}

@@ -1,1804 +1,678 @@
-// PORT-PENDING 2013 crates-jet-codegen-src-codegen-mirrust-slice-21601: crates/jet-codegen/src/Codegen/MIRRust.rs:21601-23400
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             call_args.push(self.callable_argument_from_owned(parameter_type, access, argument));
-//RS         }
-//RS         let handler_call = if !self.history_runtime_metadata_enabled()
-//RS             && matches!(
-//RS                 self.value_type(function, handler).kind(),
-//RS                 MirTypeKind::Fn(_)
-//RS             ) {
-//RS             self.fn_value_call(format!("{handler_name}.clone()"), &call_args)
-//RS         } else {
-//RS             format!("({handler_name})({})", call_args.join(", "))
-//RS         };
-//RS         format!(
-//RS             "{{ let {handler_name} = {}; std::sync::Arc::new(move |mut __jet_request: {request_type}| {{ {request_validation} {bindings} {handler_call} }}) }}",
-//RS             self.value_move(handler),
-//RS         )
-//RS     }
-//RS     fn http_route_zero_handler_adapter(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         handler: MirValueId,
-//RS         handler_param_names: &[String],
-//RS     ) -> String {
-//RS         let parameter_count = match self.value_type(function, handler).kind() {
-//RS             MirTypeKind::Fn(signature) => signature.params.len(),
-//RS             MirTypeKind::SendFn { params, .. } => params.len(),
-//RS             other => panic!(
-//RS                 "MIR HTTP zero route handler has non-callable type {}",
-//RS                 other.display_name()
-//RS             ),
-//RS         };
-//RS         if parameter_count != 0 || !handler_param_names.is_empty() {
-//RS             panic!("MIR HTTP zero route handler has checked parameters");
-//RS         }
-//RS         let handler_name = format!("__jet_http_zero_route_handler_{}", handler.0);
-//RS         let handler_call = if !self.history_runtime_metadata_enabled()
-//RS             && matches!(
-//RS                 self.value_type(function, handler).kind(),
-//RS                 MirTypeKind::Fn(_)
-//RS             ) {
-//RS             self.fn_value_call(format!("{handler_name}.clone()"), &[])
-//RS         } else {
-//RS             format!("({handler_name})()")
-//RS         };
-//RS         format!(
-//RS             "{{ let {handler_name} = {}; std::sync::Arc::new(move || {{ {handler_call} }}) }}",
-//RS             self.value_move(handler),
-//RS         )
-//RS     }
-//RS 
-//RS     fn http_router_register(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         call: MirPreludeCallId,
-//RS         receiver: MirValueId,
-//RS         path: MirValueId,
-//RS         handler: MirValueId,
-//RS         method: MirHttpMethod,
-//RS         handler_param_names: &[String],
-//RS         contract_json: &str,
-//RS         location: MirPanicLoc,
-//RS     ) -> String {
-//RS         let row = self.prelude_row(call);
-//RS         let adapted_handler = if row.member == "mux_add_zero" {
-//RS             self.http_route_zero_handler_adapter(function, handler, handler_param_names)
-//RS         } else {
-//RS             self.http_route_handler_adapter(function, handler, handler_param_names, contract_json)
-//RS         };
-//RS         let method = format!("{:?}", method.as_str());
-//RS         let path = self.value_slot_reference(path, false);
-//RS         let args = if matches!(row.member.as_str(), "mux_add" | "mux_add_zero") {
-//RS             vec![
-//RS                 self.value_borrow_mut(receiver),
-//RS                 method.clone(),
-//RS                 path.clone(),
-//RS                 adapted_handler,
-//RS             ]
-//RS         } else {
-//RS             let file = format!("{:?}", self.source_file_path(location.file));
-//RS             let line = format!("{}u32", location.line);
-//RS             vec![
-//RS                 self.value_borrow_mut(receiver),
-//RS                 method,
-//RS                 path,
-//RS                 adapted_handler,
-//RS                 file,
-//RS                 line,
-//RS                 format!("{:?}.to_string()", contract_json),
-//RS             ]
-//RS         };
-//RS         self.prelude_call_args_exact(call, &args)
-//RS     }
-//RS 
-//RS     fn columnar_read(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         accessor: MirPreludeCallId,
-//RS         base: MirValueId,
-//RS         column: MirFieldId,
-//RS         column_index: usize,
-//RS         index: MirValueId,
-//RS         location: Option<MirPanicLoc>,
-//RS     ) -> String {
-//RS         let route = self.prelude_row(accessor);
-//RS         if route.family != MirPreludeFamily::ColumnarAccess
-//RS             || route.module != "core.columnar"
-//RS             || route.symbol.name() != "jet_columns_gather_cell"
-//RS             || route.signature.arity != 3
-//RS             || route.signature.max_arity != 3
-//RS             || route.signature.borrow_mask.as_slice() != [true, false, false]
-//RS         {
-//RS             panic!("MIR columnar accessor has non-canonical Prelude route");
-//RS         }
-//RS         let location = location.unwrap_or_else(|| {
-//RS             panic!("MIR columnar read is missing its instruction source location")
-//RS         });
-//RS         let file = format!("{:?}", self.source_file_path(location.file));
-//RS         let line = format!("{}u32", location.line);
-//RS         let base = self.borrowed_value_reference(function, base, MirAccess::Read);
-//RS         let index = self.index_operand(function, index, location);
-//RS         format!(
-//RS             "({base}).cell({column_index}usize, {index}, {file}, {line}).jet_col_{}()",
-//RS             self.field_name(column)
-//RS         )
-//RS     }
-//RS 
-//RS     fn build_string(&self, parts: &[MirStringPart]) -> String {
-//RS         if self.is_core_layer() {
-//RS             let mut literal = String::new();
-//RS             for part in parts {
-//RS                 match part {
-//RS                     MirStringPart::Literal(value) => literal.push_str(value),
-//RS                     MirStringPart::Value(_) => {
-//RS                         panic!("MIR Core string interpolation requires an allocation layer")
-//RS                     }
-//RS                 }
-//RS             }
-//RS             return format!("{literal:?}");
-//RS         }
-//RS         let mut out = String::from("{ let mut __jet_string = String::new();");
-//RS         for part in parts {
-//RS             match part {
-//RS                 MirStringPart::Literal(value) => {
-//RS                     let _ = write!(out, " __jet_string.push_str({value:?});");
-//RS                 }
-//RS                 MirStringPart::Value(value) => {
-//RS                     // An interpolation hole is shown, never consumed: it
-//RS                     // borrows its value (`jet_show(&self)`).
-//RS                     let _ = write!(
-//RS                         out,
-//RS                         " __jet_string.push_str(&({}).jet_show());",
-//RS                         self.value_borrow(*value)
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         out.push_str(" __jet_string }");
-//RS         out
-//RS     }
-//RS 
-//RS     fn project_members(&self, base: MirValueId, members: &[MirFieldId]) -> String {
-//RS         let mut expression = self.value_owned(base);
-//RS         for member in members {
-//RS             expression = self
-//RS                 .native_http_headers_fields_projection(&expression, *member)
-//RS                 .unwrap_or_else(|| format!("({expression}).{}", self.field_name(*member)));
-//RS         }
-//RS         expression
-//RS     }
-//RS 
-//RS     fn call(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         callee: &MirCallee,
-//RS         args: &[MirCallArg],
-//RS         type_args: &[MirType],
-//RS     ) -> String {
-//RS         let invocation = match callee {
-//RS             MirCallee::User(id) => {
-//RS                 let row = self.function_row(*id);
-//RS                 if !row.capture_params.is_empty() {
-//RS                     panic!("MIR captured function called without a Closure operation");
-//RS                 }
-//RS                 let borrow_mask = self.parameter_borrow_mask(&row.params);
-//RS                 self.call_symbol_for_function(
-//RS                     function,
-//RS                     self.function_name(*id),
-//RS                     args,
-//RS                     if row.generic_params.is_empty() {
-//RS                         &[]
-//RS                     } else {
-//RS                         type_args
-//RS                     },
-//RS                     Some(&borrow_mask),
-//RS                 )
-//RS             }
-//RS             MirCallee::Associated {
-//RS                 function: target,
-//RS                 owner,
-//RS             } => self.associated_call(function, *target, owner, args, type_args),
-//RS             MirCallee::Method {
-//RS                 function: target,
-//RS                 owner,
-//RS             } => self.method_call(function, *target, owner, args, type_args),
-//RS             MirCallee::TraitMethod {
-//RS                 method,
-//RS                 trait_ref,
-//RS                 receiver,
-//RS             } => self.trait_method_call(function, *method, trait_ref, receiver, args, type_args),
-//RS             MirCallee::Core(id) => self.core_direct_call(function, *id, args, type_args),
-//RS             MirCallee::Prelude(id) => {
-//RS                 let row = self.prelude_row(*id);
-//RS                 self.validate_prelude_arity(row, args);
-//RS                 self.call_symbol_for_function(
-//RS                     function,
-//RS                     self.prelude_symbol(*id),
-//RS                     args,
-//RS                     type_args,
-//RS                     Some(&row.signature.borrow_mask),
-//RS                 )
-//RS             }
-//RS             MirCallee::Foreign(id) => self.foreign_call(function, *id, args, type_args),
-//RS             MirCallee::Indirect(value) => {
-//RS                 let borrow_mask = self.callable_borrow_mask(self.value_type(function, *value));
-//RS                 self.call_symbol_for_function(
-//RS                     function,
-//RS                     self.value_owned(*value),
-//RS                     args,
-//RS                     type_args,
-//RS                     Some(&borrow_mask),
-//RS                 )
-//RS             }
-//RS         };
-//RS         self.history_instantiated_call(callee, type_args, invocation)
-//RS     }
-//RS 
-//RS     fn call_result_expression(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         callee: &MirCallee,
-//RS         result: Option<MirValueId>,
-//RS         emitted: String,
-//RS     ) -> String {
-//RS         let Some(result) = result else {
-//RS             return emitted;
-//RS         };
-//RS         if self.call_result_is_success(function, callee, result) {
-//RS             format!("({emitted})?")
-//RS         } else {
-//RS             emitted
-//RS         }
-//RS     }
-//RS 
-//RS     fn call_result_is_success(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         callee: &MirCallee,
-//RS         result: MirValueId,
-//RS     ) -> bool {
-//RS         let result_type = self.value_type(function, result);
-//RS         match callee {
-//RS             MirCallee::User(id) => Self::result_matches_return_carrier(
-//RS                 result_type,
-//RS                 &self.function_row(*id).return_type,
-//RS             ),
-//RS             MirCallee::Associated { function: id, .. } | MirCallee::Method { function: id, .. } => {
-//RS                 if matches!(
-//RS                     &self.function_row(*id).form,
-//RS                     MirFunctionForm::TraitMethod {
-//RS                         serde: Some(MirSerdeCodec::Encode),
-//RS                         ..
-//RS                     }
-//RS                 ) {
-//RS                     false
-//RS                 } else {
-//RS                     Self::result_matches_return_carrier(
-//RS                         result_type,
-//RS                         &self.function_row(*id).return_type,
-//RS                     )
-//RS                 }
-//RS             }
-//RS             MirCallee::TraitMethod {
-//RS                 method, trait_ref, ..
-//RS             } => {
-//RS                 let definition = self
-//RS                     .program
-//RS                     .traits
-//RS                     .iter()
-//RS                     .find(|definition| definition.id == trait_ref.id)
-//RS                     .unwrap_or_else(|| panic!("MIR trait {:?} is missing", trait_ref.id));
-//RS                 let method = definition
-//RS                     .methods
-//RS                     .iter()
-//RS                     .find(|candidate| candidate.id == *method)
-//RS                     .unwrap_or_else(|| panic!("MIR trait method {:?} is missing", method));
-//RS                 Self::result_matches_return_carrier(result_type, &method.return_type)
-//RS             }
-//RS             MirCallee::Indirect(value) => {
-//RS                 let Some(return_type) = (match self.value_type(function, *value).kind() {
-//RS                     MirTypeKind::Fn(signature) => signature.ret.as_deref(),
-//RS                     MirTypeKind::SendFn { ret, .. } => ret.as_deref(),
-//RS                     _ => None,
-//RS                 }) else {
-//RS                     return false;
-//RS                 };
-//RS                 Self::result_matches_return_carrier(result_type, return_type)
-//RS             }
-//RS             MirCallee::Core(_) | MirCallee::Prelude(_) | MirCallee::Foreign(_) => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn result_matches_return_carrier(result_type: &MirType, return_type: &MirType) -> bool {
-//RS         return_type
-//RS             .result_parts()
-//RS             .is_some_and(|(success, _)| result_type.same_checked_type(success))
-//RS             || return_type
-//RS                 .option_inner()
-//RS                 .is_some_and(|success| result_type.same_checked_type(success))
-//RS     }
-//RS 
-//RS     fn associated_call(
-//RS         &self,
-//RS         caller: &MirFunction,
-//RS         function: MirFunctionId,
-//RS         owner: &MirType,
-//RS         args: &[MirCallArg],
-//RS         type_args: &[MirType],
-//RS     ) -> String {
-//RS         let row = self.function_row(function);
-//RS         let symbol = match &row.form {
-//RS             MirFunctionForm::Method {
-//RS                 owner: declared_owner,
-//RS                 self_access,
-//RS             } => {
-//RS                 if !declared_owner.same_checked_type(owner) {
-//RS                     panic!(
-//RS                         "MIR associated call {:?} owner does not match its function declaration",
-//RS                         function
-//RS                     );
-//RS                 }
-//RS                 if self_access.is_some() {
-//RS                     panic!(
-//RS                         "MIR associated call {:?} targets an instance method with no receiver",
-//RS                         function
-//RS                     );
-//RS                 }
-//RS                 if self.owner_independent_static(row) {
-//RS                     self.function_name(row.id)
-//RS                 } else {
-//RS                     format!(
-//RS                         "<{}>::{}",
-//RS                         self.rust_type(owner),
-//RS                         self.rust_method_symbol(row)
-//RS                     )
-//RS                 }
-//RS             }
-//RS             MirFunctionForm::TraitMethod {
-//RS                 owner: trait_owner,
-//RS                 trait_ref,
-//RS                 self_access,
-//RS                 ..
-//RS             } => {
-//RS                 if !trait_owner.same_checked_type(owner) {
-//RS                     panic!(
-//RS                         "MIR associated call {:?} owner does not match its trait method declaration",
-//RS                         function
-//RS                     );
-//RS                 }
-//RS                 if self_access.is_some() {
-//RS                     panic!(
-//RS                         "MIR associated call {:?} targets an instance trait method with no receiver",
-//RS                         function
-//RS                     );
-//RS                 }
-//RS                 format!(
-//RS                     "<{} as {}>::{}",
-//RS                     self.rust_type(owner),
-//RS                     self.trait_nominal_name(trait_ref),
-//RS                     self.rust_method_symbol(row)
-//RS                 )
-//RS             }
-//RS             MirFunctionForm::TopLevel => {
-//RS                 panic!(
-//RS                     "MIR associated call {:?} does not target a checked associated method",
-//RS                     function
-//RS                 );
-//RS             }
-//RS         };
-//RS         let borrow_mask = self.parameter_borrow_mask(&row.params);
-//RS         self.call_symbol_for_function(
-//RS             caller,
-//RS             symbol,
-//RS             args,
-//RS             if row.generic_params.is_empty() {
-//RS                 &[]
-//RS             } else {
-//RS                 type_args
-//RS             },
-//RS             Some(&borrow_mask),
-//RS         )
-//RS     }
-//RS     fn foreign_abi_name(&self, abi: &MirForeignAbi) -> String {
-//RS         match abi {
-//RS             MirForeignAbi::C => "C".to_string(),
-//RS             MirForeignAbi::CUnwind => "C-unwind".to_string(),
-//RS             MirForeignAbi::System => "system".to_string(),
-//RS             MirForeignAbi::Stdcall => "stdcall".to_string(),
-//RS             MirForeignAbi::Fastcall => "fastcall".to_string(),
-//RS             MirForeignAbi::Vectorcall => "vectorcall".to_string(),
-//RS             MirForeignAbi::Rust => "Rust".to_string(),
-//RS             MirForeignAbi::Platform(name) => name.clone(),
-//RS         }
-//RS     }
-//RS     fn foreign_language_name(&self, language: MirForeignLanguage) -> &'static str {
-//RS         match language {
-//RS             MirForeignLanguage::C => "C",
-//RS             MirForeignLanguage::Cpp => "C++",
-//RS             MirForeignLanguage::Rust => "Rust",
-//RS             MirForeignLanguage::Assembly => "assembly",
-//RS         }
-//RS     }
-//RS     fn implementation_owner_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
-//RS         let id = match ty.kind() {
-//RS             MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
-//RS             _ => return None,
-//RS         };
-//RS         self.program.types.iter().find(|definition| definition.id == id)
-//RS     }
-//RS     fn c_abi_record_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
-//RS         let id = match ty.kind() {
-//RS             MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
-//RS             _ => return None,
-//RS         };
-//RS         let definition = self.program.types.iter().find(|definition| definition.id == id)?;
-//RS         matches!(
-//RS             &definition.kind,
-//RS             MirTypeDefKind::Struct { .. }
-//RS                 if matches!(
-//RS                     definition.layout,
-//RS                     Some(MirStructLayout::C | MirStructLayout::CAligned { .. })
-//RS                 )
-//RS         )
-//RS         .then_some(definition)
-//RS     }
-//RS     fn c_abi_enum_def(&self, ty: &MirType) -> Option<&MirTypeDef> {
-//RS         let id = match ty.kind() {
-//RS             MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
-//RS             _ => return None,
-//RS         };
-//RS         let definition = self.program.types.iter().find(|definition| definition.id == id)?;
-//RS         match &definition.kind {
-//RS             MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some() => Some(definition),
-//RS             MirTypeDefKind::Distinct { base, .. } => self.c_abi_enum_def(base),
-//RS             MirTypeDefKind::Alias { target } => self.c_abi_enum_def(target),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     fn c_abi_enum_tag_type(&self, tag: MirCEnumTag) -> &'static str {
-//RS         match tag {
-//RS             MirCEnumTag::CInt => "i32",
-//RS             MirCEnumTag::U8 => "u8",
-//RS             MirCEnumTag::I8 => "i8",
-//RS             MirCEnumTag::U16 => "u16",
-//RS             MirCEnumTag::I16 => "i16",
-//RS             MirCEnumTag::U32 => "u32",
-//RS             MirCEnumTag::I32 => "i32",
-//RS             MirCEnumTag::U64 => "u64",
-//RS             MirCEnumTag::I64 => "i64",
-//RS         }
-//RS     }
-//RS     fn c_abi_enum_repr_tag(&self, definition: &MirTypeDef) -> Option<&'static str> {
-//RS         match self.c_abi_enum_tag(definition) {
-//RS             MirCEnumTag::CInt => None,
-//RS             tag => Some(self.c_abi_enum_tag_type(tag)),
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     fn c_abi_enum_name(&self, definition: &MirTypeDef) -> String {
-//RS         mangle_path(&format!("__jet_c_abi_enum::{}", definition.key))
-//RS     }
-//RS 
-//RS     fn c_abi_enum_payload_name(&self, definition: &MirTypeDef) -> String {
-//RS         format!("{}_payload", self.c_abi_enum_name(definition))
-//RS     }
-//RS 
-//RS     fn c_abi_enum_variant_name(&self, variant: &MirVariant) -> String {
-//RS         mangle_variant(&variant.name)
-//RS     }
-//RS 
-//RS     fn c_abi_enum_has_payload(&self, definition: &MirTypeDef) -> bool {
-//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS             return false;
-//RS         };
-//RS         variants
-//RS             .iter()
-//RS             .any(|variant| !matches!(&variant.payload, MirVariantPayload::Unit))
-//RS     }
-//RS 
-//RS     fn c_abi_enum_facts<'d>(&self, definition: &'d MirTypeDef) -> &'d LayoutFacts {
-//RS         let Some(layout) = definition.enum_layout.as_ref() else {
-//RS             panic!(
-//RS                 "C ABI enum {:?} has no checked TargetLayoutEngine facts",
-//RS                 definition.id
-//RS             );
-//RS         };
-//RS         let Some(_) = layout.bytes else {
-//RS             panic!(
-//RS                 "C ABI enum {:?} has unknown checked size/alignment facts",
-//RS                 definition.id
-//RS             );
-//RS         };
-//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS             unreachable!();
-//RS         };
-//RS         if layout.fields.len() != variants.len() {
-//RS             panic!(
-//RS                 "C ABI enum {:?} layout fact count does not match variants",
-//RS                 definition.id
-//RS             );
-//RS         }
-//RS         for (variant, fact) in variants.iter().zip(&layout.fields) {
-//RS             if fact.name != variant.name
-//RS                 || fact.offset.is_none()
-//RS                 || fact.size.is_none()
-//RS                 || fact.alignment.is_none()
-//RS                 || fact.stride.is_none()
-//RS             {
-//RS                 panic!(
-//RS                     "C ABI enum {:?} has incomplete checked layout fact for variant `{}`",
-//RS                     definition.id, variant.name
-//RS                 );
-//RS             }
-//RS         }
-//RS         layout
-//RS     }
-//RS 
-//RS     fn c_abi_enum_tag(&self, definition: &MirTypeDef) -> MirCEnumTag {
-//RS         definition
-//RS             .c_layout_tag
-//RS             .unwrap_or_else(|| panic!("C ABI enum {:?} has no checked tag fact", definition.id))
-//RS     }
-//RS 
-//RS     fn c_abi_enum_variant_discriminant(
-//RS         &self,
-//RS         definition: &MirTypeDef,
-//RS         variant: &MirVariant,
-//RS     ) -> i64 {
-//RS         self.c_abi_enum_facts(definition);
-//RS         variant.discriminant.unwrap_or_else(|| {
-//RS             panic!(
-//RS                 "C ABI enum {:?} variant `{}` has no checked discriminant",
-//RS                 definition.id, variant.name
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS 
-//RS     fn c_abi_record_name(&self, definition: &MirTypeDef) -> String {
-//RS         mangle_path(&format!("__jet_c_abi_record::{}", definition.key))
-//RS     }
-//RS 
-//RS     fn c_abi_type(&self, ty: &MirType, access: MirAccess) -> Option<String> {
-//RS         let scalar = |name: &str| {
-//RS             if access == MirAccess::Write {
-//RS                 format!("*mut {name}")
-//RS             } else {
-//RS                 name.to_string()
-//RS             }
-//RS         };
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int => Some(scalar("i64")),
-//RS             MirTypeKind::Float => Some(scalar("f64")),
-//RS             MirTypeKind::Float32 => Some(scalar("f32")),
-//RS             MirTypeKind::Bool => Some(scalar("bool")),
-//RS             MirTypeKind::Char => Some(scalar("u32")),
-//RS             MirTypeKind::IntN { .. } => Some(scalar(&self.rust_type(ty))),
-//RS             MirTypeKind::String => Some(if access == MirAccess::Write {
-//RS                 "*mut core::ffi::c_char".to_string()
-//RS             } else {
-//RS                 "*const core::ffi::c_char".to_string()
-//RS             }),
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.c_abi_type(base, access),
-//RS             MirTypeKind::Apply { .. } if self.is_handle_type(ty) => {
-//RS                 Some("*mut core::ffi::c_void".to_string())
-//RS             }
-//RS             MirTypeKind::Apply { .. } => {
-//RS                 if let Some(definition) = self.c_abi_enum_def(ty) {
-//RS                     self.c_abi_enum_facts(definition);
-//RS                     let native = if self.c_abi_enum_has_payload(definition) {
-//RS                         self.c_abi_enum_name(definition)
-//RS                     } else {
-//RS                         self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition))
-//RS                             .to_string()
-//RS                     };
-//RS                     return Some(if access == MirAccess::Write {
-//RS                         format!("*mut {native}")
-//RS                     } else {
-//RS                         native
-//RS                     });
-//RS                 }
-//RS                 if let Some(definition) = self.c_abi_record_def(ty) {
-//RS                     let name = self.c_abi_record_name(definition);
-//RS                     return Some(if access == MirAccess::Write {
-//RS                         format!("*mut {name}")
-//RS                     } else {
-//RS                         name
-//RS                     });
-//RS                 }
-//RS                 let id = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id))?,
-//RS                     _ => unreachable!(),
-//RS                 };
-//RS                 let definition = self.program.types.iter().find(|definition| definition.id == id)?;
-//RS                 match &definition.kind {
-//RS                     MirTypeDefKind::Distinct { base, .. } => self.c_abi_type(base, access),
-//RS                     MirTypeDefKind::Alias { target } => self.c_abi_type(target, access),
-//RS                     _ => None,
-//RS                 }
-//RS             }
-//RS 
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS     fn c_abi_record_string_count(&self, ty: &MirType) -> usize {
-//RS         match ty.kind() {
-//RS             MirTypeKind::String => 1,
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.c_abi_record_string_count(base),
-//RS             MirTypeKind::Apply { .. } => {
-//RS                 if let Some(definition) = self.c_abi_enum_def(ty) {
-//RS                     let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS                         unreachable!();
-//RS                     };
-//RS                     return variants
-//RS                         .iter()
-//RS                         .map(|variant| match &variant.payload {
-//RS                             MirVariantPayload::Unit => 0,
-//RS                             MirVariantPayload::Single(payload) => {
-//RS                                 self.c_abi_record_string_count(payload)
-//RS                             }
-//RS                             MirVariantPayload::Named(fields) => fields
-//RS                                 .iter()
-//RS                                 .map(|field| self.c_abi_record_string_count(&field.ty))
-//RS                                 .sum(),
-//RS                         })
-//RS                         .sum();
-//RS                 }
-//RS                 if let Some(definition) = self.c_abi_record_def(ty) {
-//RS                     let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
-//RS                         return 0;
-//RS                     };
-//RS                     fields
-//RS                         .iter()
-//RS                         .map(|field| self.c_abi_record_string_count(&field.ty))
-//RS                         .sum()
-//RS                 } else {
-//RS                     let id = match ty.kind() {
-//RS                         MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                         _ => None,
-//RS                     };
-//RS                     let Some(id) = id else {
-//RS                         return 0;
-//RS                     };
-//RS                     let Some(definition) =
-//RS                         self.program.types.iter().find(|definition| definition.id == id)
-//RS                     else {
-//RS                         return 0;
-//RS                     };
-//RS                     match &definition.kind {
-//RS                         MirTypeDefKind::Distinct { base, .. } => {
-//RS                             self.c_abi_record_string_count(base)
-//RS                         }
-//RS                         MirTypeDefKind::Alias { target } => {
-//RS                             self.c_abi_record_string_count(target)
-//RS                         }
-//RS 
-//RS                         _ => 0,
-//RS                     }
-//RS                 }
-//RS             }
-//RS             _ => 0,
-//RS         }
-//RS     }
-//RS     fn c_abi_write_temp_needed(&self, ty: &MirType) -> bool {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int | MirTypeKind::String | MirTypeKind::Char => true,
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.c_abi_write_temp_needed(base),
-//RS             MirTypeKind::Apply { .. } => {
-//RS                 if self.c_abi_enum_def(ty).is_some() {
-//RS                     return true;
-//RS                 }
-//RS                 if self.c_abi_record_def(ty).is_some() {
-//RS                     return true;
-//RS                 }
-//RS                 let id = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                     _ => None,
-//RS                 };
-//RS                 let Some(id) = id else {
-//RS                     return false;
-//RS                 };
-//RS                 let Some(definition) =
-//RS                     self.program.types.iter().find(|definition| definition.id == id)
-//RS                 else {
-//RS                     return false;
-//RS                 };
-//RS                 match &definition.kind {
-//RS                     MirTypeDefKind::Distinct { base, .. } => self.c_abi_write_temp_needed(base),
-//RS                     MirTypeDefKind::Alias { target } => self.c_abi_write_temp_needed(target),
-//RS                     _ => false,
-//RS                 }
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS     fn c_abi_scalar_kind(&self, ty: &MirType) -> Option<&'static str> {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int => Some("int"),
-//RS             MirTypeKind::String => Some("string"),
-//RS             MirTypeKind::Char => Some("char"),
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.c_abi_scalar_kind(base),
-//RS             MirTypeKind::Apply { .. } => {
-//RS                 let id = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                     _ => None,
-//RS                 }?;
-//RS                 let definition = self.program.types.iter().find(|definition| definition.id == id)?;
-//RS                 match &definition.kind {
-//RS                     MirTypeDefKind::Distinct { base, .. } => self.c_abi_scalar_kind(base),
-//RS                     MirTypeDefKind::Alias { target } => self.c_abi_scalar_kind(target),
-//RS                     _ => None,
-//RS                 }
-//RS             }
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     fn emit_c_abi_records(&self, out: &mut String) {
-//RS         for definition in &self.program.types {
-//RS             if !self.module_selected(definition.module)
-//RS                 || !matches!(
-//RS                     definition.layout,
-//RS                     Some(MirStructLayout::C | MirStructLayout::CAligned { .. })
-//RS                 )
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let MirTypeDefKind::Struct { fields, .. } = &definition.kind else {
-//RS                 continue;
-//RS             };
-//RS             let name = self.c_abi_record_name(definition);
-//RS             match definition.layout {
-//RS                 Some(MirStructLayout::C) => out.push_str("#[repr(C)]\n"),
-//RS                 Some(MirStructLayout::CAligned { .. }) => {
-//RS                     let fact = definition
-//RS                         .layout_alignment
-//RS                         .as_ref()
-//RS                         .unwrap_or_else(|| {
-//RS                             panic!("C ABI record {:?} has no checked alignment fact", definition.id)
-//RS                         });
-//RS                     let _ = writeln!(out, "#[repr(C, align({}))]", fact.effective_alignment);
-//RS                 }
-//RS                 _ => unreachable!(),
-//RS             }
-//RS             out.push_str("#[derive(Clone, Copy)]\n");
-//RS             let _ = writeln!(out, "struct {name} {{");
-//RS             for field in fields {
-//RS                 let field_ty = self.c_abi_type(&field.ty, MirAccess::Read).unwrap_or_else(|| {
-//RS                     panic!(
-//RS                         "C ABI record field {:?} has no checked physical representation",
-//RS                         field.id
-//RS                     )
-//RS                 });
-//RS                 let _ = writeln!(out, "    {}: {field_ty},", self.field_name(field.id));
-//RS             }
-//RS             out.push_str("}\n\n");
-//RS         }
-//RS         self.emit_c_abi_enums(out);
-//RS     }
-//RS 
-//RS     fn emit_c_abi_enums(&self, out: &mut String) {
-//RS         for definition in &self.program.types {
-//RS             if !self.module_selected(definition.module)
-//RS                 || !matches!(
-//RS                     &definition.kind,
-//RS                     MirTypeDefKind::Enum { .. } if definition.c_layout_tag.is_some()
-//RS                 )
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             self.c_abi_enum_facts(definition);
-//RS             if !self.c_abi_enum_has_payload(definition) {
-//RS                 continue;
-//RS             }
-//RS             let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS                 unreachable!();
-//RS             };
-//RS             let enum_name = self.c_abi_enum_name(definition);
-//RS             let payload_name = self.c_abi_enum_payload_name(definition);
-//RS             let tag_name = self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition));
-//RS             for variant in variants {
-//RS                 let MirVariantPayload::Named(fields) = &variant.payload else {
-//RS                     continue;
-//RS                 };
-//RS                 let variant_name = format!("{payload_name}_{}", self.c_abi_enum_variant_name(variant));
-//RS                 let _ = writeln!(out, "#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {variant_name} {{");
-//RS                 for field in fields {
-//RS                     let field_ty = self.c_abi_type(&field.ty, MirAccess::Read).unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "C ABI enum {:?} field {:?} has no checked physical representation",
-//RS                             definition.id, field.id
-//RS                         )
-//RS                     });
-//RS                     let _ = writeln!(out, "    {}: {field_ty},", self.field_name(field.id));
-//RS                 }
-//RS                 out.push_str("}\n\n");
-//RS             }
-//RS             let _ = writeln!(out, "#[repr(C)]\n#[derive(Clone, Copy)]\nunion {payload_name} {{");
-//RS             out.push_str("    __jet_unit: u8,\n");
-//RS             for variant in variants {
-//RS                 let variant_name = self.c_abi_enum_variant_name(variant);
-//RS                 let field_ty = match &variant.payload {
-//RS                     MirVariantPayload::Unit => continue,
-//RS                     MirVariantPayload::Single(payload) => self
-//RS                         .c_abi_type(payload, MirAccess::Read)
-//RS                         .unwrap_or_else(|| {
-//RS                             panic!(
-//RS                                 "C ABI enum {:?} variant `{}` has no checked physical payload",
-//RS                                 definition.id, variant.name
-//RS                             )
-//RS                         }),
-//RS                     MirVariantPayload::Named(_) => {
-//RS                         format!("{payload_name}_{variant_name}")
-//RS                     }
-//RS                 };
-//RS                 let _ = writeln!(out, "    {variant_name}: {field_ty},");
-//RS             }
-//RS             out.push_str("}\n\n");
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {enum_name} {{\n    tag: {tag_name},\n    payload: {payload_name},\n}}\n\n"
-//RS             );
-//RS         }
-//RS     }
-//RS     fn c_abi_encode_enum_ref(
-//RS         &self,
-//RS         definition: &MirTypeDef,
-//RS         value: &str,
-//RS     ) -> String {
-//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS             unreachable!();
-//RS         };
-//RS         let enum_name = self.type_name(definition.id);
-//RS         let tag_type = self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition));
-//RS         let payload = self.c_abi_enum_has_payload(definition);
-//RS         let arms = variants
-//RS             .iter()
-//RS             .map(|variant| {
-//RS                 let variant_name = self.c_abi_enum_variant_name(variant);
-//RS                 let tag = format!(
-//RS                     "({} as {tag_type})",
-//RS                     self.c_abi_enum_variant_discriminant(definition, variant)
-//RS                 );
-//RS                 match &variant.payload {
-//RS                     MirVariantPayload::Unit => {
-//RS                         if payload {
-//RS                             format!(
-//RS                                 "{enum_name}::{variant_name} => {} {{ tag: {tag}, payload: {} {{ __jet_unit: 0 }} }}",
-//RS                                 self.c_abi_enum_name(definition),
-//RS                                 self.c_abi_enum_payload_name(definition)
-//RS                             )
-//RS                         } else {
-//RS                             format!("{enum_name}::{variant_name} => {tag}")
-//RS                         }
-//RS                     }
-//RS                     MirVariantPayload::Single(payload_ty) => {
-//RS                         let encoded = self.c_abi_encode_ref(payload_ty, "payload");
-//RS                         format!(
-//RS                             "{enum_name}::{variant_name}(payload) => {} {{ tag: {tag}, payload: {} {{ {variant_name}: {encoded} }} }}",
-//RS                             self.c_abi_enum_name(definition),
-//RS                             self.c_abi_enum_payload_name(definition)
-//RS                         )
-//RS                     }
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         let encoded_fields = fields
-//RS                             .iter()
-//RS                             .map(|field| {
-//RS                                 let field_name = self.field_name(field.id);
-//RS                                 let encoded = self.c_abi_encode_ref(&field.ty, &field_name);
-//RS                                 format!("{field_name}: {encoded}")
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ");
-//RS                         let variant_payload = format!(
-//RS                             "{}_{} {{ {encoded_fields} }}",
-//RS                             self.c_abi_enum_payload_name(definition),
-//RS                             variant_name
-//RS                         );
-//RS                         format!(
-//RS                             "{enum_name}::{variant_name} {{ {} }} => {} {{ tag: {tag}, payload: {} {{ {variant_name}: {variant_payload} }} }}",
-//RS                             fields
-//RS                                 .iter()
-//RS                                 .map(|field| self.field_name(field.id))
-//RS                                 .collect::<Vec<_>>()
-//RS                                 .join(", "),
-//RS                             self.c_abi_enum_name(definition),
-//RS                             self.c_abi_enum_payload_name(definition)
-//RS                         )
-//RS                     }
-//RS                 }
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         format!("match ({value}) {{ {arms} }}")
-//RS     }
-//RS 
-//RS     fn c_abi_encode_ref(&self, ty: &MirType, value: &str) -> String {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int => self.native_int_argument(format!("*({value})"), None),
-//RS             MirTypeKind::String => format!(
-//RS                 "{{ __jet_c_strings.push(std::ffi::CString::new(({value}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\"))); __jet_c_strings.last().unwrap().as_ptr() }}"
-//RS             ),
-//RS             MirTypeKind::Float
-//RS             | MirTypeKind::Float32
-//RS             | MirTypeKind::Bool
-//RS             | MirTypeKind::IntN { .. } => format!("*({value})"),
-//RS             MirTypeKind::Char => format!("(*({value})) as u32"),
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.c_abi_encode_ref(base, value),
-//RS             MirTypeKind::Apply { .. } if self.is_handle_type(ty) => {
-//RS                 format!("({value}).as_raw()")
-//RS             }
-//RS             MirTypeKind::Apply { .. } => {
-//RS                 if self.c_abi_enum_def(ty).is_some() {
-//RS                     let id = match ty.kind() {
-//RS                         MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                         _ => None,
-//RS                     };
-//RS                     if let Some(id) = id {
-//RS                         if let Some(nominal) =
-//RS                             self.program.types.iter().find(|definition| definition.id == id)
-//RS                         {
-//RS                             match &nominal.kind {
-//RS                                 MirTypeDefKind::Enum { .. } => {
-//RS                                     let definition = self.c_abi_enum_def(ty).unwrap();
-//RS                                     return self.c_abi_encode_enum_ref(definition, value);
-//RS                                 }
-//RS                                 MirTypeDefKind::Distinct { base, .. } => {
-//RS                                     return self
-//RS                                         .c_abi_encode_ref(base, &format!("&({value}).0"));
-//RS                                 }
-//RS                                 MirTypeDefKind::Alias { target } => {
-//RS                                     return self.c_abi_encode_ref(target, value);
-//RS                                 }
-//RS                                 _ => {}
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 if let Some(definition) = self.c_abi_record_def(ty) {
-//RS                     let fields = match &definition.kind {
-//RS                         MirTypeDefKind::Struct { fields, .. } => fields,
-//RS                         _ => unreachable!(),
-//RS                     };
-//RS                     let source = value.to_string();
-//RS                     let fields = fields
-//RS                         .iter()
-//RS                         .map(|field| {
-//RS                             let field_value =
-//RS                                 format!("&({source}).{}", self.field_name(field.id));
-//RS                             format!(
-//RS                                 "{}: {}",
-//RS                                 self.field_name(field.id),
-//RS                                 self.c_abi_encode_ref(&field.ty, &field_value)
-//RS                             )
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     return format!("{} {{ {fields} }}", self.c_abi_record_name(definition));
-//RS                 }
-//RS                 let id = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                     _ => None,
-//RS                 };
-//RS                 let Some(id) = id else {
-//RS                     return value.to_string();
-//RS                 };
-//RS                 let Some(definition) = self.program.types.iter().find(|definition| definition.id == id)
-//RS                 else {
-//RS                     return value.to_string();
-//RS                 };
-//RS                 match &definition.kind {
-//RS                     MirTypeDefKind::Distinct { base, .. } => {
-//RS                         self.c_abi_encode_ref(base, &format!("&({value}).0"))
-//RS                     }
-//RS                     MirTypeDefKind::Alias { target } => self.c_abi_encode_ref(target, value),
-//RS                     _ => value.to_string(),
-//RS                 }
-//RS             }
-//RS             _ => value.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn c_abi_encode_owned(&self, ty: &MirType, value: String) -> String {
-//RS         if matches!(ty.kind(), MirTypeKind::Apply { .. }) && self.c_abi_record_def(ty).is_some() {
-//RS             return format!(
-//RS                 "{{ let __jet_c_value = {value}; {} }}",
-//RS                 self.c_abi_encode_ref(ty, "&__jet_c_value")
-//RS             );
-//RS         }
-//RS         self.c_abi_encode_ref(ty, &format!("&({value})"))
-//RS     }
-//RS 
-//RS     fn c_abi_decode_enum_owned(
-//RS         &self,
-//RS         definition: &MirTypeDef,
-//RS         value: &str,
-//RS     ) -> String {
-//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS             unreachable!();
-//RS         };
-//RS         let enum_name = self.type_name(definition.id);
-//RS         let tag_type = self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition));
-//RS         let payload = self.c_abi_enum_has_payload(definition);
-//RS         let arms = variants
-//RS             .iter()
-//RS             .map(|variant| {
-//RS                 let variant_name = self.c_abi_enum_variant_name(variant);
-//RS                 let tag = format!(
-//RS                     "({} as {tag_type})",
-//RS                     self.c_abi_enum_variant_discriminant(definition, variant)
-//RS                 );
-//RS                 match &variant.payload {
-//RS                     MirVariantPayload::Unit => {
-//RS                         if payload {
-//RS                             format!("{tag} => {enum_name}::{variant_name}")
-//RS                         } else {
-//RS                             format!("{tag} => {enum_name}::{variant_name}")
-//RS                         }
-//RS                     }
-//RS                     MirVariantPayload::Single(payload_ty) => {
-//RS                         let physical = format!(
-//RS                             "__jet_c_value.payload.{}",
-//RS                             self.c_abi_enum_variant_name(variant)
-//RS                         );
-//RS                         let decoded = self.c_abi_decode_owned(payload_ty, &physical);
-//RS                         format!(
-//RS                             "{tag} => unsafe {{ {enum_name}::{variant_name}({decoded}) }}"
-//RS                         )
-//RS                     }
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         let payload_name = self.c_abi_enum_variant_name(variant);
-//RS                         let decoded_fields = fields
-//RS                             .iter()
-//RS                             .map(|field| {
-//RS                                 let field_name = self.field_name(field.id);
-//RS                                 let physical = format!("__jet_c_payload.{field_name}");
-//RS                                 format!(
-//RS                                     "{field_name}: {}",
-//RS                                     self.c_abi_decode_owned(&field.ty, &physical)
-//RS                                 )
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ");
-//RS                         format!(
-//RS                             "{tag} => unsafe {{ let __jet_c_payload = __jet_c_value.payload.{payload_name}; {enum_name}::{variant_name} {{ {decoded_fields} }} }}"
-//RS                         )
-//RS                     }
-//RS                 }
-//RS             })
-//RS             .chain(std::iter::once(
-//RS                 "_ => panic!(\"native C enum discriminant is invalid\")".to_string(),
-//RS             ))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         if payload {
-//RS             format!("{{ let __jet_c_value = {value}; match __jet_c_value.tag {{ {arms} }} }}")
-//RS         } else {
-//RS             format!("match ({value}) {{ {arms} }}")
-//RS         }
-//RS     }
-//RS 
-//RS     fn c_abi_decode_owned(&self, ty: &MirType, value: &str) -> String {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int => {
-//RS                 format!("{}jet_std::jet_int_owned_from_i64({value})", self.config.root_prefix)
-//RS             }
-//RS             MirTypeKind::Float
-//RS             | MirTypeKind::Float32
-//RS             | MirTypeKind::Bool
-//RS             | MirTypeKind::IntN { .. } => value.to_string(),
-//RS             MirTypeKind::Char => format!(
-//RS                 "char::from_u32(({value}) as u32).unwrap_or_else(|| panic!(\"native C Char is invalid\"))"
-//RS             ),
-//RS             MirTypeKind::String => format!(
-//RS                 "{{ let __jet_c_ptr = {value}; if __jet_c_ptr.is_null() {{ panic!(\"native C String is null\") }}; unsafe {{ std::ffi::CStr::from_ptr(__jet_c_ptr) }}.to_str().unwrap_or_else(|_| panic!(\"native C String is not UTF-8\")).to_owned() }}"
-//RS             ),
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.c_abi_decode_owned(base, value),
-//RS             MirTypeKind::Apply { .. } if self.is_handle_type(ty) => {
-//RS                 format!("{}::from_raw({value})", self.rust_type(ty))
-//RS             }
-//RS             MirTypeKind::Apply { .. } => {
-//RS                 let enum_id = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                     _ => None,
-//RS                 };
-//RS                 if self.c_abi_enum_def(ty).is_some() {
-//RS                     if let Some(enum_id) = enum_id {
-//RS                         if let Some(definition) =
-//RS                             self.program.types.iter().find(|definition| definition.id == enum_id)
-//RS                         {
-//RS                             match &definition.kind {
-//RS                                 MirTypeDefKind::Enum { .. } => {
-//RS                                     let enum_definition = self.c_abi_enum_def(ty).unwrap();
-//RS                                     return self.c_abi_decode_enum_owned(enum_definition, value);
-//RS                                 }
-//RS                                 MirTypeDefKind::Distinct { base, .. } => {
-//RS                                     return format!(
-//RS                                         "{}({})",
-//RS                                         self.rust_type(ty),
-//RS                                         self.c_abi_decode_owned(base, value)
-//RS                                     );
-//RS                                 }
-//RS                                 MirTypeDefKind::Alias { target } => {
-//RS                                     return self.c_abi_decode_owned(target, value);
-//RS                                 }
-//RS                                 _ => {}
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let id = match ty.kind() {
-//RS                     MirTypeKind::Apply { name, .. } => ty.identity.or(Some(name.id)),
-//RS                     _ => None,
-//RS                 };
-//RS                 let Some(id) = id else {
-//RS                     return value.to_string();
-//RS                 };
-//RS                 let Some(definition) = self.program.types.iter().find(|definition| definition.id == id)
-//RS                 else {
-//RS                     return value.to_string();
-//RS                 };
-//RS                 if let Some(record) = self.c_abi_record_def(ty) {
-//RS                     let fields = match &record.kind {
-//RS                         MirTypeDefKind::Struct { fields, .. } => fields,
-//RS                         _ => unreachable!(),
-//RS                     };
-//RS                     let fields = fields
-//RS                         .iter()
-//RS                         .map(|field| {
-//RS                             let field_value =
-//RS                                 format!("__jet_c_value.{}", self.field_name(field.id));
-//RS                             format!(
-//RS                                 "{}: {}",
-//RS                                 self.field_name(field.id),
-//RS                                 self.c_abi_decode_owned(&field.ty, &field_value)
-//RS                             )
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     return format!("{{ let __jet_c_value = {value}; {} {{ {fields} }} }}", self.rust_type(ty));
-//RS                 }
-//RS                 match &definition.kind {
-//RS                     MirTypeDefKind::Distinct { base, .. } => format!(
-//RS                         "{}({})",
-//RS                         self.rust_type(ty),
-//RS                         self.c_abi_decode_owned(base, value)
-//RS                     ),
-//RS                     MirTypeDefKind::Alias { target } => self.c_abi_decode_owned(target, value),
-//RS                     _ => value.to_string(),
-//RS                 }
-//RS             }
-//RS             _ => value.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn foreign_call_arg(
-//RS         &self,
-//RS         caller: &MirFunction,
-//RS         foreign: &MirForeign,
-//RS         arg: &MirCallArg,
-//RS         param: &MirParam,
-//RS     ) -> String {
-//RS         if matches!(foreign.foreign_language, MirForeignLanguage::C)
-//RS             && !(foreign.handle.is_some() && self.is_handle_type(&param.ty))
-//RS         {
-//RS             if self.c_abi_record_def(&param.ty).is_some() {
-//RS                 return match arg.access {
-//RS                     MirAccess::Read => self
-//RS                         .c_abi_encode_ref(&param.ty, &self.value_slot_reference(arg.value, false)),
-//RS                     MirAccess::Write => panic!(
-//RS                         "MIR foreign C call {:?} passes C record parameter `{}` with write access, which has no checked writeback lowering",
-//RS                         foreign.id, param.name
-//RS                     ),
-//RS                     MirAccess::Move => {
-//RS                         self.c_abi_encode_owned(
-//RS                             &param.ty,
-//RS                             self.call_arg_for_function(caller, arg, false),
-//RS                         )
-//RS                     }
-//RS                 };
-//RS             }
-//RS             if matches!(param.ty.kind(), MirTypeKind::String)
-//RS                 && matches!(arg.access, MirAccess::Read | MirAccess::Move)
-//RS             {
-//RS                 let value = self.call_arg_for_function(caller, arg, false);
-//RS                 return format!(
-//RS                     "std::ffi::CString::new(({value}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\")).as_ptr()"
-//RS                 );
-//RS             }
-//RS             if !matches!(param.ty.kind(), MirTypeKind::String)
-//RS                 && !self.is_handle_type(&param.ty)
-//RS                 && self.c_abi_type(&param.ty, MirAccess::Read).is_some()
-//RS                 && matches!(arg.access, MirAccess::Read | MirAccess::Move)
-//RS             {
-//RS                 return self.c_abi_encode_owned(
-//RS                     &param.ty,
-//RS                     self.call_arg_for_function(caller, arg, false),
-//RS                 );
-//RS             }
-//RS         }
-//RS         // `foreign_param_type` declares a raw-scalar Int parameter as host
-//RS         // `i64`; the checked Int narrows at the call.
-//RS         if foreign.raw_scalar_abi
-//RS             && matches!(param.ty.kind(), MirTypeKind::Int)
-//RS             && arg.access != MirAccess::Write
-//RS         {
-//RS             return self.native_int_argument(self.call_arg_for_function(caller, arg, false), None);
-//RS         }
-//RS         if !(foreign.handle.is_some() && self.is_handle_type(&param.ty)) {
-//RS             let direct_c_aggregate = matches!(foreign.foreign_language, MirForeignLanguage::C)
-//RS                 && !foreign.bridge_eligible
-//RS                 && param.access == MirAccess::Read
-//RS                 && !self.is_scalar(&param.ty);
-//RS             let borrowed = !direct_c_aggregate
-//RS                 && param.access == MirAccess::Read
-//RS                 && !self.is_scalar(&param.ty);
-//RS             return self.call_arg_for_function(caller, arg, borrowed);
-//RS         }
-//RS         match arg.access {
-//RS             MirAccess::Read => {
-//RS                 format!("({}).as_raw()", self.value_slot_reference(arg.value, false))
-//RS             }
-//RS             MirAccess::Write => {
-//RS                 format!("({}).as_raw()", self.value_slot_reference(arg.value, true))
-//RS             }
-//RS             MirAccess::Move => format!("({}).into_raw()", self.value_move(arg.value)),
-//RS         }
-//RS     }
-//RS 
-//RS     fn foreign_call(
-//RS         &self,
-//RS         caller: &MirFunction,
-//RS         id: MirForeignId,
-//RS         args: &[MirCallArg],
-//RS         type_args: &[MirType],
-//RS     ) -> String {
-//RS         if !type_args.is_empty() {
-//RS             panic!(
-//RS                 "MIR foreign call {:?} carries unexpected type arguments",
-//RS                 id
-//RS             );
-//RS         }
-//RS         let foreign = self
-//RS             .program
-//RS             .foreign
-//RS             .iter()
-//RS             .find(|foreign| foreign.id == id)
-//RS             .unwrap_or_else(|| panic!("MIR foreign ID {:?} has no row", id));
-//RS         if !self.module_selected(foreign.module_id) {
-//RS             panic!("MIR foreign call {:?} targets an unselected module", id);
-//RS         }
-//RS         if !self.target_applicable(foreign.target_applicability) {
-//RS             panic!(
-//RS                 "MIR foreign call {:?} is not applicable to the selected artifact target",
-//RS                 id
-//RS             );
-//RS         }
-//RS         if args.len() != foreign.params.len()
-//RS             || args
-//RS                 .iter()
-//RS                 .zip(&foreign.params)
-//RS                 .any(|(argument, parameter)| argument.access != parameter.access)
-//RS         {
-//RS             panic!(
-//RS                 "MIR foreign call {:?} argument access does not match its row",
-//RS                 id
-//RS             );
-//RS         }
-//RS         match foreign.callback_transport.as_deref() {
-//RS             Some("managed-close") => {
-//RS                 if args.len() != 1 || args[0].access != MirAccess::Move {
-//RS                     panic!("managed callback unsubscribe must consume one registration");
-//RS                 }
-//RS                 let registration = self.value_move(args[0].value);
-//RS                 return format!(
-//RS                     "{}jet_std::jet_ffi_callback_registration_unsubscribe_result(({registration}).into_raw())",
-//RS                     self.config.root_prefix,
-//RS                 );
-//RS             }
-//RS             Some("emit-task") => {
-//RS                 if args.len() != 1 {
-//RS                     panic!("managed callback emission must receive exactly one payload");
-//RS                 }
-//RS                 let native = self
-//RS                     .program
-//RS                     .foreign
-//RS                     .iter()
-//RS                     .find(|candidate| {
-//RS                         candidate.module_id == foreign.module_id
-//RS                             && candidate.name == "__jet_native_emit_async"
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "managed callback emission {:?} has no native emit function",
-//RS                             foreign.name
-//RS                         )
-//RS                     });
-//RS                 let value = self.call_arg_for_function(caller, &args[0], false);
-//RS                 return format!(
-//RS                     "{}jet_std::JetTask::spawn(move || Ok(unsafe {{ {}({value}) }}))",
-//RS                     self.config.root_prefix,
-//RS                     self.foreign_name(native.id),
-//RS                 );
-//RS             }
-//RS             Some("managed") => {
-//RS                 if args.len() != 1 {
-//RS                     panic!("managed callback registration must receive exactly one callback");
-//RS                 }
-//RS                 let (callback_call, callback_id, lambda) = self
-//RS                     .value_instruction(caller, args[0].value)
-//RS                     .and_then(|instruction| {
-//RS                         match &instruction.operation {
-//RS                             MirOperation::Semantic(MirSemanticOp::CCallback {
-//RS                                 call,
-//RS                                 callback,
-//RS                                 lambda,
-//RS                             }) => Some((*call, *callback, *lambda)),
-//RS                             _ => None,
-//RS                         }
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!("managed callback argument has no C callback adapter operation")
-//RS                     });
-//RS                 let callback_row = self
-//RS                     .program
-//RS                     .callbacks
-//RS                     .iter()
-//RS                     .find(|row| row.id == callback_id)
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!("managed callback {:?} has no adapter row", callback_id)
-//RS                     });
-//RS                 if !callback_row.managed || callback_row.symbol.is_empty() {
-//RS                     panic!("managed callback argument has an unmanaged adapter row");
-//RS                 }
-//RS                 let native_start = self
-//RS                     .program
-//RS                     .foreign
-//RS                     .iter()
-//RS                     .find(|candidate| {
-//RS                         candidate.module_id == foreign.module_id
-//RS                             && candidate.name == format!("__jet_native_{}", foreign.name)
-//RS                             && candidate.callback_transport.as_deref() == Some("native-start")
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "managed callback {:?} has no native start function",
-//RS                             foreign.name
-//RS                         )
-//RS                     });
-//RS                 let native_stop = self
-//RS                     .program
-//RS                     .foreign
-//RS                     .iter()
-//RS                     .find(|candidate| {
-//RS                         candidate.module_id == foreign.module_id
-//RS                             && candidate.name == "__jet_native_unsubscribe"
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "managed callback {:?} has no native unsubscribe function",
-//RS                             foreign.name
-//RS                         )
-//RS                     });
-//RS                 let identity = foreign
-//RS                     .callback_identity
-//RS                     .as_deref()
-//RS                     .filter(|identity| !identity.is_empty())
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!("managed callback {:?} has no identity", foreign.name)
-//RS                     });
-//RS                 let digest = foreign
-//RS                     .callback_plan_digest
-//RS                     .as_deref()
-//RS                     .filter(|digest| !digest.is_empty())
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!("managed callback {:?} has no plan digest", foreign.name)
-//RS                     });
-//RS                 let handler = self.c_callback(caller, callback_call, callback_id, lambda);
-//RS                 return format!(
-//RS                     "{}jet_std::JetFfiCallbackRegistrationHandle::from_raw({}jet_std::jet_ffi_callback_registration_start_i64(Some({} as unsafe extern \"C\" fn(*mut core::ffi::c_void, i64)), |__jet_callback, __jet_context| unsafe {{ {}(__jet_callback, __jet_context) }}, |__jet_context| unsafe {{ {}(__jet_context) }}, |_| {{}}, {handler}, {:?}, {:?}))",
-//RS                     self.config.root_prefix,
-//RS                     self.config.root_prefix,
-//RS                     callback_row.symbol,
-//RS                     self.foreign_name(native_start.id),
-//RS                     self.foreign_name(native_stop.id),
-//RS                     identity,
-//RS                     digest,
-//RS                 );
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         let c_record_string_count = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
-//RS             args.iter()
-//RS                 .zip(&foreign.params)
-//RS                 .filter(|(_, param)| self.c_abi_record_string_count(&param.ty) > 0)
-//RS                 .map(|(_, param)| self.c_abi_record_string_count(&param.ty))
-//RS                 .sum()
-//RS         } else {
-//RS             0
-//RS         };
-//RS         let mut setup = Vec::new();
-//RS         if c_record_string_count > 0 {
-//RS             setup.push(format!(
-//RS                 "let mut __jet_c_strings = Vec::<std::ffi::CString>::with_capacity({c_record_string_count});"
-//RS             ));
-//RS         }
-//RS         let mut writebacks = Vec::new();
-//RS         let call_args = args
-//RS             .iter()
-//RS             .zip(&foreign.params)
-//RS             .enumerate()
-//RS             .map(|(index, (arg, param))| {
-//RS                 let needs_temp = matches!(foreign.foreign_language, MirForeignLanguage::C)
-//RS                     && arg.access == MirAccess::Write
-//RS                     && self.c_abi_write_temp_needed(&param.ty);
-//RS                 if !needs_temp {
-//RS                     return self.foreign_call_arg(caller, foreign, arg, param);
-//RS                 }
-//RS                 let place = arg.place.unwrap_or_else(|| {
-//RS                     panic!("C foreign write argument {} has no checked place", param.name)
-//RS                 });
-//RS                 let place = self.place_reference(caller, place, MirAccess::Write);
-//RS                 let temp = format!("__jet_c_ffi_arg_{index}");
-//RS                 if self.c_abi_scalar_kind(&param.ty) == Some("string") {
-//RS                     setup.push(format!(
-//RS                         "let mut {temp} = std::ffi::CString::new(({place}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\"));"
-//RS                     ));
-//RS                     writebacks.push(format!(
-//RS                         "*({place}) = {{ let __jet_c_ptr = {temp}.as_ptr(); if __jet_c_ptr.is_null() {{ panic!(\"native C String is null\") }}; unsafe {{ std::ffi::CStr::from_ptr(__jet_c_ptr) }}.to_str().unwrap_or_else(|_| panic!(\"native C String is not UTF-8\")).to_owned() }};"
-//RS                     ));
-//RS                     format!("{temp}.as_mut_ptr()")
-//RS                 } else if self.c_abi_scalar_kind(&param.ty) == Some("char") {
-//RS                     setup.push(format!(
-//RS                         "let mut {temp} = (*({place})) as u32;"
-//RS                     ));
-//RS                     writebacks.push(format!(
-//RS                         "*({place}) = {};",
-//RS                         self.c_abi_decode_owned(&param.ty, &temp)
-//RS                     ));
-//RS                     format!("&mut {temp} as *mut _")
-//RS                 } else {
-//RS                     setup.push(format!(
-//RS                         "let mut {temp} = {};",
-//RS                         self.c_abi_encode_ref(&param.ty, &place)
-//RS                     ));
-//RS                     writebacks.push(format!(
-//RS                         "*({place}) = {};",
-//RS                         self.c_abi_decode_owned(&param.ty, &temp)
-//RS                     ));
-//RS                     format!("&mut {temp} as *mut _")
-//RS                 }
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let raw_call = if matches!(foreign.foreign_language, MirForeignLanguage::Rust) {
-//RS             // A Rust crate item is called through the safe `jet_ffi_<name>`
-//RS             // wrapper the prepared bridge crate exports; it has no C symbol.
-//RS             let ffi = self
-//RS                 .config
-//RS                 .execution
-//RS                 .ffi
-//RS                 .map(|link| link.crate_name.as_str())
-//RS                 .unwrap_or("jet_ffi");
-//RS             format!("{ffi}::jet_ffi_{}({call_args})", foreign.name)
-//RS         } else if setup.is_empty() {
-//RS             format!("unsafe {{ {}({call_args}) }}", self.foreign_name(id))
-//RS         } else {
-//RS             format!(
-//RS                 "{{ {} let __jet_c_result = unsafe {{ {}({call_args}) }}; {} __jet_c_result }}",
-//RS                 setup.join(" "),
-//RS                 self.foreign_name(id),
-//RS                 writebacks.join(" ")
-//RS             )
-//RS         };
-//RS         let call = if matches!(foreign.foreign_language, MirForeignLanguage::C) {
-//RS             foreign
-//RS                 .return_type
-//RS                 .as_ref()
-//RS                 .filter(|ty| self.c_abi_type(ty, MirAccess::Read).is_some())
-//RS                 .map(|ty| self.c_abi_decode_owned(ty, &raw_call))
-//RS                 .unwrap_or(raw_call)
-//RS         } else {
-//RS             raw_call
-//RS         };
-//RS         if foreign.callback_transport.as_deref() == Some("guest-import-result") {
-//RS             return format!("Ok({call})");
-//RS         }
-//RS         if foreign
-//RS             .return_type
-//RS             .as_ref()
-//RS             .is_some_and(|ty| foreign.handle.is_some() && self.is_handle_type(ty))
-//RS             && !matches!(foreign.foreign_language, MirForeignLanguage::C)
-//RS         {
-//RS             let ty = self.rust_type(foreign.return_type.as_ref().expect("handle return type"));
-//RS             format!("{ty}::from_raw({call})")
-//RS         } else {
-//RS             call
-//RS         }
-//RS     }
-//RS 
-//RS     fn method_call(
-//RS         &self,
-//RS         caller: &MirFunction,
-//RS         function: MirFunctionId,
-//RS         owner: &MirType,
-//RS         args: &[MirCallArg],
-//RS         type_args: &[MirType],
-//RS     ) -> String {
-//RS         let row = self.function_row(function);
-//RS         let self_access = match &row.form {
-//RS             MirFunctionForm::Method {
-//RS                 owner: declared_owner,
-//RS                 self_access: Some(self_access),
-//RS             }
-//RS             | MirFunctionForm::TraitMethod {
-//RS                 owner: declared_owner,
-//RS                 self_access: Some(self_access),
-//RS                 ..
-//RS             } => {
-//RS                 if !declared_owner.same_checked_type(owner) {
-//RS                     panic!(
-//RS                         "MIR method call {:?} owner does not match its function declaration: declared={:?}, actual={:?}",
-//RS                         function,
-//RS                         declared_owner,
-//RS                         owner,
-//RS                     );
-//RS                 }
-//RS                 *self_access
-//RS             }
-//RS             MirFunctionForm::Method {
-//RS                 owner: declared_owner,
-//RS                 self_access: None,
-//RS             }
-//RS             | MirFunctionForm::TraitMethod {
-//RS                 owner: declared_owner,
-//RS                 self_access: None,
-//RS                 ..
-//RS             } => {
-//RS                 if !declared_owner.same_checked_type(owner) {
-//RS                     panic!(
-//RS                         "MIR method call {:?} owner does not match its function declaration: declared={:?}, actual={:?}",
-//RS                         function,
-//RS                         declared_owner,
-//RS                         owner,
-//RS                     );
-//RS                 }
-//RS                 panic!(
-//RS                     "MIR method call {:?} targets an associated function",
-//RS                     function
-//RS                 );
-//RS             }
-//RS             MirFunctionForm::TopLevel => {
-//RS                 panic!("MIR method call {:?} does not target a method", function)
-//RS             }
-//RS         };
-//RS         let receiver = args
-//RS             .first()
-//RS             .unwrap_or_else(|| panic!("MIR method call {:?} has no receiver argument", function));
-//RS         if receiver.access != self_access {
-//RS             panic!(
-//RS                 "MIR method call {:?} receiver access {:?} disagrees with declaration {:?}",
-//RS                 function, receiver.access, self_access
-//RS             );
-//RS         }
-//RS         let trait_ref = match &row.form {
-//RS             MirFunctionForm::TraitMethod { trait_ref, .. } => Some(trait_ref),
-//RS             _ => None,
-//RS         };
-//RS         let receiver = self.call_arg_for_function(caller, receiver, self_access == MirAccess::Read);
-//RS         let generic = if row.generic_params.is_empty() || type_args.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!(
-//RS                 "::<{}>",
-//RS                 type_args
-//RS                     .iter()
-//RS                     .map(|ty| self.rust_type(ty))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             )
-//RS         };
-//RS         // The receiver is `row.params[0]`, spelled `self` by `emit_callable_named`;
-//RS         // the declared parameters line up with the remaining args by index.
-//RS         let declared = self.declared_params(row);
-//RS         let params = args[1..]
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, arg)| {
-//RS                 let borrowed = self.arithmetic_trait_method(row)
-//RS                     || declared
-//RS                         .get(index)
-//RS                         .is_some_and(|param| self.parameter_borrowed(param));
-//RS                 self.call_arg_for_function(caller, arg, borrowed)
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         if let Some(trait_ref) = trait_ref {
-//RS             let mut trait_name = self.trait_nominal_name(trait_ref);
-//RS             if self.arithmetic_trait_method(row) {
-//RS                 let rhs = declared.first().expect("checked arithmetic RHS");
-//RS                 let _ = write!(trait_name, "<{}>", self.rust_type(&rhs.ty));
-//RS             }
-//RS             return format!(
-//RS                 "<{} as {}>::{}{}({receiver}{separator}{params})",
-//RS                 self.rust_type(owner),
-//RS                 trait_name,
-//RS                 self.rust_method_symbol(row),
-//RS                 generic,
-//RS                 separator = if params.is_empty() { "" } else { ", " },
-//RS             );
-//RS         }
-//RS         format!(
-//RS             "({receiver}).{}{}({params})",
-//RS             self.rust_method_symbol(row),
-//RS             generic
-//RS         )
-//RS     }
-//RS     fn trait_method_call(
-//RS         &self,
-//RS         caller: &MirFunction,
-//RS         method_id: MirTraitMethodId,
-//RS         trait_ref: &MirTraitRef,
-//RS         receiver: &MirType,
-//RS         args: &[MirCallArg],
-//RS         type_args: &[MirType],
-//RS     ) -> String {
-//RS         let Some(bounds) = receiver.trait_bounds() else {
-//RS             panic!("MIR trait method receiver is not a trait object");
-//RS         };
-//RS         if !bounds.iter().any(|bound| bound.name == trait_ref.name) {
-//RS             panic!(
-//RS                 "MIR trait method receiver does not contain trait {}",
-//RS                 trait_ref.name
-//RS             );
-//RS         }
-//RS         let definition = self
-//RS             .program
-//RS             .traits
-//RS             .iter()
-//RS             .find(|definition| definition.id == trait_ref.id)
-//RS             .unwrap_or_else(|| panic!("MIR trait {:?} is missing", trait_ref.id));
-//RS         let method = definition
-//RS             .methods
-//RS             .iter()
-//RS             .find(|method| method.id == method_id)
-//RS             .unwrap_or_else(|| panic!("MIR trait method {:?} is missing", method_id));
-//RS         let self_access = method
-//RS             .self_access
-//RS             .unwrap_or_else(|| panic!("MIR trait method {:?} has no receiver", method_id));
-//RS         let receiver_arg = args
-//RS             .first()
-//RS             .unwrap_or_else(|| panic!("MIR trait method {:?} has no receiver argument", method_id));
-//RS         if receiver_arg.access != self_access {
-//RS             panic!(
-//RS                 "MIR trait method {:?} receiver access {:?} disagrees with declaration {:?}",
-//RS                 method_id, receiver_arg.access, self_access
-//RS             );
-//RS         }
-//RS         if args.len() != method.params.len() + 1 {
-//RS             panic!(
-//RS                 "MIR trait method {:?} has {} arguments, expected {}",
-//RS                 method_id,
-//RS                 args.len(),
-//RS                 method.params.len() + 1
-//RS             );
-//RS         }
-//RS         let receiver =
-//RS             self.call_arg_for_function(caller, receiver_arg, self_access == MirAccess::Read);
-//RS         let generic = if type_args.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!(
-//RS                 "::<{}>",
-//RS                 type_args
-//RS                     .iter()
-//RS                     .map(|ty| self.rust_type(ty))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             )
-//RS         };
-//RS         let params = args[1..]
-//RS             .iter()
-//RS             .zip(&method.params)
-//RS             .map(|(arg, param)| {
-//RS                 self.call_arg_for_function(caller, arg, self.parameter_borrowed(param))
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let symbol =
-//RS             if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&trait_ref.name) {
-//RS                 compiler_trait_method_symbol(&trait_ref.name, &method.name)
-//RS             } else {
-//RS                 mangle(&method.name)
-//RS             };
-//RS         format!("({receiver}).{symbol}{generic}({params})")
-//RS     }
-//RS 
-//RS     fn compute_runtime_name(&self, name: &str) -> String {
-//RS         format!("{}{name}", self.config.root_prefix)
-//RS     }
-//RS 
-//RS     fn compute_tuple(&self, values: Vec<String>) -> String {
-//RS         match values.len() {
-//RS             0 => "()".to_string(),
-//RS             1 => format!("({},)", values[0]),
-//RS             _ => format!("({})", values.join(", ")),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compute_result_shape(&self, output: &MirType) -> String {
-//RS         match output.kind() {
-//RS             MirTypeKind::Tuple(fields) => format!(
-//RS                 "{}::TensorTuple({}usize)",
-//RS                 self.compute_runtime_name("JetComputeResultShape"),
-//RS                 fields.len()
-//RS             ),
-//RS             _ => format!(
-//RS                 "{}::Tensor",
-//RS                 self.compute_runtime_name("JetComputeResultShape")
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compute_base_result(&self, output: &MirType, value: &str) -> String {
-//RS         let result = self.compute_runtime_name("JetComputeBaseResult");
-//RS         match output.kind() {
-//RS             MirTypeKind::Tuple(fields) => {
-//RS                 let values = fields
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(index, _)| format!("{value}.{index}"))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 format!("{result}::TensorTuple(vec![{values}])")
-//RS             }
-//RS             _ => format!("{result}::Tensor({value})"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compute_gradient_value(
-//RS         &self,
-//RS         value_type: &MirType,
-//RS         gradients: &str,
-//RS         target: usize,
-//RS     ) -> String {
-//RS         match value_type.kind() {
-//RS             MirTypeKind::Tuple(fields) => self.compute_tuple(
-//RS                 fields
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(index, _)| format!("{gradients}[{target}][{index}].clone()"))
-//RS                     .collect(),
-//RS             ),
-//RS             _ => format!("{gradients}[{target}][0].clone()"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn compute_gradient(&self, gradient_type: &MirType, gradients: &str) -> String {
-//RS         let MirTypeKind::Tuple(fields) = gradient_type.kind() else {
-//RS             panic!("MIR compute gradient result is not a named tuple");
-//RS         };
-//RS         self.compute_tuple(
-//RS             fields
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(target, (_, value_type))| {
-//RS                     self.compute_gradient_value(value_type, gradients, target)
-// END-PORT-PENDING 2013 crates/jet-codegen/src/Codegen/MIRRust.rs:21601-23400
+use jet_foundation.MIR.*
+use jet_foundation.Layout.LayoutFacts
+use jet_codegen.Codegen.MIRRust.*
+use jet_codegen.Codegen.TIR.tir_to_mir_types.is_compiler_owned_trait
+// GATE #4499: checked MIR identity, target layout facts and discriminants.
+// GATE #4494: emitted foreign ABI/callback/Arc code binds native providers.
 
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21617
+    fn http_route_zero_handler_adapter(function: &MirFunction, handler: MirValueId, handler_param_names: &[String]) -> String {
+        parameter_count :: self.value_type(function, handler).kind() == {
+            .Fn(signature) -> signature.params.len()
+            .SendFn(params: params, ..) -> params.len()
+            other -> panic("MIR HTTP zero route handler has non-callable type {other.display_name()}")
+        }
+        if parameter_count != 0 || !handler_param_names.is_empty() { panic("MIR HTTP zero route handler has checked parameters") }
+        handler_name :: "__jet_http_zero_route_handler_{handler.0}"
+        is_fn :: self.value_type(function, handler).kind() == { .Fn(_) -> true, _ -> false }
+        handler_call :: if !self.history_runtime_metadata_enabled() && is_fn { self.fn_value_call("{handler_name}.clone()", &[]) } else { "({handler_name})()" }
+        "{{ let {handler_name} = {self.value_move(handler)}; std::sync::Arc::new(move || {{ {handler_call} }}) }}"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21650
+    fn http_router_register(function: &MirFunction, call: MirPreludeCallId, receiver: MirValueId, path: MirValueId, handler: MirValueId, method: MirHttpMethod, handler_param_names: &[String], contract_json: &String, location: MirPanicLoc) -> String {
+        row :: self.prelude_row(call)
+        adapted_handler :: if row.member == "mux_add_zero" { self.http_route_zero_handler_adapter(function, handler, handler_param_names) } else { self.http_route_handler_adapter(function, handler, handler_param_names, contract_json) }
+        method :: "{method.as_str():?}"
+        path :: self.value_slot_reference(path, false)
+        args :: if row.member == "mux_add" || row.member == "mux_add_zero" { [self.value_borrow_mut(receiver), method.clone(), path.clone(), adapted_handler] } else {
+            file :: "{self.source_file_path(location.file):?}"
+            line :: "{location.line}u32"
+            [self.value_borrow_mut(receiver), method, path, adapted_handler, file, line, "{contract_json:?}.to_string()"]
+        }
+        self.prelude_call_args_exact(call, &args)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21693
+    fn columnar_read(function: &MirFunction, accessor: MirPreludeCallId, base: MirValueId, column: MirFieldId, column_index: USize, index: MirValueId, location: MirPanicLoc?) -> String {
+        route :: self.prelude_row(accessor)
+        if route.family != .ColumnarAccess || route.module != "core.columnar" || route.symbol.name() != "jet_columns_gather_cell" || route.signature.arity != 3 || route.signature.max_arity != 3 || route.signature.borrow_mask != [true, false, false] { panic("MIR columnar accessor has non-canonical Prelude route") }
+        location :: location.unwrap_or_else(fn() { panic("MIR columnar read is missing its instruction source location") })
+        file :: "{self.source_file_path(location.file):?}"
+        line :: "{location.line}u32"
+        base :: self.borrowed_value_reference(function, base, MirAccess.Read)
+        index :: self.index_operand(function, index, location)
+        "({base}).cell({column_index}usize, {index}, {file}, {line}).jet_col_{self.field_name(column)}()"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21726
+    fn build_string(parts: &[MirStringPart]) -> String {
+        if self.is_core_layer() {
+            literal := String.new()
+            for part in parts { part == { .Literal(value) -> literal.push_str(value), .Value(_) -> panic("MIR Core string interpolation requires an allocation layer") } }
+            return "{literal:?}"
+        }
+        out := String.from("{ let mut __jet_string = String::new();")
+        for part in parts {
+            part == {
+                .Literal(value) -> out.push_str(&" __jet_string.push_str({value:?});")
+                // A shown interpolation hole borrows its value, never consumes it.
+                .Value(value) -> out.push_str(&" __jet_string.push_str(&({self.value_borrow(value)}).jet_show());")
+            }
+        }
+        out.push_str(" __jet_string }")
+        out
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21760
+    fn project_members(base: MirValueId, members: &[MirFieldId]) -> String {
+        expression := self.value_owned(base)
+        for member in members { expression = self.native_http_headers_fields_projection(&expression, member).unwrap_or_else(fn() { "({expression}).{self.field_name(member)}" }) }
+        expression
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21770
+    fn call(function: &MirFunction, callee: &MirCallee, args: &[MirCallArg], type_args: &[MirType]) -> String {
+        invocation :: callee == {
+            .User(id) -> {
+                row :: self.function_row(id)
+                if !row.capture_params.is_empty() { panic("MIR captured function called without a Closure operation") }
+                borrow_mask :: self.parameter_borrow_mask(&row.params)
+                self.call_symbol_for_function(function, self.function_name(id), args, if row.generic_params.is_empty() { &[] } else { type_args }, Some(&borrow_mask))
+            }
+            .Associated(function: target, owner: owner) -> self.associated_call(function, target, owner, args, type_args)
+            .Method(function: target, owner: owner) -> self.method_call(function, target, owner, args, type_args)
+            .TraitMethod(method: method, trait_ref: trait_ref, receiver: receiver) -> self.trait_method_call(function, method, trait_ref, receiver, args, type_args)
+            .Core(id) -> self.core_direct_call(function, id, args, type_args)
+            .Prelude(id) -> {
+                row :: self.prelude_row(id)
+                self.validate_prelude_arity(row, args)
+                self.call_symbol_for_function(function, self.prelude_symbol(id), args, type_args, Some(&row.signature.borrow_mask))
+            }
+            .Foreign(id) -> self.foreign_call(function, id, args, type_args)
+            .Indirect(value) -> {
+                borrow_mask :: self.callable_borrow_mask(self.value_type(function, value))
+                self.call_symbol_for_function(function, self.value_owned(value), args, type_args, Some(&borrow_mask))
+            }
+        }
+        self.history_instantiated_call(callee, type_args, invocation)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21836
+    fn call_result_expression(function: &MirFunction, callee: &MirCallee, result: MirValueId?, emitted: String) -> String {
+        if result.is_none() { return emitted }
+        if self.call_result_is_success(function, callee, result.unwrap()) { "({emitted})?" } else { emitted }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21853
+    fn call_result_is_success(function: &MirFunction, callee: &MirCallee, result: MirValueId) -> Bool {
+        result_type :: self.value_type(function, result)
+        callee == {
+            .User(id) -> Self.result_matches_return_carrier(result_type, &self.function_row(id).return_type)
+            .Associated(function: id, ..), .Method(function: id, ..) -> {
+                encode :: self.function_row(id).form == { .TraitMethod(serde: .Some(.Encode), ..) -> true, _ -> false }
+                if encode { false } else { Self.result_matches_return_carrier(result_type, &self.function_row(id).return_type) }
+            }
+            .TraitMethod(method: method_id, trait_ref: trait_ref, ..) -> {
+                definition :: self.program.traits.iter().find(fn(definition) { definition.id == trait_ref.id }).unwrap_or_else(fn() { panic("MIR trait {trait_ref.id:?} is missing") })
+                method :: definition.methods.iter().find(fn(candidate) { candidate.id == method_id }).unwrap_or_else(fn() { panic("MIR trait method {method_id:?} is missing") })
+                Self.result_matches_return_carrier(result_type, &method.return_type)
+            }
+            .Indirect(value) -> {
+                return_type :: self.value_type(function, value).kind() == { .Fn(signature) -> signature.ret, .SendFn(ret: ret, ..) -> ret, _ -> None }
+                if return_type.is_none() { return false }
+                Self.result_matches_return_carrier(result_type, &return_type.unwrap())
+            }
+            .Core(_), .Prelude(_), .Foreign(_) -> false
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21911
+    fn result_matches_return_carrier(result_type: &MirType, return_type: &MirType) -> Bool {
+        return_type.result_parts().is_some_and(fn((success, _)) { result_type.same_checked_type(success) }) || return_type.option_inner().is_some_and(fn(success) { result_type.same_checked_type(success) })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:21920
+    fn associated_call(caller: &MirFunction, function: MirFunctionId, owner: &MirType, args: &[MirCallArg], type_args: &[MirType]) -> String {
+        row :: self.function_row(function)
+        symbol :: row.form == {
+            .Method(owner: declared_owner, self_access: self_access) -> {
+                if !declared_owner.same_checked_type(owner) { panic("MIR associated call {function:?} owner does not match its function declaration") }
+                if self_access.is_some() { panic("MIR associated call {function:?} targets an instance method with no receiver") }
+                if self.owner_independent_static(row) { self.function_name(row.id) } else { "<{self.rust_type(owner)}>::{self.rust_method_symbol(row)}" }
+            }
+            .TraitMethod(owner: trait_owner, trait_ref: trait_ref, self_access: self_access, ..) -> {
+                if !trait_owner.same_checked_type(owner) { panic("MIR associated call {function:?} owner does not match its trait method declaration") }
+                if self_access.is_some() { panic("MIR associated call {function:?} targets an instance trait method with no receiver") }
+                "<{self.rust_type(owner)} as {self.trait_nominal_name(trait_ref)}>::{self.rust_method_symbol(row)}"
+            }
+            .TopLevel -> panic("MIR associated call {function:?} does not target a checked associated method")
+        }
+        borrow_mask :: self.parameter_borrow_mask(&row.params)
+        self.call_symbol_for_function(caller, symbol, args, if row.generic_params.is_empty() { &[] } else { type_args }, Some(&borrow_mask))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22001
+    fn foreign_abi_name(abi: &MirForeignAbi) -> String {
+        abi == { .C -> "C", .CUnwind -> "C-unwind", .System -> "system", .Stdcall -> "stdcall", .Fastcall -> "fastcall", .Vectorcall -> "vectorcall", .Rust -> "Rust", .Platform(name) -> name.clone() }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22013
+    fn foreign_language_name(language: MirForeignLanguage) -> String { language == { .C -> "C", .Cpp -> "C++", .Rust -> "Rust", .Assembly -> "assembly" } }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22021
+    fn implementation_owner_def(ty: &MirType) -> MirTypeDef? {
+        id :: ty.kind() == { .Apply(name: name, ..) -> ty.identity.or(Some(name.id)), _ -> None }
+        if id.is_none() { return None }
+        self.program.types.iter().find(fn(definition) { definition.id == id.unwrap() })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22028
+    fn c_abi_record_def(ty: &MirType) -> MirTypeDef? {
+        id :: ty.kind() == { .Apply(name: name, ..) -> ty.identity.or(Some(name.id)), _ -> None }
+        if id.is_none() { return None }
+        definition :: self.program.types.iter().find(fn(definition) { definition.id == id.unwrap() })
+        if definition.is_none() { return None }
+        definition :: definition.unwrap()
+        c_struct :: definition.kind == { .Struct(..) -> definition.layout == { .Some(.C), .Some(.CAligned(..)) -> true, _ -> false }, _ -> false }
+        if c_struct { Some(definition) } else { None }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22044
+    fn c_abi_enum_def(ty: &MirType) -> MirTypeDef? {
+        id :: ty.kind() == { .Apply(name: name, ..) -> ty.identity.or(Some(name.id)), _ -> None }
+        if id.is_none() { return None }
+        definition :: self.program.types.iter().find(fn(definition) { definition.id == id.unwrap() })
+        if definition.is_none() { return None }
+        definition :: definition.unwrap()
+        definition.kind == {
+            .Enum(..) -> if definition.c_layout_tag.is_some() { Some(definition) } else { None }
+            .Distinct(base: base, ..) -> self.c_abi_enum_def(base)
+            .Alias(target: target) -> self.c_abi_enum_def(target)
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22058
+    fn c_abi_enum_tag_type(tag: MirCEnumTag) -> String { tag == { .CInt -> "i32", .U8 -> "u8", .I8 -> "i8", .U16 -> "u16", .I16 -> "i16", .U32 -> "u32", .I32 -> "i32", .U64 -> "u64", .I64 -> "i64" } }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22071
+    fn c_abi_enum_repr_tag(definition: &MirTypeDef) -> String? { self.c_abi_enum_tag(definition) == { .CInt -> None, tag -> Some(self.c_abi_enum_tag_type(tag)) } }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22079
+    fn c_abi_enum_name(definition: &MirTypeDef) -> String { mangle_path(&"__jet_c_abi_enum::{definition.key}") }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22083
+    fn c_abi_enum_payload_name(definition: &MirTypeDef) -> String { "{self.c_abi_enum_name(definition)}_payload" }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22087
+    fn c_abi_enum_variant_name(variant: &MirVariant) -> String { mangle_variant(&variant.name) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22091
+    fn c_abi_enum_has_payload(definition: &MirTypeDef) -> Bool {
+        definition.kind == { .Enum(variants: variants, ..) -> variants.iter().any(fn(variant) { variant.payload != .Unit }), _ -> false }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22100
+    fn c_abi_enum_facts(definition: &MirTypeDef) -> &LayoutFacts {
+        layout :: definition.enum_layout.unwrap_or_else(fn() { panic("C ABI enum {definition.id:?} has no checked TargetLayoutEngine facts") })
+        if layout.bytes.is_none() { panic("C ABI enum {definition.id:?} has unknown checked size/alignment facts") }
+        variants :: definition.kind == { .Enum(variants: variants, ..) -> variants, _ -> panic("unreachable") }
+        if layout.fields.len() != variants.len() { panic("C ABI enum {definition.id:?} layout fact count does not match variants") }
+        for (variant, fact) in variants.iter().zip(&layout.fields) {
+            if fact.name != variant.name || fact.offset.is_none() || fact.size.is_none() || fact.alignment.is_none() || fact.stride.is_none() { panic("C ABI enum {definition.id:?} has incomplete checked layout fact for variant `{variant.name}`") }
+        }
+        layout
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22138
+    fn c_abi_enum_tag(definition: &MirTypeDef) -> MirCEnumTag { definition.c_layout_tag.unwrap_or_else(fn() { panic("C ABI enum {definition.id:?} has no checked tag fact") }) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22144
+    fn c_abi_enum_variant_discriminant(definition: &MirTypeDef, variant: &MirVariant) -> I64 {
+        _ :: self.c_abi_enum_facts(definition)
+        variant.discriminant.unwrap_or_else(fn() { panic("C ABI enum {definition.id:?} variant `{variant.name}` has no checked discriminant") })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22159
+    fn c_abi_record_name(definition: &MirTypeDef) -> String { mangle_path(&"__jet_c_abi_record::{definition.key}") }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22163
+    fn c_abi_type(ty: &MirType, access: MirAccess) -> String? {
+        scalar :: fn(name: &String) { if access == .Write { "*mut {name}" } else { name.to_string() } }
+        ty.kind() == {
+            .Int -> Some(scalar("i64"))
+            .Float -> Some(scalar("f64"))
+            .Float32 -> Some(scalar("f32"))
+            .Bool -> Some(scalar("bool"))
+            .Char -> Some(scalar("u32"))
+            .IntN(..) -> Some(scalar(&self.rust_type(ty)))
+            .String -> Some(if access == .Write { "*mut core::ffi::c_char" } else { "*const core::ffi::c_char" })
+            .InlineRange(base: base, ..), .Tagged(inner: base, ..), .Quantity(base: base, ..) -> self.c_abi_type(base, access)
+            .Apply(..) -> {
+                if self.is_handle_type(ty) { return Some("*mut core::ffi::c_void") }
+                enum_def :: self.c_abi_enum_def(ty)
+                if enum_def.is_some() {
+                    definition :: enum_def.unwrap()
+                    _ :: self.c_abi_enum_facts(definition)
+                    native :: if self.c_abi_enum_has_payload(definition) { self.c_abi_enum_name(definition) } else { self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition)) }
+                    return Some(if access == .Write { "*mut {native}" } else { native })
+                }
+                record_def :: self.c_abi_record_def(ty)
+                if record_def.is_some() { name :: self.c_abi_record_name(record_def.unwrap()); return Some(if access == .Write { "*mut {name}" } else { name }) }
+                definition :: self.implementation_owner_def(ty)
+                if definition.is_none() { return None }
+                definition.unwrap().kind == { .Distinct(base: base, ..) -> self.c_abi_type(base, access), .Alias(target: target) -> self.c_abi_type(target, access), _ -> None }
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22227
+    fn c_abi_record_string_count(ty: &MirType) -> USize {
+        ty.kind() == {
+            .String -> 1
+            .InlineRange(base: base, ..), .Tagged(inner: base, ..), .Quantity(base: base, ..) -> self.c_abi_record_string_count(base)
+            .Apply(..) -> {
+                enum_def :: self.c_abi_enum_def(ty)
+                if enum_def.is_some() {
+                    variants :: enum_def.unwrap().kind == { .Enum(variants: variants, ..) -> variants, _ -> panic("unreachable") }
+                    return variants.iter().map(fn(variant) {
+                        variant.payload == { .Unit -> 0, .Single(payload) -> self.c_abi_record_string_count(payload), .Named(fields) -> fields.iter().map(fn(field) { self.c_abi_record_string_count(&field.ty) }).sum() }
+                    }).sum()
+                }
+                record_def :: self.c_abi_record_def(ty)
+                if record_def.is_some() {
+                    record_def.unwrap().kind == { .Struct(fields: fields, ..) -> fields.iter().map(fn(field) { self.c_abi_record_string_count(&field.ty) }).sum(), _ -> 0 }
+                } else {
+                    definition :: self.implementation_owner_def(ty)
+                    if definition.is_none() { return 0 }
+                    definition.unwrap().kind == { .Distinct(base: base, ..) -> self.c_abi_record_string_count(base), .Alias(target: target) -> self.c_abi_record_string_count(target), _ -> 0 }
+                }
+            }
+            _ -> 0
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22288
+    fn c_abi_write_temp_needed(ty: &MirType) -> Bool {
+        ty.kind() == {
+            .Int, .String, .Char -> true
+            .InlineRange(base: base, ..), .Tagged(inner: base, ..), .Quantity(base: base, ..) -> self.c_abi_write_temp_needed(base)
+            .Apply(..) -> {
+                if self.c_abi_enum_def(ty).is_some() || self.c_abi_record_def(ty).is_some() { return true }
+                definition :: self.implementation_owner_def(ty)
+                if definition.is_none() { return false }
+                definition.unwrap().kind == { .Distinct(base: base, ..) -> self.c_abi_write_temp_needed(base), .Alias(target: target) -> self.c_abi_write_temp_needed(target), _ -> false }
+            }
+            _ -> false
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22322
+    fn c_abi_scalar_kind(ty: &MirType) -> String? {
+        ty.kind() == {
+            .Int -> Some("int"), .String -> Some("string"), .Char -> Some("char")
+            .InlineRange(base: base, ..), .Tagged(inner: base, ..), .Quantity(base: base, ..) -> self.c_abi_scalar_kind(base)
+            .Apply(..) -> {
+                definition :: self.implementation_owner_def(ty)
+                if definition.is_none() { return None }
+                definition.unwrap().kind == { .Distinct(base: base, ..) -> self.c_abi_scalar_kind(base), .Alias(target: target) -> self.c_abi_scalar_kind(target), _ -> None }
+            }
+            _ -> None
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22347
+    fn emit_c_abi_records(out: &String) -> {
+        for definition in self.program.types {
+            c_layout :: definition.layout == { .Some(.C), .Some(.CAligned(..)) -> true, _ -> false }
+            if !self.module_selected(definition.module) || !c_layout { continue }
+            fields_opt :: definition.kind == { .Struct(fields: fields, ..) -> Some(fields), _ -> None }
+            if fields_opt.is_none() { continue }
+            fields :: fields_opt.unwrap()
+            name :: self.c_abi_record_name(definition)
+            definition.layout == {
+                .Some(.C) -> out.push_str("#[repr(C)]\n")
+                .Some(.CAligned(..)) -> {
+                    fact :: definition.layout_alignment.unwrap_or_else(fn() { panic("C ABI record {definition.id:?} has no checked alignment fact") })
+                    out.push_str(&"#[repr(C, align({fact.effective_alignment}))]\n")
+                }
+                _ -> panic("unreachable")
+            }
+            out.push_str(&"#[derive(Clone, Copy)]\nstruct {name} {{\n")
+            for field in fields {
+                field_ty :: self.c_abi_type(&field.ty, MirAccess.Read).unwrap_or_else(fn() { panic("C ABI record field {field.id:?} has no checked physical representation") })
+                out.push_str(&"    {self.field_name(field.id)}: {field_ty},\n")
+            }
+            out.push_str("}\n\n")
+        }
+        self.emit_c_abi_enums(out)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22390
+    fn emit_c_abi_enums(out: &String) -> {
+        for definition in self.program.types {
+            is_c_enum :: definition.kind == { .Enum(..) -> definition.c_layout_tag.is_some(), _ -> false }
+            if !self.module_selected(definition.module) || !is_c_enum { continue }
+            _ :: self.c_abi_enum_facts(definition)
+            if !self.c_abi_enum_has_payload(definition) { continue }
+            variants :: definition.kind == { .Enum(variants: variants, ..) -> variants, _ -> panic("unreachable") }
+            enum_name :: self.c_abi_enum_name(definition)
+            payload_name :: self.c_abi_enum_payload_name(definition)
+            tag_name :: self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition))
+            for variant in variants {
+                fields_opt :: variant.payload == { .Named(fields) -> Some(fields), _ -> None }
+                if fields_opt.is_none() { continue }
+                variant_name :: "{payload_name}_{self.c_abi_enum_variant_name(variant)}"
+                out.push_str(&"#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {variant_name} {{\n")
+                for field in fields_opt.unwrap() {
+                    field_ty :: self.c_abi_type(&field.ty, MirAccess.Read).unwrap_or_else(fn() { panic("C ABI enum {definition.id:?} field {field.id:?} has no checked physical representation") })
+                    out.push_str(&"    {self.field_name(field.id)}: {field_ty},\n")
+                }
+                out.push_str("}\n\n")
+            }
+            out.push_str(&"#[repr(C)]\n#[derive(Clone, Copy)]\nunion {payload_name} {{\n    __jet_unit: u8,\n")
+            for variant in variants {
+                variant_name :: self.c_abi_enum_variant_name(variant)
+                field_ty :: variant.payload == {
+                    .Unit -> continue
+                    .Single(payload) -> self.c_abi_type(payload, MirAccess.Read).unwrap_or_else(fn() { panic("C ABI enum {definition.id:?} variant `{variant.name}` has no checked physical payload") })
+                    .Named(_) -> "{payload_name}_{variant_name}"
+                }
+                out.push_str(&"    {variant_name}: {field_ty},\n")
+            }
+            out.push_str("}\n\n")
+            out.push_str(&"#[repr(C)]\n#[derive(Clone, Copy)]\nstruct {enum_name} {{\n    tag: {tag_name},\n    payload: {payload_name},\n}}\n\n\n")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22454
+    fn c_abi_encode_enum_ref(definition: &MirTypeDef, value: &String) -> String {
+        variants :: definition.kind == { .Enum(variants: variants, ..) -> variants, _ -> panic("unreachable") }
+        enum_name :: self.type_name(definition.id)
+        tag_type :: self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition))
+        payload :: self.c_abi_enum_has_payload(definition)
+        arms :: variants.iter().map(fn(variant) {
+            variant_name :: self.c_abi_enum_variant_name(variant)
+            tag :: "({self.c_abi_enum_variant_discriminant(definition, variant)} as {tag_type})"
+            variant.payload == {
+                .Unit -> if payload { "{enum_name}::{variant_name} => {self.c_abi_enum_name(definition)} {{ tag: {tag}, payload: {self.c_abi_enum_payload_name(definition)} {{ __jet_unit: 0 }} }}" } else { "{enum_name}::{variant_name} => {tag}" }
+                .Single(payload_ty) -> {
+                    encoded :: self.c_abi_encode_ref(payload_ty, "payload")
+                    "{enum_name}::{variant_name}(payload) => {self.c_abi_enum_name(definition)} {{ tag: {tag}, payload: {self.c_abi_enum_payload_name(definition)} {{ {variant_name}: {encoded} }} }}"
+                }
+                .Named(fields) -> {
+                    encoded_fields :: fields.iter().map(fn(field) { field_name :: self.field_name(field.id); encoded :: self.c_abi_encode_ref(&field.ty, &field_name); "{field_name}: {encoded}" }).collect[[String]]().join(", ")
+                    variant_payload :: "{self.c_abi_enum_payload_name(definition)}_{variant_name} {{ {encoded_fields} }}"
+                    field_names :: fields.iter().map(fn(field) { self.field_name(field.id) }).collect[[String]]().join(", ")
+                    "{enum_name}::{variant_name} {{ {field_names} }} => {self.c_abi_enum_name(definition)} {{ tag: {tag}, payload: {self.c_abi_enum_payload_name(definition)} {{ {variant_name}: {variant_payload} }} }}"
+                }
+            }
+        }).collect[[String]]().join(", ")
+        "match ({value}) {{ {arms} }}"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22526
+    fn c_abi_encode_ref(ty: &MirType, value: &String) -> String {
+        ty.kind() == {
+            .Int -> self.native_int_argument("*({value})", None)
+            .String -> "{{ __jet_c_strings.push(std::ffi::CString::new(({value}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\"))); __jet_c_strings.last().unwrap().as_ptr() }}"
+            .Float, .Float32, .Bool, .IntN(..) -> "*({value})"
+            .Char -> "(*({value})) as u32"
+            .InlineRange(base: base, ..), .Tagged(inner: base, ..), .Quantity(base: base, ..) -> self.c_abi_encode_ref(base, value)
+            .Apply(..) -> {
+                if self.is_handle_type(ty) { return "({value}).as_raw()" }
+                if self.c_abi_enum_def(ty).is_some() {
+                    nominal :: self.implementation_owner_def(ty)
+                    if nominal.is_some() {
+                        nominal.unwrap().kind == {
+                            .Enum(..) -> return self.c_abi_encode_enum_ref(self.c_abi_enum_def(ty).unwrap(), value)
+                            .Distinct(base: base, ..) -> return self.c_abi_encode_ref(base, &"&({value}).0")
+                            .Alias(target: target) -> return self.c_abi_encode_ref(target, value)
+                            _ -> {}
+                        }
+                    }
+                }
+                record :: self.c_abi_record_def(ty)
+                if record.is_some() {
+                    definition :: record.unwrap()
+                    fields :: definition.kind == { .Struct(fields: fields, ..) -> fields, _ -> panic("unreachable") }
+                    source :: value.to_string()
+                    fields :: fields.iter().map(fn(field) {
+                        field_name :: self.field_name(field.id)
+                        field_value :: "&({source}).{field_name}"
+                        "{field_name}: {self.c_abi_encode_ref(&field.ty, &field_value)}"
+                    }).collect[[String]]().join(", ")
+                    return "{self.c_abi_record_name(definition)} {{ {fields} }}"
+                }
+                definition :: self.implementation_owner_def(ty)
+                if definition.is_none() { return value.to_string() }
+                definition.unwrap().kind == { .Distinct(base: base, ..) -> self.c_abi_encode_ref(base, &"&({value}).0"), .Alias(target: target) -> self.c_abi_encode_ref(target, value), _ -> value.to_string() }
+            }
+            _ -> value.to_string()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22614
+    fn c_abi_encode_owned(ty: &MirType, value: String) -> String {
+        is_apply :: ty.kind() == { .Apply(..) -> true, _ -> false }
+        if is_apply && self.c_abi_record_def(ty).is_some() { return "{{ let __jet_c_value = {value}; {self.c_abi_encode_ref(ty, "&__jet_c_value")} }}" }
+        self.c_abi_encode_ref(ty, &"&({value})")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22624
+    fn c_abi_decode_enum_owned(definition: &MirTypeDef, value: &String) -> String {
+        variants :: definition.kind == { .Enum(variants: variants, ..) -> variants, _ -> panic("unreachable") }
+        enum_name :: self.type_name(definition.id)
+        tag_type :: self.c_abi_enum_tag_type(self.c_abi_enum_tag(definition))
+        payload :: self.c_abi_enum_has_payload(definition)
+        arms := variants.iter().map(fn(variant) {
+            variant_name :: self.c_abi_enum_variant_name(variant)
+            tag :: "({self.c_abi_enum_variant_discriminant(definition, variant)} as {tag_type})"
+            variant.payload == {
+                .Unit -> "{tag} => {enum_name}::{variant_name}"
+                .Single(payload_ty) -> {
+                    physical :: "__jet_c_value.payload.{self.c_abi_enum_variant_name(variant)}"
+                    decoded :: self.c_abi_decode_owned(payload_ty, &physical)
+                    "{tag} => unsafe {{ {enum_name}::{variant_name}({decoded}) }}"
+                }
+                .Named(fields) -> {
+                    payload_name :: self.c_abi_enum_variant_name(variant)
+                    decoded_fields :: fields.iter().map(fn(field) {
+                        field_name :: self.field_name(field.id)
+                        physical :: "__jet_c_payload.{field_name}"
+                        "{field_name}: {self.c_abi_decode_owned(&field.ty, &physical)}"
+                    }).collect[[String]]().join(", ")
+                    "{tag} => unsafe {{ let __jet_c_payload = __jet_c_value.payload.{payload_name}; {enum_name}::{variant_name} {{ {decoded_fields} }} }}"
+                }
+            }
+        }).collect[[String]]()
+        arms.push("_ => panic!(\"native C enum discriminant is invalid\")")
+        arms :: arms.join(", ")
+        if payload { "{{ let __jet_c_value = {value}; match __jet_c_value.tag {{ {arms} }} }}" } else { "match ({value}) {{ {arms} }}" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22693
+    fn c_abi_decode_owned(ty: &MirType, value: &String) -> String {
+        ty.kind() == {
+            .Int -> "{self.config.root_prefix}jet_std::jet_int_owned_from_i64({value})"
+            .Float, .Float32, .Bool, .IntN(..) -> value.to_string()
+            .Char -> "char::from_u32(({value}) as u32).unwrap_or_else(|| panic!(\"native C Char is invalid\"))"
+            .String -> "{{ let __jet_c_ptr = {value}; if __jet_c_ptr.is_null() {{ panic!(\"native C String is null\") }}; unsafe {{ std::ffi::CStr::from_ptr(__jet_c_ptr) }}.to_str().unwrap_or_else(|_| panic!(\"native C String is not UTF-8\")).to_owned() }}"
+            .InlineRange(base: base, ..), .Tagged(inner: base, ..), .Quantity(base: base, ..) -> self.c_abi_decode_owned(base, value)
+            .Apply(..) -> {
+                if self.is_handle_type(ty) { return "{self.rust_type(ty)}::from_raw({value})" }
+                if self.c_abi_enum_def(ty).is_some() {
+                    definition :: self.implementation_owner_def(ty)
+                    if definition.is_some() {
+                        definition.unwrap().kind == {
+                            .Enum(..) -> return self.c_abi_decode_enum_owned(self.c_abi_enum_def(ty).unwrap(), value)
+                            .Distinct(base: base, ..) -> return "{self.rust_type(ty)}({self.c_abi_decode_owned(base, value)})"
+                            .Alias(target: target) -> return self.c_abi_decode_owned(target, value)
+                            _ -> {}
+                        }
+                    }
+                }
+                definition :: self.implementation_owner_def(ty)
+                if definition.is_none() { return value.to_string() }
+                record :: self.c_abi_record_def(ty)
+                if record.is_some() {
+                    fields :: record.unwrap().kind == { .Struct(fields: fields, ..) -> fields, _ -> panic("unreachable") }
+                    fields :: fields.iter().map(fn(field) {
+                        field_name :: self.field_name(field.id)
+                        field_value :: "__jet_c_value.{field_name}"
+                        "{field_name}: {self.c_abi_decode_owned(&field.ty, &field_value)}"
+                    }).collect[[String]]().join(", ")
+                    return "{{ let __jet_c_value = {value}; {self.rust_type(ty)} {{ {fields} }} }}"
+                }
+                definition.unwrap().kind == { .Distinct(base: base, ..) -> "{self.rust_type(ty)}({self.c_abi_decode_owned(base, value)})", .Alias(target: target) -> self.c_abi_decode_owned(target, value), _ -> value.to_string() }
+            }
+            _ -> value.to_string()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22789
+    fn foreign_call_arg(caller: &MirFunction, foreign: &MirForeign, arg: &MirCallArg, param: &MirParam) -> String {
+        if foreign.foreign_language == .C && !(foreign.handle.is_some() && self.is_handle_type(&param.ty)) {
+            if self.c_abi_record_def(&param.ty).is_some() {
+                return arg.access == {
+                    .Read -> self.c_abi_encode_ref(&param.ty, &self.value_slot_reference(arg.value, false))
+                    .Write -> panic("MIR foreign C call {foreign.id:?} passes C record parameter `{param.name}` with write access, which has no checked writeback lowering")
+                    .Move -> self.c_abi_encode_owned(&param.ty, self.call_arg_for_function(caller, arg, false))
+                }
+            }
+            is_string :: param.ty.kind() == { .String -> true, _ -> false }
+            if is_string && (arg.access == .Read || arg.access == .Move) {
+                value :: self.call_arg_for_function(caller, arg, false)
+                return "std::ffi::CString::new(({value}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\")).as_ptr()"
+            }
+            if !is_string && !self.is_handle_type(&param.ty) && self.c_abi_type(&param.ty, MirAccess.Read).is_some() && (arg.access == .Read || arg.access == .Move) { return self.c_abi_encode_owned(&param.ty, self.call_arg_for_function(caller, arg, false)) }
+        }
+        // Raw scalar Int is checked/narrowed to host i64 at the call.
+        is_int :: param.ty.kind() == { .Int -> true, _ -> false }
+        if foreign.raw_scalar_abi && is_int && arg.access != .Write { return self.native_int_argument(self.call_arg_for_function(caller, arg, false), None) }
+        if !(foreign.handle.is_some() && self.is_handle_type(&param.ty)) {
+            direct_c_aggregate :: foreign.foreign_language == .C && !foreign.bridge_eligible && param.access == .Read && !self.is_scalar(&param.ty)
+            borrowed :: !direct_c_aggregate && param.access == .Read && !self.is_scalar(&param.ty)
+            return self.call_arg_for_function(caller, arg, borrowed)
+        }
+        arg.access == {
+            .Read -> "({self.value_slot_reference(arg.value, false)}).as_raw()"
+            .Write -> "({self.value_slot_reference(arg.value, true)}).as_raw()"
+            .Move -> "({self.value_move(arg.value)}).into_raw()"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22863
+    fn foreign_call(caller: &MirFunction, id: MirForeignId, args: &[MirCallArg], type_args: &[MirType]) -> String {
+        if !type_args.is_empty() { panic("MIR foreign call {id:?} carries unexpected type arguments") }
+        foreign :: self.program.foreign.iter().find(fn(foreign) { foreign.id == id }).unwrap_or_else(fn() { panic("MIR foreign ID {id:?} has no row") })
+        if !self.module_selected(foreign.module_id) { panic("MIR foreign call {id:?} targets an unselected module") }
+        if !self.target_applicable(foreign.target_applicability) { panic("MIR foreign call {id:?} is not applicable to the selected artifact target") }
+        if args.len() != foreign.params.len() || args.iter().zip(&foreign.params).any(fn((argument, parameter)) { argument.access != parameter.access }) { panic("MIR foreign call {id:?} argument access does not match its row") }
+        foreign.callback_transport == {
+            .Some("managed-close") -> {
+                if args.len() != 1 || args[0].access != .Move { panic("managed callback unsubscribe must consume one registration") }
+                registration :: self.value_move(args[0].value)
+                return "{self.config.root_prefix}jet_std::jet_ffi_callback_registration_unsubscribe_result(({registration}).into_raw())"
+            }
+            .Some("emit-task") -> {
+                if args.len() != 1 { panic("managed callback emission must receive exactly one payload") }
+                native :: self.program.foreign.iter().find(fn(candidate) { candidate.module_id == foreign.module_id && candidate.name == "__jet_native_emit_async" }).unwrap_or_else(fn() { panic("managed callback emission {foreign.name:?} has no native emit function") })
+                value :: self.call_arg_for_function(caller, &args[0], false)
+                return "{self.config.root_prefix}jet_std::JetTask::spawn(move || Ok(unsafe {{ {self.foreign_name(native.id)}({value}) }}))"
+            }
+            .Some("managed") -> {
+                if args.len() != 1 { panic("managed callback registration must receive exactly one callback") }
+                (callback_call, callback_id, lambda) :: self.value_instruction(caller, args[0].value).and_then(fn(instruction) {
+                    instruction.operation == { .Semantic(.CCallback(call: call, callback: callback, lambda: lambda)) -> Some((call, callback, lambda)), _ -> None }
+                }).unwrap_or_else(fn() { panic("managed callback argument has no C callback adapter operation") })
+                callback_row :: self.program.callbacks.iter().find(fn(row) { row.id == callback_id }).unwrap_or_else(fn() { panic("managed callback {callback_id:?} has no adapter row") })
+                if !callback_row.managed || callback_row.symbol.is_empty() { panic("managed callback argument has an unmanaged adapter row") }
+                native_start :: self.program.foreign.iter().find(fn(candidate) { candidate.module_id == foreign.module_id && candidate.name == "__jet_native_{foreign.name}" && candidate.callback_transport == Some("native-start") }).unwrap_or_else(fn() { panic("managed callback {foreign.name:?} has no native start function") })
+                native_stop :: self.program.foreign.iter().find(fn(candidate) { candidate.module_id == foreign.module_id && candidate.name == "__jet_native_unsubscribe" }).unwrap_or_else(fn() { panic("managed callback {foreign.name:?} has no native unsubscribe function") })
+                identity :: foreign.callback_identity.filter(fn(identity) { !identity.is_empty() }).unwrap_or_else(fn() { panic("managed callback {foreign.name:?} has no identity") })
+                digest :: foreign.callback_plan_digest.filter(fn(digest) { !digest.is_empty() }).unwrap_or_else(fn() { panic("managed callback {foreign.name:?} has no plan digest") })
+                handler :: self.c_callback(caller, callback_call, callback_id, lambda)
+                return "{self.config.root_prefix}jet_std::JetFfiCallbackRegistrationHandle::from_raw({self.config.root_prefix}jet_std::jet_ffi_callback_registration_start_i64(Some({callback_row.symbol} as unsafe extern \"C\" fn(*mut core::ffi::c_void, i64)), |__jet_callback, __jet_context| unsafe {{ {self.foreign_name(native_start.id)}(__jet_callback, __jet_context) }}, |__jet_context| unsafe {{ {self.foreign_name(native_stop.id)}(__jet_context) }}, |_| {{}}, {handler}, {identity:?}, {digest:?}))"
+            }
+            _ -> {}
+        }
+        c_record_string_count :: if foreign.foreign_language == .C { args.iter().zip(&foreign.params).filter(fn((_, param)) { self.c_abi_record_string_count(&param.ty) > 0 }).map(fn((_, param)) { self.c_abi_record_string_count(&param.ty) }).sum() } else { 0 }
+        setup := [String].new()
+        if c_record_string_count > 0 { setup.push("let mut __jet_c_strings = Vec::<std::ffi::CString>::with_capacity({c_record_string_count});") }
+        writebacks := [String].new()
+        call_args :: args.iter().zip(&foreign.params).enumerate().map(fn((index, (arg, param))) {
+            needs_temp :: foreign.foreign_language == .C && arg.access == .Write && self.c_abi_write_temp_needed(&param.ty)
+            if !needs_temp { return self.foreign_call_arg(caller, foreign, arg, param) }
+            place :: arg.place.unwrap_or_else(fn() { panic("C foreign write argument {param.name} has no checked place") })
+            place :: self.place_reference(caller, place, MirAccess.Write)
+            temp :: "__jet_c_ffi_arg_{index}"
+            if self.c_abi_scalar_kind(&param.ty) == Some("string") {
+                setup.push("let mut {temp} = std::ffi::CString::new(({place}).as_bytes()).unwrap_or_else(|_| panic!(\"native C String contains NUL\"));")
+                writebacks.push("*({place}) = {{ let __jet_c_ptr = {temp}.as_ptr(); if __jet_c_ptr.is_null() {{ panic!(\"native C String is null\") }}; unsafe {{ std::ffi::CStr::from_ptr(__jet_c_ptr) }}.to_str().unwrap_or_else(|_| panic!(\"native C String is not UTF-8\")).to_owned() }};")
+                "{temp}.as_mut_ptr()"
+            } else if self.c_abi_scalar_kind(&param.ty) == Some("char") {
+                setup.push("let mut {temp} = (*({place})) as u32;")
+                writebacks.push("*({place}) = {self.c_abi_decode_owned(&param.ty, &temp)};")
+                "&mut {temp} as *mut _"
+            } else {
+                setup.push("let mut {temp} = {self.c_abi_encode_ref(&param.ty, &place)};")
+                writebacks.push("*({place}) = {self.c_abi_decode_owned(&param.ty, &temp)};")
+                "&mut {temp} as *mut _"
+            }
+        }).collect[[String]]().join(", ")
+        raw_call :: if foreign.foreign_language == .Rust {
+            // Prepared safe bridge wrapper owns Rust crate foreign symbols.
+            ffi :: self.config.execution.ffi.map(fn(link) { &link.crate_name }).unwrap_or("jet_ffi")
+            "{ffi}::jet_ffi_{foreign.name}({call_args})"
+        } else if setup.is_empty() { "unsafe {{ {self.foreign_name(id)}({call_args}) }}" } else {
+            "{{ {setup.join(" ")} let __jet_c_result = unsafe {{ {self.foreign_name(id)}({call_args}) }}; {writebacks.join(" ")} __jet_c_result }}"
+        }
+        call :: if foreign.foreign_language == .C { foreign.return_type.filter(fn(ty) { self.c_abi_type(ty, MirAccess.Read).is_some() }).map(fn(ty) { self.c_abi_decode_owned(ty, &raw_call) }).unwrap_or(raw_call) } else { raw_call }
+        if foreign.callback_transport == Some("guest-import-result") { return "Ok({call})" }
+        if foreign.return_type.is_some_and(fn(ty) { foreign.handle.is_some() && self.is_handle_type(ty) }) && foreign.foreign_language != .C {
+            ty :: self.rust_type(foreign.return_type.expect("handle return type"))
+            "{ty}::from_raw({call})"
+        } else { call }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23134
+    fn method_call(caller: &MirFunction, function: MirFunctionId, owner: &MirType, args: &[MirCallArg], type_args: &[MirType]) -> String {
+        row :: self.function_row(function)
+        self_access :: row.form == {
+            .Method(owner: declared_owner, self_access: .Some(self_access)), .TraitMethod(owner: declared_owner, self_access: .Some(self_access), ..) -> {
+                if !declared_owner.same_checked_type(owner) { panic("MIR method call {function:?} owner does not match its function declaration: declared={declared_owner:?}, actual={owner:?}") }
+                self_access
+            }
+            .Method(owner: declared_owner, self_access: .None), .TraitMethod(owner: declared_owner, self_access: .None, ..) -> {
+                if !declared_owner.same_checked_type(owner) { panic("MIR method call {function:?} owner does not match its function declaration: declared={declared_owner:?}, actual={owner:?}") }
+                panic("MIR method call {function:?} targets an associated function")
+            }
+            .TopLevel -> panic("MIR method call {function:?} does not target a method")
+        }
+        receiver :: args.first().unwrap_or_else(fn() { panic("MIR method call {function:?} has no receiver argument") })
+        if receiver.access != self_access { panic("MIR method call {function:?} receiver access {receiver.access:?} disagrees with declaration {self_access:?}") }
+        trait_ref :: row.form == { .TraitMethod(trait_ref: trait_ref, ..) -> Some(trait_ref), _ -> None }
+        receiver :: self.call_arg_for_function(caller, receiver, self_access == .Read)
+        generic :: if row.generic_params.is_empty() || type_args.is_empty() { "" } else { "::<{type_args.iter().map(fn(ty) { self.rust_type(ty) }).collect[[String]]().join(", ")}>" }
+        // row.params[0] is self; declared args start at index one.
+        declared :: self.declared_params(row)
+        params :: args[1..].iter().enumerate().map(fn((index, arg)) {
+            borrowed :: self.arithmetic_trait_method(row) || declared.get(index).is_some_and(fn(param) { self.parameter_borrowed(param) })
+            self.call_arg_for_function(caller, arg, borrowed)
+        }).collect[[String]]().join(", ")
+        if trait_ref.is_some() {
+            trait_name := self.trait_nominal_name(trait_ref.unwrap())
+            if self.arithmetic_trait_method(row) { rhs :: declared.first().expect("checked arithmetic RHS"); trait_name.push_str(&"<{self.rust_type(&rhs.ty)}>") }
+            separator :: if params.is_empty() { "" } else { ", " }
+            return "<{self.rust_type(owner)} as {trait_name}>::{self.rust_method_symbol(row)}{generic}({receiver}{separator}{params})"
+        }
+        "({receiver}).{self.rust_method_symbol(row)}{generic}({params})"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23251
+    fn trait_method_call(caller: &MirFunction, method_id: MirTraitMethodId, trait_ref: &MirTraitRef, receiver: &MirType, args: &[MirCallArg], type_args: &[MirType]) -> String {
+        bounds :: receiver.trait_bounds().unwrap_or_else(fn() { panic("MIR trait method receiver is not a trait object") })
+        if !bounds.iter().any(fn(bound) { bound.name == trait_ref.name }) { panic("MIR trait method receiver does not contain trait {trait_ref.name}") }
+        definition :: self.program.traits.iter().find(fn(definition) { definition.id == trait_ref.id }).unwrap_or_else(fn() { panic("MIR trait {trait_ref.id:?} is missing") })
+        method :: definition.methods.iter().find(fn(method) { method.id == method_id }).unwrap_or_else(fn() { panic("MIR trait method {method_id:?} is missing") })
+        self_access :: method.self_access.unwrap_or_else(fn() { panic("MIR trait method {method_id:?} has no receiver") })
+        receiver_arg :: args.first().unwrap_or_else(fn() { panic("MIR trait method {method_id:?} has no receiver argument") })
+        if receiver_arg.access != self_access { panic("MIR trait method {method_id:?} receiver access {receiver_arg.access:?} disagrees with declaration {self_access:?}") }
+        if args.len() != method.params.len() + 1 { panic("MIR trait method {method_id:?} has {args.len()} arguments, expected {method.params.len() + 1}") }
+        receiver :: self.call_arg_for_function(caller, receiver_arg, self_access == .Read)
+        generic :: if type_args.is_empty() { "" } else { "::<{type_args.iter().map(fn(ty) { self.rust_type(ty) }).collect[[String]]().join(", ")}>" }
+        params :: args[1..].iter().zip(&method.params).map(fn((arg, param)) { self.call_arg_for_function(caller, arg, self.parameter_borrowed(param)) }).collect[[String]]().join(", ")
+        symbol :: if is_compiler_owned_trait(&trait_ref.name) { compiler_trait_method_symbol(&trait_ref.name, &method.name) } else { mangle(&method.name) }
+        "({receiver}).{symbol}{generic}({params})"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23331
+    fn compute_runtime_name(name: &String) -> String { "{self.config.root_prefix}{name}" }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23335
+    fn compute_tuple(values: [String]) -> String { values.len() == { 0 -> "()", 1 -> "({values[0]},)", _ -> "({values.join(", ")})" } }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23343
+    fn compute_result_shape(output: &MirType) -> String {
+        output.kind() == { .Tuple(fields) -> "{self.compute_runtime_name("JetComputeResultShape")}::TensorTuple({fields.len()}usize)", _ -> "{self.compute_runtime_name("JetComputeResultShape")}::Tensor" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23357
+    fn compute_base_result(output: &MirType, value: &String) -> String {
+        result :: self.compute_runtime_name("JetComputeBaseResult")
+        output.kind() == {
+            .Tuple(fields) -> { values :: fields.iter().enumerate().map(fn((index, _)) { "{value}.{index}" }).collect[[String]]().join(", "); "{result}::TensorTuple(vec![{values}])" }
+            _ -> "{result}::Tensor({value})"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23373
+    fn compute_gradient_value(value_type: &MirType, gradients: &String, target: USize) -> String {
+        value_type.kind() == { .Tuple(fields) -> self.compute_tuple(fields.iter().enumerate().map(fn((index, _)) { "{gradients}[{target}][{index}].clone()" }).collect[[String]]()), _ -> "{gradients}[{target}][0].clone()" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:23391
+    fn compute_gradient(gradient_type: &MirType, gradients: &String) -> String {
+        fields :: gradient_type.kind() == { .Tuple(fields) -> fields, _ -> panic("MIR compute gradient result is not a named tuple") }
+        self.compute_tuple(fields.iter().enumerate().map(fn((target, (_, value_type))) { self.compute_gradient_value(value_type, gradients, target) }).collect[[String]]())
+    }
+}

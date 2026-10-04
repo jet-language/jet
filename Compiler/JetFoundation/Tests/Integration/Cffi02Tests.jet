@@ -1,0 +1,749 @@
+use std.[fs, env, process, thread, time]
+use std.process.[Command, Stdio]
+use core.sys.target.[selected_os, selected_arch]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.Cffi.[declare_local_c_dep, build_local_c_provider, add_ffi_bridge_args]
+use jetpack.Package.[DepSource, PackageFacts]
+// GATE #4494: real native file/process/thread primitives; #4483: selected target dispatch.
+// Rust: tests/cffi.rs:1823
+#Test("cffi_repr_c_enums_match_native_c_layout") {
+    if !common.have_rustc() { return }
+    root :: env.temp_dir().join("jet_cffi_reprc2_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("reprc2.c"), """
+#include <stdint.h>
+#include <stddef.h>
+typedef enum { STATUS_OK=0, STATUS_LOST=7 } Status;
+typedef enum __attribute__((packed)) { PACKET_PING=3, PACKET_DATA=7 } PacketTag;
+typedef union { long long ping; struct { long long x; long long y; } data; } PacketPayload;
+typedef struct { PacketTag tag; PacketPayload payload; } Packet;
+int32_t repr_status(Status s){return (int32_t)s;} int32_t repr_packet(Packet p){return (int32_t)p.tag*100+p.payload.ping;}
+int32_t repr_packet_size(void){return sizeof(Packet);} int32_t repr_packet_align(void){return _Alignof(Packet);}
+int32_t repr_packet_payload_offset(void){return offsetof(Packet,payload);}
+""").unwrap()
+    cc :: ["cc", "gcc", "clang"].iter().find(fn(x) { Command.new(x).arg("--version").output().is_ok() }).unwrap()
+    assert(Command.new(cc).args(["-c"]).arg(root.join("reprc2.c")).arg("-o").arg(root.join("reprc2.o")).status().unwrap().success())
+    assert(Command.new("ar").arg("rcs").arg(root.join("libreprc2.a")).arg(root.join("reprc2.o")).status().unwrap().success())
+    declare_local_c_dep(&root, "reprc2")
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.reprc2 as c
+#Layout(c)
+enum Status {
+    Ok = 0
+    Lost = 7
+}
+#Layout(c, tag: U8)
+enum Packet {
+    Ping(Int) = 3
+    Data(x: Int, y: Int) = 7
+}
+#Import module c.reprc2 {
+    fn repr_status(s: Status) -> I32 = "repr_status"
+    fn repr_packet(p: Packet) -> I32 = "repr_packet"
+    fn repr_packet_size() -> I32 = "repr_packet_size"
+    fn repr_packet_align() -> I32 = "repr_packet_align"
+    fn repr_packet_payload_offset() -> I32 = "repr_packet_payload_offset"
+}
+fn run() {
+    print(c.repr_status(Status.Lost))
+    print(c.repr_packet(Packet.Ping(41)))
+    print(c.repr_packet_size())
+    print(c.repr_packet_align())
+    print(c.repr_packet_payload_offset())
+}
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("{jet.render_diagnostics(main.to_str().unwrap(), &src, &d)}") })
+    assert(out.rust.contains("#[repr(C, u8)]") && out.rust.contains("__jet_Lost = 7") && out.rust.contains("__jet_Ping(i64) = 3"))
+    assert(out.rust.contains("typedef uint8_t Packet_Tag;") && out.rust.contains("typedef union Packet_Payload") && out.rust.contains("typedef struct Packet"))
+    fs.write(root.join("main.rs"), &out.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg("native={root.display()}").arg("-lreprc2")
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "I2: {String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(root.join("main_bin")).output().unwrap()
+    assert(run.status.success(), "{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "7\n341\n24\n8\n8\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:1930
+#Test("cffi_named_pure_callback_has_stable_c_symbol") {
+    if !common.have_rustc() { return }
+    root :: env.temp_dir().join("jet_cffi_cb_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("cb.c"), "#include <stdint.h>\n#include <pthread.h>\ntypedef int32_t (*cb_t)(int32_t);\nint32_t call_twice(cb_t cb,int32_t x){{ return cb(cb(x)); }}\ntypedef struct {{ cb_t cb; int32_t x; int32_t out; }} Job;\nstatic void* run_job(void* p){{ Job* j=(Job*)p; j->out=j->cb(j->x); return 0; }}\nint32_t call_parallel(cb_t cb){{ pthread_t t[4]; Job j[4]; for(int i=0;i<4;i++){{j[i]=(Job){{cb,i,0}}; pthread_create(&t[i],0,run_job,&j[i]);}} int32_t s=0; for(int i=0;i<4;i++){{pthread_join(t[i],0);s+=j[i].out;}} return s; }}\n").unwrap()
+    cc :: ["cc", "gcc", "clang"].iter().find(fn(x) { Command.new(x).arg("--version").output().is_ok() }).unwrap()
+    assert(Command.new(cc).args(["-c"]).arg(root.join("cb.c")).arg("-o").arg(root.join("cb.o")).status().unwrap().success())
+    assert(Command.new("ar").arg("rcs").arg(root.join("libcb.a")).arg(root.join("cb.o")).status().unwrap().success())
+    fs.write(root.join("package.jet"), "name: \"cffi_cb\"\nversion: \"0.1.0\"\ndeps: {{ cb: c@\"{root.display()}\" }}\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.cb as c
+fn increment(x: I32) -[]> I32 {
+    return x + 1
+}
+#Import module c.cb {
+    fn call_twice(cb: fn(I32) -[]> I32, x: I32) -> I32 = "call_twice"
+    fn call_parallel(cb: fn(I32) -[]> I32) -> I32 = "call_parallel"
+}
+fn run() {
+    print(c.call_twice(increment, 40))
+    print(c.call_parallel(increment))
+    print(c.call_twice((x) -> x + x, 10))
+}
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("{jet.render_diagnostics(main.to_str().unwrap(), &src, &d)}") })
+    assert(out.rust.contains("extern \"C\" fn __jet_increment"))
+    assert(out.rust.contains("extern \"C\" fn(i32) -> i32"))
+    assert(out.rust.contains("extern \"C\" fn __jet_c_callback_"))
+    fs.write(root.join("main.rs"), out.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg("native={root.display()}").arg("-lcb").arg("-lpthread")
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "I2: {String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(root.join("main_bin")).output().unwrap()
+    assert_eq(String.from_utf8_lossy(&run.stdout), "42\n10\n40\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:2020
+#Test("cffi_raw_status_out_pointer_reads_only_on_success") {
+    if !common.have_rustc() { return }
+    root :: env.temp_dir().join("jet_cffi_out_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("store.c"), "#include <stdint.h>\n#include <string.h>\ntypedef struct {{ uint64_t id; uint32_t flags; }} Record;\nint32_t store_load(uint64_t id, Record* out){{ if(id==7){{out->id=70;out->flags=3;return 0;}} memset(out,0xA5,sizeof(*out)); return 9; }}\n").unwrap()
+    cc :: ["cc", "gcc", "clang"].iter().find(fn(x) { Command.new(x).arg("--version").output().is_ok() }).unwrap()
+    assert(Command.new(cc).args(["-c"]).arg(root.join("store.c")).arg("-o").arg(root.join("store.o")).status().unwrap().success())
+    assert(Command.new("ar").arg("rcs").arg(root.join("libstore.a")).arg(root.join("store.o")).status().unwrap().success())
+    declare_local_c_dep(&root, "store")
+    main :: root.join("main.jet")
+    src :: """
+use core.mem
+use c.store as store
+#Layout(c)
+struct Record {
+    id: U64
+    flags: U32
+}
+#Error
+enum StoreError { Status }
+#Import module c.store {
+    fn store_load(id: U64, out: *Record) -> I32 = "store_load"
+}
+fn load(id: U64) -> Record StoreError! {
+    slot := Record{id: 0, flags: 0}
+    status := I32{ 1 }
+    #Unsafe("store_load receives a live non-null slot; bytes are read only after status zero") {
+        p :: mem.Ptr<Record>.from_addr(mem.address_of(slot))
+        status = store.store_load(id, p)
+        if Int.from_i32(status) == 0 { slot = ~p.* }
+    }
+    if Int.from_i32(status) != 0 { return Err(StoreError.Status) }
+    return Ok(slot)
+}
+fn run() {
+    print((load(7) ?? panic("success expected")).id)
+    if load(8) == {
+        .Ok(v) -> { print("unexpected {v.id}") }
+        .Err(e) -> { print("status 9") }
+    }
+}
+"""
+    fs.write(&main, src).unwrap()
+    out :: jet.compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("{jet.render_diagnostics(main.to_str().unwrap(), src, &d)}") })
+    assert(out.rust.contains("*mut super::__jet_Record"))
+    assert(!out.rust.contains("Result<super::__jet_Record"))
+    fs.write(root.join("main.rs"), &out.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg("native={root.display()}").arg("-lstore")
+    if link :: out.ffi { add_ffi_bridge_args(&rustc, &link) }
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "I2: {String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(root.join("main_bin")).output().unwrap()
+    assert_eq(String.from_utf8_lossy(&run.stdout), "70\nstatus 9\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:2116
+#Test("cffi_sysv64_abi_executes_native_symbol") {
+    if selected_arch() != "x86_64" || selected_os() == "windows" { return }
+    if !common.have_rustc() { return }
+    root :: env.temp_dir().join("jet_cffi_sysv_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("abi.c"), "#include <stdint.h>\nint32_t abi_add(int32_t a,int32_t b){{return a+b;}}\n").unwrap()
+    cc :: ["cc", "gcc", "clang"].iter().find(fn(x) { Command.new(x).arg("--version").output().is_ok() }).unwrap()
+    assert(Command.new(cc).args(["-c"]).arg(root.join("abi.c")).arg("-o").arg(root.join("abi.o")).status().unwrap().success())
+    assert(Command.new("ar").arg("rcs").arg(root.join("libabi.a")).arg(root.join("abi.o")).status().unwrap().success())
+    declare_local_c_dep(&root, "abi")
+    src :: """
+use c.abi as c
+#Import module c.abi {
+    #ABI(sysv64)
+    fn add(a: I32, b: I32) -> I32 = "abi_add"
+}
+fn run() { print(c.add(20, 22)) }
+"""
+    main :: root.join("main.jet")
+    fs.write(&main, src).unwrap()
+    out :: jet.compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("{jet.render_diagnostics(main.to_str().unwrap(), src, &d)}") })
+    assert(out.rust.contains("extern \"sysv64\""))
+    fs.write(root.join("main.rs"), &out.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(root.join("main.rs")).arg("-o").arg(root.join("main_bin")).arg("-L").arg("native={root.display()}").arg("-labi")
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "I2: {String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(root.join("main_bin")).output().unwrap()
+    assert_eq(String.from_utf8_lossy(&run.stdout), "42\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:2186
+#Test("cffi_string_returns_are_borrowed_non_null_utf8_and_copied") {
+    if !common.have_rustc() { return }
+    root :: env.temp_dir().join("jet_cffi_cstr_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("strret.c"), "const char* good(void){{return \"caf\\xC3\\xA9\";}} const char* null_s(void){{return 0;}} const char* bad(void){{static const char s[]={{ (char)0xff,0 }};return s;}}\n").unwrap()
+    cc :: ["cc", "gcc", "clang"].iter().find(fn(x) { Command.new(x).arg("--version").output().is_ok() }).unwrap()
+    assert(Command.new(cc).args(["-c"]).arg(root.join("strret.c")).arg("-o").arg(root.join("strret.o")).status().unwrap().success())
+    assert(Command.new("ar").arg("rcs").arg(root.join("libstrret.a")).arg(root.join("strret.o")).status().unwrap().success())
+    declare_local_c_dep(&root, "strret")
+    for (name, expected, success) in [("good", "café\n", true), ("null_s", "returned a null pointer", false), ("bad", "not valid UTF-8", false)] {
+        src :: "use c.strret as c\n#Import module c.strret {{ fn get() -> String = \"{name}\" }}\nfn run() {{ print(c.get()) }}\n"
+        main :: root.join("{name}.jet")
+        fs.write(&main, &src).unwrap()
+        out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("{jet.render_diagnostics(main.to_str().unwrap(), &src, &d)}") })
+        wrapper :: out.rust.split_once("pub fn __jet_get() -> String {{\n").unwrap_or_else(fn() { panic("missing generated C wrapper for {name}") }).1.split_once("\n}}\n").unwrap_or_else(fn() { panic("unterminated generated C wrapper for {name}") }).0
+        assert(wrapper.contains("let p = unsafe {{ {name}() }};"))
+        assert(wrapper.contains("if p.is_null()"))
+        assert(wrapper.contains("std::ffi::CStr::from_ptr(p)"))
+        assert(wrapper.contains("bytes.to_str()"))
+        assert(wrapper.contains(".to_owned()"))
+        assert(!wrapper.contains("to_string_lossy"))
+        assert(!wrapper.contains("/* unsupported:"))
+        rs :: root.join("{name}.rs")
+        bin :: root.join("{name}_bin")
+        fs.write(&rs, &out.rust).unwrap()
+        rustc := Command.new("rustc")
+        rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={root.display()}").arg("-lstrret")
+        built :: rustc.output().unwrap()
+        assert(built.status.success(), "I2: {String.from_utf8_lossy(&built.stderr)}")
+        run :: Command.new(bin).output().unwrap()
+        assert_eq(run.status.success(), success)
+        text :: "{String.from_utf8_lossy(&run.stdout)}{String.from_utf8_lossy(&run.stderr)}"
+        assert(text.contains(expected), "{name}: {text}")
+    }
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:2279
+// Runtime-built strings with embedded NUL must panic, never silently truncate.
+#Test("cffi_runtime_interior_nul_panics_instead_of_silently_truncating") {
+    if !common.have_rustc() { eprintln("note: skipping cffi_runtime_interior_nul_panics (need rustc)"); return }
+    root :: env.temp_dir().join("jet_cffi_nul_panic_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    declare_local_c_dep(&root, "jetc436")
+    build_local_c_provider(&root, "jetc436", "#include <stddef.h>\nlong long jetc436_strlen(const char *s) {{ const char *p = s; while (*p) ++p; return (long long)(p - s); }}\n")
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.jetc436 as c436
+#Import module c.jetc436 {
+    fn takes_str(s: String) -> Int = "jetc436_strlen"
+}
+fn run() {
+    line :: input() ?? ""
+    print(c436.takes_str(line))
+}
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("front end rejected the runtime-NUL fixture:\n{jet.render_diagnostics(main.to_str().unwrap(), &src, &d)}") })
+    rs :: root.join("main.rs")
+    fs.write(&rs, &out.rust).unwrap()
+    bin :: root.join("main_bin")
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={root.display()}").arg("-ljetc436")
+    if link :: out.ffi { add_ffi_bridge_args(&rustc, &link) }
+    status :: rustc.output().unwrap()
+    assert(status.status.success(), "I2: rustc rejected the runtime-NUL wrapper (jet bug):\n{String.from_utf8_lossy(&status.stderr)}")
+    child := Command.new(&bin).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    child.stdin.take().unwrap().write_all([97 as U8, 98, 0, 99, 100, 10]).unwrap()
+    run :: child.wait_with_output().unwrap()
+    assert(!run.status.success(), "a runtime String with an embedded NUL must panic at the C boundary, not silently succeed with a truncated/empty string; stdout was: {String.from_utf8_lossy(&run.stdout):?}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2368
+#Test("cffi_string_param_emits_cstring_conversion") {
+    root :: env.temp_dir().join("jet_cffi_strparam_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache).unwrap()
+    declare_local_c_dep(&root, "strlib")
+    build_local_c_provider(&root, "strlib", "long long strlib_slen(const char *s) {{ const char *p = s; while (*p) ++p; return (long long)(p - s); }}\n")
+    fs.write(cache.join("strlib.jet"), "#Bindgen module c.strlib.__bindgen__ {{ fn slen(s: String) -> Int = \"strlib_slen\" }}\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use c.strlib as s\nfn run() {{ print(s.slen(\"hello\")) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("string-param C FFI rejected:\n{d:?}") })
+    assert(out.rust.contains("let c0 = std::ffi::CString::new"), "wrapper must declare the CString temp for a String param; got:\n{out.rust}")
+    assert(out.rust.contains("strlib_slen(c0.as_ptr())"), "wrapper must call through the declared temp; got:\n{out.rust}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2407
+#Test("cffi_empty_overlay_is_bindgen_only") {
+    root :: env.temp_dir().join("jet_cffi_empty_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache).unwrap()
+    declare_local_c_dep(&root, "jetc")
+    build_local_c_provider(&root, "jetc", "long long jetc_ping(void) {{ return 7; }}\n")
+    fs.write(cache.join("jetc.jet"), "#Bindgen module c.jetc.__bindgen__ {{ fn ping() -> Int = \"jetc_ping\" }}\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.jetc as jc
+#Import module c.jetc { }
+fn run() { print(jc.ping()) }
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("empty overlay rejected:\n{d:?}") })
+    assert(out.rust.contains("jetc_ping"), "bindgen symbol must survive empty overlay")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2441
+#Test("cffi_overlay_overrides_bindgen") {
+    root :: env.temp_dir().join("jet_cffi_override_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache).unwrap()
+    declare_local_c_dep(&root, "jetc")
+    build_local_c_provider(&root, "jetc", "long long real_add(long long a, long long b) {{ return a + b; }}\n")
+    fs.write(cache.join("jetc.jet"), "#Bindgen module c.jetc.__bindgen__ {{ fn add(a: Int, b: Int) -> Int = \"gen_add\" }}\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.jetc as jc
+#Import module c.jetc { fn add(a: Int, b: Int) -> Int = "real_add" }
+fn run() { print(jc.add(1, 2)) }
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("override rejected:\n{d:?}") })
+    assert(out.rust.contains("real_add"), "overlay symbol must win")
+    assert(!out.rust.contains("gen_add"), "bindgen symbol must be replaced")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2479
+#Test("cffi_header_use_form_lowers_to_lib") {
+    root :: env.temp_dir().join("jet_cffi_header_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    declare_local_c_dep(&root, "demo")
+    build_local_c_provider(&root, "demo", "int demo_ping(void) {{ return 7; }}\n")
+    fs.write(root.join("demo.h"), "int demo_ping(void);\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use \"demo.h\" as d\nfn run() {{ print(d.demo_ping()) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("header use form rejected:\n{d:?}") })
+    assert(out.rust.contains("demo_ping"), "header form must reach the demo bindgen surface")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2512
+#Test("auto_bind_on_cache_miss") {
+    root :: env.temp_dir().join("jet_autobind_miss_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache_dir).unwrap()
+    declare_local_c_dep(&root, "mylib")
+    build_local_c_provider(&root, "mylib", "int mylib_ping(int value) {{ return value; }}\n")
+    header_dir :: root.join("include")
+    fs.create_dir_all(&header_dir).unwrap()
+    header_path :: header_dir.join("mylib.h")
+    fs.write(&header_path, "int mylib_ping(int x);\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use \"include/mylib.h\" as m\nfn run() {{ print(m.mylib_ping(1)) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    result :: jet.compile_with_path(&src, main.to_str().unwrap())
+    cache_file :: cache_dir.join("mylib.jet")
+    assert(cache_file.is_file(), "auto-bind: compiler should have created the binding cache at {cache_file:?}")
+    assert(result.is_ok(), "auto-bind on cache miss must not produce a compile error; got: {result.err():?}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2563
+#Test("descriptor_mismatch_rejects_generated_cache_before_call") {
+    root :: env.temp_dir().join("jet_descriptor_mismatch_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache_dir).unwrap()
+    generated :: jet.CBind.generate("int ping(int value);\n", "mismatch").unwrap()
+    stale :: generated.source.replacen(&generated.descriptor_stamp, "stale", 1)
+    fs.write(cache_dir.join("mismatch.jet"), stale).unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use c.mismatch as m\nfn run() {{ print(m.ping(1)) }}\n").unwrap()
+    source :: fs.read_to_string(&main).unwrap()
+    diagnostics :: jet.compile_with_path(&source, main.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3208" }), "stale descriptor must be rejected before the foreign call: {diagnostics:?}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2591
+#Test("cobol_cache_without_descriptor_rejects_abi_unknown") {
+    root :: env.temp_dir().join("jet_cobol_descriptor_missing_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/cobol")
+    fs.create_dir_all(&cache_dir).unwrap()
+    fs.write(cache_dir.join("payroll.jet"), "#Import module c.jet_cobol_payroll {{\n    fn apply_minor(value: Int) -> Int = \"jet_cobol_payroll_apply_minor\"\n}}\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use cobol.payroll as payroll\nfn run() {{ print(payroll.apply_minor(1)) }}\n").unwrap()
+    source :: fs.read_to_string(&main).unwrap()
+    diagnostics :: jet.compile_with_path(&source, main.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3208" }), "COBOL cache without a descriptor must fail closed: {diagnostics:?}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2624
+#Test("hash_invalidation_on_header_change") {
+    root :: env.temp_dir().join("jet_hash_inval_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache_dir).unwrap()
+    header_dir :: root.join("include")
+    fs.create_dir_all(&header_dir).unwrap()
+    header_path :: header_dir.join("mylib2.h")
+    header_v1 :: "int mylib2_v1(int x);\n"
+    fs.write(&header_path, header_v1).unwrap()
+    cache_file :: cache_dir.join("mylib2.jet")
+    bind_v1 :: jet.CBind.generate(header_v1, "mylib2").unwrap()
+    fs.write(&cache_file, &bind_v1.source).unwrap()
+    jet.CBind.write_bind_hash(&cache_file, header_v1, "").unwrap()
+    assert(!bind_v1.source.contains("mylib2_v2"), "sanity: v2 not in v1 cache")
+    header_v2 :: "int mylib2_v2(int y);\n"
+    fs.write(&header_path, header_v2).unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use \"include/mylib2.h\" as m\nfn run() {{ print(m.mylib2_v2(2)) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    result :: jet.compile_with_path(&src, main.to_str().unwrap())
+    new_cache :: fs.read_to_string(&cache_file).unwrap_or_default()
+    assert(new_cache.contains("mylib2_v2"), "hash invalidation: cache must be regenerated with updated symbol; got:\n{new_cache}")
+    assert(!new_cache.contains("mylib2_v1"), "hash invalidation: stale v1 symbol must not appear in regenerated cache; got:\n{new_cache}")
+    new_hash :: jet.CBind.read_stored_hash(&cache_file)
+    expected_hash :: jet.CBind.compute_bind_hash(header_v2, "")
+    assert_eq(new_hash, Val(expected_hash), "hash sidecar must be updated after re-bind")
+    _ :: result
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2695
+#Test("failed_rebind_rejects_stale_cffi_cache") {
+    root :: env.temp_dir().join("jet_stale_cbind_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache_dir).unwrap()
+    header_dir :: root.join("include")
+    fs.create_dir_all(&header_dir).unwrap()
+    header_path :: header_dir.join("stale.h")
+    old_header :: "int stale_value(void);\n"
+    fs.write(&header_path, old_header).unwrap()
+    cache_file :: cache_dir.join("stale.jet")
+    old_cache :: jet.CBind.generate(old_header, "stale").unwrap().source
+    fs.write(&cache_file, &old_cache).unwrap()
+    jet.CBind.write_bind_hash(&cache_file, old_header, "").unwrap()
+    fs.write(&header_path, "int malformed(int value,);\n").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use \"include/stale.h\" as stale\nfn run() {{ print(stale.stale_value()) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    diagnostics :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3208" }), "failed rebind must report E3208, got: {diagnostics:?}")
+    assert_eq(fs.read_to_string(&cache_file).unwrap(), old_cache, "a failed rebind may preserve old bytes on disk but must not consume them")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2737
+#Test("missing_declared_header_rejects_stale_cffi_cache") {
+    root :: env.temp_dir().join("jet_missing_cbind_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache_dir).unwrap()
+    cache_file :: cache_dir.join("missing.jet")
+    old_cache :: jet.CBind.generate("int stale_value(void);\n", "missing").unwrap().source
+    fs.write(&cache_file, &old_cache).unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, "use \"include/missing.h\" as missing\nfn run() {{ print(missing.stale_value()) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    diagnostics :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3208" }), "missing declared header must report E3208, got: {diagnostics:?}")
+    missing_header :: diagnostics.iter().find(fn(diagnostic) { diagnostic.code == "E3208" }).expect("E3208 was asserted above")
+    assert(missing_header.why.contains("the header file could not be read ("), "E3208 must preserve the missing-header cause: {missing_header:?}")
+    assert_eq(fs.read_to_string(&cache_file).unwrap(), old_cache)
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2778
+#Test("absent_or_malformed_hash_regenerates_declared_header_cache") {
+    for (case, sidecar) in [("absent", nil), ("malformed", Val("not-a-sha256"))] {
+        root :: env.temp_dir().join("jet_cbind_hash_{case}_{process.id()}")
+        _ :: fs.remove_dir_all(&root)
+        cache_dir :: root.join(".jet/bindings/c")
+        header_dir :: root.join("include")
+        fs.create_dir_all(&cache_dir).unwrap()
+        fs.create_dir_all(&header_dir).unwrap()
+        declare_local_c_dep(&root, "rebind")
+        build_local_c_provider(&root, "rebind", "int fresh_value(void) {{ return 7; }}\n")
+        header :: "int fresh_value(void);\n"
+        fs.write(header_dir.join("rebind.h"), header).unwrap()
+        cache_file :: cache_dir.join("rebind.jet")
+        stale :: jet.CBind.generate("int stale_value(void);\n", "rebind").unwrap().source
+        fs.write(&cache_file, stale).unwrap()
+        if value :: sidecar { fs.write(jet.CBind.hash_sidecar_path(&cache_file), value).unwrap() }
+        main :: root.join("main.jet")
+        fs.write(&main, "use \"include/rebind.h\" as rebind\nfn run() {{ print(rebind.fresh_value()) }}\n").unwrap()
+        src :: fs.read_to_string(&main).unwrap()
+        result :: jet.compile_with_path(&src, main.to_str().unwrap())
+        assert(result.is_ok(), "{case} hash did not trigger rebind: {result:?}")
+        assert(fs.read_to_string(&cache_file).unwrap().contains("fresh_value"), "{case} hash left stale cache bytes")
+        assert_eq(jet.CBind.read_stored_hash(&cache_file), Val(jet.CBind.compute_bind_hash(header, "")))
+        _ :: fs.remove_dir_all(&root)
+    }
+}
+// Rust: tests/cffi.rs:2830
+#Test("cache_hit_no_rebind") {
+    root :: env.temp_dir().join("jet_cache_hit_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache_dir :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache_dir).unwrap()
+    header_dir :: root.join("include")
+    fs.create_dir_all(&header_dir).unwrap()
+    header_path :: header_dir.join("mylib3.h")
+    header_src :: "int mylib3_ping(int x);\n"
+    fs.write(&header_path, header_src).unwrap()
+    cache_file :: cache_dir.join("mylib3.jet")
+    bind_result :: jet.CBind.generate(header_src, "mylib3").unwrap()
+    fs.write(&cache_file, &bind_result.source).unwrap()
+    jet.CBind.write_bind_hash(&cache_file, header_src, "").unwrap()
+    cache_before :: fs.read_to_string(&cache_file).unwrap()
+    mtime_before :: fs.metadata(&cache_file).and_then(fn(m) { m.modified() }).unwrap()
+    thread.sleep(time.Duration.from_millis(50))
+    main :: root.join("main.jet")
+    fs.write(&main, "use \"include/mylib3.h\" as m\nfn run() {{ print(m.mylib3_ping(0)) }}\n").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    _ :: jet.compile_with_path(&src, main.to_str().unwrap())
+    cache_after :: fs.read_to_string(&cache_file).unwrap()
+    mtime_after :: fs.metadata(&cache_file).and_then(fn(m) { m.modified() }).unwrap()
+    assert_eq(cache_before, cache_after, "cache-hit fast path: cache content must not change on identical header")
+    assert_eq(mtime_before, mtime_after, "cache-hit fast path: cache file must not be rewritten on hash match")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2885
+#Test("bind_hash_is_real") {
+    h1 :: jet.CBind.compute_bind_hash("int foo(int x);", "")
+    h2 :: jet.CBind.compute_bind_hash("int foo(int x);", "")
+    h3 :: jet.CBind.compute_bind_hash("int bar(int x);", "")
+    h4 :: jet.CBind.compute_bind_hash("int foo(int x);", "-I/usr/include")
+    assert_eq(h1, h2, "same inputs → same hash")
+    assert_ne(h1, h3, "different header → different hash")
+    assert_ne(h1, h4, "different cflags → different hash")
+    assert_eq(h1.len(), 64)
+    assert(h1.chars().all(fn(c) { c.is_ascii_hexdigit() }))
+}
+// Rust: tests/cffi.rs:2900
+#Test("parse_pkg_config_extracts_flags") {
+    flags :: jet.CFFI.parse_pkg_config("-I/usr/include/foo -L/usr/lib -lfoo -lbar", "foo")
+    assert_eq(flags.include_dirs, ["/usr/include/foo"])
+    assert_eq(flags.lib_dirs, ["/usr/lib"])
+    assert_eq(flags.link_names, ["foo", "bar"])
+}
+// Rust: tests/cffi.rs:2908
+#Test("parse_pkg_config_defaults_link_name") {
+    flags :: jet.CFFI.parse_pkg_config("-I/usr/include/foo", "foo")
+    assert_eq(flags.link_names, ["foo"])
+}
+// Rust: tests/cffi.rs:2914
+#Test("deps_block_parses_c_lib_refs") {
+    manifest :: """
+name: "p"
+version: "0.1.0"
+deps: {
+    raylib: c@system,
+    foo:    c@"/opt/foo",
+}
+"""
+    pm :: PackageFacts.parse(manifest, "test").expect("manifest parses")
+    assert_eq(pm.deps.get("raylib"), Val(DepSource.CLib(target: "system")))
+    assert_eq(pm.deps.get("foo"), Val(DepSource.CLib(target: "/opt/foo")))
+    assert(!pm.deps.contains_key("sqlite3"))
+}
+// Rust: tests/cffi.rs:2944
+#Test("resolve_link_unknown_lib_is_e3201") {
+    root :: env.temp_dir().join("jet_cffi_e3201_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    err :: jet.CFFI.resolve_link("nolib", &root)
+    assert(err.is_err(), "unknown lib without pkg-config must fail")
+    d :: err.unwrap_err()
+    assert_eq(d.code, "E3201")
+    rendered :: jet.render_diagnostics("main.jet", "", [&d])
+    expected :: """
+Error [E3201]: C library `nolib` was not found.
+ Why: Jet looked for a `nolib: c@…` dep in `package.jet`, then tried `pkg-config nolib` on the system; neither provided include/link paths.
+ Fix: install the system package (e.g. `pacman -S nolib`), or declare it as `nolib: c@system` in `deps:`.
+More: jet-lang.dev/e/E3201
+"""
+    assert_eq(rendered, expected)
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:2967
+#Test("e3209_link_time_missing_lib_snapshot") {
+    d :: jet.CFFI.e3209("raylib")
+    assert_eq(d.code, "E3209")
+    rendered :: jet.render_diagnostics("main.jet", "", [&d])
+    expected :: """
+Error [E3209]: The linker couldn't find C library `raylib`.
+ Why: Your program links against `raylib`, but the linker reported `cannot find -lraylib` — the library isn't on the link search path.
+ Fix: Declare it in `deps:` so Jet provisions it: `raylib: c@system` (host pkg-config, else fetched from nixpkgs), or `raylib: c@nixpkgs:<attr>` to pick the nixpkgs attribute, or install the system package.
+More: jet-lang.dev/e/E3209
+"""
+    assert_eq(rendered, expected)
+}
+// Rust: tests/cffi.rs:2983
+#Test("e3210_nixpkgs_provision_failed_snapshot") {
+    d :: jet.CFFI.e3210("raylib", "raylib", "error: attribute 'raylib' missing")
+    assert_eq(d.code, "E3210")
+    rendered :: jet.render_diagnostics("main.jet", "", [&d])
+    expected :: """
+Error [E3210]: couldn't fetch C library `raylib` from nixpkgs.
+ Why: `raylib: c@system` asked Jet to provision `nixpkgs#raylib`, but `nix build` failed: error: attribute 'raylib' missing
+ Fix: check the attr exists (`nix build nixpkgs#raylib`), or point at a local build with `raylib: c@"<path>"`, or install it and use `system`.
+More: jet-lang.dev/e/E3210
+"""
+    assert_eq(rendered, expected)
+}
+// Rust: tests/cffi.rs:2998
+#Test("e3202_pointer_boundary_snapshot") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    path :: root.join("tests/ui/cffi_e3202_ptr_boundary.jet")
+    shown :: "tests/ui/cffi_e3202_ptr_boundary.jet"
+    src :: fs.read_to_string(&path).unwrap()
+    diags :: jet.check_with_path(path.to_str().unwrap())
+    assert(diags.iter().any(fn(diagnostic) { diagnostic.code == "E3202" }), "production C boundary must reach E3202: {diags:?}")
+    rendered :: jet.render_diagnostics(shown, &src, &diags)
+    expected :: fs.read_to_string(path.with_extension("stderr")).unwrap()
+    assert_eq(rendered, expected)
+}
+// Rust: tests/cffi.rs:3017
+#Test("anonymous_union_is_rejected_before_c_ffi_codegen") {
+    root :: common.unique_tmp("jet_cffi_union_reject")
+    fs.create_dir_all(&root).unwrap()
+    main :: root.join("main.jet")
+    src :: """
+use c.union_boundary as c
+#Import module c.union_boundary {
+    fn consume(value: Int | String) -> Int = "consume"
+}
+fn run() { print(0) }
+"""
+    fs.write(&main, src).unwrap()
+    diags :: jet.check_with_path(main.to_str().unwrap())
+    assert(diags.iter().any(fn(d) { d.code == "E3203" }), "union must be rejected by sema before package-model codegen: {diags:?}")
+}
+// Rust: tests/cffi.rs:3046
+#Test("ffi_example_compiles_and_runs") {
+    have_cargo :: Command.new("cargo").arg("--version").output().is_ok()
+    if !have_cargo { eprintln("note: cargo not found; skipping FFI integration test"); return }
+    if !common.have_rustc() { eprintln("note: rustc not found; skipping FFI integration test"); return }
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    path :: root.join("Examples/features/lowlevel/ffi.jet")
+    src :: fs.read_to_string(&path).unwrap()
+    shown :: "Examples/features/lowlevel/ffi.jet"
+    out :: jet.compile_with_path(&src, shown).unwrap_or_else(fn(diags) { panic("22_ffi.jet failed the front end:\n{jet.render_diagnostics(shown, &src, &diags)}") })
+    assert(out.ffi.is_some(), "expected an FFI bridge for 22_ffi.jet")
+    user_rust :: common.strip_vetted_prelude_modules(&out.rust)
+    assert(!user_rust.contains("unsafe"), "I1: FFI output outside vetted runtime internals must not use unsafe")
+    dir :: env.temp_dir()
+    rs :: dir.join("jet_ffi_test.rs")
+    bin :: dir.join("jet_ffi_test_bin")
+    fs.write(&rs, &out.rust).unwrap()
+    link :: out.ffi.unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+    for deps_dir in link.dependency_dirs() { rustc.arg("-L").arg("dependency={deps_dir.display()}") }
+    status :: rustc.status().unwrap()
+    assert(status.success(), "rustc rejected FFI-linked output (I2)")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "22_ffi runtime failed")
+    expected :: fs.read_to_string(root.join("Examples/features/expected/lowlevel/ffi.out")).unwrap()
+    assert_eq(String.from_utf8_lossy(&run.stdout), expected)
+}
+// Rust: tests/cffi.rs:3110
+#Test("inline_ffi_pin_works_inside_manifest_project") {
+    have_cargo :: Command.new("cargo").arg("--version").output().is_ok()
+    if !have_cargo { eprintln("note: cargo not found; skipping manifest FFI integration test"); return }
+    root :: env.temp_dir().join("jet_manifest_ffi_{process.id()}_inline")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("package.jet"), "name: \"ffi_app\"\nversion: \"0.1.0\"\n").unwrap()
+    path :: root.join("main.jet")
+    src :: "extern rust \"base64@0.22\" {{\n    fn b64encode(s: String) -> String = \"base64::encode\"\n}}\nfn run() {{ print(b64encode(\"hi\")) }}\n"
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: jet.compile_with_path(src, &shown).unwrap_or_else(fn(diags) { panic("inline FFI pin should work even when package.jet exists:\n{jet.render_diagnostics(&shown, src, &diags)}") })
+    assert(out.ffi.is_some(), "expected an FFI bridge")
+}
+// Rust: tests/cffi.rs:3153
+#Test("concurrent_processes_share_one_bridge_build_per_key") {
+    if Command.new("cargo").arg("--version").output().is_err() { eprintln("note: cargo not found; skipping concurrent FFI bridge test"); return }
+    if !common.have_rustc() { eprintln("note: rustc not found; skipping concurrent FFI bridge test"); return }
+    root :: common.unique_tmp("jet_ffi_concurrent")
+    cache :: root.join("ffi-cache")
+    fs.create_dir_all(&cache).unwrap()
+    source :: "extern rust \"base64@0.22\" {{\n    fn b64encode(s: String) -> String = \"base64::encode\"\n}}\nfn run() {{ print(b64encode(\"hi\")) }}\n"
+    children := []
+    for worker in 0..2 {
+        dir :: root.join("w{worker}")
+        fs.create_dir_all(&dir).unwrap()
+        fs.write(dir.join("main.jet"), source).unwrap()
+        fs.write(dir.join("package.jet"), "name: \"ffi_concurrent\"\nversion: \"0.1.0\"\nauthority: {{\n    holds: {{ allow: [FFI, IO] }},\n}}\n").unwrap()
+        children.push(Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--profile=debug", "main.jet"]).current_dir(&dir).env("JET_FFI_CACHE_DIR", &cache).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn concurrent jet run"))
+    }
+    for (worker, child) in children.into_iter().enumerate() {
+        out :: child.wait_with_output().unwrap()
+        assert(out.status.success(), "concurrent worker {worker} failed:\n{String.from_utf8_lossy(&out.stderr)}")
+        assert_eq(String.from_utf8_lossy(&out.stdout), "aGk=\n")
+    }
+    key_dirs :: fs.read_dir(&cache).unwrap().map(fn(entry) { entry.unwrap().path() }).filter(fn(path) { path.is_dir() && !path.ends_with("deps") }).collect()
+    assert_eq(key_dirs.len(), 1, "two processes on one bridge key produced {key_dirs.len()} key dirs: {key_dirs:?}")
+    assert(!key_dirs[0].join(".build-lock").exists(), "the per-key build lock leaked: {key_dirs[0].display()}")
+    rlibs := []
+    sidecars := []
+    pending := [cache.join("deps")]
+    loop {
+        dir :: pending.pop() ?? break
+        for entry in fs.read_dir(&dir).unwrap() {
+            path :: entry.unwrap().path()
+            if path.is_dir() { pending.push(path); continue }
+            name :: path.file_name().unwrap().to_string_lossy().into_owned()
+            if name.starts_with("libjet_ffi_") && name.ends_with(".rlib") && path.parent().is_some_and(fn(parent) { parent.ends_with("release") }) {
+                rlibs.push(name)
+            } else if name.starts_with("jet_ffi_") && name.ends_with(".sha256") { sidecars.push(name) }
+        }
+    }
+    assert_eq(rlibs.len(), 1, "expected one bridge rlib, got {rlibs:?}")
+    assert_eq(sidecars.len(), 1, "expected one blessed bridge, got {sidecars:?}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:3263
+#Test("unresolvable_crate_reports_the_same_e0704_on_run_and_build") {
+    if Command.new("cargo").arg("--version").output().is_err() { eprintln("note: cargo not found; skipping E0704 tier-alignment test"); return }
+    if !jet.Comptime.Build.native_sandbox_status().available { eprintln("note: native sandbox unavailable; skipping E0704 tier-alignment test"); return }
+    root :: common.unique_tmp("jet_ffi_unresolvable")
+    cache :: root.join("ffi-cache")
+    fs.create_dir_all(&cache).unwrap()
+    fs.write(root.join("package.jet"), "name: \"ffi_unresolvable\"\nversion: \"0.1.0\"\nauthority: {{\n    holds: {{ allow: [FFI, IO, Browser, DB, Env, Exec, FS, GPU, Log, Net, Rand, Secret, Time, Mem.Alloc] }},\n}}\n").unwrap()
+    fs.write(root.join("main.jet"), "extern rust \"not-a-real-crate-xyz@9.9.9\" {{\n    fn foo() -> Int = \"not_a_real_crate_xyz::foo\"\n}}\nfn run() {{ print(foo()) }}\n").unwrap()
+    // Rust: tests/cffi.rs:3287 (local tier closure)
+    tier :: fn(verb: String) {
+        out :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args([verb, "main.jet"]).current_dir(&root).env("JET_FFI_CACHE_DIR", &cache).env("NO_COLOR", "1").env("TERM", "dumb").output().unwrap_or_else(fn(error) { panic("spawn jet {verb}: {error}") })
+        assert(!out.status.success(), "jet {verb} must fail on an unresolvable crate")
+        stderr :: String.from_utf8_lossy(&out.stderr).into_owned()
+        assert(!stderr.contains("E0956"), "jet {verb} reported a compiler-bug refusal for a user error:\n{stderr}")
+        report :: stderr.lines().filter(fn(line) { line.starts_with("Error [E0704]") || line.starts_with(" Why:") || line.starts_with(" Fix:") }).collect().join("\n")
+        assert(report.starts_with("Error [E0704]: Couldn't fetch or build `not-a-real-crate-xyz@9.9.9`"), "jet {verb} did not report E0704:\n{stderr}")
+        report
+    }
+    run :: tier("run")
+    build :: tier("build")
+    assert_eq(run, build, "run and build must render the same E0704 report")
+    _ :: fs.remove_dir_all(&root)
+}

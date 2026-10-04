@@ -1,0 +1,597 @@
+use WebBuild.[have_tool, build_web_fixture, knowledge_tier_web_source, run_web_app, jet_bin, cli_build_root, decode_source_map_mappings]
+use WebBuild03.run_node_harness
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.process.Command
+use core.sys.target
+use std.os.unix.fs.symlink
+use jet
+
+// Rust: tests/web_build.rs:223
+#Test("anonymous_unions_build_for_web") {
+    shown :: "Examples/features/types/anonymous_unions.jet"
+    src :: fs.read_to_string(shown).unwrap()
+    dir :: build_web_fixture("anonymous_unions", src, shown)
+    wasm_rust :: fs.read_to_string(dir.join("build/app_wasm.rs")).unwrap()
+    assert(wasm_rust.contains("__JetUnion_Int_String"))
+}
+// Rust: tests/web_build.rs:232
+#Test("knowledge_tier_web_js_and_wasm_runtime_values_match") {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln("note: skipping knowledge web parity test (need rustc + node)")
+        return
+    }
+    source :: knowledge_tier_web_source()
+    dir :: build_web_fixture("knowledge_tier", source, "tests/fixtures/knowledge_tier_web.jet")
+    expected :: "42\nexactness=true\nunit=5.0\nstate=state\nclassification=world\nrange=9\n"
+    assert_eq(run_web_app(dir), expected, "JS web bridge output changed")
+    harness :: """
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"""
+    assert_eq(run_node_harness(dir, "knowledge_tier_wasm_harness.mjs", harness), expected, "Wasm runtime output changed")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:265
+// D-CONC-ALLNAMED1=A: authored completion order differs from canonical field order.
+#Test("web_named_task_all_maps_heterogeneous_reverse_completion_on_js_and_wasm") {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln("note: skipping named task.all web parity test (need rustc + node)")
+        return
+    }
+    src :: """
+#Target(Web)
+fn slow() -> String {
+    turns := 0
+    loop _ in 0..<50000 { turns += 1 }
+    return "slow"
+}
+fn fast() -> Int { return 7 }
+fn run() -> {
+    values :: (task.all {
+        z: slow(),
+        a: fast()
+    }) ?? panic("named task.all failed")
+    print(values.z)
+    print(values.a)
+}
+"""
+    expected :: "slow\n7\n"
+    js_src :: src.replace("fn slow()", "#Target(JS)\nfn slow()").replace("fn fast()", "#Target(JS)\nfn fast()").replace("fn run()", "#Target(JS)\nfn run()")
+    js_dir :: build_web_fixture("named_task_all_reverse_completion_js", js_src, "tests/fixtures/web_named_task_all_reverse_completion.jet")
+    assert_eq(run_web_app(js_dir), expected, "JS named task.all mapping changed")
+    app :: fs.read_to_string(js_dir.join("build/app.js")).unwrap()
+    assert(app.contains("await jet_task_all_named(") && app.contains("[\"z\", \"a\"]") && app.contains("[\"a\", \"z\"]"), "JS must pass authored fields and project canonical fields:\n{app}")
+    _ :: fs.remove_dir_all(js_dir)
+    wasm_dir :: build_web_fixture("named_task_all_reverse_completion_wasm", src, "tests/fixtures/web_named_task_all_reverse_completion.jet")
+    harness :: """
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"""
+    assert_eq(run_node_harness(wasm_dir, "named_task_all_wasm_harness.mjs", harness), expected, "Wasm named task.all mapping changed")
+    wasm :: fs.read_to_string(wasm_dir.join("build/app_wasm.rs")).unwrap()
+    assert(wasm.contains("__jet_z: __jet___named_all_value_") && wasm.contains("__jet_a: __jet___named_all_value_"), "Wasm must assemble the named result by field:\n{wasm}")
+    _ :: fs.remove_dir_all(wasm_dir)
+}
+// Rust: tests/web_build.rs:356
+#Test("web_stream_generator_break_closes_deferred_resource") {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln("note: skipping web stream test (need rustc + node)")
+        return
+    }
+    shown :: "Examples/features/streams/generators.jet"
+    src :: fs.read_to_string(shown).unwrap()
+    dir :: build_web_fixture("streams_generators", src, shown)
+    assert_eq(run_web_app(dir), fs.read_to_string("Examples/features/expected/streams/generators.out").unwrap())
+    app :: fs.read_to_string(dir.join("build/app.js")).unwrap()
+    assert(app.contains("function*"), "web generator missing JavaScript generator protocol")
+    assert(app.contains("web_close_CleanupMarker"), "web deferred-close helper missing")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:384
+#Test("web_eager_collection_adapters_match_native_shape") {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln("note: skipping web eager collection test (need rustc + node)")
+        return
+    }
+    src :: """
+#Target(JS)
+fn run() -> {
+    nums :: [1, 2, 3, 4]
+    doubled :: nums.map((n: Int) -> n * 2)
+    evens :: nums.filter((n: Int) -> n > 2)
+    lazy_evens :: nums.lazy().filter((n: Int) -> n > 2).map((n: Int) -> n * 10).to_list()
+    print(doubled[0])
+    print(doubled[3])
+    print(evens[0])
+    print(evens[1])
+    print(lazy_evens[0])
+    print(lazy_evens[1])
+}
+"""
+    dir :: build_web_fixture("eager_collection_adapters", src, "tests/fixtures/web_eager_collection_adapters.jet")
+    assert_eq(run_web_app(dir), "2\n8\n3\n4\n30\n40\n")
+    app :: fs.read_to_string(dir.join("build/app.js")).unwrap()
+    assert(app.contains("jet_runtime_stop(") && app.contains("\"<core.collections>\","), "web lazy collection must use the shared runtime-stop boundary")
+    assert(!app.contains("throw new Error(\"lazy collection view was already consumed\")"), "web lazy collection must not leak a raw JavaScript Error")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/web_build.rs:715
+#Test("jet_cli_explain_partition_requires_web_target") {
+    // GATE #4494: real CLI subprocess, not a compiler test double.
+    executable :: jet_bin()
+    out :: Command.new(executable).args(["build", "--explain-partition", "Examples/features/basics/hello.jet"]).output().unwrap()
+    combined :: "{String.from_utf8_lossy(out.stdout)}{String.from_utf8_lossy(out.stderr)}"
+    assert(!combined.contains("isn't a flag"), "CLI should accept --explain-partition, got:\n{combined}")
+    assert(combined.contains("`--explain-partition` requires `--target=web`"), "expected web-target guard, got:\n{combined}")
+}
+// Rust: tests/web_build.rs:741
+#Test("jet_cli_web_build_succeeds") {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln("note: skipping jet CLI web build test")
+        return
+    }
+    out :: Command.new(jet_bin()).args(["build", "--target=web", "Examples/features/web/web_compute.jet"]).output().unwrap()
+    assert(out.status.success(), "jet CLI web build failed:\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+}
+// Rust: tests/web_build.rs:766
+#Test("jet_cli_infers_web_target_from_file_marker") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping web-target-inference (file marker) test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_web_target_marker_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), """
+#Target(Web)
+use core.ui as ui
+fn run() -> {
+    b :: ui.null_backend()
+    n :: ui.node_color("hi", 10.0, 5.0, "#3366ff")
+    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)
+    s :: b.measure(n, c)
+    f :: ui.rect(0.0, 0.0, s.width, s.height)
+    b.layout(n, f)
+    b.paint(n)
+}
+""").unwrap()
+    fs.write(dir.join("package.jet"), "name: \"webproj\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [Browser] }} }}\n").unwrap()
+    // Deliberately no --target=.
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(out.status.success(), "jet build (no --target flag) should infer web from #Target(Web):\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(cli_build_root(dir).join("app.js").is_file(), "no .jet/build/app.js — web backend wasn't inferred")
+    assert(cli_build_root(dir).join("app.wasm").is_file(), "no .jet/build/app.wasm — web backend wasn't inferred")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:813
+#Test("jet_cli_infers_web_target_from_manifest") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping web-target-inference (manifest) test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_web_target_manifest_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"webproj\"\nversion: \"0.1.0\"\ntarget: \"web\"\nauthority: {{ holds: {{ allow: [Browser] }} }}\n").unwrap()
+    fs.write(dir.join("main.jet"), """
+use core.ui as ui
+fn run() -> {
+    b :: ui.null_backend()
+    n :: ui.node_color("hi", 10.0, 5.0, "#3366ff")
+    c :: ui.constraint(0.0, 0.0, 50.0, 20.0)
+    s :: b.measure(n, c)
+    f :: ui.rect(0.0, 0.0, s.width, s.height)
+    b.layout(n, f)
+    b.paint(n)
+}
+""").unwrap()
+    executable :: jet_bin()
+    out :: Command.new(executable).current_dir(dir).args(["build", "main.jet"]).output().unwrap()
+    assert(out.status.success(), "jet build (no --target flag) should infer web from package.jet target: \"web\":\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert(cli_build_root(dir).join("app.js").is_file(), "no .jet/build/app.js — web backend wasn't inferred from package.jet")
+    assert(cli_build_root(dir).join("app.wasm").is_file(), "no .jet/build/app.wasm — web backend wasn't inferred from package.jet")
+    run :: Command.new(executable).current_dir(dir).args(["run", "main.jet"]).output().unwrap()
+    assert(!run.status.success(), "jet run must reject a package web default:\nstdout: {String.from_utf8_lossy(run.stdout)}\nstderr: {String.from_utf8_lossy(run.stderr)}")
+    assert(run.stdout.is_empty(), "a rejected package web run must not execute user code")
+    run_stderr :: String.from_utf8_lossy(run.stderr)
+    assert(run_stderr.contains("E-WEB-RUN") && run_stderr.contains("jet dev") && run_stderr.contains("jet build --target=web"), "package web run should explain the native/web boundary: {run_stderr}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:881
+#Test("jet_cli_rejects_native_run_for_web_marker") {
+    dir :: env.temp_dir().join("jet_web_target_run_rejects_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), "#Target(Web)\nfn run() -> {{\n    print(\"native\")\n}}\n").unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["run", "app.jet"]).output().unwrap()
+    assert(!out.status.success(), "jet run must reject #Target(Web) before native execution:\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert_eq(String.from_utf8_lossy(out.stdout), "", "a rejected native run must not execute the web program")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("E-WEB-RUN"), "expected the registered diagnostic: {stderr}")
+    assert(stderr.contains("jet dev") && stderr.contains("jet build --target=web"), "diagnostic must teach both supported web paths: {stderr}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:924
+#Test("jet_cli_explicit_native_target_runs_web_default_natively") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping explicit-native-target web-default test")
+        return
+    }
+    host_output :: Command.new("rustc").args(["-vV"]).output().expect("query rustc host target")
+    host :: String.from_utf8(host_output.stdout).expect("rustc version output is UTF-8").lines().find_map((line) -> line.strip_prefix("host: ")).expect("rustc -vV must report a host target").to_string()
+    dir :: env.temp_dir().join("jet_web_target_explicit_native_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), "#Target(Web)\nfn run() -> {{\n    print(\"native\")\n}}\n").unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["run", "--target", host, "app.jet"]).output().unwrap()
+    assert(out.status.success(), "explicit host target must run the web-default source natively:\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    assert_eq(String.from_utf8_lossy(out.stdout), "native\n", "explicit native target must execute the program")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:976
+#Test("jet_cli_uses_explicit_html_marker") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping #HTML marker test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_html_marker_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), "#[Target(Web), HTML(\"custom.html\")]\nfn run() -> {{}}\n").unwrap()
+    fs.write(dir.join("app.html"), "<html>sibling, should be ignored</html>").unwrap()
+    fs.write(dir.join("custom.html"), "<html>custom marker page</html>").unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(out.status.success(), "jet build with #HTML marker failed:\nstdout: {String.from_utf8_lossy(out.stdout)}\nstderr: {String.from_utf8_lossy(out.stderr)}")
+    served :: fs.read_to_string(cli_build_root(dir).join("index.html")).unwrap()
+    assert(served.contains("custom marker page"), "expected the #HTML(\"custom.html\") content, got:\n{served}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:1020
+#Test("jet_cli_html_marker_missing_file_is_an_error") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping #HTML missing-file test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_html_marker_missing_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), "#[Target(Web), HTML(\"does_not_exist.html\")]\nfn run() -> {{}}\n").unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(!out.status.success(), "jet build should fail loudly when #HTML names a missing file")
+    stderr :: String.from_utf8_lossy(out.stderr)
+    assert(stderr.contains("does_not_exist.html"), "error should name the missing file, got:\n{stderr}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:1053
+#Test("jet_cli_html_marker_rejects_parent_traversal") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping #HTML traversal test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_html_marker_traversal_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    outside :: dir.parent().unwrap().join("jet_html_marker_traversal_outside_{process.id()}.html")
+    fs.write(outside, "<html>must survive</html>").unwrap()
+    outside_name :: outside.file_name().unwrap().to_str().unwrap()
+    fs.write(dir.join("app.jet"), "#[Target(Web), HTML(\"../{outside_name}\")]\nfn run() -> {{}}\n").unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(!out.status.success(), "parent traversal must be rejected")
+    assert_eq(fs.read_to_string(outside).unwrap(), "<html>must survive</html>")
+    assert(!cli_build_root(dir).join("index.html").exists(), "rejected #HTML source must not publish an index")
+    _ :: fs.remove_dir_all(dir)
+    _ :: fs.remove_file(outside)
+}
+// Rust: tests/web_build.rs:1096
+#Test("jet_cli_html_marker_rejects_absolute_path") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping #HTML absolute-path test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_html_marker_absolute_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    outside :: dir.parent().unwrap().join("jet_html_marker_absolute_outside_{process.id()}.html")
+    fs.write(outside, "<html>must survive</html>").unwrap()
+    marker :: outside.to_str().unwrap().replace("\\", "\\\\")
+    fs.write(dir.join("app.jet"), "#[Target(Web), HTML(\"{marker}\")]\nfn run() -> {{}}\n").unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(!out.status.success(), "absolute #HTML paths must be rejected")
+    assert_eq(fs.read_to_string(outside).unwrap(), "<html>must survive</html>")
+    _ :: fs.remove_dir_all(dir)
+    _ :: fs.remove_file(outside)
+}
+// Rust: tests/web_build.rs:1136
+#Test("jet_cli_html_marker_rejects_symlink_source") {
+    // GATE #4483 selected family; #4494 actual Unix link provider.
+    if target.selected_family() != "unix" { return }
+    if !have_tool("rustc") {
+        eprintln("note: skipping #HTML symlink test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_html_marker_symlink_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    outside :: dir.join("outside.html")
+    fs.write(outside, "<html>must survive</html>").unwrap()
+    fs.write(dir.join("app.jet"), "#[Target(Web), HTML(\"custom.html\")]\nfn run() -> {{}}\n").unwrap()
+    symlink(outside, dir.join("custom.html")).unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(!out.status.success(), "symlinked #HTML source must be rejected")
+    assert_eq(fs.read_to_string(outside).unwrap(), "<html>must survive</html>")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:1174
+#Test("jet_cli_html_marker_rejects_hardlinked_source") {
+    if target.selected_family() != "unix" { return }
+    if !have_tool("rustc") {
+        eprintln("note: skipping #HTML hard-link test")
+        return
+    }
+    dir :: env.temp_dir().join("jet_html_marker_hardlink_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    outside :: dir.join("outside.html")
+    fs.write(outside, "<html>must survive</html>").unwrap()
+    fs.write(dir.join("app.jet"), "#[Target(Web), HTML(\"custom.html\")]\nfn run() -> {{}}\n").unwrap()
+    fs.hard_link(outside, dir.join("custom.html")).unwrap()
+    out :: Command.new(jet_bin()).current_dir(dir).args(["build", "app.jet"]).output().unwrap()
+    assert(!out.status.success(), "hard-linked #HTML source must be rejected")
+    assert_eq(fs.read_to_string(outside).unwrap(), "<html>must survive</html>")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/web_build.rs:1209
+#Test("compile_web_file_loads") {
+    out :: jet.compile_web("Examples/features/web/web_compute.jet").expect("compile_web")
+    assert(out.web.is_some())
+}
+// Rust: tests/web_build.rs:1215
+#Test("forms_table_web_lowering_preserves_typed_form_contract") {
+    shown :: "Examples/features/web/forms_table.jet"
+    source :: fs.read_to_string(shown).unwrap()
+    out :: jet.compile_web(shown).unwrap_or_else((diags) -> panic("forms/table web source must lower through the checked web path:\n{jet.render_diagnostics(shown, source, diags)}"))
+    web :: out.web.expect("forms/table web source must produce artifacts")
+    generated :: "{web.wasm_rust}\n{web.js_app}"
+    loop marker in ["jet_web_form", "jet_web_forms_typed_html", "\"Person\"", "\"save\"", "\"id\"", "\"name\"", "\"active\""] {
+        assert(generated.contains(marker), "generated web artifacts lost source-backed form marker `{marker}`")
+    }
+}
+// Rust: tests/web_build.rs:1245
+#Test("web_decimal_and_grouped_formatters_use_shared_helpers") {
+    if !have_tool("rustc") || !have_tool("node") {
+        eprintln("note: skipping decimal/grouped web parity test (need rustc + node)")
+        return
+    }
+    source :: """
+#Target(Web)
+use core.text.fmt as fmt
+fn run() -> {
+    print(fmt.decimal(Float{1234.5678}, 2))
+    print(fmt.grouped(Float{1234.5678}, 2))
+    print(fmt.decimal(1234, 2))
+    print(fmt.grouped(1234, 2))
+}
+"""
+    dir :: build_web_fixture("decimal_grouped", source, "tests/fixtures/web_decimal_grouped.jet")
+    wasm_rust :: fs.read_to_string(dir.join("build/app_wasm.rs")).unwrap()
+    js_app :: fs.read_to_string(dir.join("build/app.js")).unwrap()
+    loop helper in ["jet_fmt_decimal(", "jet_fmt_grouped(", "jet_fmt_decimal_int(", "jet_fmt_grouped_int("] {
+        assert(wasm_rust.contains(helper), "missing {helper} in wasm Rust")
+    }
+    assert(js_app.contains("function jet_fmt_decimal("))
+    assert(js_app.contains("function jet_fmt_grouped("))
+    assert(js_app.contains("function jet_fmt_decimal_int("))
+    assert(js_app.contains("function jet_fmt_grouped_int("))
+    expected :: "1234.57\n1,234.57\n1234.00\n1,234.00\n"
+    assert_eq(run_web_app(dir), expected, "JS formatter output changed")
+    harness :: """
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+instance.exports.jet_export_run();
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("unexpected Wasm outcome");
+"""
+    assert_eq(run_node_harness(dir, "decimal_grouped_wasm_harness.mjs", harness), expected, "Wasm formatter output changed")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:1297
+#Test("web_template_literals_keep_hostile_text_as_data") {
+    source :: """
+#Target(JS)
+fn run() -> {
+    value :: "safe"
+    print("`\\${owned}\n{value}")
+}
+"""
+    web :: jet.compile_web_with_path(source, "tests/fixtures/web_template_hostile.jet").expect("hostile template literal should compile").web.expect("web artifacts")
+    assert(web.js_app.contains("\\`"), "backtick escaped in JS:\n{web.js_app}")
+    assert(web.js_app.contains("\\${{owned}}"), "literal interpolation marker escaped in JS:\n{web.js_app}")
+    assert(web.js_app.contains("\\\\"), "backslash escaped in JS:\n{web.js_app}")
+    assert(web.js_app.contains("\\n"), "newline escaped in JS:\n{web.js_app}")
+}
+// Rust: tests/web_build.rs:1321
+#Test("web_named_authority_scope_uses_shared_tir") {
+    source :: """
+#Target(Web)
+fn run() -> {
+    #FX(authority: IO) {
+        value :: 1 + 1
+    }
+}
+"""
+    out :: jet.compile_web_with_path(source, "tests/fixtures/web_named_authority_scope.jet").expect("web should accept the canonical #FX scope").web.expect("web output")
+    assert(out.wasm_rust.contains("jet_export_run"), "web run export missing")
+    assert(!out.wasm_rust.contains("Authority"), "web handle leaked into emission")
+}
+// Rust: tests/web_build.rs:1339
+#Test("web_shared_values_use_the_shared_transaction_prelude") {
+    source :: fs.read_to_string("tests/fixtures/web_shared_transaction.jet").unwrap()
+    web :: jet.compile_web_with_path(source, "tests/fixtures/web_shared_transaction.jet").expect("shared web fixture").web.expect("shared web fixture must emit web artifacts")
+    assert(web.js_app.contains("jet_shared_new({{"))
+    assert(web.js_app.matches("jet_shared_read(").count() > 1)
+    assert(web.js_app.matches("jet_shared_edit(").count() > 1)
+    assert(web.js_app.matches("jet_stm_begin(").count() > 1)
+    assert(web.js_app.matches("jet_shared_edit_txn(").count() > 1)
+    assert(web.js_app.matches("jet_stm_commit(").count() > 1)
+}
+// Rust: tests/web_build.rs:1428
+#Test("js_source_map_uses_line_markers_and_hides_host_paths") {
+    src :: "#Target(JS)\nfn run() -> {{\n\n    first :: 1\n    print(\"left {{first}}\\n//# __jet_source_map line 999\\nright\")\n}}\n"
+    shown :: "{env.temp_dir().display()}/private/build-host/project/main.jet"
+    first :: jet.compile_web_with_path(src, shown).expect("web source-map fixture").web.expect("web artifacts")
+    second :: jet.compile_web_with_path(src, shown).expect("repeat web source-map fixture").web.expect("web artifacts")
+    assert_eq(first.js_app, second.js_app)
+    assert_eq(first.js_source_map, second.js_source_map)
+    assert(!first.js_app.contains("sourceMappingURL="))
+    assert(first.js_source_map.starts_with("{{\"version\":3,\"file\":\"app.js\",\"sources\":[\"main.jet\"],\"sourcesContent\":["))
+    assert(first.js_source_map.contains("\"#Target(JS)\\nfn run() -> {{\\n\\n    first :: 1\\n    print(\\\"left {{first}}\\\\n//# __jet_source_map line 999\\\\nright\\\")\\n}}\\n\""), "sourcesContent must contain the exact Jet bytes:\n{first.js_source_map}")
+    assert(!first.js_source_map.contains("/private/build-host"))
+    assert(first.js_app.contains("//# __jet_source_map line 999"), "user text must survive internal marker stripping:\n{first.js_app}")
+    mappings :: decode_source_map_mappings(first.js_source_map)
+    assert_eq(mappings.iter().map((row) -> (row.2, row.3, row.4)).collect(), [(0, 4, 0), (0, 5, 0)])
+    loop (generated_line, generated_column, _, _, _) in mappings {
+        line :: first.js_app.lines().nth(generated_line).unwrap()
+        first_code :: line.find((c) -> !c.is_whitespace()).unwrap()
+        assert_eq(generated_column, line[..<first_code].encode_utf16().count())
+        assert(line[first_code..].starts_with("let first =") || line[first_code..].starts_with("jetDom.print(`left ${{first}}"), "mapping does not point at a Jet statement: {line}")
+    }
+}
+// Rust: tests/web_build.rs:1486
+#Test("web_build_publishes_maps_and_release_omits_them") {
+    if !have_tool("rustc") {
+        eprintln("note: skipping web map publication test (need rustc)")
+        return
+    }
+    src :: "#Target(JS)\nfn run() -> {{\n    print(\"hi\")\n}}\n"
+    dir :: env.temp_dir().join("jet_web_maps_pub_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("main.jet"), src).unwrap()
+    executable :: jet_bin()
+    default_out :: Command.new(executable).current_dir(dir).args(["build", "--target=web", "main.jet"]).output().expect("jet build --target=web")
+    assert(default_out.status.success(), "default web build failed:\n{String.from_utf8_lossy(default_out.stderr)}")
+    js :: fs.read_to_string(cli_build_root(dir).join("app.js")).unwrap()
+    assert(js.contains("//# sourceMappingURL=app.js.map"), "missing js map URL:\n{js}")
+    js_map :: fs.read_to_string(cli_build_root(dir).join("app.js.map")).unwrap()
+    assert(js_map.contains("\"version\":3"), "{js_map}")
+    assert(js_map.contains("\"sourcesContent\":["), "{js_map}")
+    assert(!js_map.contains("/home/"), "host path leaked into js map")
+    wasm_map :: fs.read_to_string(cli_build_root(dir).join("app.wasm.map")).unwrap()
+    assert(wasm_map.contains("\"file\":\"app.wasm\""), "{wasm_map}")
+    assert(wasm_map.contains("\"sourcesContent\":["), "{wasm_map}")
+    default_wasm :: fs.read(cli_build_root(dir).join("app.wasm")).unwrap()
+    assert(default_wasm.windows("sourceMappingURL".as_bytes().len()).any((w) -> w == "sourceMappingURL".as_bytes()), "wasm missing sourceMappingURL custom section")
+    assert(default_wasm.windows("app.wasm.map".as_bytes().len()).any((w) -> w == "app.wasm.map".as_bytes()), "wasm missing relative map URL")
+    release_out :: Command.new(executable).current_dir(dir).args(["build", "--target=web", "--profile=release", "main.jet"]).output().expect("jet build --target=web --profile=release")
+    assert(release_out.status.success(), "release web build failed:\n{String.from_utf8_lossy(release_out.stderr)}")
+    release_js :: fs.read_to_string(cli_build_root(dir).join("app.js")).unwrap()
+    assert(!release_js.contains("sourceMappingURL="), "release app.js must not reference maps")
+    assert(!cli_build_root(dir).join("app.js.map").is_file(), "release must not write app.js.map")
+    assert(!cli_build_root(dir).join("app.wasm.map").is_file(), "release must not write app.wasm.map")
+    release_manifest :: fs.read_to_string(cli_build_root(dir).join("web.manifest.json")).unwrap()
+    assert(!release_manifest.contains("\"sourceMap\""), "release manifest must omit sourceMap")
+    release_wasm :: fs.read(cli_build_root(dir).join("app.wasm")).unwrap()
+    assert(!release_wasm.windows("sourceMappingURL".as_bytes().len()).any((w) -> w == "sourceMappingURL".as_bytes()), "release wasm must not embed sourceMappingURL")
+    assert(release_wasm.len() <= default_wasm.len(), "optimized release Wasm must not exceed the mapped default artifact: {release_wasm.len()} > {default_wasm.len()} bytes")
+    assert(!release_wasm.windows(".debug_".as_bytes().len()).any((w) -> w == ".debug_".as_bytes()), "optimized release Wasm must not carry debug custom sections")
+    wasm_src :: "#Target(Web)\n#WasmExport\nfn add(a: Int, b: Int) -[]> Int {{ return a + b }}\nfn run() -> {{}}\n"
+    fs.write(dir.join("wasm.jet"), wasm_src).unwrap()
+    wasm_out :: Command.new(executable).current_dir(dir).args(["build", "--target=web", "wasm.jet"]).output().expect("jet build wasm export")
+    assert(wasm_out.status.success(), "wasm export build failed:\n{String.from_utf8_lossy(wasm_out.stderr)}")
+    wasm_map2 :: fs.read_to_string(cli_build_root(dir).join("app.wasm.map")).unwrap()
+    mappings_field :: wasm_map2.split("\"mappings\":").nth(1).and_then((rest) -> rest.split(",").next()).unwrap_or("")
+    assert(mappings_field.contains("\"") && mappings_field.len() > 3, "wasm export map must carry mappings:\n{wasm_map2}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_build.rs:1611
+#Test("web_body_outside_tir_is_diagnostic") {
+    src :: fs.read_to_string("tests/ui/web_tir_unsupported.jet").unwrap()
+    diags :: jet.compile_web_with_path(src, "tests/ui/web_tir_unsupported.jet").expect_err("web compile should reject bodies outside TIR")
+    assert(diags.iter().any((d) -> d.code == "E-WEB-TIR-UNSUPPORTED"), "expected E-WEB-TIR-UNSUPPORTED, got {diags:Debug}")
+}
+// Rust: tests/web_build.rs:1622
+#Test("web_unsupported_tui_backend_method_is_preflight_diagnostic") {
+    src :: """
+#Target(Web)
+use core.ui as ui
+#Target(JS)
+fn run() -> {
+    b :: ui.tui_backend()
+    print(b.frame_lines())
+}
+"""
+    diags :: jet.compile_web_with_path(src, "tests/fixtures/web_tui_frame_lines.jet").expect_err("Tui-only backend methods must not pass JS preflight")
+    assert(diags.iter().any((d) -> d.code == "E-WEB-TIR-UNSUPPORTED"), "{diags:Debug}")
+}
+// Rust: tests/web_build.rs:1642
+#Test("wasm_void_body_and_internal_helper_are_emitted_from_tir") {
+    src :: """
+#Target(Web)
+fn tick() -> {}
+#WasmExport
+fn ping() -> { tick() }
+fn twice(n: Int) -> Int { return n * 2 }
+#WasmExport
+fn compute(n: Int) -> Int { return twice(n) }
+fn run() -> {}
+"""
+    out :: jet.compile_web_with_path(src, "tests/fixtures/web_wasm_helpers.jet").expect("supported Wasm helpers should compile")
+    wasm :: out.web.expect("web artifacts").wasm_rust
+    assert(wasm.contains("fn jet_wasm_tick()"))
+    assert(wasm.contains("jet_wasm_tick()"), "void body side effect was dropped:\n{wasm}")
+    assert(wasm.contains("fn jet_wasm_twice(__jet_n: JetWasmInt) -> JetOutcome<JetWasmInt, JetErr>"))
+    assert(wasm.contains("jet_wasm_twice("), "export did not call internal helper:\n{wasm}")
+}
+// Rust: tests/web_build.rs:1670
+#Test("web_value_and_range_arm_tables_emit_on_js_and_wasm") {
+    // D-IF3: arm tables share MixedSwitch / RangeSwitch with native.
+    src :: """
+#Target(Web)
+#Target(JS)
+fn digit(n: Int) -> String {
+    if n == {
+        0 -> { "0" }
+        1 -> { "1" }
+        else -> { "x" }
+    }
+}
+#Target(JS)
+fn band(n: Int) -> String {
+    if n == {
+        0..9 -> { "low" }
+        else -> { "high" }
+    }
+}
+#WasmExport
+fn wasm_digit(n: Int) -> String {
+    if n == {
+        0 -> { "0" }
+        1 -> { "1" }
+        else -> { "x" }
+    }
+}
+#WasmExport
+fn wasm_band(n: Int) -> String {
+    if n == {
+        0..9 -> { "low" }
+        10..19 -> { "mid" }
+        else -> { "high" }
+    }
+}
+fn run() -> {}
+"""
+    out :: jet.compile_web_with_path(src, "tests/fixtures/web_arm_tables.jet").expect("value/range arm tables must compile on web")
+    web :: out.web.expect("web artifacts")
+    assert(web.js_app.contains("} else if"), "JS MixedSwitch must emit an if/else-if chain:\n{web.js_app}")
+    assert(web.js_app.contains("(n == 0n)") && web.js_app.contains("(n == 1n)"), "JS MixedSwitch must compare the already-bound parameter subject:\n{web.js_app}")
+    assert(web.wasm_rust.contains("__jet_n == JetWasmInt::from_i64(0)") && web.wasm_rust.contains("__jet___if_range_"), "Wasm arm tables must reuse the parameter and cache each range subject:\n{web.wasm_rust}")
+    assert(web.wasm_rust.contains("} else if"), "Wasm arm tables must emit an if/else-if chain:\n{web.wasm_rust}")
+    assert(web.wasm_rust.contains(">= JetWasmInt::from_i64(0)") && web.wasm_rust.contains("<= JetWasmInt::from_i64(9)"), "Wasm RangeSwitch must emit inclusive range tests:\n{web.wasm_rust}")
+}

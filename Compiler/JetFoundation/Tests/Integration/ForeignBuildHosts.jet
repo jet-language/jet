@@ -1,0 +1,15 @@
+// Rust: tests/foreign_build_hosts.rs:1
+// Foreign hosts share one checked Jet Library contract, without treating absent host tools as success.
+use std.fs
+use std.env
+// Rust: tests/foreign_build_hosts.rs:15
+fn repo_root() -> OSPath { OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()) }
+// Rust: tests/foreign_build_hosts.rs:19
+fn read(path: &OSPath) -> String {
+    // GATE #4494: real adapter and fixture reads.
+    fs.read_to_string(path).unwrap_or_else((error) -> panic("read {}: {error}", path.display()))
+}
+// Rust: tests/foreign_build_hosts.rs:23
+fn maintained_lines(path: &OSPath) -> USize {
+    read(path).lines().map((line) -> line.trim()).filter((line) -> !line.is_empty() && !line.starts_with('#') && !line.starts_with("//") && !line.starts_with("<!--")).count()
+}

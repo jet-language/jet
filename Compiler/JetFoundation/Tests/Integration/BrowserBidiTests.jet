@@ -1,0 +1,658 @@
+use jet_foundation.Tests.Integration.BrowserBidi.*
+use jet_foundation.Tests.Integration.Common as common
+use std.[fs, thread]
+use std.net.TcpListener
+
+// Rust: tests/browser_bidi.rs:586
+#Test("native_bidi_bad_method_arguments_stop_in_sema") {
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? return
+    timeout :: browser.timeout(500) ?? return
+    session :: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
+    context :: session.context() ?? return
+    page :: context.page() ?? return
+    locator :: page.get_by_role("button", "Save")
+    text :: page.get_by_text("Save")
+    label :: page.get_by_label("Name")
+    placeholder :: page.get_by_placeholder("email")
+    test_id :: page.get_by_test_id("save")
+    css :: page.get_by_css("button.save")
+    protocol :: session.protocol("bidi") ?? return
+    session.subscribe(1) ?? return
+    &session.next_event("soon") ?? return
+    session.add_intercept(1) ?? return
+    session.add_intercept_url(1, 2) ?? return
+    session.continue_request(1) ?? return
+    session.fail_request(1) ?? return
+    session.fulfill_request(1, "200", 3) ?? return
+    session.protocol(1) ?? return
+    page.goto(1) ?? return
+    wrong_locator :: page.get_by_role(1, 2)
+    page.get_by_text(1)
+    page.get_by_label(1)
+    page.get_by_placeholder(1)
+    page.get_by_test_id(1)
+    page.get_by_css(1)
+    locator.wait(1) ?? return
+    locator.wait_gone(1) ?? return
+    locator.fill(1) ?? return
+    locator.press(1) ?? return
+    protocol.send(1, 2) ?? return
+    event_name :: "log.entryAdded"
+    session.subscribe(^event_name) ?? return
+    session.close(1) ?? return
+}
+"""
+    diags :: jet.compile(source).expect_err("Browser bad arguments must fail in sema")
+    loop method in ["subscribe", "next_event", "add_intercept", "add_intercept_url", "continue_request", "fail_request", "fulfill_request", "protocol", "goto", "get_by_role", "get_by_text", "get_by_label", "get_by_placeholder", "get_by_test_id", "get_by_css", "wait", "wait_gone", "fill", "press", "send"] {
+        assert(diags.iter().any(fn(diag) { diag.code == "E0112" && diag.what.contains(method) }), "missing typed `{method}` diagnostic: {diags:?}")
+    }
+    assert(diags.iter().any(fn(diag) { diag.code == "E0203" && diag.what.contains("does not consume") }), "Browser read-only arguments accepted an ownership move: {diags:?}")
+    assert(diags.iter().any(fn(diag) { diag.code == "E0104" && diag.what.contains("`close`") }), "Browser wrong arity did not use the standard diagnostic: {diags:?}")
+}
+// Rust: tests/browser_bidi.rs:674
+#Test("native_bidi_session_handles_cannot_cross_tasks_or_channels") {
+    source :: """
+use core.web.browser as browser
+use core.tasks
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? return
+    timeout :: browser.timeout(10) ?? return
+    session :: browser.connect_profile("ws://127.0.0.1:1", profile, timeout) ?? return
+    handle :: task session.close()
+    (sender, channel) :: channel<Browser>()
+    sender.send(session)
+}
+"""
+    diags :: jet.compile(source).expect_err("Browser handles must stay thread-confined")
+    assert(diags.iter().filter(fn(diag) { diag.code == "E1102" }).count() >= 2, "task and channel crossings must stop in sema without rustc: {diags:?}")
+}
+// Rust: tests/browser_bidi.rs:696
+#Test("native_bidi_io_handle_methods_record_net_effect") {
+    validators :: """
+use core.web.browser as browser
+fn validators() -[]> {
+    profile :: browser.profile("bidi-2025.5") ?? return
+    timeout :: browser.timeout(500) ?? return
+}
+fn run() { validators() }
+"""
+    jet.compile(validators).expect("profile and timeout validation must stay pure")
+    source :: """
+use core.web.browser as browser
+fn connect() -[FS]> Unit { browser.connect("ws://127.0.0.1:1") ?? return }
+fn context(session: Browser) -[FS]> Unit { session.context() ?? return }
+fn subscribe(session: Browser) -[FS]> Unit { session.subscribe("log.entryAdded") ?? return }
+fn next(session: Browser, timeout: BrowserTimeout) -[FS]> Unit { &session.next_event(timeout) ?? return }
+fn add_intercept(session: Browser) -[FS]> Unit { session.add_intercept("beforeRequestSent") ?? return }
+fn add_intercept_url(session: Browser) -[FS]> Unit { session.add_intercept_url("beforeRequestSent", "https://example.test/*") ?? return }
+fn continue_request(session: Browser) -[FS]> Unit { session.continue_request("req-1") ?? return }
+fn fail_request(session: Browser) -[FS]> Unit { session.fail_request("req-1") ?? return }
+fn fulfill_request(session: Browser) -[FS]> Unit { session.fulfill_request("req-1", 200, "blocked") ?? return }
+fn protocol(session: Browser) -[FS]> Unit { session.protocol("bidi") ?? return }
+fn close(session: Browser) -[FS]> Unit { session.close() ?? return }
+fn page(context: BrowserContext) -[FS]> Unit { context.page() ?? return }
+fn tab(context: BrowserContext) -[FS]> Unit { context.tab() ?? return }
+fn goto(page: BrowserPage) -[FS]> Unit { page.goto("https://example.test") ?? return }
+fn frames(page: BrowserPage) -[FS]> Unit { page.frames() ?? return }
+fn frame_close(frame: BrowserFrame) -[FS]> Unit { frame.close() ?? return }
+fn wait(locator: BrowserLocator, timeout: BrowserTimeout) -[FS]> Unit { locator.wait(timeout) ?? return }
+fn wait_gone(locator: BrowserLocator, timeout: BrowserTimeout) -[FS]> Unit { locator.wait_gone(timeout) ?? return }
+fn click(locator: BrowserLocator) -[FS]> Unit { locator.click() ?? return }
+fn hover(locator: BrowserLocator) -[FS]> Unit { locator.hover() ?? return }
+fn fill(locator: BrowserLocator) -[FS]> Unit { locator.fill("value") ?? return }
+fn press(locator: BrowserLocator) -[FS]> Unit { locator.press("Enter") ?? return }
+fn remove(intercept: BrowserIntercept) -[FS]> Unit { intercept.remove() ?? return }
+fn send(protocol: BrowserProtocol) -[FS]> Unit { protocol.send("session.status", "{{}}") ?? return }
+fn run() {}
+"""
+    diags :: jet.compile(source).expect_err("Browser I/O methods must infer Net")
+    assert(diags.iter().filter(fn(diag) { diag.code == "E0740" }).count() >= 24, "Browser connect and every I/O method must violate an FS-only bound: {diags:?}")
+}
+// Rust: tests/browser_bidi.rs:749
+#Test("native_bidi_cleanup_retries_failures_and_drops_last_owners_once") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=LIFECYCLE_SECRET"
+    server :: thread.spawn(fn() { run_lifecycle(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    retry_context :: session.context() ?? panic("retry context")
+    retry_page :: retry_context.page() ?? panic("retry page")
+    retry_locator :: retry_page.get_by_role("button", "Save")
+    loop attempt in [1, 2] { retry_page.close() ?? next }
+    loop attempt in [1] {
+        retry_locator.click() ?? next
+        print("unexpected click")
+    }
+    loop attempt in [1, 2] { retry_context.close() ?? next }
+    local_context :: session.context() ?? panic("local context")
+    local_page :: local_context.page() ?? panic("local page")
+    local_context.close() ?? panic("local context close")
+    local_page.close() ?? panic("local page close")
+    drop_context :: session.context() ?? panic("drop context")
+    drop_page :: drop_context.page() ?? panic("drop page")
+    session.close() ?? return
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_lifecycle", "browser_bidi_lifecycle", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    assert(server.join().unwrap() == ["session.status", "session.new", "browser.createUserContext", "browsingContext.create", "browsingContext.close", "browsingContext.close", "browser.removeUserContext", "browser.removeUserContext", "browser.createUserContext", "browsingContext.create", "browser.removeUserContext", "browser.createUserContext", "browsingContext.create", "session.end", "browsingContext.close", "browser.removeUserContext", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:824
+#Test("native_bidi_tab_and_frame_lifecycle_is_explicit_and_idempotent") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=TAB_FRAME_SECRET"
+    server :: thread.spawn(fn() { run_tab_frame_lifecycle(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    tab_one :: context.tab() ?? panic("tab one")
+    tab_two :: context.page() ?? panic("tab two")
+    main :: tab_one.main_frame() ?? panic("main")
+    frames :: tab_one.frames() ?? panic("frames")
+    print("frames:{frames.len()}")
+    child :: frames[1]
+    child.close() ?? panic("child close")
+    child.close() ?? panic("child close idempotent")
+    tab_two.close() ?? panic("tab two close")
+    main.close() ?? panic("main close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_tab_frame", "browser_bidi_tab_frame", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "frames:3\n")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    assert(server.join().unwrap() == ["session.status", "session.new", "browser.createUserContext", "browsingContext.create", "browsingContext.create", "browsingContext.getTree", "browsingContext.close", "browsingContext.close", "browsingContext.close", "browser.removeUserContext", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:886
+#Test("native_bidi_frames_on_closed_page_fail_without_get_tree") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=CLOSED_FRAME_SECRET"
+    server :: thread.spawn(fn() { run_closed_frames_hostile(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.tab() ?? panic("tab")
+    page.close() ?? panic("close")
+    loop attempt in [1] {
+        page.frames() ?? next
+        print("unexpected")
+    }
+    print("caught")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_closed_frames", "browser_bidi_closed_frames", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "caught\n")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    assert(server.join().unwrap() == ["session.status", "session.new", "browser.createUserContext", "browsingContext.create", "browsingContext.close", "browser.removeUserContext", "session.end"])
+}
+
+// Rust: tests/browser_bidi.rs:936
+#Test("native_bidi_profile_drives_isolated_session_and_redacts_trace") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=TOP_SECRET"
+    server :: thread.spawn(fn() { run_mock(^listener) })
+    source :: include_str!("fixtures/browser_bidi.jet").replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi", "browser_bidi", source)
+    assert(code == 0, "stderr:\n{stderr}")
+    assert(stdout.contains("abilities:true:true:bidi-2025.5"), stdout)
+    assert(stdout.contains("event:log.entryAdded"), stdout)
+    assert(stdout.contains("raw:{\"message\":\"ready\",\"ready\":true}"), stdout)
+    assert(stdout.contains("cdp:{}"), stdout); assert(stdout.contains("trace:"), stdout)
+    assert(stdout.contains(":true:"), stdout)
+    assert(!stdout.contains("TOP_SECRET"), stdout); assert(!stdout.contains("SECRET PAGE DATA"), stdout)
+    assert(server.join().unwrap() == ["session.status", "session.new", "browser.createUserContext", "browsingContext.create", "browsingContext.navigate", "browsingContext.locateNodes", "browsingContext.locateNodes", "input.performActions", "session.subscribe", "session.status", "goog:cdp.sendCommand", "browsingContext.close", "browser.removeUserContext", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:984
+#Test("native_bidi_rejects_hostile_frames_profiles_and_timeouts_without_leaks") {
+    (malformed, malformed_server) :: hostile_listener(HostileReply.Malformed)
+    (mismatched, mismatched_server) :: hostile_listener(HostileReply.MismatchedId)
+    (protocol, protocol_server) :: hostile_listener(HostileReply.ProtocolError)
+    (timeout, timeout_server) :: hostile_listener(HostileReply.Timeout)
+    (no_cdp, no_cdp_server) :: hostile_listener(HostileReply.NoCdp)
+    (invalid_number, invalid_number_server) :: handshake_listener("{\"ready\":01,\"message\":\"bad\"}", false)
+    (not_ready, not_ready_server) :: handshake_listener("{\"ready\":false,\"message\":\"busy\"}", false)
+    (surrogate, surrogate_server) :: handshake_listener("{\"ready\":true,\"message\":\"\\uD83D\\uDE80\"}", true)
+    (closed_protocol, closed_protocol_server) :: handshake_listener("{\"ready\":true,\"message\":\"ready\"}", true)
+    (malformed_session, malformed_session_server) :: malformed_session_listener()
+    source :: """
+use core.web.browser as browser
+fn connect_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
+    session.close() ?? return "close-error"
+    return "unexpected-success"
+}
+fn profile_outcome() -> String {
+    profile :: browser.profile("rolling") ?? return "caught"
+    return "unexpected-success"
+}
+fn timeout_outcome() -> String {
+    timeout :: browser.timeout(0) ?? return "caught"
+    return "unexpected-success"
+}
+fn cdp_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    cdp :: session.protocol("cdp") ?? return "caught"
+    return "unexpected-success"
+}
+fn valid_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "caught"
+    session.close() ?? return "close-error"
+    return "connected"
+}
+fn closed_protocol_outcome(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.close() ?? return "close-error"
+    loop attempt in [1] {
+        session.protocol("bidi") ?? next
+        return "unexpected-open"
+    }
+    return "closed"
+}
+fn run() {
+    print(connect_outcome("__MALFORMED__"))
+    print(connect_outcome("__MISMATCHED__"))
+    print(connect_outcome("__PROTOCOL__"))
+    print(connect_outcome("__TIMEOUT__"))
+    print(profile_outcome())
+    print(timeout_outcome())
+    print(cdp_outcome("__NO_CDP__"))
+    print(connect_outcome("__INVALID_NUMBER__"))
+    print(connect_outcome("__NOT_READY__"))
+    print(valid_outcome("__SURROGATE__"))
+    print(closed_protocol_outcome("__CLOSED_PROTOCOL__"))
+    print(connect_outcome("__MALFORMED_SESSION__"))
+}
+""".replace("__MALFORMED__", malformed).replace("__MISMATCHED__", mismatched)
+    .replace("__PROTOCOL__", protocol).replace("__TIMEOUT__", timeout).replace("__NO_CDP__", no_cdp)
+    .replace("__INVALID_NUMBER__", invalid_number).replace("__NOT_READY__", not_ready)
+    .replace("__SURROGATE__", surrogate).replace("__CLOSED_PROTOCOL__", closed_protocol)
+    .replace("__MALFORMED_SESSION__", malformed_session)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_hostile", "browser_bidi_hostile", source)
+    assert(code == 0, "stderr:\n{stderr}")
+    assert(stdout == "caught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\ncaught\nconnected\nclosed\ncaught\n")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    malformed_server.join().unwrap(); mismatched_server.join().unwrap(); protocol_server.join().unwrap()
+    timeout_server.join().unwrap(); no_cdp_server.join().unwrap()
+    assert(invalid_number_server.join().unwrap() == ["session.status"])
+    assert(not_ready_server.join().unwrap() == ["session.status"])
+    assert(surrogate_server.join().unwrap() == ["session.status", "session.new", "session.end"])
+    assert(closed_protocol_server.join().unwrap() == ["session.status", "session.new", "session.end"])
+    assert(malformed_session_server.join().unwrap() == ["session.status", "session.new", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:1106
+#Test("native_bidi_bounds_event_queue_and_hashes_large_remote_method_facts") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session"
+    server :: thread.spawn(fn() { run_event_storm(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    bidi.send("session.status", "{{}}") ?? panic("storm")
+    first :: &session.next_event(timeout) ?? panic("queued event")
+    print(first.kind() == "event.44")
+    trace :: session.trace()
+    print("{trace.redacted()}:{trace.entry_count()}")
+    print(trace.summary())
+    session.close() ?? panic("close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_storm", "browser_bidi_storm", source)
+    assert(code == 0, "stderr:\n{stderr}")
+    lines := stdout.lines(); assert(lines.next() == Val("true"), stdout)
+    summary := lines.next().expect("trace facts") // #4303
+    assert(summary.starts_with("true:"), stdout)
+    count: USize :: summary.trim_start_matches("true:").parse().unwrap()
+    assert(count < 310, "trace must be byte bounded: {stdout}")
+    assert(!stdout.contains("SECRET_REMOTE_METHOD"), stdout)
+    assert(!stdout.contains("x".repeat(128)), stdout)
+    assert(server.join().unwrap() == ["session.status", "session.new", "session.status", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:1152
+#Test("native_bidi_command_deadline_does_not_reset_on_continuous_events") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session"
+    server :: thread.spawn(fn() { run_continuous_events(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    outcome :: bidi.send("session.status", "{{}}") ?? "caught"
+    print(outcome)
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_deadline", "browser_bidi_deadline", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "caught\n")
+    assert(!stderr.contains("network.tick"), stderr)
+    assert(server.join().unwrap() == ["session.status", "session.new", "session.status", "session.end"])
+}
+
+// Rust: tests/browser_bidi.rs:1189
+#Test("native_bidi_runs_real_network_path_in_forced_and_default_dev_tier_zero") {
+    // Rust: tests/browser_bidi.rs:1190
+    // Retired engine traces become real network behavior on O0/O1/O2/Web.
+    fn run_once(tier: String) -> (String, [String]) {
+        listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+        endpoint :: "ws://{listener.local_addr().unwrap()}/session"
+        server :: thread.spawn(fn() { run_smoke(^listener) })
+        source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2024.11") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    print(session.abilities().profile())
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    blocked :: bidi.send("webExtension.install", "{{}}") ?? "blocked"
+    print(blocked)
+    unknown :: bidi.send("network.futureCommand", "{{}}") ?? "blocked"
+    print(unknown)
+    raw_cdp :: bidi.send("goog:cdp.sendCommand", "{{}}") ?? "blocked"
+    print(raw_cdp)
+    session.close() ?? panic("close")
+}
+""".replace("__ENDPOINT__", endpoint)
+        dir :: common.unique_tmp("jet_browser_bidi_dev")
+        fs.create_dir_all(&dir).unwrap()
+        fs.write(dir.join("package.jet"), "name: \"browser_bidi_dev\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Net] } }\n").unwrap()
+        path :: dir.join("browser_bidi_dev.jet"); fs.write(&path, source).unwrap()
+        outcome :: common.run_entry_tier(path, tier, false)
+        stdout :: if outcome == {
+            .Ran(exit_code, stdout, stderr) -> {
+                assert(exit_code == 0, "dev stderr:\n{stderr}"); assert(stderr == ""); stdout
+            }
+            .Problems(diags) -> panic("Browser dev tier rejected real network program: {diags:?}")
+        }
+        (stdout, server.join().unwrap())
+    }
+    // Rust: tests/browser_bidi.rs:1246
+    fn dev_stdout(source: String, label: String) -> String {
+        dir :: common.unique_tmp(label); fs.create_dir_all(&dir).unwrap()
+        fs.write(dir.join("package.jet"), "name: \"browser_bidi_dev\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Net] } }\n").unwrap()
+        path :: dir.join("browser_bidi_dev.jet"); fs.write(&path, source).unwrap()
+        if common.run_entry_tier(path, "O0", false) == {
+            .Ran(exit_code, stdout, stderr) -> {
+                assert(exit_code == 0, "dev stderr:\n{stderr}"); assert(stderr == ""); stdout
+            }
+            .Problems(diags) -> panic("Browser dev tier rejected real network program: {diags:?}")
+        }
+    }
+    (forced_stdout, forced_methods) :: run_once("O0")
+    assert(forced_stdout == "bidi-2024.11\nblocked\nblocked\nblocked\n")
+    assert(forced_methods == ["session.status", "session.new", "session.end"])
+    loop tier in ["O1", "O2", "Web"] {
+        (default_stdout, default_methods) :: run_once(tier)
+        assert(default_stdout == forced_stdout); assert(default_methods == forced_methods)
+    }
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session"
+    server :: thread.spawn(fn() { run_profile_smoke(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    bidi :: session.protocol("bidi") ?? panic("protocol")
+    install_outcome :: bidi.send("webExtension.install", "{{}}") ?? "failed"
+    print(install_outcome)
+    unknown_outcome :: bidi.send("network.futureCommand", "{{}}") ?? "blocked"
+    print(unknown_outcome)
+    cdp_outcome :: bidi.send("goog:cdp.sendCommand", "{{}}") ?? "blocked"
+    print(cdp_outcome)
+    session.close() ?? panic("close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    assert(dev_stdout(source, "jet_browser_bidi_profile_2025") == "{}\nblocked\nblocked\n")
+    assert(server.join().unwrap() == ["session.status", "session.new", "webExtension.install", "session.end"])
+    loop iteration in 0..<2 {
+        guard_listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+        guard_endpoint :: "ws://{guard_listener.local_addr().unwrap()}/session"
+        guard_server :: thread.spawn(fn() { run_smoke(^guard_listener) })
+        guard_source :: """
+use core.web.browser as browser
+fn run() {
+    session :: browser.connect("__ENDPOINT__") ?? panic("connect")
+    print(session.abilities().profile())
+}
+""".replace("__ENDPOINT__", guard_endpoint)
+        assert(dev_stdout(guard_source, "jet_browser_bidi_guard_{iteration}") == "bidi-2025.5\n")
+        assert(guard_server.join().unwrap() == ["session.status", "session.new", "session.end"], "runtime entry guard must drain Browser owners on iteration {iteration}")
+    }
+    (invalid, invalid_server) :: handshake_listener("{\"ready\":01,\"message\":\"bad\"}", false)
+    (surrogate, surrogate_server) :: handshake_listener("{\"ready\":true,\"message\":\"\\uD83D\\uDE80\"}", true)
+    codec_source :: """
+use core.web.browser as browser
+fn outcome(endpoint: String) -> String {
+    session :: browser.connect(endpoint) ?? return "caught"
+    session.close() ?? return "close-error"
+    return "connected"
+}
+fn run() {
+    print(outcome("__INVALID__"))
+    print(outcome("__SURROGATE__"))
+}
+""".replace("__INVALID__", invalid).replace("__SURROGATE__", surrogate)
+    assert(dev_stdout(codec_source, "jet_browser_bidi_json_codec") == "caught\nconnected\n")
+    assert(invalid_server.join().unwrap() == ["session.status"])
+    assert(surrogate_server.join().unwrap() == ["session.status", "session.new", "session.end"])
+}
+
+// Rust: tests/browser_bidi.rs:1436
+#Test("native_bidi_semantic_locators_actions_and_waits") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=LOCATOR_SECRET"
+    server :: thread.spawn(fn() { run_locator_actions(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/form") ?? panic("goto")
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.hover() ?? panic("hover")
+    save.click() ?? panic("click")
+    name :: page.get_by_label("Name")
+    name.fill("Ada") ?? panic("fill")
+    name.press("Tab") ?? panic("press")
+    page.get_by_text("Save").wait(timeout) ?? panic("text wait")
+    page.get_by_placeholder("email").wait(timeout) ?? panic("placeholder wait")
+    page.get_by_test_id("save").wait(timeout) ?? panic("test id wait")
+    page.get_by_css("button.save").wait(timeout) ?? panic("css wait")
+    gone :: page.get_by_role("status", "Saving")
+    gone.wait_gone(timeout) ?? panic("wait_gone")
+    print("locators:ok")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_locators", "browser_bidi_locators", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "locators:ok\n")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    methods :: server.join().unwrap()
+    assert(methods.iter().filter(fn(m) { m == "browsingContext.locateNodes" }).count() >= 11, "expected repeated locateNodes for waits/actions: {methods:?}")
+    assert(methods.iter().any(fn(m) { m == "script.callFunction" }), "fill must use script.callFunction: {methods:?}")
+    assert(methods.iter().filter(fn(m) { m == "input.performActions" }).count() >= 3, "hover/click/press need performActions: {methods:?}")
+    assert(methods.last() == Val("session.end"))
+}
+// Rust: tests/browser_bidi.rs:1513
+#Test("native_bidi_missing_locator_action_times_out_without_leaks") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=MISSING_LOCATOR_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap(); accept_websocket(&stream); methods := [String]{}
+        loop _ in 0..<12 {
+            request :: read_text_frame(&stream); id :: field(request, "id"); method :: field(request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{\"ready\":true,\"message\":\"ready\"}"
+                "session.new" -> "{\"sessionId\":\"mock-session\",\"capabilities\":{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}"
+                "browser.createUserContext" -> "{\"userContext\":\"user-1\"}"
+                "browsingContext.create" -> "{\"context\":\"page-1\"}"
+                "browsingContext.locateNodes" -> "{\"nodes\":[]}"
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{}"
+                other -> panic("unexpected BiDi method {other}: {request}")
+            }
+            write_text_frame(&stream, "{\"type\":\"success\",\"id\":{id},\"result\":{result}}")
+            if method == "session.end" -> break
+        }
+        ^methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(80) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    missing :: page.get_by_role("button", "Missing")
+    loop attempt in [1] {
+        missing.click() ?? next
+        print("unexpected")
+    }
+    print("caught")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_missing_locator", "browser_bidi_missing_locator", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "caught\n")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    methods :: server.join().unwrap()
+    assert(methods.iter().any(fn(m) { m == "browsingContext.locateNodes" }), "{methods:?}")
+    assert(!methods.iter().any(fn(m) { m == "input.performActions" }), "missing locator must not click: {methods:?}")
+}
+// Rust: tests/browser_bidi.rs:1652
+#Test("native_bidi_network_events_inspection_and_interception") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=NETWORK_SECRET"
+    server :: thread.spawn(fn() { run_network_events(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    session.subscribe("network.beforeRequestSent") ?? panic("subscribe")
+    intercept :: session.add_intercept("beforeRequestSent") ?? panic("add_intercept")
+    event :: &session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.request_id())
+    print(event.request_method())
+    print(event.is_blocked())
+    hash :: event.url_hash()
+    print(hash.len() == 16)
+    print(hash.contains("SECRET") == false)
+    session.continue_request(event.request_id()) ?? panic("continue")
+    session.fail_request("req-secret-1") ?? panic("fail")
+    session.fulfill_request("req-secret-1", 200, "ok") ?? panic("fulfill")
+    url_intercept :: session.add_intercept_url("beforeRequestSent", "https://api.test/*") ?? panic("add_intercept_url")
+    url_intercept.remove() ?? panic("remove url")
+    intercept.remove() ?? panic("remove")
+    intercept.remove() ?? panic("remove idempotent")
+    print("network:ok")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_network", "browser_bidi_network", source)
+    assert(code == 0, "stderr:\n{stderr}")
+    assert(stdout.contains("network.beforeRequestSent\n"), stdout); assert(stdout.contains("req-secret-1\n"), stdout)
+    assert(stdout.contains("GET\n"), stdout); assert(stdout.contains("true\n"), stdout); assert(stdout.contains("network:ok\n"), stdout)
+    assert(!stdout.contains("TOP_SECRET"), stdout); assert(!stdout.contains("NETWORK_SECRET"), stdout)
+    assert(!stderr.contains("TOP_SECRET"), stderr); assert(!stderr.contains("NETWORK_SECRET"), stderr)
+    methods :: server.join().unwrap()
+    assert(methods.iter().any(fn(m) { m == "session.subscribe" }), "{methods:?}")
+    assert(methods.iter().filter(fn(m) { m == "network.addIntercept" }).count() == 2, "{methods:?}")
+    assert(methods.iter().any(fn(m) { m == "network.continueRequest" }), "{methods:?}")
+    assert(methods.iter().any(fn(m) { m == "network.failRequest" }), "{methods:?}")
+    assert(methods.iter().any(fn(m) { m == "network.provideResponse" }), "{methods:?}")
+    assert(methods.iter().filter(fn(m) { m == "network.removeIntercept" }).count() == 2, "second remove must be local-idempotent: {methods:?}")
+    assert(methods.last() == Val("session.end"))
+}
+// Rust: tests/browser_bidi.rs:1743
+#Test("native_bidi_network_intercept_rejects_bad_phase_and_empty_request") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=HOSTILE_NETWORK_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap(); accept_websocket(&stream); methods := [String]{}
+        loop _ in 0..<10 {
+            request :: read_text_frame(&stream); id :: field(request, "id"); method :: field(request, "method"); methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{\"ready\":true,\"message\":\"ready\"}"
+                "session.new" -> "{\"sessionId\":\"mock-session\",\"capabilities\":{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}"
+                "session.end" -> "{}"
+                other -> panic("unexpected BiDi method {other}: {request}")
+            }
+            write_text_frame(&stream, "{\"type\":\"success\",\"id\":{id},\"result\":{result}}")
+            if method == "session.end" -> break
+        }
+        ^methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    loop attempt in [1] {
+        session.add_intercept("not-a-phase") ?? next
+        print("unexpected phase")
+    }
+    loop attempt in [1] {
+        session.continue_request("") ?? next
+        print("unexpected empty")
+    }
+    loop attempt in [1] {
+        session.fulfill_request("req", 99, "nope") ?? next
+        print("unexpected status")
+    }
+    print("caught")
+    session.close() ?? panic("close")
+}
+""".replace("__ENDPOINT__", endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_network_hostile", "browser_bidi_network_hostile", source)
+    assert(code == 0, "stderr:\n{stderr}"); assert(stdout == "caught\n")
+    assert(!stdout.contains("SECRET"), stdout); assert(!stderr.contains("SECRET"), stderr)
+    methods :: server.join().unwrap()
+    assert(!methods.iter().any(fn(m) { m.starts_with("network.") }), "invalid client calls must not hit the wire: {methods:?}")
+}
+// Rust: tests/browser_bidi.rs:1818
+// The following test attribute belongs to the next packet's function at :1819.

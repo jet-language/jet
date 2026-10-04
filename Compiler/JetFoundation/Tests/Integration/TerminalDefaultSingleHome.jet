@@ -1,0 +1,19 @@
+use core.fs as fs
+use std.env
+
+// Rust: tests/terminal_default_single_home.rs:15
+fn root() -> OSPath { env.manifest_dir() }
+// Rust: tests/terminal_default_single_home.rs:19
+TERMINAL_DEFAULT_HOME :: "crates/jet-codegen/src/Prelude/TerminalDefault.rs"
+// Rust: tests/terminal_default_single_home.rs:21
+fn collect_rs_files(dir: OSPath, out: &[OSPath]) -> {
+    entries :: fs.read_dir(dir) ?? return
+    for entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() {
+            collect_rs_files(&path, &out)
+        } else if path.extension().is_some_and((e) -> e == "rs") {
+            out.push(path)
+        }
+    }
+}

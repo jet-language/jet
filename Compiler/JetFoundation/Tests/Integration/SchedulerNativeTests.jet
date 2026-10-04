@@ -1,0 +1,178 @@
+use jet.compile
+use jet_foundation.Tests.Integration.SchedulerNative.[TASK_PROGRAM, SAFE_CORE_PROGRAMS, strip_region, strip_mod]
+use jet_foundation.Tests.Integration.SyncCrdt as sync_crdt
+use jet_foundation.Tests.Integration.TestingTiers.jet_string
+use jet_foundation.Tests.Integration.TirIoAndOwnership.build_and_run_stdin
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport.[have_rustc, build_and_run, build_and_run_multi, run_default_multi, assert_tiers_agree, assert_release_tiers_agree]
+// Rust: tests/scheduler_native.rs:74
+#Test("emitted_scheduler_ships_native_readiness_backend") {
+    out :: compile(TASK_PROGRAM).expect("task program should compile")
+    rust :: &out.rust
+    assert(rust.contains("epoll_wait") && rust.contains("epoll_create1"), "emitted program must ship the native epoll backend (Tower #126)")
+    assert(rust.contains("fn kqueue()"), "emitted program must ship the kqueue backend behind cfg")
+    assert(rust.contains("CreateIoCompletionPort") && rust.contains("GetQueuedCompletionStatus") && rust.contains("WSARecv") && rust.contains("CancelIoEx") && rust.contains("PostQueuedCompletionStatus"), "emitted program must ship real IOCP registration, completion, wake, and cancellation")
+    assert(rust.contains("enum IOBackendState") && rust.contains("IOBackendState::Failed") && rust.contains("scheduler IOCP completion port failed") && rust.contains("drain_deadline") && rust.contains("METRIC_IO_PORT_CLOSED") && rust.contains("iocp_shutdown_done"), "emitted IOCP backend must publish terminal failure and reject later waits")
+    assert(!rust.contains("IOCP path: fall back to portable poll"), "Windows native path must never route through portable readiness polling")
+    assert(!rust.contains("feature = \"jet_native_io\""), "emitted program must not gate native IO behind a Cargo feature it never sets")
+    assert(rust.contains("return \"epoll\";") && rust.contains("return \"kqueue\";") && rust.contains("return \"iocp\";"), "emitted io_backend must select native backends per target_os")
+}
+// Rust: tests/scheduler_native.rs:128
+#Test("emitted_scheduler_native_region_is_the_only_unsafe") {
+    out :: compile(TASK_PROGRAM).expect("task program should compile")
+    scanned := strip_region(&out.rust, "// jet:scheduler-native-begin", "// jet:scheduler-native-end")
+    for name in ["jet_mem", "jet_txn", "jet_term_unix", "jet_term_windows", "jet_os_unix", "jet_atomic_windows", "jet_gtk", "jet_crypto_entropy"] {
+        scanned = strip_mod(&scanned, name)
+    }
+    scanned = common.strip_vetted_module(&scanned, "jet_env_windows")
+    assert(scanned.contains("epoll_wait") == false, "the native region should have been excised for the scan")
+    assert(!scanned.contains("unsafe"), "I1: all emitted `unsafe` must live inside the vetted jet:scheduler-native region")
+}
+// Rust: tests/scheduler_native.rs:162
+#Test("safe_core_calls_do_not_inherit_native_scheduler_unsafe") {
+    for source in SAFE_CORE_PROGRAMS {
+        out :: compile(source).expect("safe Core program should compile")
+        scanned :: common.strip_vetted_prelude_modules(&out.rust)
+        assert(!scanned.contains("unsafe"), "safe Core use inherited generated unsafe outside vetted std internals")
+        assert(!out.rust.contains("epoll_create1") && !out.rust.contains("fn kqueue()") && !out.rust.contains("CreateIoCompletionPort"), "safe Core use inherited an unrelated native scheduler backend")
+        assert(out.rust.contains("run_portable_poll"), "safe Core use still needs the scheduler compatibility surface")
+    }
+}
+// Rust: tests/sync_crdt.rs:128
+#Test("sync_laws_hold_on_aot_path") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("sync_laws", sync_crdt.SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, sync_crdt.SYNC_EXPECTED)
+}
+// Rust: tests/sync_crdt.rs:138
+#Test("sync_laws_hold_on_default_run") {
+    (code, stdout, stderr) :: run_default_multi("sync_laws_jit", "main.jet", &[("main.jet", sync_crdt.SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, sync_crdt.SYNC_EXPECTED)
+}
+// Rust: tests/sync_crdt.rs:146
+#Test("map_merge_equal_timestamp_conflicts_are_deterministic") {
+    assert_tiers_agree("sync_map_equal_clock_tie", sync_crdt.MAP_MERGE_TIE_SOURCE, sync_crdt.MAP_MERGE_TIE_EXPECTED)
+}
+// Rust: tests/testing_tiers.rs:19
+#Test("testing_file_helpers_preserve_success_and_failure_values_across_tiers") {
+    if !have_rustc() { return }
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    golden :: jet_string(&root.join("tests/fixtures/testing_failure_reports.golden"))
+    missing :: jet_string(&root.join("tests/fixtures/testing_failure_reports.missing"))
+    source :: "use core.testing as testing\n\nfn run() {{\n    print(testing.golden(\"{golden}\", \"expected\n\"))\n    print(testing.golden(\"{missing}\", \"actual\n\"))\n    print(testing.golden(\"{golden}\", \"actual\n\"))\n    print(testing.fixture(\"{missing}\").len())\n    print(testing.fixture(\"{golden}\").len())\n}}\n"
+    assert_tiers_agree("testing_file_helpers_tiers", &source, "true\nfalse\nfalse\n0\n9\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:76
+#Test("qualified_io_input_or_return") {
+    if !have_rustc() { return }
+    src :: "use core.term as io\nfn collect() -[IO]> [String] {{\n    out := [String]{{}}\n    loop true {{\n        line :: io.input(\"> \") ?? return ~out\n        if line == \"\" {{\n            break\n        }}\n        out.push(line)\n    }}\n    return out\n}}\nfn run() {{\n    got :: collect()\n    print(\"count={{got.len()}}\")\n    loop g in got {{\n        print(g)\n    }}\n    print(\"done\")\n}}\n"
+    (code, stdout) :: build_and_run_stdin("tir_io_input_lines", src, "alpha\nbeta\n\n")
+    assert_eq(code, 0)
+    assert_eq(stdout, "> > > count=2\nalpha\nbeta\ndone\n")
+    (eof_code, eof_stdout) :: build_and_run_stdin("tir_io_input_eof", src, "")
+    assert_eq(eof_code, 0)
+    assert_eq(eof_stdout, "> count=0\ndone\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:122
+#Test("generic_fns_and_trait_object_dispatch") {
+    if !have_rustc() { return }
+    src :: "trait Shape {{\n    fn area(self) -> Float\n    fn name(self) -> String\n}}\nstruct Circle {{\n    radius: Float\n\n    impl Shape {{\n        fn area(self) -[]> Float {{\n            return ((3.14159 * self.radius) * self.radius)\n        }}\n        fn name(self) -[]> String {{\n            return \"circle\"\n        }}\n    }}\n}}\nstruct Square {{\n    side: Float\n}}\nimpl Square.Shape {{\n    fn area(self) -[]> Float {{\n        return (self.side * self.side)\n    }}\n    fn name(self) -[]> String {{\n        return \"square\"\n    }}\n}}\nfn largest<T: Comparable>(xs: [T]) -[]> T? {{\n    if xs.len() == 0 {{\n        return None\n    }}\n    best := ~xs[0]\n    i := 1\n    loop i < xs.len() {{\n        if xs[i] > best {{\n            best = ~xs[i]\n        }}\n        i+= 1\n    }}\n    return Val(best)\n}}\nfn print_area(s: Shape) {{\n    print(\"{{s.name()}}: {{s.area()}}\")\n}}\n#Comparable\nstruct Score {{\n    points: Int\n}}\nfn run() {{\nshapes :: [Shape]{{ Circle{{radius: 1.0}}, Square{{side: 2.0}} }}\n    shapes.each((s) -> {{\n        print_area(s)\n    }})\n    nums :: [3, 1, 4, 1, 5]\n    print(largest(nums))\n    scores := [Score{{points: 10}}, Score{{points: 20}}]\n    scores.sort_by((s: Score) -> s.points)\n    print(scores[0].points)\n}}\n"
+    assert_release_tiers_agree("tir_generic_trait_object", src, "circle: 3.14159\nsquare: 4.0\n5\n10\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:198
+#Test("trait_object_each_callback_result_parity") {
+    if !have_rustc() { return }
+    src :: "#Error\nenum VisitError {{\n    Stop\n}}\ntrait Shape {{\n    fn name(self) -[]> String\n}}\nstruct Circle {{\n    radius: Float\n    impl Shape {{\n        fn name(self) -[]> String {{\n            return \"circle\"\n        }}\n    }}\n}}\nstruct Square {{\n    side: Float\n}}\nimpl Square.Shape {{\n    fn name(self) -[]> String {{\n        return \"square\"\n    }}\n}}\nfn visit_ok(s: Shape) -> VisitError! {{\n    name :: s.name() ?? \"unreachable\"\n    print(name)\n    return\n}}\nfn visit_fail(s: Shape) -> VisitError! {{\n    name :: s.name() ?? \"unreachable\"\n    print(name)\n    if name == \"circle\" {{\n        return Err(VisitError.Stop)\n    }}\n    return\n}}\nfn consume_plain() -[]> Unit {{\n    shapes :: [Shape]{{ Circle{{radius: 1.0}}, Square{{side: 2.0}} }}\n    shapes.each((s) -> {{}})\n}}\nfn consume_ok() -> VisitError! {{\n    shapes :: [Shape]{{ Circle{{radius: 1.0}}, Square{{side: 2.0}} }}\n    shapes.each((s) -> visit_ok(s))\n    return\n}}\nfn consume_fail() -> VisitError! {{\n    shapes :: [Shape]{{ Circle{{radius: 1.0}}, Square{{side: 2.0}} }}\n    shapes.each((s) -> visit_fail(s))\n    return\n}}\nfn run() {{\n    consume_ok() ? ok -> {{ print(\"callback-ok\") }} ! error -> {{ print(\"callback-ok-failed\") }}\n    consume_fail() ? ok -> {{ print(\"callback-failed-missed\") }} ! error -> {{ print(\"callback-failed\") }}\n    consume_plain()\n    print(\"plain-ok\")\n}}\n"
+    assert_release_tiers_agree("tir_trait_object_each_callback", src, "circle\nsquare\ncallback-ok\ncircle\ncallback-failed\nplain-ok\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:271
+#Test("trait_object_list_boxes_local_implementing_values") {
+    if !have_rustc() { return }
+    src :: "trait Sink {{\n    fn absorb(self, value: Float) -> Float\n}}\nstruct Holder {{\n    offset: Float\n\n    impl Sink {{\n        fn absorb(self, value: Float) -[]> Float {{\n            return value + self.offset\n        }}\n    }}\n}}\nfn run() {{\n    holder :: Holder{{ offset: 1.0 }}\n    sinks :: [Sink]{{ holder }}\n    print(sinks.len())\n}}\n"
+    (code, stdout) :: build_and_run("tir_trait_object_local_list", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:302
+#Test("borrowed_parameter_field_assignment_materializes_copy") {
+    src :: "struct Ledger {{\n    rows: [Int]\n    fn put_back(&self, s: [Int]) {{\n        self.rows = s\n    }}\n}}\nfn run() {{\n    data :: [Int]{{ 1, 2, 3 }}\n    ledger := Ledger{{ rows: [] }}\n    ledger.put_back(data)\n    print(ledger.rows[0])\n    print(ledger.rows[1])\n    print(ledger.rows[2])\n}}\n"
+    (code, stdout) :: build_and_run("tir_borrowed_parameter_field_copy", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n2\n3\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:327
+#Test("borrowed_parameter_field_assignment_preserves_alias_isolation") {
+    src :: "struct Ledger {{\n    rows: [Int]\n    fn put_back(&self, s: [Int]) {{\n        self.rows = s\n    }}\n}}\nfn run() {{\n    data := [Int]{{ 1, 2, 3 }}\n    ledger := Ledger{{ rows: [] }}\n    ledger.put_back(data)\n    data[0] = 9\n    print(ledger.rows[0])\n    print(data[0])\n}}\n"
+    assert_tiers_agree("tir_borrowed_parameter_field_alias_isolation", src, "1\n9\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:354
+#Test("borrowed_parameter_option_fallback_materializes_copy") {
+    src :: "struct Config {{\n    path: String?\n}}\nfn selected(config: Config) -[]> String {{\n    return config.path ?? \"default.toml\"\n}}\nfn run() {{\n    print(selected(Config{{ path: None }}))\n}}\n"
+    (code, stdout) :: build_and_run("tir_borrowed_parameter_option_copy", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "default.toml\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:375
+#Test("mut_self_field_assign") {
+    if !have_rustc() { return }
+    src :: "struct Counter {{\n    n: Int\n    fn bump(&self) {{\n        self.n = self.n + 1\n    }}\n    fn add(&self, k: Int) {{\n        self.n += k\n    }}\n}}\nfn run() {{\n    c := Counter{{ n: 0 }}\n    c.bump()\n    c.add(10)\n    print(c.n)\n}}\n"
+    (code, stdout) :: build_and_run("tir_mut_self_field", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "11\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:405
+#Test("mut_self_whole_reassignment") {
+    if !have_rustc() { return }
+    src :: "struct Counter {{\n    n: Int\n    fn reset(&self) {{\n        self = Counter{{ n: 0 }}\n    }}\n}}\nfn run() {{\n    c := Counter{{ n: 9 }}\n    c.reset()\n    print(c.n)\n}}\n"
+    (code, stdout) :: build_and_run("tir_mut_self_whole", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "0\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:431
+#Test("mut_self_trait_method_field_assign") {
+    if !have_rustc() { return }
+    src :: "trait Bumpable {{\n    fn bump(&self)\n}}\nstruct Counter {{\n    n: Int\n}}\nimpl Counter.Bumpable {{\n    fn bump(&self) {{\n        self.n = self.n + 1\n    }}\n}}\nfn run() {{\n    c := Counter{{ n: 0 }}\n    c.bump()\n    c.bump()\n    print(c.n)\n}}\n"
+    (code, stdout) :: build_and_run("tir_mut_self_trait", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:466
+#Test("recursive_struct_construction") {
+    if !have_rustc() { return }
+    src :: "struct Tree {{\n    value: Int\n    child: Tree?\n}}\nfn run() {{\n    root :: Tree{{\n        value: 3,\n        child: Val(Tree{{\n            value: 2,\n            child: Val(Tree{{ value: 1, child: None }})\n        }})\n    }}\n    print(root.value)\n}}\n"
+    (code, stdout) :: build_and_run("tir_recursive_struct", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:498
+#Test("unqualified_foreign_struct_literal") {
+    if !have_rustc() { return }
+    main_src :: "use \"notes\"\nfn run() {{\n    n :: Note{{ text: \"hi\" }}\n    print(n.text)\n}}\n"
+    notes_src :: "pub struct Note {{\n    pub text: String\n}}\n"
+    (code, stdout) :: build_and_run_multi("tir_foreign_struct_lit", "main.jet", &[("main.jet", main_src), ("notes.jet", notes_src)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "hi\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:524
+#Test("plain_parameter_modes_match_tir_and_aot") {
+    if !have_rustc() { return }
+    src :: "\nstruct Parcel {{ label: String }}\nstruct Leaf {{ text: String }}\nstruct Branch {{ leaf: Leaf }}\n\nimpl Parcel {{\n    fn show(self) {{ print(self.label) }}\n}}\n\nfn read_text(text: String) {{ print(text) }}\nfn read_list(values: [Int]) {{ print(values.len()) }}\nfn read_generic<T>(value: T) {{ print(7) }}\nfn read_nested(branch: Branch) {{ print(branch.leaf.text) }}\nfn apply(f: fn(Int) -> Int, value: Int) -[]> Int {{ return f(value) }}\nfn increment(value: Int) -[]> Int {{ return value + 1 }}\nfn edit(values: &[Int]) {{ values[0] = 9 }}\nfn consume(text: ^String) {{ print(text) }}\n\nfn run() {{\n    text :: \"hello\"\n    values := [1, 2]\n    parcel :: Parcel{{ label: \"parcel\" }}\n    branch :: Branch{{ leaf: Leaf{{ text: \"nested\" }} }}\n    callback :: increment\n    read_text(text)\n    read_list(values)\n    read_generic(text)\n    read_generic(callback)\n    read_nested(branch)\n    parcel.show()\n    print(apply((n: Int) -> (n + 1), 41))\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}}\n"
+    (code, stdout) :: build_and_run("tir_plain_parameter_modes", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "hello\n2\n7\n7\nnested\nparcel\n42\n9\nhello\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:570
+#Test("generic_inherent_methods_use_per_method_clone_bounds") {
+    if !have_rustc() { return }
+    src :: "\ntrait Measure {{\n    fn measure(self) -> Int\n}}\n\nstruct Holder<T> {{\n    reader: fn(T) -> Int\n\n    fn inspect(self) -[]> Int {{\n        return 1\n    }}\n\n    fn copy_tagged(self, value: #Input T) -[]> #Input T {{\n        return ~value\n    }}\n}}\n\nfn increment(value: Int) -[]> Int {{ return value + 1 }}\nfn read_callback(value: fn(Int) -> Int) -[]> Int {{ return 1 }}\nfn read_measure(value: Measure) -[]> Int {{ return 2 }}\nfn read_string(value: String) -[]> Int {{ return value.len() }}\n\nfn run() {{\n    callbacks :: Holder<fn(Int) -> Int>{{reader: read_callback}}\n    measures :: Holder<Measure>{{reader: read_measure}}\n    strings :: Holder<String>{{reader: read_string}}\n    print(callbacks.inspect())\n    print(measures.inspect())\n    copied :: strings.copy_tagged(#Input \"copy\")\n    print(3)\n}}\n"
+    (code, stdout) :: build_and_run("tir_generic_method_clone_bounds", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n1\n3\n")
+}
+// Rust: tests/tir_io_and_ownership.rs:612
+#Test("path_parent_exhaustive_match_preserves_option_shape") {
+    src :: "\nfn classify(path: Path) -[]> String {{\n    parent :: path.parent()\n    if parent == {{\n        .Val(next) -> return \"present:{{next.to_string()}}\"\n        .None -> return \"none\"\n    }}\n}}\n\nfn run() {{\n    print(classify(Path.from(\"/tmp/jet-parent/child\")))\n    print(classify(Path.from(\"/\")))\n}}\n"
+    assert_tiers_agree("path_parent_exhaustive_match", src, "present:/tmp/jet-parent\nnone\n")
+}

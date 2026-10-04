@@ -1,297 +1,131 @@
-// PORT-PENDING 2156 crates-jet-foundation-src-canonicalpass: crates/jet-foundation/src/CanonicalPass.rs:1-293
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Opt-in compiler-owned pass-boundary evidence used by the proof observer.
-//RS //!
-//RS //! The journal is deliberately inert unless the existing adapter evidence
-//RS //! environment is active. Passes append their real input/output snapshots;
-//RS //! `jet inspect decisions --json` projects the records without reconstructing
-//RS //! a route from a digest or a decision row.
-//RS 
-//RS use crate::AST::{Item, ProgramBundle};
-//RS use crate::JSON::json_escape;
-//RS use std::cell::RefCell;
-//RS use std::fs::OpenOptions;
-//RS use std::io::Write;
-//RS 
-//RS pub const SCHEMA: &str = "jet.canonical-pass-record.v1";
-//RS pub const PROTOCOL: &str = "jet.canonical-pass.v1";
-//RS pub const BASE_PREMISES: &[&str] = &[
-//RS     "source_origin_is_retained",
-//RS     "typed_failure_is_retained",
-//RS     "mutation_is_retained",
-//RS     "input_consumption_is_exact",
-//RS     "ordered_effects_are_retained",
-//RS     "cleanup_edges_are_retained",
-//RS     "resource_premises_are_explicit",
-//RS     "target_applicability_is_checked",
-//RS ];
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS pub struct Record {
-//RS     pub stage: String,
-//RS     pub operation_id: String,
-//RS     pub occurrence: usize,
-//RS     pub order: usize,
-//RS     pub source: String,
-//RS     pub input_representation: String,
-//RS     pub input_payload: String,
-//RS     pub input_identity: String,
-//RS     pub output_representation: String,
-//RS     pub output_payload: String,
-//RS     pub output_identity: String,
-//RS     pub premises: Vec<String>,
-//RS     pub disposition: String,
-//RS }
-//RS 
-//RS thread_local! {
-//RS     static RECORDS: RefCell<Vec<Record>> = const { RefCell::new(Vec::new()) };
-//RS }
-//RS 
-//RS /// Capture is tied to the already-existing adapter evidence environment. It
-//RS /// is not a public compiler switch and remains disabled for ordinary builds.
-//RS pub fn enabled() -> bool {
-//RS     std::env::var_os("JET_ADAPTER_MODE").is_some_and(|mode| !mode.is_empty())
-//RS         && std::env::var_os("JET_ADAPTER_OPERATION_IDS").is_some_and(|ids| !ids.is_empty())
-//RS }
-//RS 
-//RS pub fn clear() {
-//RS     RECORDS.with(|records| records.borrow_mut().clear());
-//RS }
-//RS 
-//RS pub fn record(
-//RS     stage: &str,
-//RS     operation_id: &str,
-//RS     source: &str,
-//RS     input_representation: &str,
-//RS     input_payload: String,
-//RS     input_identity: String,
-//RS     output_representation: &str,
-//RS     output_payload: String,
-//RS     output_identity: String,
-//RS     disposition: &str,
-//RS ) {
-//RS     if !enabled()
-//RS         || !std::env::var("JET_ADAPTER_OPERATION_IDS")
-//RS             .ok()
-//RS             .is_some_and(|ids| ids.split(',').any(|candidate| candidate == operation_id))
-//RS     {
-//RS         return;
-//RS     }
-//RS     RECORDS.with(|records| {
-//RS         let mut records = records.borrow_mut();
-//RS         let occurrence = records
-//RS             .iter()
-//RS             .filter(|record| record.operation_id == operation_id)
-//RS             .count()
-//RS             + 1;
-//RS         let order = records.len() + 1;
-//RS         records.push(Record {
-//RS             stage: stage.to_string(),
-//RS             operation_id: operation_id.to_string(),
-//RS             occurrence,
-//RS             order,
-//RS             source: source.to_string(),
-//RS             input_representation: input_representation.to_string(),
-//RS             input_payload,
-//RS             input_identity,
-//RS             output_representation: output_representation.to_string(),
-//RS             output_payload,
-//RS             output_identity,
-//RS             premises: BASE_PREMISES.iter().map(|value| (*value).to_string()).collect(),
-//RS             disposition: disposition.to_string(),
-//RS         });
-//RS     });
-//RS }
-//RS 
-//RS pub fn take() -> Vec<Record> {
-//RS     RECORDS.with(|records| std::mem::take(&mut *records.borrow_mut()))
-//RS }
-//RS 
-//RS 
-//RS fn record_json(record: &Record) -> String {
-//RS     let premises = record
-//RS         .premises
-//RS         .iter()
-//RS         .map(|premise| format!("\"{}\"", json_escape(premise)))
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"schema\":\"{}\",\"protocol\":\"{}\",\"stage\":\"{}\",\"operation_id\":\"{}\",\"occurrence\":{},\"order\":{},\"source\":{{\"path\":\"{}\"}},\"input\":{{\"representation\":\"{}\",\"canonical_payload\":{},\"identity\":{}}},\"output\":{{\"representation\":\"{}\",\"canonical_payload\":{},\"identity\":{}}},\"premises\":[{}],\"disposition\":\"{}\"}}",
-//RS         SCHEMA,
-//RS         PROTOCOL,
-//RS         json_escape(&record.stage),
-//RS         json_escape(&record.operation_id),
-//RS         record.occurrence,
-//RS         record.order,
-//RS         json_escape(&record.source),
-//RS         json_escape(&record.input_representation),
-//RS         record.input_payload,
-//RS         record.input_identity,
-//RS         json_escape(&record.output_representation),
-//RS         record.output_payload,
-//RS         record.output_identity,
-//RS         premises,
-//RS         json_escape(&record.disposition),
-//RS     )
-//RS }
-//RS 
-//RS /// Persist one compiler-process journal for evidence commands that do not
-//RS /// project `CanonicalPass::take()` through inspect JSON. The file is append
-//RS /// only and deliberately best-effort: evidence capture must never alter
-//RS /// compiler semantics when its scratch path is unavailable.
-//RS pub fn persist_process(process: &str) {
-//RS     if std::env::var("JET_ADAPTER_CANONICAL_PASS_PROCESS").ok().as_deref() != Some(process) {
-//RS         return;
-//RS     }
-//RS     let Some(path) = std::env::var_os("JET_ADAPTER_CANONICAL_PASS_PATH") else {
-//RS         return;
-//RS     };
-//RS     let records = take();
-//RS     if records.is_empty() {
-//RS         return;
-//RS     }
-//RS     let rows = records.iter().map(record_json).collect::<Vec<_>>().join(",");
-//RS     let payload = format!(
-//RS         "{{\"schema\":\"jet.canonical-pass-journal.v1\",\"protocol\":\"{}\",\"process\":\"{}\",\"records\":[{}]}}\n",
-//RS         PROTOCOL,
-//RS         json_escape(process),
-//RS         rows,
-//RS     );
-//RS     let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) else {
-//RS         return;
-//RS     };
-//RS     let _ = file.write_all(payload.as_bytes());
-//RS }
-//RS /// A structured, source-backed AST snapshot. The pass journal intentionally
-//RS /// retains node kinds and order instead of reducing the program to one hash.
-//RS pub fn ast_payload(bundle: &ProgramBundle) -> String {
-//RS     let modules = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| {
-//RS             let items = module
-//RS                 .items
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .map(|(index, item)| {
-//RS                     format!(
-//RS                         "{{\"index\":{index},\"kind\":\"{}\"}}",
-//RS                         item_kind(item)
-//RS                     )
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(",");
-//RS             format!(
-//RS                 "{{\"display\":\"{}\",\"alias\":\"{}\",\"source_length\":{},\"items\":[{}]}}",
-//RS                 json_escape(&module.display),
-//RS                 json_escape(&module.alias),
-//RS                 module.source.len(),
-//RS                 items
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"representation\":\"ast\",\"entry\":{},\"modules\":[{}]}}",
-//RS         bundle.entry, modules
-//RS     )
-//RS }
-//RS 
-//RS pub fn ast_identity(bundle: &ProgramBundle) -> String {
-//RS     let modules = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| {
-//RS             format!(
-//RS                 "{{\"display\":\"{}\",\"items\":{}}}",
-//RS                 json_escape(&module.display),
-//RS                 module.items.len()
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"representation\":\"ast\",\"entry\":{},\"modules\":[{}]}}",
-//RS         bundle.entry, modules
-//RS     )
-//RS }
-//RS 
-//RS fn item_kind(item: &Item) -> &'static str {
-//RS     match item {
-//RS         Item::Func(_) => "Func",
-//RS         Item::Struct(_) => "Struct",
-//RS         Item::Enum(_) => "Enum",
-//RS         Item::Distinct(_) => "Distinct",
-//RS         Item::TypeAlias(_) => "TypeAlias",
-//RS         Item::UnitFamily(_) => "UnitFamily",
-//RS         Item::Trait(_) => "Trait",
-//RS         Item::Tag(_) => "Tag",
-//RS         Item::EffectDecl(_) => "EffectDecl",
-//RS         Item::Impl(_) => "Impl",
-//RS         Item::Const(_) => "Const",
-//RS         Item::Test(_) => "Test",
-//RS         Item::ExternRust(_) => "ExternRust",
-//RS         Item::Module(_) => "Module",
-//RS         Item::CModule(_) => "CModule",
-//RS         Item::CodeModule(_) => "CodeModule",
-//RS         Item::ErrorConv(_) => "ErrorConv",
-//RS         Item::Migration(_) => "Migration",
-//RS         Item::ProtocolDecl(_) => "ProtocolDecl",
-//RS         Item::UserDerive(_) => "UserDerive",
-//RS         Item::TemplateLoop(_) => "TemplateLoop",
-//RS         Item::GenericModule(_) => "GenericModule",
-//RS         Item::ModuleAlias(_) => "ModuleAlias",
-//RS         Item::MarkerDecl(_) => "MarkerDecl",
-//RS         Item::FactDecl(_) => "FactDecl",
-//RS     }
-//RS }
-//RS pub fn ast_items_payload(items: &[Item]) -> String {
-//RS     let rows = items
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, item)| {
-//RS             format!(
-//RS                 "{{\"index\":{index},\"kind\":\"{}\"}}",
-//RS                 item_kind(item)
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!("{{\"representation\":\"ast\",\"items\":[{rows}]}}")
-//RS }
-//RS 
-//RS pub fn ast_items_identity(items: &[Item]) -> String {
-//RS     format!(
-//RS         "{{\"representation\":\"ast\",\"item_count\":{}}}",
-//RS         items.len()
-//RS     )
-//RS }
-//RS 
-//RS pub fn debug_payload<T: std::fmt::Debug>(
-//RS     representation: &str,
-//RS     operation_id: &str,
-//RS     value: &T,
-//RS ) -> String {
-//RS     format!(
-//RS         "{{\"representation\":\"{}\",\"operation_id\":\"{}\",\"debug\":\"{}\"}}",
-//RS         json_escape(representation),
-//RS         json_escape(operation_id),
-//RS         json_escape(&format!("{value:?}")),
-//RS     )
-//RS }
-//RS 
-//RS pub fn debug_identity<T: std::fmt::Debug>(
-//RS     representation: &str,
-//RS     operation_id: &str,
-//RS     value: &T,
-//RS ) -> String {
-//RS     format!(
-//RS         "{{\"representation\":\"{}\",\"operation_id\":\"{}\",\"identity\":\"{}\"}}",
-//RS         json_escape(representation),
-//RS         json_escape(operation_id),
-//RS         json_escape(&format!("{value:?}")),
-//RS     )
-//RS }
-//RS 
-// END-PORT-PENDING 2156 crates/jet-foundation/src/CanonicalPass.rs:1-293
+// Opt-in compiler-owned pass-boundary evidence. Ordinary builds do not capture.
+use AST.[Item, ProgramBundle]
+use JSON.[json_escape]
+use std.env
+use std.cell.[RefCell]
+use std.thread_local.[ThreadLocal]
+use std.fs.[OpenOptions]
+use std.mem
+use std.fmt.[Debug]
 
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:14
+pub SCHEMA :: prep { "jet.canonical-pass-record.v1" }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:15
+pub PROTOCOL :: prep { "jet.canonical-pass.v1" }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:16
+pub BASE_PREMISES :: prep { ["source_origin_is_retained", "typed_failure_is_retained", "mutation_is_retained", "input_consumption_is_exact", "ordered_effects_are_retained", "cleanup_edges_are_retained", "resource_premises_are_explicit", "target_applicability_is_checked"] }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:28
+pub struct Record {
+    pub stage: String
+    pub operation_id: String
+    pub occurrence: Int
+    pub order: Int
+    pub source: String
+    pub input_representation: String
+    pub input_payload: String
+    pub input_identity: String
+    pub output_representation: String
+    pub output_payload: String
+    pub output_identity: String
+    pub premises: [String]
+    pub disposition: String
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:44
+// GATE #4494: native thread-local RefCell ownership, not a process-global journal.
+RECORDS :: prep { ThreadLocal<RefCell<[Record]>>.new(|| -> RefCell.new([Record]{})) }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:50
+pub fn enabled() -> Bool {
+    // GATE #4494: native environment reads retain OS text semantics.
+    env.var_os("JET_ADAPTER_MODE").is_some_and(|mode| -> !mode.is_empty()) && env.var_os("JET_ADAPTER_OPERATION_IDS").is_some_and(|ids| -> !ids.is_empty())
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:55
+pub fn clear() -> { RECORDS.with(|records| -> records.borrow_mut().clear()) }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:59
+pub fn record(stage: String, operation_id: String, source: String, input_representation: String, input_payload: ^String, input_identity: ^String, output_representation: String, output_payload: ^String, output_identity: ^String, disposition: String) -> {
+    if !enabled() || !env.var("JET_ADAPTER_OPERATION_IDS").ok().is_some_and(|ids| -> ids.split(',').any(|candidate| -> candidate == operation_id)) -> return
+    RECORDS.with(|cell| -> {
+        records := cell.borrow_mut()
+        occurrence :: records.iter().filter(|entry| -> entry.operation_id == operation_id).count() + 1
+        order :: records.len() + 1
+        records.push(Record{stage: ~stage, operation_id: ~operation_id, occurrence: occurrence, order: order, source: ~source, input_representation: ~input_representation, input_payload: ^input_payload, input_identity: ^input_identity, output_representation: ~output_representation, output_payload: ^output_payload, output_identity: ^output_identity, premises: BASE_PREMISES.iter().map(|value| -> ~value).collect(), disposition: ~disposition})
+    })
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:104
+pub fn take() -> [Record] { RECORDS.with(|records| -> mem.take(&records.borrow_mut())) }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:109
+fn record_json(record: Record) -> String {
+    premises :: record.premises.iter().map(|premise| -> "\"" + json_escape(premise) + "\"").collect().join(",")
+    "{\"schema\":\"" + SCHEMA + "\",\"protocol\":\"" + PROTOCOL + "\",\"stage\":\"" + json_escape(record.stage) + "\",\"operation_id\":\"" + json_escape(record.operation_id) + "\",\"occurrence\":" + record.occurrence.to_string() + ",\"order\":" + record.order.to_string() + ",\"source\":{\"path\":\"" + json_escape(record.source) + "\"},\"input\":{\"representation\":\"" + json_escape(record.input_representation) + "\",\"canonical_payload\":" + record.input_payload + ",\"identity\":" + record.input_identity + "},\"output\":{\"representation\":\"" + json_escape(record.output_representation) + "\",\"canonical_payload\":" + record.output_payload + ",\"identity\":" + record.output_identity + "},\"premises\":[" + premises + "],\"disposition\":\"" + json_escape(record.disposition) + "\"}"
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:140
+// Append-only, best effort; unavailable scratch paths never alter compilation.
+pub fn persist_process(process: String) -> {
+    if env.var("JET_ADAPTER_CANONICAL_PASS_PROCESS").ok() != Val(process) -> return
+    path :: env.var_os("JET_ADAPTER_CANONICAL_PASS_PATH") ?? return
+    records :: take()
+    if records.is_empty() -> return
+    rows :: records.iter().map(|entry| -> record_json(entry)).collect().join(",")
+    payload :: "{\"schema\":\"jet.canonical-pass-journal.v1\",\"protocol\":\"" + PROTOCOL + "\",\"process\":\"" + json_escape(process) + "\",\"records\":[" + rows + "]}\n"
+    // GATE #4494: native append/create and write; preserve best-effort error policy.
+    file := OpenOptions.new().create(true).append(true).open(OSPath.from(path)) catch _ -> return
+    _ :: file.write_all(payload.as_bytes()) catch _ -> {}
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:165
+// Structured source-backed snapshot: node kinds and order, not a digest.
+pub fn ast_payload(bundle: ProgramBundle) -> String {
+    modules :: bundle.modules.iter().map(|module| -> {
+        items :: module.items.iter().enumerate().map(|(index, item)| -> "{\"index\":" + index.to_string() + ",\"kind\":\"" + item_kind(item) + "\"}").collect().join(",")
+        "{\"display\":\"" + json_escape(module.display) + "\",\"alias\":\"" + json_escape(module.alias) + "\",\"source_length\":" + module.source.as_bytes().len().to_string() + ",\"items\":[" + items + "]}"
+    }).collect().join(",")
+    "{\"representation\":\"ast\",\"entry\":" + bundle.entry.to_string() + ",\"modules\":[" + modules + "]}"
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:198
+pub fn ast_identity(bundle: ProgramBundle) -> String {
+    modules :: bundle.modules.iter().map(|module| -> "{\"display\":\"" + json_escape(module.display) + "\",\"items\":" + module.items.len().to_string() + "}").collect().join(",")
+    "{\"representation\":\"ast\",\"entry\":" + bundle.entry.to_string() + ",\"modules\":[" + modules + "]}"
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:217
+fn item_kind(item: Item) -> String {
+    match item {
+        Item.Func(_) => "Func"
+        Item.Struct(_) => "Struct"
+        Item.Enum(_) => "Enum"
+        Item.Distinct(_) => "Distinct"
+        Item.TypeAlias(_) => "TypeAlias"
+        Item.UnitFamily(_) => "UnitFamily"
+        Item.Trait(_) => "Trait"
+        Item.Tag(_) => "Tag"
+        Item.EffectDecl(_) => "EffectDecl"
+        Item.Impl(_) => "Impl"
+        Item.Const(_) => "Const"
+        Item.Test(_) => "Test"
+        Item.ExternRust(_) => "ExternRust"
+        Item.Module(_) => "Module"
+        Item.CModule(_) => "CModule"
+        Item.CodeModule(_) => "CodeModule"
+        Item.ErrorConv(_) => "ErrorConv"
+        Item.Migration(_) => "Migration"
+        Item.ProtocolDecl(_) => "ProtocolDecl"
+        Item.UserDerive(_) => "UserDerive"
+        Item.TemplateLoop(_) => "TemplateLoop"
+        Item.GenericModule(_) => "GenericModule"
+        Item.ModuleAlias(_) => "ModuleAlias"
+        Item.MarkerDecl(_) => "MarkerDecl"
+        Item.FactDecl(_) => "FactDecl"
+    }
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:246
+pub fn ast_items_payload(items: [Item]) -> String {
+    rows :: items.iter().enumerate().map(|(index, item)| -> "{\"index\":" + index.to_string() + ",\"kind\":\"" + item_kind(item) + "\"}").collect().join(",")
+    "{\"representation\":\"ast\",\"items\":[" + rows + "]}"
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:261
+pub fn ast_items_identity(items: [Item]) -> String { "{\"representation\":\"ast\",\"item_count\":" + items.len().to_string() + "}" }
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:268
+pub fn debug_payload<T: Debug>(representation: String, operation_id: String, value: T) -> String {
+    "{\"representation\":\"" + json_escape(representation) + "\",\"operation_id\":\"" + json_escape(operation_id) + "\",\"debug\":\"" + json_escape(value.debug()) + "\"}"
+}
+// Rust: crates/jet-foundation/src/CanonicalPass.rs:281
+pub fn debug_identity<T: Debug>(representation: String, operation_id: String, value: T) -> String {
+    "{\"representation\":\"" + json_escape(representation) + "\",\"operation_id\":\"" + json_escape(operation_id) + "\",\"identity\":\"" + json_escape(value.debug()) + "\"}"
+}

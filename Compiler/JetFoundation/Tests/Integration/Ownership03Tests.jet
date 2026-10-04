@@ -1,0 +1,524 @@
+use jet.compile
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use std.process.Command
+use std.fs
+use jet.Interpreter.RunOutcome
+use jet.Interpreter.dev_iteration
+use jet.Loader.load_entry
+use jet.Sema.check_bundle
+use jet.Sema.CompileMode
+use jet.Diagnostics.Severity
+use jet_jit.CraneliftBackend
+use jet_jit.cranelift_host_supported
+use jet_jit as jit
+
+// Rust: tests/ownership.rs:3609
+#Test("write_window_cannot_be_stored") {
+    src :: "\nstruct Holder {{ window: ViewMut<Int> }}\nfn run() {{\n    xs := [1, 2, 3]\n    edit :: &xs[0..1]\n    holder :: Holder{{ window: edit }}\n    print(holder.window.len())\n}}\n"
+    diags :: compile(src).expect_err("write view storage must be rejected")
+    assert(diags.iter().any(|d| -> d.code == "E2305"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:3624
+#Test("write_window_cannot_cross_task_boundary") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    edit :: &xs[0..1]\n    handle :: task edit.len()\n    print(handle.join() ?? 0)\n}}\n"
+    diags :: compile(src).expect_err("write view task capture must be rejected")
+    assert(diags.iter().any(|d| -> d.code == "E1102"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:3638
+#Test("write_window_cannot_cross_channel_boundary") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    edit :: &xs[0..1]\n    (sender, channel) :: channel<ViewMut<Int>>()\n    sender.send(edit)\n}}\n"
+    diags :: compile(src).expect_err("write view channel send must be rejected")
+    assert(diags.iter().any(|d| -> d.code == "E1102"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:3652
+// D-MEM1 S9 / #649: resizing storage is exclusive with a live view.
+// Rust: tests/ownership.rs:3654
+#Test("resizing_list_owner_with_live_view_is_error") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    window :: xs[0..1]\n    &xs.push(4)\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("resizing a viewed owner must fail")
+    assert(diags.iter().any(|d| -> d.code == "E0212"))
+}
+// Rust: tests/ownership.rs:3668
+#Test("named_range_view_blocks_owner_resize_and_replacement") {
+    for action in ["xs.push(4)", "xs = [4, 5, 6]"] {
+        src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    band :: 0..<2\n    window :: xs[band]\n    {action}\n    print(window.len())\n}}\n"
+        diags :: compile(&src).expect_err("changing a viewed owner must fail")
+        assert(diags.iter().any(|d| -> d.code == "E0212"), "expected E0212 for `{action}`, got {diags:?}")
+    }
+}
+// Rust: tests/ownership.rs:3692
+#Test("replacing_list_owner_with_live_view_is_error") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    window :: xs[0..1]\n    xs = [4, 5, 6]\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("replacing a viewed owner must fail")
+    assert(diags.iter().any(|d| -> d.code == "E0212"))
+}
+// Rust: tests/ownership.rs:3708
+#Test("owner_can_resize_after_view_scope_ends") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    if true {{\n        window :: xs[0..1]\n        print(window.len())\n    }}\n    &xs.push(4)\n    print(xs.len())\n}}\n"
+    _ :: compile(src).expect("expired view must not keep owner borrowed")
+}
+// Rust: tests/ownership.rs:3726
+#Test("field_view_blocks_owner_resize") {
+    src :: "\nstruct Bucket {{\n    values: [Int]\n}}\n\nfn run() {{\n    bucket := Bucket{{ values: [1, 2, 3] }}\n    window :: bucket.values[0..1]\n    &bucket.values.push(4)\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("field owner mutation must conflict with view")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "got {diags:?}")
+}
+// Rust: tests/ownership.rs:3744
+#Test("field_assignment_conflicts_with_live_view") {
+    src :: "\nstruct Bucket {{\n    values: [Int]\n}}\n\nfn run() {{\n    bucket := Bucket{{ values: [1, 2, 3] }}\n    window :: bucket.values[0..1]\n    bucket.values = [4, 5]\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("field assignment must conflict with view")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "got {diags:?}")
+}
+// Rust: tests/ownership.rs:3762
+#Test("write_argument_conflicts_with_live_view") {
+    src :: "\nfn edit(xs: &[Int]) {{\n    print(xs.len())\n}}\n\nfn run() {{\n    xs := [1, 2, 3]\n    window :: xs[0..1]\n    edit(&xs)\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("write argument must conflict with view")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "got {diags:?}")
+}
+// Rust: tests/ownership.rs:3780
+#Test("method_write_argument_conflicts_with_live_view_once") {
+    src :: "\nstruct Editor {{ id: Int }}\n\nimpl Editor {{\n    fn touch(self, values: &[Int]) {{\n        &values.push(9)\n    }}\n}}\n\nfn run() {{\n    editor :: Editor{{ id: 0 }}\n    values := [1, 2, 3]\n    window :: values[0..2]\n    editor.touch(&values)\n    print(window[0])\n}}\n"
+    diags :: compile(src).expect_err("live view must block method write argument")
+    assert_eq(diags.iter().filter(|diag| -> diag.code == "E0212").count(), 1, "method write argument must report E0212 once: {diags:?}")
+}
+// Rust: tests/ownership.rs:3807
+#Test("inline_module_write_argument_conflicts_with_live_view_once") {
+    src :: "\nmodule edit {{\n    pub fn touch(values: &[Int]) {{\n        &values.push(9)\n    }}\n}}\n\nfn run() {{\n    values := [1, 2, 3]\n    window :: values[0..2]\n    edit.touch(&values)\n    print(window[0])\n}}\n"
+    diags :: compile(src).expect_err("live view must block inline-module write argument")
+    assert_eq(diags.iter().filter(|diag| -> diag.code == "E0212").count(), 1, "inline-module write argument must report E0212 once: {diags:?}")
+}
+// Rust: tests/ownership.rs:3831
+#Test("method_write_argument_allows_nonoverlapping_owner") {
+    src :: "\nstruct Editor {{ id: Int }}\n\nimpl Editor {{\n    fn touch(self, values: &[Int]) {{\n        &values.push(9)\n    }}\n}}\n\nfn run() {{\n    editor :: Editor{{ id: 0 }}\n    viewed := [1, 2, 3]\n    changed := [4, 5, 6]\n    window :: viewed[0..2]\n    editor.touch(&changed)\n    print(window[0])\n}}\n"
+    _ :: compile(src).expect("write to nonoverlapping owner must stay valid")
+}
+// Rust: tests/ownership.rs:3854
+#Test("returned_parameter_view_uses_stable_parameter_provenance") {
+    src :: "\nfn first(xs: [Int], other: [Int]) -[]> View<Int> {{\n    return xs[0..1]\n}}\n\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    first_view :: first(left, right)\n    print(first_view[0])\n}}\n"
+    _ :: compile(src).expect("parameter 0 provenance must make the returned view safe")
+}
+// Rust: tests/ownership.rs:3871
+#Test("returned_view_composes_through_wrapper_call") {
+    src :: "\nfn first(left: [Int], right: [Int]) -[]> View<Int> {{\n    return left[0..1]\n}}\n\nfn wrapper(left: [Int], right: [Int]) -[]> View<Int> {{\n    return first(left, right)\n}}\n\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    result :: wrapper(left, right)\n    print(result[0])\n}}\n"
+    _ :: compile(src).expect("callee parameter 0 must map to wrapper parameter 0")
+}
+// Rust: tests/ownership.rs:3894
+#Test("zero_copy_parser_returns_token_and_remainder_views") {
+    src :: "\nstruct Token {{\n    text: View<str>,\n    rest: View<str>\n}}\n\nfn scan(source: String) -[]> Token {{\n    text :: source.before(\":\")\n    rest :: source.after(\":\")\n    return Token{{ text: text, rest: rest }}\n}}\n\nfn parse(source: String) -[]> Token {{\n    return scan(source)\n}}\n\nfn run() {{\n    source := \"name:value\"\n    token :: parse(source)\n    print(token.text)\n    print(token.rest)\n    expected :: \"name\"\n    print(\"wrapped: {{token.text}}\")\n    print(\"wrapped: {{expected}}\")\n}}\n"
+    out :: compile(src).expect("a parser token and remainder may borrow one caller-owned source")
+    assert(out.rust.contains("pub struct __jet_Token<'__jet___view>") && out.rust.contains("pub __jet_text: &'__jet___view str") && out.rust.contains("pub __jet_rest: &'__jet___view str") && out.rust.contains("-> JetOutcome<__jet_Token<'__jet___view>, JetErr>"), "both parser views must share the hidden source lifetime: {out.rust}")
+}
+// Rust: tests/ownership.rs:3936
+#Test("zero_copy_parser_rejects_locally_owned_source") {
+    src :: "\nstruct Token {{\n    text: View<str>,\n    rest: View<str>\n}}\n\nfn parse_owned() -[]> Token {{\n    source := \"name:value\"\n    text :: source.before(\":\")\n    rest :: source.after(\":\")\n    return Token{{ text: text, rest: rest }}\n}}\n\nfn run() {{\n    print(parse_owned().text)\n}}\n"
+    diags :: compile(src).expect_err("parser-owned storage cannot back returned token views")
+    assert(diags.iter().any(|diag| -> diag.code == "E2307"), "expected string-view owner error: {diags:?}")
+}
+// Rust: tests/ownership.rs:3965
+#Test("zero_copy_parser_blocks_source_replacement_while_token_is_live") {
+    for (projection, field) in [("parse_text", "text"), ("parse_rest", "rest")] {
+        src :: "\nstruct Token {{\n    text: View<str>,\n    rest: View<str>\n}}\n\nfn scan(source: String) -[]> Token {{\n    text :: source.before(\":\")\n    rest :: source.after(\":\")\n    return Token{{ text: text, rest: rest }}\n}}\n\nfn parse(source: String) -[]> Token {{\n    return scan(source)\n}}\n\nfn parse_text(source: String) -[]> View<str> {{\n    return parse(source).text\n}}\n\nfn parse_rest(source: String) -[]> View<str> {{\n    return parse(source).rest\n}}\n\nfn run() {{\n    source := \"name:value\"\n    selected :: $PROJECTION(source)\n    source = \"other:data\"\n    print(selected)\n}}\n".replace("$PROJECTION", projection)
+        diags :: compile(&src).expect_err("live parser views must keep caller storage stable")
+        assert(diags.iter().any(|diag| -> diag.code == "E0212"), "expected owner-invalidation error for token.{field}: {diags:?}")
+    }
+}
+// Rust: tests/ownership.rs:4011
+#Test("zero_copy_parser_example_covers_production_pipeline") {
+    // GATE #4494: native process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", "Examples/features/memory/returned_views.jet"]).current_dir(env("CARGO_MANIFEST_DIR")).output().expect("run the returned-views example through the production CLI")
+    assert(output.status.success(), "native parser example failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).expect("example stdout must be UTF-8"), "7\nexample.com\nname\nwrapped: name\nvalue\na longer value\nleft\nright\nmessage\nhello\n")
+}
+// Rust: tests/ownership.rs:4029
+#Test("returned_string_view_uses_parameter_provenance") {
+    src :: "\nfn domain(email: String) -[]> View<str> {{\n    result :: email.after(\"@\")\n    return result\n}}\nfn run() {{ print(domain(\"user@example.com\")) }}\n"
+    out :: compile(src).expect("parameter-rooted string view return must compile")
+    assert(out.rust.contains("fn __jet_domain<'__jet___view>(__jet_email: &'__jet___view String) -> JetOutcome<&'__jet___view str, JetErr>"), "generated lifetime must tie the string view to parameter 0: {out.rust}")
+    assert(out.rust.contains("return Ok(__jet_result);"), "a String-backed view return must lift its payload into JetOutcome: {out.rust}")
+}
+// Rust: tests/ownership.rs:4053
+#Test("returned_string_view_cannot_outlive_local_owner") {
+    src :: "\nfn bad() -[]> View<str> {{\n    email := \"user@example.com\"\n    result :: email.after(\"@\")\n    return result\n}}\nfn run() {{ print(bad()) }}\n"
+    diags :: compile(src).expect_err("locally-owned string view return must fail")
+    assert(diags.iter().any(|d| -> d.code == "E2307"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:4067
+#Test("returned_aggregate_stabilizes_string_view_field_provenance") {
+    src :: "\nstruct Domain {{ value: View<str> }}\n\nfn domain(email: String) -[]> Domain {{\n    result :: email.after(\"@\")\n    return Domain{{ value: result }}\n}}\nfn run() {{ print(domain(\"user@example.com\").value) }}\n"
+    out :: compile(src).expect("parameter-rooted string view field must compile")
+    assert(out.rust.contains("pub struct __jet_Domain<'__jet___view>"), "{out.rust}")
+    assert(out.rust.contains("pub __jet_value: &'__jet___view str"), "{out.rust}")
+}
+// Rust: tests/ownership.rs:4091
+#Test("returned_view_constant_aggregate_keeps_borrowed_field_lowering") {
+    src :: "\nstruct Token {{\n    text: View<str>\n    rest: View<str>\n}}\n\nfn scan(source: String) -[]> Token {{\n    text :: source.before(\":\")\n    rest :: source.after(\":\")\n    return Token{{ text: text, rest: rest }}\n}}\n\nfn run() {{\n    source :: \"name:value\"\n    token :: scan(source)\n    print(token.text)\n    print(token.rest)\n}}\n"
+    out :: compile(src).expect("constant returned-view aggregate must compile")
+    assert(out.rust.contains("fn __jet_scan<'__jet___view>(__jet_source: &'__jet___view String) -> JetOutcome<__jet_Token<'__jet___view>, JetErr>"), "view-bearing constants must lower through the borrow-preserving call path:\n{out.rust}")
+    assert(!out.rust.contains("__jet_text: \"name\".to_string()") && !out.rust.contains("__jet_rest: \"value\".to_string()"), "view fields must not be emitted as owned Strings:\n{out.rust}")
+}
+// Rust: tests/ownership.rs:4127
+#Test("returned_string_view_field_cannot_outlive_local_owner") {
+    src :: "\nstruct Domain {{ value: View<str> }}\n\nfn bad() -[]> Domain {{\n    email := \"user@example.com\"\n    result :: email.after(\"@\")\n    return Domain{{ value: result }}\n}}\nfn run() {{ print(bad().value) }}\n"
+    diags :: compile(src).expect_err("locally-owned string view field must fail")
+    assert(diags.iter().any(|d| -> d.code == "E2307"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:4143
+#Test("returned_string_view_rejects_temporary_call_owner_before_codegen") {
+    src :: "\nfn domain(email: String) -[]> View<str> {{\n    result :: email.after(\"@\")\n    return result\n}}\nfn run() {{\n    result :: domain(\"user@example.com\")\n    print(result)\n}}\n"
+    diags :: compile(src).expect_err("temporary owner must be rejected in sema")
+    assert(diags.iter().any(|d| -> d.code == "E2307"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:4159
+#Test("returned_view_summary_is_independent_of_declaration_order") {
+    src :: "\nfn wrapper(left: [Int], right: [Int]) -[]> View<Int> {{\n    return first(left, right)\n}}\n\nfn first(left: [Int], right: [Int]) -[]> View<Int> {{\n    return left[0..1]\n}}\n\nfn run() {{ print(0) }}\n"
+    _ :: compile(src).expect("forward callable provenance must stabilize before validation")
+}
+// Rust: tests/ownership.rs:4175
+#Test("mutually_recursive_view_summaries_stabilize") {
+    src :: "\nfn first(values: [Int], recurse: Bool) -[]> View<Int> {{\n    if recurse {{\n        return second(values, false)\n    }}\n    return values[0..1]\n}}\n\nfn second(values: [Int], recurse: Bool) -[]> View<Int> {{\n    if recurse {{\n        return first(values, false)\n    }}\n    return values[0..1]\n}}\n\nfn run() {{ print(0) }}\n"
+    _ :: compile(src).expect("mutually recursive parameter-0 summaries must converge")
+}
+// Rust: tests/ownership.rs:4197
+#Test("returned_view_composes_through_inherent_method") {
+    src :: "\nstruct Selector {{ marker: Int }}\n\nimpl Selector {{\n    fn first(self, left: [Int], right: [Int]) -[]> View<Int> {{\n        return left[0..1]\n    }}\n}}\n\nfn wrapper(selector: Selector, left: [Int], right: [Int]) -[]> View<Int> {{\n    return selector.first(left, right)\n}}\n\nfn run() {{\n    selector :: Selector{{ marker: 0 }}\n    left := [7, 8]\n    right := [9, 10]\n    result :: wrapper(selector, left, right)\n    print(result[0])\n}}\n"
+    _ :: compile(src).expect("method parameter 0 must compose onto wrapper parameter 1")
+}
+// Rust: tests/ownership.rs:4223
+#Test("trait_view_summary_is_independent_of_impl_order") {
+    src :: "\ntrait Select {{\n    fn select(self, left: [Int], right: [Int]) -> View<Int>\n}}\n\nstruct First {{ marker: Int }}\n\nfn wrapper(selector: First, left: [Int], right: [Int]) -[]> View<Int> {{\n    return selector.select(left, right)\n}}\n\nimpl First.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> View<Int> {{\n        return left[0..1]\n    }}\n}}\n\nfn run() {{ print(0) }}\n"
+    _ :: compile(src).expect("trait method provenance must stabilize before wrapper validation")
+}
+// Rust: tests/ownership.rs:4247
+#Test("trait_view_contract_unions_compatible_implementation_sources") {
+    src :: "\ntrait Select {{\n    fn select(self, left: [Int], right: [Int]) -> View<Int>\n}}\n\nstruct First {{}}\nimpl First.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> View<Int> {{\n        return left[0..1]\n    }}\n}}\n\nstruct Last {{}}\nimpl Last.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> View<Int> {{\n        return right[0..1]\n    }}\n}}\n\nfn run() {{ print(0) }}\n"
+    _ :: compile(src).expect("trait dispatch may choose any compatible implementation owner")
+}
+// Rust: tests/ownership.rs:4273
+#Test("aggregate_trait_view_contract_stabilizes_through_wrapper_in_either_impl_order") {
+    template :: "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\ntrait Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> Pair\n}}\n\nfn wrapper(selector: Select, left: [Int], right: [Int]) -[]> Pair {{\n    return selector.select(left, right)\n}}\n\n$IMPLS\n\nfn run() {{ print(0) }}\n"
+    first :: "\nstruct First {{}}\nimpl First.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> Pair {{\n        left_view :: left[0..1]\n        right_view :: right[0..1]\n        return Pair{{ left: left_view, right: right_view }}\n    }}\n}}\n"
+    last :: "\nstruct Last {{}}\nimpl Last.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> Pair {{\n        left_view :: left[0..1]\n        right_view :: right[0..1]\n        return Pair{{ left: left_view, right: right_view }}\n    }}\n}}\n"
+    for implementations in ["{first}{last}", "{last}{first}"] {
+        src :: template.replace("$IMPLS", &implementations)
+        _ :: compile(&src).expect("aggregate trait contract must stabilize before wrapper")
+    }
+}
+// Rust: tests/ownership.rs:4316
+#Test("aggregate_trait_view_contract_unions_sources_in_either_impl_order") {
+    template :: "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\ntrait Select {{\n    fn select(self, left: [Int], right: [Int]) -> Pair\n}}\n\n$IMPLS\n\nfn run() {{ print(0) }}\n"
+    first :: "\nstruct First {{}}\nimpl First.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> Pair {{\n        left_view :: left[0..1]\n        right_view :: right[0..1]\n        return Pair{{ left: left_view, right: right_view }}\n    }}\n}}\n"
+    last :: "\nstruct Last {{}}\nimpl Last.Select {{\n    fn select(self, left: [Int], right: [Int]) -[]> Pair {{\n        left_view :: left[0..1]\n        right_view :: left[0..1]\n        return Pair{{ left: left_view, right: right_view }}\n    }}\n}}\n"
+    for implementations in ["{first}{last}", "{last}{first}"] {
+        src :: template.replace("$IMPLS", &implementations)
+        _ :: compile(&src).expect("aggregate trait implementations union compatible slot sources")
+    }
+}
+// Rust: tests/ownership.rs:4355
+#Test("returned_view_provenance_transfers_on_binding_move") {
+    src :: "\nfn first(values: [Int]) -[]> View<Int> {{\n    initial :: values[0..1]\n    moved :: initial\n    return moved\n}}\n\nfn run() {{\n    values := [7, 8]\n    result :: first(values)\n    print(result[0])\n}}\n"
+    _ :: compile(src).expect("moving a view binding must transfer its owner provenance")
+}
+// Rust: tests/ownership.rs:4373
+#Test("returned_aggregate_stabilizes_view_field_provenance") {
+    src :: "\nstruct Window {{ values: View<Int> }}\n\nfn window(values: [Int]) -[]> Window {{\n    selected :: values[0..1]\n    return Window{{ values: selected }}\n}}\n\nfn run() {{\n    values := [7, 8]\n    result :: window(values)\n    print(result.values[0])\n}}\n"
+    out :: compile(src).expect("returned aggregate must keep its view tied to parameter 0")
+    assert(out.rust.contains("pub struct __jet_Window<'__jet___view>") && out.rust.contains("pub __jet_values: &'__jet___view [i64]") && out.rust.contains("-> JetOutcome<__jet_Window<'__jet___view>, JetErr>"), "aggregate and return must share the hidden owner lifetime: {out.rust}")
+}
+// Rust: tests/ownership.rs:4399
+#Test("nested_returned_aggregate_stabilizes_each_view_output_slot") {
+    src :: "\nstruct Inner {{ values: View<Int> }}\nstruct Outer {{ inner: Inner }}\n\nfn outer(values: [Int]) -[]> Outer {{\n    selected :: values[0..1]\n    return Outer{{ inner: Inner{{ values: selected }} }}\n}}\n\nfn run() {{\n    values := [7, 8]\n    result :: outer(values)\n    print(result.inner.values[0])\n}}\n"
+    out :: compile(src).expect("nested returned aggregate must carry transitive view provenance")
+    assert(out.rust.contains("pub struct __jet_Inner<'__jet___view>"), "{out.rust}")
+    assert(out.rust.contains("pub struct __jet_Outer<'__jet___view>"), "{out.rust}")
+    assert(out.rust.contains("pub __jet_inner: __jet_Inner<'__jet___view>"), "{out.rust}")
+    assert(out.rust.contains("-> JetOutcome<__jet_Outer<'__jet___view>, JetErr>"), "{out.rust}")
+}
+// Rust: tests/ownership.rs:4440
+// View lifetimes belong to the named leaf, never its wrapper. D-FAIL-CARRIER1=A /
+// D-FAIL-MODEL1=A use JetOutcome for both optional and error surface forms;
+// negative wrapper guards detect accidental lifetime parameterization.
+// Rust: tests/ownership.rs:4455
+#Test("wrapper_returned_view_aggregates_render_lifetimes_on_named_leaves") {
+    src :: "\nstruct Window {{ values: View<Int> }}\nstruct Holder {{ maybe: Window? }}\nstruct GenericHolder<T> {{ value: T, maybe: Window? }}\n\nfn maybe(values: [Int]) -[]> (Window?) {{\n    selected :: values[0..1]\n    return Val(Window{{ values: selected }})\n}}\n\nfn result(values: [Int]) -[]> Window String! {{\n    selected :: values[0..1]\n    return Ok(Window{{ values: selected }})\n}}\n\nfn tuple(values: [Int]) -[]> (window: Window, count: Int) {{\n    selected :: values[0..1]\n    return (window: Window{{ values: selected }}, count: 1)\n}}\n\nfn run() {{ print(0) }}\n"
+    out :: compile(src).expect("wrapper returns must preserve view provenance")
+    assert(out.rust.contains("JetOutcome<__jet_Window<'__jet___view>, JetAbsent>"), "{out.rust}")
+    assert(out.rust.contains("JetOutcome<__jet_Window<'__jet___view>, String>"), "{out.rust}")
+    assert(out.rust.contains("pub __jet_window: __jet_Window<'__jet___view>"), "{out.rust}")
+    assert(out.rust.contains("pub struct __jet_GenericHolder<'__jet___view, T"), "{out.rust}")
+    assert(out.rust.contains("pub __jet_maybe: JetOutcome<__jet_Window<'__jet___view>, JetAbsent>"), "{out.rust}")
+    assert(!out.rust.contains("JetOutcome<'__jet___view"), "{out.rust}")
+    assert(!out.rust.contains("Option<'__jet___view"), "{out.rust}")
+    assert(!out.rust.contains("Result<'__jet___view"), "{out.rust}")
+}
+// Rust: tests/ownership.rs:4519
+#Test("enums_and_mutable_aggregates_carry_view_provenance") {
+    src :: "\nenum Selection {{\n    One(View<Int>)\n    Pair(PairViews)\n}}\n\nstruct PairViews {{ left: View<Int>, right: View<Int> }}\nstruct Edit {{ values: ViewMut<Int> }}\n\nfn select(left: [Int], right: [Int], pair: Bool) -[]> Selection {{\n    if pair {{\n        left_view :: left[0..1]\n        right_view :: right[0..1]\n        return Selection.Pair(PairViews{{ left: left_view, right: right_view }})\n    }}\n    selected :: right[0..1]\n    return Selection.One(selected)\n}}\n\nfn first(selection: Selection) -[]> View<Int> {{\n    if selection == {{\n        .One(values) -> {{ return values }}\n        .Pair(values) -> {{ return values.left }}\n    }}\n}}\n\nfn edit(values: &[Int]) -[]> Edit {{\n    selected :: &values[0..1]\n    return Edit{{ values: selected }}\n}}\n\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    chosen :: select(left, right, true)\n    print(first(chosen)[0])\n    target := [1, 2]\n    borrowed :: edit(&target)\n    borrowed.values[0] = 3\n    print(borrowed.values[0])\n}}\n"
+    out :: compile(src).expect("enum and mutable aggregate views must reach codegen")
+    assert(out.rust.contains("pub enum __jet_Selection<'__jet___view>") && out.rust.contains("__jet_One(&'__jet___view [i64])") && out.rust.contains("__jet_Pair(__jet_PairViews<'__jet___view>)") && out.rust.contains("pub __jet_left: &'__jet___view [i64],") && out.rust.contains("pub __jet_right: &'__jet___view [i64],"), "{out.rust}")
+    assert(out.rust.contains("pub struct __jet_Edit<'__jet___view>") && out.rust.contains("pub __jet_values: &'__jet___view mut [i64]"), "{out.rust}")
+    if common.have_rustc() {
+        (code, stdout, stderr) :: common.build_and_run("jet_view_enum", "view_enum_aggregate", src)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, "7\n3\n")
+    }
+    root :: common.unique_tmp("jet_view_enum_quick_run")
+    _ :: fs.create_dir_all(&root).unwrap()
+    path :: root.join("main.jet")
+    _ :: fs.write(&path, src).unwrap()
+    // GATE #4494: native process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", path.to_str().unwrap()]).current_dir(&root).output().expect("run mutable aggregate views through the default tier")
+    assert(output.status.success(), "default mutable aggregate run failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).unwrap(), "7\n3\n")
+}
+// Rust: tests/ownership.rs:4607
+#Test("mutable_view_aggregates_are_not_cloneable") {
+    src :: "\nstruct Edit {{ values: ViewMut<Int> }}\n\nfn edit(values: &[Int]) -[]> Edit {{\n    selected :: &values[0..1]\n    return Edit{{ values: selected }}\n}}\n\nfn run() {{\n    target := [1, 2]\n    borrowed :: edit(&target)\n    duplicate :: ~borrowed\n    print(duplicate.values[0])\n}}\n"
+    diags :: compile(src).expect_err("copying an exclusive view would duplicate it")
+    assert(diags.iter().any(|diag| -> diag.code == "E0211"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:4628
+#Test("disjoint_mutable_views_can_travel_in_a_list_and_write_through") {
+    src :: "\nfn edits(values: &[Int]) -[]> [ViewMut<Int>] {{\n    return [&values[0..1], &values[2..3]]\n}}\n\nfn run() {{\n    values := [7, 8, 9, 10]\n    selected :: edits(&values)\n    selected[0][0] = 11\n    selected[1][0] = 12\n    print(selected[0][0])\n    print(selected[1][0])\n}}\n"
+    out :: compile(src).expect("disjoint mutable view lists must pass sema")
+    assert(out.rust.contains("jet_views_mut_new"), "{out.rust}")
+    assert(out.rust.contains("jet_index_vec_mut"), "{out.rust}")
+    if common.have_rustc() {
+        (code, stdout, stderr) :: common.build_and_run("jet_view_mut_list", "view_mut_list", src)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, "11\n12\n")
+    }
+    root :: common.unique_tmp("jet_view_mut_list_quick_run")
+    _ :: fs.create_dir_all(&root).unwrap()
+    path :: root.join("main.jet")
+    _ :: fs.write(&path, src).unwrap()
+    // GATE #4494: native process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", path.to_str().unwrap()]).current_dir(&root).output().expect("run mutable view lists through the default tier")
+    assert(output.status.success(), "default mutable view list run failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).unwrap(), "11\n12\n")
+}
+// Rust: tests/ownership.rs:4671
+#Test("mutable_view_bounds_fail_at_construction_in_every_tier") {
+    src :: "\nfn run() {{\n    values := [1]\n    outside :: [&values[0..0], &values[2..2]]\n}}\n"
+    // D-FAIL-BREACH1=A: the shared stop boundary retains Jet source locations.
+    stop :: "Stop [E3001]: `panic: can't view 1 items from 2 to 2 (inclusive)`"
+    _ :: compile(src).expect("dynamic view bounds must reach runtime validation")
+    if common.have_rustc() {
+        (code, _stdout, stderr) :: common.build_and_run("jet_view_mut_bounds_aot", "view_mut_bounds_aot", src)
+        assert_ne(code, 0, "AOT accepted an invalid mutable view")
+        assert(stderr.contains(stop), "AOT reported the wrong runtime failure: {stderr}")
+    }
+    root :: common.unique_tmp("jet_view_mut_bounds_tiers")
+    _ :: fs.create_dir_all(&root).unwrap()
+    path :: root.join("main.jet")
+    _ :: fs.write(&path, src).unwrap()
+    bundle := load_entry(path.to_str().unwrap()).unwrap()
+    errors :: check_bundle(&bundle, CompileMode.Run).into_iter().filter(|diag| -> diag.severity == Severity.Error).collect()
+    assert(errors.is_empty(), "{errors:?}")
+    jit_report: String? := None
+    if cranelift_host_supported() {
+        assert(common.cranelift_resident_safe(&bundle), "{common.cranelift_resident_safe_detail(&bundle)}")
+        policy :: common.development_policy()
+        _ :: common.compile_cranelift_bundle(&bundle, &policy).expect("mutable view bounds must lower to JIT")
+        backend := CraneliftBackend.new()
+        if common.run_cranelift_bundle(&backend, &bundle, false, &policy) == {
+            .Ran{stderr, exit_code, ..} -> {
+                assert_eq(exit_code, 70, "resident JIT exit drift: {stderr}")
+                assert(stderr.starts_with(stop), "resident JIT reported the wrong runtime failure: {stderr}")
+                jit_report = Some(stderr)
+            }
+            .Problems(diags) -> { panic("resident JIT returned diagnostics instead of running: {diags:?}") }
+        }
+    }
+    if dev_iteration(path.to_str().unwrap(), false, true) == {
+        .Ran{stderr, exit_code, ..} -> {
+            assert_eq(exit_code, 70, "forced interpreter exit drift: {stderr}")
+            assert(stderr.starts_with(stop), "forced interpreter reported the wrong runtime failure: {stderr}")
+            assert(stderr.contains("main.jet:4 in run"), "forced interpreter dropped the Jet source location: {stderr}")
+            if jit_report == .Some(jit) {
+                assert_eq(jit, stderr, "the resident JIT and the interpreter must report one failure")
+            }
+        }
+        .Problems(diags) -> { panic("forced interpreter returned diagnostics instead of running: {diags:?}") }
+    }
+    // GATE #4494: native process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", path.to_str().unwrap()]).current_dir(&root).output().expect("run invalid mutable view through the default tier")
+    assert(!output.status.success(), "default tier accepted an invalid mutable view")
+}
+// Rust: tests/ownership.rs:4776
+#Test("runtime_disjoint_split_and_indexes_write_through") {
+    src :: "\nfn run() {{\n    split_values := [1, 2, 3, 4]\n    parts :: &split_values.split_write(2) ?? panic(\"split failed\")\n    parts.left[0] = 10\n    parts.right[0] = 30\n    print(split_values)\n\n    indexed_values := [5, 6, 7, 8]\n    edits :: &indexed_values.get_disjoint_write([0, 3]) ?? panic(\"index proof failed\")\n    loop edit in edits {{\n        edit[0] = edit[0] + 45\n    }}\n    print(indexed_values)\n}}\n"
+    out :: compile(src).expect("checked runtime disjoint views must compile")
+    assert(out.rust.contains("jet_split_write"), "{out.rust}")
+    assert(out.rust.contains("jet_get_disjoint_write"), "{out.rust}")
+    if common.have_rustc() {
+        (code, stdout, stderr) :: common.build_and_run("jet_runtime_disjoint", "runtime_disjoint", src)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, "[10, 2, 30, 4]\n[50, 6, 7, 53]\n")
+    }
+}
+// Rust: tests/ownership.rs:4805
+#Test("runtime_disjoint_proof_reports_bounds_and_duplicates_before_mutation") {
+    bounds :: "\nfn run() {{\n    values := [1, 2]\n    result := &values.get_disjoint_write([0, 2])\n    if result == {{\n        .Ok(_) -> panic(\"accepted invalid bounds\")\n        .Err(error) -> print(error)\n    }}\n}}\n"
+    duplicate :: "\nfn run() {{\n    values := [1, 2]\n    result := &values.get_disjoint_write([0, 0])\n    if result == {{\n        .Ok(_) -> panic(\"accepted duplicate index\")\n        .Err(error) -> print(error)\n    }}\n}}\n"
+    for (name, src, message) in [("bounds", bounds, "outside"), ("duplicate", duplicate, "duplicate")] {
+        _ :: compile(src).expect("checked runtime proof failures are typed values")
+        if common.have_rustc() {
+            (code, stdout, stderr) :: common.build_and_run("jet_runtime_disjoint_error", name, src)
+            assert_eq(code, 0, "{stderr}")
+            assert(stdout.contains(message), "{stdout}")
+        }
+    }
+}
+// Rust: tests/ownership.rs:4841
+#Test("runtime_disjoint_views_match_aot_jit_dev_and_interpreter") {
+    src :: "\nfn run() {{\n    values := [1, 2, 3, 4]\n    parts :: &values.split_write(2) ?? panic(\"split failed\")\n    parts.left[0] = 10\n    parts.right[1] = 40\n\n    &values.edit_disjoint([0, 2], (left, right) -> {{\n        left[0] = left[0] + 1\n        right[0] = right[0] + 2\n    }}) ?? panic(\"edit failed\")\n\n    selected :: &values.get_disjoint_write([1, 3]) ?? panic(\"selection failed\")\n    loop edit in selected {{\n        edit[0] = edit[0] + 5\n    }}\n    print(values)\n}}\n"
+    expected :: "[11, 7, 5, 45]\n"
+    root :: common.unique_tmp("jet_runtime_disjoint_tiers")
+    _ :: fs.create_dir_all(&root).unwrap()
+    path :: root.join("main.jet")
+    _ :: fs.write(&path, src).unwrap()
+    if common.have_rustc() {
+        (code, stdout, stderr) :: common.build_and_run("jet_runtime_disjoint_tiers", "aot", src)
+        assert_eq(code, 0, "AOT failed: {stderr}")
+        assert_eq(stdout, expected, "AOT output drift")
+    }
+    bundle := load_entry(path.to_str().unwrap()).unwrap()
+    errors :: check_bundle(&bundle, CompileMode.Run).into_iter().filter(|diag| -> diag.severity == Severity.Error).collect()
+    assert(errors.is_empty(), "{errors:?}")
+    assert(common.cranelift_resident_safe(&bundle), "{common.cranelift_resident_safe_detail(&bundle)}")
+    _ :: common.compile_cranelift_bundle(&bundle, &common.development_policy()).expect("disjoint views must lower to resident JIT")
+    for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
+        jit.reset_jit_trace_for_test()
+        if dev_iteration(path.to_str().unwrap(), false, force_interpreter) == {
+            .Ran{stdout, stderr, exit_code} -> {
+                assert_eq(exit_code, 0, "{tier}: {stderr}")
+                assert_eq(stderr, "", "{tier} stderr drift")
+                assert_eq(stdout, expected, "{tier} output drift")
+            }
+            .Problems(diags) -> { panic("{tier} failed: {diags:?}") }
+        }
+        if !force_interpreter {
+            assert(jit.jit_executed_for_test(), "resident JIT did not execute")
+            assert(!jit.fallback_invoked_for_test() && !jit.deopt_invoked_for_test(), "resident JIT used an interpreter fallback")
+        }
+    }
+    // GATE #4494: native process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", path.to_str().unwrap()]).current_dir(&root).output().expect("run disjoint views through the default tier")
+    assert(output.status.success(), "default run failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).unwrap(), expected)
+}
+// Rust: tests/ownership.rs:4930
+#Test("runtime_disjoint_views_reject_alias_storage_and_owner_invalidation") {
+    alias :: "\nfn run() {{\n    values := [1, 2]\n    selected :: &values.get_disjoint_write([0, 1]) ?? panic(\"selection failed\")\n    saved := [ViewMut<Int>]{{}}\n    loop edit in selected {{\n        &saved.push(edit)\n    }}\n}}\n"
+    alias_diags :: compile(alias).expect_err("a lending loop must not let an exclusive view escape")
+    assert(alias_diags.iter().any(|diag| -> diag.code == "E0120" || diag.code == "E0212"), "{alias_diags:?}")
+    invalidation :: "\nfn run() {{\n    values := [1, 2]\n    selected :: &values.get_disjoint_write([0, 1]) ?? panic(\"selection failed\")\n    &values.push(3)\n    selected[0][0] = 9\n}}\n"
+    invalidation_diags :: compile(invalidation).expect_err("the owner must stay borrowed while views are live")
+    assert(invalidation_diags.iter().any(|diag| -> diag.code == "E0212" || diag.code == "E0507"), "{invalidation_diags:?}")
+}
+// Rust: tests/ownership.rs:4969
+#Test("lending_disjoint_views_reject_every_retaining_boundary") {
+    cases :: [
+        ("aggregate binding", "\nfn run() {{\n    values := [1, 2]\n    selected :: &values.get_disjoint_write([0, 1]) ?? panic(\"selection failed\")\n    loop edit in selected {{ held :: [edit] }}\n}}\n"),
+        ("assignment", "\nfn run() {{\n    values := [1, 2]\n    selected :: &values.get_disjoint_write([0, 1]) ?? panic(\"selection failed\")\n    held := [ViewMut<Int>]{{}}\n    loop edit in selected {{ held = [edit] }}\n}}\n"),
+        ("named helper", "\nfn retain(view: ViewMut<Int>) {{}}\nfn run() {{\n    values := [1, 2]\n    selected :: values.get_disjoint_write([0, 1]) ?? panic(\"selection failed\")\n    loop edit in selected {{ retain(edit) }}\n}}\n"),
+        ("return", "\nfn leak(values: &[Int]) -[]> ViewMut<Int> {{\n    selected :: &values.get_disjoint_write([0, 1]) ?? panic(\"selection failed\")\n    loop edit in selected {{ return edit }}\n    panic(\"unreachable\")\n}}\nfn run() {{\n    values := [1, 2]\n    leak(&values)\n}}\n")
+    ]
+    for (boundary, src) in cases {
+        diagnostics :: compile(src).expect_err("a lending mutable view must not cross a retaining boundary")
+        assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0212"), "{boundary}: {diagnostics:?}")
+    }
+}
+// Rust: tests/ownership.rs:5031
+#Test("edit_disjoint_callback_views_reject_every_retaining_boundary") {
+    cases :: [
+        ("aggregate binding", "\nfn run() {{\n    values := [1, 2]\n    &values.edit_disjoint([0, 1], (left, right) -> {{\n        held :: [left, right]\n    }})\n}}\n"),
+        ("assignment", "\nfn run() {{\n    values := [1, 2]\n    held := [ViewMut<Int>]{{}}\n    &values.edit_disjoint([0, 1], (left, right) -> {{\n        held = [left, right]\n    }})\n}}\n"),
+        ("named helper", "\nfn retain(view: ViewMut<Int>) {{}}\nfn run() {{\n    values := [1, 2]\n    values.edit_disjoint([0, 1], (left, right) -> {{\n        retain(left)\n    }})\n}}\n"),
+        ("return", "\nfn leak(values: &[Int]) -[]> ViewMut<Int> {{\n    return &values.edit_disjoint([0, 1], (left, right) -> {{\n        return left\n    }}) ?? panic(\"selection failed\")\n}}\nfn run() {{\n    values := [1, 2]\n    leak(&values)\n}}\n")
+    ]
+    for (boundary, src) in cases {
+        diagnostics :: compile(src).expect_err("an edit_disjoint callback view must not cross a retaining boundary")
+        assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0212"), "{boundary}: {diagnostics:?}")
+    }
+}
+// Rust: tests/ownership.rs:5096
+#Test("mutable_view_extraction_transfers_struct_option_and_enum_loans") {
+    src :: "\nstruct Edit {{ values: ViewMut<Int> }}\nenum Choice {{\n    First(ViewMut<Int>)\n    Second(ViewMut<Int>)\n}}\n\nfn edit(values: &[Int]) -[]> Edit {{\n    return Edit{{ values: &values[0..1] }}\n}}\n\nfn maybe(values: &[Int]) -[]> ViewMut<Int>? {{\n    return Val(&values[0..1])\n}}\n\nfn choose(values: &[Int], first: Bool) -[]> Choice {{\n    if first {{ return Choice.First(&values[0..1]) }}\n    return Choice.Second(&values[0..1])\n}}\n\nfn run() {{\n    struct_values := [1, 2]\n    aggregate :: edit(&struct_values)\n    struct_part :: aggregate.values\n    struct_part[0] = 3\n    print(struct_part[0])\n\n    option_values := [4, 5]\n    optional :: maybe(&option_values)\n    if optional == Val(option_part) {{\n        option_part[0] = 6\n        print(option_part[0])\n    }}\n\n    enum_values := [7, 8]\n    selected :: choose(&enum_values, false)\n    if selected == {{\n        .First(enum_part) -> {{\n            enum_part[0] = 9\n            print(enum_part[0])\n        }}\n        .Second(enum_part) -> {{\n            enum_part[0] = 10\n            print(enum_part[0])\n        }}\n    }}\n}}\n"
+    _ :: compile(src).expect("mutable aggregate extraction must transfer the exclusive loan")
+    if common.have_rustc() {
+        (code, stdout, stderr) :: common.build_and_run("jet_view_mut_extract", "view_mut_extract", src)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, "3\n6\n10\n")
+    }
+    root :: common.unique_tmp("jet_view_mut_extract_quick_run")
+    _ :: fs.create_dir_all(&root).unwrap()
+    path :: root.join("main.jet")
+    _ :: fs.write(&path, src).unwrap()
+    // GATE #4494: native process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", path.to_str().unwrap()]).current_dir(&root).output().expect("run mutable aggregate extraction through the default tier")
+    assert(output.status.success(), "default mutable aggregate extraction failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).unwrap(), "3\n6\n10\n")
+}
+// Rust: tests/ownership.rs:5171
+#Test("mutable_view_extraction_retires_the_source_aggregate") {
+    struct_src :: "\nstruct Edit {{ values: ViewMut<Int> }}\n\nfn edit(values: &[Int]) -[]> Edit {{\n    return Edit{{ values: &values[0..1] }}\n}}\n\nfn run() {{\n    values := [1, 2]\n    aggregate :: edit(&values)\n    selected :: aggregate.values\n    print(aggregate.values[0])\n    print(selected[0])\n}}\n"
+    diags :: compile(struct_src).expect_err("extracting an exclusive view must retire its source aggregate")
+    assert(diags.iter().any(|diag| -> diag.code == "E0121"), "{diags:?}")
+    option_src :: "\nfn maybe(values: &[Int]) -[]> ViewMut<Int>? {{\n    return Val(&values[0..1])\n}}\n\nfn run() {{\n    values := [1, 2]\n    optional :: maybe(&values)\n    if optional == Val(selected) {{\n        print(optional)\n        print(selected[0])\n    }}\n}}\n"
+    option_diags :: compile(option_src).expect_err("extracting an exclusive option payload must retire its subject")
+    assert(option_diags.iter().any(|diag| -> diag.code == "E0121"), "{option_diags:?}")
+}
+// Rust: tests/ownership.rs:5211
+#Test("borrowed_mutable_view_enum_requires_take_before_destructuring") {
+    src :: "\nenum Choice {{\n    First(ViewMut<Int>)\n    Second(ViewMut<Int>)\n}}\n\nfn inspect(choice: Choice) {{\n    if choice == {{\n        .First(selected) -> print(selected[0])\n        .Second(selected) -> print(selected[0])\n    }}\n}}\n\nfn run() {{\n    values := [1, 2]\n    choice :: Choice.First(&values[0..1])\n    inspect(choice)\n}}\n"
+    diags :: compile(src).expect_err("a borrowed non-cloneable enum cannot move out its payload")
+    matching :: diags.iter().filter(|diag| -> diag.code == "E0120").collect()
+    assert_eq(matching.len(), 1, "{diags:?}")
+    assert(matching[0].fix.contains("choice: ^Choice"), "{diags:?}")
+    take_src :: src.replace("fn inspect(choice: Choice)", "fn inspect(choice: ^Choice)").replace("inspect(choice)", "inspect(^choice)")
+    _ :: compile(&take_src).expect("taking the enum must permit moving out its exclusive view")
+    if common.have_rustc() {
+        (code, _stdout, stderr) :: common.build_and_run("jet_view_mut_enum_take", "view_mut_enum_take", &take_src)
+        assert_eq(code, 0, "{stderr}")
+    }
+}
+// Rust: tests/ownership.rs:5249
+#Test("mutable_view_list_elements_must_be_disjoint") {
+    src :: "\nfn duplicate(values: &[Int]) -[]> [ViewMut<Int>] {{\n    return [&values[0..1], &values[0..1]]\n}}\n\nfn run() {{ print(0) }}\n"
+    diags :: compile(src).expect_err("coexisting list elements cannot alias one mutable range")
+    assert(diags.iter().any(|diag| -> diag.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:5263
+#Test("enum_pattern_payload_keeps_its_original_owner_live") {
+    src :: "\nenum Selection {{ One(View<Int>) }}\n\nfn select(values: [Int]) -[]> Selection {{\n    selected :: values[0..1]\n    return Selection.One(selected)\n}}\n\nfn run() {{\n    values := [7, 8]\n    selected :: select(values)\n    if selected == {{\n        .One(part) -> {{\n            &values.push(9)\n            print(part[0])\n        }}\n    }}\n}}\n"
+    diags :: compile(src).expect_err("a matched payload must keep the source owner borrowed")
+    assert(diags.iter().any(|diag| -> diag.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:5289
+#Test("recursive_view_summaries_converge_to_every_possible_owner") {
+    src :: "\nfn alpha(left: [Int], right: [Int], choose_left: Bool) -[]> View<Int> {{\n    if choose_left {{\n        selected :: left[0..1]\n        return selected\n    }}\n    return beta(left, right, choose_left)\n}}\n\nfn beta(left: [Int], right: [Int], choose_left: Bool) -[]> View<Int> {{\n    if !choose_left {{\n        selected :: right[0..1]\n        return selected\n    }}\n    return alpha(left, right, choose_left)\n}}\n\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    selected :: alpha(left, right, false)\n    &right.push(11)\n    print(selected[0])\n}}\n"
+    diags :: compile(src).expect_err("recursive summaries must retain the right-owner path")
+    assert(diags.iter().any(|diag| -> diag.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:5321
+#Test("recursive_view_aggregate_graph_terminates_without_ice") {
+    src :: "\nstruct Node {{ next: Node?, values: View<Int> }}\n\nfn node(values: [Int]) -[]> Node {{\n    selected :: values[0..1]\n    return Node{{ next: None, values: selected }}\n}}\n\nfn run() {{ print(0) }}\n"
+    out :: compile(src).expect("recursive view graph must terminate in sema and codegen")
+    assert(out.rust.contains("pub struct __jet_Node<'__jet___view>"), "{out.rust}")
+    assert(out.rust.contains("__jet_Node<'__jet___view>"), "{out.rust}")
+}
+// Rust: tests/ownership.rs:5346
+#Test("returned_aggregate_accepts_distinct_sources_per_output_slot") {
+    src :: "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -[]> Pair {{\n    left_view :: left[0..1]\n    right_view :: right[0..1]\n    return Pair{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    result :: pair(left, right)\n    print(result.left[0])\n    print(result.right[0])\n}}\n"
+    _ :: compile(src).expect("each returned output field may name its own stable owner")
+}
+// Rust: tests/ownership.rs:5368
+#Test("multi_source_returned_aggregate_still_blocks_owner_invalidation") {
+    for (owner, field) in [("left", "left"), ("right", "right")] {
+        src :: "\nstruct Pair {{ left: View<Int>, right: View<Int> }}\n\nfn pair(left: [Int], right: [Int]) -[]> Pair {{\n    left_view :: left[0..1]\n    right_view :: right[0..1]\n    return Pair{{ left: left_view, right: right_view }}\n}}\n\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    result :: pair(left, right)\n    $OWNER.push(11)\n    print(result.$FIELD[0])\n}}\n".replace("$OWNER", owner).replace("$FIELD", field)
+        diags :: compile(&src).expect_err("each returned output slot must keep its own owner live")
+        assert(diags.iter().any(|diag| -> diag.code == "E0212"), "{owner}/{field}: {diags:?}")
+    }
+}

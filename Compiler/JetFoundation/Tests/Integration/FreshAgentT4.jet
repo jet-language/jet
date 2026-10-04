@@ -1,0 +1,48 @@
+use std.fs
+use std.env
+use std.process.[Command, Output, id]
+use std.sync.atomic.[AtomicU64, Ordering]
+// Rust: tests/fresh_agent_t4.rs:6
+// GATE #4494: exact native atomic increment.
+static SCRATCH_SEQUENCE: AtomicU64 = AtomicU64.new(0)
+// Rust: tests/fresh_agent_t4.rs:8
+const VALID_OUTPUT: String = "{{\"count\":2,\"name\":\"Ada\",\"note\":\"line \\\"one\\\"\"}}\n"
+// Rust: tests/fresh_agent_t4.rs:11
+struct MalformedCase { fixture: String, line: USize, reason: String }
+// Rust: tests/fresh_agent_t4.rs:17
+const MALFORMED_CASES: [MalformedCase] = [
+    MalformedCase{fixture: "truncated.tsv", line: 3, reason: "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>"},
+    MalformedCase{fixture: "empty-key.tsv", line: 3, reason: "what=empty TSV key; why=each row needs a named report field; fix=write name, count, or note before the tab"},
+    MalformedCase{fixture: "extra-column.tsv", line: 3, reason: "what=malformed TSV row; why=expected exactly two tab-separated fields; fix=write <key><tab><value>"},
+    MalformedCase{fixture: "unknown-key.tsv", line: 3, reason: "what=unknown TSV key; why=only name, count, and note are valid report fields; fix=use one of the required keys"},
+    MalformedCase{fixture: "duplicate-key.tsv", line: 3, reason: "what=duplicate TSV key; why=each report field must appear once; fix=remove the repeated row"},
+    MalformedCase{fixture: "invalid-count.tsv", line: 2, reason: "what=invalid count value; why=count must be a decimal integer; fix=write a whole-number count"},
+    MalformedCase{fixture: "missing-required-key.tsv", line: 3, reason: "what=missing required TSV key; why=report needs name, count, and note; fix=add the missing row"},
+]
+// Rust: tests/fresh_agent_t4.rs:55
+struct Scratch { path: OSPath }
+impl Scratch {
+    // Rust: tests/fresh_agent_t4.rs:60
+    fn new(tier: String) -> Scratch {
+        sequence :: SCRATCH_SEQUENCE.fetch_add(1, Ordering.Relaxed)
+        path :: env.temp_dir().join("jet-fresh-agent-t4-{id()}-{tier}-{sequence}")
+        fs.create_dir_all(&path).expect("create T4 scratch directory")
+        Scratch{path: ^path}
+    }
+}
+impl Drop for Scratch {
+    // Rust: tests/fresh_agent_t4.rs:72
+    fn drop(&self) -> { _ :: fs.remove_dir_all(&self.path) }
+}
+// Rust: tests/fresh_agent_t4.rs:77
+fn fixture_root() -> OSPath { OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/fresh_agent_t4") }
+// Rust: tests/fresh_agent_t4.rs:81
+fn copy_fixture_project(root: &OSPath, scratch: &OSPath) -> {
+    fs.copy(root.join("package.jet"), scratch.join("package.jet")).expect("copy T4 package manifest")
+    fs.copy(root.join("run.jet"), scratch.join("run.jet")).expect("copy T4 Jet program")
+}
+// Rust: tests/fresh_agent_t4.rs:87
+fn run_tier(scratch: &Scratch, command_args: &[String]) -> Output {
+    // GATE #4494: real subprocess and cache isolation.
+    Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(command_args).args(["run.jet", "--", "report.tsv"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.path.join("cache")).env("NO_COLOR", "1").output().expect("run T4 Jet fixture")
+}

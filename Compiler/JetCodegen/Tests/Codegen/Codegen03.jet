@@ -1,0 +1,165 @@
+use JetCodegen.Codegen.*
+use JetCodegen.AST.*
+use JetPkgModel.Package.[ReleaseDevtoolsPolicy]
+use JetSema.Sema.[CompileMode, SemIndexEffectFacts, check_bundle_with_effect_facts]
+use JetSyntax.Syntax
+use JetLexer.Lexer.[lex]
+use JetParser.Parser.[parse]
+use JetDiagnostics.Diagnostics.[Severity]
+use JetFoundation.SHA256.[sha256_hex]
+use std.collections.[HashMap, HashSet, BTreeSet] // GATE #4499: canonical set identities.
+
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4644
+#Test("aot_ffi_host_installs_bridge_reporter") {
+    link := FfiLink(crate_name: "jet_ffi_fixture", cache_identity: "fixture-identity", provenance_path: OSPath("fixture.provenance"), rlib_path: OSPath("fixture.rlib"), cdylib_path: OSPath("fixture.so"), target_deps_dir: OSPath("deps"), host_deps_dir: OSPath("deps"), helper_bin_path: None, secrets_helper_bin_path: None, handle_facts: [], link_closure: FfiLinkClosure.default())
+    mut source := String.new()
+    push_ffi_reporter(&source, Some(&link))
+    assert(source.contains("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)"))
+    assert(source.contains("// JET_VETTED_UNSAFE_BEGIN: ffi_reporter"))
+    assert(source.contains("// JET_VETTED_UNSAFE_END: ffi_reporter"))
+    assert(source.contains("extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {\n    let _ = (message, len);\n}\n"))
+    assert(!source.contains("panic: a foreign function panicked"))
+    mut cached := String.new()
+    push_cached_runtime_with_policy(&cached, Some(&link), &ReleaseDevtoolsPolicy.development())
+    reporter := cached.find("jet_ffi_fixture::jet_ffi_set_reporter(jet_ffi_reporter)").unwrap()
+    marker := cached.find(CACHED_RUNTIME_BEGIN).unwrap()
+    assert(reporter < marker)
+    assert(!cached[marker..].contains("jet_ffi_fixture::jet_ffi_set_reporter"))
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4692
+fn core_fingerprint(used_core: &HashSet<String>, test_harness: Bool) -> String {
+    mut bundle := checked_generic_bundle("fn run() {}", "core-fingerprint")
+    bundle.used_core = used_core.clone()
+    corelib_emission_fingerprint(&bundle, test_harness)
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4700
+#Test("relevant_stdlib_digest_is_exact_and_core_closure_sensitive") {
+    mut runtime_source := String.new()
+    push_cached_runtime_with_policy(&runtime_source, None, &ReleaseDevtoolsPolicy.development())
+    assert(cached_runtime_fingerprint() == sha256_hex(runtime_source.as_bytes()), "native cache identity must hash the emitted fixed runtime")
+    assert(!runtime_source.contains("__JET_PACKAGE_EDITION"), "package-specific edition data must not poison the fixed runtime object")
+    files := HashSet.from(["core.files::read"])
+    net := HashSet.from(["core.net::tcp_connect"])
+    assert(core_fingerprint(&files, false) != core_fingerprint(&net, false), "native cache identity must include the relevant Core closure")
+    assert(core_fingerprint(&files, false) == core_fingerprint(&files, false), "the same relevant Core closure must reuse one stable digest")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4732
+#Test("core_digest_covers_the_complete_emitted_core_block") {
+    files := HashSet.from(["core.files::read"])
+    mut bundle := checked_generic_bundle("fn run() {}", "core-fingerprint-block")
+    bundle.used_core = files.clone()
+    body := core_runtime_body(&bundle, false)
+    mut emitted := String.new()
+    if !body.is_empty() {
+        emitted.push_str(CACHED_CORE_BEGIN)
+        emitted.push_str(body)
+        emitted.push_str(CACHED_CORE_END)
+    }
+    assert(emitted.contains(scheduler_prelude_for_emit(true)))
+    assert(body.contains("__JET_PACKAGE_EDITION"))
+    assert(body.contains("fn jet_deadline_exceeded"))
+    assert(body.contains("fn jet_seeded_rng_int"))
+    assert(emitted.contains(body.as_str()))
+    assert(corelib_emission_fingerprint(&bundle, false) == corelib_emission_identity(body, &files), "the relevant digest must hash the exact Core body that gets emitted")
+    testing := HashSet.from(["core.testing"])
+    assert(core_fingerprint(&testing, false) != core_fingerprint(&testing, true), "test-harness Core emission must have its own digest")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4763
+#Test("r10_corelib_emits_only_reachable_top_modules") {
+    files_only := HashSet.from(["core.files::read"])
+    mut files_out := String.new()
+    push_corelib_prelude_with_policy(&files_out, &files_only, false, &ReleaseDevtoolsPolicy.development())
+    assert(files_out.contains("struct JetPath"), "files usage must emit PathFiles")
+    assert(!files_out.contains("JetHTTPServer") && !files_out.contains("struct JetBrowser") && !files_out.contains("fn jet_game_"), "files-only Core must not emit HTTP server/Browser/Game templates")
+    assert(files_out.contains("struct JetTCPStream"), "JetStd kernel closure always needs JetTCPStream")
+    net_only := HashSet.from(["core.net::tcp_connect"])
+    mut net_out := String.new()
+    push_corelib_prelude_with_policy(&net_out, &net_only, false, &ReleaseDevtoolsPolicy.development())
+    assert(net_out.contains("struct JetTCPStream") && net_out.contains("fn jet_net_tcp_connect"), "net usage must emit NetHTTP")
+    assert(!net_out.contains("JetHTTPServer") && !net_out.contains("struct JetBrowser"), "pure core.net must not emit HTTP server or Browser templates")
+    http := HashSet.from(["core.http.client::get"])
+    mut http_out := String.new()
+    push_corelib_prelude_with_policy(&http_out, &http, false, &ReleaseDevtoolsPolicy.development())
+    assert(http_out.contains("JetHTTPServer") || http_out.contains("fn jet_http_"), "http usage must emit HTTP templates")
+    files_fp := core_fingerprint(&files_only, false)
+    net_fp := core_fingerprint(&net_only, false)
+    assert(files_fp != net_fp, "R10 cache identity must differ when Top-module reachability differs")
+    assert(files_fp == core_fingerprint(&files_only, false), "R10 fingerprint must be stable for the same used_core set")
+    compute_only := HashSet.from(["core.compute::zeros"])
+    mut compute_out := String.new()
+    push_corelib_prelude_with_policy(&compute_out, &compute_only, false, &ReleaseDevtoolsPolicy.development())
+    assert(compute_out.contains("fn jet_compute_zeros") && compute_out.contains("struct JetTensor"), "core.compute usage must emit Compute.rs")
+    assert(!compute_out.contains("JetHTTPServer") && !compute_out.contains("struct JetBrowser"), "compute-only Core must not emit HTTP/Browser templates")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4850
+#Test("file_handle_owners_are_in_the_common_closure_without_filesystem_runtime") {
+    used_core := HashSet.from(["core.encoding.base64::is_base64"])
+    owner_source := include_str("../Prelude/Core/FileHandleOwners.rs") // GATE #4494: compile-time source embedding.
+    common_source := include_str("../Prelude/CoreLib/JetStd/CommonTypes.rs")
+    filesystem_source := include_str("../Prelude/CoreLib/Top/FSRuntimeOps.rs")
+    policy := ReleaseDevtoolsPolicy.development()
+    assert_common_closure := |emitted| {
+        owners := emitted.find(owner_source).expect("common file owner carriers must be emitted")
+        common := emitted.find(common_source).expect("JetStd CommonTypes must be emitted")
+        assert(owners < common, "root owner definitions must precede the JetStd re-export")
+        assert(!emitted.contains(filesystem_source), "a non-filesystem closure must not pull in FSRuntimeOps")
+        for owner in ["pub struct JetTempDirOwner", "pub struct JetTempFileOwner", "pub struct JetFileLockOwner"] {
+            assert(emitted.matches(owner).count() == 1, format("the common closure must emit `{}` exactly once", owner))
+        }
+    }
+    mut ordinary := String.new()
+    push_corelib_prelude_with_policy(&ordinary, &used_core, false, &policy)
+    assert_common_closure(&ordinary)
+    mut cached := String.new()
+    push_full_corelib_prelude_with_policy(&cached, Syntax.OSTarget.Linux, false, "2026", &BTreeSet.new(), false, false, &policy)
+    assert_common_closure(&cached)
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4906
+#Test("simd_core_marker_selects_shared_lane_closure_without_selecting_plain_programs") {
+    mut plain := String.new()
+    push_corelib_prelude_with_policy(&plain, &HashSet.new(), false, &ReleaseDevtoolsPolicy.development())
+    assert(plain.is_empty(), "a program with no Core reachability must not emit the SIMD closure")
+    simd := HashSet.from(["core.math::__mathtypes__"])
+    mut simd_out := String.new()
+    push_corelib_prelude_with_policy(&simd_out, &simd, false, &ReleaseDevtoolsPolicy.development())
+    assert(simd_out.contains("fn jet_scalar_loop_barrier"), "SIMD reachability must emit the shared scalar-loop barrier")
+    assert(simd_out.contains("jet_lane_type!(F32x8"), "SIMD reachability must emit the lane type closure")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4945
+#Test("command_suite_root_adapters_are_never_gated") {
+    no_testing := HashSet.from(["core.compute::zeros"])
+    mut out := String.new()
+    push_corelib_prelude_with_policy(&out, &no_testing, false, &ReleaseDevtoolsPolicy.development())
+    assert(out.contains(include_str("../Prelude/CoreLib/Top/CommandSuite.rs")), "the crate-root suite adapters must ship with the kernel part that defines their callees; the handle-op call site names them with no `used_core` guard") // GATE #4494
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4975
+fn checked_generic_bundle(src: &String, root: &String) -> ProgramBundle {
+    checked_generic_bundle_with_facts(src, root).0
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:4979
+fn checked_generic_bundle_with_facts(src: &String, root: &String) -> (ProgramBundle, SemIndexEffectFacts) {
+    (tokens, lex_diagnostics) := lex(src)
+    assert(lex_diagnostics.is_empty(), format("{:?}", lex_diagnostics))
+    mut program := parse(&tokens).expect("parse")
+    mut bundle := ProgramBundle(
+        entry: 0,
+        project_root: OSPath(root),
+        modules: [LoadedModule(
+            path: OSPath(root).join("main.jet"), display: "main.jet", source: src, alias: "main",
+            imports: ^program.imports, items: ^program.items, script_body: ^program.script_body,
+            block_spans: ^program.block_spans, web_target_ceiling: program.web_target_ceiling,
+            pub_file: program.pub_file, no_prelude: program.no_prelude, default_target: program.default_target,
+            html_path: program.html_path, policy_declarations: program.policy_declarations.clone(),
+            user_policy_declarations: program.user_policy_declarations.clone(), rule_facts: ^program.rule_facts
+        )],
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [], used_core: HashSet.new(),
+        ffi_callback_fns: HashSet.new(), cffi: CFfi.default(), comptime_inputs: [], name_ledger: NameLedger.default(),
+        layer_ceiling: None, inferred_layer: Syntax.RuntimeLayer.Core, web_partitions: HashMap.new(),
+        web_partition_enforced: false, web_partition_report: None, dep_roots: HashMap.new(),
+        package_guarantees: Default.default(), program_allocator: Default.default(), active_os: Syntax.OSTarget.host(),
+        build_facts: Default.default(), edition: "2027"
+    )
+    (diagnostics, facts) := check_bundle_with_effect_facts(&bundle, CompileMode.Run)
+    assert(!diagnostics.iter().any(|d| d.severity == Severity.Error), format("{:#?}", diagnostics))
+    (bundle, facts)
+}

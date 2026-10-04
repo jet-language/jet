@@ -1,0 +1,31 @@
+// Rust: tests/web_partition.rs:1
+// D-WASM1=A: web JS/Wasm partition sema.
+use std.[fs, env, process]
+use jet_foundation.DataTree.DataTree
+use jet_foundation.JSON.[json_get, json_str, parse_json]
+// GATE #4494: filesystem, environment and process id.
+
+// Rust: tests/web_partition.rs:10
+fn codes(src: &String) -> [String] {
+    jet.compile(src).err().unwrap().into_iter().map(fn(d) { d.code.to_string() }).collect()
+}
+// Rust: tests/web_partition.rs:230
+fn temp_web_project(stem: &String, files: &[(String, String)]) -> OSPath {
+    dir :: env.temp_dir().join("jet_web_partition_{stem}_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"web-partition\"\nversion: \"0.1.0\"\nedition: \"2026\"\n").unwrap()
+    for (path, src) in files { fs.write(dir.join(path), src).unwrap() }
+    dir
+}
+// Rust: tests/web_partition.rs:245
+fn manifest_partitions(manifest: &String) -> [(String, String)] {
+    root :: parse_json(manifest).expect("manifest must be valid JSON")
+    partitions :: json_get(&root, "partitions").expect("manifest missing partitions")
+    if partitions == {
+        .Object(rows) -> rows.iter().map(fn((key, bucket)) {
+            (key.clone(), json_str(bucket).expect("partition bucket must be a string").to_string())
+        }).collect()
+        _ -> panic("manifest partitions must be an object")
+    }
+}

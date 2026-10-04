@@ -1,0 +1,619 @@
+use BuildSandbox.*
+use common
+use jetpack.[Recipe, Toolchain, RuntimePolicy, Package, RefSpec, Store, Provider, BuildDebug]
+use jetpack.Recipe.[BuildContext, BuildRecipe, BuildStep]
+use jet.Comptime.Build
+use jet.Comptime.Build.[execute_build_plan, ActionSpec, BuildCapability, TargetSpec]
+use jet_driver.Driver.BuildArtifactStoreHandle
+use std.fs
+use std.process.Command
+use std.net.TcpListener
+use std.io.Read
+use std.io.ErrorKind
+use std.time.[Duration, Instant]
+use std.thread
+use core.sys.target
+// All native test IO/process/env/thread/socket operations: GATE #4494.
+// Selected-OS/family dispatch below preserves Rust cfg: GATE #4483.
+// Nonblocking socket WouldBlock identity: GATE #4409.
+// Capability grant sets use nominal enum keys: GATE #4499.
+
+// Rust: tests/build_sandbox.rs:34
+#Test("target_sandbox_manifest_runs") {
+    source :: """
+name: "mathkit"
+version: "0.1.0"
+packages: {
+    mathkit: sandbox { export: "mathkit" },
+}
+"""
+    facts :: Package.PackageFacts.parse(source, "package.jet").expect("sandbox target manifest should parse")
+    assert(if facts.packages[0].targets == { [Package.Target.Plugin { export: Val(name) }] -> name == "mathkit" else -> false })
+    (rewritten, count) :: Package.rewrite_retired_targets(&source.replace("sandbox", "plugin"))
+    assert_eq(count, 1)
+    assert(rewritten.contains("mathkit: sandbox"), "{rewritten}")
+}
+// Rust: tests/build_sandbox.rs:109
+#Test("sandbox_denies_ambient_network_e1236") {
+    base :: scratch("net"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+    fs.create_dir_all(&src).unwrap()
+    ctx :: BuildContext { source_dir: &src, output_root: &out, tools: [String:OSPath]{}, fetch_cache: &cache, offline: false }
+    recipe :: BuildRecipe { steps: [BuildStep.Fetch { url: "https://example.invalid/x.tar", sha256: String.new() }] }
+    assert_eq(Recipe.run(&recipe, &ctx, None).unwrap_err().code, "E1236")
+    _ :: fs.remove_dir_all(&base).ok()
+}
+// Rust: tests/build_sandbox.rs:133
+#Test("sandbox_confines_output_e1237") {
+    base :: scratch("confine"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+    fs.create_dir_all(&src).unwrap(); fs.write(src.join("f"), "hi").unwrap()
+    ctx :: BuildContext { source_dir: &src, output_root: &out, tools: [String:OSPath]{}, fetch_cache: &cache, offline: false }
+    recipe :: BuildRecipe { steps: [BuildStep.Install { src: "f", dest: "../escape" }] }
+    assert_eq(Recipe.run(&recipe, &ctx, None).unwrap_err().code, "E1237")
+    _ :: fs.remove_dir_all(&base).ok()
+}
+// Rust: tests/build_sandbox.rs:158
+#Test("sandbox_tool_must_be_a_dep_e1238") {
+    base :: scratch("tool"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+    fs.create_dir_all(&src).unwrap()
+    ctx :: BuildContext { source_dir: &src, output_root: &out, tools: [String:OSPath]{}, fetch_cache: &cache, offline: false }
+    recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "gcc", args: [] }] }
+    assert_eq(Recipe.validate(&recipe, &ctx).unwrap_err().code, "E1238")
+    _ :: fs.remove_dir_all(&base).ok()
+}
+// Rust: tests/build_sandbox.rs:183
+#Test("sandbox_tool_path_must_be_an_absolute_realized_artifact") {
+    base :: scratch("relative-tool"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+    fs.create_dir_all(&src).unwrap()
+    tools :: ["cc": OSPath("cc")]
+    ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+    recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "cc", args: [] }] }
+    assert_eq(Recipe.validate(&recipe, &ctx).unwrap_err().code, "E1238")
+    _ :: fs.remove_dir_all(&base).ok()
+}
+// Rust: tests/build_sandbox.rs:210
+#Test("build_hook_does_not_inherit_host_credentials") {
+    if target.selected_family() == "unix" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("clean-env"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+        fs.create_dir_all(&src).unwrap()
+        secret_name :: "JET_TEST_SECRET_DO_NOT_LEAK"
+        previous :: std.env.var_os(secret_name); std.env.set_var(secret_name, "sentinel")
+        tools :: ["sh": host_tool("sh")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "sh", args: ["-c", "test \"${{{secret_name}:-}}\" = \"\" && printf clean > \"$JET_BUILD_OUTPUT/clean\""] }] }
+        result :: Recipe.run(&recipe, &ctx, None)
+        if previous == Val(value) { std.env.set_var(secret_name, value) } else { std.env.remove_var(secret_name) }
+        result.unwrap()
+        assert_eq(fs.read_to_string(out.join("clean")).unwrap(), "clean")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:253
+#Test("native_linux_recipe_sandbox_blocks_host_escape_and_records_backend_receipt") {
+    if target.selected_os() == "linux" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("native-linux"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+        host_marker :: base.with_file_name("{base.file_name().unwrap().to_string_lossy()}-host-escape")
+        fs.create_dir_all(&src).unwrap(); fs.write(src.join("input"), "source").unwrap()
+        tools :: ["sh": host_tool("sh")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "sh", args: ["-c", "test ! -e /etc/passwd && if printf hostile > '{host_marker.display()}'; then exit 41; fi && if printf hostile > input; then exit 42; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""] }] }
+        report :: Recipe.run(&recipe, &ctx, None).expect("native Linux sandbox should run recipe")
+        assert_eq(report.sandbox_class, "linux-bwrap")
+        assert(report.sandbox_policy.contains("filesystem=source-readonly,output-private-copy"))
+        assert(report.sandbox_policy.contains("process=private-pid,parent-death"))
+        assert(report.sandbox_policy.contains("network=isolated"))
+        assert_eq(fs.read_to_string(out.join("ok")).unwrap(), "ok")
+        assert(!host_marker.exists(), "recipe wrote through to the host filesystem")
+        assert_eq(fs.read_to_string(src.join("input")).unwrap(), "source")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:311
+#Test("logged_recipe_sandbox_blocks_host_escape") {
+    if target.selected_os() == "linux" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("logged-native-linux"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+        host_marker :: base.with_file_name("{base.file_name().unwrap().to_string_lossy()}-logged-host-escape")
+        fs.create_dir_all(&src).unwrap()
+        tools :: ["sh": host_tool("sh")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "sh", args: ["-c", "if printf hostile > '{host_marker.display()}'; then exit 41; fi && printf ok > \"$JET_BUILD_OUTPUT/ok\""] }] }
+        attempt := BuildDebug.Attempt.new("logged-sandbox", "logged-sandbox", "test", "recipe", "source")
+        result :: Recipe.run_logged(&recipe, &ctx, None, &attempt)
+        status :: Build.native_sandbox_status()
+        if status.available {
+            report :: result.expect("logged recipe sandbox should run")
+            assert_eq(report.sandbox_class, "linux-bwrap")
+            assert_eq(fs.read_to_string(out.join("ok")).unwrap(), "ok")
+        } else { assert_eq(result.unwrap_err().code, "E1275") }
+        assert(!host_marker.exists(), "logged recipe execution escaped its native sandbox")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:377
+#Test("native_windows_appcontainer_allows_declared_output_and_records_receipt") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("native-windows-output"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+        fs.create_dir_all(&src).unwrap(); fs.write(src.join("input"), "source").unwrap()
+        secret_name :: "JET_WINDOWS_HOST_SECRET"
+        previous_secret :: std.env.var_os(secret_name); std.env.set_var(secret_name, "must-not-enter-appcontainer")
+        tools :: ["cmd": windows_command_interpreter()]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "cmd", args: ["/C", "if defined JET_WINDOWS_HOST_SECRET (exit /b 13) else type \"%CD%\\input\" > \"%JET_BUILD_OUTPUT%\\ok\""] }] }
+        result :: Recipe.run(&recipe, &ctx, None)
+        if previous_secret == Val(value) { std.env.set_var(secret_name, value) } else { std.env.remove_var(secret_name) }
+        report :: result.expect("AppContainer build should run")
+        assert_eq(report.sandbox_class, "windows-appcontainer")
+        assert(report.sandbox_policy.contains("source-readonly,output-readwrite"))
+        for policy in ["process=appcontainer+job-kill-on-close+active-process=256", "network=denied", "environment=clear+declared", "devices=appcontainer-default-deny", "resources=memory-2GiB+active-process-256"] { assert(report.sandbox_policy.contains(policy), "{policy}") }
+        text := fs.read_to_string(out.join("ok")).unwrap().trim() // #4303
+        assert_eq(text, "source")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:437
+#Test("native_windows_appcontainer_hermetic_build_allows_declared_output") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("windows-hermetic-success"); marker :: base.join("host-marker")
+        command :: "echo escaped>\"{marker.display()}\" || echo blocked>status & if exist \"{marker.display()}\" (exit /b 70) else echo ok>status"
+        context := Build.BuildContext.new()
+        action :: context.action("windows-hermetic-success", ActionSpec.uncached_phony([windows_command_interpreter().to_string_lossy().to_string(), "/C", command]).with_outputs(["status"]).with_cap(BuildCapability.Exec)).expect("hermetic Windows action should register")
+        target :: context.add_executable("windows-hermetic-success", TargetSpec.new().with_action(action)).expect("hermetic Windows target should register")
+        plan :: context.plan_with_default(target).expect("hermetic Windows plan should validate")
+        artifact_store :: BuildArtifactStoreHandle.at(base.join(".jet-store")).expect("open test artifact store")
+        grants :: Set.from([BuildCapability.Exec])
+        result :: execute_build_plan(&plan, &base, &artifact_store, &grants).expect("AppContainer hermetic build should complete")
+        assert_eq(result.report.metrics.actions_total, 1); assert_eq(result.report.metrics.failed_actions, 0)
+        text := fs.read_to_string(base.join("status")).unwrap().trim() // #4303
+        assert_eq(text, "ok")
+        assert(!marker.exists(), "hermetic build wrote outside its output")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:485
+#Test("native_windows_appcontainer_hermetic_build_rejects_host_write") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        assert_eq(RuntimePolicy.detect_sandbox().level, RuntimePolicy.SandboxLevel.Strong, "Windows hermetic test requires the native AppContainer backend")
+        base :: scratch("windows-hermetic-failure"); marker :: base.join("host-marker")
+        context := Build.BuildContext.new()
+        action :: context.action("windows-hermetic-failure", ActionSpec.uncached_phony([windows_command_interpreter().to_string_lossy().to_string(), "/C", "echo escaped>\"{marker.display()}\" && exit /b 70"]).with_cap(BuildCapability.Exec)).expect("hermetic Windows action should register")
+        target :: context.add_executable("windows-hermetic-failure", TargetSpec.new().with_action(action)).expect("hermetic Windows target should register")
+        plan :: context.plan_with_default(target).expect("hermetic Windows plan should validate")
+        grants :: Set.from([BuildCapability.Exec])
+        artifact_store :: BuildArtifactStoreHandle.at(base.join(".jet-store")).expect("open test artifact store")
+        result :: execute_build_plan(&plan, &base, &artifact_store, &grants)
+        assert(result.is_err(), "host write must fail the hermetic action")
+        assert(!marker.exists(), "hermetic build wrote outside its output")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:527
+#Test("native_windows_appcontainer_rejects_reparse_parent_before_launch") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        assert_eq(RuntimePolicy.detect_sandbox().level, RuntimePolicy.SandboxLevel.Strong, "Windows reparse-point test requires the native AppContainer backend")
+        base :: scratch("windows-reparse-parent"); real :: base.join("real"); linked :: base.join("linked")
+        source :: real.join("source"); output :: real.join("output"); marker :: base.join("launched")
+        fs.create_dir_all(&source).unwrap(); fs.create_dir_all(&output).unwrap()
+        std.os.windows.fs.symlink_dir(&real, &linked).expect("Windows reparse-point test needs a directory link")
+        command :: "echo launched>\"{marker.display()}\" & if exist \"{marker.display()}\" (exit /b 70) else exit /b 0"
+        result :: Build.run_native_sandboxed(&windows_command_interpreter(), ["/C", command], &linked.join("source"), Val(&linked.join("output")), &[String:String]{}, false)
+        assert(result.is_err(), "a reparse-point parent must be rejected before launch: {result:?}")
+        assert(!marker.exists(), "reparse-point rejection launched the tool")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:573
+#Test("native_windows_appcontainer_blocks_sibling_write_before_publication") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("native-windows-escape"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache"); sibling :: base.join("sibling-escape")
+        fs.create_dir_all(&src).unwrap()
+        tools :: ["cmd": windows_command_interpreter()]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "cmd", args: ["/C", "echo escaped>{sibling.display()}"] }] }
+        error :: Recipe.run(&recipe, &ctx, None).unwrap_err()
+        assert_eq(error.code, "E1238")
+        assert(!sibling.exists(), "AppContainer wrote outside the declared output")
+        assert(!out.join("ok").exists(), "failed sandbox stage was published")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:616
+#Test("unavailable_windows_appcontainer_refuses_before_recipe_tool_launch") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("windows-unavailable"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache"); marker :: base.join("host-marker")
+        fs.create_dir_all(&src).unwrap()
+        previous :: std.env.var_os("JETPACK_FAKE_SANDBOX"); std.env.set_var("JETPACK_FAKE_SANDBOX", "unavailable")
+        tools :: ["cmd": windows_command_interpreter()]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "cmd", args: ["/C", "echo launched>\"{marker.display()}\" & echo launched>\"%JET_BUILD_OUTPUT%\\marker\""] }] }
+        result :: Recipe.run(&recipe, &ctx, None)
+        if previous == Val(value) { std.env.set_var("JETPACK_FAKE_SANDBOX", value) } else { std.env.remove_var("JETPACK_FAKE_SANDBOX") }
+        error :: result.expect_err("an unavailable AppContainer backend must fail closed")
+        assert_eq(error.code, "E1275")
+        assert(!marker.exists(), "the recipe tool launched without AppContainer")
+        assert(!out.join("marker").exists())
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:665
+#Test("native_windows_appcontainer_uses_the_shared_hostile_corpus") {
+    if target.selected_os() == "windows" {
+        _sandbox_guard :: sandbox_test_lock()
+        cases :: hostile_cases()
+        for (case_id, _category, _attempt, _expected) in cases {
+            base :: scratch("windows-hostile-{case_id}"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+            host_secret :: base.join("host-secret"); host_marker :: base.join("host-marker")
+            fs.create_dir_all(&src).unwrap(); fs.write(&host_secret, "host-only-secret").unwrap()
+            if case_id == "source-symlink" { std.os.windows.fs.symlink_file(&host_secret, src.join("link")).expect("Windows hostile corpus needs symlink creation to test the source boundary") }
+            network_thread := None
+            (tool, args) :: if case_id == {
+                "host-read" -> (windows_command_interpreter(), ["/C", "copy /Y \"{host_secret.display()}\" \"{host_marker.display()}\" >NUL 2>&1 && exit /b 70 || echo blocked>\"%JET_BUILD_OUTPUT%\\status\""])
+                "host-write" -> (windows_command_interpreter(), ["/C", "echo escaped>\"{host_marker.display()}\""])
+                "source-symlink" -> (windows_command_interpreter(), ["/C", "if exist \"%CD%\\link\" (copy /Y \"%CD%\\link\" \"%JET_BUILD_OUTPUT%\\leak\" >NUL 2>&1 && exit /b 70) else echo blocked>\"%JET_BUILD_OUTPUT%\\status\""])
+                "output-symlink" -> (windows_command_interpreter(), ["/C", "mklink \"%JET_BUILD_OUTPUT%\\link\" \"{host_marker.display()}\" >NUL 2>&1 && echo escaped>\"%JET_BUILD_OUTPUT%\\link\" || echo blocked>\"%JET_BUILD_OUTPUT%\\status\""])
+                "network-exfiltration" -> {
+                    listener :: TcpListener.bind("127.0.0.1:0").unwrap(); listener.set_nonblocking(true).unwrap()
+                    port :: listener.local_addr().unwrap().port()
+                    network_thread = Val(thread.spawn(() -> {
+                        deadline :: Instant.now() + Duration.from_millis(750)
+                        loop {
+                            if listener.accept() == {
+                                .Ok((_stream, _address)) -> return true
+                                .Err(error) -> {
+                                    if error.kind() != ErrorKind.WouldBlock { return false }
+                                    if Instant.now() >= deadline { return false }
+                                    thread.sleep(Duration.from_millis(5))
+                                }
+                            }
+                        }
+                    }))
+                    powershell :: OSPath(std.env.var_os("WINDIR").unwrap_or_else(() -> "C:\\Windows")).join("System32").join("WindowsPowerShell").join("v1.0").join("powershell.exe")
+                    (powershell, ["-NoProfile", "-NonInteractive", "-Command", "try {$c=New-Object Net.Sockets.TcpClient('127.0.0.1',{port});$c.Close();exit 70} catch {exit 0}"])
+                }
+                "child-process" -> {
+                    interpreter :: windows_command_interpreter()
+                    (interpreter.clone(), ["/C", "start \"\" /b \"{interpreter.display()}\" /C \"echo escaped>\\\"{host_marker.display()}\\\"\""])
+                }
+                "tmpfs-exhaustion" -> {
+                    interpreter :: windows_command_interpreter()
+                    (interpreter.clone(), ["/C", "for /L %i in (1,1,300) do @start \"\" /b \"{interpreter.display()}\" /C \"timeout /T 3 /NOBREAK >NUL\" & echo blocked>\"%JET_BUILD_OUTPUT%\\status\""])
+                }
+                other -> panic("unmapped hostile corpus case {other}")
+            }
+            tools :: ["hostile-tool": tool]
+            ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+            recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "hostile-tool", args }] }
+            result :: Recipe.run(&recipe, &ctx, None)
+            if result.as_ref().err() == Val(error) { assert(["E1237", "E1238", "E1275"].contains(error.code), "{case_id} returned an unrelated diagnostic: {error.code}") }
+            if result == .Ok(report) {
+                assert_eq(report.sandbox_class, "windows-appcontainer")
+                for policy in ["filesystem=", "process=", "network=", "environment=", "devices=", "resources="] { assert(report.sandbox_policy.contains(policy), "{case_id}: {policy}") }
+            }
+            if network_thread == Val(worker) { assert(!worker.join().unwrap(), "{case_id} reached the network") }
+            if case_id == "source-symlink" { assert(!out.join("leak").exists(), "{case_id} exposed the host file through declared output") }
+            if case_id == "child-process" { thread.sleep(Duration.from_millis(100)) }
+            assert(!host_marker.exists(), "{case_id} wrote the host marker")
+            _ :: fs.remove_dir_all(&base).ok()
+        }
+    }
+}
+// Rust: tests/build_sandbox.rs:856
+#Test("unavailable_native_backend_refuses_before_recipe_tool_launch") {
+    if target.selected_os() == "linux" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("unavailable"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache"); marker :: base.join("host-marker")
+        fs.create_dir_all(&src).unwrap()
+        previous :: std.env.var_os("JETPACK_FAKE_SANDBOX"); std.env.set_var("JETPACK_FAKE_SANDBOX", "unavailable")
+        tools :: ["sh": host_tool("sh")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "sh", args: ["-c", "printf launched > '{marker.display()}'; printf launched > \"$JET_BUILD_OUTPUT/marker\""] }] }
+        result :: Recipe.run(&recipe, &ctx, None)
+        if previous == Val(value) { std.env.set_var("JETPACK_FAKE_SANDBOX", value) } else { std.env.remove_var("JETPACK_FAKE_SANDBOX") }
+        error :: result.expect_err("an unavailable native backend must fail closed")
+        assert_eq(error.code, "E1275")
+        assert(!marker.exists(), "the recipe tool launched without a sandbox")
+        assert(!out.join("marker").exists())
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:905
+#Test("failed_recipe_preserves_previous_output_and_removes_partial_stage") {
+    if target.selected_family() == "unix" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("rollback"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+        fs.create_dir_all(&src).unwrap(); fs.create_dir_all(&out).unwrap(); fs.write(out.join("old"), "previous").unwrap()
+        tools :: ["sh": host_tool("sh")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [
+            BuildStep.Exec { tool: "sh", args: ["-c", "printf replacement > \"$JET_BUILD_OUTPUT/new\""] },
+            BuildStep.Exec { tool: "sh", args: ["-c", "false"] },
+        ] }
+        error :: Recipe.run(&recipe, &ctx, None).unwrap_err()
+        assert_eq(error.code, "E1238")
+        assert_eq(fs.read_to_string(out.join("old")).unwrap(), "previous")
+        assert(!out.join("new").exists())
+        assert(fs.read_dir(&base).unwrap().flatten().all((entry) -> !entry.file_name().to_string_lossy().starts_with(".out.jet-stage-")), "failed recipe left a partial staged output")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:1000
+#Test("macos_native_sandbox_records_seatbelt_policy") {
+    if target.selected_os() == "macos" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("macos-receipt"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+        fs.create_dir_all(&src).unwrap()
+        tools :: ["bash": OSPath("/bin/bash")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "bash", args: ["-c", "printf ok > \"$JET_BUILD_OUTPUT/ok\""] }] }
+        report :: Recipe.run(&recipe, &ctx, None).expect("native macOS sandbox should run")
+        assert_eq(report.sandbox_class, "macos-seatbelt")
+        for policy in ["filesystem=source-readonly,output-readwrite", "process=declared-tool-and-fork", "network=denied", "environment=clear", "devices=denied", "resources="] { assert(report.sandbox_policy.contains(policy), "{policy}") }
+        assert_eq(fs.read_to_string(out.join("ok")).unwrap(), "ok")
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:1043
+#Test("unavailable_macos_backend_refuses_before_recipe_tool_launch") {
+    if target.selected_os() == "macos" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("macos-unavailable"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache"); marker :: base.join("host-marker")
+        fs.create_dir_all(&src).unwrap()
+        previous :: std.env.var_os("JETPACK_FAKE_SANDBOX"); std.env.set_var("JETPACK_FAKE_SANDBOX", "unavailable")
+        tools :: ["bash": OSPath("/bin/bash")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "bash", args: ["-c", "printf launched > '{marker.display()}'"] }] }
+        result :: Recipe.run(&recipe, &ctx, None)
+        if previous == Val(value) { std.env.set_var("JETPACK_FAKE_SANDBOX", value) } else { std.env.remove_var("JETPACK_FAKE_SANDBOX") }
+        error :: result.expect_err("an unavailable macOS backend must fail closed")
+        assert_eq(error.code, "E1275")
+        assert(!marker.exists(), "recipe tool launched without Seatbelt")
+        assert(!out.join("marker").exists())
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:1086
+#Test("macos_native_sandbox_blocks_host_read") {
+    if target.selected_os() == "macos" {
+        run_macos_attack("macos-host-read", "if IFS= read -r value < \"{HOST}\"; then printf '%s' \"$value\" > \"{OUTSIDE}\"; exit 0; else exit 77; fi")
+    }
+}
+// Rust: tests/build_sandbox.rs:1095
+#Test("macos_native_sandbox_blocks_sibling_write") {
+    if target.selected_os() == "macos" {
+        run_macos_attack("macos-sibling-write", "if printf escape > \"{OUTSIDE}\"; then exit 0; else exit 77; fi")
+    }
+}
+// Rust: tests/build_sandbox.rs:1104
+#Test("macos_native_sandbox_blocks_source_and_symlink_escape") {
+    if target.selected_os() == "macos" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("macos-symlink"); outside :: base.join("symlink-result"); host :: base.join("host-secret"); src :: base.join("src")
+        fs.create_dir_all(&src).unwrap(); fs.write(&host, "host-only").unwrap()
+        std.os.unix.fs.symlink(&host, src.join("link")).unwrap()
+        command :: "if IFS= read -r value < \"{src.display()}/link\"; then printf '%s' \"$value\" > \"{outside.display()}\"; exit 0; else exit 77; fi"
+        out :: base.join("out"); cache :: base.join("cache"); tools :: ["bash": OSPath("/bin/bash")]
+        ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+        recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "bash", args: ["-c", command] }] }
+        error :: Recipe.run(&recipe, &ctx, None).unwrap_err()
+        assert(["E1237", "E1238"].contains(error.code), "{error:?}")
+        assert(!outside.exists())
+        _ :: fs.remove_dir_all(&base).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:1143
+#Test("macos_native_sandbox_blocks_undeclared_process_network_and_device") {
+    if target.selected_os() == "macos" {
+        for (tag, command) in [
+            ("macos-process", "if /bin/echo escaped >/dev/null; then exit 0; else exit 77; fi"),
+            ("macos-network", "if exec 3<>/dev/tcp/127.0.0.1/9; then exit 0; else exit 77; fi"),
+            ("macos-device", "if test -r /dev/zero; then exit 0; else exit 77; fi"),
+        ] { run_macos_attack(tag, command) }
+    }
+}
+// Rust: tests/build_sandbox.rs:1163
+#Test("toolchain_unavailable_is_e1240") {
+    d :: Toolchain.e1240()
+    assert_eq(d.code, "E1240")
+    assert(d.fix.contains("jet update jet"))
+}
+// Rust: tests/build_sandbox.rs:1171
+#Test("shared_hostile_corpus_uses_the_recipe_production_path") {
+    if target.selected_family() == "unix" {
+        _sandbox_guard :: sandbox_test_lock()
+        cases :: hostile_cases()
+        sandbox_shell :: std.env.split_paths(&std.env.var_os("PATH").expect("PATH should be available to sandbox tests")).map((directory) -> directory.join("bash")).find((candidate) -> candidate.is_file()).or_else(() -> {
+            std.env.split_paths(&std.env.var_os("PATH").expect("PATH should be available to sandbox tests")).map((directory) -> directory.join("sh")).find((candidate) -> candidate.is_file())
+        }).expect("a shell is required for the hostile corpus")
+        for (case_id, _category, _attempt, expected) in cases {
+            base :: scratch("hostile-{case_id}"); src :: base.join("src"); out :: base.join("out"); cache :: base.join("cache")
+            host_secret :: base.join("host-secret"); host_marker :: base.join("host-marker")
+            fill_path :: OSPath("/tmp/jet-build-hostile-fill-{std.process.id()}-{case_id}")
+            fs.create_dir_all(&src).unwrap(); fs.write(&host_secret, "host-only-secret").unwrap()
+            if case_id == "source-symlink" { std.os.unix.fs.symlink(&host_secret, src.join("link")).unwrap() }
+            network_thread := None
+            command :: if case_id == {
+                "host-read" -> "if [ -r {shell_quote(&host_secret)} ]; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                "host-write" -> "if printf escaped > {shell_quote(&host_marker)}; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                "source-symlink" -> "if [ -r \"$PWD/link\" ]; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                "output-symlink" -> "if {shell_quote(&host_tool("ln"))} -s {shell_quote(&host_marker)} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                "network-exfiltration" -> {
+                    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+                    listener.set_nonblocking(true).expect("test listener should accept nonblocking mode")
+                    port :: listener.local_addr().unwrap().port()
+                    network_thread = Val(thread.spawn(() -> {
+                        deadline :: Instant.now() + Duration.from_millis(500)
+                        loop {
+                            if listener.accept() == {
+                                .Ok((stream, _)) -> {
+                                    stream := ^stream
+                                    bytes := [U8]{}
+                                    _ :: stream.read_to_end(&bytes)
+                                    return bytes == "escaped".as_bytes()
+                                }
+                                .Err(error) -> {
+                                    if error.kind() != ErrorKind.WouldBlock { return false }
+                                    if Instant.now() >= deadline { return false }
+                                    thread.sleep(Duration.from_millis(5))
+                                }
+                            }
+                        }
+                    }))
+                    "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf leaked > \"$JET_BUILD_OUTPUT/status\"; exit 70; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                }
+                "child-process" -> "(printf escaped > {shell_quote(&host_marker)}) & child=$!; wait \"$child\"; if [ -e {shell_quote(&host_marker)} ]; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                "tmpfs-exhaustion" -> "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {shell_quote(&fill_path)}; then printf blocked > \"$JET_BUILD_OUTPUT/status\"; break; fi; i=$((i + 1)); done; if [ \"$i\" -ge 1025 ]; then printf escaped > \"$JET_BUILD_OUTPUT/status\"; else printf blocked > \"$JET_BUILD_OUTPUT/status\"; fi"
+                other -> panic("unmapped hostile corpus case {other}")
+            }
+            tools :: ["sh": sandbox_shell.clone()]
+            ctx :: BuildContext { source_dir: &src, output_root: &out, tools, fetch_cache: &cache, offline: false }
+            recipe :: BuildRecipe { steps: [BuildStep.Exec { tool: "sh", args: ["-c", ^command] }] }
+            result :: Recipe.run(&recipe, &ctx, None)
+            if result == {
+                .Ok(report) -> {
+                    assert_ne(report.sandbox_class, "non-executing")
+                    assert(report.sandbox_policy.contains("filesystem="))
+                    assert(report.sandbox_policy.contains("process="))
+                    assert(report.sandbox_policy.contains("network="))
+                    assert(report.sandbox_policy.contains("environment="))
+                    assert(report.sandbox_policy.contains("devices="))
+                    assert(report.sandbox_policy.contains("resources="))
+                    status := fs.read_to_string(out.join("status")).unwrap().trim() // #4303
+                    assert_eq(status, "blocked", "{case_id} corpus result must prove the attempt was blocked")
+                }
+                .Err(error) -> assert(["E1237", "E1275"].contains(error.code), "{case_id} returned an executable failure instead of blocked/unsupported: {error.code}")
+            }
+            if case_id == "child-process" { thread.sleep(Duration.from_millis(100)) }
+            assert(!host_marker.exists(), "{case_id} escaped the sandbox and wrote the host marker")
+            if network_thread == Val(worker) { assert(!worker.join().unwrap(), "{case_id} escaped the network namespace") }
+            if fs.read_to_string(out.join("status")) == .Ok(status) { assert_ne(status, "leaked"); assert_ne(status, "escaped") }
+            _ :: fs.remove_file(&fill_path).ok(); _ :: fs.remove_dir_all(&base).ok()
+            assert_eq(expected, "blocked-or-unsupported")
+        }
+    }
+}
+// Rust: tests/build_sandbox.rs:1326
+#Test("shared_hostile_corpus_uses_agent_executor_production_path") {
+    if target.selected_family() == "unix" {
+        _sandbox_guard :: sandbox_test_lock()
+        cases :: hostile_cases()
+        base :: scratch("agent-hostile")
+        host_secret :: base.with_file_name("build-sandbox-agent-hostile-secret"); host_marker :: base.with_file_name("build-sandbox-agent-hostile-marker")
+        fs.write(&host_secret, "host-only-secret").unwrap()
+        source_link :: base.join("link"); std.os.unix.fs.symlink(&host_secret, &source_link).unwrap()
+        agent_fill_path :: "/tmp/jet-agent-hostile-fill-{std.process.id()}"
+        base_literal :: jet_string_literal(&base.to_string_lossy())
+        network_thread := None
+        commands :: cases.iter().map(((case_id, _, _, _)) -> {
+            command :: if case_id == {
+                "host-read" -> "if test -r {shell_quote(&host_secret)}; then printf escaped; else printf blocked; fi"
+                "host-write" -> "if printf escaped > {shell_quote(&host_marker)}; then printf escaped; else printf blocked; fi"
+                "source-symlink" -> "if test -r \"$PWD/link\"; then printf escaped; else printf blocked; fi"
+                "output-symlink" -> "if {shell_quote(&host_tool("ln"))} -s {shell_quote(&host_marker)} \"$JET_BUILD_OUTPUT/link\" && printf escaped > \"$JET_BUILD_OUTPUT/link\"; then printf escaped; else printf blocked; fi"
+                "network-exfiltration" -> {
+                    listener :: TcpListener.bind("127.0.0.1:0").unwrap(); listener.set_nonblocking(true).unwrap()
+                    port :: listener.local_addr().unwrap().port()
+                    network_thread = Val(thread.spawn(() -> {
+                        deadline :: Instant.now() + Duration.from_millis(750)
+                        loop {
+                            if listener.accept() == {
+                                .Ok(_) -> return true
+                                .Err(error) -> {
+                                    if error.kind() != ErrorKind.WouldBlock { return false }
+                                    if Instant.now() >= deadline { return false }
+                                    thread.sleep(Duration.from_millis(5))
+                                }
+                            }
+                        }
+                    }))
+                    "if printf escaped > /dev/tcp/127.0.0.1/{port} 2>/dev/null; then printf escaped; else printf blocked; fi"
+                }
+                "child-process" -> "(printf escaped > {shell_quote(&host_marker)}) & printf blocked"
+                "tmpfs-exhaustion" -> "i=0; while [ \"$i\" -lt 1025 ]; do if ! printf '%65536s' x >> {shell_quote(&OSPath(agent_fill_path))}; then printf blocked; exit 0; fi; i=$((i + 1)); done; printf escaped"
+                other -> panic("unmapped hostile corpus case {other}")
+            }
+            (case_id, command)
+        }).collect()
+        source := String.from("use core.process as process\n\nfn run() {\n    policy :: process.workspace()\n")
+        for (index, (case_id, command)) in commands.iter().enumerate() {
+            source.push_str("    print({jet_string_literal(case_id)})\n    if process.cmd([\"bash\", \"-c\", {jet_string_literal(command)}]).cwd({base_literal}).under(policy).run_checked() == {\n        .Ok(value) -> print(value.output)\n        .Err(_) -> print(\"unsupported\")\n    }\n")
+        }
+        source.push_str("}\n")
+        source_path :: base.join("agent-hostile.jet"); fs.write(&source_path, source).unwrap()
+        output :: Command.new(common.jet_bin()).args(["run", "--release"]).arg(&source_path).current_dir(&base).output().expect("agent executor should launch through the public CLI")
+        assert(output.status.success(), "agent hostile corpus failed: stdout={String.from_utf8_lossy(&output.stdout)} stderr={String.from_utf8_lossy(&output.stderr)}")
+        stdout :: String.from_utf8_lossy(&output.stdout); lines :: stdout.lines().collect()
+        assert_eq(lines.len(), cases.len() * 2, "agent corpus output lost a row")
+        capability :: RuntimePolicy.detect_sandbox()
+        expected :: if capability.level == RuntimePolicy.SandboxLevel.Strong { "blocked" } else { "unsupported" }
+        for (index, (case_id, _, _, _)) in cases.iter().enumerate() {
+            assert_eq(lines[index * 2], case_id)
+            assert_eq(lines[index * 2 + 1], expected, "{case_id} result")
+        }
+        if network_thread == Val(worker) { assert(!worker.join().unwrap(), "agent corpus reached the network") }
+        thread.sleep(Duration.from_millis(100))
+        assert_eq(fs.read_to_string(&host_secret).unwrap(), "host-only-secret", "agent corpus modified the host secret")
+        assert(!host_marker.exists(), "agent corpus wrote the host marker")
+        _ :: fs.remove_file(&agent_fill_path).ok(); _ :: fs.remove_dir_all(&base).ok()
+        _ :: fs.remove_file(&host_secret).ok(); _ :: fs.remove_file(&host_marker).ok()
+    }
+}
+// Rust: tests/build_sandbox.rs:1497
+#Test("core_cargo_build_refuses_before_unavailable_sandbox_can_run_build_script") {
+    _sandbox_guard :: sandbox_test_lock()
+    base :: scratch("core-cargo-unavailable"); repo :: base.join("repo"); root :: base.join("root"); marker :: base.join("host-marker")
+    fs.create_dir_all(&repo).unwrap()
+    fs.write(repo.join("package.jet"), "name: \"escape\"\nversion: \"0.1.0\"\npackages: { escape: library }\n").unwrap()
+    fs.write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap()
+    fs.write(repo.join("Cargo.toml"), "[package]\nname = \"escape\"\nversion = \"0.1.0\"\nbuild = \"build.rs\"\n[lib]\npath = \"lib.rs\"\n").unwrap()
+    fs.write(repo.join("Cargo.lock"), "# This file is automatically @generated by Cargo.\nversion = 3\n\n[[package]]\nname = \"escape\"\nversion = \"0.1.0\"\n\n").unwrap()
+    fs.write(repo.join("build.rs"), "fn main() { let _ = std::fs::write({marker.to_string_lossy():?}, \"escaped\"); }\n").unwrap()
+    table :: RefSpec.SourceTable.from_decls([("mine", "path:{repo.display()}", RefSpec.ProviderKind.Core)])
+    spec :: RefSpec.classify_in("escape@mine", &table).unwrap()
+    roots :: Store.Roots.at(root.clone()); store :: roots.hangar_dir()
+    ctx :: Provider.Ctx { fixtures: None, store_dir: &store, offline: false, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false }
+    previous :: std.env.var_os("JETPACK_FAKE_SANDBOX"); std.env.set_var("JETPACK_FAKE_SANDBOX", "unavailable")
+    result :: Store.realize_verified(&roots, &ctx, Store.RealizeRequest.Package { spec: &spec, table: &table })
+    if previous == Val(value) { std.env.set_var("JETPACK_FAKE_SANDBOX", value) } else { std.env.remove_var("JETPACK_FAKE_SANDBOX") }
+    error :: if result == {
+        .Ok(_) -> panic("an unavailable build sandbox must refuse Core Cargo")
+        .Err(error) -> error
+    }
+    assert("{error:?}".contains("SandboxUnavailable"), "{error:?}")
+    assert(!marker.exists(), "Cargo build.rs ran without the sandbox")
+    assert(Store.list(&roots).is_empty())
+    _ :: fs.remove_dir_all(base).ok()
+}
+// Rust: tests/build_sandbox.rs:1573
+#Test("core_cargo_build_is_private_and_not_published_to_shared_cache") {
+    if target.selected_os() == "linux" {
+        _sandbox_guard :: sandbox_test_lock()
+        base :: scratch("core-cargo-private"); repo :: base.join("repo"); root :: base.join("root"); mirror :: base.join("mirror")
+        fs.create_dir_all(&repo).unwrap(); fs.create_dir_all(&mirror).unwrap()
+        fs.write(repo.join("package.jet"), "name: \"private\"\nversion: \"0.1.0\"\npackages: { private: library }\n").unwrap()
+        fs.write(repo.join("lib.rs"), "pub fn value() -> u8 { 1 }\n").unwrap()
+        fs.write(repo.join("Cargo.toml"), "[package]\nname = \"private\"\nversion = \"0.1.0\"\n[lib]\npath = \"lib.rs\"\n").unwrap()
+        fs.write(repo.join("Cargo.lock"), "# This file is automatically @generated by Cargo.\nversion = 3\n\n[[package]]\nname = \"private\"\nversion = \"0.1.0\"\n\n").unwrap()
+        table :: RefSpec.SourceTable.from_decls([("mine", "path:{repo.display()}", RefSpec.ProviderKind.Core)])
+        spec :: RefSpec.classify_in("private@mine", &table).unwrap()
+        roots :: Store.Roots.at(root.clone())
+        Store.bind_cache(&roots, "public", [mirror.display().to_string()], None, None, true).unwrap()
+        store :: roots.hangar_dir()
+        ctx :: Provider.Ctx { fixtures: None, store_dir: &store, offline: false, project_dir: None, nix_index: None, nix_roots: None, allow_local_nix_catalog: false }
+        realized :: Store.realize_verified(&roots, &ctx, Store.RealizeRequest.Package { spec: &spec, table: &table }).expect("native Core Cargo build should produce a private lease")
+        assert_eq(realized.source_state(), Provider.SourceState.Built)
+        assert_eq(realized.consumption_status(), &Store.ConsumptionStatus.Consumable)
+        producer :: Store.ProducerRecord.decode(&realized.metadata().producer_record).unwrap()
+        assert_eq(producer.facts.get("build.trust").map((value) -> value.as_str()), Val("private-untrusted"))
+        assert_eq(producer.plan.facts().get("build.trust").map((value) -> value.as_str()), Val("private-untrusted"))
+        assert(fs.read_dir(&mirror).unwrap().flatten().all((item) -> item.path().extension().and_then((ext) -> ext.to_str()) != Val("narinfo")))
+        drop(^realized)
+        _ :: fs.remove_dir_all(base).ok()
+    }
+}

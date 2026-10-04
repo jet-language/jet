@@ -1,0 +1,42 @@
+use JetFoundation.Devtools.Observation.*
+use JetFoundation.Devtools.EventBody.*
+use JetFoundation.Devtools.Wire.*
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2082
+#Test("envelope_uses_one_canonical_wire_shape_and_payload_is_opt_in") {
+    envelope := JetDevtoolsEnvelope.new("session", U64{10})
+    event :: JetDevtoolsEvent.try_new(U64{11}, "test", .Query("orders", .Fresh, U64{3})) ?? panic(err)
+    _ :: &envelope.push(^event)
+    &envelope.set_selection(Val(JetDevtoolsSelection.new("Queries", Val("orders"))))
+    events := envelope.events()
+    event :: &events.next() ?? panic("event")
+    assert_eq(event.sequence(), U64{1})
+    assert_eq(event.payload_json(), None)
+    assert_eq(envelope.serialize() ?? panic(err), `{"protocol":"jet.devtools.v1","session_id":"session","started_at_ms":10,"events":[{"sequence":1,"timestamp_ms":11,"source":"test","kind":"Query","entity":"orders","fields":{"name":"orders","state":"fresh","footprint":3},"payload":null}],"selection":{"panel_id":"Queries","item_key":"orders"},"cursor":1}`)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2110
+#Test("typed_publication_attaches_opt_in_payload_without_reframing_envelope") {
+    envelope := JetDevtoolsEnvelope.new("game", U64{1})
+    event :: JetDevtoolsEvent.try_new(U64{2}, "game", .Frame("scene", "ready", U64{1})) ?? panic(err)
+    published :: ^event.publish(JetDevtoolsPayload.one("index", .Int(I64{1}))) ?? panic(err)
+    _ :: &envelope.push(^published)
+    json :: envelope.serialize() ?? panic(err)
+    assert(json.contains("\"protocol\":\"jet.devtools.v1\""))
+    assert(json.contains(`"payload":{"fields":{"index":1}}`))
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2134
+#Test("state_ring_returns_the_newest_past_cursor_and_drops_oldest") {
+    ring := JetDevtoolsStateRing.with_capacity(U64{2})
+    loop cursor in [U64]{U64{10}, U64{20}, U64{30}} {
+        snapshot :: JetDevtoolsStateSnapshot.new(cursor,
+            [JetDevtoolsStateEntry]{JetDevtoolsStateEntry.new("cart", "ready", cursor)},
+            [JetDevtoolsStateEntry]{JetDevtoolsStateEntry.new("orders", "fresh", cursor)})
+        &ring.push(^snapshot) ?? panic(err)
+    }
+    assert_eq(ring.at(U64{10}), None)
+    assert_eq((ring.at(U64{25}) ?? panic("snapshot")).cursor, U64{20})
+    assert_eq((ring.store_at(U64{30}) ?? panic("store"))[0].revision, U64{30})
+    assert_eq((ring.query_cache_at(U64{30}) ?? panic("query cache"))[0].key, "orders")
+}

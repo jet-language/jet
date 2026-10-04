@@ -1,0 +1,11 @@
+use jet_foundation.Type
+use jet_sema.Sema.CheckerCore.TypeAssign.is_core_view_generic
+
+// Rust: crates/jet-sema/src/Sema/CheckerCore/type_assign.rs:1722
+#Test("returned_view_generic_recognition_is_exact") {
+    loop name in [String]{"View", "ViewMut"} {
+        assert(is_core_view_generic(.Apply(~name, [Type]{.Int})))
+        assert(!is_core_view_generic(.Named(~name)))
+    }
+    assert(!is_core_view_generic(.Apply("UserView", [Type]{.Int})))
+}

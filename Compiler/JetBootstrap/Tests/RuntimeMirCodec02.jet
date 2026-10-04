@@ -1,0 +1,20 @@
+use JetBootstrap.RuntimeMirCodec.[Body, TypeExpr]
+use JetBootstrap.RuntimeMirCodec02.[parse_definitions, parse_type]
+
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2518
+#Test("source_schema_parser_retains_nested_typed_rows") {
+    definitions := parse_definitions("pub struct Row {{ pub id: Int pub values: [String] pub attrs: [String: ?MirType] }}\npub enum Choice {{ Empty Full(name: String, row: Row) }}").expect("schema parser")
+    assert_eq(definitions.len(), 2)
+    fields := if definitions[0].body == { .Struct(fields) -> fields, _ -> panic("expected struct") }
+    assert_eq(fields[2].ty, "[String: ?MirType]")
+    variants := if definitions[1].body == { .Enum(variants) -> variants, _ -> panic("expected enum") }
+    assert_eq(variants[1].fields.len(), 2)
+    assert_eq(variants[1].fields[1].ty, "Row")
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2537
+#Test("type_parser_distinguishes_optional_list_and_map") {
+    assert_eq(parse_type("?[String: ?MirType]").expect("type"),
+        TypeExpr.Optional(Box.new(TypeExpr.Map(
+            Box.new(TypeExpr.Named("String")),
+            Box.new(TypeExpr.Optional(Box.new(TypeExpr.Named("MIRType"))))))))
+}

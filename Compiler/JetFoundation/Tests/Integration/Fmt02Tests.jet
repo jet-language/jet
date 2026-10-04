@@ -1,0 +1,628 @@
+use jet.[format_source, format_source_with_options]
+use jet.Formatter.[FormatOptions]
+use jet.Compiler.[parse_source]
+use Fmt.[assert_fmt_stable]
+use Fmt02.[assert_fmt_keeps]
+
+// Rust: tests/fmt.rs:1790
+#Test("fmt_concurrency_spellings_that_parse_today") {
+    src := "fn inspect(handle: Task<Int>, group: Group, rx: Receiver<Int>, tx: Sender<Int>) -> TaskFailure {{\n    joined :: handle.join()\n    cancelled :: .Cancelled\n    deadline :: .DeadlineBlown\n    loop value in rx -> tx.send(value)\n    return .Panicked(\"boom\")\n}}\n\nfn open() {{\n    pair :: channel<Int>(capacity: 8)\n    plain :: task {{ 1 }}\n    frozen :: freeze(1)\n    task.group g {{\n        child :: task ^frozen {{ frozen }}\n        child.join() ?? 0\n    }}\n}}\n"
+    once := format_source(src).expect("parseable concurrency spellings should format")
+    loop spelling in ["Task<Int>", "Group", "Receiver<Int>", "Sender<Int>", "TaskFailure", "handle.join()", ".Cancelled", ".DeadlineBlown", "loop value in rx", ".Panicked(\"boom\")", "channel<Int>(capacity: 8)", "plain :: task {{ 1 }}", "freeze(1)", "task ^frozen"] {
+        assert(once.contains(spelling), "fmt dropped {spelling:?}:\n{once}")
+    }
+    assert_eq(once, format_source(once).expect("concurrency spellings should re-format"))
+}
+// Rust: tests/fmt.rs:1839
+#Test("fmt_shield_block_stability") {
+    src := "fn run() {{\n    #Shield {{\n        print(\"committed\")\n    }}\n}}\n"
+    expected := "fn run() {{\n    #Shield {{ print(\"committed\") }}\n}}\n"
+    out := format_source(src).expect("#Shield block should format")
+    assert_eq(out, expected)
+    assert_eq(out, format_source(out).expect("collapsed #Shield block should re-format"))
+}
+// Rust: tests/fmt.rs:1851
+#Test("fmt_shield_block_keeps_comment_and_over_width_multiline") {
+    commented_src := "fn run() {{\n    #Shield {{\n        // keep this comment\n        print(\"committed\")\n    }}\n}}\n"
+    commented_expected := "fn run() {{\n    #Shield {{\n        // keep this comment\n        print(\"committed\")\n    }}\n}}\n"
+    commented := format_source(commented_src).expect("commented #Shield block should format")
+    assert_eq(commented, commented_expected)
+    body := "x".repeat(80)
+    wide_src := "fn run() {{\n    #Shield {{\n        print(\"" + body + "\")\n    }}\n}}\n"
+    wide_expected := "fn run() {{\n    #Shield {{\n        print(\"" + body + "\")\n    }}\n}}\n"
+    wide := format_source(wide_src).expect("over-width #Shield block should format")
+    assert_eq(wide, wide_expected)
+    assert_eq(wide, format_source(wide).expect("over-width #Shield block should re-format"))
+}
+// Rust: tests/fmt.rs:1875
+#Test("fmt_preserves_single_line_if") {
+    src := "fn run() {{\n    ready :: true\n    if ready -> launch()\n}}\n"
+    assert_fmt_stable(src, "single-line if")
+}
+// Rust: tests/fmt.rs:1882
+#Test("fmt_preserves_multiline_if") {
+    src := "fn run() {{\n    ready :: true\n    if ready {{\n        launch()\n    }}\n}}\n"
+    expected := "fn run() {{\n    ready :: true\n    if ready -> launch()\n}}\n"
+    out := format_source(src).expect("multiline if should format")
+    assert_eq(out, expected)
+    assert_eq(out, format_source(out).expect("collapsed if should reformat"))
+}
+// Rust: tests/fmt.rs:1894
+#Test("fmt_classic_if_ignores_braces_inside_leading_trivia") {
+    src := "fn run() {{\n    ready :: true\n    if /* {{ trivia */ ready {{ launch() }}\n}}\n"
+    out := format_source(src).expect("commented classic if should format")
+    expected := "fn run() {{\n    ready :: true\n    if /* {{ trivia */ ready -> launch()\n}}\n"
+    assert_eq(out, expected)
+    assert_eq(out, format_source(out).expect("commented classic if should reformat"))
+}
+// Rust: tests/fmt.rs:1906
+#Test("fmt_classic_if_does_not_mix_braced_then_with_arrow_else") {
+    source := "fn run() {{\n    if flag {{\n        print(\"then-a\")\n        print(\"then-b\")\n    }} else {{\n        print(\"else-only\")\n    }}\n}}\n"
+    once := format_source_with_options(source, FormatOptions{simplify: true}).expect("mixed if/else should format")
+    assert(!once.contains("}} else ->"), "braced then-branch must not pair with an arrow else:\n{once}")
+    assert(once.contains("}} else {{") || once.contains("else {{"), "else should stay a braced body:\n{once}")
+}
+// Rust: tests/fmt.rs:1931
+#Test("fmt_if_else_chain_collapses_when_every_branch_fits") {
+    src := "fn run() {{\n    if a {{ x() }} else {{\n        y()\n    }}\n}}\n"
+    out := format_source(src).expect("fmt should accept the mixed chain")
+    assert_eq(out, "fn run() {{\n    if a -> x() else -> y()\n}}\n", "fitting if/else branches should collapse, got:\n{out}")
+    twice := format_source(out).expect("collapsed chain should re-fmt")
+    assert_eq(out, twice, "collapsed chain must be idempotent")
+}
+// Rust: tests/fmt.rs:1943
+#Test("fmt_single_line_comment_forces_expand") {
+    src := "fn run() {{\n    if ready {{ launch() /* go */ }}\n}}\n"
+    out := format_source(src).expect("fmt should accept the commented body")
+    assert(out.contains("if ready {{\n"), "inner comment should force expansion, got:\n{out}")
+    twice := format_source(out).expect("expanded body should re-fmt")
+    assert_eq(out, twice, "comment-forced expansion must be idempotent")
+}
+// Rust: tests/fmt.rs:1956
+#Test("fmt_single_line_over_width_forces_expand") {
+    long := "x".repeat(120)
+    src := "fn run() {{\n    if ready {{ print(\"" + long + "\") }}\n}}\n"
+    out := format_source(src).expect("fmt should accept the wide body")
+    assert(out.contains("if ready {{\n"), "over-width body should expand, got:\n{out}")
+    twice := format_source(out).expect("expanded wide body should re-fmt")
+    assert_eq(out, twice, "over-width expansion must be idempotent")
+}
+// Rust: tests/fmt.rs:1970
+#Test("fmt_single_line_nested_forces_expand") {
+    src := "fn run() {{\n    if a {{ if b {{ x() }} }}\n}}\n"
+    out := format_source(src).expect("fmt should accept the nested if")
+    assert(out.contains("if a {{\n"), "outer body should expand around a nested block, got:\n{out}")
+    assert(out.contains("if b -> x()"), "inner single-line if should survive as an arrow, got:\n{out}")
+    twice := format_source(out).expect("nested output should re-fmt")
+    assert_eq(out, twice, "nested expansion must be idempotent")
+}
+// Rust: tests/fmt.rs:1989
+#Test("fmt_preserves_single_line_loops_and_fn") {
+    assert_fmt_stable("fn run() {{\n    n :: 0\n    loop n < 3 -> n += 1\n}}\n", "single-line while/loop")
+    assert_fmt_stable("fn run() {{\n    loop -> break\n}}\n", "single-line infinite loop")
+    assert_fmt_stable("fn run() {{\n    loop i := 0, i < 3 -> i += 1\n}}\n", "single-line state loop")
+    assert_fmt_stable("fn run() {{\n    loop i in 0..3 -> print(\"{{i}}\")\n}}\n", "single-line for/loop")
+    assert_fmt_stable("fn run() {{\n    loop i in 0..<3 -> print(\"{{i}}\")\n}}\n", "exclusive range loop")
+    assert_fmt_stable("fn run() {{\n    loop (i, x) in xs -> print(\"{{i}}\")\n}}\n", "list two-binding loop")
+    assert_fmt_stable("fn one() -> Int {{ 1 }}\n", "single-line fn body")
+    retired_fn := format_source("fn one() => Int = 1\n").expect("retired fn body should be fixable")
+    assert(retired_fn.contains("fn one() -> Int {{ 1 }}"), "{retired_fn}")
+    assert_fmt_stable("fn noop() {{}}\n", "empty single-line fn body")
+}
+// Rust: tests/fmt.rs:2019
+#Test("fmt_preserves_single_line_if_expr_branch") {
+    src := "fn run() {{\n    a :: true\n    n :: if a -> 1 else -> 2\n    print(\"{{n}}\")\n}}\n"
+    assert_fmt_stable(src, "single-line if-expression")
+}
+// Rust: tests/fmt.rs:2026
+#Test("fmt_compact_result_handler_is_one_line_when_it_fits") {
+    src := "fn pick(value: Int String!) -> String {{ value ? ok -> ok ! error -> error }}\n"
+    out := format_source(src).expect("compact Result handler should format")
+    assert(out.contains("value ? ok -> ok ! error -> error"), "fitting handler should stay on one line:\n{out}")
+    assert_eq(out, format_source(out).expect("compact handler should be idempotent"))
+}
+// Rust: tests/fmt.rs:2040
+#Test("fmt_compact_result_handler_expands_long_branches_deterministically") {
+    long_ok := "ok_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz"
+    long_err := "error_value_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz_abcdefghijklmnopqrstuvwxyz"
+    src := "fn pick(value: Int String!) -> String {{ value ? ok -> " + long_ok + " ! error -> " + long_err + " }}\n"
+    out := format_source(src).expect("long Result handler should format")
+    assert(out.contains("\n! error ->"), "long handler should use the two-arm layout:\n{out}")
+    assert(out.contains("-> {{"), "expanded handler arms need canonical arrow spacing:\n{out}")
+    assert(!out.contains("->{{"), "expanded handler arms must not join the arrow and brace:\n{out}")
+    assert_eq(out, format_source(out).expect("expanded handler should be idempotent"))
+}
+// Rust: tests/fmt.rs:2067
+#Test("fmt_result_handler_expands_blocked_nested_and_commented_branches") {
+    blocked := "fn pick(value: Int String!) -> String {{ value ? ok -> {{\n    saved :: ok\n    saved\n}} ! error -> {{\n    saved_error :: error\n    saved_error\n}} }}\n"
+    nested := "fn pick(value: Int String!) -> Int {{ value ? ok -> value ? inner -> inner ! inner_error -> inner_error ! error -> 0 }}\n"
+    nested_if := "fn pick(value: Int String!) -> Int {{ value ? ok -> if ready -> 1 else -> 2 ! error -> 0 }}\n"
+    commented := "fn pick(value: Int String!) -> String {{ value ? ok -> ok /* keep this branch readable */ ! error -> error }}\n"
+    commented_failure := "fn pick(value: Int String!) -> String {{ value ? ok -> ok ! error -> error /* keep failure readable */ }}\n"
+    loop (source, label) in [(blocked, "blocked"), (nested, "nested"), (nested_if, "nested if"), (commented, "commented"), (commented_failure, "commented failure")] {
+        out := format_source(source).expect("Result handler should format")
+        assert(out.contains("\n! error ->"), "{label} handler should use the deterministic two-arm layout:\n{out}")
+        assert(out.contains("-> {{"), "{label} handler arms need canonical arrow spacing:\n{out}")
+        assert(!out.contains("->{{"), "{label} handler arms must not join the arrow and brace:\n{out}")
+        if label == "commented" {
+            assert(out.contains("ok  /* keep this branch readable */"), "comment must remain attached to its branch:\n{out}")
+        }
+        if label == "commented failure" {
+            assert(out.contains("error  /* keep failure readable */"), "failure comment must remain attached to its branch:\n{out}")
+        }
+        assert_eq(out, format_source(out).expect("expanded handler should be idempotent"), "{label} handler formatting should be stable")
+    }
+}
+// Rust: tests/fmt.rs:2144
+#Test("fmt_nested_enum_groups_stability") {
+    src := "enum Damage {{\n    Physical {{ Blunt, Pierce }}\n    Fire {{ Burn, Scald }}\n    Cold\n}}\n\nfn run() {{\n    d := Damage.Fire.Burn\n    if d == {{\n        .Physical -> {{ print(\"physical\") }}\n        .Fire -> {{ print(\"fire\") }}\n        .Cold -> {{ print(\"cold\") }}\n    }}\n}}\n"
+    assert_fmt_keeps(src, ["Physical {{", "Blunt", "Pierce", ".Fire ->", "Fire {{"], "nested enum variant groups (D-TAG1)")
+}
+// Rust: tests/fmt.rs:2169
+#Test("fmt_keeps_codable_and_field_rename_and_turbofish") {
+    src := "#Codable\nstruct Order {{\n    id: Int\n    #Rename(\"customer\") who: String\n}}\n\nfn run() {{\n    raw :: \"x\"\n    back :: json.decode<Order>(raw) ?? panic(\"bad\")\n    print(back.who)\n}}\n"
+    assert_fmt_keeps(src, ["#Codable", "#Rename(\"customer\")", "decode<Order>"], "codable + rename + turbofish")
+}
+// Rust: tests/fmt.rs:2194
+#Test("fmt_rewrites_marker_stacking_to_one_shape_and_is_stable") {
+    single := format_source("#[Codable]\nstruct Invoice {{ id: Int }}\n").expect("fmt should recover a single-item marker list")
+    assert(single.contains("#Codable\nstruct Invoice"), "fmt must remove brackets around one marker:\n{single}")
+    single_twice := format_source(single).expect("canonical single marker should parse")
+    assert_eq(single, single_twice, "single-marker rewrite must be stable")
+    stacked := format_source("#Job #Every(5min) fn prune() {{\n}}\n").expect("fmt should recover a bare marker stack")
+    assert(stacked.contains("#[Job, Every(5min)] fn prune"), "fmt must combine a bare stack into one marker list:\n{stacked}")
+    stacked_twice := format_source(stacked).expect("canonical marker list should parse")
+    assert_eq(stacked, stacked_twice, "marker-list rewrite must be stable")
+}
+// Rust: tests/fmt.rs:2215
+#Test("fmt_preserves_memo_bound_marker") {
+    src := "#Memo(bound: none) fn cube(value: Int) -[]> Int {{ value * value * value }}\n\nfn run() {{}}\n"
+    assert_fmt_stable(src, "#Memo(bound: none) marker")
+}
+// Rust: tests/fmt.rs:2222
+#Test("fmt_keeps_cli_doc_and_default_field_markers") {
+    src := "#CLI\nstruct ServeArgs {{\n    #[Doc(\"port to listen on\")] port: Int{{3000}}\n    #Doc(\"print extra detail\") verbose: Bool\n}}\n\nfn run(args: ServeArgs) {{\n    print(args.port)\n    print(args.verbose)\n}}\n"
+    assert_fmt_keeps(src, ["#Doc(\"port to listen on\")", "port: Int{{3000}}", "#CLI"], "cli #Doc + field = default")
+    assert_fmt_stable(src, "cli doc/default field markers")
+}
+// Rust: tests/fmt.rs:2245
+#Test("fmt_keeps_cli_command_bindings") {
+    src := "#CLI\nstruct Commands {{\n    #Doc(\"preview changes\") plan = plan_impl\n\n    fn serve(self) {{}}\n}}\n\nfn plan_impl(args: Commands) {{}}\nfn run(args: Commands) {{}}\n"
+    assert_fmt_keeps(src, ["#Doc(\"preview changes\")", "plan = plan_impl", "#CLI"], "cli command binding")
+    assert_fmt_stable(src, "cli command binding")
+}
+// Rust: tests/fmt.rs:2266
+#Test("fmt_keeps_container_rename_all") {
+    src := "#[Codable, RenameAll(camel)]\nstruct Person {{\n    full_name: String\n}}\n"
+    assert_fmt_keeps(src, ["#[Codable, RenameAll(camel)]"], "container RenameAll")
+}
+// Rust: tests/fmt.rs:2282
+#Test("fmt_keeps_layout_columnar_and_codable") {
+    src := "#[Codable, Layout(columnar)]\nstruct Particle {{\n    x: Float\n}}\n"
+    assert_fmt_keeps(src, ["#[Codable, Layout(columnar)]"], "layout columnar + codable")
+    out := format_source(src).unwrap()
+    assert(!out.contains("derive Encode"), "no leaked body derive:\n{out}")
+    assert(!out.contains("derive Decode"), "no leaked body derive:\n{out}")
+}
+// Rust: tests/fmt.rs:2309
+#Test("fmt_stable_at_marked_fn_and_struct") {
+    fn_src := "fn double(n: Int) -[]> Int {{\n    return (n * 2)\n}}\n"
+    assert_fmt_stable(fn_src, "#Pure fn round-trip")
+    struct_src := "#[Codable, Layout(columnar)]\nstruct Particle {{\n    x: Float\n}}\n"
+    assert_fmt_stable(struct_src, "#Codable + #Layout struct round-trip")
+}
+// Rust: tests/fmt.rs:2330
+#Test("fmt_stable_effect_arrows") {
+    src := "fn load(path: String) -[FS.Read, ..E]> String {{\n    return path\n}}\n\nfn visit(callback: fn(Int) -[IO]>) -[via callback]> {{\n    callback(1)\n}}\n\n// `-[]>` replaces the retired `#Pure` marker without moving this comment.\nfn hash(n: Int) -[]> Int {{\n    return n\n}}\n"
+    assert_fmt_stable(src, "D-SHAPE8 effect arrows")
+}
+// Rust: tests/fmt.rs:2349
+#Test("fmt_keeps_single_use_marker") {
+    src := "#SingleUse struct Lock {{\n    resource: String\n}}\n"
+    assert_fmt_keeps(src, ["#SingleUse struct Lock"], "single-use struct")
+}
+// Rust: tests/fmt.rs:2359
+#Test("fmt_keeps_layout_c_struct") {
+    src := "#Layout(c)\nstruct Header {{\n    magic: Int\n}}\n"
+    assert_fmt_keeps(src, ["#Layout(c)"], "layout c struct")
+}
+// Rust: tests/fmt.rs:2370
+#Test("fmt_rejects_retired_body_derive_line") {
+    src := "struct Score {{\n    points: Int\n\n    derive Comparable\n}}\n"
+    assert(format_source(src).is_err())
+}
+// Rust: tests/fmt.rs:2383
+#Test("fmt_keeps_enum_variant_rename_and_tag") {
+    src := "#[Codable, Discriminant(\"type\")]\nenum Shape {{\n    #Rename(\"circle\") Circle(Float)\n    Square(Float)\n}}\n"
+    assert_fmt_keeps(src, ["#[Codable, Discriminant(\"type\")]", "#Rename(\"circle\")"], "enum tag + variant rename")
+}
+// Rust: tests/fmt.rs:2400
+#Test("fmt_keeps_replayable_marker") {
+    src := "#Replayable fn replay_turn(seed: Int) -> Int {{\n    return seed + 1\n}}\n"
+    assert_fmt_keeps(src, ["#Replayable fn replay_turn"], "replayable fn")
+}
+// Rust: tests/fmt.rs:2410
+#Test("fmt_keeps_typestate_markers") {
+    src := "struct Reservation {{\n    state {{ Pending, Confirmed }}\n    guest: String\n\n    #Transition(_, Pending) fn book(guest: String) -> Reservation {{\n        return Reservation{{guest: ~guest}}\n    }}\n\n    #Transition(Pending, Confirmed) fn pay(self: ^Reservation) -> Reservation {{\n        return self\n    }}\n\n    #State(Confirmed) fn check_in(self) {{\n        print(self.guest)\n    }}\n}}\n"
+    assert_fmt_keeps(src, ["#Transition(_, Pending)", "#Transition(Pending, Confirmed)", "#State(Confirmed)"], "typestate markers")
+}
+// Rust: tests/fmt.rs:2444
+#Test("fmt_box_drawing_comment_does_not_panic") {
+    src := "fn run() {{\n    x :: foo()\n        // │┌└─\n        .bar()\n    print(x)\n}}\n"
+    out := format_source(src).expect("fmt should not panic on box-drawing comments")
+    assert(out.contains('┌') && out.contains('│'), "box glyphs dropped:\n{out}")
+    twice := format_source(out).expect("box-drawing fmt must re-fmt")
+    assert_eq(out, twice, "box-drawing fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:2463
+#Test("fmt_impure_block_round_trips") {
+    src := "fn run() {{\n    #Impure(\"reading build config\") {{\n        print(\"inside\")\n    }}\n}}\n"
+    expected := "fn run() {{\n    #Impure(\"reading build config\") {{ print(\"inside\") }}\n}}\n"
+    out := format_source(src).expect("fmt should succeed on #Impure block")
+    assert_eq(out, expected)
+    assert_eq(out, format_source(out).expect("#Impure fmt must re-fmt"))
+}
+// Rust: tests/fmt.rs:2474
+#Test("fmt_impure_block_no_reason_round_trips") {
+    src := "fn run() {{\n    #Impure {{\n        print(\"inside\")\n    }}\n}}\n"
+    out := format_source(src).expect("fmt should succeed on #Impure block without reason")
+    assert(out.contains("#Impure {{") || out.contains("#Impure{{"), "#Impure block without reason dropped by fmt:\n{out}")
+    twice := format_source(out).expect("#Impure (no reason) fmt must re-fmt")
+    assert_eq(out, twice, "#Impure (no reason) fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:2488
+#Test("fmt_unsafe_reasons_escape_strings") {
+    src := "use core.mem\n\n#Unsafe(\"caller says \\\"ok\\\"\") fn raw() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    #Unsafe(\"path C:\\\\tmp\") {{\n        print(\"{{raw()}}\")\n    }}\n}}\n"
+    out := format_source(src).expect("fmt should succeed on unsafe reasons")
+    assert(out.contains("#Unsafe(\"caller says \\\"ok\\\"\")") && out.contains("#Unsafe(\"path C:\\\\tmp\")"), "unsafe reason escaping broke:\n{out}")
+    twice := format_source(out).expect("unsafe reason fmt must re-fmt")
+    assert_eq(out, twice, "unsafe reason fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:2503
+#Test("fmt_keeps_parens_around_binary_receiver") {
+    src := "fn run() {{\n    c :: (1 + 2).to_string()\n    d :: (1 + 2) * 3\n    print(c)\n    print(d)\n}}\n"
+    out := format_source(src).expect("fmt should succeed")
+    assert(out.contains("(1 + 2).to_string()"), "parens around binary method receiver dropped:\n{out}")
+    assert(out.contains("(1 + 2) * 3"), "parens around lower-prec binary operand dropped:\n{out}")
+    plain := format_source("fn run() {{\n    a :: 1 + 2 * 3\n    print(a)\n}}\n").unwrap()
+    assert(plain.contains("a :: 1 + 2 * 3"), "added spurious parens:\n{plain}")
+    twice := format_source(out).expect("paren fmt must re-fmt")
+    assert_eq(out, twice, "paren fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:2528
+#Test("fmt_prep_block_is_idempotent") {
+    src := "LIMIT :: prep {{ 1000 }}\n\nfn run() {{\n    prep {{\n        ratio :: LIMIT / 10\n        if ratio < 1 {{ panic(\"bad\") }}\n    }}\n    print(\"ok\")\n}}\n"
+    out := format_source(src).expect("fmt should accept a prep block")
+    assert(out.contains("    prep {{\n"), "prep block head + open brace must survive fmt, got:\n{out}")
+    twice := format_source(out).expect("second fmt should succeed")
+    assert_eq(out, twice, "comptime block formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:2551
+#Test("fmt_dot_construction_d_dotctor1") {
+    named := "struct Pt {{\n    x: Int\n    y: Int\n}}\n\nfn run() {{\n    p :: Pt{{ x: 1, y: 2 }}\n    print(\"{{p.x}}\")\n}}\n"
+    out_named := format_source(named).expect("fmt should accept named Pt construction")
+    assert(out_named.contains("Pt{{"), "named head Pt{{ must survive fmt, got:\n{out_named}")
+    assert(!out_named.contains("Pt.{{"), "fmt must not regress to dotted construction form, got:\n{out_named}")
+    twice_named := format_source(out_named).expect("named form must re-fmt")
+    assert_eq(out_named, twice_named, "named form must be fmt-idempotent")
+    old := "struct Pt {{\n    x: Int\n    y: Int\n}}\n\nfn run() {{\n    p :: Pt.{{ x: 1, y: 2 }}\n    print(\"{{p.x}}\")\n}}\n"
+    out_old := format_source(old).expect("fmt should recover retired dotted form")
+    assert(out_old.contains("Pt{{"), "retired dotted form must auto-fix to Pt{{, got:\n{out_old}")
+    assert(!out_old.contains("Pt.{{"), "dotted construction form must not survive fmt, got:\n{out_old}")
+    twice_old := format_source(out_old).expect("fixed form must re-fmt")
+    assert_eq(out_old, twice_old, "fixed form must be fmt-idempotent")
+}
+// Rust: tests/fmt.rs:2585
+#Test("fmt_inferred_new_stability") {
+    src := "struct Box<T> {{\n    value: T\n}}\n\nimpl Box {{\n    fn new(value: ^T) -> Box<T> {{\n        return Box<T>{{ value: value }}\n    }}\n}}\n\nfn run() {{\n    inferred :: Box.new(1)\n    explicit :: Box<Int>.new(2)\n    expected :: Box<Int>.new(3)\n}}\n"
+    out := format_source(src).expect("fmt should accept `.new(...)`")
+    loop spelling in ["Box.new(1)", "Box<Int>.new(2)", ".new(3)"] {
+        assert(out.contains(spelling), "formatter lost `{spelling}`:\n{out}")
+    }
+    assert_eq(out, format_source(out).expect("second fmt"))
+}
+// Rust: tests/fmt.rs:2598
+#Test("fmt_enum_dot_pattern_stability") {
+    dot_src := "enum Shape {{\n    Circle(Float)\n    Square(Float)\n    Empty\n}}\n\nfn describe(s: Shape) -> String {{\n    if s == {{\n        .Circle(r) -> {{ return \"circle:{{r}}\" }}\n        .Square(side) -> {{ return \"square:{{side}}\" }}\n        .Empty -> {{ return \"empty\" }}\n    }}\n    return \"?\"\n}}\n\nfn run() {{\n    print(describe(Shape.Circle(2.0)))\n    print(describe(Shape.Empty))\n}}\n"
+    assert_fmt_keeps(dot_src, [".Circle(r)", ".Square(side)", ".Empty"], "dot-variant patterns in if-dispatch arms")
+    bare_src := "enum Shape {{\n    Circle(Float)\n    Square(Float)\n}}\n\nfn area(s: Shape) -> Float {{\n    if s == {{\n        Circle(r) -> {{ return r * r }}\n        Square(side) -> {{ return side * side }}\n    }}\n    return 0.0\n}}\n\nfn run() {{\n    print(area(Shape.Circle(3.0)))\n}}\n"
+    out := format_source(bare_src).expect("fmt should accept bare variant patterns")
+    assert(out.contains(".Circle(r)"), "bare payload variant in if-dispatch arm must gain leading dot, got:\n{out}")
+    assert(out.contains(".Square(side)"), "bare payload variant `Square(side)` must gain leading dot, got:\n{out}")
+    twice := format_source(out).expect("second fmt of dot-form must succeed")
+    assert_eq(out, twice, "dot-form variant patterns must be fmt-idempotent")
+}
+// Rust: tests/fmt.rs:2667
+#Test("fmt_comptime_splice_stability") {
+    src := "derive T.Debug {{\n    fn tag(self) -> String {{ \"ok\" }}\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n"
+    once := format_source(src).expect("fmt should accept a typed derive body")
+    twice := format_source(once).expect("second fmt should succeed")
+    assert_eq(once, twice, "typed derive body must be fmt-idempotent")
+    splice_src := "derive T.Named {{\n    tname :: \"test\"\n    x :: $tname\n    fn $tname(self) -> String {{ $tname }}\n}}\n\nfn run() {{}}\n"
+    splice_once := format_source(splice_src).expect("fmt should accept $name splice")
+    assert(splice_once.contains("x :: $tname") && splice_once.contains("fn $tname(self)"), "`$tname` splice must survive fmt, got:\n{splice_once}")
+    splice_twice := format_source(splice_once).expect("$name fmt must be idempotent")
+    assert_eq(splice_once, splice_twice, "`$name` splice must be fmt-idempotent")
+}
+// Rust: tests/fmt.rs:2692
+#Test("fmt_layout_compiler_fact_and_field_selector_stability") {
+    src := "derive T.LayoutFacts {{\n    info :: T.$layout\n    selected :: info[.count]\n    full :: T.reflect().layout\n}}\n\nfn run() {{}}\n"
+    once := format_source(src).expect("layout compiler fact should parse")
+    assert(once.contains("T.$layout"), "fact spelling was lost:\n{once}")
+    assert(once.contains("info[.count]"), "typed selector spelling was lost:\n{once}")
+    assert(once.contains("T.reflect().layout"), "reflection projection was lost:\n{once}")
+    twice := format_source(once).expect("formatted layout fact should parse")
+    assert_eq(once, twice, "layout fact formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:2712
+#Test("fmt_origin_compiler_fact_stability") {
+    src := "fn run() {{\n    #Track speed :: 3.5\n    speed_origin :: prep {{ speed.$origin }}\n}}\n"
+    once := format_source(src).expect("origin compiler fact should parse")
+    assert(once.contains("speed.$origin"), "fact spelling was lost:\n{once}")
+    twice := format_source(once).expect("formatted origin fact should parse")
+    assert_eq(once, twice, "origin fact formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:2724
+#Test("layout_compiler_fact_rejects_unknown_and_user_owned_at_members") {
+    parsed := parse_source("derive T.LayoutFacts {{ info :: T.$unknown }}\nfn run() {{}}\n")
+    unknown := parsed.diagnostics.iter().find(diagnostic -> diagnostic.code == "E0302").expect("unknown compiler fact should have a registered diagnostic")
+    assert(unknown.message.contains("$unknown"), "{unknown:?}")
+    assert(unknown.fix.contains("$layout"), "{unknown:?}")
+    user_member := parse_source("struct Bad {{ @layout: Int }}\nfn run() {{}}\n")
+    assert(user_member.diagnostics.iter().any(diagnostic -> diagnostic.code == "E0003"), "user declarations must not claim the compiler-owned @ member: {user_member.diagnostics:?}")
+}
+// Rust: tests/fmt.rs:2747
+#Test("fmt_impl_dot_trait_stability") {
+    src := "trait Greet {{\n    fn hello(self) -> String\n}}\n\nstruct Foo {{}}\n\nimpl Foo.Greet {{\n    fn hello(self) -> String {{\n        return \"hi\"\n    }}\n}}\n"
+    assert_fmt_keeps(src, ["impl Foo.Greet"], "impl dot trait")
+    once := format_source(src).expect("fmt should accept impl Type.Trait")
+    twice := format_source(once).expect("second fmt of impl Type.Trait must succeed")
+    assert_eq(once, twice, "impl Type.Trait must be fmt-idempotent")
+}
+// Rust: tests/fmt.rs:2769
+#Test("fmt_test_paren_name_stability") {
+    src := "fn run() {{}}\n#Test(\"double returns twice\") {{\n    assert_eq(2 * 2, 4)\n}}\n"
+    assert_fmt_keeps(src, ["#Test(\"double returns twice\")"], "test paren name")
+    once := format_source(src).expect("fmt should accept #Test(\"name\")")
+    twice := format_source(once).expect("second fmt of #Test(\"name\") must succeed")
+    assert_eq(once, twice, "#Test(\"name\") must be fmt-idempotent")
+}
+// Rust: tests/fmt.rs:2785
+#Test("fmt_test_measure_member_is_stable") {
+    src := "fn run() {{}}\n#Test(\"measured\") {{\n    .measure {{\n        assert_eq(2 * 2, 4)\n    }}\n}}\n"
+    once := format_source(src).expect("#Test .measure should format")
+    assert(once.contains(".measure"), "formatter dropped .measure: {once}")
+    twice := format_source(once).expect("formatted .measure should reformat")
+    assert_eq(once, twice, "#Test .measure formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:2806
+#Test("fmt_test_faults_stability") {
+    src := "#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic() {{\n    assert(true)\n}}\nfn run() {{}}\n"
+    once := format_source(src).expect("fault-configured test should format")
+    assert(once.contains("#Test(faults: [FS.Write]) fn sqlite_style_fail_nth_effect_loop_is_deterministic()"), "formatter dropped the fault selector: {once}")
+    twice := format_source(once).expect("fault-configured test should reformat")
+    assert_eq(once, twice, "fault-configured Test must be fmt-idempotent")
+}
+// Rust: tests/fmt.rs:2827
+#Test("fmt_scope_members_stability") {
+    src := "fn run() {{\n\n}}\n\n#Test(\"members\") {{\n    .setup {{\n        base :: 1\n    }}\n    .expect_fail {{\n        assert(false)\n    }}\n    .timeout(500ms) {{\n        assert((base == 1))\n    }}\n    .skip(\"later\") {{\n        assert(false)\n    }}\n}}\n"
+    assert_fmt_stable(src, "scope members")
+}
+// Rust: tests/fmt.rs:2856
+#Test("fmt_bare_binding_d_bind_bare1_stability") {
+    src := "fn run() {{\n    x :: 42\n    s := \"hi\"\n    print(\"{{x}} {{s}}\")\n}}\n"
+    assert_fmt_keeps(src, ["x :: 42", "s := \"hi\""], "bare binding")
+    once := format_source(src).expect("fmt should accept bare bindings")
+    twice := format_source(once).expect("second fmt of bare bindings must succeed")
+    assert_eq(once, twice, "bare binding fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:2872
+#Test("fmt_preserves_track_binding_marker") {
+    src := "fn run() {{\n    #Track count :: 1\n    #Track total := 2\n    #Track label :: \"ok\"\n    print(\"{{count}} {{total}} {{label}}\")\n}}\n"
+    assert_fmt_stable(src, "#Track binding marker")
+}
+// Rust: tests/fmt.rs:2885
+#Test("fmt_preserves_local_and_shared_reactive_pins") {
+    src := "use core.reactive as reactive\n\nfn run() {{\n    #Local pending := reactive.signal(0)\n    #Shared shared := reactive.signal(1)\n    print(\"{{pending.get()}} {{shared.get()}}\")\n}}\n"
+    assert_fmt_stable(src, "#Local/#Shared reactive pins")
+}
+// Rust: tests/fmt.rs:2899
+#Test("fmt_write_sigil_d_mem1_stability") {
+    src := "struct Player {{\n    hp: Int\n}}\n\nimpl Player {{\n    fn show(self) -> Int {{ return self.hp }}\n\n    fn heal(&self, amount: Int) {{ self.hp = self.hp + amount }}\n}}\n\nfn damage(p: &Player, amount: Int) {{\n    p.hp = p.hp - amount\n}}\n\nfn archive(p: ^Player) -> Int {{\n    return p.hp\n}}\n\nfn run() {{\n    p := Player{{hp: 100}}\n    damage(&p, 10)\n    p.heal(5)\n    print(archive(^p))\n}}\n"
+    assert_fmt_keeps(src, ["fn heal(&self, amount: Int)", "fn damage(p: &Player, amount: Int)", "fn archive(p: ^Player) -> Int {{", "damage(&p, 10)", "archive(^p)"], "D-MEM1 write sigil")
+}
+// Rust: tests/fmt.rs:2943
+#Test("fmt_memory_denial_d_authority_mem1_stability") {
+    src := "fn run() -[!Mem.Alloc]> {{\n    print(\"ok\")\n}}\n"
+    assert_fmt_keeps(src, ["fn run() -[!Mem.Alloc]>"], "D-AUTHORITY-MEM1 effect denial")
+}
+// Rust: tests/fmt.rs:2958
+#Test("fmt_copies_policy_d_mem_copysem1_stability") {
+    src := "#Policy(copies: .Explicit)\n\nfn run() {{\n    print(\"ok\")\n}}\n"
+    assert_fmt_keeps(src, ["#Policy(copies: .Explicit)"], "D-MEM-COPYSEM1 copies policy")
+}
+// Rust: tests/fmt.rs:2974
+#Test("fmt_copy_sigil_d_shape_copy1_stability") {
+    src := "struct Ticket {{\n    id: Int\n    label: String\n}}\n\nfn archive(t: ^Ticket) -> String {{\n    return t.label\n}}\n\nfn run() {{\n    name :: \"vault\"\n    saved :: ~name\n    t :: Ticket{{id: 1, label: \"root\"}}\n    print(archive(~t))\n    print(~t.label)\n}}\n"
+    assert_fmt_keeps(src, ["saved :: ~name", "print(archive(~t))", "print(~t.label)"], "D-SHAPE-COPY1 copy sigil")
+}
+// Rust: tests/fmt.rs:3004
+#Test("fmt_loop_label_d_looplabel3_stability") {
+    src := "fn run() {{\n    outer :: loop i in [1, 2] {{\n        loop j in [1, 2] {{\n            if i == j {{\n                value() ?? next(outer)\n                break(outer)\n            }}\n        }}\n    }}\n    print(\"done\")\n}}\n"
+    assert_fmt_keeps(src, ["outer :: loop", "next(outer)", "break(outer)"], "named loop target-argument exits")
+    once := format_source(src).expect("fmt should accept named loop dot exits")
+    twice := format_source(once).expect("second fmt of loop labels must succeed")
+    assert_eq(once, twice, "loop label fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:3030
+#Test("fmt_loop_values_and_yielding_loops_are_idempotent") {
+    src := "fn find(xs: [Int]) -> Int {{\n    found :: loop {{\n        loop x in xs {{\n            if x > 2 {{ break(found, x) }}\n        }}\n        break -1\n    }}\n    found\n}}\n\nfn run() {{\n    xs :: [Int]{{ 1, 2, 3, 4 }}\n    values :: loop x in xs -> {{\n        if x > 3 {{ break }}\n        x * 2\n    }}\n    print(values)\n}}\n"
+    assert_fmt_keeps(src, ["found :: loop", "break(found, x)", "values :: loop x in xs ->"], "loop values")
+    once := format_source(src).expect("fmt should accept loop values")
+    twice := format_source(once).expect("second loop-value fmt should succeed")
+    assert_eq(once, twice, "loop-value fmt must be idempotent")
+    assert(!once.contains("__jet_"), "formatter must hide compiler-generated machine labels: {once}")
+    guard_src := "fn run() {{\n    values :: loop u in users if u.active -> u.name\n}}\n"
+    guard_once := format_source(guard_src).expect("guarded loop should format")
+    assert_eq(guard_once, guard_src, "canonical guard spelling must round-trip byte-for-byte")
+    assert_eq(format_source(guard_once).expect("formatted guarded loop should reformat"), guard_once, "canonical guard formatting must be stable")
+}
+// Rust: tests/fmt.rs:3081
+#Test("fmt_counted_loop_d_loop_semicolon1_stability") {
+    src := "fn run() {{\n    sum := 0\n    loop i in 0..<5 {{\n        sum += i\n    }}\n    print(sum)\n}}\n"
+    assert_fmt_keeps(src, ["loop i in 0..<5"], "range counted loop header")
+    once := format_source(src).expect("fmt should accept range counted loop")
+    twice := format_source(once).expect("second fmt of counted loop must succeed")
+    assert_eq(once, twice, "counted loop fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:3099
+#Test("fmt_unified_loop_headers_and_next_stability") {
+    src := "fn next() -> Int {{ return 7 }}\n\nfn run() {{\n    next()\n    cursor.next()\n    saved :: Int.parse(\"1\") ?? (next)\n    loop item in [1, 2, 3], 2 {{\n        value :: Int.parse(\"1\") ?? next\n        if value == 1 {{ next }}\n    }}\n}}\n"
+    assert_fmt_keeps(src, ["fn next()", "next()", ".next()", "?? (next)", "loop item in [1, 2, 3], 2", "?? next", "if value == 1 -> next"], "unified loop header")
+    once := format_source(src).expect("fmt should accept unified loop syntax")
+    twice := format_source(once).expect("formatted unified loop must parse")
+    assert_eq(once, twice, "unified loop formatting must be stable")
+    loop retired in ["fn run() {{ loop i in 0..2 step 1 {{}} }}\n", "fn run() {{ loop {{ continue }} }}\n", "fn run() {{ loop i :: 0, true {{}} }}\n", "fn run() {{ loop [i] := [0], true {{}} }}\n", "fn run() {{ loop i := 0 true {{}} }}\n", "fn run() {{ loop i := 0, true, i += 1, i += 2 {{}} }}\n", "fn run() {{ loop i := 0, i < 3, i += 1 {{}} }}\n"] {
+        assert(format_source(retired).is_err(), "retired loop spelling must take the ordinary parse-error path: {retired}")
+    }
+}
+// Rust: tests/fmt.rs:3135
+#Test("control_bodies_use_arrows_when_they_fit") {
+    src := "fn run() {{\n    if true {{\n        print(\"yes\")\n    }}\n    loop false print(\"no\")\n}}\n"
+    once := format_source(src).expect("fmt should recover the retired adjacent loop")
+    assert(once.contains("if true -> print(\"yes\")"), "{once}")
+    assert(once.contains("loop false -> print(\"no\")"), "{once}")
+    twice := format_source(once).expect("formatted controls must parse")
+    assert_eq(once, twice)
+}
+// Rust: tests/fmt.rs:3145
+#Test("effect_control_arrows_format_as_one_statement_bodies") {
+    src := "fn run() {{\n    if true -> print(\"yes\") else -> print(\"no\")\n    loop false -> print(\"again\")\n    loop -> print(\"forever\")\n    loop item in [1, 2] -> print(item)\n    loop i := 0, i < 2 -> i += 1\n}}\n"
+    once := format_source(src).expect("effect control arrows should format")
+    assert(once.contains("if true -> print(\"yes\") else -> print(\"no\")"), "{once}")
+    assert(once.contains("loop false -> print(\"again\")"), "{once}")
+    assert(once.contains("loop -> print(\"forever\")"), "{once}")
+    assert(once.contains("loop item in [1, 2] -> print(item)"), "{once}")
+    assert(once.contains("loop i := 0, i < 2 -> i += 1"), "{once}")
+    assert_eq(once, format_source(once).expect("arrow controls should be stable"))
+}
+// Rust: tests/fmt.rs:3166
+#Test("fmt_preserves_braced_loop_value_drop_and_is_stable") {
+    src := "fn value() -> String {{ \"value\" }}\n\nfn run() {{\n    values := [1, 2]\n    loop v in values {{ value() }}\n}}\n"
+    once := format_source(src).expect("braced value-dropping loop should format")
+    assert(once.contains("loop v in values {{ value() }}"), "{once}")
+    assert(!once.contains("loop v in values ->"), "{once}")
+    assert_eq(once, format_source(once).expect("braced value-dropping loop should reformat"))
+}
+// Rust: tests/fmt.rs:3178
+#Test("fmt_canonicalizes_explicit_drop_to_arrow_loop_body") {
+    src := "fn value() -> String {{ \"value\" }}\n\nfn run() {{\n    values := [1, 2]\n    loop v in values {{ value().drop(\"checked\") }}\n}}\n"
+    once := format_source(src).expect("explicit-drop loop should format")
+    assert(once.contains("loop v in values -> value().drop(\"checked\")"), "{once}")
+    assert_eq(once, format_source(once).expect("explicit-drop arrow loop should reformat"))
+}
+// Rust: tests/fmt.rs:3192
+#Test("loop_headers_use_in_binding_and_comma_clauses") {
+    src := "fn run() {{\n    loop item in [1, 2, 3], 2 {{ print(item) }}\n    loop (key, value) in counts {{ print(key) }}\n    loop i in 0..<3 {{ print(i) }}\n}}\n"
+    once := format_source(src).expect("fmt should accept canonical loop headers")
+    loop expected in ["loop item in [1, 2, 3], 2 {{ print(item) }}", "loop (key, value) in counts {{ print(key) }}", "loop i in 0..<3 {{ print(i) }}"] {
+        assert(once.contains(expected), "missing `{expected}`:\n{once}")
+    }
+    twice := format_source(once).expect("formatted loop headers must parse")
+    assert_eq(once, twice)
+}
+// Rust: tests/fmt.rs:3207
+#Test("fmt_long_loop_headers_wrap_at_clause_boundaries_stability") {
+    src := "fn run() {{\n    loop item in // source clause\n        [1000000000000000000, 2000000000000000000, 3000000000000000000, 4000000000000000000], // stride clause\n        2 {{\n        next\n    }}\n    loop cursor in // start\n        0..<9000000000000000000, // end\n        1000000000000000000 {{\n        print(cursor)\n    }}\n    loop ready := true, ready {{\n        break\n    }}\n}}\n"
+    once := format_source(src).expect("long unified loop headers should format")
+    loop token in ["loop item in", "// source clause", "],", "// stride clause", "loop cursor in", "0..<9000000000000000000,", "1000000000000000000", "loop ready := true, ready {{"] {
+        assert(once.contains(token), "fmt dropped loop token `{token}`:\n{once}")
+    }
+    assert(once.contains("loop cursor in"), "long range header must keep comma clauses:\n{once}")
+    twice := format_source(once).expect("formatted long loop headers must reparse")
+    assert_eq(once, twice, "long loop header formatting must be byte-stable")
+}
+// Rust: tests/fmt.rs:3252
+#Test("fmt_selective_import_d_selimport1_stability") {
+    src := "module math {{\n    pub fn clamp(x: Int, lo: Int, hi: Int) -> Int {{\n        if x < lo {{ return lo }}\n        if x > hi {{ return hi }}\n        return x\n    }}\n}}\n\nuse math.[clamp, clamp as c2]\nuse core.math.[abs as absolute, min]\nuse core.encoding.[json, csv]\nuse c.[raylib as rl, sqlite3]\n\nfn run() {{\n    print(clamp(15, 0, 10))\n    print(c2(5, 0, 3))\n}}\n"
+    assert_fmt_keeps(src, ["use math.[clamp, clamp as c2]", "use core.math.[abs as absolute, min]", "use core.encoding.[json, csv]", "use c.[raylib as rl, sqlite3]"], "selective import with alias")
+    once := format_source(src).expect("fmt should accept selective imports")
+    twice := format_source(once).expect("second fmt of selective imports must succeed")
+    assert_eq(once, twice, "selective import fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:3289
+#Test("fmt_value_tag_type_d_qual4_stability") {
+    src := "fn process(input: #Input String) -> String {{\n    return \"{{input}}-clean\"\n}}\n\nfn run() {{\n    result :: process(\"hello\")\n    print(result)\n}}\n"
+    assert_fmt_keeps(src, ["#Input String"], "value-tag type qualifier")
+    once := format_source(src).expect("fmt should accept value-tag types")
+    twice := format_source(once).expect("second fmt of value-tag types must succeed")
+    assert_eq(once, twice, "value-tag type fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:3308
+#Test("fmt_layout_block_round_trips_byte_for_byte") {
+    src := "fn run() {{\n    form :: Layout{{\n        label.width >= 80.0,\n        label.right + 16.0 == input.left,\n        label.width + 16.0 + input.width == self.width\n    }}\n    w :: form.value(form.h(\"label\", \"width\"))\n    print(w)\n}}\n"
+    out := format_source(src).expect("fmt should accept a `layout` block")
+    assert_eq(out, src, "`layout {{ … }}` must round-trip byte-for-byte, not just idempotently")
+    twice := format_source(out).expect("second fmt of a layout block must succeed")
+    assert_eq(out, twice, "layout block fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:3336
+#Test("fmt_preserves_multiline_lambda_call_arg") {
+    src := "fn twice(f: fn()) {{\n    f()\n    f()\n}}\n\nfn run() {{\n    twice(() -> {{\n        print(\"HI\")\n        print(\"Hello\")\n    }})\n}}\n"
+    assert_fmt_stable(src, "multiline () -> call arg")
+}
+// Rust: tests/fmt.rs:3357
+#Test("fmt_preserves_bare_lambda_params") {
+    src := "fn run() {{\n    nums :: [1, 2, 3, 4, 5]\n    big :: nums.filter(x -> x > 3)\n    explicit :: nums.filter((x) -> x > 3)\n    typed :: nums.filter((n: Int) -> n > 3)\n    print(big)\n    print(explicit)\n    print(typed)\n}}\n"
+    assert_fmt_stable(src, "bare lambda params")
+}
+// Rust: tests/fmt.rs:3375
+#Test("fmt_preserves_destructure_rest") {
+    src := "struct Incident {{\n    id: Int\n    severity: Int\n    title: String\n}}\n\nfn run() {{\n    Incident{{id, severity: sev, ..}} :: Incident{{id: 1, severity: 5, title: \"boom\"}}\n    print(\"{{id}} {{sev}}\")\n}}\n"
+    assert_fmt_stable(src, "destructure rename + rest")
+}
+// Rust: tests/fmt.rs:3395
+#Test("fmt_preserves_struct_pattern_arm_head") {
+    src := "struct Incident {{\n    title: String\n    kind: String\n}}\n\nfn run() {{\n    routed :: Incident{{title: \"database down\", kind: \"page\"}}\n    if routed == {{\n        {{ kind: \"page\", title, .. }} -> print(\"page {{title}}\")\n        else -> print(\"other\")\n    }}\n}}\n"
+    assert_fmt_keeps(src, ["{{kind: \"page\", title, ..}}", "print(\"page {{title}}\")"], "struct-pattern dispatch arm")
+}
+// Rust: tests/fmt.rs:3420
+#Test("fmt_preserves_unit_literal") {
+    src := "fn run() {{\n    a :: 500ms\n    print(a)\n    z :: 4i\n    print(z)\n}}\n"
+    assert_fmt_stable(src, "unit literal")
+}
+// Rust: tests/fmt.rs:3435
+#Test("fmt_preserves_scaled_affine_unit_declaration") {
+    src := "#UnitFamily(Temperature, base: kelvin) {{\n    kelvin\n    celsius(scale: 1, offset: 27315/100)\n}}\n"
+    assert_fmt_stable(src, "scaled affine #UnitFamily declaration")
+}
+// Rust: tests/fmt.rs:3448
+#Test("fmt_preserves_open_dimension_and_scale_provenance") {
+    src := "#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) {{\n    newton\n    standard_gravity(scale: conventional(9.80665, source: \"BIPM-2026\"))\n}}\n"
+    assert_fmt_stable(src, "open dimension and scale provenance")
+}
+// Rust: tests/fmt.rs:3458
+#Test("fmt_preserves_rounded_unit_conversion_contract") {
+    src := "#UnitFamily(Length, base: meter) {{\n    meter\n    half(scale: 1/2)\n}}\n\nfn run() {{\n    source :: 5half\n    Meter.from_half_rounded(source, .TowardZero, digits: 0).drop(\"mode\")\n    Meter.from_half_rounded(source, .Floor, digits: 1).drop(\"mode\")\n    Meter.from_half_rounded(source, .Ceiling, digits: 2).drop(\"mode\")\n    Meter.from_half_rounded(source, .NearestEven, digits: 3).drop(\"mode\")\n}}\n"
+    assert_fmt_stable(src, "D-QUANTITY-CONVERT1 rounded conversion")
+}
+// Rust: tests/fmt.rs:3476
+#Test("fmt_preserves_range_constraint") {
+    src := "Severity :: distinct Int(0..10)\n\nfn run() {{\n    sev :: Severity.from_int(3)\n    print(\"{{sev.raw()}}\")\n}}\n"
+    assert_fmt_stable(src, "range constraint")
+}
+// Rust: tests/fmt.rs:3493
+#Test("fmt_preserves_inline_range_in_type_positions") {
+    src := "struct Brightness {{\n    level: Int(0..100)\n}}\n\nfn set_brightness(level: Int(0..100)) -> Int(0..100) {{\n    return level\n}}\n\nfn run() {{\n    value :: Int(0..100).from_int(12)\n    print(\"{{set_brightness(value)}}\")\n}}\n"
+    assert_fmt_keeps(src, ["level: Int(0..100)", "Int(0..100) {{", "Int(0..100).from_int(12)"], "inline range type positions")
+}
+// Rust: tests/fmt.rs:3522
+#Test("fmt_preserves_parse_pattern") {
+    src := "fn run() {{\n    ticket :: \"inc-42-open\"\n    if ticket == {{\n        \"inc-{{id:Int}}-{{status}}\" -> {{ print(\"incident #{{id}} {{status}}\") }}\n        else -> {{\n            print(\"not an incident id\")\n        }}\n    }}\n}}\n"
+    assert_fmt_keeps(src, ["\"inc-{{id:Int}}-{{status}}\"", "print(\"incident #{{id}} {{status}}\")"], "str-match pattern arm (untyped + typed hole)")
+}
+// Rust: tests/fmt.rs:3550
+#Test("fmt_preserves_checked_text_type") {
+    src := "enum TextError {{ Empty }}\n\nPattern :: distinct String\n\nimpl Pattern.CheckedText {{\n    type Error = TextError\n\n    fn check(text: String) -[]> Err! {{\n        if text == \"\" {{ return Err(TextError.Empty) }}\n        return Ok(())\n    }}\n\n    fn encode_hole<T: Printable>(value: T) -[]> String {{\n        return \"[{{value}}]\"\n    }}\n}}\n\nfn render(value: Pattern) {{\n    #Unsafe(\"formatter fixture\") {{\n        print(value.raw())\n    }}\n}}\n\nfn run() {{\n    id :: 42\n    value :: Pattern{{\"value {{id}}\"}}\n    render(value)\n}}\n"
+    assert_fmt_stable(src, "checked text type")
+}

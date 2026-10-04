@@ -1,958 +1,204 @@
-// PORT-PENDING 2122 crates-jet-foundation-src-report: crates/jet-foundation/src/Report.rs:1-954
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Shared machine-report value model.
-//RS //
-//RS // This file is dependency-free because the AOT test harness includes the
-//RS // same source. CLI, LSP, Foundation JSON, and generated test reports all
-//RS // serialize this envelope instead of maintaining separate protocol shapes.
-//RS 
-//RS pub const REPORT_NAME: &str = "jet.report";
-//RS pub const REPORT_VERSION: u32 = 3;
-//RS pub const REPORT_SCHEMA: &str = "jet.report/v3";
-//RS pub const STATUS_NAME: &str = "jet.status";
-//RS pub const STATUS_VERSION: u32 = 1;
-//RS pub const STATUS_SCHEMA: &str = "jet.status/v1";
-//RS 
-//RS /// Why a diagnostic has no machine-applicable edit.
-//RS ///
-//RS /// The next action is deliberately part of the value instead of being
-//RS /// inferred from the kind. A reason is useful only when it tells a person
-//RS /// what to do next.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum NoFixReasonKind {
-//RS     Behavior,
-//RS     Design,
-//RS     Ambiguous,
-//RS }
-//RS 
-//RS impl NoFixReasonKind {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Behavior => "behavior",
-//RS             Self::Design => "design",
-//RS             Self::Ambiguous => "ambiguous",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn parse(value: &str) -> Result<Self, String> {
-//RS         match value {
-//RS             "behavior" => Ok(Self::Behavior),
-//RS             "design" => Ok(Self::Design),
-//RS             "ambiguous" => Ok(Self::Ambiguous),
-//RS             _ => Err(format!("unknown no-fix reason kind `{value}`")),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A reviewed action for a diagnostic that cannot carry an automatic edit.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct NoFixReason {
-//RS     pub kind: NoFixReasonKind,
-//RS     pub next: String,
-//RS }
-//RS 
-//RS impl NoFixReason {
-//RS     pub fn new(kind: NoFixReasonKind, next: impl Into<String>) -> Self {
-//RS         let reason = Self { kind, next: next.into() };
-//RS         reason
-//RS             .validate()
-//RS             .expect("NoFixReason::new requires a reviewed next action");
-//RS         reason
-//RS     }
-//RS 
-//RS     pub fn try_new(kind: NoFixReasonKind, next: impl Into<String>) -> Result<Self, String> {
-//RS         let reason = Self { kind, next: next.into() };
-//RS         reason.validate()?;
-//RS         Ok(reason)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         if self.next.trim().is_empty() {
-//RS             return Err("no-fix reason next action must not be empty".to_string());
-//RS         }
-//RS         if self.next.chars().any(char::is_control) {
-//RS             return Err("no-fix reason next action must not contain control characters".to_string());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS }
-//RS 
-//RS /// A typed JSON value accepted as an action-specific status field.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum StatusValue {
-//RS     Null,
-//RS     Bool(bool),
-//RS     Integer(i128),
-//RS     Float(String),
-//RS     String(String),
-//RS     Array(Vec<Self>),
-//RS     Object(StatusFields),
-//RS }
-//RS 
-//RS impl StatusValue {
-//RS     pub fn object(fields: StatusFields) -> Self {
-//RS         Self::Object(fields)
-//RS     }
-//RS 
-//RS     pub fn array(values: impl IntoIterator<Item = Self>) -> Self {
-//RS         Self::Array(values.into_iter().collect())
-//RS     }
-//RS 
-//RS     pub fn parse(text: &str) -> Result<Self, String> {
-//RS         let value = crate::JSON::parse(text)?;
-//RS         Self::from_data_tree(&value)
-//RS     }
-//RS 
-//RS     pub fn from_data_tree(value: &crate::DataTree::DataTree) -> Result<Self, String> {
-//RS         match value {
-//RS             crate::DataTree::DataTree::Null => Ok(Self::Null),
-//RS             crate::DataTree::DataTree::Bool(value) => Ok(Self::Bool(*value)),
-//RS             crate::DataTree::DataTree::Int(value) => Ok(Self::Integer(i128::from(*value))),
-//RS             crate::DataTree::DataTree::Float(value) if value.is_finite() => {
-//RS                 Ok(Self::Float(value.to_string()))
-//RS             }
-//RS             crate::DataTree::DataTree::Float(_) => {
-//RS                 Err("status fields cannot contain non-finite numbers".to_string())
-//RS             }
-//RS             crate::DataTree::DataTree::Number(value) => {
-//RS                 if let Ok(parsed) = value.parse::<i128>() {
-//RS                     Ok(Self::Integer(parsed))
-//RS                 } else {
-//RS                     Ok(Self::Float(value.clone()))
-//RS                 }
-//RS             }
-//RS             crate::DataTree::DataTree::TypedText(value)
-//RS             | crate::DataTree::DataTree::Text(value) => Ok(Self::String(value.clone())),
-//RS             crate::DataTree::DataTree::Bytes(values) => Ok(Self::Array(
-//RS                 values
-//RS                     .iter()
-//RS                     .map(|value| Self::Integer(i128::from(*value)))
-//RS                     .collect(),
-//RS             )),
-//RS             crate::DataTree::DataTree::Array(values) => Ok(Self::Array(
-//RS                 values
-//RS                     .iter()
-//RS                     .map(Self::from_data_tree)
-//RS                     .collect::<Result<Vec<_>, _>>()?,
-//RS             )),
-//RS             crate::DataTree::DataTree::Object(values) => {
-//RS                 Ok(Self::Object(StatusFields::from_data_tree_object(values)?))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn json(&self) -> String {
-//RS         match self {
-//RS             Self::Null => "null".to_string(),
-//RS             Self::Bool(value) => value.to_string(),
-//RS             Self::Integer(value) => value.to_string(),
-//RS             Self::Float(value) => value.clone(),
-//RS             Self::String(value) => report_json_string(value),
-//RS             Self::Array(values) => format!(
-//RS                 "[{}]",
-//RS                 values.iter().map(Self::json).collect::<Vec<_>>().join(",")
-//RS             ),
-//RS             Self::Object(fields) => format!("{{{}}}", fields.json()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl From<bool> for StatusValue {
-//RS     fn from(value: bool) -> Self {
-//RS         Self::Bool(value)
-//RS     }
-//RS }
-//RS 
-//RS impl From<i128> for StatusValue {
-//RS     fn from(value: i128) -> Self {
-//RS         Self::Integer(value)
-//RS     }
-//RS }
-//RS 
-//RS impl From<i64> for StatusValue {
-//RS     fn from(value: i64) -> Self {
-//RS         Self::Integer(i128::from(value))
-//RS     }
-//RS }
-//RS 
-//RS impl From<i32> for StatusValue {
-//RS     fn from(value: i32) -> Self {
-//RS         Self::Integer(i128::from(value))
-//RS     }
-//RS }
-//RS 
-//RS impl From<u64> for StatusValue {
-//RS     fn from(value: u64) -> Self {
-//RS         Self::Integer(i128::from(value))
-//RS     }
-//RS }
-//RS 
-//RS impl From<u32> for StatusValue {
-//RS     fn from(value: u32) -> Self {
-//RS         Self::Integer(i128::from(value))
-//RS     }
-//RS }
-//RS 
-//RS impl From<usize> for StatusValue {
-//RS     fn from(value: usize) -> Self {
-//RS         Self::Integer(value as i128)
-//RS     }
-//RS }
-//RS 
-//RS impl From<String> for StatusValue {
-//RS     fn from(value: String) -> Self {
-//RS         Self::String(value)
-//RS     }
-//RS }
-//RS 
-//RS impl From<&str> for StatusValue {
-//RS     fn from(value: &str) -> Self {
-//RS         Self::String(value.to_string())
-//RS     }
-//RS }
-//RS 
-//RS /// Ordered, typed action-specific fields for a status object.
-//RS #[derive(Clone, Debug, Default, PartialEq, Eq)]
-//RS pub struct StatusFields(Vec<(String, StatusValue)>);
-//RS 
-//RS impl StatusFields {
-//RS     pub const fn new() -> Self {
-//RS         Self(Vec::new())
-//RS     }
-//RS 
-//RS     pub fn with(mut self, name: impl Into<String>, value: impl Into<StatusValue>) -> Self {
-//RS         self.insert(name, value)
-//RS             .expect("status fields must have unique, non-empty names");
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn try_with(
-//RS         mut self,
-//RS         name: impl Into<String>,
-//RS         value: impl Into<StatusValue>,
-//RS     ) -> Result<Self, String> {
-//RS         self.insert(name, value)?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn insert(
-//RS         &mut self,
-//RS         name: impl Into<String>,
-//RS         value: impl Into<StatusValue>,
-//RS     ) -> Result<(), String> {
-//RS         let name = name.into();
-//RS         if name.is_empty() || name.chars().any(char::is_control) {
-//RS             return Err("status field names must be non-empty and printable".to_string());
-//RS         }
-//RS         if self.0.iter().any(|(existing, _)| existing == &name) {
-//RS             return Err(format!("duplicate status field `{name}`"));
-//RS         }
-//RS         self.0.push((name, value.into()));
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn extend(&mut self, fields: Self) -> Result<(), String> {
-//RS         for (name, value) in fields.0 {
-//RS             self.insert(name, value)?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.0.is_empty()
-//RS     }
-//RS 
-//RS     pub fn iter(&self) -> impl Iterator<Item = (&str, &StatusValue)> {
-//RS         self.0.iter().map(|(name, value)| (name.as_str(), value))
-//RS     }
-//RS 
-//RS     fn from_data_tree_object(
-//RS         value: &[(String, crate::DataTree::DataTree)],
-//RS     ) -> Result<Self, String> {
-//RS         let mut fields = Self::new();
-//RS         for (name, value) in value {
-//RS             fields.insert(name.clone(), StatusValue::from_data_tree(value)?)?;
-//RS         }
-//RS         Ok(fields)
-//RS     }
-//RS 
-//RS 
-//RS     fn json(&self) -> String {
-//RS         self.0
-//RS             .iter()
-//RS             .map(|(name, value)| format!("{}:{}", report_json_string(name), value.json()))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     }
-//RS }
-//RS 
-//RS /// The one machine status object for every command `--json` result.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct StatusEnvelope {
-//RS     pub action: String,
-//RS     pub ok: bool,
-//RS     pub reports: Vec<ReportEnvelope>,
-//RS     pub fields: StatusFields,
-//RS }
-//RS 
-//RS impl StatusEnvelope {
-//RS     pub fn new(action: impl Into<String>, ok: bool) -> Self {
-//RS         Self {
-//RS             action: action.into(),
-//RS             ok,
-//RS             reports: Vec::new(),
-//RS             fields: StatusFields::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn with_report(mut self, report: ReportEnvelope) -> Self {
-//RS         self.reports.push(report);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_reports(mut self, reports: impl IntoIterator<Item = ReportEnvelope>) -> Self {
-//RS         self.reports.extend(reports);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_field(
-//RS         mut self,
-//RS         name: impl Into<String>,
-//RS         value: impl Into<StatusValue>,
-//RS     ) -> Self {
-//RS         self.fields = self.fields.with(name, value);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_fields(mut self, fields: StatusFields) -> Self {
-//RS         self.fields
-//RS             .extend(fields)
-//RS             .expect("status fields must not duplicate envelope fields");
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn try_with_fields(mut self, fields: StatusFields) -> Result<Self, String> {
-//RS         self.fields.extend(fields)?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         if self.action.is_empty() {
-//RS             return Err("status action must not be empty".to_string());
-//RS         }
-//RS         if self.action.chars().any(char::is_control) {
-//RS             return Err("status action must not contain control characters".to_string());
-//RS         }
-//RS         for (name, _) in self.fields.iter() {
-//RS             if matches!(name, "schema" | "action" | "ok" | "reports") {
-//RS                 return Err(format!("status field `{name}` is reserved"));
-//RS             }
-//RS         }
-//RS         for report in &self.reports {
-//RS             report.validate()?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn json(&self) -> String {
-//RS         self.validate().expect("invalid jet.status/v1 envelope");
-//RS         let mut out = format!(
-//RS             "{{\"schema\":{},\"action\":{},\"ok\":{},\"reports\":[",
-//RS             report_json_string(STATUS_SCHEMA),
-//RS             report_json_string(&self.action),
-//RS             self.ok
-//RS         );
-//RS         for (index, report) in self.reports.iter().enumerate() {
-//RS             if index > 0 {
-//RS                 out.push(',');
-//RS             }
-//RS             out.push_str(&report.json());
-//RS         }
-//RS         out.push(']');
-//RS         let fields = self.fields.json();
-//RS         if !fields.is_empty() {
-//RS             out.push(',');
-//RS             out.push_str(&fields);
-//RS         }
-//RS         out.push('}');
-//RS         out
-//RS     }
-//RS 
-//RS     pub fn json_line(&self) -> String {
-//RS         let mut out = self.json();
-//RS         out.push('\n');
-//RS         out
-//RS     }
-//RS }
-//RS /// Render a typed status envelope without exposing the serialization details
-//RS /// at a command boundary.
-//RS ///
-//RS /// `StatusFields` is deliberately the public input. This keeps status
-//RS /// producers from assembling untyped JSON fragments and makes the reserved
-//RS /// envelope keys fail through the same validator as every other producer.
-//RS pub fn render_status(
-//RS     action: impl Into<String>,
-//RS     ok: bool,
-//RS     fields: StatusFields,
-//RS ) -> String {
-//RS     StatusEnvelope::new(action, ok)
-//RS         .try_with_fields(fields)
-//RS         .expect("status fields must not duplicate envelope fields")
-//RS         .json()
-//RS }
-//RS 
-//RS /// Render one status object with typed report children.
-//RS pub fn render_status_with_reports(
-//RS     action: impl Into<String>,
-//RS     ok: bool,
-//RS     reports: impl IntoIterator<Item = ReportEnvelope>,
-//RS     fields: StatusFields,
-//RS ) -> String {
-//RS     StatusEnvelope::new(action, ok)
-//RS         .with_reports(reports)
-//RS         .try_with_fields(fields)
-//RS         .expect("status fields must not duplicate envelope fields")
-//RS         .json()
-//RS }
-//RS 
-//RS 
-//RS 
-//RS /// D-REPORT-FIXGRADE1=D: closed safety classes for machine edits.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum FixSafety {
-//RS     Formatting,
-//RS     BehaviorPreserving,
-//RS     ApiChanging,
-//RS     TargetChanging,
-//RS     NeedsReview,
-//RS }
-//RS 
-//RS impl FixSafety {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Formatting => "formatting",
-//RS             Self::BehaviorPreserving => "behavior-preserving",
-//RS             Self::ApiChanging => "api-changing",
-//RS             Self::TargetChanging => "target-changing",
-//RS             Self::NeedsReview => "needs-review",
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn auto_apply(self) -> bool {
-//RS         matches!(self, Self::Formatting | Self::BehaviorPreserving)
-//RS     }
-//RS }
-//RS 
-//RS /// D-REPORT-FIXGRADE1=D: the promise attached to a machine-applicable edit.
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub enum FixApplicability {
-//RS     /// Applying every edit with this grade is proved to make report progress.
-//RS     Safe,
-//RS     /// The edit is useful to show, but a person must choose whether to apply it.
-//RS     Suggested,
-//RS }
-//RS 
-//RS impl FixApplicability {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Safe => "safe",
-//RS             Self::Suggested => "suggested",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A source identity suitable for a report consumer to open from its process.
-//RS ///
-//RS /// Relative disk paths are made absolute lexically. No manifest or `.git`
-//RS /// search is involved, and the source does not need to exist yet. Synthetic
-//RS /// labels such as `<cli>` remain labels.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReportPath(String);
-//RS 
-//RS impl ReportPath {
-//RS     fn new(value: impl Into<String>) -> Self {
-//RS         Self(value.into())
-//RS     }
-//RS 
-//RS     pub fn from_process(value: &str) -> Self {
-//RS         if value.is_empty() || value.starts_with('<') {
-//RS             return Self::new(value);
-//RS         }
-//RS         Self::from_path(std::path::Path::new(value))
-//RS     }
-//RS 
-//RS     pub fn from_path(path: &std::path::Path) -> Self {
-//RS         let display = path.to_string_lossy();
-//RS         if display.is_empty() || display.starts_with('<') {
-//RS             return Self::new(display.into_owned());
-//RS         }
-//RS         let absolute = if path.is_absolute() {
-//RS             path.to_path_buf()
-//RS         } else {
-//RS             match std::env::current_dir() {
-//RS                 Ok(cwd) => cwd.join(path),
-//RS                 Err(_) => return Self::new(display.into_owned()),
-//RS             }
-//RS         };
-//RS         Self::new(
-//RS             lexically_normalize(&absolute)
-//RS                 .to_string_lossy()
-//RS                 .into_owned(),
-//RS         )
-//RS     }
-//RS 
-//RS     pub fn as_str(&self) -> &str {
-//RS         &self.0
-//RS     }
-//RS 
-//RS     pub fn is_empty(&self) -> bool {
-//RS         self.0.is_empty()
-//RS     }
-//RS }
-//RS 
-//RS impl AsRef<str> for ReportPath {
-//RS     fn as_ref(&self) -> &str {
-//RS         self.as_str()
-//RS     }
-//RS }
-//RS 
-//RS impl std::fmt::Display for ReportPath {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         f.write_str(self.as_str())
-//RS     }
-//RS }
-//RS 
-//RS fn lexically_normalize(path: &std::path::Path) -> std::path::PathBuf {
-//RS     use std::path::{Component, PathBuf};
-//RS 
-//RS     let mut normalized = PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-//RS             Component::RootDir => normalized.push(component.as_os_str()),
-//RS             Component::CurDir => {}
-//RS             Component::ParentDir => {
-//RS                 normalized.pop();
-//RS             }
-//RS             Component::Normal(part) => normalized.push(part),
-//RS         }
-//RS     }
-//RS     normalized
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-//RS pub struct ReportSpan {
-//RS     pub start: usize,
-//RS     pub end: usize,
-//RS }
-//RS 
-//RS impl ReportSpan {
-//RS     pub const fn new(start: usize, end: usize) -> Self {
-//RS         Self { start, end }
-//RS     }
-//RS }
-//RS 
-//RS /// One ordered cause in a `jet.report/v3` diagnostic.
-//RS ///
-//RS /// Every location component is independent. A cause with no originating
-//RS /// snapshot or span keeps those fields explicitly unknown instead of
-//RS /// inheriting the root report's location.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReportCause {
-//RS     pub code: String,
-//RS     pub file: Option<ReportPath>,
-//RS     pub line: Option<usize>,
-//RS     pub col: Option<usize>,
-//RS     pub span: Option<ReportSpan>,
-//RS }
-//RS 
-//RS impl ReportCause {
-//RS     pub fn new(code: impl Into<String>) -> Self {
-//RS         Self {
-//RS             code: code.into(),
-//RS             file: None,
-//RS             line: None,
-//RS             col: None,
-//RS             span: None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// Code-only access for non-report status projections.
-//RS     pub fn as_str(&self) -> &str {
-//RS         &self.code
-//RS     }
-//RS }
-//RS 
-//RS /// A secondary source location that explains a report, such as the move a
-//RS /// later use reaches. It lives in the report's own file.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReportLabel {
-//RS     pub line: usize,
-//RS     pub col: usize,
-//RS     pub span: ReportSpan,
-//RS     pub message: String,
-//RS }
-//RS 
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReportEdit {
-//RS     pub file: ReportPath,
-//RS     pub span: ReportSpan,
-//RS     pub new_text: String,
-//RS     pub safety: FixSafety,
-//RS }
-//RS 
-//RS impl ReportEdit {
-//RS     pub fn new(
-//RS         file: ReportPath,
-//RS         span: ReportSpan,
-//RS         new_text: impl Into<String>,
-//RS         safety: FixSafety,
-//RS     ) -> Self {
-//RS         Self {
-//RS             file,
-//RS             span,
-//RS             new_text: new_text.into(),
-//RS             safety,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub enum ReportExtension {
-//RS     Crypto {
-//RS         reason: String,
-//RS         operation: String,
-//RS         expected: Option<String>,
-//RS         actual: Option<i128>,
-//RS     },
-//RS     BuildError {
-//RS         report: String,
-//RS     },
-//RS }
-//RS 
-//RS /// A `jet.report/v3` diagnostic or machine finding.
-//RS #[derive(Clone, Debug, PartialEq, Eq)]
-//RS pub struct ReportEnvelope {
-//RS     pub schema_name: &'static str,
-//RS     pub schema_version: u32,
-//RS     pub moment: String,
-//RS     pub severity: String,
-//RS     pub code: String,
-//RS     pub what: String,
-//RS     pub why: String,
-//RS     pub fix: String,
-//RS     pub applicability: Option<FixApplicability>,
-//RS     pub detail: Option<String>,
-//RS     pub file: Option<ReportPath>,
-//RS     pub line: Option<usize>,
-//RS     pub col: Option<usize>,
-//RS     pub span: Option<ReportSpan>,
-//RS     fix_edits: Vec<ReportEdit>,
-//RS     pub cause: Vec<ReportCause>,
-//RS     pub labels: Vec<ReportLabel>,
-//RS     pub clears: usize,
-//RS     pub extension: Option<ReportExtension>,
-//RS     no_fix_reason: Option<NoFixReason>,
-//RS     pub denial_kind: Option<String>,
-//RS     pub call_chain: Vec<String>,
-//RS     pub scope_chain: Vec<String>,
-//RS     pub nearest_granting_scope: Option<String>,
-//RS }
-//RS 
-//RS impl ReportEnvelope {
-//RS     pub fn new(
-//RS         moment: impl Into<String>,
-//RS         severity: impl Into<String>,
-//RS         code: impl Into<String>,
-//RS         what: impl Into<String>,
-//RS         why: impl Into<String>,
-//RS         fix: impl Into<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             schema_name: REPORT_NAME,
-//RS             schema_version: REPORT_VERSION,
-//RS             moment: moment.into(),
-//RS             severity: severity.into(),
-//RS             code: code.into(),
-//RS             what: what.into(),
-//RS             why: why.into(),
-//RS             fix: fix.into(),
-//RS             applicability: None,
-//RS             detail: None,
-//RS             file: None,
-//RS             line: None,
-//RS             col: None,
-//RS             span: None,
-//RS             fix_edits: Vec::new(),
-//RS             cause: Vec::new(),
-//RS             labels: Vec::new(),
-//RS             clears: 0,
-//RS             extension: None,
-//RS             no_fix_reason: None,
-//RS             denial_kind: None,
-//RS             call_chain: Vec::new(),
-//RS             scope_chain: Vec::new(),
-//RS             nearest_granting_scope: None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn fix_edits(&self) -> &[ReportEdit] {
-//RS         &self.fix_edits
-//RS     }
-//RS 
-//RS     pub fn no_fix_reason(&self) -> Option<&NoFixReason> {
-//RS         self.no_fix_reason.as_ref()
-//RS     }
-//RS 
-//RS     pub fn push_fix_edit(&mut self, edit: ReportEdit) -> Result<(), String> {
-//RS         if self.no_fix_reason.is_some() {
-//RS             return Err("a report cannot carry fix_edits and no_fix_reason".to_string());
-//RS         }
-//RS         self.fix_edits.push(edit);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn with_fix_edits(
-//RS         mut self,
-//RS         edits: impl IntoIterator<Item = ReportEdit>,
-//RS     ) -> Result<Self, String> {
-//RS         for edit in edits {
-//RS             self.push_fix_edit(edit)?;
-//RS         }
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn set_no_fix_reason(&mut self, reason: NoFixReason) -> Result<(), String> {
-//RS         reason.validate()?;
-//RS         if !self.fix_edits.is_empty() {
-//RS             return Err("a report cannot carry fix_edits and no_fix_reason".to_string());
-//RS         }
-//RS         self.no_fix_reason = Some(reason);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn with_no_fix_reason(mut self, reason: NoFixReason) -> Result<Self, String> {
-//RS         self.set_no_fix_reason(reason)?;
-//RS         Ok(self)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         if self.schema_name != REPORT_NAME || self.schema_version != REPORT_VERSION {
-//RS             return Err("report envelope has an unsupported schema identity".to_string());
-//RS         }
-//RS         if let Some(reason) = &self.no_fix_reason {
-//RS             reason.validate()?;
-//RS             if !self.fix_edits.is_empty() {
-//RS                 return Err("a report cannot carry fix_edits and no_fix_reason".to_string());
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     pub fn json(&self) -> String {
-//RS         self.validate().expect("invalid jet.report/v3 envelope");
-//RS         let mut out = String::from("{\"schema\":");
-//RS         let schema = format!("{}/v{}", self.schema_name, self.schema_version);
-//RS         out.push_str(&report_json_string(&schema));
-//RS         out.push_str(",\"moment\":");
-//RS         out.push_str(&report_json_string(&self.moment));
-//RS         out.push_str(",\"severity\":");
-//RS         out.push_str(&report_json_string(&self.severity));
-//RS         out.push_str(",\"code\":");
-//RS         out.push_str(&report_json_string(&self.code));
-//RS         out.push_str(",\"what\":");
-//RS         out.push_str(&report_json_string(&self.what));
-//RS         out.push_str(",\"why\":");
-//RS         out.push_str(&report_json_string(&self.why));
-//RS         out.push_str(",\"fix\":");
-//RS         out.push_str(&report_json_string(&self.fix));
-//RS         if let Some(applicability) = self.applicability {
-//RS             out.push_str(",\"applicability\":");
-//RS             out.push_str(&report_json_string(applicability.as_str()));
-//RS         }
-//RS         out.push_str(",\"detail\":");
-//RS         match &self.detail {
-//RS             Some(detail) => out.push_str(&report_json_string(detail)),
-//RS             None => out.push_str("null"),
-//RS         }
-//RS         out.push_str(",\"denial_kind\":");
-//RS         match &self.denial_kind {
-//RS             Some(kind) => out.push_str(&report_json_string(kind)),
-//RS             None => out.push_str("null"),
-//RS         }
-//RS         out.push_str(",\"call_chain\":");
-//RS         out.push_str(&report_json_strings(&self.call_chain));
-//RS         out.push_str(",\"scope_chain\":");
-//RS         out.push_str(&report_json_strings(&self.scope_chain));
-//RS         out.push_str(",\"nearest_granting_scope\":");
-//RS         match &self.nearest_granting_scope {
-//RS             Some(scope) => out.push_str(&report_json_string(scope)),
-//RS             None => out.push_str("null"),
-//RS         }
-//RS         out.push_str(",\"file\":");
-//RS         match &self.file {
-//RS             Some(file) if !file.is_empty() => out.push_str(&report_json_string(file.as_str())),
-//RS             _ => out.push_str("null"),
-//RS         }
-//RS         out.push_str(",\"line\":");
-//RS         push_optional_usize(&mut out, self.line);
-//RS         out.push_str(",\"col\":");
-//RS         push_optional_usize(&mut out, self.col);
-//RS         out.push_str(",\"span\":");
-//RS         match self.span {
-//RS             Some(span) => out.push_str(&format!(
-//RS                 "{{\"start\":{},\"end\":{}}}",
-//RS                 span.start, span.end
-//RS             )),
-//RS             None => out.push_str("null"),
-//RS         }
-//RS         if !self.fix_edits.is_empty() {
-//RS             out.push_str(",\"fix_edits\":[");
-//RS             for (index, edit) in self.fix_edits.iter().enumerate() {
-//RS                 if index > 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 out.push_str(&format!(
-//RS                     "{{\"file\":{},\"span\":{{\"start\":{},\"end\":{}}},\"new_text\":{},\"safety\":{}}}",
-//RS                     report_json_string(edit.file.as_str()),
-//RS                     edit.span.start,
-//RS                     edit.span.end,
-//RS                     report_json_string(&edit.new_text),
-//RS                     report_json_string(edit.safety.as_str()),
-//RS                 ));
-//RS             }
-//RS             out.push(']');
-//RS         } else if let Some(reason) = &self.no_fix_reason {
-//RS             out.push_str(",\"no_fix_reason\":{");
-//RS             out.push_str("\"kind\":");
-//RS             out.push_str(&report_json_string(reason.kind.as_str()));
-//RS             out.push_str(",\"next\":");
-//RS             out.push_str(&report_json_string(&reason.next));
-//RS             out.push('}');
-//RS         } else {
-//RS             out.push_str(",\"fix_edits\":[]");
-//RS         }
-//RS         out.push_str(",\"cause\":[");
-//RS         for (index, cause) in self.cause.iter().enumerate() {
-//RS             if index > 0 {
-//RS                 out.push(',');
-//RS             }
-//RS             out.push_str("{\"code\":");
-//RS             out.push_str(&report_json_string(&cause.code));
-//RS             out.push_str(",\"file\":");
-//RS             match &cause.file {
-//RS                 Some(file) if !file.is_empty() => {
-//RS                     out.push_str(&report_json_string(file.as_str()))
-//RS                 }
-//RS                 _ => out.push_str("null"),
-//RS             }
-//RS             out.push_str(",\"line\":");
-//RS             push_optional_usize(&mut out, cause.line);
-//RS             out.push_str(",\"col\":");
-//RS             push_optional_usize(&mut out, cause.col);
-//RS             out.push_str(",\"span\":");
-//RS             match cause.span {
-//RS                 Some(span) => out.push_str(&format!(
-//RS                     "{{\"start\":{},\"end\":{}}}",
-//RS                     span.start, span.end
-//RS                 )),
-//RS                 None => out.push_str("null"),
-//RS             }
-//RS             out.push('}');
-//RS         }
-//RS         out.push(']');
-//RS         if !self.labels.is_empty() {
-//RS             out.push_str(",\"labels\":[");
-//RS             for (index, label) in self.labels.iter().enumerate() {
-//RS                 if index > 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 out.push_str(&format!(
-//RS                     "{{\"line\":{},\"col\":{},\"span\":{{\"start\":{},\"end\":{}}},\"message\":{}}}",
-//RS                     label.line,
-//RS                     label.col,
-//RS                     label.span.start,
-//RS                     label.span.end,
-//RS                     report_json_string(&label.message),
-//RS                 ));
-//RS             }
-//RS             out.push(']');
-//RS         }
-//RS         out.push_str(&format!(",\"clears\":{}", self.clears));
-//RS         if let Some(ReportExtension::Crypto {
-//RS             reason,
-//RS             operation,
-//RS             expected,
-//RS             actual,
-//RS         }) = &self.extension
-//RS         {
-//RS             out.push_str(",\"reason\":");
-//RS             out.push_str(&report_json_string(reason));
-//RS             out.push_str(",\"operation\":");
-//RS             out.push_str(&report_json_string(operation));
-//RS             if let Some(expected) = expected {
-//RS                 out.push_str(",\"expected\":");
-//RS                 out.push_str(&report_json_string(expected));
-//RS             }
-//RS             if let Some(actual) = actual {
-//RS                 out.push_str(&format!(",\"actual\":{actual}"));
-//RS             }
-//RS         }
-//RS         if let Some(ReportExtension::BuildError { report }) = &self.extension {
-//RS             out.push_str(",\"build_error\":");
-//RS             out.push_str(report);
-//RS         }
-//RS         out.push('}');
-//RS         out
-//RS     }
-//RS 
-//RS     pub fn json_line(&self) -> String {
-//RS         let mut out = self.json();
-//RS         out.push('\n');
-//RS         out
-//RS     }
-//RS }
-//RS 
-//RS fn push_optional_usize(out: &mut String, value: Option<usize>) {
-//RS     match value {
-//RS         Some(value) => out.push_str(&value.to_string()),
-//RS         None => out.push_str("null"),
-//RS     }
-//RS }
-//RS 
-//RS fn report_json_string(value: &str) -> String {
-//RS     let mut out = String::with_capacity(value.len() + 2);
-//RS     out.push('"');
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             '\u{08}' => out.push_str("\\b"),
-//RS             '\u{0C}' => out.push_str("\\f"),
-//RS             character if (character as u32) < 0x20 => {
-//RS                 out.push_str(&format!("\\u{:04x}", character as u32))
-//RS             }
-//RS             character => out.push(character),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS 
-//RS fn report_json_strings(values: &[String]) -> String {
-//RS     let mut out = String::from("[");
-//RS     for (index, value) in values.iter().enumerate() {
-//RS         if index > 0 {
-//RS             out.push(',');
-//RS         }
-//RS         out.push_str(&report_json_string(value));
-//RS     }
-//RS     out.push(']');
-//RS     out
-//RS }
-//RS 
-// END-PORT-PENDING 2122 crates/jet-foundation/src/Report.rs:1-954
+// Shared report model: reuse Report/Report.jet's canonical types, validators,
+// consuming builders and linear byte serializers. Only missing access/conversion
+// items live here; there is no second report envelope or JSON producer.
 
+// Rust: crates/jet-foundation/src/Report.rs:7-12
+// Canonical Report/Report.jet: REPORT_NAME/VERSION/SCHEMA and STATUS_NAME/VERSION/SCHEMA.
+// Rust: crates/jet-foundation/src/Report.rs:14
+// Canonical: NoFixReasonKind (Behavior, Design, Ambiguous).
+// Rust: crates/jet-foundation/src/Report.rs:27
+// Canonical: NoFixReasonKind.as_str.
+// Rust: crates/jet-foundation/src/Report.rs:35
+// Canonical: NoFixReasonKind.parse, exact unknown-kind message.
+// Rust: crates/jet-foundation/src/Report.rs:45
+// Canonical: NoFixReason.
+// Rust: crates/jet-foundation/src/Report.rs:53
+// Canonical: NoFixReason.new, reviewed-action failure is not suppressed.
+// Rust: crates/jet-foundation/src/Report.rs:61
+// Canonical: NoFixReason.try_new.
+// Rust: crates/jet-foundation/src/Report.rs:67
+// Canonical: NoFixReason.validate, Unicode control-character detection.
+// Rust: crates/jet-foundation/src/Report.rs:78
+// Canonical: StatusValue; Integer is canonical Int (Rust i128).
+// Rust: crates/jet-foundation/src/Report.rs:91
+// Canonical: StatusValue.object.
+// Rust: crates/jet-foundation/src/Report.rs:95
+// Canonical: StatusValue.array, accepts the canonical materialized iterable.
+// Rust: crates/jet-foundation/src/Report.rs:99
+// Canonical: StatusValue.parse, one Foundation JSON parser.
+// Rust: crates/jet-foundation/src/Report.rs:104
+// Canonical: StatusValue.from_data_tree; retained carrier-variant seams in ledger.
+// Rust: crates/jet-foundation/src/Report.rs:142
+// Canonical: StatusValue.json / report_status_value_json.
+
+// GATE #4499: publish the standard From conversion trait with the canonical
+// Report StatusValue carrier; integers widen without truncation or text parsing.
+use std.convert.From
+// Rust: crates/jet-foundation/src/Report.rs:158
+impl From<Bool> for StatusValue {
+    fn from(value: Bool) -> StatusValue { StatusValue.Bool{value: value} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:164
+impl From<Int> for StatusValue {
+    fn from(value: Int) -> StatusValue { StatusValue.Integer{value: value} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:170
+impl From<I64> for StatusValue {
+    fn from(value: I64) -> StatusValue { StatusValue.Integer{value: Int.from_i64(value)} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:176
+impl From<I32> for StatusValue {
+    fn from(value: I32) -> StatusValue { StatusValue.Integer{value: Int.from_i32(value)} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:182
+impl From<U64> for StatusValue {
+    fn from(value: U64) -> StatusValue { StatusValue.Integer{value: Int.from_u64(value)} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:188
+impl From<U32> for StatusValue {
+    fn from(value: U32) -> StatusValue { StatusValue.Integer{value: Int.from_u32(value)} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:194
+// usize uses the canonical Int index and the From<Int> implementation above.
+// Rust: crates/jet-foundation/src/Report.rs:200
+impl From<String> for StatusValue {
+    fn from(value: String) -> StatusValue { StatusValue.String{value: ^value} }
+}
+// Rust: crates/jet-foundation/src/Report.rs:206
+// &str uses canonical String input; borrowed text is copied when an owned value
+// is required, and the From<String> route constructs the same String variant.
+
+// Rust: crates/jet-foundation/src/Report.rs:212
+// Canonical: StatusFields, source-ordered entries plus private membership index.
+// Rust: crates/jet-foundation/src/Report.rs:217
+// Canonical: StatusFields.new.
+// Rust: crates/jet-foundation/src/Report.rs:221
+// Canonical: StatusFields.with (consuming builder).
+// Rust: crates/jet-foundation/src/Report.rs:227
+// Canonical: StatusFields.try_with.
+// Rust: crates/jet-foundation/src/Report.rs:236
+// Canonical: StatusFields.insert, duplicate/name checks before append.
+// Rust: crates/jet-foundation/src/Report.rs:252
+// Canonical: StatusFields.extend, preserves prefix mutations on refusal.
+// Rust: crates/jet-foundation/src/Report.rs:259
+// Canonical: StatusFields.is_empty.
+impl StatusFields {
+    // Rust: crates/jet-foundation/src/Report.rs:263
+    // The canonical StatusField rows carry the same name/value pair, borrowed.
+    pub fn iter(self) -> View<StatusField> { self.entries[0..<self.entries.len()] }
+    // Rust: crates/jet-foundation/src/Report.rs:267
+    // Canonical: StatusFields.from_data_tree_object.
+    // Rust: crates/jet-foundation/src/Report.rs:278
+    fn json(self) -> String {
+        out := [U8]{}
+        report_status_fields_json(&out, self)
+        report_bytes_text(out)
+    }
+}
+// Rust: crates/jet-foundation/src/Report.rs:287
+// Canonical: StatusEnvelope.
+// Rust: crates/jet-foundation/src/Report.rs:297
+// Canonical: StatusEnvelope.new.
+// Rust: crates/jet-foundation/src/Report.rs:306
+// Canonical: StatusEnvelope.with_report.
+// Rust: crates/jet-foundation/src/Report.rs:311
+// Canonical: StatusEnvelope.with_reports.
+// Rust: crates/jet-foundation/src/Report.rs:316
+// Canonical: StatusEnvelope.with_field.
+// Rust: crates/jet-foundation/src/Report.rs:325
+// Canonical: StatusEnvelope.with_fields.
+// Rust: crates/jet-foundation/src/Report.rs:332
+// Canonical: StatusEnvelope.try_with_fields.
+// Rust: crates/jet-foundation/src/Report.rs:337
+// Canonical: StatusEnvelope.validate, reserved fields and child validation.
+// Rust: crates/jet-foundation/src/Report.rs:355
+// Canonical: StatusEnvelope.json, exact wire field order.
+// Rust: crates/jet-foundation/src/Report.rs:379
+// Canonical: StatusEnvelope.json_line.
+// Rust: crates/jet-foundation/src/Report.rs:385
+// render_status: canonical report_render_status.
+// Rust: crates/jet-foundation/src/Report.rs:402
+// render_status_with_reports: canonical report_render_status_with_reports.
+// Rust: crates/jet-foundation/src/Report.rs:418
+// Canonical: FixSafety (APIChanging spelling maps Rust ApiChanging).
+// Rust: crates/jet-foundation/src/Report.rs:429
+// Canonical: FixSafety.as_str.
+// Rust: crates/jet-foundation/src/Report.rs:439
+// Canonical: FixSafety.auto_apply.
+// Rust: crates/jet-foundation/src/Report.rs:444
+// Canonical: FixApplicability.
+// Rust: crates/jet-foundation/src/Report.rs:454
+// Canonical: FixApplicability.as_str.
+// Rust: crates/jet-foundation/src/Report.rs:462
+// Canonical: ReportPath.
+impl ReportPath {
+    // Rust: crates/jet-foundation/src/Report.rs:471
+    fn new(value: String) -> ReportPath { ReportPath{value: ^value} }
+    // Rust: crates/jet-foundation/src/Report.rs:475
+    // Canonical: ReportPath.from_process.
+    // Rust: crates/jet-foundation/src/Report.rs:482
+    // Canonical: ReportPath.from_path.
+    // Rust: crates/jet-foundation/src/Report.rs:502
+    // Canonical: ReportPath.as_str.
+    // Rust: crates/jet-foundation/src/Report.rs:506
+    // Canonical: ReportPath.is_empty.
+    // Rust: crates/jet-foundation/src/Report.rs:511
+    fn as_ref(self) -> String { self.as_str() }
+    // Rust: crates/jet-foundation/src/Report.rs:517
+    fn fmt(self, formatter: &std.fmt.Formatter) -> std.fmt.Result {
+        // GATE #4409: native formatter writes the path label without decoration.
+        formatter.write_str(self.as_str())
+    }
+}
+// Rust: crates/jet-foundation/src/Report.rs:523
+// Canonical: report_lexically_normalize, OS-prefix handling seam in ledger.
+// Rust: crates/jet-foundation/src/Report.rs:541
+// Canonical: ReportSpan.
+// Rust: crates/jet-foundation/src/Report.rs:548
+// Canonical: ReportSpan.new.
+// Rust: crates/jet-foundation/src/Report.rs:553
+// Canonical: ReportCause.
+// Rust: crates/jet-foundation/src/Report.rs:568
+// Canonical: ReportCause.new, independent unknown location components.
+// Rust: crates/jet-foundation/src/Report.rs:578
+// Canonical: ReportCause.as_str.
+// Rust: crates/jet-foundation/src/Report.rs:584
+// Canonical: ReportLabel.
+// Rust: crates/jet-foundation/src/Report.rs:595
+// Canonical: ReportEdit.
+// Rust: crates/jet-foundation/src/Report.rs:604
+// Canonical: ReportEdit.new.
+// Rust: crates/jet-foundation/src/Report.rs:619
+// Canonical: ReportExtension (Crypto, BuildError).
+// Rust: crates/jet-foundation/src/Report.rs:632
+// Canonical: ReportEnvelope.
+impl ReportEnvelope {
+    // Rust: crates/jet-foundation/src/Report.rs:662
+    // Canonical: ReportEnvelope.new, current schema and empty optional fields.
+    // Rust: crates/jet-foundation/src/Report.rs:698
+    pub fn fix_edits(self) -> View<ReportEdit> { self.fix_edits[0..<self.fix_edits.len()] }
+    // Rust: crates/jet-foundation/src/Report.rs:702
+    pub fn no_fix_reason(self) -> NoFixReason? { self.no_fix_reason }
+    // Rust: crates/jet-foundation/src/Report.rs:706
+    // Canonical: ReportEnvelope.push_fix_edit.
+    // Rust: crates/jet-foundation/src/Report.rs:714
+    // Canonical: ReportEnvelope.with_fix_edits.
+    // Rust: crates/jet-foundation/src/Report.rs:724
+    // Canonical: ReportEnvelope.set_no_fix_reason, validate before mutual-exclusion check.
+    // Rust: crates/jet-foundation/src/Report.rs:733
+    // Canonical: ReportEnvelope.with_no_fix_reason.
+    // Rust: crates/jet-foundation/src/Report.rs:738
+    // Canonical: ReportEnvelope.validate.
+    // Rust: crates/jet-foundation/src/Report.rs:750
+    // Canonical: ReportEnvelope.json / report_extension_json / optional field emitters;
+    // retains every extension, cause, label and policy chain in exact wire order.
+    // Rust: crates/jet-foundation/src/Report.rs:907
+    // Canonical: ReportEnvelope.json_line.
+}
+// Rust: crates/jet-foundation/src/Report.rs:914
+// push_optional_usize: canonical report_optional_usize.
+// Rust: crates/jet-foundation/src/Report.rs:921
+// report_json_string: canonical linear report_json_string byte sink; all C0 escapes.
+// Rust: crates/jet-foundation/src/Report.rs:943
+// report_json_strings: canonical linear report_json_strings byte sink.
+// No original #[test] items occur in Rust1-954.

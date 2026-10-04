@@ -1,0 +1,39 @@
+use jet as jet
+use jet_foundation.MIR as MIR
+use jet_foundation.Layout.[TargetLayout]
+use core.fs as fs
+use Compiler.JetFoundation.Tests.Integration.Common as common
+
+// Rust: tests/output_callable.rs:7
+pub fn emit_native_aot(bundle: jet.AST.ProgramBundle) -> String {
+    emit_native_artifact(bundle, MIR.MirArtifactKind.NativeExecutable, MIR.MirArtifactBuildMode.Dev)
+}
+
+// Rust: tests/output_callable.rs:15
+pub fn emit_test_harness(bundle: jet.AST.ProgramBundle) -> String {
+    emit_native_artifact(bundle, MIR.MirArtifactKind.TestExecutable, MIR.MirArtifactBuildMode.Test)
+}
+
+// Rust: tests/output_callable.rs:23
+pub fn emit_native_artifact(bundle: jet.AST.ProgramBundle, kind: MIR.MirArtifactKind, mode: MIR.MirArtifactBuildMode) -> String {
+    request :: MIR.MirArtifactRequest.new(MIR.MirArtifactTarget.RustAot, kind, mode)
+    (mir, artifact) :: jet.Codegen.TIR.lower_checked_mir_program_for(bundle, request).expect("checked native artifact lowers through MIR")
+    mir.validate().expect("canonical MIR validates in output-callable test")
+    optimized :: MIR.optimize_mir_program(^mir, MIR.MirOptimizationPolicy.conservative()).expect("canonical MIR optimizes in output-callable test")
+    jet.Codegen.MIRRust.emit_mir_program(optimized, jet.Codegen.MIRRust.MirRustConfig.{
+        target: TargetLayout.host(), target_kind: jet.Codegen.MIRRust.MirRustTarget.Native,
+        root_prefix: "", execution: jet.Codegen.MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    })
+}
+
+// Rust: tests/output_callable.rs:53
+pub fn checked_bundle(source: String, tag: String, mode: jet.Sema.CompileMode) -> jet.AST.ProgramBundle {
+    dir :: common.unique_tmp(tag)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, source).unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, mode)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    ^bundle
+}

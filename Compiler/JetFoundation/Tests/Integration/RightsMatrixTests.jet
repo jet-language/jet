@@ -1,0 +1,402 @@
+use RightsMatrix.*
+use jet
+use jet.[Loader, Syntax, Sema, Diagnostics, Lock, Interpreter, FixEngine]
+use jet_foundation.Authority.Verdict
+use jet_foundation.sema.[RightsProvenance, RightsRow]
+use jetpack.Package
+use std.[fs, env]
+use common
+use tir_support
+
+// Rust: tests/rights_matrix.rs:101
+#Test("canonical_rows_match_legacy_rights_verdicts") {
+    for case in case_rows() {
+        call_chain :: [case.name]
+        observed :: case.row.observe(case.name, &case.effects, &call_chain, &[], case.legacy)
+            .unwrap_or_else(fn(mismatch) { panic("rights row drift: {mismatch:#?}") })
+        walked :: case.row.walk(&case.effects, &call_chain, &[])
+        assert_eq(observed, walked, "observed row changed for {case.name}")
+        for right in &case.effects {
+            assert_eq(case.row.decide(right), case.legacy(right), "right {right}")
+        }
+    }
+}
+// Rust: tests/rights_matrix.rs:123
+#Test("invocation_deny_wins_after_leaf_expansion") {
+    row :: RightsRow.invocation(["FS"], ["FS.Write"], RightsProvenance.new("rights_matrix::precedence", "deny-wins oracle"))
+    assert_eq(row.decide("FS.Read"), Verdict.Allowed)
+    assert_eq(row.decide("FS.Write"), Verdict.Denied)
+    assert_eq(row.decide("FS.Write:/tmp/out"), Verdict.Denied)
+}
+// Rust: tests/ring_layer.rs:16
+#Test("manifest_parses_layer_ceiling") {
+    raw :: """
+name: "embed"
+version: "0.1.0"
+runtime: alloc
+"""
+    pm :: Package.PackageFacts.parse(raw, "test").unwrap()
+    assert_eq(pm.layer, Some(Syntax.RuntimeLayer.Alloc))
+    mf :: Package.to_manifest(&pm, raw).unwrap()
+    assert_eq(mf.package.layer, Some(Syntax.RuntimeLayer.Alloc))
+}
+// Rust: tests/ring_layer.rs:29
+#Test("manifest_rejects_unknown_layer") {
+    raw :: "name: \"x\"\nversion: \"1\"\nruntime: heap\n"
+    err :: Package.PackageFacts.parse(raw, "test").unwrap_err()
+    assert(match err { Package.PackageParseError.InvalidValue { .. } -> true; _ -> false })
+}
+// Rust: tests/ring_layer.rs:39
+#Test("manifest_rejects_retired_std_runtime_name") {
+    raw :: "name: \"x\"\nversion: \"1\"\nruntime: std\n"
+    err :: Package.PackageFacts.parse(raw, "test").unwrap_err()
+    assert(match err { Package.PackageParseError.InvalidValue { .. } -> true; _ -> false })
+}
+// Rust: tests/ring_layer.rs:49
+#Test("math_import_infers_core_layer") {
+    dir :: tmp_project("math")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap()
+    main :: """
+use core.math as math
+
+fn run() -> {
+    print(math.sqrt(9.0))
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    main_path :: dir.join("main.jet")
+    path :: main_path.to_str().unwrap()
+    bundle := Loader.load_entry(path).unwrap()
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(!diags.iter().any(fn(d) { d.severity == Diagnostics.Severity.Error }), "{jet.render_diagnostics(path, main, &diags)}")
+    assert_eq(bundle.inferred_layer, Syntax.RuntimeLayer.Core)
+}
+// Rust: tests/ring_layer.rs:75
+#Test("solve_import_infers_alloc_layer") {
+    dir :: tmp_project("solve")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap()
+    main :: """
+use core.compute.solve as solve
+
+fn run() -> {
+    solver := solve.Solver.new(1)
+    solver.require(true)
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    main_path :: dir.join("main.jet")
+    path :: main_path.to_str().unwrap()
+    bundle := Loader.load_entry(path).unwrap()
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(!diags.iter().any(fn(d) { d.severity == Diagnostics.Severity.Error }), "{jet.render_diagnostics(path, main, &diags)}")
+    assert_eq(bundle.inferred_layer, Syntax.RuntimeLayer.Alloc)
+}
+// Rust: tests/ring_layer.rs:102
+#Test("fs_import_infers_std_layer") {
+    dir :: tmp_project("fs")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap()
+    main :: """
+use core.files as fs
+
+fn run() -> {
+    print("ok")
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    main_path :: dir.join("main.jet")
+    path :: main_path.to_str().unwrap()
+    bundle := Loader.load_entry(path).unwrap()
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(!diags.iter().any(fn(d) { d.severity == Diagnostics.Severity.Error }), "{jet.render_diagnostics(path, main, &diags)}")
+    assert_eq(bundle.inferred_layer, Syntax.RuntimeLayer.Std)
+}
+// Rust: tests/ring_layer.rs:128
+#Test("ceiling_blocks_std_import") {
+    dir :: tmp_project("ceiling")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n").unwrap()
+    main :: """
+use core.files as fs
+
+fn run() -> {
+    print("ok")
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    path :: dir.join("main.jet")
+    shown :: path.to_string_lossy()
+    diags :: jet.check_with_path(&shown)
+    assert(diags.iter().any(fn(d) { d.code == "E1006" }), "expected E1006, got: {jet.render_diagnostics(&shown, main, &diags)}")
+}
+// Rust: tests/ring_layer.rs:154
+#Test("alloc_ceiling_allows_mem_not_fs") {
+    dir :: tmp_project("alloc_ok")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\nruntime: alloc\n").unwrap()
+    main :: """
+use core.mem as mem
+
+fn run() -> {
+    print("ok")
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    main_path :: dir.join("main.jet")
+    path :: main_path.to_str().unwrap()
+    bundle := Loader.load_entry(path).unwrap()
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(!diags.iter().any(fn(d) { d.code == "E1006" }), "mem import should be allowed under alloc ceiling")
+    assert_eq(bundle.inferred_layer, Syntax.RuntimeLayer.Alloc)
+}
+// Rust: tests/ring_layer.rs:181
+#Test("ambient_input_infers_std_layer") {
+    dir :: tmp_project("input")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\n").unwrap()
+    main :: """
+fn run() -> {
+    _ :: input("name? ")
+    print("ok")
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    main_path :: dir.join("main.jet")
+    path :: main_path.to_str().unwrap()
+    bundle := Loader.load_entry(path).unwrap()
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(!diags.iter().any(fn(d) { d.severity == Diagnostics.Severity.Error }), "{jet.render_diagnostics(path, main, &diags)}")
+    assert_eq(bundle.inferred_layer, Syntax.RuntimeLayer.Std)
+}
+// Rust: tests/ring_layer.rs:206
+#Test("ceiling_blocks_ambient_input_helper") {
+    dir :: tmp_project("input_ceiling")
+    fs.write(dir.join("package.jet"), "name: \"m\"\nversion: \"0.1.0\"\nruntime: core\n").unwrap()
+    main :: """
+fn run() -> {
+    _ :: input("name? ")
+    print("ok")
+}
+"""
+    fs.write(dir.join("main.jet"), main).unwrap()
+    path :: dir.join("main.jet")
+    shown :: path.to_string_lossy()
+    diags :: jet.check_with_path(&shown)
+    assert(diags.iter().any(fn(d) { d.code == "E1006" }), "expected E1006 for ambient input under core ceiling")
+    e1006 :: diags.iter().find(fn(d) { d.code == "E1006" }).unwrap()
+    assert(e1006.why.contains("import chain:"), "E1006 should include import chain: {e1006.why}")
+    assert(e1006.why.contains("input()"), "chain should name ambient input: {e1006.why}")
+}
+// Rust: tests/ring_layer.rs:241
+#Test("lock_roundtrip_layer_metadata") {
+    pkg :: Lock.LockedPackage {
+        name: "embed", version: "0.1.0", source: Lock.LockSource.Root, nix_closure: None,
+        locked: None, fingerprint: "", content_hash: None, dependencies: [],
+        layer: Some(Syntax.RuntimeLayer.Alloc), inferred_layer: Some(Syntax.RuntimeLayer.Std),
+        effects: [], effect_grants: [], required_effects: [], granted_effects: [], denied_effects: [],
+        effect_authority: None, envelope: None, receipt: None, provenance: None,
+    }
+    lock :: Lock.LockFile {
+        version: 1, packages: [pkg], root_dependencies: [], authority: None, workspace_members: [],
+        workspace_source_digest: None, workspace_overlay_policy: Default.default(), comptime_inputs: [],
+        toolchains: [], browsers: [], source_channels: [], build_stamp: None, build_contributions: [],
+    }
+    raw :: Lock.write(&lock)
+    parsed :: Lock.parse(&raw).unwrap()
+    assert_eq(parsed.packages[0].layer, Some(Syntax.RuntimeLayer.Alloc))
+    assert_eq(parsed.packages[0].inferred_layer, Some(Syntax.RuntimeLayer.Std))
+}
+// Rust: tests/ring_shipping.rs:29
+#Test("ring_module_realizes_from_hangar") {
+    // GATE #4494: process-global environment; run in isolation as in the Rust test binary.
+    env.remove_var(Syntax.TOOLCHAIN_OBJECT_ENV)
+    assert(!Syntax.is_ring_module_staged("http"), "with no toolchain object, no ring is staged")
+    assert_eq(Loader.resolve_ring_module("http"), Loader.RingResolution.Embedded)
+    obj :: scratch("obj")
+    ring :: obj.join("ring")
+    fs.create_dir_all(&ring).unwrap()
+    fs.write(ring.join("http"), "prebuilt-http").unwrap()
+    fs.write(ring.join("regex"), "prebuilt-regex").unwrap()
+    env.set_var(Syntax.TOOLCHAIN_OBJECT_ENV, &obj)
+    assert(Syntax.is_ring_module_staged("http"), "is_ring_module_staged(\"http\") must flip true when the object stages it")
+    assert(Syntax.is_ring_module_staged("regex"))
+    match Loader.resolve_ring_module("http") {
+        Loader.RingResolution.Staged(path) -> { assert_eq(path, ring.join("http"), "must point at the staged artifact") }
+        other -> { panic("expected Staged, got {other:?}") }
+    }
+    assert(!Syntax.is_ring_module_staged("db"))
+    assert_eq(Loader.resolve_ring_module("db"), Loader.RingResolution.Embedded)
+    assert(!Syntax.is_ring_module_staged("not_a_ring"))
+    env.remove_var(Syntax.TOOLCHAIN_OBJECT_ENV)
+    _ :: fs.remove_dir_all(&obj).ok()
+}
+// Rust: tests/ring_shipping.rs:76
+#Test("ring_platform_miss_diagnostic_exists") {
+    d :: Loader.e1241_ring_platform_miss("http")
+    assert_eq(d.code, "E1241")
+    assert(d.what.contains("core.http"))
+}
+// Rust: tests/rollback.rs:20
+#Test("rollback_restores_on_failure") {
+    if !common.have_rustc() { return }
+    src :: """
+struct Counter {
+    value: Int
+    ops: Int
+}
+struct CounterSnap {
+    value: Int
+    ops: Int
+}
+impl Counter.Rollback {
+    type Snapshot = CounterSnap
+    fn snapshot(self) -> CounterSnap {
+        return CounterSnap{ value: self.value, ops: self.ops }
+    }
+    fn restore(&self, snap: ^CounterSnap) -> {
+        self.value = snap.value
+        self.ops = snap.ops
+    }
+}
+enum Fail { Bad }
+fn bump(c: &Counter) -> Int !Fail {
+    #Transact {
+        c.value += 1
+        c.ops += 1
+        return Err(Fail.Bad)
+    }
+    return Ok(c.value)
+}
+fn run() -> {
+    c := Counter{ value: 10, ops: 0 }
+    _ :: bump(&c) ?? 0
+    print(c.value)
+    print(c.ops)
+}
+"""
+    (code, stdout) :: build_and_run("rollback_failure", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "10\n0\n")
+}
+// Rust: tests/rollback.rs:67
+#Test("rollback_not_triggered_on_success") {
+    if !common.have_rustc() { return }
+    src :: """
+struct Counter {
+    value: Int
+    ops: Int
+}
+struct CounterSnap {
+    value: Int
+    ops: Int
+}
+impl Counter.Rollback {
+    type Snapshot = CounterSnap
+    fn snapshot(self) -> CounterSnap {
+        return CounterSnap{ value: self.value, ops: self.ops }
+    }
+    fn restore(&self, snap: ^CounterSnap) -> {
+        self.value = snap.value
+        self.ops = snap.ops
+    }
+}
+enum Fail { Bad }
+fn bump(c: &Counter) -> Int !Fail {
+    #Transact {
+        c.value += 1
+        c.ops += 1
+    }
+    return Ok(c.value)
+}
+fn run() -> {
+    c := Counter{ value: 10, ops: 0 }
+    _ :: bump(&c) ?? 0
+    print(c.value)
+    print(c.ops)
+}
+"""
+    (code, stdout) :: build_and_run("rollback_success", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "11\n1\n")
+}
+// Rust: tests/rollback.rs:114
+#Test("rollback_trait_interpreter_restores_projected_fields") {
+    bundle := Loader.load_entry("Examples/features/errors/rollback_trait.jet").expect("rollback trait fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors :: diagnostics.iter().filter(fn(diagnostic) { diagnostic.severity == Diagnostics.Severity.Error }).collect()
+    assert(errors.is_empty(), "rollback trait fixture should be semantically valid: {errors:#?}")
+    match common.run_interpreter_checked_bundle(&bundle, true, Interpreter.InterpreterInvocation.RunInterpret, &common.development_policy()) {
+        Interpreter.RunOutcome.Ran { stdout, exit_code, .. } -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stdout, include_str("Examples/features/expected/errors/rollback_trait.out"))
+        }
+        Interpreter.RunOutcome.Problems(diagnostics) -> { panic("rollback trait interpreter failed: {diagnostics:?}") }
+    }
+}
+// Rust: tests/rollback.rs:153
+#Test("snapshot_custom_in_codegen") {
+    src :: """
+struct Counter {
+    value: Int
+}
+struct CounterSnap { value: Int }
+impl Counter.Rollback {
+    type Snapshot = CounterSnap
+    fn snapshot(self) -> CounterSnap {
+        return CounterSnap{ value: self.value }
+    }
+    fn restore(&self, snap: ^CounterSnap) -> {
+        self.value = snap.value
+    }
+}
+enum Fail { Bad }
+fn bump(c: &Counter) -> Int !Fail {
+    #Transact {
+        c.value += 1
+        return Err(Fail.Bad)
+    }
+    return Ok(c.value)
+}
+fn run() -> {
+    c := Counter{ value: 0 }
+    _ :: bump(&c) ?? 0
+    print(c.value)
+}
+"""
+    dir :: unique_tmp("codegen")
+    fs.create_dir_all(&dir).unwrap()
+    jet_path :: dir.join("snap_codegen.jet")
+    fs.write(&jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy().into_owned()
+    out :: jet.compile_with_path(src, &shown).unwrap_or_else(fn(diags) { panic("front end rejected: {diags:?}") })
+    rust :: &out.rust
+    assert(rust.contains("snapshot_custom"), "expected snapshot_custom in generated Rust:\n{rust}")
+    assert(rust.contains("trait __jet_Rollback"), "expected trait __jet_Rollback in generated Rust:\n{rust}")
+    user_code :: common.strip_vetted_prelude_modules(rust)
+    assert(!user_code.contains("unsafe"), "unsafe leaked outside jet_txn/jet_mem:\n{user_code}")
+}
+// Rust: tests/s5_columnar_witness.rs:27
+#Test("s5_aos_and_columnar_variants_are_byte_identical_across_tiers") {
+    assert_tiers("s5_aos", AOS)
+    assert_tiers("s5_columnar", COLUMNAR)
+}
+// Rust: tests/same_subject_dispatch.rs:24
+#Test("rewrite_compiles_formats_and_preserves_parser_dispatch_behavior") {
+    output :: tir_support.compile_source("adjacent_subject_dispatch_witness.jet", SOURCE).expect("the non-Jetpack dispatch witness should compile")
+    lint :: output.lints.iter().find(fn(diagnostic) { diagnostic.code == "L0514" }).expect("three adjacent categorical guards should be linted")
+    assert_eq(lint.applicability, Some(Diagnostics.FixApplicability.Suggested))
+    assert_eq(lint.safety, Some(Diagnostics.FixSafety.NeedsReview))
+    edit :: lint.edit.clone().expect("L0514 should carry a source edit")
+    fixed :: FixEngine.apply_edits(SOURCE, &[edit]).expect("the structured L0514 edit should apply")
+    assert(fixed.contains("if key == {\n        \"revision\" | \"rev\" -> print(\"revision\")"), "fixed source did not group aliases in an ordered table:\n{fixed}")
+    assert_eq(jet.format_source(&fixed).expect("the rewrite should be formatter-readable"), fixed, "the L0514 action should produce formatted source")
+    fixed_output :: tir_support.compile_source("adjacent_subject_dispatch_witness_fixed.jet", &fixed).expect("the suggested rewrite should compile")
+    assert(!fixed_output.lints.iter().any(fn(diagnostic) { diagnostic.code == "L0514" }), "the rewrite should remove the adjacent guard run")
+    tir_support.assert_tiers_agree("adjacent_subject_dispatch_original", SOURCE, EXPECTED_STDOUT)
+    tir_support.assert_tiers_agree("adjacent_subject_dispatch_rewrite", &fixed, EXPECTED_STDOUT)
+}
+// Rust: tests/same_subject_dispatch.rs:70
+#Test("braced_rewrite_is_formatter_stable_and_compiles") {
+    output :: tir_support.compile_source("adjacent_subject_dispatch_braced.jet", BRACED_SOURCE).expect("the braced dispatch witness should compile")
+    lint :: output.lints.iter().find(fn(diagnostic) { diagnostic.code == "L0514" }).expect("three adjacent braced guards should be linted")
+    edit :: lint.edit.clone().expect("L0514 should carry a source edit")
+    fixed :: FixEngine.apply_edits(BRACED_SOURCE, &[edit]).expect("the braced L0514 edit should apply")
+    assert_eq(jet.format_source(&fixed).expect("the braced rewrite should format"), fixed, "the LSP refactor action should produce formatter-stable source")
+    _ :: tir_support.compile_source("adjacent_subject_dispatch_braced_fixed.jet", &fixed).expect("the formatted braced rewrite should compile")
+}

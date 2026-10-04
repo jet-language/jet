@@ -1,1212 +1,317 @@
-// PORT-PENDING 1021 tests-corelib-parts-platform-email-module-group: tests/corelib_parts/platform_email.rs:1-67
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[test]
-//RS fn core_email_address_and_mime_are_bounded_and_deterministic() {
-//RS     let scratch = common::Scratch::new("email-mime");
-//RS     let dir = &scratch.path;
-//RS     let src = r#"
-//RS use core.email as email
-//RS 
-//RS fn run() {
-//RS     sender :: email.address("Mara ☕ <mara@example.com>") ?? panic("unicode address")
-//RS     recipient :: email.address("Ada <ada@example.net>") ?? panic("recipient")
-//RS     hidden :: email.address("audit@example.org") ?? panic("bcc")
-//RS     if email.address("attacker@example.com\nBcc: stolen@example.com") == {
-//RS         .Ok(_) -> panic("address injection accepted")
-//RS         .Err(_) -> print("address-rejected")
-//RS     }
-//RS     if email.message(~sender, [~recipient], [Address]{}, "hello\nBcc := stolen@example.com", "text", HTML{""}, [Attachment]{}) == {
-//RS         .Ok(_) -> panic("header injection accepted")
-//RS         .Err(_) -> print("header-rejected")
-//RS     }
-//RS     recipients := [~recipient]
-//RS     count := 1
-//RS     loop count < 101 {
-//RS         &recipients.push(~recipient)
-//RS         count += 1
-//RS     }
-//RS     if email.message(~sender, recipients, [Address]{}, "subject", "text", HTML{""}, [Attachment]{}) == {
-//RS         .Ok(_) -> panic("recipient bound ignored")
-//RS         .Err(_) -> print("recipient-bound")
-//RS     }
-//RS     too_large := "x".repeat(26214401).bytes()
-//RS     if email.attachment("large.bin", "application/octet-stream", too_large) == {
-//RS         .Ok(_) -> panic("attachment bound ignored")
-//RS         .Err(_) -> print("attachment-bound")
-//RS     }
-//RS     attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
-//RS     message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", HTML{"<b>html</b>"}, [attachment]) ?? panic("message")
-//RS     first :: email.serialize(~message) ?? panic("serialize")
-//RS     second :: email.serialize(message) ?? panic("serialize twice")
-//RS     print(first == second)
-//RS     print(first.len())
-//RS }
-//RS 
-//RS "#;
-//RS     let (code, stdout, stderr) = build_and_run(&dir, "email_mime", src, &[], None);
-//RS     assert_eq!(code, 0, "stderr: {stderr}");
-//RS     assert!(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}");
-//RS     let file = dir.join("email_mime.jet");
-//RS     fs::write(&file, src).unwrap();
-//RS     for (tier, use_interpreter) in [("default dev", false), ("forced interpreter", true)] {
-//RS         match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, use_interpreter) {
-//RS             jet::Interpreter::RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => {
-//RS                 assert_eq!(exit_code, 0, "email MIME failed in {tier}: {stderr}");
-//RS                 assert!(
-//RS                     stdout.starts_with(
-//RS                         "address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"
-//RS                     ),
-//RS                     "{tier}: {stdout}"
-//RS                 );
-//RS             }
-//RS             other => panic!("email MIME did not run in {tier}: {other:?}"),
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 1021 tests/corelib_parts/platform_email.rs:1-67
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.DevParts.Support as dev
+use Compiler.JetFoundation.Outcome.[Outcome]
+use jet.[CompileOutput, compile_with_path, compile_web_with_path, render_diagnostics]
+use core.fs as fs
+use std.process.[Command, Stdio]
+use std.net.[TcpListener, UdpSocket, SocketAddr]
+use std.io.[ErrorKind]
 
-// PORT-PENDING 1021 tests-corelib-parts-platform-email-module-group: tests/corelib_parts/support.rs:1-379
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #[allow(unused_imports)]
-//RS use jet_foundation::Outcome::*;
-//RS use std::fs;
-//RS #[cfg(unix)]
-//RS use std::os::unix::fs::PermissionsExt;
-//RS use std::path::PathBuf;
-//RS use std::process::Command;
-//RS 
-//RS mod dns_resolver_policy {
-//RS     #[allow(unused_imports)]
-//RS     pub use jet_foundation::Outcome::*;
-//RS     include!("../../crates/jet-codegen/src/Prelude/CoreLib/Top/DNSResolverPolicy.rs");
-//RS 
-//RS     pub fn resolv_conf(text: &str) -> Vec<String> {
-//RS         jet_net_dns_parse_resolv_conf(text)
-//RS     }
-//RS 
-//RS     pub fn scutil(text: &str) -> Vec<String> {
-//RS         jet_net_dns_parse_scutil(text)
-//RS     }
-//RS 
-//RS     pub fn windows(text: &str) -> Vec<String> {
-//RS         jet_net_dns_parse_windows_addresses(text)
-//RS     }
-//RS }
-//RS 
-//RS fn compile_temp(name: &str, src: &str) -> jet::CompileOutput {
-//RS     let dir = std::env::temp_dir().join(format!("jet_corelib_test_{}", std::process::id()));
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let path = dir.join(name);
-//RS     fs::write(&path, src).unwrap();
-//RS     let shown = path.to_string_lossy();
-//RS     jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn standalone_tls_probe_source(mut rust: String) -> String {
-//RS     rust = rust.replacen("fn main()", "fn jet_generated_main()", 1);
-//RS     let mut isolated = String::with_capacity(rust.len());
-//RS     let mut cfg_test = false;
-//RS     let mut test_module = 0usize;
-//RS     for line in rust.split_inclusive('\n') {
-//RS         let body = line.strip_suffix('\n').unwrap_or(line);
-//RS         if body == "#[cfg(test)]" {
-//RS             cfg_test = true;
-//RS             isolated.push_str(line);
-//RS             continue;
-//RS         }
-//RS         if body.starts_with("extern crate jet_ffi_") {
-//RS             continue;
-//RS         }
-//RS         if body.starts_with("fn jet_ffi_install_reporter() {") {
-//RS             isolated.push_str("fn jet_ffi_install_reporter() {}");
-//RS             if line.ends_with('\n') {
-//RS                 isolated.push('\n');
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if cfg_test {
-//RS             cfg_test = false;
-//RS             let trimmed = body.trim_start();
-//RS             if trimmed.starts_with("mod tests {") {
-//RS                 let indent = &body[..body.len() - trimmed.len()];
-//RS                 isolated.push_str(indent);
-//RS                 isolated.push_str(&format!("mod jet_standalone_test_module_{test_module} {{"));
-//RS                 if line.ends_with('\n') {
-//RS                     isolated.push('\n');
-//RS                 }
-//RS                 test_module += 1;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         isolated.push_str(line);
-//RS     }
-//RS     isolated
-//RS }
-//RS 
-//RS fn jet_bin() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_BIN_EXE_jet"))
-//RS }
-//RS 
-//RS fn build_and_run(
-//RS     dir: &PathBuf,
-//RS     name: &str,
-//RS     src: &str,
-//RS     env: &[(&str, &str)],
-//RS     stdin: Option<&str>,
-//RS ) -> (i32, String, String) {
-//RS     let path = dir.join(name);
-//RS     fs::write(&path, src).unwrap();
-//RS     let shown = path.to_string_lossy();
-//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     });
-//RS     let rs = dir.join(format!("{name}.rs"));
-//RS     let bin = dir.join(name);
-//RS     let mut rustc_cmd = Command::new("rustc");
-//RS     let _runtime_lease = common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
-//RS     rustc_cmd.arg("-o").arg(&bin);
-//RS     if let Some(link) = &out.ffi {
-//RS         rustc_cmd
-//RS             .arg("--extern")
-//RS             .arg(format!("{}={}", link.crate_name, link.rlib_path.display()));
-//RS         for deps_dir in link.dependency_dirs().filter(|dir| dir.is_dir()) {
-//RS             rustc_cmd
-//RS                 .arg("-L")
-//RS                 .arg(format!("dependency={}", deps_dir.display()));
-//RS         }
-//RS     }
-//RS     let rustc = rustc_cmd.output().unwrap();
-//RS     assert!(
-//RS         rustc.status.success(),
-//RS         "rustc rejected generated code:\n{}",
-//RS         String::from_utf8_lossy(&rustc.stderr)
-//RS     );
-//RS     let mut cmd = Command::new(&bin);
-//RS     cmd.current_dir(dir);
-//RS     for (k, v) in env {
-//RS         cmd.env(k, v);
-//RS     }
-//RS     if let Some(text) = stdin {
-//RS         cmd.stdin(std::process::Stdio::piped());
-//RS         cmd.stdout(std::process::Stdio::piped());
-//RS         cmd.stderr(std::process::Stdio::piped());
-//RS         let mut child = cmd.spawn().unwrap();
-//RS         if let Some(mut input) = child.stdin.take() {
-//RS             use std::io::Write;
-//RS             input.write_all(text.as_bytes()).unwrap();
-//RS         }
-//RS         let out = child.wait_with_output().unwrap();
-//RS         return (
-//RS             out.status.code().unwrap_or(-1),
-//RS             String::from_utf8_lossy(&out.stdout).into_owned(),
-//RS             String::from_utf8_lossy(&out.stderr).into_owned(),
-//RS         );
-//RS     }
-//RS     let out = cmd.output().unwrap();
-//RS     (
-//RS         out.status.code().unwrap_or(-1),
-//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS fn run_web_js_source(dir: &PathBuf, name: &str, src: &str) -> Option<String> {
-//RS     if Command::new("node").arg("--version").output().is_err() {
-//RS         return None;
-//RS     }
-//RS     let web_dir = dir.join(format!("{name}_web"));
-//RS     let _ = fs::remove_dir_all(&web_dir);
-//RS     fs::create_dir_all(&web_dir).unwrap();
-//RS     let source_path = web_dir.join(format!("{name}.jet"));
-//RS     fs::write(&source_path, src).unwrap();
-//RS     let shown = source_path.to_string_lossy();
-//RS     let out = jet::compile_web_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected Web fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     });
-//RS     let web = out.web.expect("Web fixture must produce Web artifacts");
-//RS     fs::write(web_dir.join("app.js"), web.js_app).unwrap();
-//RS     fs::write(web_dir.join("jet_dom_runtime.js"), web.dom_runtime).unwrap();
-//RS     fs::write(web_dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
-//RS     let node = Command::new("node")
-//RS         .current_dir(&web_dir)
-//RS         .arg("app.js")
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         node.status.success(),
-//RS         "Web JS fixture failed:\nstdout: {}\nstderr: {}",
-//RS         String::from_utf8_lossy(&node.stdout),
-//RS         String::from_utf8_lossy(&node.stderr)
-//RS     );
-//RS     Some(String::from_utf8_lossy(&node.stdout).into_owned())
-//RS }
-//RS 
-//RS fn build_and_run_multi(
-//RS     dir: &PathBuf,
-//RS     name: &str,
-//RS     entry: &str,
-//RS     files: &[(&str, &str)],
-//RS ) -> (i32, String, String) {
-//RS     for (rel, src) in files {
-//RS         let path = dir.join(rel);
-//RS         if let Some(parent) = path.parent() {
-//RS             fs::create_dir_all(parent).unwrap();
-//RS         }
-//RS         fs::write(path, src).unwrap();
-//RS     }
-//RS     let entry_path = dir.join(entry);
-//RS     let src = fs::read_to_string(&entry_path).unwrap();
-//RS     let shown = entry_path.to_string_lossy();
-//RS     let out = jet::compile_with_path(&src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected multi-file fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, &src, &diags)
-//RS         )
-//RS     });
-//RS     let rs = dir.join(format!("{name}.rs"));
-//RS     let bin = dir.join(name);
-//RS     let mut rustc_cmd = Command::new("rustc");
-//RS     let _runtime_lease = common::add_generated_rust(&mut rustc_cmd, &rs, &out.rust, out.ffi.is_some(), &[]);
-//RS     let rustc = rustc_cmd.arg("-o").arg(&bin).output().unwrap();
-//RS     assert!(
-//RS         rustc.status.success(),
-//RS         "rustc rejected generated multi-file code:\n{}",
-//RS         String::from_utf8_lossy(&rustc.stderr)
-//RS     );
-//RS     let run = Command::new(&bin).current_dir(dir).output().unwrap();
-//RS     (
-//RS         run.status.code().unwrap_or(-1),
-//RS         String::from_utf8_lossy(&run.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&run.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn write_executable(path: &std::path::Path, body: &str) {
-//RS     fs::write(path, body).unwrap();
-//RS     let mut perms = fs::metadata(path).unwrap().permissions();
-//RS     perms.set_mode(0o755);
-//RS     fs::set_permissions(path, perms).unwrap();
-//RS }
-//RS 
-//RS fn jet_string_path(path: &std::path::Path) -> String {
-//RS     path.to_string_lossy()
-//RS         .replace('\\', "\\\\")
-//RS         .replace('"', "\\\"")
-//RS }
-//RS 
-//RS fn dns_name_wire(name: &str) -> Vec<u8> {
-//RS     let mut out = Vec::new();
-//RS     for label in name.trim_end_matches('.').split('.') {
-//RS         out.push(label.len() as u8);
-//RS         out.extend_from_slice(label.as_bytes());
-//RS     }
-//RS     out.push(0);
-//RS     out
-//RS }
-//RS 
-//RS fn dns_fixture_response(query: &[u8]) -> Vec<u8> {
-//RS     let mut pos = 12usize;
-//RS     while pos < query.len() && query[pos] != 0 {
-//RS         pos += query[pos] as usize + 1;
-//RS     }
-//RS     pos += 1;
-//RS     let qtype = u16::from_be_bytes([query[pos], query[pos + 1]]);
-//RS     let question_end = pos + 4;
-//RS     let mut resp = Vec::new();
-//RS     resp.extend_from_slice(&query[0..2]);
-//RS     resp.extend_from_slice(&0x8180u16.to_be_bytes());
-//RS     resp.extend_from_slice(&1u16.to_be_bytes());
-//RS     resp.extend_from_slice(&1u16.to_be_bytes());
-//RS     resp.extend_from_slice(&0u16.to_be_bytes());
-//RS     resp.extend_from_slice(&0u16.to_be_bytes());
-//RS     resp.extend_from_slice(&query[12..question_end]);
-//RS     resp.extend_from_slice(&[0xc0, 0x0c]);
-//RS     resp.extend_from_slice(&qtype.to_be_bytes());
-//RS     resp.extend_from_slice(&1u16.to_be_bytes());
-//RS     resp.extend_from_slice(&0u32.to_be_bytes());
-//RS     let rdata = match qtype {
-//RS         16 => {
-//RS             let mut r = Vec::new();
-//RS             r.push(3);
-//RS             r.extend_from_slice(b"jet");
-//RS             r
-//RS         }
-//RS         33 => {
-//RS             let mut r = Vec::new();
-//RS             r.extend_from_slice(&10u16.to_be_bytes());
-//RS             r.extend_from_slice(&20u16.to_be_bytes());
-//RS             r.extend_from_slice(&443u16.to_be_bytes());
-//RS             r.extend_from_slice(&dns_name_wire("srv.example.test"));
-//RS             r
-//RS         }
-//RS         _ => Vec::new(),
-//RS     };
-//RS     resp.extend_from_slice(&(rdata.len() as u16).to_be_bytes());
-//RS     resp.extend_from_slice(&rdata);
-//RS     resp
-//RS }
-//RS 
-//RS fn dns_question_end(query: &[u8]) -> usize {
-//RS     let mut pos = 12usize;
-//RS     while pos < query.len() && query[pos] != 0 {
-//RS         pos += query[pos] as usize + 1;
-//RS     }
-//RS     pos + 5
-//RS }
-//RS 
-//RS fn dns_truncated_response(query: &[u8]) -> Vec<u8> {
-//RS     let end = dns_question_end(query);
-//RS     let mut response = Vec::new();
-//RS     response.extend_from_slice(&query[0..2]);
-//RS     response.extend_from_slice(&0x8380u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&0u16.to_be_bytes());
-//RS     response.extend_from_slice(&0u16.to_be_bytes());
-//RS     response.extend_from_slice(&query[12..end]);
-//RS     // A TC response may end inside a declared record. The client must validate
-//RS     // the authenticated header/question, then retry over TCP without parsing
-//RS     // an explicitly incomplete UDP record body.
-//RS     response.push(0xc0);
-//RS     response
-//RS }
-//RS 
-//RS fn dns_cname_additional_response(query: &[u8]) -> Vec<u8> {
-//RS     let end = dns_question_end(query);
-//RS     let alias = dns_name_wire("alias.example.test");
-//RS     let mut response = Vec::new();
-//RS     response.extend_from_slice(&query[0..2]);
-//RS     response.extend_from_slice(&0x8180u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&0u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&query[12..end]);
-//RS     response.extend_from_slice(&[0xc0, 0x0c]);
-//RS     response.extend_from_slice(&5u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&0u32.to_be_bytes());
-//RS     response.extend_from_slice(&(alias.len() as u16).to_be_bytes());
-//RS     response.extend_from_slice(&alias);
-//RS     response.extend_from_slice(&alias);
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&1u16.to_be_bytes());
-//RS     response.extend_from_slice(&0u32.to_be_bytes());
-//RS     response.extend_from_slice(&4u16.to_be_bytes());
-//RS     response.extend_from_slice(&[192, 0, 2, 42]);
-//RS     response
-//RS }
-//RS 
-//RS fn bind_dns_dual_protocol_fixture() -> (
-//RS     std::net::TcpListener,
-//RS     std::net::UdpSocket,
-//RS     std::net::SocketAddr,
-//RS ) {
-//RS     const MAX_ATTEMPTS: usize = 64;
-//RS 
-//RS     for attempt in 1..=MAX_ATTEMPTS {
-//RS         let tcp = match std::net::TcpListener::bind("127.0.0.1:0") {
-//RS             Ok(tcp) => tcp,
-//RS             Err(error)
-//RS                 if error.kind() == std::io::ErrorKind::AddrInUse
-//RS                     && attempt < MAX_ATTEMPTS =>
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => break,
-//RS             Err(error) => panic!("failed to bind DNS fixture TCP listener: {error}"),
-//RS         };
-//RS         let addr = tcp.local_addr().unwrap_or_else(|error| {
-//RS             panic!("failed to read DNS fixture TCP listener address: {error}")
-//RS         });
-//RS         match std::net::UdpSocket::bind(addr) {
-//RS             Ok(udp) => return (tcp, udp, addr),
-//RS             Err(error)
-//RS                 if error.kind() == std::io::ErrorKind::AddrInUse
-//RS                     && attempt < MAX_ATTEMPTS =>
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => break,
-//RS             Err(error) => panic!("failed to bind DNS fixture UDP socket at {addr}: {error}"),
-//RS         }
-//RS     }
-//RS 
-//RS     panic!("failed to reserve one TCP/UDP DNS fixture port after {MAX_ATTEMPTS} attempts")
-//RS }
-// END-PORT-PENDING 1021 tests/corelib_parts/support.rs:1-379
+// Rust: tests/corelib_parts/support.rs:9
+// The included resolver policy remains owned by the canonical CoreLib module.
+use jet_codegen.Prelude.CoreLib.Top.DNSResolverPolicy as dns_resolver_policy
+// Rust: tests/corelib_parts/support.rs:14
+fn resolv_conf(text: String) -> [String] { dns_resolver_policy.jet_net_dns_parse_resolv_conf(text) }
+// Rust: tests/corelib_parts/support.rs:18
+fn scutil(text: String) -> [String] { dns_resolver_policy.jet_net_dns_parse_scutil(text) }
+// Rust: tests/corelib_parts/support.rs:22
+fn windows(text: String) -> [String] { dns_resolver_policy.jet_net_dns_parse_windows_addresses(text) }
 
-// PORT-PENDING 1021 tests-corelib-parts-platform-email-module-group: tests/dev_parts/corpus.rs:1-31
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // The shared corpus observation and everything ratcheted against it (#2020).
-//RS //
-//RS // `jit_coverage_audit` and `cranelift_three_way_differential_battery` both read the ONE memoised
-//RS // `collect_jit_coverage` walk, so they are deliberately kept in the SAME target:
-//RS // splitting them apart would pay for that whole-corpus compile walk twice and
-//RS // let two copies of the same answer drift (AGENTS.md I8).
-//RS 
-//RS /// The one compile-coverage ratchet (#125 / #778, hole closed by #1663).
-//RS ///
-//RS /// Audits every example through the JIT lowerer and the observed run-tier gate.
-//RS /// The old hand-maintained `jit_gaps.txt` baseline is retired. The audit now
-//RS /// states its own denominator: `EXAMPLE_CORPUS_FLOOR` pins how many stems it
-//RS /// measures and `OUT_OF_UNIVERSE_CEILING` pins how many it cannot judge.
-//RS #[test]
-//RS fn jit_coverage_audit() {
-//RS     with_jit_test_scope(jit_coverage_audit_inner);
-//RS }
-//RS 
-//RS /// c139 M3+: three-way differential (JIT == interpreter == AOT) on resident-safe examples.
-//RS ///
-//RS /// The universe is stated, not implied: the `resident_safe` bucket of the shared
-//RS /// `collect_jit_coverage` observation — the compile-covered stems the resident
-//RS /// JIT will also run — restricted to the ones carrying an `.out` golden. Every
-//RS /// other stem of the corpus is counted and named on every run, and
-//RS /// `EXAMPLE_CORPUS_FLOOR`, `OUT_OF_UNIVERSE_CEILING`, `RESIDENT_SAFE_FLOOR` and
-//RS /// `THREE_WAY_RAN_FLOOR` pin all of it, so this battery cannot pass over a
-//RS /// universe that quietly shrank (#2012).
-//RS #[test]
-//RS fn cranelift_three_way_differential_battery() {
-//RS     with_jit_test_scope(cranelift_three_way_differential_battery_inner);
-//RS }
-// END-PORT-PENDING 1021 tests/dev_parts/corpus.rs:1-31
+// Rust: tests/corelib_parts/support.rs:27
+fn compile_temp(name: String, src: String) -> CompileOutput {
+    dir :: std.env.temp_dir().join("jet_corelib_test_{std.process.id()}") // GATE #4494
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join(name)
+    fs.write(path, src).unwrap()
+    shown :: path.to_string_lossy()
+    compile_with_path(src, shown).unwrap_or_else((diags) -> panic("front end rejected fixture:\n{render_diagnostics(shown, src, diags)}"))
+}
 
-// PORT-PENDING 1021 tests-corelib-parts-platform-email-module-group: tests/dev_parts/corpus_gate.rs:1-513
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // The strict JIT<->AOT differential corpus gate (#2020).
-//RS //
-//RS // Own target: it classifies all ~500 stems with an AOT build each, and
-//RS // `Tools/ci/jit-aot-parity.sh` already runs it as its own invocation.
-//RS 
-//RS /// #2013: the ledger accounts for the whole corpus — checked with no run at all.
-//RS ///
-//RS /// Deliberately its own test, ahead of the gate below. The gate needs a Cranelift
-//RS /// host and an AOT build per stem and returns green early where the host is
-//RS /// unsupported, so `tests/jit_corpus_gate.txt` could — and did — drift to 374
-//RS /// rows against a 496-stem corpus without any check firing. This one parses the
-//RS /// ledger and walks `Examples/features/<topic>/`; it runs everywhere, in
-//RS /// milliseconds, and says nothing about which tier runs a stem.
-//RS #[test]
-//RS fn corpus_gate_manifest_accounts_for_every_example() {
-//RS     assert_corpus_gate_manifest_covers_corpus();
-//RS }
-//RS 
-//RS /// #2013 negative control: the completeness law actually fires.
-//RS ///
-//RS /// The check above passes today only because 122 unclassified stems sit under a
-//RS /// declared ceiling, so "it passed" says nothing about whether it can fail. Hand
-//RS /// `audit_corpus_gate_ledger` a corpus with a stem no section names, a stem two
-//RS /// sections claim, a row with no file, and a held-out row with no reason, and
-//RS /// require it to name each one. Without this, the pins would rest on an assertion
-//RS /// nobody ever watched fail.
-//RS #[test]
-//RS fn corpus_gate_ledger_audit_fires_on_a_missing_row() {
-//RS     let manifest = vec![
-//RS         CorpusGateRecord {
-//RS             stem: "basics/hello".to_string(),
-//RS             class: CorpusGateClass::ResidentJit,
-//RS             detail: String::new(),
-//RS         },
-//RS         CorpusGateRecord {
-//RS             stem: "basics/twice".to_string(),
-//RS             class: CorpusGateClass::ResidentJit,
-//RS             detail: String::new(),
-//RS         },
-//RS         CorpusGateRecord {
-//RS             stem: "basics/twice".to_string(),
-//RS             class: CorpusGateClass::DeoptInterp,
-//RS             detail: String::new(),
-//RS         },
-//RS         CorpusGateRecord {
-//RS             stem: "tooling/data_line".to_string(),
-//RS             class: CorpusGateClass::ResidentJit,
-//RS             detail: String::new(),
-//RS         },
-//RS         CorpusGateRecord {
-//RS             stem: "net/http_server".to_string(),
-//RS             class: CorpusGateClass::GateExcluded,
-//RS             detail: String::new(),
-//RS         },
-//RS     ];
-//RS     let corpus = vec![
-//RS         "basics/hello".to_string(),
-//RS         "basics/twice".to_string(),
-//RS         "net/http_server".to_string(),
-//RS         "tooling/data_plot".to_string(),
-//RS     ];
-//RS 
-//RS     let audit = audit_corpus_gate_ledger(&manifest, &corpus);
-//RS 
-//RS     assert_eq!(
-//RS         audit.unclassified,
-//RS         vec!["tooling/data_plot".to_string()],
-//RS         "a stem in no section must be named, not counted away"
-//RS     );
-//RS     assert_eq!(
-//RS         audit.ghosts,
-//RS         vec!["tooling/data_line".to_string()],
-//RS         "a row with no file must read as a stale row, never as a class change"
-//RS     );
-//RS     assert_eq!(audit.duplicated.len(), 1, "{:?}", audit.duplicated);
-//RS     assert!(
-//RS         audit.duplicated[0].contains("basics/twice")
-//RS             && audit.duplicated[0].contains("resident_jit")
-//RS             && audit.duplicated[0].contains("deopt_interp"),
-//RS         "the duplicate must name both claiming sections: {:?}",
-//RS         audit.duplicated
-//RS     );
-//RS     assert_eq!(audit.reasonless.len(), 1, "{:?}", audit.reasonless);
-//RS     assert!(
-//RS         audit.reasonless[0].contains("net/http_server")
-//RS             && audit.reasonless[0].contains("gate_excluded"),
-//RS         "a held-out row with no reason must be named with its section: {:?}",
-//RS         audit.reasonless
-//RS     );
-//RS     // Ghost rows are excluded from the classified count on purpose: a row naming
-//RS     // no file classifies nothing, so counting it would let three stale rows pay
-//RS     // for three stems that fell out of the ledger.
-//RS     assert_eq!(
-//RS         audit.classified, 3,
-//RS         "only stems that exist count toward the floor"
-//RS     );
-//RS     assert_eq!(
-//RS         audit.classified + audit.unclassified.len(),
-//RS         corpus.len(),
-//RS         "the identity the two pins rest on must hold on synthetic input too"
-//RS     );
-//RS     assert_eq!(audit.excluded, 1);
-//RS }
-//RS 
-//RS fn core_conformance_shard(entries: Vec<(String, String)>) -> Vec<(String, String)> {
-//RS     let index = std::env::var("JET_CORE_CONFORMANCE_SHARD_INDEX").ok();
-//RS     let count = std::env::var("JET_CORE_CONFORMANCE_SHARD_COUNT").ok();
-//RS     let entries = match (index, count) {
-//RS         (None, None) => entries,
-//RS         (Some(index), Some(count)) => {
-//RS             let index = index
-//RS                 .parse::<usize>()
-//RS                 .expect("Core conformance shard index must be an integer");
-//RS             let count = count
-//RS                 .parse::<usize>()
-//RS                 .expect("Core conformance shard count must be an integer");
-//RS             assert!(count > 0, "Core conformance shard count must be positive");
-//RS             assert!(
-//RS                 index < count,
-//RS                 "Core conformance shard index must be below its count"
-//RS             );
-//RS             entries
-//RS                 .into_iter()
-//RS                 .enumerate()
-//RS                 .filter_map(|(position, entry)| (position % count == index).then_some(entry))
-//RS                 .collect()
-//RS         }
-//RS         _ => panic!("Core conformance shard index and count must be set together"),
-//RS     };
-//RS     // Repair mode: `JET_CORE_CONFORMANCE_FILTER=a/b,c/d` keeps only witnesses
-//RS     // whose stem contains one of the comma-separated needles, so one witness
-//RS     // can be proven without rerunning the whole denominator.
-//RS     match std::env::var("JET_CORE_CONFORMANCE_FILTER") {
-//RS         Ok(filter) if !filter.trim().is_empty() => {
-//RS             let needles: Vec<String> = filter
-//RS                 .split(',')
-//RS                 .map(|n| n.trim().to_string())
-//RS                 .filter(|n| !n.is_empty())
-//RS                 .collect();
-//RS             let kept: Vec<(String, String)> = entries
-//RS                 .into_iter()
-//RS                 .filter(|(stem, _)| needles.iter().any(|n| stem.contains(n.as_str())))
-//RS                 .collect();
-//RS             assert!(
-//RS                 !kept.is_empty(),
-//RS                 "Core conformance filter `{filter}` matched no witness stem"
-//RS             );
-//RS             kept
-//RS         }
-//RS         _ => entries,
-//RS     }
-//RS }
-//RS 
-//RS /// #2286: generated Core witnesses use the same strict resident-JIT,
-//RS /// interpreter, and AOT oracle as the feature corpus. Discovery is a sorted
-//RS /// filesystem walk, so adding a witness cannot silently leave it outside the
-//RS /// gate. The registry denominator is checked here too, before any tier run,
-//RS /// so a missing witness fails the suite rather than becoming invisible.
-//RS #[test]
-//RS fn core_conformance_corpus_uses_strict_three_tier_gate() {
-//RS     // Census mode: report every failing witness in one run instead of
-//RS     // stopping at the first, so repairs are planned from a complete list.
-//RS     let census = std::env::var("JET_CORE_CONFORMANCE_CENSUS").as_deref() == Ok("1");
-//RS     if census
-//RS         && std::env::var("JET_CORE_CONFORMANCE_FILTER")
-//RS             .map_or(true, |filter| filter.trim().is_empty())
-//RS     {
-//RS         let gate = std::process::Command::new("node")
-//RS             .arg("Tools/agent/closeout-gate.mjs")
-//RS             .arg("check")
-//RS             .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS             .output()
-//RS             .expect("node must run the milestone closeout gate");
-//RS         assert!(
-//RS             gate.status.success(),
-//RS             "unfiltered Core conformance census is milestone-closeout-only:\nstdout:\n{}\nstderr:\n{}",
-//RS             String::from_utf8_lossy(&gate.stdout),
-//RS             String::from_utf8_lossy(&gate.stderr)
-//RS         );
-//RS     }
-//RS     let denominator = std::process::Command::new("node")
-//RS         .arg("Tools/agent/core-conformance.mjs")
-//RS         .arg("--check")
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .output()
-//RS         .expect("node must run the Core conformance denominator checker");
-//RS     assert!(
-//RS         denominator.status.success(),
-//RS         "Core conformance denominator is incomplete or malformed:\nstdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&denominator.stdout),
-//RS         String::from_utf8_lossy(&denominator.stderr)
-//RS     );
-//RS     let denominator_stdout = String::from_utf8_lossy(&denominator.stdout);
-//RS     let expected_programs = denominator_stdout
-//RS         .split("; ")
-//RS         .find_map(|field| {
-//RS             field
-//RS                 .trim()
-//RS                 .strip_suffix(" program(s)")?
-//RS                 .parse::<usize>()
-//RS                 .ok()
-//RS         })
-//RS         .expect("Core conformance denominator must report its program count");
-//RS     with_jit_test_scope(|| {
-//RS         if skip_if_cranelift_host_unsupported() {
-//RS             return;
-//RS         }
-//RS         let all_entries = core_conformance_corpus_entries();
-//RS         assert_eq!(
-//RS             all_entries.len(),
-//RS             expected_programs,
-//RS             "strict tier gate must discover exactly the denominator's witness programs"
-//RS         );
-//RS         let entries = core_conformance_shard(all_entries);
-//RS         assert!(
-//RS             !entries.is_empty(),
-//RS             "Core conformance corpus must have witnesses"
-//RS         );
-//RS         let mut failures: Vec<(String, String)> = Vec::new();
-//RS         if census {
-//RS             std::panic::set_hook(Box::new(|_| {}));
-//RS         }
-//RS         for (stem, file) in entries {
-//RS             let run = || {
-//RS                 jet::Comptime::with_ambient(
-//RS                     Some(jet::Compiler::eval_core_call_with_type),
-//RS                     None,
-//RS                     None,
-//RS                     || assert_cranelift_three_way(&file, &stem),
-//RS                 )
-//RS             };
-//RS             if !census {
-//RS                 run();
-//RS                 continue;
-//RS             }
-//RS             if let Err(payload) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
-//RS                 let message = payload
-//RS                     .downcast_ref::<String>()
-//RS                     .cloned()
-//RS                     .or_else(|| payload.downcast_ref::<&str>().map(|s| s.to_string()))
-//RS                     .unwrap_or_else(|| "non-string panic".to_string());
-//RS                 failures.push((stem.clone(), message));
-//RS             }
-//RS         }
-//RS         if census {
-//RS             let _ = std::panic::take_hook();
-//RS             for (stem, message) in &failures {
-//RS                 let line = message.replace('\n', " ");
-//RS                 eprintln!("CENSUS {stem}\t{}", &line[..line.len().min(600)]);
-//RS             }
-//RS             assert!(
-//RS                 failures.is_empty(),
-//RS                 "Core conformance census: {} witness(es) failed the strict three-tier gate",
-//RS                 failures.len()
-//RS             );
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS /// #2286 criteria 1 and 3: the checker rejects structural false greens and
-//RS /// synthetic denominator rows, including the bind-and-discard shape that
-//RS /// previously made `uuid.v4` look covered.
-//RS #[test]
-//RS fn core_conformance_checker_rejects_structural_false_greens() {
-//RS     let output = std::process::Command::new("node")
-//RS         .arg("Tools/agent/core-conformance.mjs")
-//RS         .arg("--hostile-fixtures")
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .output()
-//RS         .expect("node must run the Core conformance checker");
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "Core conformance hostile fixture was accepted:\nstdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     assert!(
-//RS         String::from_utf8_lossy(&output.stdout).contains("rejected bind-and-discard result"),
-//RS         "hostile fixture output must state the result-consumption guard"
-//RS     );
-//RS     assert!(
-//RS         String::from_utf8_lossy(&output.stdout).contains("denominator rows"),
-//RS         "hostile fixture output must state the denominator guard"
-//RS     );
-//RS }
-//RS 
-//RS /// c727 C1–C4: discover every top-level example, classify it, and ratchet the
-//RS /// manifest. AOT-oracle examples (exit 0) must resident-JIT or deopt-interp
-//RS /// with backend attribution — never silent fallback. Each AOT-oracle case
-//RS /// compares default tiered against optimized AOT stdout/stderr/exit
-//RS /// byte-for-byte, and compares the pure interpreter too WHEN the canonical MIR
-//RS /// evaluator runs the program. A pure-interpreter refusal carrying E0956 is
-//RS /// accepted and records `interpreter_refused: CODE` on the observed backend row. A
-//RS /// `resident_jit` row proves AOT==tiered-JIT plus resident Cranelift execution.
-//RS /// It proves interpreter parity only without that marker. Every accepted refusal
-//RS /// is MIR coverage owed against D-ONECORE1=A/I9, not a settled boundary. Do not
-//RS /// cite a marked `resident_jit` row as three-tier parity. An AOT-green example whose
-//RS /// default tiered run REFUSES to run it lands in `run_tier_broken`, which must
-//RS /// hold exactly `RUN_TIER_BROKEN_HELD_OUT`; one that runs but disagrees with the
-//RS /// oracle lands in `tier_divergent`, which must stay empty. Recording both facts
-//RS /// in one section made the run-tier message false for the divergences
-//RS /// (D-VERDICT-1254-1 / D-LENS-RUN1). An example whose AOT oracle failed to build
-//RS /// or exited non-zero gets no comparison at all and lands in `aot_broken`, which
-//RS /// must hold exactly `AOT_BROKEN_HELD_OUT`: that fact used to be filed under
-//RS /// `expected_exit`, so seven stems with a broken oracle sat in a benign section
-//RS /// and were dropped from the differential (#2016).
-//RS /// parity: guard tests/dev_corpus_gate.rs::example_corpus_strict_jit_aot_differential_gate
-//RS ///
-//RS /// c730: CI runs this via `Tools/ci/jit-aot-parity.sh` on every supported
-//RS /// native x86_64 host (Linux/macOS/Windows). Set the shard index/count to run
-//RS /// one weighted corpus slice; each slice writes its report, and
-//RS /// `Tools/ci/compose-corpus-gate.sh` composes the ledger. Set
-//RS /// `JET_CORPUS_GATE_REPORT_DIR` to write the report bundle.
-//RS #[test]
-//RS fn example_corpus_strict_jit_aot_differential_gate() {
-//RS     let started = std::time::Instant::now();
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let shard = corpus_gate_shard_config();
-//RS     let filter = std::env::var("JET_CORPUS_GATE_FILTER").ok();
-//RS     let selected_stems = corpus_gate_selected_stems();
-//RS     let records = collect_corpus_gate_records();
-//RS     let covered_stems: Vec<String> = records.iter().map(|record| record.stem.clone()).collect();
-//RS     assert_eq!(
-//RS         covered_stems, selected_stems,
-//RS         "corpus gate shard did not classify its exact selected stem set"
-//RS     );
-//RS     if std::env::var("JET_DUMP_CORPUS_GATE").as_deref() == Ok("1") {
-//RS         print_corpus_gate_manifest(&records);
-//RS         if shard.is_some() {
-//RS             assert!(
-//RS                 std::env::var_os("JET_CORPUS_GATE_REPORT_DIR").is_some(),
-//RS                 "a sharded corpus dump needs JET_CORPUS_GATE_REPORT_DIR; compose shard reports instead of overwriting the canonical ledger"
-//RS             );
-//RS         } else if std::env::var("JET_WRITE_CORPUS_GATE").as_deref() == Ok("1") {
-//RS             let manifest = corpus_gate_manifest_from_records(&records);
-//RS             fs::write(
-//RS                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/jit_corpus_gate.txt"),
-//RS                 manifest,
-//RS             )
-//RS             .expect("write tests/jit_corpus_gate.txt");
-//RS         }
-//RS         write_corpus_gate_report(&records, started.elapsed());
-//RS         eprintln!(
-//RS             "c727 corpus gate: shard {}/{} classified {} examples ({} resident JIT, {} deopt-interp, {} run-tier-broken, {} tier-divergent)",
-//RS             shard.map_or(0, |(index, _)| index),
-//RS             shard.map_or(1, |(_, count)| count),
-//RS             records.len(),
-//RS             records
-//RS                 .iter()
-//RS                 .filter(|r| r.class == CorpusGateClass::ResidentJit)
-//RS                 .count(),
-//RS             records
-//RS                 .iter()
-//RS                 .filter(|r| r.class == CorpusGateClass::DeoptInterp)
-//RS                 .count(),
-//RS             records
-//RS                 .iter()
-//RS                 .filter(|r| r.class == CorpusGateClass::RunTierBroken)
-//RS                 .count(),
-//RS             records
-//RS                 .iter()
-//RS                 .filter(|r| r.class == CorpusGateClass::TierDivergent)
-//RS                 .count(),
-//RS         );
-//RS         return;
-//RS     }
-//RS     let mut expected = parse_corpus_gate_manifest();
-//RS     if filter.is_some() || shard.is_some() {
-//RS         let selected: std::collections::HashSet<&str> =
-//RS             selected_stems.iter().map(String::as_str).collect();
-//RS         expected.retain(|record| selected.contains(record.stem.as_str()));
-//RS     } else {
-//RS         assert_eq!(
-//RS             records.len(),
-//RS             all_example_stems().len(),
-//RS             "corpus gate must classify every discovered example"
-//RS         );
-//RS         // #1998 + #2013: ghosts, duplicates and unlisted stems are ONE law, and
-//RS         // it lives beside the pins that make it a ratchet — not a second copy
-//RS         // here (AGENTS.md I8). It runs before the blob compare because that
-//RS         // compare reports the first diverging record, so a missing or
-//RS         // nonexistent row reads exactly like a classification that changed.
-//RS         assert_corpus_gate_manifest_covers_corpus();
-//RS     }
-//RS     // Hard floor, independent of the ledger: the run-tier class holds exactly the
-//RS     // stems named in `RUN_TIER_BROKEN_HELD_OUT` and nothing else, and the
-//RS     // broken-oracle class holds exactly `AOT_BROKEN_HELD_OUT`. A regression that
-//RS     // moves an AOT-green example into the run-tier class, or breaks another
-//RS     // stem's oracle, fails here even if the manifest is regenerated, and a fixed
-//RS     // hold-out fails too, so neither list can outlive its defect
-//RS     // (D-VERDICT-1254-1 / D-LENS-RUN1, #2016).
-//RS     let broken: Vec<(&str, &str)> = records
-//RS         .iter()
-//RS         .filter(|r| r.class == CorpusGateClass::RunTierBroken)
-//RS         .map(|r| (r.stem.as_str(), r.detail.as_str()))
-//RS         .collect();
-//RS     // One filter for both compares: a hold-out this run never put an oracle
-//RS     // behind is not evidence of a fix. `JET_CORPUS_GATE_FILTER` narrows which
-//RS     // stems were classified at all, and a host without rustc classifies every
-//RS     // stem `oracle_unavailable` without building anything.
-//RS     let oracle_reached: std::collections::HashSet<&str> = records
-//RS         .iter()
-//RS         .filter(|r| r.class != CorpusGateClass::OracleUnavailable)
-//RS         .map(|r| r.stem.as_str())
-//RS         .collect();
-//RS     let held_out: Vec<(&str, &str)> = RUN_TIER_BROKEN_HELD_OUT
-//RS         .iter()
-//RS         .filter(|(stem, _, _)| oracle_reached.contains(stem))
-//RS         .map(|(stem, codes, _)| (*stem, *codes))
-//RS         .collect();
-//RS     assert_eq!(
-//RS         broken,
-//RS         held_out,
-//RS         "JIT/AOT run-tier regression: the AOT-green example(s) whose default `jet run` REFUSES \
-//RS          to run them are not the held-out set. New entries are the defect; a vanished entry is \
-//RS          fixed and must leave RUN_TIER_BROKEN_HELD_OUT in the same diff. Held out: {}",
-//RS         RUN_TIER_BROKEN_HELD_OUT
-//RS             .iter()
-//RS             .map(|(stem, codes, why)| format!("{stem} ({codes}) — {why}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join("; ")
-//RS     );
-//RS     // #2016: the section that used to hide inside `expected_exit`. A stem whose
-//RS     // AOT oracle failed to build or exited non-zero gets NO tier comparison at
-//RS     // all, so every row here is a hole in the differential and the set may only
-//RS     // shrink. A build failure is also an I2 internal compiler error: rustc
-//RS     // rejecting generated code is never a user-facing outcome.
-//RS     let aot_broken: Vec<(&str, &str)> = records
-//RS         .iter()
-//RS         .filter(|r| r.class == CorpusGateClass::AotBroken)
-//RS         .map(|r| (r.stem.as_str(), r.detail.as_str()))
-//RS         .collect();
-//RS     let aot_held_out: Vec<(&str, &str)> = AOT_BROKEN_HELD_OUT
-//RS         .iter()
-//RS         .filter(|(stem, _, _)| oracle_reached.contains(stem))
-//RS         .map(|(stem, detail, _)| (*stem, *detail))
-//RS         .collect();
-//RS     assert_eq!(
-//RS         aot_broken,
-//RS         aot_held_out,
-//RS         "AOT oracle regression: the example(s) whose optimized AOT build or run FAILED are not \
-//RS          the held-out set, so the three-tier differential silently covers a different set than \
-//RS          the one this gate claims. New entries are the defect — a failed AOT build of generated \
-//RS          code is an I2 internal compiler error; a vanished entry is fixed and must leave \
-//RS          AOT_BROKEN_HELD_OUT in the same diff. Held out: {}",
-//RS         AOT_BROKEN_HELD_OUT
-//RS             .iter()
-//RS             .map(|(stem, detail, why)| format!("{stem} ({detail}) — {why}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join("; ")
-//RS     );
-//RS     // The other half of the same law, and the reason it used to read false: a
-//RS     // stem that RAN under both tiers with different observables is a divergence,
-//RS     // not a refusal. It stays empty — default tiered output must equal optimized
-//RS     // AOT output byte for byte (D-ONECORE1=A), the same law
-//RS     // `jit_coverage_audit` states and enforces.
-//RS     let divergent: Vec<String> = records
-//RS         .iter()
-//RS         .filter(|r| r.class == CorpusGateClass::TierDivergent)
-//RS         .map(|r| format!("{} ({})", r.stem, r.detail))
-//RS         .collect();
-//RS     assert!(
-//RS         divergent.is_empty(),
-//RS         "JIT/AOT tier divergence: AOT-green example(s) also ran under default `jet run`, but the \
-//RS          named stream(s) disagree with the optimized AOT oracle (tier_divergent must stay \
-//RS          empty): {}",
-//RS         divergent.join(", ")
-//RS     );
-//RS     assert_eq!(
-//RS         records, expected,
-//RS         "corpus gate manifest drifted; update tests/jit_corpus_gate.txt only for an intentional \
-//RS          ratchet move (D-VERDICT-1254-1: run_tier_broken may only shrink). Refresh with \
-//RS          JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 \
-//RS          bash Tools/ci/jit-aot-parity.sh"
-//RS     );
-//RS     let aot_oracle: Vec<_> = records
-//RS         .iter()
-//RS         .filter(|r| {
-//RS             matches!(
-//RS                 r.class,
-//RS                 CorpusGateClass::ResidentJit | CorpusGateClass::DeoptInterp
-//RS             )
-//RS         })
-//RS         .collect();
-//RS     eprintln!(
-//RS         "c727 corpus gate: {} classified, {} AOT-oracle ({} resident JIT, {} deopt-interp), {} run-tier-broken, {} tier-divergent, {} aot-broken",
-//RS         records.len(),
-//RS         aot_oracle.len(),
-//RS         records
-//RS             .iter()
-//RS             .filter(|r| r.class == CorpusGateClass::ResidentJit)
-//RS             .count(),
-//RS         records
-//RS             .iter()
-//RS             .filter(|r| r.class == CorpusGateClass::DeoptInterp)
-//RS             .count(),
-//RS         records
-//RS             .iter()
-//RS             .filter(|r| r.class == CorpusGateClass::RunTierBroken)
-//RS             .count(),
-//RS         records
-//RS             .iter()
-//RS             .filter(|r| r.class == CorpusGateClass::TierDivergent)
-//RS             .count(),
-//RS         records
-//RS             .iter()
-//RS             .filter(|r| r.class == CorpusGateClass::AotBroken)
-//RS             .count(),
-//RS     );
-//RS     write_corpus_gate_report(&records, started.elapsed());
-//RS }
-// END-PORT-PENDING 1021 tests/dev_parts/corpus_gate.rs:1-513
+// Rust: tests/corelib_parts/support.rs:41
+fn standalone_tls_probe_source(rust: String) -> String {
+    renamed :: rust.replacen("fn main()", "fn jet_generated_main()", 1)
+    isolated := String.with_capacity(renamed.len())
+    cfg_test := false
+    test_module := 0
+    loop line in renamed.split_inclusive('\n') {
+        body :: line.strip_suffix('\n').unwrap_or(line)
+        if body == "#[cfg(test)]" {
+            cfg_test = true
+            &isolated.push_str(line)
+            continue
+        }
+        if body.starts_with("extern crate jet_ffi_") { continue }
+        if body.starts_with("fn jet_ffi_install_reporter() {") {
+            &isolated.push_str("fn jet_ffi_install_reporter() {}")
+            if line.ends_with('\n') { &isolated.push('\n') }
+            continue
+        }
+        if cfg_test {
+            cfg_test = false
+            trimmed := body.trim_start() // #4303
+            if trimmed.starts_with("mod tests {") {
+                &isolated.push_str(body[0..body.len() - trimmed.len()])
+                &isolated.push_str("mod jet_standalone_test_module_{test_module} {{")
+                if line.ends_with('\n') { &isolated.push('\n') }
+                test_module += 1
+                continue
+            }
+        }
+        &isolated.push_str(line)
+    }
+    isolated
+}
 
-// PORT-PENDING 1021 tests-corelib-parts-platform-email-module-group: tests/dev_parts/default_parity.rs:1-80
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Whole-corpus default (`tiered Cranelift`) `jet dev` parity battery (#2020).
-//RS //
-//RS // Own target for the same reason as `interp_parity`: one AOT build per stem
-//RS // over the whole corpus does not fit a shared 900s budget.
-//RS 
-//RS /// c125 M4 exit gate: the DEFAULT `jet dev` path uses tiered Cranelift. JIT-covered
-//RS /// examples must match the AOT binary; uncovered examples deopt to the interpreter
-//RS /// with byte-identical output (D-LENS-RUN2=A / #778).
-//RS #[test]
-//RS fn dev_default_matches_compiled_binary() {
-//RS     let handle = std::thread::Builder::new()
-//RS         .name("dev-default-battery".into())
-//RS         .spawn(|| {
-//RS             let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-//RS             let have_rustc = have_rustc();
-//RS             if !have_rustc {
-//RS                 eprintln!(
-//RS                     "note: rustc not found; skipping jet dev (default backend) differential battery"
-//RS                 );
-//RS                 return;
-//RS             }
-//RS             let dir = std::env::temp_dir()
-//RS                 .join(format!("jet_dev_default_diff_{}", std::process::id()));
-//RS             fs::create_dir_all(&dir).unwrap();
-//RS             // No persistent parity exceptions: every observed divergence fails.
-//RS             let manifested_divergences = Vec::new();
-//RS             let (stems, sema_rejected) = typechecked_example_stems();
-//RS             // #2020: name what left the universe BEFORE measuring anything over
-//RS             // it. A stem may not leave this battery by breaking.
-//RS             for row in &sema_rejected {
-//RS                 eprintln!("  sema-rejected, NOT tested by this battery: {row}");
-//RS             }
-//RS             assert!(
-//RS                 sema_rejected.len() <= SEMA_REJECTED_CEILING,
-//RS                 "{} shipped example(s) fail the run-path front end (ceiling \
-//RS                  {SEMA_REJECTED_CEILING}), so the default `jet dev` battery never tested them, \
-//RS                  and the count may only fall:\n{}",
-//RS                 sema_rejected.len(),
-//RS                 sema_rejected.join("\n")
-//RS             );
-//RS             let stats = run_dev_default_battery_parallel(stems, dir, manifested_divergences);
-//RS             eprintln!(
-//RS                 "c125 default-backend battery: {} ran ({} default==compiled, {} manifested divergences), {} deopt, {} boundary-asserted, {} total",
-//RS                 stats.ran,
-//RS                 stats.ran - stats.manifested,
-//RS                 stats.manifested,
-//RS                 stats.deopt,
-//RS                 stats.boundary,
-//RS                 stats.ran + stats.boundary
-//RS             );
-//RS             assert!(
-//RS                 stats.ran > 0,
-//RS                 "expected at least some examples to run via the default jet dev backend"
-//RS             );
-//RS             assert!(
-//RS                 stats.deopt > 0,
-//RS                 "expected tiered deopt for uncovered examples instead of transparent AOT fallback"
-//RS             );
-//RS             let mut observed_boundaries = stats.boundary_stems;
-//RS             observed_boundaries.sort();
-//RS             observed_boundaries.dedup();
-//RS             for required in DEFAULT_BACKEND_EXPECTED_BOUNDARIES {
-//RS                 assert!(
-//RS                     observed_boundaries.iter().any(|s| s == required),
-//RS                     "missing expected boundary `{required}` in {observed_boundaries:?}"
-//RS                 );
-//RS             }
-//RS             // #778: many stems deopt then stop at E0956 — named boundaries, not
-//RS             // E2211. Do not pin the full set; corpus gate + jit_gaps ratchet own
-//RS             // coverage growth.
-//RS             assert_eq!(
-//RS                 stats.manifested, 0,
-//RS                 "default jet dev must not carry manifested stdout/stderr/exit-code divergences"
-//RS             );
-//RS         })
-//RS         .expect("spawn default-backend battery");
-//RS     handle
-//RS         .join()
-//RS         .expect("default-backend battery thread panicked");
-//RS }
-// END-PORT-PENDING 1021 tests/dev_parts/default_parity.rs:1-80
+// Rust: tests/corelib_parts/support.rs:82
+fn jet_bin() -> OSPath { OSPath.from(std.env.compile_time_var("CARGO_BIN_EXE_jet")) }
 
-// PORT-PENDING 1021 tests-corelib-parts-platform-email-module-group: tests/dev_parts/interp_parity.rs:1-118
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Whole-corpus pure-interpreter parity batteries (#2020).
-//RS //
-//RS // Own target: each stem here is compared against a fresh optimized `rustc`
-//RS // build of the same program, so this slice cannot share a 900s budget with any
-//RS // other whole-corpus battery.
-//RS 
-//RS /// c77 widened battery: EVERY example either runs (interpreted stdout/stderr/exit
-//RS /// code == compiled-binary stdout/stderr/exit code, byte for byte — I2) or stops at a named boundary
-//RS /// (E2202/E0956 — never a silent skip). Reports the run/boundary split so
-//RS /// the coverage can't quietly shrink.
-//RS #[test]
-//RS fn interpreter_matches_compiled_binary() {
-//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-//RS     let have_rustc = have_rustc();
-//RS     if !have_rustc {
-//RS         eprintln!("note: rustc not found; skipping jet dev differential battery");
-//RS         return;
-//RS     }
-//RS     let dir = std::env::temp_dir().join(format!("jet_dev_diff_{}", std::process::id()));
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     // No persistent parity exceptions: every observed divergence fails.
-//RS     let manifested_divergences = Vec::new();
-//RS     let stats =
-//RS         run_interpreter_battery_parallel(interpreter_example_stems(), dir, manifested_divergences);
-//RS     eprintln!(
-//RS         "c77 battery: {} ran ({} interp==compiled, {} manifested divergences), {} boundary-asserted, {} total",
-//RS         stats.ran,
-//RS         stats.ran - stats.manifested,
-//RS         stats.manifested,
-//RS         stats.boundary,
-//RS         stats.ran + stats.boundary
-//RS     );
-//RS     assert!(
-//RS         stats.ran > 0,
-//RS         "expected at least some examples to run in the interpreter"
-//RS     );
-//RS }
-//RS 
-//RS /// Every example that runs in the interpreter and has a checked-in
-//RS /// `expected/*.out` golden (the executable spec, I5) must match it byte for
-//RS /// byte — a cheap check that needs no rustc. Examples that hit a boundary, or
-//RS /// that have no golden (error/panic demos), are asserted as boundaries here too
-//RS /// so nothing is silently skipped.
-//RS #[test]
-//RS fn interpreter_matches_expected_golden() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let mut checked = 0usize;
-//RS     for stem in interpreter_example_stems() {
-//RS         let file = example_path(&stem);
-//RS         // D-JPK-TASKRUN1 / R12 (card #476): job_runner's meaningful entries are
-//RS         // its `#Job` fns, not the `fn run()` usage hint. Mirror golden.rs's
-//RS         // AOT job battery on the interpreter tier via `run_named_job`,
-//RS         // proving the same TIR dispatches each job identically. The bare
-//RS         // `fn run()` output is not a golden.
-//RS         if stem == "devloop/job_runner" {
-//RS             check_job_runner_interpreter(&root, &file);
-//RS             checked += 2;
-//RS             continue;
-//RS         }
-//RS         if uses_ffi_bridge(&stem) {
-//RS             continue;
-//RS         }
-//RS         // `Examples/features/expected/web/web_wasm_*.out` are Node/browser
-//RS         // harness goldens (web_build), not interpreter `fn run()` print shape.
-//RS         if stem.starts_with("web/web_wasm_") {
-//RS             continue;
-//RS         }
-//RS         // #2017: an interactive example's golden was recorded WITH answers, and
-//RS         // this battery fed none, so it compared a no-input run against a
-//RS         // fed-input transcript — agreement by shared absence, not agreement.
-//RS         // The in-process interpreter reads the test binary's own fd 0, which
-//RS         // every thread of this suite shares, so the fed run is a child on the
-//RS         // forced tier-0 CLI (`jet run --interpret`, pinned as tier 0 by
-//RS         // tests/run_interpret.rs::run_interpret_forces_tier_zero_without_watch).
-//RS         // The answers come from `common::example_stdin`, their one home (I8).
-//RS         if let Some(answers) = common::example_stdin(&stem) {
-//RS             let interpreted = cli_tier_program_output(&file, &stem, answers.piped, true);
-//RS             assert_eq!(
-//RS                 interpreted.stdout,
-//RS                 golden_stdout(&stem),
-//RS                 "`{stem}`: forced interpreter differs from the golden recorded with its answers"
-//RS             );
-//RS             checked += 1;
-//RS             continue;
-//RS         }
-//RS         let expected_path = root.join(format!("Examples/features/expected/{}.out", stem));
-//RS         match dev_iteration_with_timeout(&stem, &file, true) {
-//RS             RunOutcome::Ran { stdout, .. } => {
-//RS                 if let Some(expected) = host_expected_stdout(&stem) {
-//RS                     assert_eq!(
-//RS                         stdout, expected,
-//RS                         "`{}`: interpreter output differs from host expected output",
-//RS                         stem
-//RS                     );
-//RS                     checked += 1;
-//RS                 } else if let Ok(expected) = fs::read_to_string(&expected_path) {
-//RS                     assert_eq!(
-//RS                         stdout, expected,
-//RS                         "`{}`: interpreter output differs from expected golden",
-//RS                         stem
-//RS                     );
-//RS                     checked += 1;
-//RS                 }
-//RS                 // No golden (e.g. a panic demo) → nothing to compare; the
-//RS                 // compiled-binary battery still covers it.
-//RS             }
-//RS             RunOutcome::Problems(diags) => {
-//RS                 assert!(
-//RS                     is_named_dev_boundary(&stem, &diags),
-//RS                     "`{}` neither ran nor stopped at a named boundary; codes were {:?}",
-//RS                     stem,
-//RS                     diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     assert!(checked > 0, "expected at least some golden comparisons");
-//RS }
-// END-PORT-PENDING 1021 tests/dev_parts/interp_parity.rs:1-118
+// Rust: tests/corelib_parts/support.rs:86
+fn build_and_run(dir: OSPath, name: String, src: String, env: [(String, String)], stdin: String?) -> (I32, String, String) {
+    path :: dir.join(name)
+    fs.write(path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: compile_with_path(src, shown).unwrap_or_else((diags) -> panic("front end rejected fixture:\n{render_diagnostics(shown, src, diags)}"))
+    rs :: dir.join("{name}.rs")
+    bin :: dir.join(name)
+    rustc_cmd := Command.new("rustc") // GATE #4494: real child process provider
+    runtime_lease :: common.add_generated_rust(&rustc_cmd, rs, out.rust, out.ffi.is_some(), [])
+    &rustc_cmd.arg("-o").arg(bin)
+    if out.ffi == .Some(link) {
+        &rustc_cmd.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+        loop deps_dir in link.dependency_dirs().filter((dir) -> dir.is_dir()) {
+            &rustc_cmd.arg("-L").arg("dependency={deps_dir.display()}")
+        }
+    }
+    rustc :: rustc_cmd.output().unwrap()
+    assert(rustc.status.success(), "rustc rejected generated code:\n{String.from_utf8_lossy(rustc.stderr)}")
+    cmd := Command.new(bin)
+    &cmd.current_dir(dir)
+    loop (k, v) in env { &cmd.env(k, v) }
+    if stdin == .Some(text) {
+        &cmd.stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped())
+        child := cmd.spawn().unwrap()
+        if &child.stdin.take() == .Some(input) { &input.write_all(text.as_bytes()).unwrap() }
+        output :: child.wait_with_output().unwrap()
+        return (output.status.code().unwrap_or(-1), String.from_utf8_lossy(output.stdout).into_owned(), String.from_utf8_lossy(output.stderr).into_owned())
+    }
+    output :: cmd.output().unwrap()
+    (output.status.code().unwrap_or(-1), String.from_utf8_lossy(output.stdout).into_owned(), String.from_utf8_lossy(output.stderr).into_owned())
+}
 
+// Rust: tests/corelib_parts/support.rs:152
+fn run_web_js_source(dir: OSPath, name: String, src: String) -> String? {
+    if Command.new("node").arg("--version").output().is_err() { return .None }
+    web_dir :: dir.join("{name}_web")
+    _ :: fs.remove_dir_all(web_dir)
+    fs.create_dir_all(web_dir).unwrap()
+    source_path :: web_dir.join("{name}.jet")
+    fs.write(source_path, src).unwrap()
+    shown :: source_path.to_string_lossy()
+    out :: compile_web_with_path(src, shown).unwrap_or_else((diags) -> panic("front end rejected Web fixture:\n{render_diagnostics(shown, src, diags)}"))
+    web :: out.web.expect("Web fixture must produce Web artifacts")
+    fs.write(web_dir.join("app.js"), web.js_app).unwrap()
+    fs.write(web_dir.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+    fs.write(web_dir.join("package.json"), "{\"type\":\"module\"}").unwrap()
+    node :: Command.new("node").current_dir(web_dir).arg("app.js").output().unwrap()
+    assert(node.status.success(), "Web JS fixture failed:\nstdout: {String.from_utf8_lossy(node.stdout)}\nstderr: {String.from_utf8_lossy(node.stderr)}")
+    .Some(String.from_utf8_lossy(node.stdout).into_owned())
+}
+
+// Rust: tests/corelib_parts/support.rs:186
+fn build_and_run_multi(dir: OSPath, name: String, entry: String, files: [(String, String)]) -> (I32, String, String) {
+    loop (rel, src) in files {
+        path :: dir.join(rel)
+        if path.parent() == .Some(parent) { fs.create_dir_all(parent).unwrap() }
+        fs.write(path, src).unwrap()
+    }
+    entry_path :: dir.join(entry)
+    src :: fs.read_to_string(entry_path).unwrap()
+    shown :: entry_path.to_string_lossy()
+    out :: compile_with_path(src, shown).unwrap_or_else((diags) -> panic("front end rejected multi-file fixture:\n{render_diagnostics(shown, src, diags)}"))
+    rs :: dir.join("{name}.rs")
+    bin :: dir.join(name)
+    rustc_cmd := Command.new("rustc") // GATE #4494
+    runtime_lease :: common.add_generated_rust(&rustc_cmd, rs, out.rust, out.ffi.is_some(), [])
+    rustc :: rustc_cmd.arg("-o").arg(bin).output().unwrap()
+    assert(rustc.status.success(), "rustc rejected generated multi-file code:\n{String.from_utf8_lossy(rustc.stderr)}")
+    run :: Command.new(bin).current_dir(dir).output().unwrap()
+    (run.status.code().unwrap_or(-1), String.from_utf8_lossy(run.stdout).into_owned(), String.from_utf8_lossy(run.stderr).into_owned())
+}
+
+// Rust: tests/corelib_parts/support.rs:227
+fn write_executable(path: OSPath, body: String) -> {
+    if core.sys.target.selected_family() == "unix" { // GATE #4483
+        fs.write(path, body).unwrap()
+        perms := fs.metadata(path).unwrap().permissions()
+        &perms.set_mode(0o755) // GATE #4494
+        fs.set_permissions(path, perms).unwrap()
+    }
+}
+
+// Rust: tests/corelib_parts/support.rs:234
+fn jet_string_path(path: OSPath) -> String {
+    path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+// Rust: tests/corelib_parts/support.rs:240
+fn dns_name_wire(name: String) -> [U8] {
+    out := [U8]{}
+    trimmed := name.trim_end_matches('.') // #4303
+    loop label in trimmed.split('.') {
+        &out.push(label.len() as U8)
+        &out.extend_from_slice(label.as_bytes())
+    }
+    &out.push(0)
+    out
+}
+
+// Rust: tests/corelib_parts/support.rs:250
+fn dns_fixture_response(query: [U8]) -> [U8] {
+    pos := 12
+    loop pos < query.len() && query[pos] != 0 { pos += query[pos] as USize + 1 }
+    pos += 1
+    qtype :: U16.from_be_bytes([query[pos], query[pos + 1]])
+    question_end :: pos + 4
+    resp := [U8]{}
+    &resp.extend_from_slice(query[0..2])
+    &resp.extend_from_slice((0x8180 as U16).to_be_bytes())
+    &resp.extend_from_slice((1 as U16).to_be_bytes())
+    &resp.extend_from_slice((1 as U16).to_be_bytes())
+    &resp.extend_from_slice((0 as U16).to_be_bytes())
+    &resp.extend_from_slice((0 as U16).to_be_bytes())
+    &resp.extend_from_slice(query[12..question_end])
+    &resp.extend_from_slice([0xc0, 0x0c])
+    &resp.extend_from_slice(qtype.to_be_bytes())
+    &resp.extend_from_slice((1 as U16).to_be_bytes())
+    &resp.extend_from_slice((0 as U32).to_be_bytes())
+    rdata :: if qtype == {
+        16 -> {
+            r := [U8]{}
+            &r.push(3)
+            &r.extend_from_slice("jet".as_bytes())
+            r
+        }
+        33 -> {
+            r := [U8]{}
+            &r.extend_from_slice((10 as U16).to_be_bytes())
+            &r.extend_from_slice((20 as U16).to_be_bytes())
+            &r.extend_from_slice((443 as U16).to_be_bytes())
+            &r.extend_from_slice(dns_name_wire("srv.example.test"))
+            r
+        }
+        _ -> [U8]{}
+    }
+    &resp.extend_from_slice((rdata.len() as U16).to_be_bytes())
+    &resp.extend_from_slice(rdata)
+    resp
+}
+
+// Rust: tests/corelib_parts/support.rs:292
+fn dns_question_end(query: [U8]) -> USize {
+    pos := 12
+    loop pos < query.len() && query[pos] != 0 { pos += query[pos] as USize + 1 }
+    pos + 5
+}
+
+// Rust: tests/corelib_parts/support.rs:300
+fn dns_truncated_response(query: [U8]) -> [U8] {
+    end :: dns_question_end(query)
+    response := [U8]{}
+    &response.extend_from_slice(query[0..2])
+    &response.extend_from_slice((0x8380 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((0 as U16).to_be_bytes())
+    &response.extend_from_slice((0 as U16).to_be_bytes())
+    &response.extend_from_slice(query[12..end])
+    // The authenticated TC header/question must trigger TCP retry before parsing this incomplete record.
+    &response.push(0xc0)
+    response
+}
+
+// Rust: tests/corelib_parts/support.rs:317
+fn dns_cname_additional_response(query: [U8]) -> [U8] {
+    end :: dns_question_end(query)
+    alias :: dns_name_wire("alias.example.test")
+    response := [U8]{}
+    &response.extend_from_slice(query[0..2])
+    &response.extend_from_slice((0x8180 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((0 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice(query[12..end])
+    &response.extend_from_slice([0xc0, 0x0c])
+    &response.extend_from_slice((5 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((0 as U32).to_be_bytes())
+    &response.extend_from_slice((alias.len() as U16).to_be_bytes())
+    &response.extend_from_slice(alias)
+    &response.extend_from_slice(alias)
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((1 as U16).to_be_bytes())
+    &response.extend_from_slice((0 as U32).to_be_bytes())
+    &response.extend_from_slice((4 as U16).to_be_bytes())
+    &response.extend_from_slice([192, 0, 2, 42])
+    response
+}
+
+// Rust: tests/corelib_parts/support.rs:343
+fn bind_dns_dual_protocol_fixture() -> (TcpListener, UdpSocket, SocketAddr) {
+    MAX_ATTEMPTS :: 64
+    loop attempt in 1..=MAX_ATTEMPTS {
+        tcp :: if TcpListener.bind("127.0.0.1:0") == { // GATE #4494; #4409 ErrorKind fidelity
+            .Ok(tcp) -> tcp
+            .Err(error) -> {
+                if error.kind() == ErrorKind.AddrInUse {
+                    if attempt < MAX_ATTEMPTS { continue }
+                    break
+                }
+                panic("failed to bind DNS fixture TCP listener: {error}")
+            }
+        }
+        addr :: tcp.local_addr().unwrap_or_else((error) -> panic("failed to read DNS fixture TCP listener address: {error}"))
+        if UdpSocket.bind(addr) == {
+            .Ok(udp) -> return (^tcp, ^udp, addr)
+            .Err(error) -> {
+                if error.kind() == ErrorKind.AddrInUse {
+                    if attempt < MAX_ATTEMPTS { continue }
+                    break
+                }
+                panic("failed to bind DNS fixture UDP socket at {addr}: {error}")
+            }
+        }
+    }
+    panic("failed to reserve one TCP/UDP DNS fixture port after {MAX_ATTEMPTS} attempts")
+}
+
+// Rust: tests/dev_parts/corpus_gate.rs:105
+fn core_conformance_shard(entries: [(String, String)]) -> [(String, String)] {
+    index :: std.env.var("JET_CORE_CONFORMANCE_SHARD_INDEX").ok()
+    count :: std.env.var("JET_CORE_CONFORMANCE_SHARD_COUNT").ok()
+    selected :: if (index, count) == {
+        (.None, .None) -> ^entries
+        (.Some(index_text), .Some(count_text)) -> {
+            index :: index_text.parse[USize]().expect("Core conformance shard index must be an integer")
+            count :: count_text.parse[USize]().expect("Core conformance shard count must be an integer")
+            assert(count > 0, "Core conformance shard count must be positive")
+            assert(index < count, "Core conformance shard index must be below its count")
+            entries.into_iter().enumerate().filter_map(((position, entry)) -> if position % count == index { .Some(^entry) } else { .None }).collect()
+        }
+        _ -> panic("Core conformance shard index and count must be set together")
+    }
+    if std.env.var("JET_CORE_CONFORMANCE_FILTER") == .Ok(filter) {
+        trimmed := filter.trim() // #4303
+        if !trimmed.is_empty() {
+            needles :: filter.split(',').map((n) -> { text := n.trim(); text.to_string() }).filter((n) -> !n.is_empty()).collect[[String]]()
+            kept :: selected.into_iter().filter(((stem, _)) -> needles.iter().any((n) -> stem.contains(n))).collect[[(String, String)]]()
+            assert(!kept.is_empty(), "Core conformance filter `{filter}` matched no witness stem")
+            return kept
+        }
+    }
+    selected
+}
+
+// Rust tests/corelib_parts/platform_email.rs:2, tests/dev_parts/corpus.rs:15,29,
+// tests/dev_parts/corpus_gate.rs:15,28,160,264,315, tests/dev_parts/default_parity.rs:10,
+// tests/dev_parts/interp_parity.rs:12,45 are in PlatformEmailTests.jet.

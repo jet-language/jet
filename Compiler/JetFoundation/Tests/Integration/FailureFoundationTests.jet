@@ -1,0 +1,340 @@
+use std.[fs, env, process, thread, panic]
+use std.process.Command
+use std.sync.[Arc, Mutex]
+use std.collections.VecDeque
+use jet
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.FailureFoundation.[CONTRACT_MATRIX, MATRIX, MATRIX_STDOUT, CONVERSION, NET_ERROR_CONVERSION, RECOVERED_CONTEXT, normalize_journey_paths, runtime_error_suffix, have_tool, have_wasm_target, SOURCE, EXPECTED, Rng, fuzz_seed, fuzz_variants, load_example_seeds, mutate_source, check_fuzz_variant]
+// GATE #4494: native process, filesystem, thread and synchronized test job queues.
+
+// Rust: tests/failure_foundation.rs:120
+#Test("failure_contract_matrix_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree("failure_contract_matrix", CONTRACT_MATRIX, "2\n-1\n2\n-2\n2\n-3\n2\n-4\n-5\n2\n-6\n7\n-7\n2\n-8\n2\n-9\n7\n")
+}
+// Rust: tests/failure_foundation.rs:129
+#Test("direct_struct_error_match_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree("direct_struct_error_match", include_str("Examples/features/errors/direct_struct_error_match.jet"), "ok: 7\nerr: empty input\n")
+}
+// Rust: tests/failure_foundation.rs:140
+#Test("default_err_display_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree("default_err_display", """
+fn fails(n: Int) -> Int Err! {
+    if n < 0 -> return Err("negative: {n}")
+    Ok(n)
+}
+fn run() -> {
+    a :: fails(-1) ?? {
+        print("fallback: {err}")
+        0
+    }
+    print(a)
+    if fails(-2) == {
+        .Ok(n) -> print(n)
+        .Err(e) -> print("failed: {e}")
+    }
+}
+""", "fallback: negative: -1\n0\nfailed: negative: -2\n")
+}
+// Rust: tests/failure_foundation.rs:169
+#Test("union_error_struct_match_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree("union_error_struct_match", """
+#Error
+struct ListWasEmpty { message: String }
+#Error
+struct BadNumStr { message: String }
+fn first(xs: [String]) -> String ListWasEmpty! {
+    if xs.is_empty() -> return Err(ListWasEmpty{message: "empty"})
+    Ok(xs[0])
+}
+fn to_num(s: String) -> Int BadNumStr! {
+    s.to_int() ?? return Err(BadNumStr{message: "nan"})
+}
+fn increment_first(xs: [String]) -> Int (ListWasEmpty | BadNumStr)! {
+    s :: first(xs)
+    n :: to_num(s)
+    Ok(n + 1)
+}
+fn run() -> {
+    loop xs in [["41"], [], ["x"]] {
+        if increment_first(xs) == {
+            .Ok(n) -> print(n)
+            .Err(.ListWasEmpty(_)) -> print("empty")
+            .Err(.BadNumStr(_)) -> print("not a number")
+        }
+    }
+}
+""", "42\nempty\nnot a number\n")
+}
+// Rust: tests/failure_foundation.rs:214
+#Test("memo_inferred_pure_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree("memo_inferred_pure", "#Memo fn slow_square(n: Int) -> Int {{ n * n }}\n\nfn run() -> {{\n    print(slow_square(12))\n    print(slow_square(12))\n    print(slow_square(13))\n}}\n", "144\n144\n169\n")
+}
+// Rust: tests/failure_foundation.rs:223
+#Test("optional_success_result_fallback_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree_with_application_policy("optional_success_result_fallback", """
+#Error
+enum TestFailure { Missing }
+fn optional_success_result(value: Int) -> Int? TestFailure! {
+    if value == -1 { return Err(TestFailure.Missing) }
+    if value == 0 { return None }
+    return Ok(Val(value))
+}
+fn run() -> {
+    print(optional_success_result(8080) ?? 0)
+    print(optional_success_result(0) ?? 0)
+    print(optional_success_result(-1) ?? 0)
+}
+""", "8080\n0\n0\n", "name: \"optional_success_result_fallback\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n")
+}
+// Rust: tests/failure_foundation.rs:254
+#Test("never_contract_rejects_every_reachable_failure_route") {
+    cases :: [
+        ("explicit propagation", """
+fn fail() -> Int { Err("bad") }
+fn impossible() -> Int Never! { fail()?("unreachable") }
+fn run() -> {}
+"""),
+        ("implicit direct return", """
+fn fail() -> Int { Err("bad") }
+fn impossible() -> Int Never! { fail() }
+fn run() -> {}
+"""),
+        ("implicit statement propagation", """
+fn fail() -> Int { Err("bad") }
+fn impossible() -> Never! { fail() }
+fn run() -> {}
+"""),
+        ("implicit branch propagation", """
+fn fail() -> Int { Err("bad") }
+fn impossible(value: Bool) -> Int Never! {
+    if value { fail() }
+    return 7
+}
+fn run() -> {}
+""")
+    ]
+    scratch :: common.Scratch.new("failure-never")
+    path :: scratch.join("failure_never.jet")
+    shown :: path.to_string_lossy().into_owned()
+    for (case, source) in cases {
+        fs.write(&path, source).expect("write !Never fixture")
+        diagnostics :: jet.compile_with_path(source, &shown).expect_err("!Never must reject a reachable failure")
+        assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E2404"), "{case}: expected E2404, got {diagnostics:Debug}")
+    }
+    empty_path :: scratch.join("failure_never_empty.jet")
+    empty_shown :: empty_path.to_string_lossy().into_owned()
+    empty_source :: "fn impossible() -> Never! {{}}\nfn run() -> {{}}\n"
+    fs.write(&empty_path, empty_source).expect("write empty !Never fixture")
+    jet.compile_with_path(empty_source, &empty_shown).expect("a !Never function with no reachable failure can fall through as success")
+}
+// Rust: tests/failure_foundation.rs:323
+#Test("never_call_in_value_branch_agrees_across_execution_tiers") {
+    tir_support.assert_tiers_agree("never_call_in_value_branch", """
+fn stop(message: String) -> { panic(message) }
+fn load_name(found: Bool) -> String {
+    return if found -> { "Ada" } else -> { stop("name missing") }
+}
+fn run() -> { print(load_name(true)) }
+""", "Ada\n")
+}
+
+// Rust: tests/failure_tier_parity.rs:167
+#Test("declared_conversion_keeps_one_report_across_runtime_tiers") {
+    (jit_code, jit_out, jit_err) :: tir_support.jit_run("failure_conversion_tiers", CONVERSION)
+    assert_eq(jit_code, 1, "default JIT must report the converted failure")
+    assert(jit_out.is_empty(), "converted failure must not print stdout")
+    assert(jit_err.contains("converted"), "JIT report: {jit_err}")
+    (interpreter_code, interpreter_out, interpreter_err) :: tir_support.interpreter_run("failure_conversion_tiers", CONVERSION)
+    assert_eq(interpreter_code, jit_code)
+    assert_eq(interpreter_out, jit_out)
+    assert_eq(normalize_journey_paths(&interpreter_err), normalize_journey_paths(&jit_err))
+    if tir_support.have_rustc() {
+        (aot_code, aot_out, aot_err) :: tir_support.build_and_run_full("failure_conversion_tiers", "main", CONVERSION)
+        assert_eq(aot_code, jit_code)
+        assert_eq(aot_out, jit_out)
+        assert_eq(normalize_journey_paths(&aot_err), normalize_journey_paths(&jit_err))
+    }
+}
+// Rust: tests/failure_tier_parity.rs:198
+#Test("core_net_error_conversion_renders_in_resident_jit") {
+    (jit_code, jit_out, jit_err) :: tir_support.jit_run("net_error_conversion_tiers", NET_ERROR_CONVERSION)
+    assert_eq(jit_code, 1, "default JIT must report the NetError conversion")
+    assert(jit_out.is_empty(), "failed DNS lookup must not print stdout")
+    jit_runtime :: runtime_error_suffix(&jit_err)
+    assert(jit_runtime.contains("network timeout must be non-negative"), "JIT report: {jit_err}")
+    assert(jit_runtime.contains("(type: NetError)"), "JIT report lost the NetError type: {jit_err}")
+    assert(jit_runtime.contains("conversion"), "JIT report lost the conversion trail: {jit_err}")
+    (interpreter_code, interpreter_out, interpreter_err) :: tir_support.interpreter_run("net_error_conversion_tiers", NET_ERROR_CONVERSION)
+    assert_eq(interpreter_code, jit_code)
+    assert_eq(interpreter_out, jit_out)
+    assert_eq(normalize_journey_paths(&interpreter_err), normalize_journey_paths(&jit_err))
+    if tir_support.have_rustc() {
+        (aot_code, aot_out, aot_err) :: tir_support.build_and_run_full("net_error_conversion_tiers", "main", NET_ERROR_CONVERSION)
+        assert_eq(aot_code, jit_code)
+        assert_eq(aot_out, jit_out)
+        assert_eq(normalize_journey_paths(runtime_error_suffix(&aot_err)), normalize_journey_paths(jit_runtime))
+    }
+}
+// Rust: tests/failure_tier_parity.rs:248
+#Test("recovered_context_does_not_leak_into_a_later_failure") {
+    (jit_code, jit_out, jit_err) :: tir_support.jit_run("failure_recovery_tiers", RECOVERED_CONTEXT)
+    assert_eq(jit_code, 1, "default JIT must report the later failure")
+    assert(jit_out.is_empty(), "later failure must not print stdout")
+    assert(jit_err.contains("later"), "JIT report: {jit_err}")
+    assert(!jit_err.contains("loading"), "recovered context leaked into JIT report: {jit_err}")
+    (interpreter_code, interpreter_out, interpreter_err) :: tir_support.interpreter_run("failure_recovery_tiers", RECOVERED_CONTEXT)
+    assert_eq(interpreter_code, jit_code)
+    assert_eq(interpreter_out, jit_out)
+    assert_eq(normalize_journey_paths(&interpreter_err), normalize_journey_paths(&jit_err))
+    if tir_support.have_rustc() {
+        (aot_code, aot_out, aot_err) :: tir_support.build_and_run_full("failure_recovery_tiers", "main", RECOVERED_CONTEXT)
+        assert_eq(aot_code, jit_code)
+        assert_eq(aot_out, jit_out)
+        assert_eq(normalize_journey_paths(&aot_err), normalize_journey_paths(&jit_err))
+    }
+}
+// Rust: tests/failure_tier_parity.rs:281
+#Test("failure_contract_matrix_matches_comptime_and_hosted_tiers") {
+    tir_support.assert_tiers_agree_with_application_policy("failure_contract_matrix_tiers", MATRIX, MATRIX_STDOUT, "name: \"failure_contract_matrix_tiers\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc] }} }}\n")
+}
+// Rust: tests/failure_tier_parity.rs:291
+#Test("failure_contract_matrix_matches_web_js_and_wasm") {
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() {
+        eprintln("note: skipping failure matrix web execution (need rustc, wasm32, and node)")
+        return
+    }
+    output :: jet.compile_web_with_path(MATRIX, "tests/fixtures/failure_tier_parity.jet").expect("failure matrix must compile for web")
+    web :: output.web.expect("web compile must produce artifacts")
+    scratch :: common.Scratch.new("failure-tier-parity-web")
+    fs.write(scratch.join("app.js"), &web.js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap()
+    fs.write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap()
+    wasm :: Command.new("rustc").current_dir(&scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("spawn web wasm rustc")
+    assert(wasm.status.success(), "rustc rejected failure matrix web output: {String.from_utf8_lossy(&wasm.stderr)}")
+    js :: Command.new("node").current_dir(&scratch.path).arg("app.js").output().expect("run web JS failure matrix")
+    assert(js.status.success(), "web JS failure matrix failed: {String.from_utf8_lossy(&js.stderr)}")
+    assert_eq(String.from_utf8_lossy(&js.stdout), MATRIX_STDOUT)
+    fs.write(scratch.join("wasm.mjs"), """
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+const status = instance.exports.jet_export_run();
+if (status !== 0) throw new Error(`failure matrix Wasm status: ${status}`);
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("failure matrix Wasm stopped");
+""").unwrap()
+    wasm_run :: Command.new("node").current_dir(&scratch.path).arg("wasm.mjs").output().expect("run web Wasm failure matrix")
+    assert(wasm_run.status.success(), "web Wasm failure matrix failed: {String.from_utf8_lossy(&wasm_run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&wasm_run.stdout), MATRIX_STDOUT)
+}
+
+// Rust: tests/flow_facts_tiers.rs:48
+#Test("parser_reads_the_fixture") {
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(SOURCE)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:Debug}")
+    assert(jet.Parser.parse(&tokens).is_ok(), "the flow-fact fixture must parse")
+}
+// Rust: tests/flow_facts_tiers.rs:60
+#Test("sema_proves_the_fixture") {
+    out :: jet.compile(SOURCE)
+    assert(out.is_ok(), "sema must accept the fixture: {out.err():Debug}")
+}
+// Rust: tests/flow_facts_tiers.rs:72
+#Test("tir_records_the_proven_unwrap") {
+    out :: jet.compile(SOURCE).expect("fixture compiles")
+    assert(out.rust.contains("if let Some("), "the refined optional must reach lowering already proven:\n{out.rust}")
+}
+// Rust: tests/flow_facts_tiers.rs:84
+#Test("aot_and_jet_run_agree") {
+    tir_support.assert_tiers_agree("flow_facts_tiers", SOURCE, EXPECTED)
+}
+// Rust: tests/flow_facts_tiers.rs:91
+#Test("comptime_folds_the_same_answer") {
+    source :: "{SOURCE}\nFOLDED :: prep {{ score(true) }}\n\nfn show() -> {{\n    print(FOLDED)\n}}\n"
+    out :: jet.compile(&source)
+    assert(out.is_ok(), "comptime must fold the same branch: {out.err():Debug}")
+}
+// Rust: tests/flow_facts_tiers.rs:104
+#Test("repl_answers_the_same") {
+    transcript :: jet.REPL.run_transcript(&["fn label(text: String?) -> String {{ if text != None {{ return text }} return \"none\" }}", "print(label(Val(\"keep\")))", "print(label(None))"], nil)
+    assert(transcript.contains("keep") && transcript.contains("none"), "REPL disagreed with the other tiers:\n{transcript}")
+}
+// Rust: tests/flow_facts_tiers.rs:122
+#Test("web_target_builds_the_fixture") {
+    scratch :: common.Scratch.new("flow-facts-web")
+    entry :: scratch.join("app.jet")
+    fs.write(&entry, SOURCE).unwrap()
+    out :: Command.new(env.build("CARGO_BIN_EXE_jet")).args(["check", entry.to_str().unwrap(), "--target", "web"]).env("NO_COLOR", "1").output().expect("spawn jet")
+    assert(out.status.success(), "web check failed:\nstdout={String.from_utf8_lossy(&out.stdout)}\nstderr={String.from_utf8_lossy(&out.stderr)}")
+}
+
+// Rust: tests/fuzz_sema.rs:226
+#Test("fuzz_sema_rustc_agreement") {
+    root :: OSPath.from(env.build("CARGO_MANIFEST_DIR"))
+    if !common.have_rustc() { eprintln("note: rustc not found; skipping fuzz_sema"); return }
+    seeds :: load_example_seeds(&root)
+    assert(seeds.len() >= 2, "expected at least 2 example seeds, found {seeds.len()}")
+    seed :: fuzz_seed()
+    rng := Rng.new(seed)
+    fuzz_dir :: env.temp_dir().join("jet_fuzz_{process.id()}")
+    _ :: fs.remove_dir_all(&fuzz_dir)
+    fs.create_dir_all(&fuzz_dir).unwrap()
+    variants := []
+    for i in 0..fuzz_variants() {
+        (shown, src) :: rng.pick(&seeds).clone()
+        mutated :: mutate_source(&rng, &src, i)
+        file :: fuzz_dir.join("variant_{i}.jet")
+        fs.write(&file, &mutated).unwrap()
+        file_str :: file.to_string_lossy().into_owned()
+        variants.push((i, shown, mutated, file_str))
+    }
+    jobs :: Arc.new(Mutex.new(VecDeque.from(variants)))
+    failures :: Arc.new(Mutex.new([String]{}))
+    handles := []
+    for _ in 0..common.test_worker_count(16) {
+        worker_jobs :: Arc.clone(&jobs)
+        worker_failures :: Arc.clone(&failures)
+        handles.push(thread.spawn(() -> {
+            loop {
+                job :: worker_jobs.lock().unwrap().pop_front()
+                if job == nil { break }
+                (i, shown, mutated, file_str) :: job.unwrap()
+                result :: panic.catch_unwind(panic.AssertUnwindSafe(() -> check_fuzz_variant(i, &shown, &mutated, &file_str)))
+                match result {
+                    .Err(payload) -> worker_failures.lock().unwrap().push("variant {i} from {shown}: {common.panic_message(payload)}")
+                    .Ok(_) -> {}
+                }
+            }
+        }))
+    }
+    for handle in handles { handle.join().expect("fuzz worker panicked outside harness") }
+    held_failures :: failures.lock().unwrap()
+    assert(held_failures.is_empty(), "fuzz sema failures:\n{held_failures.join("\n\n")}")
+    _ :: fs.remove_dir_all(&fuzz_dir)
+}
+// Rust: tests/fuzz_sema.rs:300
+#Test("fuzz_sema_i1_unsafe_gate_is_ungated_on_rustc") {
+    root :: OSPath.from(env.build("CARGO_MANIFEST_DIR"))
+    seeds :: load_example_seeds(&root)
+    assert(seeds.len() >= 2, "expected at least 2 example seeds, found {seeds.len()}")
+    seed :: fuzz_seed()
+    rng := Rng.new(seed)
+    violations: [String] = []
+    for i in 0..fuzz_variants() {
+        (shown, src) :: rng.pick(&seeds).clone()
+        mutated :: mutate_source(&rng, &src, i)
+        if mutated.contains("#Unsafe") { continue }
+        match jet.compile_with_path(&mutated, "fuzz_variant_{i}.jet") {
+            .Ok(out) -> {
+                if common.strip_vetted_prelude_modules(&out.rust).contains("unsafe") {
+                    violations.push("variant {i} from {shown}: source has no #Unsafe but generated code contains `unsafe`")
+                }
+            }
+            .Err(_) -> {}
+        }
+    }
+    assert(violations.is_empty(), "I1 violated in fuzz_sema-generated programs (checked independently of rustc availability):\n{violations.join("\n")}")
+}
+// Rust: tests/fuzz_sema.rs:371
+#Test("semantic_corpus_policy_runs_with_fuzz_fixtures") {
+    common.corpus_policy.CorpusPolicy.load().expect("corpus manifest").check_gate("fixture").expect("fuzz fixture corpus semantic policy")
+}

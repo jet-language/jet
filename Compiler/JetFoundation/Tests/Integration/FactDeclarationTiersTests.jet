@@ -1,0 +1,309 @@
+use std.[fs, env]
+use std.process.Command
+use jet.[compile, compile_with_path, compile_web_with_path]
+use jet.AST.[Dimension, Item, KnowledgeFact, Measure, Type, ComptimeInput]
+use jet.Diagnostics.Severity
+use jet.Sema.[check_bundle, CompileMode]
+use jet.Interpreter.[dev_iteration, run_interpreter_once_with_args]
+use jet_foundation.Registry
+use jet_foundation.Facts.BuildStamp
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.FactDeclarationTiers.*
+// GATE #4494: filesystem and real execution providers.
+// GATE #4483: build.os is checked against selected target, not host facts.
+// Rust: tests/fact_declaration_tiers.rs:35
+#Test("parser_reads_the_fact_source_and_fixture") {
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(Registry.FACT_SOURCE)
+    assert(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics}")
+    program :: jet.Parser.parse(&tokens).expect("Facts.jet must parse")
+    parsed_names :: program.items.iter().filter_map(fn(item) {
+        if item == { .FactDecl(declaration) -> Some(declaration.name.as_str()); else -> None }
+    }).collect()
+    registry_names :: Registry.fact_declarations().iter().map(fn(declaration) { declaration.source_name }).collect()
+    assert_eq(parsed_names, registry_names)
+    (fixture_tokens, fixture_diagnostics) :: jet.Lexer.lex(SOURCE)
+    assert(fixture_diagnostics.is_empty(), "lex fixture: {fixture_diagnostics}")
+    assert(jet.Parser.parse(&fixture_tokens).expect("fact fixture must parse").items.iter().any(fn(item) {
+        if item == { .FactDecl(declaration) -> declaration.name == "Exactness"; else -> false }
+    }))
+}
+// Rust: tests/fact_declaration_tiers.rs:72
+#Test("registry_reads_the_same_fact_columns") {
+    declaration :: Registry.fact_declarations().iter().find(fn(declaration) { declaration.name == "Exactness" }).expect("Exactness is written in Facts.jet")
+    row :: Registry.row("Exactness").expect("Exactness is in the one registry")
+    assert_eq(row.target, declaration.target)
+    assert_eq(row.safe_direction, declaration.safe_direction)
+    assert_eq(row.gates, declaration.gates)
+    assert_eq(row.decision, declaration.decision)
+}
+// Rust: tests/fact_declaration_tiers.rs:86
+#Test("sema_accepts_the_fixture") {
+    out :: compile(SOURCE)
+    assert(out.is_ok(), "sema rejected the fact fixture: {out.err()}")
+}
+// Rust: tests/fact_declaration_tiers.rs:97
+#Test("tir_erases_the_declaration") {
+    _ :: compile(SOURCE).expect("fact fixture compiles")
+    // Declaration-only metadata is exercised through native/Web behavior, not retired Rust emission.
+    assert_fact_tiers("fact_declaration_erasure", SOURCE, EXPECTED)
+}
+// Rust: tests/fact_declaration_tiers.rs:108
+#Test("aot_and_jet_run_agree") { tir_support.assert_tiers_agree("fact_declaration_tiers", SOURCE, EXPECTED) }
+// Rust: tests/fact_declaration_tiers.rs:116
+#Test("resident_jit_and_forced_interpreter_agree_without_fallback") {
+    scratch :: common.Scratch.new("fact-declaration-tiers")
+    entry :: scratch.join("app.jet")
+    fs.write(&entry, SOURCE).unwrap()
+    bundle := jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    errors :: check_bundle(&bundle, CompileMode.Run).into_iter().filter(fn(diagnostic) { diagnostic.severity == Severity.Error }).collect()
+    assert(errors.is_empty(), "fact fixture rejected before tier proof: {errors}")
+    // The resident JIT is retired. Every canonical backend must run the checked bundle directly.
+    for tier in ["O0", "O1", "O2", "Web"] {
+        assert_eq(stdout(common.run_checked_bundle_tier(&bundle, tier, false, &common.development_policy()), tier), EXPECTED)
+    }
+    assert_eq(stdout(dev_iteration(entry.to_str().unwrap(), false, true), "forced interpreter"), EXPECTED)
+}
+// Rust: tests/fact_declaration_tiers.rs:180
+#Test("comptime_accepts_the_fixture") {
+    _ :: compile(COMPTIME_SOURCE).expect("comptime fact fixture compiles")
+    assert_fact_tiers("comptime_fact_declaration", COMPTIME_SOURCE, EXPECTED)
+}
+// Rust: tests/fact_declaration_tiers.rs:187
+#Test("repl_accepts_the_fixture") {
+    transcript :: jet.REPL.run_transcript(&["fact Flow($holds: .Value, $safe: .Gain, $gates: [], $decision: \"D-TEST\")", "print(\"fact declaration\")"], None)
+    assert(transcript.contains("fact declaration"), "REPL rejected or lost the declaration-only item:\n{transcript}")
+}
+// Rust: tests/fact_declaration_tiers.rs:202
+#Test("measure_rows_share_one_registry_and_all_tiers") {
+    plane :: Registry.type_plane("Measure")
+    fixed :: Type.FixedList { elem: Type.Int, len: Measure.literal("length", 4) }
+    matrix :: Type.compute_shape_type("Matrix", &[2, 3])
+    lanes :: Type.Named("F32x4")
+    quantity :: Type.Quantity { base: Type.Float, dimension: Dimension.base("Length") }
+    assert(Registry.row(plane).is_some(), "measure plane must be registered")
+    assert(fixed.knowledge_vector().facts(plane).any(fn(fact) {
+        if fact == { .Measure(.Literal { kind, value }) -> kind == "length" && value == 4; else -> false }
+    }))
+    assert(matrix.knowledge_vector().facts(plane).any(fn(fact) {
+        if fact == { .Measure(.Literal { kind, value }) -> kind == "shape" && value == 2; else -> false }
+    }))
+    assert(lanes.knowledge_vector().facts(plane).any(fn(fact) {
+        if fact == { .Measure(.Literal { kind, value }) -> kind == "lane" && value == 4; else -> false }
+    }))
+    assert(quantity.knowledge_vector().facts(plane).any(fn(fact) {
+        if fact == { .Measure(.SignedLiteral { kind, value }) -> kind == "exponent" && value == 1; else -> false }
+    }))
+    source :: "\nuse core.compute as compute\n\nfn vec_rank(value: Vec<3>) -> Int {\n    return compute.rank(value)\n}\n\nfn matrix_rank(value: Matrix<2, 3>) -> Int {\n    return compute.rank(value)\n}\n\nfn run() {\n    vector :: compute.vec(3, 1.0) ?? panic(\"vector\")\n    matrix :: compute.matrix(2, 3, 2.0) ?? panic(\"matrix\")\n    print(\"vector:{vec_rank(vector)}\")\n    print(\"matrix:{matrix_rank(matrix)}\")\n}\n"
+    tir_support.assert_tiers_agree("measure_rows_share_one_registry", source, "vector:1\nmatrix:2\n")
+}
+// Rust: tests/fact_declaration_tiers.rs:269
+#Test("measure_rows_share_one_registry_and_all_tiers_examples") {
+    for (stem, expected) in [("collections/fixed_arrays", include_str("Examples/features/expected/collections/fixed_arrays.out")), ("tooling/compute_linalg", include_str("Examples/features/expected/tooling/compute_linalg.out")), ("types/dimensional_quantities", include_str("Examples/features/expected/types/dimensional_quantities.out"))] {
+        tir_support.assert_example_cli_tiers_agree(stem, expected)
+    }
+}
+// Rust: tests/fact_declaration_tiers.rs:290
+#Test("web_target_accepts_the_fixture") {
+    scratch :: common.Scratch.new("fact-declaration-web")
+    entry :: scratch.join("app.jet")
+    fs.write(&entry, SOURCE).unwrap()
+    out :: Command.new(env.var("JET_BIN").unwrap()).args(["check", entry.to_str().unwrap(), "--target", "web"]).env("NO_COLOR", "1").output().expect("spawn jet")
+    assert(out.status.success(), "web check failed:\nstdout={String.from_utf8_lossy(&out.stdout)}\nstderr={String.from_utf8_lossy(&out.stderr)}")
+}
+// Rust: tests/fact_reads.rs:99
+#Test("runtime_fact_reads_are_refused_before_codegen") {
+    diags :: diagnostics("#Numeric Severity :: distinct Int(0..10)\n\nfn run() {\n    print(Severity.$range.start)\n}\n")
+    diagnostic :: diags.iter().find(fn(diagnostic) { diagnostic.code == "E0302" }).expect("runtime fact read should have a registered diagnostic")
+    assert(diagnostic.what.contains("compile-time only"), "{diagnostic}")
+    assert(diagnostic.why.contains("never selects runtime behavior"), "{diagnostic}")
+    assert(diagnostic.fix.contains("binding"), "{diagnostic}")
+}
+// Rust: tests/fact_reads.rs:119
+#Test("fact_reads_do_not_enter_type_position") {
+    diags :: diagnostics("#Numeric Severity :: distinct Int(0..10)\n\nfn takes(value: Severity.$range) {}\nfn run() {}\n")
+    diagnostic :: diags.iter().find(fn(diagnostic) { diagnostic.code == "E0119" }).expect("a fact in type position should have a registered diagnostic")
+    assert(diagnostic.what.contains("fact value"), "{diagnostic}")
+    assert(diagnostic.why.contains("do not mint or select types"), "{diagnostic}")
+}
+// Rust: tests/fact_reads.rs:135
+#Test("folded_fact_reads_emit_values_without_runtime_dispatch") {
+    source :: "#Numeric Severity :: distinct Int(0..10)\n\nRANGE :: prep { Severity.$range }\n\nfn run() {\n    print(RANGE.start)\n}\n"
+    _ :: compile(source).expect("a comptime fact read should compile")
+    assert_fact_tiers("folded_range", source, "0\n")
+}
+// Rust: tests/fact_reads.rs:151
+#Test("every_registered_plane_has_a_source_fact_read") {
+    reads :: jet.Syntax.fact_read_members().map(fn(member) { Registry.fact_read(&member).unwrap_or_else(fn() { panic("unregistered fact member: {member}") }) }).collect()
+    for plane in Registry.fact_rows().filter(fn(row) { row.kind() == Registry.RowKind.Plane }) {
+        read :: Registry.registered_fact_read(plane.name).unwrap_or_else(fn() { panic("registered plane `{plane.name}` has no typed reader") })
+        assert(reads.contains(&read), "registered plane `{plane.name}` has no source member-position read")
+        assert_eq(read.reflection_kind(), Registry.reflection_kind(plane.name), "source read and aggregate reflection disagree for `{plane.name}`")
+    }
+}
+// Rust: tests/fact_reads.rs:179
+#Test("registry_derived_plane_reads_are_typed_and_folded") {
+    source :: "FLOW :: prep { Flow.$flow }\nTAINT :: prep { Taint.$taint }\nDUTY :: prep { Duty.$duty }\n\nfn run() {\n    print(FLOW.kind == .Flow)\n    print(TAINT.kind == .Taint)\n    print(DUTY.kind == .Duty)\n}\n"
+    tir_support.assert_tiers_agree("registry-derived-plane-reads", source, "true\ntrue\ntrue\n")
+    _ :: compile(source).expect("registry-derived plane reads should compile")
+    assert_fact_tiers("registry_derived_fold", source, "true\ntrue\ntrue\n")
+}
+// Rust: tests/fact_reads.rs:187
+#Test("tracked_binding_origin_reads_the_track_marker") {
+    source :: "fn run() {\n    #Track tracked :: 1.0\n    origin :: prep { tracked.$origin }\n    print(origin?.tracked ?? false)\n    print(origin?.source ?? \"missing\")\n    print(origin?.line ?? 0)\n    print(origin?.column ?? 0)\n    print(origin?.ambiguity ?? false)\n}\n"
+    tir_support.assert_tiers_agree("tracked-binding-origin", source, "true\ntracked\n2\n12\nfalse\n")
+    _ :: compile(source).expect("a tracked binding should publish its typed origin")
+    assert_fact_tiers("tracked_origin_fold", source, "true\ntracked\n2\n12\nfalse\n")
+}
+// Rust: tests/fact_reads.rs:199
+#Test("origin_fact_uses_the_stable_origin_info_schema") {
+    _ :: compile("fn run() {\n    #Track tracked :: 1.0\n    origin :: prep { tracked.$origin }\n}\n").expect("origin fact should compile")
+    assert_eq(jet.Syntax.fact_read_kind("origin"), Some(Registry.FactRead.Origin))
+    // All five schema fields must type-check and yield their folded values.
+    source :: "fn run() {\n    #Track tracked :: 1.0\n    origin :: prep { tracked.$origin }\n    print(origin?.tracked ?? false)\n    print(origin?.source ?? \"missing\")\n    print(origin?.line ?? 0)\n    print(origin?.column ?? 0)\n    print(origin?.ambiguity ?? false)\n}\n"
+    assert_fact_tiers("origin_schema", source, "true\ntracked\n2\n12\nfalse\n")
+}
+// Rust: tests/fact_reads.rs:217
+#Test("retired_origin_method_is_rejected_for_every_tracked_value_type") {
+    diags :: diagnostics("struct Sample { value: Int }\n\nfn run() {\n    #Track count :: 1\n    #Track sample :: Sample{value: 1}\n    print(count.origin())\n    print(sample.origin())\n}\n")
+    assert_eq(diags.iter().filter(fn(diagnostic) { diagnostic.code == "E0311" }).count(), 2, "tracked non-Float values must not reach ordinary method lookup: {diags}")
+    assert(diags.iter().all(fn(diagnostic) { diagnostic.code != "E0311" || (diagnostic.what == "`.origin()` is retired for tracked values" && diagnostic.fix == "read `value.$origin` in comptime code") }))
+}
+// Rust: tests/fact_reads.rs:234
+#Test("retired_origin_method_preempts_root_dispatch") {
+    diags :: diagnostics("fn origin(#Root value: Int) -> Int { value }\n\nfn run() {\n    #Track speed :: 3\n    print(speed.origin())\n}\n")
+    assert_eq(diags.iter().filter(fn(diagnostic) { diagnostic.code == "E0311" }).count(), 1, "tracked `.origin()` must be rejected before #Root compatibility dispatch: {diags}")
+    assert(!diags.iter().any(fn(diagnostic) { diagnostic.code == "E0105" }), "{diags}")
+    assert(diags.iter().any(fn(diagnostic) { diagnostic.code == "E0311" && diagnostic.what == "`.origin()` is retired for tracked values" && diagnostic.fix == "read `value.$origin` in comptime code" }))
+}
+// Rust: tests/fact_reads.rs:252
+#Test("parser_preserves_the_typed_fact_fixture") {
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(FIXTURE)
+    assert(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics}")
+    program :: jet.Parser.parse(&tokens).expect("typed fact fixture must parse")
+    assert(program.items.iter().any(fn(item) { if item == { .Const(binding) -> binding.is_comptime; else -> false } }))
+}
+// Rust: tests/fact_reads.rs:263
+#Test("typed_fact_fixture_folds_all_planes_without_runtime_dispatch") {
+    _ :: compile(FIXTURE).expect("typed fact fixture must compile")
+    assert(FIXTURE_EXPECTED.contains("report"), "folded fact value missing: report")
+    assert_fact_tiers("typed_fact_fold", FIXTURE, FIXTURE_EXPECTED)
+}
+// Rust: tests/fact_reads.rs:275
+#Test("aggregate_reflection_reads_typed_facts_without_runtime_dispatch") {
+    _ :: compile(AGGREGATE_FIXTURE).expect("aggregate fact fixture must compile")
+    assert(AGGREGATE_EXPECTED.contains("Range"), "aggregate fact value missing: Range")
+    assert_fact_tiers("aggregate_fact_fold", AGGREGATE_FIXTURE, AGGREGATE_EXPECTED)
+}
+// Rust: tests/fact_reads.rs:287
+#Test("nested_reflection_fact_reads_fold_across_all_native_tiers") {
+    tir_support.assert_example_cli_tiers_agree("reflection/reflect-value", AGGREGATE_EXPECTED)
+    output :: web_stdout("reflection-fact-reads-web", AGGREGATE_FIXTURE, "Examples/features/reflection/reflect-value.jet")
+    if output.is_some() { assert_eq(output.unwrap(), AGGREGATE_EXPECTED) }
+}
+// Rust: tests/fact_reads.rs:299
+#Test("typed_fact_fixture_matches_aot_default_and_interpreter") { tir_support.assert_tiers_agree("fact_reads", FIXTURE, FIXTURE_EXPECTED) }
+// Rust: tests/fact_reads.rs:304
+#Test("typed_fact_fixture_is_accepted_by_comptime_repl_and_web") {
+    transcript :: jet.REPL.run_transcript(&["ANSWER :: prep { report.$attribution.source }", "print(ANSWER)"], None)
+    assert(transcript.contains("report"), "REPL fact read failed: {transcript}")
+    _ :: compile_web_with_path(FIXTURE, "Examples/features/reflection/fact_reads.jet").expect("web fact fixture must compile").web.expect("web fact fixture must produce artifacts")
+    output :: web_stdout("fact-reads-web", FIXTURE, "Examples/features/reflection/fact_reads.jet")
+    if output.is_some() { assert_eq(output.unwrap(), FIXTURE_EXPECTED) }
+}
+// Rust: tests/fact_reads.rs:329
+#Test("derive_bodies_read_the_same_typed_fact") {
+    _ :: compile("derive T.Debug {\n    states :: T.$states\n    fn derived_fact_read() -> String { \"ok\" }\n}\n\n#Debug\nstruct Report {\n    state { Draft, Published }\n    value: Int\n}\n\nfn run() {}\n").expect("derive fact read should compile")
+}
+// Rust: tests/fact_reads.rs:338
+#Test("registered_build_facts_are_folded_in_value_position") {
+    source :: "fn run() {\n    print($package.name)\n    print($package.version)\n    print($build.profile)\n}\n"
+    _ :: compile(source).expect("registered build facts are values, not runtime readers")
+    // Use the original compile path identity rather than the scratch filename.
+    output :: web_stdout("build_fact_values", source, "input.jet")
+    if output.is_some() { assert_eq(output.unwrap(), "input\n0.0.0\ndev\n") }
+}
+// Rust: tests/fact_reads.rs:362
+#Test("build_fact_reads_do_not_enter_type_position") {
+    diags :: diagnostics("fn takes(value: $build.os) {}\nfn run() {}\n")
+    diagnostic :: diags.iter().find(fn(diagnostic) { diagnostic.code == "E0119" }).expect("a build fact in type position should have a registered diagnostic")
+    assert(diagnostic.what.contains("fact value"), "{diagnostic}")
+    assert(diagnostic.why.contains("do not mint or select types"), "{diagnostic}")
+}
+// Rust: tests/fact_reads.rs:376
+#Test("package_facts_seed_build_identity") {
+    scratch :: common.Scratch.new("build-facts-package")
+    fs.write(scratch.join("package.jet"), "name: \"luna_demo\"\nversion: \"2.3.4\"\n").unwrap()
+    entry :: scratch.join("main.jet")
+    fs.write(&entry, "fn run() {\n    print($package.name)\n    print($package.version)\n}\n").unwrap()
+    _ :: compile_with_path("", entry.to_str().unwrap()).expect("package facts should seed the registered build rows")
+    for tier in ["O0", "O1", "O2", "Web"] { assert_eq(stdout(common.run_entry_tier(entry.to_str().unwrap(), tier, false), tier), "luna_demo\n2.3.4\n") }
+}
+// Rust: tests/fact_reads.rs:397
+#Test("bare_script_facts_have_filename_and_zero_version") {
+    scratch :: common.Scratch.new("build-facts-script")
+    entry :: scratch.join("hello.jet")
+    fs.write(&entry, "print($package.name)\nprint($package.version)\n").unwrap()
+    _ :: compile_with_path("", entry.to_str().unwrap()).expect("a bare script should expose its filename identity")
+    for tier in ["O0", "O1", "O2", "Web"] { assert_eq(stdout(common.run_entry_tier(entry.to_str().unwrap(), tier, false), tier), "hello\n0.0.0\n") }
+}
+// Rust: tests/fact_reads.rs:412
+#Test("aot_default_and_interpreter_fold_the_same_build_facts") {
+    scratch :: common.Scratch.new("build-facts-tiers")
+    entry :: scratch.join("main.jet")
+    fs.write(&entry, "fn run() {\n    print($package.name)\n    print($package.version)\n    print($build.os)\n    print($build.profile)\n}\n").unwrap()
+    path :: entry.to_str().unwrap()
+    _ :: compile_with_path("", path).expect("AOT front end should fold build facts")
+    expected :: "main\n0.0.0\n{core.sys.target.selected_os()}\ndev\n"
+    interpreter :: stdout(run_interpreter_once_with_args(path, &[]), "interpreter")
+    assert_eq(interpreter, expected)
+    for tier in ["O0", "O1", "O2", "Web"] { assert_eq(stdout(common.run_entry_tier(path, tier, false), tier), interpreter) }
+}
+// Rust: tests/fact_reads.rs:442
+#Test("checked_in_lock_stamp_is_a_byte_stable_golden") {
+    scratch :: common.Scratch.new("build-stamp-golden")
+    lock_path :: scratch.join(".jet/lock")
+    fs.create_dir_all(lock_path.parent().unwrap()).unwrap()
+    golden :: include_str("tests/fixtures/build_stamp.lock")
+    fs.write(&lock_path, golden).unwrap()
+    lock :: jet.Lock.parse(golden).expect("checked-in lock golden must parse")
+    assert_eq(jet.Lock.write(&lock), golden)
+    stamp :: jet.Lock.build_stamp(&scratch.path, true).expect("locked stamp replay")
+    assert_eq(stamp.at, "2026-08-13T12:34:56.000000000Z")
+    assert_eq(stamp.git.as_deref(), Some("abc123-dirty"))
+    assert(stamp.dirty)
+    assert_eq(stamp.toolchain, "1.0.0")
+}
+// Rust: tests/fact_reads.rs:459
+#Test("registered_build_stamp_facts_fold_from_the_lock") {
+    scratch :: common.Scratch.new("build-stamp-facts")
+    lock_path :: scratch.join(".jet/lock")
+    fs.create_dir_all(lock_path.parent().unwrap()).unwrap()
+    fs.write(&lock_path, include_str("tests/fixtures/build_stamp.lock")).unwrap()
+    entry :: scratch.join("main.jet")
+    fs.write(&entry, "fn run() {\n    print($build.stamp.git ?? \"none\")\n    print($build.stamp.dirty)\n    print($build.stamp.toolchain)\n    print($build.stamp.at)\n}\n").unwrap()
+    path :: entry.to_str().unwrap()
+    _ :: compile_with_path("", path).expect("registered stamp facts should fold from the lock")
+    expected :: "abc123-dirty\ntrue\n1.0.0\n2026-08-13T12:34:56.000000000Z\n"
+    for tier in ["O0", "O1", "O2", "Web"] { assert_eq(stdout(common.run_entry_tier(path, tier, false), tier), expected) }
+    assert_eq(stdout(run_interpreter_once_with_args(path, &[]), "interpreter"), expected)
+}
+// Rust: tests/fact_reads.rs:498
+#Test("lock_stamp_is_captured_once_and_replayed_without_a_clock") {
+    scratch :: common.Scratch.new("build-stamp-replay")
+    generated :: [ComptimeInput { path: ".jet/generated/main.jet", hash: "sha256-fixed" }]
+    first :: BuildStamp { git: Some("fixed-revision"), dirty: false, toolchain: "1.0.0", at: "2026-08-13T12:34:56.000000000Z" }
+    jet.Lock.record_generated_inputs(&scratch.path, &generated, false, &first).expect("unlocked generated provenance should write the lock")
+    before :: fs.read(scratch.join(".jet/lock")).unwrap()
+    changed :: BuildStamp { git: Some("different-revision"), dirty: true, toolchain: "different-toolchain", at: "2099-01-01T00:00:00.000000000Z" }
+    jet.Lock.record_generated_inputs(&scratch.path, &generated, false, &changed).expect("replaying generated provenance should remain valid")
+    after :: fs.read(scratch.join(".jet/lock")).unwrap()
+    assert_eq(before, after, "repeated builds must preserve lock bytes")
+    assert_eq(jet.Lock.build_stamp(&scratch.path, true).unwrap(), first)
+    hostile :: common.Scratch.new("build-stamp-missing")
+    hostile_lock :: hostile.join(".jet/lock")
+    fs.create_dir_all(hostile_lock.parent().unwrap()).unwrap()
+    fs.write(&hostile_lock, "version = 1\n").unwrap()
+    error :: jet.Lock.build_stamp(&hostile.path, true).expect_err("missing stamp must fail locked")
+    assert(error.contains("[build.stamp]"), "{error}")
+}

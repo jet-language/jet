@@ -1,0 +1,159 @@
+use jet_foundation.Tests.Integration.ComputeParity.[SOURCE, EXPECTED]
+use jet_foundation.Tests.Integration.TirSupport.[assert_tiers_agree, assert_awaited_web_tier, build_and_run, compile_source, have_rustc, run_default_multi]
+use jet_foundation.Tests.Integration.ComputeViews.[run_native_optimization]
+use jet_driver.Driver.[compile]
+// Rust: tests/compute_parity.rs:71
+#Test("compute_cpu_oracle_aot_covers_storage_algebra_and_corruption") {
+    if !have_rustc() { eprintln("SKIP compute_cpu_oracle_aot_covers_storage_algebra_and_corruption: rustc is unavailable"); return }
+    (code, stdout) :: build_and_run("compute_cpu_oracle", SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, EXPECTED)
+}
+// Rust: tests/compute_parity.rs:85
+#Test("compute_cpu_oracle_default_run_matches_aot_meaning") {
+    (code, stdout, stderr) :: run_default_multi("compute_cpu_oracle_jit", "main.jet", &[(String, String)]{("main.jet", SOURCE)})
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, EXPECTED)
+}
+// Rust: tests/compute_parity.rs:99
+#Test("compute_set_requires_mutable_binding_before_codegen") {
+    immutable :: include_str("tests/ui/compute_set_immutable.jet")
+    diagnostics :: compile_source("compute_set_immutable", immutable).expect_err("an immutable tensor passed to compute.set must be rejected")
+    diagnostic :: diagnostics.iter().find(fn(d) -> d.code == "E0111").unwrap_or_else(fn() -> panic("missing E0111: {diagnostics.debug()}"))
+    assert_eq(diagnostic.what, "`tensor` was made with `::`, so it can't be changed")
+    assert_eq(diagnostic.why, "`set` will change this value, so it must be mutable (`:=`)")
+    assert_eq(diagnostic.fix, "Declare it with `tensor := ...`")
+    assert(diagnostic.span.is_some(), diagnostic.debug())
+    mutable :: """
+use core.compute as compute
+fn run() -> {
+    tensor := compute.zeros([2, 2]) ?? panic("zeros")
+    compute.set(&tensor, [0, 1], 3.0) ?? panic("set")
+    print("values:{compute.to_list(tensor)}")
+}
+"""
+    assert_tiers_agree("compute_set_mutable", mutable, "values:[0.0, 3.0, 0.0, 0.0]\n")
+}
+// Rust: tests/compute_parity.rs:135
+#Test("compute_result_tensor_payload_survives_resident_return_cleanup") {
+    source :: """
+use core.compute as compute
+fn make_tensor() -> Tensor ComputeError! {
+    tensor :: compute.full([2], 3.0) ?? panic("tensor")
+    return tensor
+}
+fn run() -> {
+    tensor :: make_tensor() ?? panic("result")
+    print("shape:{compute.shape(tensor)}")
+    print("value:{compute.to_list(tensor)}")
+}
+"""
+    expected :: "shape:[2]\nvalue:[3.0, 3.0]\n"
+    assert_tiers_agree("compute_result_tensor_payload", source, expected)
+    // Rust: tests/compute_parity.rs:153-159 — retired resident trace assertions
+    // become real optimization-level and Web behavioral return-cleanup witnesses.
+    loop level in [Int]{0, 1, 2} {
+        (code, stdout, stderr) :: run_native_optimization("compute_result_tensor_payload_O{level}", source, level)
+        assert_eq(code, 0, "optimized native run failed: {stderr}")
+        assert_eq(stdout, expected, "optimized native output drifted: {stderr}")
+    }
+    assert_awaited_web_tier("compute_result_tensor_payload_web", source, expected)
+}
+// Rust: tests/compute_parity.rs:163
+#Test("compute_tensor_in_record_has_parity_across_tiers") {
+    source :: """
+use core.compute as compute
+struct TensorRecord { value: Tensor }
+fn run() -> {
+    tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    record :: TensorRecord{ value: tensor }
+    print("wrapped:{compute.shape(record.value)}")
+}
+"""
+    assert_tiers_agree("compute_tensor_record", source, "wrapped:[2]\n")
+}
+// Rust: tests/compute_parity.rs:181
+#Test("named_gradient_composes_into_second_derivative") {
+    source :: """
+use core.compute as compute
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
+fn run() -> {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    derivative :: compute.gradient(loss)
+    curvature :: compute.gradient(derivative)
+    result :: curvature(w, x)
+    print("ww:{compute.to_list(result.w.w)}")
+    print("wx:{compute.to_list(result.w.x)}")
+    print("xw:{compute.to_list(result.x.w)}")
+    print("xx:{compute.to_list(result.x.x)}")
+}
+"""
+    assert_tiers_agree("compute_named_second_derivative", source, "ww:[0.0]\nwx:[1.0]\nxw:[1.0]\nxx:[0.0]\n")
+}
+// Rust: tests/compute_parity.rs:207
+#Test("compute_fixed_vec_and_matrix_aliases_keep_shape_facts_on_the_tensor_substrate") {
+    source :: """
+use core.compute as compute
+fn vec_rank(value: Vec<3>) -[GPU]> Int { return compute.rank(value) }
+fn matrix_rank(value: Matrix<2, 3>) -[GPU]> Int { return compute.rank(value) }
+fn run() -> {
+    vector :: compute.vec(3, 1.0) ?? panic("vec")
+    matrix :: compute.matrix(2, 3, 2.0) ?? panic("matrix")
+    print("vec:{vec_rank(vector)}")
+    print("matrix:{matrix_rank(matrix)}")
+}
+"""
+    if have_rustc() {
+        (code, stdout) :: build_and_run("compute_fixed_aliases", source)
+        assert_eq(code, 0); assert_eq(stdout, "vec:1\nmatrix:2\n")
+    } else { eprintln("SKIP compute_fixed_vec_and_matrix_aliases_keep_shape_facts_on_the_tensor_substrate AOT leg: rustc is unavailable") }
+    (code, stdout, stderr) :: run_default_multi("compute_fixed_aliases_default", "main.jet", &[(String, String)]{("main.jet", source)})
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "vec:1\nmatrix:2\n")
+}
+// Rust: tests/compute_parity.rs:243
+#Test("matrix_shape_measures_match_or_diagnose_inner_sides") {
+    matching :: """
+use core.compute as compute
+fn accept_3_by_2(value: Matrix<3, 2>) -> {}
+fn run() -> {
+    left :: compute.matrix(3, 4, 1.0) ?? panic("left")
+    right :: compute.matrix(4, 2, 1.0) ?? panic("right")
+    product :: left * right ?? panic("product")
+    accept_3_by_2(product)
+}
+"""
+    compile(matching).expect("3x4 multiplied by 4x2 must produce Matrix<3, 2>")
+    mismatched :: """
+use core.compute as compute
+fn run() -> {
+    left :: compute.matrix(3, 4, 1.0) ?? panic("left")
+    right :: compute.matrix(5, 2, 1.0) ?? panic("right")
+    product :: left * right
+}
+"""
+    diagnostics :: compile(mismatched).expect_err("matrix inner measures 4 and 5 must not match")
+    assert(diagnostics.iter().any(fn(d) -> d.code == "E2512" && d.what.contains("inner sides") && d.what.contains('4') && d.what.contains('5')), "the matrix mismatch must teach the differing inner measures: {diagnostics.debug()}")
+}
+// Rust: tests/compute_parity.rs:281
+#Test("compute_broadcast_ufunc_fuses_indexing_and_arithmetic") {
+    source :: """
+use core.compute as compute
+fn run() -> {
+    rows :: compute.full([2, 1], 3.0) ?? panic("rows")
+    columns :: compute.from_list([1.0, 2.0, 4.0]) ?? panic("columns")
+    fused :: compute.add(rows, columns) ?? panic("fused")
+    print("shape:{compute.shape(fused)}")
+    print("values:{compute.to_list(fused)}")
+}
+"""
+    if have_rustc() {
+        (code, stdout) :: build_and_run("compute_fused_broadcast", source)
+        assert_eq(code, 0)
+        assert_eq(stdout, "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n")
+    } else { eprintln("SKIP compute_broadcast_ufunc_fuses_indexing_and_arithmetic AOT leg: rustc is unavailable") }
+    (code, stdout, stderr) :: run_default_multi("compute_fused_broadcast_default", "main.jet", &[(String, String)]{("main.jet", source)})
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "shape:[2, 3]\nvalues:[4.0, 5.0, 7.0, 4.0, 5.0, 7.0]\n")
+}

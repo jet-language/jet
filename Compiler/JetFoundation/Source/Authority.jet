@@ -1,1158 +1,309 @@
-// PORT-PENDING 2114 crates-jet-foundation-src-authority: crates/jet-foundation/src/Authority.rs:1-1154
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-AUTHORITY-MODEL1=A: one rights tree, one holds relation, one gate record.
-//RS //!
-//RS //! Authority names and laws are compile-time facts. Named `#FX` scopes
-//RS //! also lower to the shared Prelude's ordinary runtime carrier; this module
-//RS //! does not define a second value or policy representation.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use std::collections::BTreeSet;
-//RS 
-//RS pub use crate::BuildEffects::BuildEffect;
-//RS pub use crate::Effects::{
-//RS     effect_declarations, Effect, EffectDeclaration, EFFECT_DECLARATIONS, EFFECT_ROOTS,
-//RS     EFFECT_SOURCE,
-//RS };
-//RS 
-//RS impl Effect {
-//RS     pub fn requires_comptime_gate(self) -> bool {
-//RS         matches!(
-//RS             self,
-//RS             Self::Net
-//RS                 | Self::FS
-//RS                 | Self::IO
-//RS                 | Self::DB
-//RS                 | Self::Env
-//RS                 | Self::Exec
-//RS                 | Self::Browser
-//RS                 | Self::Secret
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Root segment of a dotted right (`FS.Read` → `FS`).
-//RS pub fn root(right: &str) -> &str {
-//RS     right.split('.').next().unwrap_or(right)
-//RS }
-//RS 
-//RS /// Resolve one root using the canonical table. Dotted input is accepted only
-//RS /// for its root; leaf declaration remains sema's job.
-//RS pub fn parse_root(right: &str) -> Option<&'static str> {
-//RS     let root = root(right);
-//RS     if root.eq_ignore_ascii_case("Panic") {
-//RS         return Some("Panic");
-//RS     }
-//RS     if root.eq_ignore_ascii_case("Mem") {
-//RS         return Some("Mem");
-//RS     }
-//RS     EFFECT_ROOTS
-//RS         .iter()
-//RS         .copied()
-//RS         .find(|known| known.eq_ignore_ascii_case(root))
-//RS }
-//RS 
-//RS /// Preserve a right's leaf spelling while normalizing its canonical root.
-//RS pub fn parse_right(right: &str) -> Option<String> {
-//RS     let right = right.trim();
-//RS     let root = parse_root(right)?;
-//RS     if root == "Panic" && right != "Panic" {
-//RS         return None;
-//RS     }
-//RS     Some(match right.split_once('.') {
-//RS         Some((_, leaf)) => format!("{root}.{leaf}"),
-//RS         None => root.to_string(),
-//RS     })
-//RS }
-//RS /// True when the source-declared irreversible fact covers `right`.
-//RS ///
-//RS /// A root declaration such as `effect FFI $irreversible` covers every
-//RS /// foreign leaf through the same ancestor relation used by authority rows.
-//RS pub fn is_declared_irreversible(right: &str) -> bool {
-//RS     let canonical = parse_right(right).unwrap_or_else(|| right.trim().to_string());
-//RS     effect_declarations()
-//RS         .iter()
-//RS         .filter(|declaration| declaration.irreversible)
-//RS         .any(|declaration| covers(declaration.name, &canonical))
-//RS }
-//RS 
-//RS /// D-EFFTREE1: a bound covers itself and every descendant in the rights tree.
-//RS ///
-//RS /// Resource-qualified rights use `:` for hosts and paths (for example,
-//RS /// `FS.Read:/data` or `Net.Connect:api.example.com`). A qualified descendant
-//RS /// must cross a separator boundary, so `/data` does not accidentally cover
-//RS /// `/database`.
-//RS pub fn covers(bound: &str, right: &str) -> bool {
-//RS     let bound = parse_right(bound).unwrap_or_else(|| bound.trim().to_string());
-//RS     let right = parse_right(right).unwrap_or_else(|| right.trim().to_string());
-//RS     let qualified = bound.contains(':');
-//RS     right == bound
-//RS         || right
-//RS             .strip_prefix(&bound)
-//RS             .is_some_and(|suffix| {
-//RS                 suffix.as_bytes().first().is_some_and(|byte| {
-//RS                     if qualified {
-//RS                         *byte == b'/'
-//RS                     } else {
-//RS                         matches!(byte, b'.' | b':' | b'/')
-//RS                     }
-//RS                 })
-//RS             })
-//RS }
-//RS 
-//RS /// One rights carrier for every authority checkpoint.
-//RS pub type Holds = BTreeSet<String>;
-//RS 
-//RS /// D-AUTHORITY-MODEL1: the canonical authority value projected to runtime
-//RS /// adapters. It owns the same `Holds` relation used by compile/build/session
-//RS /// policy; sandbox wrappers must not maintain a second grant set.
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct Authority {
-//RS     holds: Holds,
-//RS }
-//RS 
-//RS /// A requested scope that would widen its parent authority.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TightenError {
-//RS     pub uncovered: Holds,
-//RS }
-//RS 
-//RS impl std::fmt::Display for TightenError {
-//RS     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         let rights = self.uncovered.iter().cloned().collect::<Vec<_>>().join(", ");
-//RS         write!(f, "authority scope widens its parent for `{rights}`")
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for TightenError {}
-//RS 
-//RS impl Authority {
-//RS     /// Construct an authority from canonical or resource-qualified rights.
-//RS     /// Unknown spellings are retained for the caller's diagnostic; policy
-//RS     /// checks still fail closed because they are never covered by a known hold.
-//RS     pub fn from_rights<I, S>(rights: I) -> Self
-//RS     where
-//RS         I: IntoIterator<Item = S>,
-//RS         S: Into<String>,
-//RS     {
-//RS         let holds = rights
-//RS             .into_iter()
-//RS             .map(Into::into)
-//RS             .map(|right| parse_right(&right).unwrap_or(right))
-//RS             .collect();
-//RS         Self { holds }
-//RS     }
-//RS 
-//RS     pub fn from_holds(holds: Holds) -> Self {
-//RS         Self { holds }
-//RS     }
-//RS 
-//RS     pub fn holds(&self) -> &Holds {
-//RS         &self.holds
-//RS     }
-//RS 
-//RS     pub fn rights(&self) -> impl Iterator<Item = &str> {
-//RS         self.holds.iter().map(String::as_str)
-//RS     }
-//RS 
-//RS     pub fn allows(&self, right: &str) -> bool {
-//RS         covers_any(&self.holds, right)
-//RS     }
-//RS 
-//RS     /// True when this authority can satisfy a host operation whose declared
-//RS     /// right is `right`.  Unlike `allows`, this also accepts a resource
-//RS     /// qualified hold (`FS.Read:/data`) for the unqualified operation
-//RS     /// (`FS.Read`).  The operation is still bounded by the held descendant;
-//RS     /// callers must apply that resource to their path/host argument.
-//RS     pub fn allows_operation(&self, right: &str) -> bool {
-//RS         self.allows(right) || self.holds.iter().any(|held| covers(right, held))
-//RS     }
-//RS 
-//RS     /// Check one typed host import against this authority without letting an
-//RS     /// adapter reinterpret the right or keep a parallel grant table.
-//RS     pub fn decide_import(&self, import: &HostImportFact) -> Verdict {
-//RS         if self.allows_operation(import.required_grant()) {
-//RS             Verdict::Allowed
-//RS         } else {
-//RS             Verdict::Missing
-//RS         }
-//RS     }
-//RS 
-//RS     /// Return a child authority only when every requested right is covered by
-//RS     /// this authority. The child retains exactly the requested scope.
-//RS     pub fn tighten(&self, requested: &Holds) -> Result<Self, TightenError> {
-//RS         let uncovered = uncovered(requested, &self.holds);
-//RS         if uncovered.is_empty() {
-//RS             Ok(Self::from_holds(requested.clone()))
-//RS         } else {
-//RS             Err(TightenError { uncovered })
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Stable, typed result of checking one host import.  This is deliberately
-//RS /// data-only so AOT, JIT, interpreter, web, and host adapters all marshal the
-//RS /// same authority verdict rather than re-solving policy locally.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct HostImportDecision {
-//RS     pub import: HostImportFact,
-//RS     pub verdict: Verdict,
-//RS }
-//RS 
-//RS impl HostImportDecision {
-//RS     pub fn check(authority: &Authority, import: HostImportFact) -> Self {
-//RS         let verdict = authority.decide_import(&import);
-//RS         Self { import, verdict }
-//RS     }
-//RS 
-//RS     pub fn is_allowed(&self) -> bool {
-//RS         self.verdict == Verdict::Allowed
-//RS     }
-//RS }
-//RS 
-//RS impl HostImportFact {
-//RS     pub fn decision(&self, authority: &Authority) -> HostImportDecision {
-//RS         HostImportDecision::check(authority, self.clone())
-//RS     }
-//RS }
-//RS 
-//RS /// Backend-neutral description of one host-provided operation. Payloads are
-//RS /// copied at the boundary and refer to the existing interface snapshot type
-//RS /// identities rather than introducing a second wire type registry.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct HostImportFact {
-//RS     pub id: String,
-//RS     pub operation: String,
-//RS     pub required_right: String,
-//RS     pub parameter_type_ids: Vec<String>,
-//RS     pub result_type_id: Option<String>,
-//RS }
-//RS 
-//RS impl HostImportFact {
-//RS     pub fn new(
-//RS         id: impl Into<String>,
-//RS         operation: impl Into<String>,
-//RS         required_right: impl Into<String>,
-//RS         parameter_type_ids: impl IntoIterator<Item = String>,
-//RS         result_type_id: Option<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             id: id.into(),
-//RS             operation: operation.into(),
-//RS             required_right: required_right.into(),
-//RS             parameter_type_ids: parameter_type_ids.into_iter().collect(),
-//RS             result_type_id,
-//RS         }
-//RS     }
-//RS 
-//RS     /// All payload type identities crossed by this import. The host owns
-//RS     /// copying and validation; no borrowed or untyped payload is admitted.
-//RS     pub fn payload_type_ids(&self) -> impl Iterator<Item = &str> {
-//RS         self.parameter_type_ids
-//RS             .iter()
-//RS             .map(String::as_str)
-//RS             .chain(self.result_type_id.iter().map(String::as_str))
-//RS     }
-//RS 
-//RS     pub fn required_grant(&self) -> &str {
-//RS         &self.required_right
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum Verdict {
-//RS     Allowed,
-//RS     Denied,
-//RS     Missing,
-//RS }
-//RS 
-//RS /// D-EFFECT-AUTHORITY1: the application boundary's one checked policy fact.
-//RS ///
-//RS /// Sema owns `required_effects`; the package loader owns the initial policy
-//RS /// rows; an interactive CLI may replace those rows with its once/project
-//RS /// decision. Every execution tier receives this same carrier through the
-//RS /// checked `ProgramBundle`. It is deliberately separate from `JetAuthority`,
-//RS /// which is the ordinary source-level value lowered by the Prelude.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct ApplicationAuthority {
-//RS     pub required_effects: Holds,
-//RS     pub granted_effects: Holds,
-//RS     pub denied_effects: Holds,
-//RS     pub authority: String,
-//RS }
-//RS 
-//RS impl Default for ApplicationAuthority {
-//RS     fn default() -> Self {
-//RS         Self::ambient_basics()
-//RS     }
-//RS }
-//RS 
-//RS impl ApplicationAuthority {
-//RS     /// D-AUTH-AMBIENT1=A: a manifest-less application may print, allocate,
-//RS     /// and read its own arguments without an authority ceremony. Argument
-//RS     /// reading is the `Exec.Args` leaf, never the `Exec` root, because that
-//RS     /// root also covers spawning processes. A package manifest replaces this
-//RS     /// default with its explicit holds, so expert deny/audit control remains.
-//RS     pub const AMBIENT_BASIC_EFFECTS: [&'static str; 3] =
-//RS         ["IO", "Mem.Alloc", crate::Syntax::EFFECT_LEAF_EXEC_ARGS];
-//RS 
-//RS     /// Policy identity of the manifest-less beginner default.
-//RS     pub const APPLICATION_DEFAULT: &'static str = "application default";
-//RS 
-//RS     /// Policy identity of a `package.jet` that writes no `authority.holds`
-//RS     /// (#3718). It receives the same beginner floor; writing `holds`
-//RS     /// replaces the floor with exactly the written policy.
-//RS     pub const PACKAGE_DEFAULT: &'static str = "package.jet default";
-//RS 
-//RS     pub fn ambient_basics() -> Self {
-//RS         Self::beginner_floor(Self::APPLICATION_DEFAULT)
-//RS     }
-//RS 
-//RS     /// The beginner floor for a package whose manifest writes no holds.
-//RS     pub fn package_default() -> Self {
-//RS         Self::beginner_floor(Self::PACKAGE_DEFAULT)
-//RS     }
-//RS 
-//RS     fn beginner_floor(authority: &str) -> Self {
-//RS         Self {
-//RS             required_effects: Holds::new(),
-//RS             granted_effects: Self::AMBIENT_BASIC_EFFECTS
-//RS                 .iter()
-//RS                 .map(|effect| (*effect).to_string())
-//RS                 .collect(),
-//RS             denied_effects: Holds::new(),
-//RS             authority: authority.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// True when the policy source is the manifest-less default, alone or
-//RS     /// widened by invocation flags. Such a program has no `package.jet` to
-//RS     /// edit; its written grant is a leading inline `package { … }` block
-//RS     /// (D-ECO-INLINEPACKAGE1).
-//RS     pub fn is_application_default(&self) -> bool {
-//RS         self.authority.starts_with(Self::APPLICATION_DEFAULT)
-//RS     }
-//RS 
-//RS     /// True when the policy is a beginner floor (manifest-less or a manifest
-//RS     /// with no holds). Writing a grant replaces that floor, so the written
-//RS     /// row must name every required effect, not only the undecided ones.
-//RS     pub fn is_beginner_floor(&self) -> bool {
-//RS         self.is_application_default() || self.authority.starts_with(Self::PACKAGE_DEFAULT)
-//RS     }
-//RS 
-//RS     /// The complete `allow:` row a manifest-less program must declare. An
-//RS     /// inline Package replaces the beginner default instead of extending it,
-//RS     /// so the row names every required effect, not only the undecided ones.
-//RS     /// `Panic` is a deny-only stop row and is never a positive grant.
-//RS     pub fn inline_allow_row(&self) -> Holds {
-//RS         self.required_effects
-//RS             .iter()
-//RS             .filter(|effect| root(effect) != Effect::Panic.name())
-//RS             .cloned()
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Project the parsed `authority.holds` rows without teaching an engine
-//RS     /// how to parse package policy.
-//RS     pub fn from_policy(
-//RS         allow: Option<&[String]>,
-//RS         deny: Option<&[String]>,
-//RS         authority: impl Into<String>,
-//RS     ) -> Self {
-//RS         let parse = |names: Option<&[String]>| {
-//RS             names
-//RS                 .into_iter()
-//RS                 .flatten()
-//RS                 .filter_map(|name| parse_right(name))
-//RS                 .collect()
-//RS         };
-//RS         Self {
-//RS             required_effects: Holds::new(),
-//RS             granted_effects: parse(allow),
-//RS             denied_effects: parse(deny),
-//RS             authority: authority.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Required effects with no policy verdict at the application boundary.
-//RS     /// `Panic` is an internal deny-only stop row, not a positive authority
-//RS     /// request. An explicit `Panic` denial is still reported below.
-//RS     pub fn undecided_effects(&self) -> Holds {
-//RS         self.required_effects
-//RS             .iter()
-//RS             .filter(|effect| {
-//RS                 root(effect) != Effect::Panic.name()
-//RS                     && answer(&self.granted_effects, &self.denied_effects, effect)
-//RS                         == Verdict::Missing
-//RS             })
-//RS             .cloned()
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// Required effects that the policy explicitly denies.
-//RS     pub fn denied_required_effects(&self) -> Holds {
-//RS         self.required_effects
-//RS             .iter()
-//RS             .filter(|effect| answer(&self.granted_effects, &self.denied_effects, effect) == Verdict::Denied)
-//RS             .cloned()
-//RS             .collect()
-//RS     }
-//RS 
-//RS     pub fn is_allowed(&self) -> bool {
-//RS         self.undecided_effects().is_empty() && self.denied_required_effects().is_empty()
-//RS     }
-//RS 
-//RS     /// Render the one-line policy fix from the complete undecided set.
-//RS     /// Denied effects are never turned into an allow suggestion. A beginner
-//RS     /// floor is replaced by the grant it teaches, so that grant names the
-//RS     /// complete required row.
-//RS     pub fn policy_fix(&self) -> String {
-//RS         let undecided = self.undecided_effects();
-//RS         if !undecided.is_empty() && self.is_application_default() {
-//RS             return format!(
-//RS                 "declare the complete row `allow: [{}]` under `authority.holds` in a leading `package {{ … }}` block of this file (`jet fix --all` inserts it); otherwise approve the exact operation once in an interactive terminal",
-//RS                 join_rights(&self.inline_allow_row())
-//RS             );
-//RS         }
-//RS         let policy_step = if undecided.is_empty() {
-//RS             "adjust the denial in `authority.holds.deny`".to_string()
-//RS         } else if self.is_beginner_floor() {
-//RS             format!(
-//RS                 "add the complete row `allow: [{}]` under `authority.holds` in `package.jet`",
-//RS                 join_rights(&self.inline_allow_row())
-//RS             )
-//RS         } else {
-//RS             format!(
-//RS                 "add `allow: [{}]` under `authority.holds` in `package.jet`",
-//RS                 join_rights(&undecided)
-//RS             )
-//RS         };
-//RS         format!(
-//RS             "{policy_step}; otherwise deny effects deliberately, or approve the exact operation once or for the project in an interactive terminal"
-//RS         )
-//RS     }
-//RS 
-//RS     /// #3718: the human Why of E1803 — one plain sentence naming what the
-//RS     /// program tried to do and which policy has not allowed it. The raw role
-//RS     /// rows live in [`Self::policy_facts`] for `--json`.
-//RS     pub fn policy_why(&self) -> String {
-//RS         let denied = self.denied_required_effects();
-//RS         let (rights, verdict) = if denied.is_empty() {
-//RS             (self.undecided_effects(), "has not allowed that yet")
-//RS         } else {
-//RS             (denied, "denies that")
-//RS         };
-//RS         let mut actions: Vec<&'static str> = Vec::new();
-//RS         for right in &rights {
-//RS             let action = effect_action(right);
-//RS             if !actions.contains(&action) {
-//RS                 actions.push(action);
-//RS             }
-//RS         }
-//RS         let actions = match actions.as_slice() {
-//RS             [] => "uses no authority".to_string(),
-//RS             [one] => (*one).to_string(),
-//RS             [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
-//RS         };
-//RS         format!("This program {actions}, and {} {verdict}.", self.policy_owner())
-//RS     }
-//RS 
-//RS     /// The plain name of the policy that decides this run.
-//RS     fn policy_owner(&self) -> String {
-//RS         if self.is_application_default() {
-//RS             "the default for a file with no package block".to_string()
-//RS         } else if self.authority.starts_with(Self::PACKAGE_DEFAULT) {
-//RS             "package.jet (which has no authority block)".to_string()
-//RS         } else if self.authority.starts_with("package.jet") {
-//RS             "package.jet".to_string()
-//RS         } else if self.authority.starts_with("inline Package") {
-//RS             "this file's package block".to_string()
-//RS         } else if self.authority.starts_with("jet repl") || self.authority.starts_with("REPL") {
-//RS             "this REPL session".to_string()
-//RS         } else {
-//RS             format!("`{}`", self.authority)
-//RS         }
-//RS     }
-//RS 
-//RS     /// The machine facts behind E1803, carried as structured diagnostic
-//RS     /// detail: `--json` reports it, the human renderer keeps it out of the
-//RS     /// sentence. The key names are the stable projection field names.
-//RS     pub fn policy_facts(&self) -> String {
-//RS         let render = |rights: &Holds| {
-//RS             if rights.is_empty() {
-//RS                 "none".to_string()
-//RS             } else {
-//RS                 join_rights(rights)
-//RS             }
-//RS         };
-//RS         format!(
-//RS             "authority_facts:required_effects={}; granted_effects={}; denied_effects={}; denied_required_effects={}; undecided_effects={}; authority={}",
-//RS             render(&self.required_effects),
-//RS             render(&self.granted_effects),
-//RS             render(&self.denied_effects),
-//RS             render(&self.denied_required_effects()),
-//RS             render(&self.undecided_effects()),
-//RS             self.authority
-//RS         )
-//RS     }
-//RS 
-//RS     /// The one E1803 renderer. The CLI adds its script repair on top; the
-//RS     /// interpreter and JIT adapters use it directly.
-//RS     pub fn policy_refusal(&self) -> Diagnostic {
-//RS         let denied = self.denied_required_effects();
-//RS         let what = if denied.is_empty() {
-//RS             format!(
-//RS                 "application authority is undecided for `{}`",
-//RS                 join_rights(&self.undecided_effects())
-//RS             )
-//RS         } else {
-//RS             format!("application authority denies `{}`", join_rights(&denied))
-//RS         };
-//RS         Diagnostic::error("E1803", what, self.policy_why(), self.policy_fix(), None)
-//RS             .with_detail(self.policy_facts())
-//RS             .with_rights_chain(
-//RS                 "authority",
-//RS                 std::iter::empty::<String>(),
-//RS                 std::iter::once(self.authority.clone()),
-//RS                 None,
-//RS             )
-//RS     }
-//RS 
-//RS     /// Structured refusal shared by the interpreter and JIT adapters. CLI
-//RS     /// approval happens before those adapters and updates this same carrier.
-//RS     pub fn policy_diagnostic(&self) -> Option<Diagnostic> {
-//RS         (!self.is_allowed()).then(|| self.policy_refusal())
-//RS     }
-//RS }
-//RS 
-//RS fn join_rights(rights: &Holds) -> String {
-//RS     rights.iter().map(String::as_str).collect::<Vec<_>>().join(", ")
-//RS }
-//RS 
-//RS /// #3718: the REPL's E1803 Why. The policy sentence leads, then the REPL's
-//RS /// own reason, so the REPL and a program run read the same way. When the
-//RS /// policy itself allows the right (a platform or confinement refusal), only
-//RS /// the reason is stated.
-//RS pub fn repl_refusal_why(authority: &ApplicationAuthority, reason: &str) -> String {
-//RS     let mut chars = reason.chars();
-//RS     let reason = match chars.next() {
-//RS         Some(first) => format!("{}{}", first.to_uppercase(), chars.as_str()),
-//RS         None => String::new(),
-//RS     };
-//RS     if authority.is_allowed() {
-//RS         format!("{reason}, so the host operation did not run.")
-//RS     } else {
-//RS         format!("{} {reason}, so the host operation did not run.", authority.policy_why())
-//RS     }
-//RS }
-//RS 
-//RS /// Plain words for what a program does when it uses `right`. Unlisted
-//RS /// leaves fall back to their root's words.
-//RS pub fn effect_action(right: &str) -> &'static str {
-//RS     let canonical = parse_right(right).unwrap_or_else(|| right.trim().to_string());
-//RS     match canonical.as_str() {
-//RS         "FS.Read" => return "reads files",
-//RS         "FS.Write" => return "writes files",
-//RS         "Exec.Exit" => return "ends its own process",
-//RS         "Time.Wait" => return "waits",
-//RS         "Mem.Alloc" => return "allocates memory",
-//RS         "DB.Read" => return "reads a database",
-//RS         "DB.Write" => return "writes a database",
-//RS         "Rand.Draw" => return "draws random numbers",
-//RS         leaf if leaf == crate::Syntax::EFFECT_LEAF_EXEC_ARGS => return "reads its arguments",
-//RS         _ => {}
-//RS     }
-//RS     match root(&canonical) {
-//RS         "IO" => "prints text or reads input",
-//RS         "FS" => "reads and writes files",
-//RS         "Net" => "uses the network",
-//RS         "Exec" => "starts other programs",
-//RS         "Env" => "reads environment variables",
-//RS         "Time" => "reads the clock",
-//RS         "Rand" => "draws random numbers",
-//RS         "DB" => "uses a database",
-//RS         "Log" => "writes logs",
-//RS         "GPU" => "uses the GPU",
-//RS         "FFI" => "calls foreign code",
-//RS         "Browser" => "uses browser APIs",
-//RS         "Secret" => "reads secrets",
-//RS         "Mem" => "allocates memory",
-//RS         "Panic" => "can stop with a panic",
-//RS         _ => "uses an undeclared authority",
-//RS     }
-//RS }
-//RS 
-//RS pub fn covers_any(bounds: &Holds, right: &str) -> bool {
-//RS     bounds.iter().any(|bound| covers(bound, right))
-//RS }
-//RS 
-//RS pub fn answer(held: &Holds, denied: &Holds, right: &str) -> Verdict {
-//RS     if covers_any(denied, right) {
-//RS         Verdict::Denied
-//RS     } else if covers_any(held, right) {
-//RS         Verdict::Allowed
-//RS     } else {
-//RS         Verdict::Missing
-//RS     }
-//RS }
-//RS 
-//RS /// D-AUTHORITY-MODEL1: inner scope may only tighten its parent's holds set.
-//RS pub fn tighten(outer: &Holds, inner: &Holds) -> bool {
-//RS     inner
-//RS         .iter()
-//RS         .all(|right| outer.iter().any(|bound| covers(bound, right)))
-//RS }
-//RS 
-//RS /// Rights in `used` not covered by any held right.
-//RS pub fn uncovered(used: &Holds, held: &Holds) -> Holds {
-//RS     used.iter()
-//RS         .filter(|right| !covers_any(held, right))
-//RS         .cloned()
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Rights in `used` covered by a prohibition or other matching set.
-//RS pub fn covered(used: &Holds, matching: &Holds) -> Holds {
-//RS     used.iter()
-//RS         .filter(|right| covers_any(matching, right))
-//RS         .cloned()
-//RS         .collect()
-//RS }
-//RS 
-//RS /// D-MARK-SCOPE1: the lexical authority ladder, outer to inner.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
-//RS pub enum Scope {
-//RS     Organization,
-//RS     Package,
-//RS     Module,
-//RS     Function,
-//RS     Block,
-//RS }
-//RS 
-//RS impl Scope {
-//RS     pub const ALL: [Self; 5] = [
-//RS         Self::Organization,
-//RS         Self::Package,
-//RS         Self::Module,
-//RS         Self::Function,
-//RS         Self::Block,
-//RS     ];
-//RS 
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Organization => "organization",
-//RS             Self::Package => "package",
-//RS             Self::Module => "module",
-//RS             Self::Function => "function",
-//RS             Self::Block => "block",
-//RS         }
-//RS     }
-//RS 
-//RS     pub(crate) const fn rank(self) -> u8 {
-//RS         match self {
-//RS             Self::Organization => 0,
-//RS             Self::Package => 1,
-//RS             Self::Module => 2,
-//RS             Self::Function => 3,
-//RS             Self::Block => 4,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One kind for every written widening or audited fact move.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-//RS pub enum GateKind {
-//RS     Unsafe,
-//RS     Impure,
-//RS     DependencyGrant,
-//RS     BuildFlag,
-//RS     SessionFlag,
-//RS     TrustGrant,
-//RS     ForcePin,
-//RS     TaintScrub,
-//RS     DutyDrop,
-//RS     StateTransition,
-//RS     PrecisionDemotion,
-//RS     Nondeterministic,
-//RS     Structure,
-//RS }
-//RS 
-//RS impl GateKind {
-//RS     pub const fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Unsafe => "unsafe",
-//RS             Self::Impure => "impure",
-//RS             Self::DependencyGrant => "dependency_grant",
-//RS             Self::BuildFlag => "build_flag",
-//RS             Self::SessionFlag => "session_flag",
-//RS             Self::TrustGrant => "trust_grant",
-//RS             Self::ForcePin => "force_pin",
-//RS             Self::TaintScrub => "taint_scrub",
-//RS             Self::DutyDrop => "duty_drop",
-//RS             Self::StateTransition => "state_transition",
-//RS             Self::PrecisionDemotion => "precision_demotion",
-//RS             Self::Nondeterministic => "nondeterministic",
-//RS             Self::Structure => "structure",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn parse(value: &str) -> Option<Self> {
-//RS         match value.trim().to_ascii_lowercase().as_str() {
-//RS             "unsafe" | "unsafe_region" | "unsafe_fn" => Some(Self::Unsafe),
-//RS             "impure" => Some(Self::Impure),
-//RS             "dependency" | "dependency_grant" | "grant" => Some(Self::DependencyGrant),
-//RS             "build" | "build_flag" => Some(Self::BuildFlag),
-//RS             "session" | "session_flag" => Some(Self::SessionFlag),
-//RS             "trust" | "trust_grant" => Some(Self::TrustGrant),
-//RS             "force" | "force_pin" => Some(Self::ForcePin),
-//RS             "scrub" | "taint" | "taint_scrub" => Some(Self::TaintScrub),
-//RS             "drop" | "detach" | "duty" | "duty_drop" => Some(Self::DutyDrop),
-//RS             "state" | "transition" | "state_transition" => Some(Self::StateTransition),
-//RS             "approx" | "precision" | "precision_demotion" | "rounded" | "wrapping"
-//RS             | "saturating" | "checked" => Some(Self::PrecisionDemotion),
-//RS             "nondeterministic" | "determinism" => Some(Self::Nondeterministic),
-//RS             "structure" => Some(Self::Structure),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn is_security(self) -> bool {
-//RS         matches!(
-//RS             self,
-//RS             Self::Unsafe
-//RS                 | Self::Impure
-//RS                 | Self::DependencyGrant
-//RS                 | Self::BuildFlag
-//RS                 | Self::SessionFlag
-//RS                 | Self::TrustGrant
-//RS                 | Self::ForcePin
-//RS                 | Self::Nondeterministic
-//RS         )
-//RS     }
-//RS 
-//RS     pub const fn is_rights_kind(self) -> bool {
-//RS         self.is_security()
-//RS     }
-//RS 
-//RS     const fn display_order(self) -> u8 {
-//RS         match self {
-//RS             Self::Unsafe => 0,
-//RS             Self::Impure => 1,
-//RS             Self::Nondeterministic => 2,
-//RS             Self::DependencyGrant => 3,
-//RS             Self::BuildFlag => 4,
-//RS             Self::SessionFlag => 5,
-//RS             Self::TrustGrant => 6,
-//RS             Self::ForcePin => 7,
-//RS             Self::TaintScrub => 8,
-//RS             Self::DutyDrop => 9,
-//RS             Self::StateTransition => 10,
-//RS             Self::PrecisionDemotion => 11,
-//RS             Self::Structure => 12,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct GateOperation {
-//RS     pub kind: String,
-//RS     pub span: Span,
-//RS     pub required: Vec<String>,
-//RS     pub asserted: Vec<String>,
-//RS     pub discharged: bool,
-//RS }
-//RS 
-//RS /// D-AUTHORITY-GATE1: the one record shape for every gate source.
-//RS #[derive(Debug, Clone)]
-//RS pub struct GateEntry {
-//RS     pub kind: GateKind,
-//RS     pub domain: String,
-//RS     pub scope: String,
-//RS     pub source: String,
-//RS     pub span: Option<Span>,
-//RS     pub subject: String,
-//RS     pub reason: Option<String>,
-//RS     pub status: Option<String>,
-//RS     pub detail: String,
-//RS     pub provenance: Vec<String>,
-//RS     pub operations: Vec<GateOperation>,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct GateDiagnostic {
-//RS     pub source: String,
-//RS     pub diagnostic: Diagnostic,
-//RS }
-//RS 
-//RS /// Merged authority-gate read model. Writers stay in their owning subsystems;
-//RS /// all readers append this same record and retain every provenance source.
-//RS #[derive(Debug, Clone, Default)]
-//RS pub struct GateLedger {
-//RS     entries: Vec<GateEntry>,
-//RS     diagnostics: Vec<GateDiagnostic>,
-//RS }
-//RS 
-//RS impl GateLedger {
-//RS     pub fn entries(&self) -> &[GateEntry] {
-//RS         &self.entries
-//RS     }
-//RS 
-//RS     pub fn diagnostics(&self) -> &[GateDiagnostic] {
-//RS         &self.diagnostics
-//RS     }
-//RS 
-//RS     pub fn set_diagnostics(&mut self, diagnostics: Vec<GateDiagnostic>) {
-//RS         self.diagnostics = diagnostics;
-//RS     }
-//RS 
-//RS     /// Add one gate while coalescing the same fact with another provenance
-//RS     /// source. The ledger never drops provenance.
-//RS     pub fn push(&mut self, mut entry: GateEntry) {
-//RS         if entry.provenance.is_empty() {
-//RS             entry.provenance.push(entry.source.clone());
-//RS         }
-//RS         if let Some(existing) = self
-//RS             .entries
-//RS             .iter_mut()
-//RS             .find(|candidate| same_fact(candidate, &entry))
-//RS         {
-//RS             for provenance in entry.provenance {
-//RS                 if !existing.provenance.contains(&provenance) {
-//RS                     existing.provenance.push(provenance);
-//RS                 }
-//RS             }
-//RS             if existing.reason.is_none() {
-//RS                 existing.reason = entry.reason;
-//RS             }
-//RS             if existing.status.is_none() {
-//RS                 existing.status = entry.status;
-//RS             }
-//RS             existing.provenance.sort();
-//RS             return;
-//RS         }
-//RS         entry.provenance.sort();
-//RS         self.entries.push(entry);
-//RS     }
-//RS 
-//RS     pub fn sort(&mut self) {
-//RS         self.entries.sort_by(|left, right| {
-//RS             (
-//RS                 !left.kind.is_security(),
-//RS                 left.kind.display_order(),
-//RS                 left.kind.name(),
-//RS                 left.source.as_str(),
-//RS                 left.span.map(|span| span.start).unwrap_or(usize::MAX),
-//RS                 left.span.map(|span| span.end).unwrap_or(usize::MAX),
-//RS                 left.subject.as_str(),
-//RS                 left.detail.as_str(),
-//RS             )
-//RS                 .cmp(&(
-//RS                     !right.kind.is_security(),
-//RS                     right.kind.display_order(),
-//RS                     right.kind.name(),
-//RS                     right.source.as_str(),
-//RS                     right.span.map(|span| span.start).unwrap_or(usize::MAX),
-//RS                     right.span.map(|span| span.end).unwrap_or(usize::MAX),
-//RS                     right.subject.as_str(),
-//RS                     right.detail.as_str(),
-//RS                 ))
-//RS         });
-//RS     }
-//RS }
-//RS 
-//RS fn same_fact(left: &GateEntry, right: &GateEntry) -> bool {
-//RS     left.kind == right.kind
-//RS         && left.domain == right.domain
-//RS         && left.scope == right.scope
-//RS         && left.subject == right.subject
-//RS         && left.detail == right.detail
-//RS         && match (left.span, right.span) {
-//RS             (None, None) => true,
-//RS             (Some(left_span), Some(right_span)) => {
-//RS                 left_span == right_span && left.source == right.source
-//RS             }
-//RS             _ => false,
-//RS         }
-//RS }
-//RS 
-//RS /// Shared purity classification consumed by both purity walkers.
-//RS pub fn builtin_effect(name: &str) -> Option<Effect> {
-//RS     crate::Syntax::IMPURE_BUILTINS
-//RS         .contains(&name)
-//RS         .then_some(Effect::IO)
-//RS }
-//RS 
-//RS /// Core calls that consume ambient input rather than only transforming values.
-//RS pub fn is_impure_core(module: &str, method: &str) -> bool {
-//RS     matches!(
-//RS         (module, method),
-//RS         (
-//RS             "core.term",
-//RS             "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input"
-//RS         )
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn rights_use_one_tree_and_only_tighten() {
-//RS         let outer = Holds::from(["FS".to_string(), "Net".to_string()]);
-//RS         let inner = Holds::from(["FS.Read".to_string(), "Net".to_string(), "DB".to_string()]);
-//RS         assert!(covers("FS", "FS.Read"));
-//RS         assert!(!tighten(&outer, &inner));
-//RS         assert!(!tighten(&inner, &outer));
-//RS         assert_eq!(uncovered(&inner, &outer), Holds::from(["DB".to_string()]));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn every_checkpoint_uses_one_canonical_answer() {
-//RS         let held = Holds::from(["FS".to_string()]);
-//RS         let denied = Holds::from(["Secret".to_string()]);
-//RS         let missing = Holds::new();
-//RS         let right = parse_right("fs.Read").expect("known right");
-//RS         assert_eq!(right, "FS.Read");
-//RS         assert_eq!(parse_right("fs.read").as_deref(), Some("FS.read"));
-//RS         let checkpoints = [
-//RS             ("compile", answer(&held, &denied, &right)),
-//RS             ("build", answer(&held, &denied, &right)),
-//RS             ("session", answer(&held, &denied, &right)),
-//RS             ("repl", answer(&held, &denied, &right)),
-//RS         ];
-//RS         assert!(checkpoints
-//RS             .iter()
-//RS             .all(|(_, verdict)| *verdict == Verdict::Allowed));
-//RS         assert_eq!(
-//RS             answer(&held, &Holds::from(["FS".to_string()]), &right),
-//RS             Verdict::Denied
-//RS         );
-//RS         assert_eq!(answer(&held, &denied, "Secret"), Verdict::Denied);
-//RS         assert_eq!(answer(&held, &denied, "Net"), Verdict::Missing);
-//RS         assert_eq!(
-//RS             answer(&held, &missing, "FS.Read"),
-//RS             answer(&held, &missing, "fs.Read")
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn one_gate_record_keeps_provenance() {
-//RS         let mut ledger = GateLedger::default();
-//RS         let entry = |provenance: &str| GateEntry {
-//RS             kind: GateKind::TrustGrant,
-//RS             domain: "security".to_string(),
-//RS             scope: "package".to_string(),
-//RS             source: "package.jet".to_string(),
-//RS             span: None,
-//RS             subject: "dep".to_string(),
-//RS             reason: None,
-//RS             status: Some("recorded".to_string()),
-//RS             detail: "FS.Read".to_string(),
-//RS             provenance: vec![provenance.to_string()],
-//RS             operations: Vec::new(),
-//RS         };
-//RS         ledger.push(entry("lockfile"));
-//RS         ledger.push(entry("trust store"));
-//RS         assert_eq!(ledger.entries().len(), 1);
-//RS         assert_eq!(ledger.entries()[0].provenance.len(), 2);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn effect_roots_are_the_thirteen_grantable_roots() {
-//RS         assert_eq!(
-//RS             EFFECT_ROOTS.as_slice(),
-//RS             &[
-//RS                 "Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI",
-//RS                 "Browser", "Secret",
-//RS             ]
-//RS         );
-//RS         assert_eq!(Effect::all().len(), 13);
-//RS         assert_eq!(parse_right("Panic").as_deref(), Some("Panic"));
-//RS         assert_eq!(parse_right("Mem.Alloc").as_deref(), Some("Mem.Alloc"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn manifestless_application_default_grants_beginner_basics() {
-//RS         let authority = ApplicationAuthority::default();
-//RS         assert_eq!(
-//RS             authority.granted_effects,
-//RS             Holds::from([
-//RS                 "IO".to_string(),
-//RS                 "Mem.Alloc".to_string(),
-//RS                 crate::Syntax::EFFECT_LEAF_EXEC_ARGS.to_string(),
-//RS             ])
-//RS         );
-//RS         assert!(authority.denied_effects.is_empty());
-//RS         assert_eq!(authority.authority, "application default");
-//RS     }
-//RS 
-//RS     /// #3697: the floor grants argument reading, never process spawning.
-//RS     #[test]
-//RS     fn manifestless_floor_reads_arguments_but_cannot_spawn() {
-//RS         let mut argv = ApplicationAuthority::ambient_basics();
-//RS         argv.required_effects = Holds::from([
-//RS             "IO".to_string(),
-//RS             crate::Syntax::EFFECT_LEAF_EXEC_ARGS.to_string(),
-//RS         ]);
-//RS         assert!(argv.is_allowed(), "{:?}", argv.policy_diagnostic());
-//RS 
-//RS         let mut spawn = ApplicationAuthority::ambient_basics();
-//RS         spawn.required_effects = Holds::from(["Exec".to_string(), "IO".to_string()]);
-//RS         let diagnostic = spawn.policy_diagnostic().expect("spawning needs a grant");
-//RS         assert_eq!(diagnostic.code, "E1803");
-//RS         assert!(diagnostic.what.contains("`Exec`"), "{}", diagnostic.what);
-//RS         assert!(
-//RS             !ApplicationAuthority::AMBIENT_BASIC_EFFECTS
-//RS                 .iter()
-//RS                 .any(|granted| covers(granted, "Exec")),
-//RS             "the ambient floor must not hold the Exec root"
-//RS         );
-//RS     }
-//RS 
-//RS     /// #3718: the human Why is one sentence; the role rows move to detail.
-//RS     #[test]
-//RS     fn authority_refusal_why_is_a_sentence_and_facts_are_detail() {
-//RS         let mut authority = ApplicationAuthority::package_default();
-//RS         authority.required_effects = Holds::from([
-//RS             "IO".to_string(),
-//RS             "FS.Write".to_string(),
-//RS             "Exec".to_string(),
-//RS         ]);
-//RS         let diagnostic = authority.policy_diagnostic().expect("E1803");
-//RS         assert_eq!(
-//RS             diagnostic.why,
-//RS             "This program starts other programs and writes files, and package.jet (which has no authority block) has not allowed that yet."
-//RS         );
-//RS         assert!(!diagnostic.why.contains('='), "{}", diagnostic.why);
-//RS         let detail = diagnostic.detail.as_deref().expect("facts detail");
-//RS         assert!(detail.starts_with("authority_facts:required_effects=Exec, FS.Write, IO;"), "{detail}");
-//RS         assert!(detail.contains("undecided_effects=Exec, FS.Write"), "{detail}");
-//RS         // The floor is replaced by the written grant, so the fix names IO too.
-//RS         assert!(
-//RS             diagnostic.fix.contains("allow: [Exec, FS.Write, IO]"),
-//RS             "{}",
-//RS             diagnostic.fix
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn authority_diagnostic_fix_lists_all_undecided_effects() {
-//RS         let authority = ApplicationAuthority {
-//RS             required_effects: Holds::from([
-//RS                 "IO".to_string(),
-//RS                 "Mem.Alloc".to_string(),
-//RS                 "Exec".to_string(),
-//RS             ]),
-//RS             granted_effects: Holds::new(),
-//RS             denied_effects: Holds::new(),
-//RS             authority: "package.jet authority.holds".to_string(),
-//RS         };
-//RS         let diagnostic = authority.policy_diagnostic().expect("E1803");
-//RS         assert!(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn manifestless_fix_declares_the_complete_inline_row() {
-//RS         // The inline block replaces the beginner default, so a row naming
-//RS         // only the undecided `FS` would newly strand `IO`.
-//RS         let mut authority = ApplicationAuthority::ambient_basics();
-//RS         authority.required_effects =
-//RS             Holds::from(["FS".to_string(), "IO".to_string(), "Panic".to_string()]);
-//RS         let diagnostic = authority.policy_diagnostic().expect("E1803");
-//RS         assert!(diagnostic.what.contains("`FS`"), "{}", diagnostic.what);
-//RS         assert!(diagnostic.fix.contains("allow: [FS, IO]"), "{}", diagnostic.fix);
-//RS         assert!(diagnostic.fix.contains("package { … }"), "{}", diagnostic.fix);
-//RS         assert!(!diagnostic.fix.contains("package.jet"), "{}", diagnostic.fix);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn application_authority_does_not_request_a_positive_panic_grant() {
-//RS         let mut authority = ApplicationAuthority {
-//RS             required_effects: Holds::from(["IO".to_string(), "Panic".to_string()]),
-//RS             granted_effects: Holds::from(["IO".to_string()]),
-//RS             denied_effects: Holds::new(),
-//RS             authority: "application default".to_string(),
-//RS         };
-//RS         assert!(authority.undecided_effects().is_empty());
-//RS         assert!(authority.is_allowed());
-//RS         assert!(authority.policy_diagnostic().is_none());
-//RS 
-//RS         authority.denied_effects.insert("Panic".to_string());
-//RS         let diagnostic = authority.policy_diagnostic().expect("E1803");
-//RS         assert!(diagnostic.what.contains("Panic"));
-//RS         assert!(diagnostic
-//RS             .fix
-//RS             .to_ascii_lowercase()
-//RS             .contains("adjust the denial"));
-//RS         assert!(!diagnostic.fix.contains("allow: [Panic]"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn every_ffi_language_leaf_is_covered_by_the_ffi_root() {
-//RS         for leaf in crate::Syntax::BUILTIN_EFFECT_LEAVES
-//RS             .iter()
-//RS             .copied()
-//RS             .filter(|leaf| leaf.starts_with("FFI."))
-//RS         {
-//RS             assert!(covers("FFI", leaf), "FFI must cover {leaf}");
-//RS             assert!(parse_right(leaf).is_some(), "leaf must parse: {leaf}");
-//RS             assert_eq!(
-//RS                 answer(&Holds::new(), &Holds::from(["FFI".to_string()]), leaf),
-//RS                 Verdict::Denied,
-//RS                 "FFI denial must cover {leaf}"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn retired_flat_ffi_spellings_do_not_parse() {
-//RS         for root in [
-//RS             "Go",
-//RS             "Java",
-//RS             "DotNet",
-//RS             "Fortran",
-//RS             "Cobol",
-//RS             "Tcl",
-//RS             "Lua",
-//RS             "Ada",
-//RS             "Pascal",
-//RS             "Dart",
-//RS             "PowerShell",
-//RS             "Perl",
-//RS             "Ruby",
-//RS             "Php",
-//RS             "R",
-//RS             "Com",
-//RS             "Cpp",
-//RS             "Py",
-//RS             "Octave",
-//RS         ] {
-//RS             assert!(
-//RS                 parse_right(root).is_none(),
-//RS                 "retired spelling parsed: {root}"
-//RS             );
-//RS             assert!(Effect::parse(root).is_none(), "retired root parsed: {root}");
-//RS         }
-//RS     }
-//RS     #[test]
-//RS     fn resource_qualified_rights_keep_tree_boundaries() {
-//RS         assert!(covers("FS.Read", "FS.Read:/data/file"));
-//RS         assert!(covers("Net.Connect", "Net.Connect:api.example.com"));
-//RS         assert!(!covers("FS.Read:/data", "FS.Read:/database"));
-//RS         assert!(!covers("Net.Connect:api.example.com", "Net.Connect:api.example.com.evil"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn canonical_authority_tightens_without_widening() {
-//RS         let host = Authority::from_rights(["FS.Read", "Net.Connect"]);
-//RS         let child = Holds::from(["FS.Read:/data".to_string()]);
-//RS         let narrowed = host.tighten(&child).expect("child scope is covered");
-//RS         assert!(narrowed.allows("FS.Read:/data/file"));
-//RS         assert!(!narrowed.allows("FS.Read:/other"));
-//RS         assert!(host.tighten(&Holds::from(["Exec".to_string()])).is_err());
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2114 crates/jet-foundation/src/Authority.rs:1-1154
+// D-AUTHORITY-MODEL1=A: reuse the rights tree and policy carriers in
+// Authority/Authority.jet; this file adds only missing compiler-facing items.
+use jet_foundation.Registry.[Effect, FoundationEmbeddedCore]
+use jet_foundation.Diagnostics.[Diagnostic, Span, diagnostic_with_detail, diagnostic_with_rights]
+use jet_foundation.MIR.[MIRHostImportFact]
 
+// Rust: crates/jet-foundation/src/Authority.rs:17
+impl Effect {
+    pub fn requires_comptime_gate(self) -> Bool Never! {
+        if self == { .Net | .FS | .IO | .DB | .Env | .Exec | .Browser | .Secret -> true else -> false }
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:33
+// root -> Authority/Authority.jet:55 authority_root.
+// Rust: crates/jet-foundation/src/Authority.rs:39
+// parse_root -> Authority/Authority.jet:73 authority_parse_root.
+// Rust: crates/jet-foundation/src/Authority.rs:54
+// parse_right -> Authority/Authority.jet:87 authority_parse_right.
+// Rust: crates/jet-foundation/src/Authority.rs:69
+pub fn is_declared_irreversible(right: String) -> Bool Never! {
+    canonical := authority_parse_right(right) ?? right.trim() // #4303
+    loop declaration in FoundationEmbeddedCore{}.effect_declarations() {
+        if declaration.irreversible && authority_covers(declaration.name, canonical) -> return true
+    }
+    false
+}
+// Rust: crates/jet-foundation/src/Authority.rs:83
+// covers -> Authority/Authority.jet:106 authority_covers.
+// Rust: crates/jet-foundation/src/Authority.rs:102
+// Holds -> sorted duplicate-free [String], constructed by authority_holds.
+// Rust: crates/jet-foundation/src/Authority.rs:108
+// Authority -> Authority/Authority.jet:169 CanonicalAuthority.
+// Rust: crates/jet-foundation/src/Authority.rs:114
+// TightenError and Display/Error -> Authority/Authority.jet:158 AuthorityTightenError.
+// Rust: crates/jet-foundation/src/Authority.rs:131
+// Authority.from_rights -> canonical:174.
+// Rust: crates/jet-foundation/src/Authority.rs:144
+// Authority.from_holds -> canonical:180.
+impl CanonicalAuthority {
+    pub fn default() -> CanonicalAuthority Never! { CanonicalAuthority{holds: []} }
+    // Rust: crates/jet-foundation/src/Authority.rs:148
+    pub fn holds(self) -> View<String> from self { self.holds[0..<self.holds.len()] }
+    // Rust: crates/jet-foundation/src/Authority.rs:152
+    pub fn rights(self) -> AuthorityRights from self { AuthorityRights{rows: self.holds[0..<self.holds.len()], at: 0} }
+    // Rust: crates/jet-foundation/src/Authority.rs:171
+    pub fn decide_import(self, import: MIRHostImportFact) -> AuthorityVerdict Never! {
+        if self.allows_operation(import.required_right) -> AuthorityVerdict.Allowed else -> AuthorityVerdict.Missing
+    }
+}
+pub struct AuthorityRights { pub rows: View<String>, pub at: Int }
+impl AuthorityRights.Iterator {
+    type Item = @String
+    fn next(&self) -> (@String)? from self {
+        if self.at >= self.rows.len() -> return None
+        index :: self.at
+        self.at += 1
+        Val(@self.rows[index])
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:156
+// Authority.allows -> canonical:184.
+// Rust: crates/jet-foundation/src/Authority.rs:165
+// Authority.allows_operation -> canonical:191.
+// Rust: crates/jet-foundation/src/Authority.rs:181
+// Authority.tighten -> canonical:200.
+// Rust: crates/jet-foundation/src/Authority.rs:195
+// HostImportDecision/check/is_allowed -> PackageModel/Authority/SandboxAuthority.jet:30-40.
+// Rust: crates/jet-foundation/src/Authority.rs:213
+// HostImportFact.decision -> same canonical HostImportDecision.check.
+// Rust: crates/jet-foundation/src/Authority.rs:221
+// HostImportFact -> MIR/MIR.jet:1108 MIRHostImportFact, the existing snapshot carrier.
+impl MIRHostImportFact {
+    // Rust: crates/jet-foundation/src/Authority.rs:230
+    pub fn new(id: String, operation: String, required_right: String, parameter_type_ids: [String], result_type_id: String?) -> MIRHostImportFact Never! {
+        MIRHostImportFact{id: id, operation: operation, required_right: required_right, parameter_type_ids: parameter_type_ids, result_type_id: result_type_id}
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:248
+    pub fn payload_type_ids(self) -> HostPayloadTypeIds from self { HostPayloadTypeIds{fact: @self, at: 0} }
+    // Rust: crates/jet-foundation/src/Authority.rs:255
+    pub fn required_grant(self) -> @String from self { @self.required_right }
+}
+pub struct HostPayloadTypeIds { pub fact: @MIRHostImportFact, pub at: Int }
+impl HostPayloadTypeIds.Iterator {
+    type Item = @String
+    fn next(&self) -> (@String)? from self {
+        index :: self.at
+        if index < self.fact.parameter_type_ids.len() {
+            self.at += 1
+            return Val(@self.fact.parameter_type_ids[index])
+        }
+        if index == self.fact.parameter_type_ids.len() {
+            self.at += 1
+            if self.fact.result_type_id == .Val(result) -> return Val(@result)
+        }
+        None
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:261
+// Verdict -> Authority/Authority.jet:29 AuthorityVerdict.
+// Rust: crates/jet-foundation/src/Authority.rs:275
+// ApplicationAuthority -> Authority/Authority.jet:209.
+impl ApplicationAuthority {
+    // Rust: crates/jet-foundation/src/Authority.rs:283
+    pub fn default() -> ApplicationAuthority Never! { ApplicationAuthority.ambient_basics() }
+    // Rust: crates/jet-foundation/src/Authority.rs:499
+    pub fn policy_refusal(self) -> Diagnostic Never! {
+        denied :: self.denied_required_effects()
+        what :: if denied.len() == 0 -> "application authority is undecided for `{self.undecided_effects().join(", ")}`" else -> "application authority denies `{denied.join(", ")}`"
+        diagnostic :: Diagnostic.error("E1803", what, self.policy_why(), self.policy_fix(), None)
+        detailed :: diagnostic_with_detail(^diagnostic, self.policy_facts())
+        diagnostic_with_rights(^detailed, "authority", [], [String]{self.authority}, None)
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:521
+    pub fn policy_diagnostic(self) -> Diagnostic? Never! {
+        if self.is_allowed() -> None else -> Val(self.policy_refusal())
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:294
+// AMBIENT_BASIC_EFFECTS -> canonical:20 AUTHORITY_AMBIENT_BASIC_EFFECTS.
+// Rust: crates/jet-foundation/src/Authority.rs:298
+// APPLICATION_DEFAULT -> canonical:22 AUTHORITY_APPLICATION_DEFAULT.
+// Rust: crates/jet-foundation/src/Authority.rs:303
+// PACKAGE_DEFAULT -> canonical:24 AUTHORITY_PACKAGE_DEFAULT.
+// Rust: crates/jet-foundation/src/Authority.rs:305
+// ambient_basics -> canonical:216.
+// Rust: crates/jet-foundation/src/Authority.rs:310
+// package_default -> canonical:221.
+// Rust: crates/jet-foundation/src/Authority.rs:314
+// beginner_floor -> canonical:225.
+// Rust: crates/jet-foundation/src/Authority.rs:330
+// is_application_default -> canonical:246.
+// Rust: crates/jet-foundation/src/Authority.rs:337
+// is_beginner_floor -> canonical:252.
+// Rust: crates/jet-foundation/src/Authority.rs:345
+// inline_allow_row -> canonical:258.
+// Rust: crates/jet-foundation/src/Authority.rs:355
+// from_policy -> canonical:235.
+// Rust: crates/jet-foundation/src/Authority.rs:378
+// undecided_effects -> canonical:268.
+// Rust: crates/jet-foundation/src/Authority.rs:391
+// denied_required_effects -> canonical:278.
+// Rust: crates/jet-foundation/src/Authority.rs:399
+// is_allowed -> canonical:286.
+// Rust: crates/jet-foundation/src/Authority.rs:407
+// policy_fix -> canonical:293.
+// Rust: crates/jet-foundation/src/Authority.rs:436
+// policy_why -> canonical:308.
+// Rust: crates/jet-foundation/src/Authority.rs:459
+// policy_owner -> canonical:325.
+// Rust: crates/jet-foundation/src/Authority.rs:478
+// policy_facts -> canonical:337.
+// Rust: crates/jet-foundation/src/Authority.rs:526
+// join_rights -> sorted rights.join(", ").
+// Rust: crates/jet-foundation/src/Authority.rs:534
+pub fn repl_refusal_why(authority: ApplicationAuthority, reason: String) -> String Never! {
+    chars := reason.chars()
+    capitalized :: if chars.next() == { .Val(first) -> "{first.to_uppercase()}{chars.as_str()}" else -> "" }
+    if authority.is_allowed() -> "{capitalized}, so the host operation did not run."
+    else -> "{authority.policy_why()} {capitalized}, so the host operation did not run."
+}
+// Rust: crates/jet-foundation/src/Authority.rs:549
+// effect_action -> canonical:350 authority_effect_action.
+// Rust: crates/jet-foundation/src/Authority.rs:583
+// covers_any -> canonical:117 authority_covers_any.
+// Rust: crates/jet-foundation/src/Authority.rs:587
+// answer -> canonical:124 authority_answer.
+// Rust: crates/jet-foundation/src/Authority.rs:598
+// tighten -> canonical:131 authority_tighten.
+// Rust: crates/jet-foundation/src/Authority.rs:605
+// uncovered -> canonical:139 authority_uncovered.
+// Rust: crates/jet-foundation/src/Authority.rs:613
+// covered -> canonical:148 authority_covered.
+
+// Rust: crates/jet-foundation/src/Authority.rs:622
+pub enum Scope {
+    Organization Package Module Function Block
+    // Rust: crates/jet-foundation/src/Authority.rs:631
+    pub ALL :: prep { [Scope]{.Organization, .Package, .Module, .Function, .Block} }
+    // Rust: crates/jet-foundation/src/Authority.rs:639
+    pub fn name(self) -> String Never! {
+        if self == { .Organization -> "organization" .Package -> "package" .Module -> "module" .Function -> "function" .Block -> "block" }
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:649
+    pub fn rank(self) -> U8 Never! {
+        if self == { .Organization -> 0 .Package -> 1 .Module -> 2 .Function -> 3 .Block -> 4 }
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:662
+pub enum GateKind {
+    Unsafe Impure DependencyGrant BuildFlag SessionFlag TrustGrant ForcePin TaintScrub DutyDrop StateTransition PrecisionDemotion Nondeterministic Structure
+    // Rust: crates/jet-foundation/src/Authority.rs:679
+    pub fn name(self) -> String Never! {
+        if self == {
+            .Unsafe -> "unsafe" .Impure -> "impure" .DependencyGrant -> "dependency_grant" .BuildFlag -> "build_flag"
+            .SessionFlag -> "session_flag" .TrustGrant -> "trust_grant" .ForcePin -> "force_pin" .TaintScrub -> "taint_scrub"
+            .DutyDrop -> "duty_drop" .StateTransition -> "state_transition" .PrecisionDemotion -> "precision_demotion"
+            .Nondeterministic -> "nondeterministic" .Structure -> "structure"
+        }
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:697
+    pub fn parse(value: String) -> GateKind? Never! {
+        trimmed := value.trim() // #4303
+        if trimmed.to_ascii_lower() == {
+            "unsafe" | "unsafe_region" | "unsafe_fn" -> Val(.Unsafe)
+            "impure" -> Val(.Impure)
+            "dependency" | "dependency_grant" | "grant" -> Val(.DependencyGrant)
+            "build" | "build_flag" -> Val(.BuildFlag)
+            "session" | "session_flag" -> Val(.SessionFlag)
+            "trust" | "trust_grant" -> Val(.TrustGrant)
+            "force" | "force_pin" -> Val(.ForcePin)
+            "scrub" | "taint" | "taint_scrub" -> Val(.TaintScrub)
+            "drop" | "detach" | "duty" | "duty_drop" -> Val(.DutyDrop)
+            "state" | "transition" | "state_transition" -> Val(.StateTransition)
+            "approx" | "precision" | "precision_demotion" | "rounded" | "wrapping" | "saturating" | "checked" -> Val(.PrecisionDemotion)
+            "nondeterministic" | "determinism" -> Val(.Nondeterministic)
+            "structure" -> Val(.Structure)
+            else -> None
+        }
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:717
+    pub fn is_security(self) -> Bool Never! {
+        if self == { .Unsafe | .Impure | .DependencyGrant | .BuildFlag | .SessionFlag | .TrustGrant | .ForcePin | .Nondeterministic -> true else -> false }
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:731
+    pub fn is_rights_kind(self) -> Bool Never! { self.is_security() }
+    // Rust: crates/jet-foundation/src/Authority.rs:735
+    fn display_order(self) -> U8 Never! {
+        if self == {
+            .Unsafe -> 0 .Impure -> 1 .Nondeterministic -> 2 .DependencyGrant -> 3 .BuildFlag -> 4 .SessionFlag -> 5
+            .TrustGrant -> 6 .ForcePin -> 7 .TaintScrub -> 8 .DutyDrop -> 9 .StateTransition -> 10 .PrecisionDemotion -> 11 .Structure -> 12
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:755
+pub struct GateOperation { pub kind: String, pub span: Span, pub required: [String], pub asserted: [String], pub discharged: Bool }
+// Rust: crates/jet-foundation/src/Authority.rs:765
+pub struct GateEntry {
+    pub kind: GateKind
+    pub domain: String
+    pub scope: String
+    pub source: String
+    pub span: Span?
+    pub subject: String
+    pub reason: String?
+    pub status: String?
+    pub detail: String
+    pub provenance: [String]
+    pub operations: [GateOperation]
+}
+// Rust: crates/jet-foundation/src/Authority.rs:780
+pub struct GateDiagnostic { pub source: String, pub diagnostic: Diagnostic }
+// Rust: crates/jet-foundation/src/Authority.rs:788
+pub struct GateLedger {
+    rows: [GateEntry]
+    diagnostic_rows: [GateDiagnostic]
+    pub fn default() -> GateLedger Never! { GateLedger{rows: [], diagnostic_rows: []} }
+    // Rust: crates/jet-foundation/src/Authority.rs:794
+    pub fn entries(self) -> View<GateEntry> from self { self.rows[0..<self.rows.len()] }
+    // Rust: crates/jet-foundation/src/Authority.rs:798
+    pub fn diagnostics(self) -> View<GateDiagnostic> from self { self.diagnostic_rows[0..<self.diagnostic_rows.len()] }
+    // Rust: crates/jet-foundation/src/Authority.rs:802
+    pub fn set_diagnostics(&self, diagnostics: ^[GateDiagnostic]) -> { self.diagnostic_rows = ^diagnostics }
+    // Rust: crates/jet-foundation/src/Authority.rs:808
+    pub fn push(&self, incoming: ^GateEntry) -> {
+        entry := ^incoming
+        if entry.provenance.len() == 0 -> &entry.provenance.push(entry.source)
+        loop index in 0..<self.rows.len() {
+            if !same_fact(self.rows[index], entry) -> next
+            loop provenance in entry.provenance {
+                if !self.rows[index].provenance.contains(provenance) -> &self.rows[index].provenance.push(provenance)
+            }
+            if self.rows[index].reason == None -> self.rows[index].reason = ^entry.reason
+            if self.rows[index].status == None -> self.rows[index].status = ^entry.status
+            &self.rows[index].provenance.sort()
+            return
+        }
+        &entry.provenance.sort()
+        &self.rows.push(^entry)
+    }
+    // Rust: crates/jet-foundation/src/Authority.rs:835
+    pub fn sort(&self) -> {
+        &self.rows.sort_by((left: GateEntry, right: GateEntry) -> {
+            left_key :: (!left.kind.is_security(), left.kind.display_order(), left.kind.name(), left.source,
+                left.span.map((span: Span) -> span.start) ?? Int.MAX, left.span.map((span: Span) -> span.end) ?? Int.MAX, left.subject, left.detail)
+            right_key :: (!right.kind.is_security(), right.kind.display_order(), right.kind.name(), right.source,
+                right.span.map((span: Span) -> span.start) ?? Int.MAX, right.span.map((span: Span) -> span.end) ?? Int.MAX, right.subject, right.detail)
+            left_key <=> right_key
+        })
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:861
+fn same_fact(left: GateEntry, right: GateEntry) -> Bool Never! {
+    if left.kind != right.kind || left.domain != right.domain || left.scope != right.scope || left.subject != right.subject || left.detail != right.detail -> return false
+    if (left.span, right.span) == {
+        (None, None) -> true
+        (.Val(left_span), .Val(right_span)) -> left_span == right_span && left.source == right.source
+        else -> false
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:877
+pub fn builtin_effect(name: String) -> Effect? Never! {
+    if IMPURE_BUILTINS.contains(name) -> Val(Effect.IO) else -> None
+}
+// Rust: crates/jet-foundation/src/Authority.rs:884
+pub fn is_impure_core(module: String, method: String) -> Bool Never! {
+    module == "core.term" && if method == { "stdin" | "input" | "confirm" | "choose" | "input_secret" | "read_all_input" -> true else -> false }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:894
+// All fourteen original tests are ported in Tests/Authority.jet.

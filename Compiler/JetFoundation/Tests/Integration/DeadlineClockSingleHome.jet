@@ -1,0 +1,29 @@
+// #1747: one deadline clock and deadline TLS declaration in the reference renderer.
+use std.fs
+use std.env
+// GATE #4494: actual filesystem traversal.
+// Rust: tests/deadline_clock_single_home.rs:14
+pub fn root() -> OSPath { env.manifest_dir() }
+// Rust: tests/deadline_clock_single_home.rs:18
+pub const DEADLINE_HOME: String = "crates/jet-codegen/src/Prelude/Deadline.rs"
+// Rust: tests/deadline_clock_single_home.rs:20
+pub fn collect_rs_files(dir: &OSPath, out: &[OSPath]) -> {
+    entries :: match fs.read_dir(dir) { Ok(entries) -> entries, Err(_) -> return }
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() { collect_rs_files(&path, out) }
+        else if path.extension().is_some_and(fn(e) -> e == "rs") { out.push(path) }
+    }
+}
+// Rust: tests/deadline_clock_single_home.rs:34
+pub fn homes_for(needle: String) -> [String] {
+    root :: root()
+    files := [OSPath]{}
+    collect_rs_files(&root.join("crates"), &files)
+    homes := [String]{}
+    loop file in &files {
+        text :: fs.read_to_string(file).unwrap_or_default()
+        if text.contains(needle) { homes.push(file.strip_prefix(&root).unwrap_or(file).display().to_string()) }
+    }
+    homes
+}

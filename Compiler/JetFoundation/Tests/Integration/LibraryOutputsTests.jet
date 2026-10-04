@@ -1,0 +1,326 @@
+use std.[fs, env]
+use std.process.Command
+use jet
+use jet_foundation.Tests.Integration.Common.[have_rustc, Scratch]
+use jet_foundation.Tests.Integration.LibraryOutputs.*
+// GATE #4494: real native builds, loader lifecycle and foreign process calls.
+// GATE #4483: Unix-only suite and per-target shared library/link flags.
+// Rust: tests/library_outputs.rs:115
+#Test("native_and_component_exports_share_one_typed_surface") {
+    if core.sys.target.selected_family() != "unix" { return }
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/packages/library_loadable")
+    scratch :: Scratch.new("embedding-parity")
+    copy_tree(&fixture, &scratch.path)
+    source :: scratch.path.join("library.jet").to_string_lossy()
+    library :: jet.compile_library(&source, None).expect("native Library codegen should accept the fixture").library.expect("native Library artifacts")
+    plugin :: jet.compile_plugin(&source).expect("sandbox Component codegen should accept the fixture").plugin.expect("sandbox Component artifacts")
+    assert(plugin.exports.iter().all(fn(export) -> export.scalar.is_some()), "the scalar library fixture must expose a concrete scalar for every Component export")
+    library_rows :: library.exports.iter().map(fn(export) -> (export.name.clone(), Some(export.scalar), export.conventions.clone())).collect()
+    plugin_rows :: plugin.exports.iter().map(fn(export) -> (export.name.clone(), export.scalar, export.params.clone())).collect()
+    assert_eq(library_rows, plugin_rows)
+    assert_eq(plugin.exported_fns, library.exports.iter().map(fn(export) -> export.name.clone()).collect())
+}
+// Rust: tests/library_outputs.rs:164
+#Test("guest_import_library_calls_native_c_and_cpp_hosts") {
+    if core.sys.target.selected_family() != "unix" { return }
+    assert(have_rustc(), "guest import proof requires rustc")
+    cc :: cc().expect("guest import C proof requires a C compiler")
+    cxx :: cxx().expect("guest import C++ proof requires a C++ compiler")
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/guest_import_library")
+    scratch :: Scratch.new("guest-import-library")
+    copy_tree(&fixture, &scratch.path)
+    build :: run_jet(&scratch.path, ["build", "--lib", "library.jet"])
+    assert(build.status.success(), "guest import Library build failed:\n{compiler_text(&build)}")
+    target :: scratch.path.join(".jet/build")
+    archive :: target.join("libguestimport.a")
+    header :: target.join("guestimport.h")
+    assert(archive.is_file(), "guest import build missed {archive.display()}")
+    assert(header.is_file(), "guest import build missed {header.display()}")
+    c_source :: scratch.path.join("foreign.c")
+    c_binary :: scratch.path.join("foreign-c")
+    c_build := Command.new(cc)
+    c_build.args(["-std=c11", "-I"]).arg(&target).arg(&c_source).arg(&archive).arg("-o").arg(&c_binary)
+    if core.sys.target.selected_os() == "linux" { c_build.args(["-ldl", "-lpthread", "-lm"]) }
+    c_result :: c_build.output().unwrap()
+    assert(c_result.status.success(), "guest import C host failed to compile:\n{compiler_text(&c_result)}")
+    c :: Command.new(&c_binary).output().unwrap()
+    assert(c.status.success(), "guest import C host failed at runtime:\n{compiler_text(&c)}")
+    assert_eq(String.from_utf8_lossy(&c.stdout), "42\n")
+    cpp_source :: scratch.path.join("foreign.cpp")
+    cpp_binary :: scratch.path.join("foreign-cpp")
+    cpp_build := Command.new(cxx)
+    cpp_build.args(["-std=c++17", "-I"]).arg(&target).arg(&cpp_source).arg(&archive).arg("-o").arg(&cpp_binary).arg("-pthread")
+    if core.sys.target.selected_os() == "linux" { cpp_build.args(["-ldl", "-lpthread", "-lm"]) }
+    cpp_result :: cpp_build.output().unwrap()
+    assert(cpp_result.status.success(), "guest import C++ host failed to compile:\n{compiler_text(&cpp_result)}")
+    cpp :: Command.new(&cpp_binary).output().unwrap()
+    assert(cpp.status.success(), "guest import C++ host failed at runtime:\n{compiler_text(&cpp)}")
+    assert_eq(String.from_utf8_lossy(&cpp.stdout), "42\n")
+}
+// Rust: tests/library_outputs.rs:243
+#Test("library_build_load_and_foreign_call_are_one_surface") {
+    if core.sys.target.selected_family() != "unix" { return }
+    assert(have_rustc(), "Library end-to-end proof requires rustc")
+    cc :: cc().expect("Library end-to-end proof requires a C compiler")
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/packages/library_loadable")
+    scratch :: Scratch.new("library-loadable")
+    copy_tree(&fixture, &scratch.path)
+    package :: fs.read_to_string(scratch.path.join("package.jet")).unwrap()
+    assert(package.contains("outputs: {"))
+    fs.write(scratch.path.join("package.jet"), package.replacen("outputs: {", "authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\noutputs: {", 1)).unwrap()
+    expected :: expected_output()
+    build :: run_jet(&scratch.path, ["build", "--lib", "library.jet"])
+    assert(build.status.success(), "Library build failed:\n{compiler_text(&build)}")
+    target :: scratch.path.join(".jet/build")
+    shared :: if core.sys.target.selected_os() == "macos" { target.join("libloadable.dylib") } else if core.sys.target.selected_os() == "windows" { target.join("libloadable.dll") } else { target.join("libloadable.so") }
+    for path in [target.join("libloadable.a"), target.join("loadable.h"), target.join("loadable.jetlib"), target.join("bindings/loadable.h"), target.join("bindings/loadable.py"), target.join("bindings/loadable.swift")] {
+        assert(path.is_file(), "Library build missed {path.display()}")
+    }
+    assert(shared.is_file(), "Library build missed {shared.display()}")
+    artifact :: jet.JetLibArtifact.decode(&fs.read(target.join("loadable.jetlib")).unwrap()).expect("loadable Library metadata should decode")
+    assert_eq(artifact.stamp.library_name, "loadable")
+    assert_eq(artifact.stamp.abi_version, jet.JetLib.ABI_VERSION)
+    assert_eq(artifact.stamp.exports, [jet.JetLibExport.new("greet", jet.JetLibScalar.Text, 1), jet.JetLibExport.new("is_enabled", jet.JetLibScalar.Bool, 1), jet.JetLibExport.new("on_tick", jet.JetLibScalar.Int, 1)])
+    jet.JetLib.validate_load_metadata(&artifact.stamp).expect("generated Library metadata should match the loader ABI")
+    completion :: fs.read_to_string(target.join(".loadable.jet-library.complete")).unwrap()
+    assert(completion.starts_with("jet-library-set-v1\n"))
+    for (name, path) in [("libloadable.a", target.join("libloadable.a")), ("loadable.h", target.join("loadable.h")), ("loadable.jetlib", target.join("loadable.jetlib"))] {
+        digest :: jet.SHA256.sha256_hex(&fs.read(path).unwrap())
+        assert(completion.contains("{name}\tsha256-{digest}\n"), "completion marker missed {name}")
+    }
+    header_text :: fs.read_to_string(target.join("loadable.h")).unwrap()
+    assert(header_text.contains("int64_t on_tick(int64_t p0);"))
+    assert(header_text.contains("bool is_enabled(bool p0);"))
+    assert(header_text.contains("JetText greet(JetText p0);"))
+    assert(header_text.contains("void jet_text_free(JetText value);"))
+    c_source :: scratch.path.join("foreign.c")
+    assert(c_source.is_file(), "missing checked-in C host example")
+    c_binary :: scratch.path.join("foreign")
+    c_build := Command.new(cc)
+    c_build.arg("-std=c11").arg("-I").arg(&target).arg(&c_source).arg(target.join("libloadable.a")).arg("-o").arg(&c_binary)
+    if core.sys.target.selected_os() == "linux" { c_build.args(["-ldl", "-lpthread", "-lm"]) }
+    c_result :: c_build.output().unwrap()
+    assert(c_result.status.success(), "foreign C caller failed:\n{compiler_text(&c_result)}")
+    foreign :: Command.new(&c_binary).output().unwrap()
+    assert(foreign.status.success(), "foreign C caller failed at runtime")
+    assert_eq(String.from_utf8_lossy(&foreign.stdout), expected.as_str())
+    deterministic_paths :: [target.join("libloadable.a"), shared.clone(), target.join("loadable.jetlib"), target.join("loadable.h"), target.join("bindings/loadable.h"), target.join("bindings/loadable.py"), target.join("bindings/loadable.swift")]
+    deterministic_before :: deterministic_paths.iter().map(fn(path) -> fs.read(path).unwrap()).collect()
+    rebuild :: run_jet(&scratch.path, ["build", "--lib", "library.jet"])
+    assert(rebuild.status.success(), "repeat Library build failed:\n{compiler_text(&rebuild)}")
+    for (path, before) in deterministic_paths.iter().zip(deterministic_before) { assert_eq(fs.read(path).unwrap(), before, "non-deterministic {path.display()}") }
+    cxx :: cxx().expect("C++ Library host proof requires a C++ compiler")
+    cpp_source :: scratch.path.join("foreign.cpp")
+    assert(cpp_source.is_file(), "missing checked-in C++ host example")
+    cpp_binary :: scratch.path.join("foreign-cpp")
+    cpp_build := Command.new(cxx)
+    cpp_build.arg("-std=c++17").arg("-I").arg(&target).arg(&cpp_source).arg("-o").arg(&cpp_binary).arg("-pthread")
+    if core.sys.target.selected_os() == "linux" { cpp_build.arg("-ldl") }
+    cpp_result :: cpp_build.output().unwrap()
+    assert(cpp_result.status.success(), "foreign C++ host failed to compile:\n{compiler_text(&cpp_result)}")
+    cpp :: Command.new(&cpp_binary).arg(&shared).output().unwrap()
+    assert(cpp.status.success(), "foreign C++ host failed at runtime:\n{compiler_text(&cpp)}")
+    expected_cpp :: expected_cpp_output()
+    assert_eq(String.from_utf8_lossy(&cpp.stdout), expected_cpp.as_str())
+    panic_scratch :: Scratch.new("library-panic")
+    copy_tree(&fixture, &panic_scratch.path)
+    fs.write(panic_scratch.path.join("library.jet"), "#Export(c) pub fn panic_now(value: Int) -> Int { panic(\"foreign panic {value}\")\nreturn 0 }\n").unwrap()
+    panic_build :: run_jet(&panic_scratch.path, ["build", "--lib", "library.jet"])
+    assert(panic_build.status.success(), "panic Library build failed:\n{compiler_text(&panic_build)}")
+    panic_shared :: if core.sys.target.selected_os() == "macos" { panic_scratch.path.join(".jet/build/libloadable.dylib") } else if core.sys.target.selected_os() == "windows" { panic_scratch.path.join(".jet/build/libloadable.dll") } else { panic_scratch.path.join(".jet/build/libloadable.so") }
+    assert(panic_shared.is_file(), "panic Library build missed {panic_shared.display()}")
+    panic_output :: Command.new(&cpp_binary).args(["--panic", panic_shared.to_str().unwrap()]).output().unwrap()
+    assert(!panic_output.status.success(), "panic crossed the C ABI as a successful C++ call")
+    panic_text :: compiler_text(&panic_output)
+    assert(panic_text.contains("Stop [E3001]: `panic: foreign panic 0`"), "panic did not report a runtime panic:\n{panic_text}")
+    jit :: run_jet(&scratch.path, ["run", "host.jet"])
+    assert(jit.status.success(), "default jet run failed:\n{compiler_text(&jit)}")
+    assert_eq(String.from_utf8_lossy(&jit.stdout), expected.as_str())
+    aot :: run_jet(&scratch.path, ["run", "--release", "host.jet"])
+    assert(aot.status.success(), "AOT jet run failed:\n{compiler_text(&aot)}")
+    assert_eq(String.from_utf8_lossy(&aot.stdout), expected.as_str())
+    jetlib :: target.join("loadable.jetlib")
+    original :: fs.read(&jetlib).unwrap()
+    altered := jet.JetLibArtifact.decode(&original).unwrap()
+    altered.stamp.compiler_version = "0.0.1-foreign"
+    altered.stamp.declared_effects.insert("Net")
+    altered.payload = b"not a shared object".to_vec()
+    fs.write(&jetlib, altered.encode()).unwrap()
+    mismatched :: run_jet(&scratch.path, ["run", "host.jet"])
+    assert(!mismatched.status.success(), "mismatched .jetlib unexpectedly loaded")
+    mismatched_text :: compiler_text(&mismatched)
+    assert(mismatched_text.contains("E1338"), "missing identity refusal:\n{mismatched_text}")
+    assert(!mismatched_text.contains("cannot map library payload"), "identity refusal happened after mapping:\n{mismatched_text}")
+    altered.stamp.compiler_version = jet.Manifest.COMPILER_VERSION.to_string()
+    fs.write(&jetlib, altered.encode()).unwrap()
+    over_granted :: run_jet(&scratch.path, ["run", "host.jet"])
+    assert(!over_granted.status.success(), "ungranted .jetlib unexpectedly loaded")
+    over_granted_text :: compiler_text(&over_granted)
+    assert(over_granted_text.contains("E1339"), "missing effect refusal:\n{over_granted_text}")
+    assert(!over_granted_text.contains("cannot map library payload"), "effect refusal happened after mapping:\n{over_granted_text}")
+    malformed := jet.JetLibArtifact.decode(&original).unwrap()
+    malformed.payload = b"not a shared object".to_vec()
+    fs.write(&jetlib, malformed.encode()).unwrap()
+    before_staging :: all_staged_loader_files()
+    (loader_pid, invalid_payload) :: run_jet_with_pid(&scratch.path, ["run", "host.jet"])
+    assert(!invalid_payload.status.success())
+    invalid_payload_text :: compiler_text(&invalid_payload)
+    assert(invalid_payload_text.contains("cannot map library payload"), "missing native mapping diagnostic:\n{invalid_payload_text}")
+    assert_eq(staged_loader_files(loader_pid), before_staging.into_iter().filter(fn(name) -> name.starts_with("jet-mod-{loader_pid}-")).collect(), "failed native mapping left a staged payload behind")
+    malformed = jet.JetLibArtifact.decode(&original).unwrap()
+    malformed.stamp.target = "foreign-target"
+    fs.write(&jetlib, malformed.encode()).unwrap()
+    wrong_target :: run_jet(&scratch.path, ["run", "host.jet"])
+    assert(!wrong_target.status.success())
+    wrong_target_text :: compiler_text(&wrong_target)
+    assert(wrong_target_text.contains("E1341") && wrong_target_text.contains("targets"), "missing target diagnostic:\n{wrong_target_text}")
+    assert(!wrong_target_text.contains("cannot map library payload"), "target refusal happened after mapping:\n{wrong_target_text}")
+}
+// Rust: tests/library_outputs.rs:539
+#Test("guest_embedding_contract_covers_lifecycle_threads_reentry_and_panic") {
+    if core.sys.target.selected_family() != "unix" { return }
+    assert(have_rustc(), "guest embedding proof requires rustc")
+    cxx :: cxx().expect("guest embedding proof requires a C++ compiler")
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("Examples/interop/guest_library")
+    scratch :: Scratch.new("guest-embedding-contract")
+    copy_tree(&fixture, &scratch.path)
+    build :: run_jet(&scratch.path, ["build", "--lib", "library.jet"])
+    assert(build.status.success(), "guest embedding Library build failed:\n{compiler_text(&build)}")
+    target :: scratch.path.join(".jet/build")
+    shared :: if core.sys.target.selected_os() == "macos" { target.join("libembedding.dylib") } else if core.sys.target.selected_os() == "windows" { target.join("libembedding.dll") } else { target.join("libembedding.so") }
+    assert(shared.is_file(), "guest embedding build missed {shared.display()}")
+    header :: target.join("embedding.h")
+    assert(header.is_file(), "guest embedding build missed {header.display()}")
+    header_text :: fs.read_to_string(&header).unwrap()
+    assert(header_text.contains("int64_t on_tick(int64_t p0);"))
+    assert(header_text.contains("int64_t reenter(int64_t p0);"))
+    assert(header_text.contains("void jet_text_free(JetText value);"))
+    cpp_source :: scratch.path.join("foreign.cpp")
+    cpp_binary :: scratch.path.join("foreign")
+    cpp_build := Command.new(cxx)
+    cpp_build.args(["-std=c++17", "-I"]).arg(&target).arg(&cpp_source).arg("-o").arg(&cpp_binary).arg("-pthread")
+    if core.sys.target.selected_os() == "linux" { cpp_build.args(["-ldl", "-rdynamic"]) } else if core.sys.target.selected_os() == "macos" { cpp_build.args(["-ldl", "-Wl,-export_dynamic"]) }
+    cpp_result :: cpp_build.output().unwrap()
+    assert(cpp_result.status.success(), "guest embedding host failed to compile:\n{compiler_text(&cpp_result)}")
+    // Host rows cover init/shutdown, threads/TLS, reentry, signals, allocation ownership,
+    // panic containment and repeated load/unload. Double-free/post-dlclose are UB-by-C.
+    host :: Command.new(&cpp_binary).arg(&shared).output().unwrap()
+    assert(host.status.success(), "guest embedding host failed at runtime:\n{compiler_text(&host)}")
+    assert_eq(String.from_utf8_lossy(&host.stdout), "embedding-ok\n")
+    assert(String.from_utf8_lossy(&host.stderr).contains("Stop [E3001]"), "panic child did not emit the E3001 report:\n{compiler_text(&host)}")
+}
+// Rust: tests/library_outputs.rs:616
+#Test("component_build_load_and_foreign_call_are_one_surface") {
+    if core.sys.target.selected_family() != "unix" { return }
+    if !have_rustc() { eprintln("note: skipping Component end-to-end proof (need rustc)"); return }
+    if Command.new("wasm-tools").arg("--version").output().is_err() { eprintln("note: skipping Component end-to-end proof (need wasm-tools)"); return }
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/packages/library_loadable")
+    scratch :: Scratch.new("component-loadable")
+    copy_tree(&fixture, &scratch.path)
+    package :: fs.read_to_string(scratch.path.join("package.jet")).unwrap()
+    assert(package.contains("outputs: {"))
+    fs.write(scratch.path.join("package.jet"), package.replacen("outputs: {", "authority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\noutputs: {", 1)).unwrap()
+    build :: run_jet(&scratch.path, ["build", "--target=sandbox", "library.jet"])
+    assert(build.status.success(), "Component build failed:\n{compiler_text(&build)}")
+    component :: scratch.path.join(".jet/build/library.wasm")
+    assert(component.is_file(), "Component build missed {component.display()}")
+    host :: run_jet(&scratch.path, ["run", "component_host.jet"])
+    assert(host.status.success(), "sandboxed Component host failed:\n{compiler_text(&host)}")
+    assert_eq(String.from_utf8_lossy(&host.stdout), "42|true|hello, Ada!\n")
+}
+// Rust: tests/library_outputs.rs:672
+#Test("library_rejects_colliding_c_symbols_before_codegen") {
+    if core.sys.target.selected_family() != "unix" { return }
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/packages/library_loadable")
+    scratch :: Scratch.new("library-symbol-collision")
+    copy_tree(&fixture, &scratch.path)
+    fs.write(scratch.path.join("library.jet"), "#Export(c) pub fn café() -> Int { 1 }\n#Export(c) pub fn cafö() -> Int { 2 }\n#Export(c) pub fn jet_text_free() -> String { \"bad\" }\n").unwrap()
+    source :: scratch.path.join("library.jet").to_string_lossy()
+    errors :: jet.compile_library(&source, None).expect_err("colliding C symbols accepted")
+    assert(errors.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("same C symbol")), "missing C symbol collision diagnostic: {errors:?}")
+    assert(errors.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("generated C symbol")), "missing generated allocator symbol diagnostic: {errors:?}")
+}
+// Rust: tests/library_outputs.rs:701
+#Test("guest_import_rejects_invalid_signature_and_duplicate_native_symbol") {
+    if core.sys.target.selected_family() != "unix" { return }
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/guest_import_library")
+    scratch :: Scratch.new("guest-import-negative")
+    copy_tree(&fixture, &scratch.path)
+    source :: scratch.path.join("library.jet")
+    fs.write(&source, "#Import(c) fn bad(values: [Int]) -> Int = \"guest_bad\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n").unwrap()
+    source_text :: source.to_string_lossy()
+    invalid :: jet.compile_library(&source_text, None).expect_err("non-C-safe guest import signature accepted")
+    assert(invalid.iter().any(fn(error) -> error.code == "E3203"), "missing invalid guest import signature diagnostic: {invalid:?}")
+    fs.write(&source, "#Import(c) fn mutate(value: &Int) -> Int = \"guest_mutate\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n").unwrap()
+    capability :: jet.compile_library(&source_text, None).expect_err("capability guest import accepted by the hidden bridge")
+    assert(capability.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("hidden C bridge")), "missing capability bridge diagnostic: {capability:?}")
+    fs.write(&source, "#Layout(c)\nstruct Pair {\n    value: Int\n}\n#Import(c) fn use_pair(value: Pair) -> Int = \"guest_pair\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n").unwrap()
+    layout :: jet.compile_library(&source_text, None).expect_err("C-layout guest import accepted by the hidden bridge")
+    assert(layout.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("hidden C bridge")), "missing C-layout bridge diagnostic: {layout:?}")
+    fs.write(&source, "#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n").unwrap()
+    duplicate :: jet.compile_library(&source_text, None).expect_err("duplicate guest native symbol accepted")
+    assert(duplicate.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("Guest imports") && error.what.contains("same C symbol")), "missing duplicate guest import symbol diagnostic: {duplicate:?}")
+    fs.write(&source, "#Import module c.fake {\n    fn module_host(value: Int) -> Int = \"call_host\"\n}\n#Import(c) fn first(value: Int) -> Int = \"call_host\"\n#Export(c) pub fn call_host(value: Int) -> Int { value }\n").unwrap()
+    c_module :: jet.compile_library(&source_text, None).expect_err("C-module and guest import symbol collision accepted")
+    assert(c_module.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("C module imports") && error.what.contains("same C symbol")), "missing C-module symbol collision diagnostic: {c_module:?}")
+}
+// Rust: tests/library_outputs.rs:784
+#Test("library_output_selection_is_named_and_fail_closed") {
+    if core.sys.target.selected_family() != "unix" { return }
+    scratch :: Scratch.new("library-output-selection")
+    fs.write(scratch.path.join("package.jet"), "name: \"library-selection\"\nversion: \"0.1.0\"\noutputs: {\n    alpha: .Library{ name: \"alpha\", entry: run, native: true }\n    beta: .Library{ name: \"beta\", entry: run, native: true }\n    app: .Executable{ name: \"app\", entry: run }\n}\n").unwrap()
+    fs.write(scratch.path.join("library.jet"), "#Export(c) pub fn on_tick(dt: Int) -> Int { dt + 1 }\nfn run() {}\n").unwrap()
+    source :: scratch.path.join("library.jet").to_string_lossy()
+    ambiguous :: jet.compile_library(&source, None).expect_err("ambiguous Library accepted")
+    assert(ambiguous.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("Multiple Library outputs") && error.fix.contains("alpha, beta")), "missing ambiguous Library diagnostic: {ambiguous:?}")
+    selected :: jet.compile_library(&source, Some("beta")).expect("named Library output should compile")
+    selected_config :: selected.library_config.unwrap()
+    assert_eq(selected_config.name, "beta")
+    assert_eq(selected_config.entry.as_deref(), Some("run"))
+    missing :: jet.compile_library(&source, Some("missing")).expect_err("missing Library output accepted")
+    assert(missing.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("Library output `missing`")), "missing named Library diagnostic: {missing:?}")
+    non_library :: jet.compile_library(&source, Some("app")).expect_err("non-Library output accepted")
+    assert(non_library.iter().any(fn(error) -> error.code == "E1341" && error.what.contains("Output `app` is not a Library")))
+}
+// Rust: tests/library_outputs.rs:835
+#Test("locked_library_compile_requires_the_lock_stamp") {
+    if core.sys.target.selected_family() != "unix" { return }
+    scratch :: Scratch.new("library-locked")
+    fs.write(scratch.path.join("package.jet"), "name: \"locked-library\"\nversion: \"0.1.0\"\noutputs: { core: .Library{ name: \"core\", native: true } }\n").unwrap()
+    fs.write(scratch.path.join("library.jet"), "#Export(c) pub fn on_tick(dt: Int) -> Int { dt + 1 }\n").unwrap()
+    source :: scratch.path.join("library.jet").to_string_lossy()
+    settings: [String: String] = [:]
+    errors :: jet.compile_library_with_gates_and_settings(&source, None, jet.Policy.GateSet.default(), true, &settings).expect_err("locked Library compile accepted a missing lock stamp")
+    assert(errors.iter().any(fn(error) -> error.code == "E3512"))
+}
+// Rust: tests/library_outputs.rs:909
+#Test("locked_named_library_build_selects_the_requested_output") {
+    if core.sys.target.selected_family() != "unix" { return }
+    assert(have_rustc(), "locked Library build proof requires rustc")
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("tests/fixtures/foreign_build_hosts/cmake")
+    scratch :: library_build_scratch("library-locked-build")
+    copy_tree(&fixture, &scratch.path)
+    jet_dir :: scratch.path.join(".jet")
+    fs.create_dir_all(&jet_dir).unwrap()
+    _ :: fs.copy(fixture.join("lock.fixture"), jet_dir.join("lock")).unwrap()
+    build :: run_jet(&scratch.path, ["build", "--lib", "--locked", "--output", "core", "library.jet"])
+    assert(build.status.success(), "locked named Library build failed:\n{compiler_text(&build)}")
+    assert(scratch.path.join(".jet/build/libloadable.a").is_file())
+    assert(scratch.path.join(".jet/build/loadable.h").is_file())
+    assert(scratch.path.join(".jet/build/loadable.jetlib").is_file())
+}
+// Rust: tests/library_outputs.rs:933
+#Test("default_library_rejects_cross_target_before_publication") {
+    if core.sys.target.selected_family() != "unix" { return }
+    assert(have_rustc(), "Library target diagnostic proof requires rustc")
+    fixture :: OSPath.from(env.var_os("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/packages/library_loadable")
+    scratch :: Scratch.new("library-target")
+    copy_tree(&fixture, &scratch.path)
+    target :: "--target={env.var("JET_BUILD_TARGET").unwrap()}"
+    rejected :: run_jet(&scratch.path, ["build", target.as_str(), "library.jet"])
+    assert(!rejected.status.success(), "cross-target Library build unexpectedly succeeded:\n{compiler_text(&rejected)}")
+    text :: compiler_text(&rejected)
+    assert(text.contains("E1341"), "missing unsupported-target diagnostic:\n{text}")
+    shared :: if core.sys.target.selected_os() == "macos" { scratch.path.join(".jet/build/libloadable.dylib") } else if core.sys.target.selected_os() == "windows" { scratch.path.join(".jet/build/libloadable.dll") } else { scratch.path.join(".jet/build/libloadable.so") }
+    assert(!scratch.path.join(".jet/build/libloadable.a").exists() && !scratch.path.join(".jet/build/loadable.h").exists() && !scratch.path.join(".jet/build/loadable.jetlib").exists() && !shared.exists(), "unsupported Library target published artifacts")
+}

@@ -1,0 +1,563 @@
+use std.[fs, process]
+use std.process.Command
+use jet.[compile, compile_with_path, render_diagnostics, check_with_path]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.Determinism.[run_fresh_draw_program, jet, repo_root, isolated_cwd, ScaffoldCleanup, dir_join_unique]
+// GATE #4494: real subprocess/filesystem/clock/entropy providers.
+// Rust: tests/determinism.rs:25
+#Test("pure_fn_injected_clock_ok") {
+    src :: """
+fn at(clock: Clock) -[]> Int { return clock.now() }
+fn run() {
+    c :: Clock.new(500)
+    print("{at(c)}")
+}
+use core.time as time
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "injected Clock should compile: {res.err():?}")
+}
+// Rust: tests/determinism.rs:46
+#Test("pure_fn_injected_rng_ok") {
+    src :: """
+use core.math.random as random
+fn draw(rng: &RNG) -[]> Int { return rng.int(1, 6) }
+fn run() {
+    r := random.rng(7)
+    print("{draw(&r)}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "injected RNG should compile: {res.err():?}")
+}
+// Rust: tests/determinism.rs:64
+#Test("pure_fn_constructs_caps_ok") {
+    src :: """
+use core.time as time
+use core.math.random as random
+fn seeded() -[]> Int {
+    c :: Clock.new(10)
+    r := random.rng(1)
+    return c.now() + r.int(0, 0)
+}
+fn run() { print("{seeded()}") }
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "cap constructors should be pure: {res.err():?}")
+}
+// Rust: tests/determinism.rs:84
+#Test("system_clock_is_monotonic_and_effectful") {
+    pure :: """
+fn bad() -[]> Int {
+    clock := Clock.system()
+    return clock.now()
+}
+fn run() { print(bad()) }
+"""
+    diags :: compile(pure).expect_err("Clock.system must carry Time")
+    assert(diags.iter().any((diag) -> diag.code == "E3403"))
+    launder :: """
+fn read(clock: Clock) -[]> Int { return clock.now() }
+fn make_system_clock() -> Clock { return Clock.system() }
+fn run() {
+    direct := Clock.system()
+    print(read(direct))
+    hidden := make_system_clock()
+    print(read(hidden))
+}
+"""
+    diags :: compile(launder).expect_err("a system Clock must not enter pure code")
+    assert(diags.iter().filter((diag) -> diag.code == "E3403").count() >= 2, "both direct and return-type laundering must fail: {diags:?}")
+    if !common.have_rustc() { return }
+    runtime :: """
+use core.time as time
+
+struct ClockBox { clock: Clock }
+fn run() {
+    clock := Clock.system()
+    before := clock.now()
+    fork := ~clock
+    fork_before := fork.now()
+    time.sleep(2ms)
+    after := clock.now()
+    print(after > before)
+    print(fork.now() > fork_before)
+    reported := &clock.tick(-1000000)
+    print(clock.now() >= after)
+    print(clock.now() >= reported)
+    manual := Clock.new(1000)
+    copied := ~manual
+    &copied.tick(5000)
+    print(manual.now())
+    print(copied.now())
+    boxed := ClockBox{ clock: Clock.new(7) }
+    copied_box := ~boxed
+    &copied_box.clock.tick(3)
+    print(boxed.clock.now())
+    print(copied_box.clock.now())
+}
+"""
+    dir :: common.unique_tmp("jet_system_clock_tiers")
+    fs.create_dir_all(&dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"clock_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Time, Time.Wait] } }\n").unwrap()
+    path :: dir.join("main.jet")
+    fs.write(&path, runtime).unwrap()
+    path :: path.to_str().unwrap()
+    // Retired interpreter mode becomes the real native O0 tier; O1/O2 remain.
+    for args in [["run", "--debug", path], ["run", path], ["run", "--release", path]] {
+        output :: common.jet_cli_output_with_stdin(args, "")
+        assert(output.status.success(), "{args:?}: {String.from_utf8_lossy(&output.stderr)}")
+        assert_eq(output.stdout, "true\ntrue\ntrue\ntrue\n1000\n6000\n7\n10\n".as_bytes(), "{args:?}")
+    }
+    fs.remove_dir_all(dir).unwrap()
+}
+// Rust: tests/determinism.rs:177
+#Test("pure_code_rejects_clock_provenance_laundered_through_a_struct") {
+    read :: """
+struct Holder { clock: Clock }
+fn read(holder: Holder) -[]> Int { return holder.clock.now() }
+fn run() {
+    holder := Holder{ clock: Clock.system() }
+    print(read(holder))
+}
+"""
+    diagnostics :: compile(read).expect_err("aggregate clock observation must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+    compare :: """
+struct Holder { clock: Clock }
+fn same(holder: Holder) -[]> Bool { return holder.clock == holder.clock }
+fn run() {
+    holder := Holder{ clock: Clock.system() }
+    print(same(holder))
+}
+"""
+    diagnostics :: compile(compare).expect_err("aggregate clock comparison must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+    copy :: """
+struct Holder { clock: Clock }
+fn copy_clock(holder: Holder) -[]> Clock { return ~holder.clock }
+fn run() {
+    holder := Holder{ clock: Clock.system() }
+    copied := copy_clock(holder)
+    print(copied.now())
+}
+"""
+    diagnostics :: compile(copy).expect_err("aggregate clock copy must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+    copy_aggregate :: """
+struct Holder { clock: Clock }
+fn copy_holder(holder: Holder) -[]> Holder { return ~holder }
+fn run() {
+    holder := Holder{ clock: Clock.system() }
+    copied := copy_holder(holder)
+    print(copied.clock.now())
+}
+"""
+    diagnostics :: compile(copy_aggregate).expect_err("whole aggregate clock copy must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+    enum_aggregate :: """
+enum BoxedClock { Held(Clock) }
+fn copy_box(value: BoxedClock) -[]> BoxedClock { return ~value }
+fn show_box(value: BoxedClock) -[]> String { return "{value:Debug}" }
+fn run() {}
+"""
+    diagnostics :: compile(enum_aggregate).expect_err("enum-contained clock observation must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+    format :: """
+struct Holder { clock: Clock }
+fn show(holder: Holder) -[]> String { return "{holder.clock} {holder.clock:Debug}" }
+fn run() {
+    holder := Holder{ clock: Clock.system() }
+    print(show(holder))
+}
+"""
+    diagnostics :: compile(format).expect_err("aggregate clock formatting must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+    format_aggregate :: """
+struct Holder { clock: Clock }
+fn show(holder: Holder) -[]> String { return "{holder:Debug}" }
+fn run() {
+    holder := Holder{ clock: Clock.system() }
+    print(show(holder))
+}
+"""
+    diagnostics :: compile(format_aggregate).expect_err("whole aggregate clock formatting must retain Time")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+}
+// Rust: tests/determinism.rs:327
+#Test("pure_code_rejects_clock_observation_through_an_imported_nominal_type") {
+    dir :: common.unique_tmp("jet_imported_clock_aggregate")
+    fs.create_dir_all(&dir).unwrap()
+    fs.write(dir.join("clock_box.jet"), "pub enum BoxedClock {\n    Held(Clock)\n}\n").unwrap()
+    main :: dir.join("main.jet")
+    fs.write(&main, "use \"clock_box\"\nfn copy_box(value: clock_box.BoxedClock) -[]> clock_box.BoxedClock {\n    return ~value\n}\nfn show_box(value: clock_box.BoxedClock) -[]> String {\n    return \"{value:Debug}\"\n}\nfn run() {}\n").unwrap()
+    diagnostics :: check_with_path(main.to_str().unwrap())
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "{diagnostics:#?}")
+}
+// Rust: tests/determinism.rs:354
+#Test("pure_fn_ambient_time_still_e3403") {
+    src :: """
+use core.time as time
+fn bad() -[]> Int { return time.now() }
+fn run() { print("{bad()}") }
+"""
+    res :: compile(src)
+    assert(res.is_err(), "ambient time.now() in #Pure fn must fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any((diag) -> diag.code == "E3403"), "expected E3403, got: {diags.iter().map((diag) -> diag.code.as_str()).collect::<[String]>():?}")
+}
+// Rust: tests/determinism.rs:374
+#Test("pure_fn_ambient_random_still_e3403") {
+    src :: """
+use core.math.random as random
+fn bad() -[]> Int { return random.int(1, 6) }
+fn run() { print("{bad()}") }
+"""
+    res :: compile(src)
+    assert(res.is_err(), "ambient random.int() in #Pure fn must fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any((diag) -> diag.code == "E3403"), "expected E3403, got: {diags.iter().map((diag) -> diag.code.as_str()).collect::<[String]>():?}")
+}
+// Rust: tests/determinism.rs:396
+#Test("nondeterministic_time_classification_is_shared_by_purity_and_folding") {
+    pure_src :: """
+use core.time as date
+fn pure_today() -[]> String { return date.today().to_string() }
+fn run() { print(pure_today()) }
+"""
+    purity_diagnostics :: compile(pure_src).expect_err("ambient date.today must be rejected in pure code")
+    assert(purity_diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "sema purity must report E3403, got: {purity_diagnostics:#?}")
+    fold_src :: """
+use core.time as date
+fn run() { today :: prep { date.today() } }
+"""
+    fold_diagnostics :: compile(fold_src).expect_err("ambient date.today must be rejected at comptime")
+    assert(fold_diagnostics.iter().any((diagnostic) -> diagnostic.code == "E3403"), "explicit comptime folding must report E3403, got: {fold_diagnostics:#?}")
+    assert(fold_diagnostics.iter().all((diagnostic) -> diagnostic.code != "E0956"), "ambient date.today must not fall back to generic comptime E0956: {fold_diagnostics:#?}")
+}
+// Rust: tests/determinism.rs:444
+#Test("assume_deterministic_suppresses_e3403") {
+    src :: """
+use core.time as time
+fn risky() -[]> Int {
+    t := 0
+    #Nondeterministic("ambient clock is explicit test input") { t = time.now() }
+    return t
+}
+fn run() { print("{risky()}") }
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "#Nondeterministic should suppress E3403: {res.err():?}")
+}
+// Rust: tests/determinism.rs:466
+#Test("assume_deterministic_suppresses_e3401") {
+    src :: """
+fn risky() -[]> Int {
+    #Nondeterministic("ambient print is deliberate") { print("side effect") }
+    return 42
+}
+fn run() { print("{risky()}") }
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "#Nondeterministic should suppress E3401: {res.err():?}")
+}
+// Rust: tests/determinism.rs:486
+#Test("assume_deterministic_is_scoped") {
+    src :: """
+use core.time as time
+fn risky() -[]> Int {
+    #Nondeterministic("ambient clock is deliberate") { a := time.now() }
+    return time.now()
+}
+fn run() { print("{risky()}") }
+"""
+    res :: compile(src)
+    assert(res.is_err(), "ambient call outside the block must still fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any((diag) -> diag.code == "E3403"), "expected E3403 for the call outside the block, got: {diags.iter().map((diag) -> diag.code.as_str()).collect::<[String]>():?}")
+}
+// Rust: tests/determinism.rs:512
+#Test("retired_determinism_word_is_ordinary_identifier") {
+    src :: """
+fn run() {
+    old_escape_name :: 5
+    print("{old_escape_name}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "ordinary identifier should compile: {res.err():?}")
+}
+// Rust: tests/determinism.rs:536
+#Test("pure_fn_widened_rng_ok") {
+    src :: """
+use core.math.random as random
+fn draws(rng: &RNG) -[]> Bool {
+    flip := rng.bool()
+    xs := [1, 2, 3]
+    chosen := rng.pick(xs) ?? 0
+    deck := [9, 8, 7]
+    rng.shuffle(&deck)
+    return flip || chosen == 0
+}
+fn run() {
+    r := random.rng(7)
+    print("{draws(&r)}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "widened RNG draws should compile: {res.err():?}")
+}
+// Rust: tests/determinism.rs:562
+#Test("rng_pick_returns_element_option") {
+    src :: """
+use core.math.random as random
+fn choose(rng: &RNG) -[]> String {
+    cards := ["A", "K", "Q"]
+    return rng.pick(cards) ?? "none"
+}
+fn run() {
+    r := random.rng(1)
+    print("{choose(&r)}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "rng.pick element typing should compile: {res.err():?}")
+}
+// Rust: tests/determinism.rs:584
+#Test("rng_bool_needs_mut_receiver") {
+    src :: """
+use core.math.random as random
+fn run() {
+    r :: random.rng(3)
+    b := r.bool()
+    print("{b}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_err(), "rng.bool() on a non-`&` rng must fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any((diag) -> diag.code == "E0202"), "expected E0202, got: {diags.iter().map((diag) -> diag.code.as_str()).collect::<[String]>():?}")
+}
+// Rust: tests/determinism.rs:605
+#Test("rng_shuffle_needs_mut_list_arg") {
+    src :: """
+use core.math.random as random
+fn run() {
+    r := random.rng(3)
+    deck := [1, 2, 3]
+    r.shuffle(deck)
+    print("{deck}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_err(), "rng.shuffle without `&` on the list must fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any((diag) -> diag.code == "E0202"), "expected E0202, got: {diags.iter().map((diag) -> diag.code.as_str()).collect::<[String]>():?}")
+}
+// Rust: tests/determinism.rs:630
+#Test("pure_fn_widened_clock_ok") {
+    src :: """
+use core.time as time
+fn drive_clock(clock: &Clock) -[]> Int {
+    base := &clock.advance(5000)
+    span := Duration.seconds(1) ?? panic("duration")
+    return base + clock.wait(span)
+}
+fn run() {
+    c := Clock.new(0)
+    print("{drive_clock(&c)}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "widened Clock surface should compile: {res.err():?}")
+}
+// Rust: tests/determinism.rs:653
+#Test("clock_advance_needs_mut_receiver") {
+    src :: """
+use core.time as time
+fn run() {
+    c :: Clock.new(0)
+    n := &c.advance(100)
+    print("{n}")
+}
+"""
+    res :: compile(src)
+    assert(res.is_err(), "clock.advance() on a non-`&` clock must fail")
+    diags :: res.unwrap_err()
+    assert(diags.iter().any((diag) -> diag.code == "E0202"), "expected E0202, got: {diags.iter().map((diag) -> diag.code.as_str()).collect::<[String]>():?}")
+}
+// Rust: tests/determinism.rs:674
+#Test("pure_fn_duration_ok") {
+    src :: """
+use core.time as time
+fn span_ms() -[]> Int {
+    d := Duration.seconds(3) ?? panic("duration")
+    return d.in(.Milliseconds) ?? panic("duration read")
+}
+fn run() { print("{span_ms()}") }
+"""
+    res :: compile(src)
+    assert(res.is_ok(), "Duration value ops should be pure: {res.err():?}")
+}
+// Rust: tests/determinism.rs:711
+#Test("ambient_draws_are_never_folded_into_the_build") {
+    root :: common.unique_tmp("jet_fresh_draws")
+    uuid_dir :: root.join("uuid")
+    seeded_dir :: root.join("seeded")
+    for (dir, name) in [(&uuid_dir, "fresh_uuid"), (&seeded_dir, "fresh_seeded")] {
+        fs.create_dir_all(dir).unwrap()
+        fs.write(dir.join("package.jet"), "name: \"{name}\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Rand] }} }}\n").unwrap()
+    }
+    fs.write(uuid_dir.join("uuid.jet"), """
+use core.crypto.uuid as uuid
+fn run() -[Rand, IO]> {
+    id :: uuid.v4() ?? panic("uuid")
+    print(id)
+}
+""").unwrap()
+    fs.write(seeded_dir.join("seeded.jet"), """
+use core.math.random as random
+fn run() -[Rand, IO]> {
+    random.seed(42)
+    first :: random.int(0, 1000000)
+    second :: random.int(0, 1000000)
+    print("{first != second}")
+}
+""").unwrap()
+    first :: run_fresh_draw_program(&uuid_dir, &["run", "--debug", "uuid.jet"])
+    second :: run_fresh_draw_program(&uuid_dir, &["run", "--debug", "uuid.jet"])
+    assert_ne(first.trim(), second.trim(), "uuid.v4 repeated across runs")
+    rust :: run_fresh_draw_program(&uuid_dir, &["emit", "--rust", "uuid.jet"])
+    // Generated Rust is a peer comparator, never a production callback.
+    for id in [first.trim(), second.trim()] { assert(!rust.contains(id), "generated Rust contains the drawn UUID {id}") }
+    for tier in [["run", "seeded.jet"], ["run", "--debug", "seeded.jet"], ["run", "--release", "seeded.jet"]] {
+        assert_eq(run_fresh_draw_program(&seeded_dir, tier).trim(), "true", "two seeded draws repeated one folded value on {tier:?}")
+    }
+}
+// Rust: tests/devtools.rs:53
+#Test("devtools_reduce_shrinks_to_minimal_e0107_repro") {
+    dir :: isolated_cwd("reduce")
+    src_path :: dir.join("repro.jet")
+    fs.write(&src_path, "fn helper_a() {\n    print(\"a\")\n}\n\nfn helper_b() {\n    print(\"b\")\n}\n\nfn run() {\n    helper_a()\n    helper_b()\n    print(nonexistent_symbol_for_reduce_test)\n}\n").unwrap()
+    out :: Command.new(jet()).args(["self", "devtools", "reduce"]).arg(&src_path).args(["--code", "E0107"]).output().unwrap()
+    assert(out.status.success(), "reduce should succeed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    reduced_path :: dir.join("repro.reduced.jet")
+    reduced :: fs.read_to_string(&reduced_path).unwrap_or_else((_) -> panic("missing {reduced_path.display()}; reduce stdout was:\n{String.from_utf8_lossy(&out.stdout)}"))
+    assert(!reduced.contains("helper_a") && !reduced.contains("helper_b"), "reduce didn't shrink away the unused helpers:\n{reduced}")
+    assert(reduced.contains("nonexistent_symbol_for_reduce_test"), "reduce shrunk away the line that reproduces E0107:\n{reduced}")
+    assert(reduced.lines().count() <= 3, "expected reduce to shrink to <= 3 lines, got:\n{reduced}")
+    recheck :: Command.new(jet()).arg("check").arg(&reduced_path).output().unwrap()
+    stderr :: String.from_utf8_lossy(&recheck.stderr)
+    assert(stderr.contains("E0107"), "reduced case no longer reproduces E0107:\n{stderr}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/devtools.rs:123
+#Test("devtools_reduce_rejects_non_reproducing_input") {
+    dir :: isolated_cwd("reduce_clean")
+    src_path :: dir.join("clean.jet")
+    fs.write(&src_path, "fn run() {\n    print(\"hello\")\n}\n").unwrap()
+    out :: Command.new(jet()).args(["self", "devtools", "reduce"]).arg(&src_path).args(["--code", "E0107"]).output().unwrap()
+    assert(!out.status.success(), "reduce should refuse a file that never reproduces the oracle")
+    assert(String.from_utf8_lossy(&out.stderr).contains("doesn't reproduce"), "expected an oracle-mismatch message, got:\n{String.from_utf8_lossy(&out.stderr)}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/devtools.rs:150
+#Test("devtools_ice_report_bundles_source_rust_and_versions") {
+    dir :: isolated_cwd("ice_report")
+    src_path :: dir.join("prog.jet")
+    fs.write(&src_path, "fn run() {\n    print(\"hi\")\n}\n").unwrap()
+    out :: Command.new(jet()).current_dir(&dir).args(["self", "devtools", "ice-report"]).arg(&src_path).output().unwrap()
+    assert(out.status.success(), "ice-report should succeed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    bundle_line :: stdout.lines().find_map((line) -> line.strip_prefix("wrote ICE report bundle to ")).unwrap_or_else(() -> panic("no bundle-path line in stdout:\n{stdout}"))
+    bundle_dir :: dir.join(bundle_line)
+    assert(bundle_dir.is_dir(), "bundle dir `{bundle_dir.display()}` (from `{bundle_line}`) doesn't exist")
+    for name in ["source.jet", "generated.rs", "rustc.stderr", "versions.txt"] { assert(bundle_dir.join(name).is_file(), "ice-report bundle missing `{name}` in {bundle_dir.display()}") }
+    versions :: fs.read_to_string(bundle_dir.join("versions.txt")).unwrap()
+    assert(versions.contains("jet "), "versions.txt: {versions}")
+    source :: fs.read_to_string(bundle_dir.join("source.jet")).unwrap()
+    assert(source.contains("fn run()"))
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/devtools.rs:205
+#Test("devtools_new_example_scaffolds_a_passing_golden_pair") {
+    root :: repo_root()
+    topic :: "tooling"
+    name :: "devtools_test_scaffold_{process.id()}_208"
+    example_path :: root.join("Examples/features").join(topic).join("{name}.jet")
+    expected_path :: root.join("Examples/features/expected").join(topic).join("{name}.out")
+    _ :: fs.remove_file(&example_path)
+    _ :: fs.remove_file(&expected_path)
+    _cleanup :: ScaffoldCleanup{paths: [example_path.clone(), expected_path.clone()]}
+    out :: Command.new(jet()).current_dir(&root).args(["self", "devtools", "new-example"]).arg("{topic}/{name}").output().unwrap()
+    assert(out.status.success(), "new-example should succeed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(example_path.is_file(), "missing {example_path.display()}")
+    assert(expected_path.is_file(), "missing {expected_path.display()}")
+    src :: fs.read_to_string(&example_path).unwrap()
+    shown :: "Examples/features/{topic}/{name}.jet"
+    compiled :: compile_with_path(&src, &example_path.to_string_lossy()).unwrap_or_else((diags) -> panic("scaffolded example failed the front end:\n{render_diagnostics(&shown, &src, &diags)}"))
+    if common.have_rustc() {
+        // Real rustc peer comparator proves the generated scaffold and golden pair.
+        rs :: dir_join_unique("devtools_new_example")
+        fs.write(&rs, &compiled.rust).unwrap()
+        bin :: rs.with_extension("")
+        rustc :: Command.new("rustc").args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).output().unwrap()
+        assert(rustc.status.success(), "I2 violated by scaffold: rustc rejected generated code:\n{String.from_utf8_lossy(&rustc.stderr)}")
+        run :: Command.new(&bin).output().unwrap()
+        assert(run.status.success())
+        expected :: fs.read_to_string(&expected_path).unwrap()
+        assert_eq(String.from_utf8_lossy(&run.stdout), expected, "scaffold stdout must match its own .out fixture")
+        _ :: fs.remove_file(&rs)
+        _ :: fs.remove_file(&bin)
+    }
+    _ :: fs.remove_file(&example_path)
+    _ :: fs.remove_file(&expected_path)
+}
+// Rust: tests/devtools.rs:295
+#Test("devtools_new_ui_scaffolds_a_self_consistent_snapshot_pair") {
+    root :: repo_root()
+    name :: "devtools_test_scaffold_{process.id()}_297"
+    jet_path :: root.join("tests/ui").join("{name}.jet")
+    stderr_path :: root.join("tests/ui").join("{name}.stderr")
+    _ :: fs.remove_file(&jet_path)
+    _ :: fs.remove_file(&stderr_path)
+    _cleanup :: ScaffoldCleanup{paths: [jet_path.clone(), stderr_path.clone()]}
+    out :: Command.new(jet()).current_dir(&root).args(["self", "devtools", "new-ui"]).arg(&name).output().unwrap()
+    assert(out.status.success(), "new-ui should succeed:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(jet_path.is_file(), "missing {jet_path.display()}")
+    assert(stderr_path.is_file(), "missing {stderr_path.display()}")
+    src :: fs.read_to_string(&jet_path).unwrap()
+    shown_path :: "tests/ui/{name}.jet"
+    actual :: match compile_with_path(&src, &shown_path) {
+        Err(diags) -> render_diagnostics(&shown_path, &src, &diags),
+        Ok(_) -> "(no errors)\n"
+    }
+    expected :: fs.read_to_string(&stderr_path).unwrap()
+    assert_eq(actual, expected, "scaffolded pair isn't self-consistent")
+    assert(actual.contains("Error ["), "expected the scaffold to trigger a real diagnostic, got:\n{actual}")
+    _ :: fs.remove_file(&jet_path)
+    _ :: fs.remove_file(&stderr_path)
+}
+// Rust: tests/devtools.rs:343
+#Test("devtools_check_fixture_paths_runs_clean_on_this_repo") {
+    root :: repo_root()
+    out :: Command.new(jet()).current_dir(&root).args(["self", "devtools", "check-fixture-paths"]).output().unwrap()
+    assert(out.status.success(), "check-fixture-paths should run clean on this repo:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(String.from_utf8_lossy(&out.stdout).contains("all present"), "expected an all-present summary line")
+}
+// Rust: tests/devtools.rs:369
+#Test("devtools_bless_dry_run_lists_every_known_target") {
+    out :: Command.new(jet()).args(["self", "devtools", "bless", "--dry-run"]).output().unwrap()
+    assert(out.status.success())
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    for target in ["cli", "cross", "diagnostic_snapshots", "diagnostics_coverage", "release_gates"] {
+        assert(stdout.contains("cargo test --test {target}"), "bless --dry-run missing target `{target}`:\n{stdout}")
+        assert(stdout.contains("UPDATE_EXPECT=1"), "bless --dry-run should show the UPDATE_EXPECT wiring:\n{stdout}")
+    }
+}
+// Rust: tests/devtools.rs:398
+#Test("devtools_bless_rejects_unknown_target") {
+    out :: Command.new(jet()).args(["self", "devtools", "bless", "not_a_real_test_target", "--dry-run"]).output().unwrap()
+    assert(!out.status.success(), "bless should reject an unknown target name")
+    assert(String.from_utf8_lossy(&out.stderr).contains("unknown bless target"), "stderr: {String.from_utf8_lossy(&out.stderr)}")
+}

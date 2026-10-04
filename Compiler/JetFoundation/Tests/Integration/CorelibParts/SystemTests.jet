@@ -1,0 +1,634 @@
+use std.[fs, env, process]
+use std.process.Command
+use core.sys.target.selected_family
+use jet.[AST, Loader, Syntax, compile]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.CorelibParts.PlatformEmail.[build_and_run, jet_bin, write_executable, jet_string_path]
+// GATE #4494: actual native process/filesystem providers; #4483: selected target family.
+// Rust: tests/corelib_parts/system.rs:2
+#Test("text_unicode_audit_surface_runs") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping text unicode test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_text_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "text_unicode", """
+use core.text as text
+
+fn run() {
+    print(text.caseless_eq("Straße", "STRASSE"))
+    print(text.nfc("é") == "é")
+    print(text.nfkc("ﬃ"))
+    print(text.graphemes("é👍").len())
+    print(text.words("Hi, κόσμε 123.").len())
+    print(text.sentences("One. Two!").len())
+    print(text.display_width("表a"))
+    print(text.is_alphabetic("Ж"))
+    print(text.is_numeric("٣"))
+    print(text.pad_start("7", 3, "0"))
+    print(text.center("x", 3, "."))
+    print(text.starts_any("jetpack", ["jet", "go"]))
+    print(text.char_indices("éa")[1])
+}
+""", &[], None)
+    assert_eq(code, 0, "text unicode test failed: {stderr}")
+    assert_eq(stdout, "true\ntrue\nffi\n2\n3\n2\n3\ntrue\ntrue\n007\n.x.\ntrue\n2:a\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:45
+#Test("db_checked_sql_execute_uses_typed_sql") {
+    assert(common.have_rustc(), "DB query_one proof requires rustc")
+    dir :: env.temp_dir().join("jet_corelib_db_sql_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "db_checked_sql", """
+use core.db as db
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    created :: db.migrate(scoped, "person-v1", [
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
+    ]) ?? panic("migrate")
+    skipped :: db.migrate(scoped, "person-v1", [
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT, active INTEGER)"}
+    ]) ?? panic("migrate again")
+    id :: 7
+    name :: "Ada"
+    insert :: SQL{"INSERT INTO person (id, name, active) VALUES ({id}, {name}, 1)"}
+    _inserted :: scoped.execute(insert) ?? panic("insert")
+    failed :: db.transaction(scoped, "bad batch", [
+        SQL{"INSERT INTO person (id, name, active) VALUES (8, 'Grace', 1)"},
+        SQL{"INSERT INTO missing_table VALUES (1)"}
+    ]) ?? 0
+    found :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {id}"}) ?? panic("query")
+    missing_id :: 99
+    missing :: scoped.query_one(SQL{"SELECT id, name, active FROM person WHERE id = {missing_id}"})
+    counted :: scoped.query_one(SQL{"SELECT COUNT(*) AS n FROM person"}) ?? panic("count")
+    print(created)
+    print(skipped)
+    print(failed)
+    print(db.row_int(found, "id") ?? 0)
+    print(db.row_text(found, "name") ?? "bad")
+    print(db.row_int(found, "active") ?? 0)
+    print(db.row_int(counted, "n") ?? 0)
+    if missing == .None { print("absent") } else { panic("unexpected row") }
+    _closed :: scoped.close()
+}
+""", &[], None)
+    assert_eq(code, 0, "db checked sql test failed: {stderr}")
+    assert_eq(stdout, "1\n0\n0\n7\nAda\n1\n1\nabsent\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:98
+#Test("core_db_implements_driver_trait") {
+    assert(common.have_rustc(), "DB Driver query_one proof requires rustc")
+    dir :: env.temp_dir().join("jet_corelib_db_driver_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.db as db
+
+fn count_people<T: Driver>(&conn: T) -> Int DBError! {
+    row :: conn.query_one(SQL{"SELECT COUNT(*) AS n FROM person"})
+    found :: row ?? panic("missing")
+    missing :: conn.query_one(SQL{"SELECT id, name FROM person WHERE id = 99"})
+    if missing == .None { print("absent") } else { panic("unexpected row") }
+    return .Ok(db.row_int(found, "n") ?? 0)
+}
+
+fn run() {
+    conn := db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _ :: db.migrate(scoped, "person-v1", [
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
+    ]) ?? panic("create")
+    _ :: scoped.execute(
+        SQL{"INSERT INTO person (id, name) VALUES (1, 'Ada')"}
+    ) ?? panic("insert")
+    n :: count_people(&scoped) ?? panic("count")
+    print(n)
+    _closed :: scoped.close()
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "db_driver_trait", src, &[], None)
+    assert_eq(code, 0, "db Driver trait AOT failed: {stderr}")
+    assert_eq(stdout, "absent\n1\n")
+    // I9: default run must retain the same Driver meaning after JIT retirement.
+    jet :: jet_bin()
+    path :: dir.join("db_driver_trait_run.jet")
+    fs.write(&path, src).unwrap()
+    out :: Command.new(&jet).arg("run").arg(&path).output().expect("spawn jet run for Driver")
+    assert(out.status.success(), "db Driver trait run failed: {String.from_utf8_lossy(&out.stderr)}")
+    assert_eq(String.from_utf8_lossy(&out.stdout), "absent\n1\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:158
+#Test("core_db_query_one_first_row_matches_all_execution_tiers") {
+    assert(common.have_rustc(), "DB query_one parity proof requires rustc")
+    dir :: common.unique_tmp("jet_corelib_db_query_one_parity")
+    fs.create_dir_all(&dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"db-query-one-parity\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [DB, DB.Read, DB.Write, IO, Mem.Alloc] } }\n").unwrap()
+    src :: """
+use core.db as db
+
+fn run() {
+    conn :: db.open_memory()
+    policy :: db.policy("person", "true") ?? panic("policy")
+    scoped := conn.with_policy(policy, "owner")
+    _ :: db.migrate(scoped, "person-v1", [
+        SQL{"CREATE TABLE person (id INTEGER PRIMARY KEY, name TEXT)"}
+    ]) ?? panic("create")
+    _ :: scoped.execute(
+        SQL{"INSERT INTO person (id, name) VALUES (7, 'Ada')"}
+    ) ?? panic("insert")
+    present :: scoped.query_one(
+        SQL{"SELECT id, name FROM person WHERE id = 7"}
+    )
+    if present == {
+        .Val(_) -> { print("present") }
+        .None -> { panic("present row absent") }
+    }
+    absent :: scoped.query_one(
+        SQL{"SELECT id, name FROM person WHERE id = 99"}
+    )
+    if absent == .None { print("absent") } else { panic("absent row present") }
+    _closed :: scoped.close()
+}
+"""
+    (code, aot_stdout, stderr) :: build_and_run(&dir, "db_query_one_parity", src, &[], None)
+    assert_eq(code, 0, "DB query_one AOT failed: {stderr}")
+    expected :: "present\nabsent\n"
+    assert_eq(aot_stdout, expected)
+    // Rust interpreter/JIT representation guards retire; actual O0/O1/O2/Web behavior remains.
+    tir_support.assert_tiers_agree("db_query_one_parity", src, expected)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:240
+#Test("core_fmt_human_formatting_surface_runs") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping core.text.fmt runtime test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_fmt_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "human_format", """
+use core.text.fmt as fmt
+
+fn run() {
+    print(fmt.number(1204331))
+    print(fmt.decimal(Float{1234.5678}, 2))
+    print(fmt.grouped(Float{1234.5678}, 2))
+    print(fmt.decimal(1234, 2))
+    print(fmt.grouped(1234, 2))
+    print(fmt.percent(0.1234, 1))
+    print(fmt.bytes(1500000000))
+    print(fmt.duration(222000))
+    print(fmt.ordinal(21))
+    print(fmt.plural(2, "row", "rows"))
+    print(fmt.pad_left("7", 3, "0"))
+    print(fmt.pad_right("go", 4, "."))
+    print(fmt.pad_center("x", 3, "."))
+}
+""", &[], None)
+    assert_eq(code, 0, "core.text.fmt program failed: {stderr}")
+    assert_eq(stdout, "1,204,331\n1234.57\n1,234.57\n1234.00\n1,234.00\n12.3%\n1.5 GB\n3m 42s\n21st\n2 rows\n007\ngo..\n.x.\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:283
+#Test("core_log_structured_file_sink_runs") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping core.log file sink test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_log_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "log_file", """
+use core.log as log
+
+fn run() {
+    log.set_sink("jsonl", "service.log")
+    s :: log.span("request")
+    log.enter(s)
+    log.info_fields("served", [log.field("route", "/"), log.int("status", 200), log.redact("token")])
+    log.close(s)
+    print("done")
+}
+""", &[], None)
+    assert_eq(code, 0, "core.log file sink failed: {stderr}")
+    assert_eq(stdout, "done\n")
+    log :: fs.read_to_string(dir.join("service.log")).expect("service.log must be written")
+    assert(log.contains("\"body\":\"served\""), "log: {log}")
+    assert(log.contains("\"route\":\"/\""), "log: {log}")
+    assert(log.contains("\"status\":200"), "log: {log}")
+    assert(log.contains("\"token\":\"[redacted]\""), "log: {log}")
+    assert(log.contains("\"spans\":[\"request\"]"), "log: {log}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:322
+#Test("core_testing_helpers_run_against_files") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping core.testing helper test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_testing_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(dir.join("corpus")).unwrap()
+    fs.write(dir.join("fixture.txt"), "fixture").unwrap()
+    fs.write(dir.join("golden.txt"), "gold").unwrap()
+    fs.write(dir.join("corpus/a.txt"), "alpha").unwrap()
+    fs.write(dir.join("corpus/b.txt"), "beta").unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "testing_helpers", """
+use core.testing as testing
+
+module perf.testing {
+    budgets: [Budget{
+        name: "parse",
+        scope: .Test("parse"),
+        metric: .BenchTime(.P50),
+        provider: .BenchMeasurement("parse"),
+        comparison: .AbsoluteFrom("local/testing-helpers"),
+        limit: .AtMost(5ms),
+        enforcement: .Warn,
+    }]
+}
+
+fn run() {
+    print(testing.fixture("fixture.txt"))
+    print(testing.golden("golden.txt", "gold"))
+    print(testing.snap("case", "snap"))
+    print(testing.corpus("corpus").len())
+    print(testing.temp_dir("case").len() > 0)
+    clock :: testing.fake_clock(99)
+    rng := testing.fake_rng(5)
+    print(clock.now())
+    print(rng.int(1, 4) >= 1)
+}
+
+#Test("parse") { .measure {} }
+""", &[], None)
+    assert_eq(code, 0, "core.testing helpers failed: {stderr}")
+    assert_eq(stdout, "fixture\ntrue\ntrue\n2\ntrue\n99\ntrue\n")
+    assert_eq(fs.read_to_string(dir.join("__snapshots__/case.snap")).unwrap(), "snap")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:383
+#Test("deadline_context_exceed_reports_e3003") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping deadline runtime test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_deadline_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, _stdout, stderr) :: build_and_run(&dir, "deadline_exceeded", """
+use core.time as time
+
+fn run() {
+    #Context(deadline: time.now()) {
+        time.sleep(5ms)
+    }
+}
+
+""", &[], None)
+    assert_eq(code, 70, "deadline exceed should stop with runtime code 70")
+    assert(stderr.contains("Error [E3003]"), "deadline exceed should report E3003, got: {stderr:?}")
+    assert(stderr.contains("E3003"), "deadline exceed should carry code E3003, got: {stderr:?}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:422
+#Test("process_wait_observes_inherited_deadline") {
+    if selected_family() != "unix" { return } // GATE #4483
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping process deadline runtime test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_process_deadline_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    sleeper :: dir.join("sleep.sh")
+    write_executable(&sleeper, "#!/bin/sh\nsleep 2\n")
+    source :: "\nuse core.process as process\nuse core.time as time\n\nfn run() {{\n    child :: process.cmd([\"{jet_string_path(&sleeper)}\"]).spawn() ?? panic(\"spawn failed\")\n    #Context(deadline: time.now() + 20) {{\n        child.wait() ?? panic(\"wait failed\")\n    }}\n}}\n"
+    (code, _stdout, stderr) :: build_and_run(&dir, "process_wait_deadline", &source, &[], None)
+    assert_eq(code, 70, "process wait deadline should stop with runtime code 70")
+    assert(stderr.contains("Error [E3003]") && stderr.contains("process wait"), "process wait should report its compiler-owned deadline boundary: {stderr:?}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:461
+#Test("core_sys_expand_home_patterns_are_identical_across_tiers") {
+    inherited_home :: env.var("HOME").expect("HOME must be present in the test environment")
+    assert(!inherited_home.is_empty(), "HOME must be nonempty in the test environment")
+    tir_support.assert_tiers_agree("core_sys_expand_home_patterns", """
+use core.sys as sys
+
+fn run() {
+    home :: sys.get("HOME") ?? ""
+    print(home != "")
+    print(sys.expand("$HOME") == home)
+    print(sys.expand("${{HOME}}") == home)
+    print(sys.expand("%HOME%") == home)
+    print(sys.expand("λ<$HOME>🌍") == "λ<{home}>🌍")
+    print(sys.expand("$$HOME") == "$HOME")
+}
+""", "true\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/corelib_parts/system.rs:488
+#Test("core_sys_set_then_get_mutation_is_identical_across_tiers") {
+    key :: "JET_CORE_SYS_SET_GET_{process.id()}"
+    source :: "\nuse core.sys as sys\n\nfn run() {{\n    sys.set(\"{key}\", \"set-from-jet\")\n    value :: sys.get(\"{key}\") ?? \"\"\n    print(value == \"set-from-jet\")\n    print(value)\n}}\n"
+    tir_support.assert_tiers_agree("core_sys_set_then_get_mutation", &source, "true\nset-from-jet\n")
+}
+// SL9/R10: importing unused Core modules must not bloat the binary.
+// Rust: tests/corelib_parts/system.rs:512
+#Test("importing_all_core_modules_without_calls_stays_hello_world_sized") {
+    jet :: jet_bin()
+    have_rustc :: common.have_rustc()
+    if !have_rustc || !jet.exists() { eprintln("note: skipping core use size test (need jet + rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_size_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    fs.create_dir_all(dir.join(".jet/build")).unwrap()
+    fs.write(dir.join("hello.jet"), "fn run() {\n    print(\"hello, world\")\n}\n").unwrap()
+    fs.write(dir.join("core_import_only.jet"), """
+use core.files as fs
+use core.term as io
+use core.sys as env
+use core.process as process
+use core.math as math
+use core.math.random as random
+use core.time as time
+use core.encoding.json as json
+
+fn run() {
+    print("ok")
+}
+""").unwrap()
+    hello :: Command.new(&jet).args(["build", "--small", "hello.jet"]).current_dir(&dir).output().unwrap()
+    assert(hello.status.success(), "hello build failed")
+    imports :: Command.new(&jet).args(["build", "--small", "core_import_only.jet"]).current_dir(&dir).output().unwrap()
+    assert(imports.status.success(), "import-only build failed")
+    hello_size :: fs.metadata(dir.join(".jet/build/hello")).unwrap().len()
+    import_size :: fs.metadata(dir.join(".jet/build/core_import_only")).unwrap().len()
+    assert(import_size <= hello_size.saturating_add(4096), "import-only binary ({import_size} bytes) should stay within 4 KiB of hello ({hello_size} bytes)")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:578
+#Test("json_decode_lenient_surfaces_coercions") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping json_decode_lenient_surfaces_coercions (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_json_decode_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code_a, stdout_a, stderr_a) :: build_and_run(&dir, "json_coerce_a", """
+use core.encoding.json as json
+fn run() {
+    data :: json.decode("{{\"port\":\"8080\"}}") ?? panic("bad json")
+    if data == .Object(m) {
+        if m["port"] == .Int(n) { print(n + 1) }
+    }
+}
+""", &[], None)
+    assert_eq(code_a, 0, "probe (a) failed: {stderr_a}")
+    assert_eq(stdout_a, "8081\n", "probe (a): decoded value should be plain number + 1")
+    assert(stderr_a.contains("json coerce") && stderr_a.contains("port") && stderr_a.contains("number"), "probe (a): coercion log line missing or malformed; got: {stderr_a}")
+    (code_b, stdout_b, stderr_b) :: build_and_run(&dir, "json_coerce_b", """
+use core.encoding.json as json
+fn run() {
+    data :: json.decode("{{\"port\":8080,\"name\":\"api\"}}") ?? panic("bad json")
+    if data == .Object(m) {
+        if m["port"] == .Int(n) { print(n) }
+    }
+}
+""", &[], None)
+    assert_eq(code_b, 0, "probe (b) failed: {stderr_b}")
+    assert_eq(stdout_b, "8080\n", "probe (b): value should be 8080")
+    assert(!stderr_b.contains("json coerce"), "probe (b): spurious coercion line emitted for clean JSON; got: {stderr_b}")
+    (code_c, stdout_c, stderr_c) :: build_and_run(&dir, "json_coerce_c", """
+use core.encoding.json as json
+fn run() {
+    data :: json.decode("{{\"port\":\"8080\",\"enabled\":\"true\"}}") ?? panic("bad json")
+    if data == .Object(m) {
+        if m["port"] == .Int(n) { print(n) }
+        if m["enabled"] == .Bool(b) { print(b) }
+    }
+}
+""", &[], None)
+    assert_eq(code_c, 0, "probe (c) failed: {stderr_c}")
+    assert_eq(stdout_c, "8080\ntrue\n", "probe (c): both coerced values should come back plain")
+    coerce_lines :: stderr_c.lines().filter((line) -> line.contains("json coerce")).collect::<[String]>()
+    assert_eq(coerce_lines.len(), 2, "probe (c): expected 2 coercion lines, got {coerce_lines.len()}; stderr: {stderr_c}")
+    assert(coerce_lines.iter().any((line) -> line.contains("port")), "probe (c): no coercion line for 'port'")
+    assert(coerce_lines.iter().any((line) -> line.contains("enabled")), "probe (c): no coercion line for 'enabled'")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:696
+#Test("json_parser_is_rfc8259_complete") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping json_parser_is_rfc8259_complete (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_json_full_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code_a, stdout_a, stderr_a) :: build_and_run(&dir, "json_full_a", """
+use core.encoding.json as json
+fn run() {
+    raw :: "{{\"big\":1.5e3,\"acc\":\"caf\\u00e9\",\"grin\":\"\\uD83D\\uDE00\",\"tab\":\"a\\tb\"}}"
+    data :: json.parse(raw) ?? panic("bad json")
+    print(json.to_string(data))
+}
+""", &[], None)
+    assert_eq(code_a, 0, "probe (a) failed: {stderr_a}")
+    // Integral exponent numbers collapse to Int in Data.
+    assert_eq(stdout_a, "{\"acc\":\"café\",\"big\":1500,\"grin\":\"😀\",\"tab\":\"a\\tb\"}\n", "probe (a): full parse + re-serialize")
+    (code_b, stdout_b, stderr_b) :: build_and_run(&dir, "json_full_b", """
+use core.encoding.json as json
+fn run() {
+    if json.parse("{{\"x\":\"a\\qb\"}}") == {
+        .Ok(_) -> { print("OK") }
+        .Err(e) -> { print("ERR: {e.message}") }
+    }
+}
+""", &[], None)
+    assert_eq(code_b, 0, "probe (b) failed: {stderr_b}")
+    assert_eq(stdout_b, "ERR: invalid escape in string\n", "probe (b): bad escape rejected")
+    (code_c, stdout_c, stderr_c) :: build_and_run(&dir, "json_full_c", "\nuse core.encoding.json as json\nfn run() {\n    if json.parse(\"{{\\\"x\\\":\\\"a\tb\\\"}}\") == {\n        .Ok(_) -> { print(\"OK\") }\n        .Err(e) -> { print(\"ERR: {e.message}\") }\n    }\n}\n", &[], None)
+    assert_eq(code_c, 0, "probe (c) failed: {stderr_c}")
+    assert_eq(stdout_c, "ERR: control character in string\n", "probe (c): raw control char rejected")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:779
+#Ignore
+#Test("channel_stress_1000_messages") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping channel stress test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_channel_stress_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "channel_stress", """
+use core.tasks as tasks
+
+fn run() {
+(sender, ch) : channel<Int>()
+    producer :: task {
+        loop i in 1..1000 { sender.send(i) }
+    }
+    producer.join() ?? 0
+    total: Int = 0
+    loop i in 1..1000 { total = total + (ch.receive() ?? panic("channel closed")) }
+    print(total)
+}
+""", &[], None)
+    assert_eq(code, 0, "channel stress failed: {stderr}")
+    assert_eq(stdout, "500500\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:818
+#Test("scheduler_spawn_1000_tasks") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping scheduler spawn test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_scheduler_spawn_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "scheduler_spawn", """
+use core.tasks as tasks
+
+fn run() {
+(sender, ch) :: channel<Int>()
+    loop i in 1..1000 {
+        dup :: ~sender
+        task { dup.send(1) }
+    }
+    total := 0
+    loop i in 1..1000 { total = (total + (ch.receive() ?? panic("channel closed"))) }
+    print(total)
+}
+""", &[], None)
+    assert_eq(code, 0, "scheduler spawn stress failed: {stderr}")
+    assert_eq(stdout, "1000\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:857
+#Test("scheduler_spawn_10000_tasks") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping 10k scheduler spawn test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_scheduler_10k_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "scheduler_spawn_10k", """
+use core.tasks as tasks
+
+fn run() {
+(sender, ch) :: channel<Int>()
+    loop i in 1..10000 {
+        dup :: ~sender
+        task { dup.send(1) }
+    }
+    total := 0
+    loop i in 1..10000 { total = (total + (ch.receive() ?? panic("channel closed"))) }
+    print(total)
+}
+""", &[], None)
+    assert_eq(code, 0, "10k scheduler spawn failed: {stderr}")
+    assert_eq(stdout, "10000\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:897
+#Ignore("local 100k parked-task stress; run with --ignored")
+#Test("scheduler_spawn_100000_tasks_bench") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping 100k scheduler bench (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_scheduler_100k_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "scheduler_spawn_100k", """
+use core.tasks as tasks
+
+fn run() {
+(sender, ch) :: channel<Int>()
+    loop i in 1..100000 {
+        dup :: ~sender
+        task { dup.send(1) }
+    }
+    total := 0
+    loop i in 1..100000 { total = (total + (ch.receive() ?? panic("channel closed"))) }
+    print(total)
+}
+""", &[], None)
+    assert_eq(code, 0, "100k scheduler bench failed: {stderr}")
+    assert_eq(stdout, "100000\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:936
+#Test("race_cancels_losing_task") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping race cancel test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_race_cancel_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "race_cancel", """
+use core.tasks as tasks
+use core.time as time
+
+fn fast_nine() -> Int { return 9 }
+fn slow_one() -> Int {
+    time.sleep(300ms)
+    return 1
+}
+fn run() {
+    task.group g {
+        winner :: (task.race { slow_one(), fast_nine() }) ?? panic("race failed")
+        print(winner)
+    }
+}
+""", &[], None)
+    assert_eq(code, 0, "race cancel test failed: {stderr}")
+    assert_eq(stdout, "9\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/system.rs:981
+#Test("compiler_sources_reject_retired_jet_ring_keys") {
+    // Guard all Jet compiler source owners after clean Rust cutover.
+    roots :: ["Source", "Compiler/JetFoundation/Source", "Compiler/JetDriver/Source", "Compiler/JetSema/Source", "Compiler/JetCodegen/Source", "Compiler/JetComptime/Source", "Compiler/JetRepl/Source"]
+    retired :: ["\"jet.log\"", "\"jet.crypto\"", "\"jet.http\"", "\"jet.regex\"", "\"jet.reactive\"", "\"jet.db\"", "\"jet.plugin\"", "\"jet.time\""]
+    pending := roots.iter().map((root) -> OSPath(root)).collect::<[OSPath]>()
+    while path :: pending.pop() {
+        metadata :: fs.metadata(&path).unwrap_or_else((error) -> panic("failed to inspect compiler source {path.display()}: {error}"))
+        if metadata.is_dir() {
+            for entry in fs.read_dir(&path).unwrap_or_else((error) -> panic("failed to read compiler source {path.display()}: {error}")) { pending.push(entry.unwrap().path()) }
+            continue
+        }
+        if path.extension().and_then((extension) -> extension.to_str()) != Val("jet") { continue }
+        source :: fs.read_to_string(&path).unwrap_or_else((error) -> panic("failed to read compiler source {path.display()}: {error}"))
+        for key in &retired { assert(!source.contains(key), "retired internal module key {key} found in {path.display()}") }
+    }
+}
+// Rust: tests/corelib_parts/system.rs:1035
+#Test("core_reference_lists_every_built_core_module") {
+    docs :: fs.read_to_string("Docs/spec/reference/core-library.md").expect("core library reference must exist")
+    missing :: Loader.KNOWN_CORE_MODULES.iter().copied().filter((module) -> module != "core").filter((module) -> !docs.contains("`{module}`")).collect::<[String]>()
+    assert(missing.is_empty(), "Docs/spec/reference/core-library.md must list every built Core module from KNOWN_CORE_MODULES: {missing:?}")
+}
+// Rust: tests/corelib_parts/system.rs:1052
+#Test("retired_core_namespaces_name_their_canonical_homes") {
+    assert_eq(AST.core_list_prefix("core"), Val("core"))
+    assert_eq(AST.core_list_prefix("core.game"), Val("core.game"))
+    assert_eq(AST.core_list_prefix("jet"), None)
+    assert_eq(AST.core_list_prefix("jet.game"), None)
+    retired :: [("core.io", "core.term"), ("core.path", "core.files"), ("core.time.date", "core.time"), ("core.time.datetime", "core.time"), ("core.text.unicode", "core.text"), ("core.fmt", "core.text.fmt"), ("core.random", "core.math.random"), ("core.env", "core.sys"), ("core.os", "core.sys"), ("core.tls", "core.net.tls"), ("core.ws", "core.net.ws"), ("core.url", "core.net.url"), ("core.mime", "core.net.mime"), ("core.uuid", "core.crypto.uuid"), ("core.vault", "core.crypto.vault"), ("core.raylib", "core.game.raylib"), ("core.browser", "core.web.browser"), ("core.solve", "core.compute.solve"), ("core.sketch.hll", "core.data.sketch.hll"), ("core.sketch.tdigest", "core.data.sketch.tdigest"), ("core.sketch.reservoir", "core.data.sketch.reservoir"), ("core.sketch.cms", "core.data.sketch.cms"), ("core.compress.gzip", "core.archive.gzip"), ("core.compress.zstd", "core.archive.zstd"), ("core.science.measurement", "core.units"), ("core.mem.alloc", "core.mem"), ("core.scope", "core.mem.scope"), ("core.lang", "core.compiler.lang"), ("core.binary", "core.encoding")]
+    for (retired, canonical) in retired {
+        source :: "use {retired} as old\nfn run() {{}}\n"
+        diagnostics :: compile(&source).expect_err(retired)
+        diagnostic :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E1001").unwrap_or_else(() -> panic("{retired} did not produce E1001: {diagnostics:?}"))
+        assert(diagnostic.fix.contains(canonical), "{retired} did not name {canonical}: {diagnostic.fix}")
+    }
+}
+// Rust: tests/corelib_parts/system.rs:1108
+#Test("jet_raylib_namespace_is_not_a_core_module_alias") {
+    assert(Syntax.is_known_core_module("core.game.raylib"))
+    assert(!Syntax.is_known_core_module("jet.raylib"))
+    src :: "\nuse jet.raylib as rl\n\nfn run() {\n    print(\"nope\")\n}\n"
+    diags :: compile(src).expect_err("jet.raylib must be rejected")
+    assert(diags.iter().any((diagnostic) -> diagnostic.code == "E0341"), "expected E0341 for retired namespace, got: {diags.iter().map((diagnostic) -> diagnostic.code.to_string()).collect::<[String]>():?}")
+    assert(diags.iter().any((diagnostic) -> diagnostic.fix.contains("core.game.raylib")), "raylib retirement must name its canonical home: {diags:?}")
+}
+// Rust: tests/corelib_parts/system.rs:1132
+#Test("jet_time_namespace_uses_retirement_teaching") {
+    source :: "use jet" + ".time as time\n\n" + "fn run() {\n" + "    time.now()\n" + "}\n"
+    diagnostics :: compile(source).expect_err("the retired time namespace must fail")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0341"), "expected E0341 for the retired time namespace, got: {diagnostics.iter().map((diagnostic) -> diagnostic.code.to_string()).collect::<[String]>():?}")
+    assert_eq(Syntax.rename_target("jet" + ".time" + ".now"), Val("core.time.now"))
+}

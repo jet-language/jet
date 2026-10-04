@@ -1,0 +1,568 @@
+use Compiler.JetFoundation.Tests.Integration.Generics.*
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use std.env as env
+use std.process as process
+use std.process.[Command]
+use jet.Loader as Loader
+use jet.Driver as Driver
+use jet.Sema as Sema
+use jet.Diagnostics.[Severity]
+use jet_semindex as semindex
+
+// Rust: tests/generics.rs:8
+#Test("generic_module_profile_fact_values_are_closed_and_fingerprinted") {
+    root :: env.temp_dir().join("jet_generic_module_profile_fact_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create profile fact fixture")
+    fs.write(root.join("package.jet"), """
+name: "profile_fact"
+version: "0.1.0"
+settings: { cache_slots: Int = 3 }
+build: {
+    compact: Build{ optimize: full, settings: { cache_slots: 2 } },
+    spacious: Build{ optimize: full, settings: { cache_slots: 5 } },
+}
+""").expect("write profile fact manifest")
+    source :: """
+module cache<K>(capacity: Int) {
+    pub struct Buffer { items: [K#capacity] }
+    pub fn slots() -> Int { capacity }
+}
+PROFILE_SLOTS :: prep { $build.settings.cache_slots }
+module tuned :: cache<Int>($build.settings.cache_slots)
+module chained :: cache<Int>(PROFILE_SLOTS)
+fn run() { print(tuned.slots()) }
+"""
+    entry :: root.join("main.jet")
+    fs.write(entry, source).expect("write profile fact source")
+    fingerprints := [String]{}
+    loop profile in ["compact", "spacious"] {
+        bundle := Loader.load_entry_with_overlay(entry.to_str().expect("profile fact path"), nil, false).expect("load profile fact source")
+        Driver.seed_build_facts(&bundle, profile, false, [String:String]{}).expect("seed profile settings")
+        diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Check)
+        assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != Severity.Error), "profile fact module should check: {diagnostics:#?}")
+        identity :: bundle.modules.iter().flat_map((module) -> module.items.iter()).find_map((item) -> {
+            if item == {
+                .CodeModule(module) -> if module.name == "tuned" { module.instance_identity } else { nil }
+                _ -> nil
+            }
+        }).expect("fact-fed module instance identity")
+        assert_eq(identity.argument_values[1], "value:{if profile == "compact" { 2 } else { 5 }}")
+        assert(identity.argument_provenance[1].iter().any((source) -> source.contains("settings.cache_slots")))
+        assert(identity.argument_provenance[1].iter().any((source) -> source.contains("build.{profile}")))
+        assert(identity.applications.iter().any((application) -> application.name == "chained"), "a setting folded through the definition evaluator must reuse the direct fact specialization")
+        fingerprints.push(identity.fingerprint.clone())
+    }
+    assert_ne(fingerprints[0], fingerprints[1], "profile values must not collide")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/generics.rs:100
+#Test("generic_module_fact_value_example_has_profile_and_tier_parity") {
+    repo :: OSPath.from(env.manifest_dir())
+    fixture :: repo.join("Examples/features/modules")
+    root :: env.temp_dir().join("jet_generic_module_fact_parity_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create isolated fact-value example")
+    entry :: root.join("fact_value_arguments.jet")
+    fs.copy(fixture.join("fact_value_arguments.jet"), entry).expect("copy fact-value module")
+    expected :: fs.read(repo.join("Examples/features/expected/modules/fact_value_arguments.out")).expect("fact-value module golden")
+    loop (profile, setting, expected_output) in [("compact", "2", b"2\n"), ("spacious", "5", b"5\n")] {
+        profile_arg :: "--profile={profile}"
+        setting_arg :: "cache_slots={setting}"
+        // GATE #4494: real child runs and profile facts.
+        profile_run :: Command.new(common.jet_bin()).current_dir(root).arg("run").arg(profile_arg).arg(entry).env("NO_COLOR", "1").output().expect("run fact-value module under named profile")
+        assert_eq(profile_run.status.code(), 0, "named profile `{profile}` failed:\n{String.from_utf8_lossy(profile_run.stderr)}")
+        assert_eq(profile_run.stdout, expected_output, "named profile `{profile}` size drifted")
+        // Retired forced-interpreter representation becomes an O0 behavioral witness;
+        // the named profile still supplies the same folded build facts.
+        // GATE #4494: retained profile-aware tier provider, native argv/root/env contract.
+        profile_dev :: common.run_entry_tier_with_profile(entry, "O0", profile, root, [("NO_COLOR", "1")])
+        release :: Command.new(common.jet_bin()).current_dir(root).args(["run", "--release", "--set"]).arg(setting_arg).arg(entry).env("NO_COLOR", "1").output().expect("run fact-value module through release AOT")
+        default :: Command.new(common.jet_bin()).current_dir(root).args(["run", "--set"]).arg(setting_arg).arg(entry).env("NO_COLOR", "1").output().expect("run fact-value module through default native tier")
+        loop (tier, child_output) in [("jet run --release", release), ("jet run", default)] {
+            assert_eq(child_output.status.code(), 0, "{tier} failed for `{profile}`: {String.from_utf8_lossy(child_output.stderr)}")
+            assert_eq(child_output.stdout, expected_output, "{tier} output drifted for `{profile}`")
+        }
+        if profile_dev == {
+            .Ran(exit_code, stdout, stderr) -> {
+                assert_eq(exit_code, 0, "O0 failed for `{profile}`: {stderr}")
+                assert_eq(stdout.as_bytes(), expected_output, "O0 output drifted for `{profile}`")
+            }
+            else -> panic("O0 did not execute fact-value module under `{profile}`")
+        }
+    }
+    explain :: Command.new(common.jet_bin()).current_dir(root).args(["explain", "tuned.slots"]).arg(entry).arg("--profile=compact").env("NO_COLOR", "1").output().expect("explain fact-fed module value")
+    assert(explain.status.success(), "module explain failed: {String.from_utf8_lossy(explain.stderr)}")
+    explanation :: String.from_utf8_lossy(explain.stdout)
+    assert(explanation.contains("value:2"), "explain must show the folded value: {explanation}")
+    assert(explanation.contains("build.compact.settings.cache_slots"), "explain must show profile provenance: {explanation}")
+    shown :: entry.to_str().expect("fact-value module path")
+    // Default, release, O0 run and O0 dev replace the four original execution lenses.
+    loop args in [["run", "--release", shown], ["run", shown], ["run", "--profile=debug", shown], ["dev", shown, "--profile=debug", "--watch=off"]] {
+        run :: Command.new(common.jet_bin()).current_dir(root).args(args).env("NO_COLOR", "1").output().expect("run fact-value module through execution tier")
+        assert_eq(run.status.code(), 0, "execution tier failed: {String.from_utf8_lossy(run.stderr)}")
+        assert_eq(run.stdout, expected, "execution tier output drifted")
+    }
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/generics.rs:246
+#Test("generic_modules_canonical_spelling_keeps_comptime_bindings") {
+    source :: """
+BASE :: prep { 40 }
+
+module cache<K>(capacity: Int) {
+    COMPUTED_SIZE :: prep { BASE + capacity }
+    pub struct Entry { items: [K#capacity] }
+    pub fn size() -> Int { COMPUTED_SIZE }
+}
+
+module x :: cache<Int>(64)
+
+module plain_template<K> {
+    pub fn identity(value: K) -> K { value }
+}
+module plain :: plain_template<Int>
+
+fn run() {
+    print(x.size())
+    print(plain.identity(7))
+}
+"""
+    jet.compile(source).unwrap_or_else((diags) -> panic("canonical generic-module spelling failed: {diags:#?}"))
+}
+// Rust: tests/generics.rs:273
+#Test("generic_module_diagnostics_hide_instance_mangling") {
+    diagnostics :: jet.compile("""
+module box<T> {
+    pub struct Entry { value: T }
+}
+module boxed :: box<Int>
+fn wrong(value: boxed.Entry) -> String { return value }
+fn run() {}
+""").expect_err("the return type mismatch must be diagnosed")
+    text :: diagnostics.iter().flat_map((diagnostic) -> [diagnostic.what, diagnostic.why, diagnostic.fix]).collect().join("\n")
+    assert(!text.contains("M5BoxedEntry"), "compiler-owned generic-module names leaked into a diagnostic: {text}")
+}
+
+// Rust: tests/generics.rs:303
+#Test("generic_modules_complete_instantiation") {
+    // FEATURE_CLAIM: claim.generic-modules / complete-instantiation
+    complete :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("Examples/features/modules/generic_modules.jet")).expect("generic module example")
+    jet.compile(complete).unwrap_or_else((diags) -> panic("closed generic-module surface failed: {diags:#?}"))
+    nested :: """
+module outer<T>(count: Int) {
+    module inner<U>(extra: Int) {
+        pub fn total(first: T, second: U) -> Int { return count + extra }
+    }
+    module closed :: inner<T>(count)
+}
+module instance :: outer<String>(3)
+fn run() {}
+"""
+    jet.compile(nested).unwrap_or_else((diags) -> panic("nested generic-module instantiation failed: {diags:#?}"))
+    body_items :: """
+module complete<T>(count: Int, label: String) {
+    #Meta(category: label)
+    VALUE :: prep { count }
+    COMPTIME_VALUE :: prep { count + 1 }
+    tag Marked { deny: [Net] }
+    trait Reveal { fn reveal(self) -> T }
+    struct Wrapped { value: T }
+    enum Maybe { Empty Value(T) }
+    impl Wrapped.Reveal { fn reveal(self) -> T { return self.value } }
+    enum SourceErr { Bad(T) }
+    enum TargetErr { Wrapped(SourceErr) }
+    impl SourceErr -> TargetErr { return TargetErr.Wrapped(self) }
+    #Target(OS.Linux)
+    impl Wrapped { fn linux_value(self) -> T { return self.value } }
+    module plain { pub fn value() -> Int { return count } }
+    module nested<U> { pub fn keep(value: U) -> U { return ~value } }
+    module nested_use :: nested<T>
+    #Meta(category: label)
+    pub fn marked(value: ^#Marked T) -> #Marked T {
+        #Meta(category: label)
+        local := T{ value }
+        return local
+    }
+    #Test fn identity(value: T) { expect(count == count) }
+    #Test("complete") { .measure { assert(label == label) } }
+}
+module complete_use :: complete<Int>(3, "generic module")
+fn run() {}
+"""
+    jet.compile(body_items).unwrap_or_else((diags) -> panic("generic-module body substitution failed: {diags:#?}"))
+    distinct_generated_names :: """
+module with_bar_baz<T> { pub struct BarBaz { value: T } }
+module with_baz<T> { pub struct Baz { value: T } }
+module foo :: with_bar_baz<Int>
+module foo_bar :: with_baz<Int>
+fn run() {
+    first :: foo.BarBaz{ value: 1 }
+    second :: foo_bar.Baz{ value: 2 }
+    print(first.value + second.value)
+}
+"""
+    jet.compile(distinct_generated_names).unwrap_or_else((diags) -> panic("generic-module type names collided: {diags:#?}"))
+    root :: env.temp_dir().join("jet_generic_modules_complete_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create generic-module acceptance directory")
+    fs.write(root.join("package.jet"), "name: \"generic_modules_complete\"\nversion: \"0.1.0\"\n").expect("write generic-module package")
+    fs.write(root.join("left.jet"), "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n").expect("write left template")
+    fs.write(root.join("right.jet"), "pub module boxed<T>(n: Int) { pub fn value() -> Int { return n } }\n").expect("write right template")
+    main :: root.join("main.jet")
+    fs.write(main, """
+module left
+module right
+use left.[boxed as left_boxed]
+use right.[boxed as right_boxed]
+module first :: left_boxed<Int>(3)
+module equivalent :: left_boxed<Int>(3)
+module different_type :: left_boxed<String>(3)
+module different_value :: left_boxed<Int>(4)
+module different_path :: right_boxed<Int>(3)
+fn run() {}
+""").expect("write generic-module identity program")
+    index :: semindex.open(main).expect("generic-module identity program checks")
+    assert_eq(index.instances().len(), 4, "only complete full keys may reuse an instance")
+    shared :: index.instances().iter().find((instance) -> instance.applications.iter().any((application) -> application.name == "first")).expect("canonical first instance")
+    assert_eq(shared.applications.iter().map((application) -> application.name).collect(), ["first", "equivalent"])
+    full_keys := [String:Bool]{}
+    loop instance in index.instances() { full_keys[instance.full_key_hex] = true }
+    assert_eq(full_keys.len(), 4, "type, value, and defining module path remain identity inputs")
+    _ :: fs.remove_dir_all(root)
+    assert_nested_generic_module_execution()
+    assert_closed_value_identity()
+}
+
+// Rust: tests/generics.rs:448
+#Test("generic_module_local_bindings_shadow_substitution_values") {
+    source :: """
+module box(capacity: Int) {
+    BASE :: prep { capacity }
+    pub fn shadowed() -> Int {
+        base :: prep { 5 }
+        return base
+    }
+    pub fn plain_shadowed() -> Int {
+        capacity := 5
+        return capacity
+    }
+}
+module b32 :: box(32)
+fn run() {
+    print(b32.shadowed())
+    print(b32.plain_shadowed())
+}
+"""
+    root :: env.temp_dir().join("jet_generic_module_shadowing_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create generic-module shadowing directory")
+    fs.write(root.join("package.jet"), "name: \"generic_module_shadowing\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n").expect("write generic-module shadowing package")
+    path :: root.join("main.jet")
+    fs.write(path, source).expect("write generic-module shadowing program")
+    loop release in [false, true] {
+        command := Command.new(common.jet_bin())
+        command.arg("run")
+        if release { command.arg("--release") }
+        output :: command.arg(path).output().unwrap_or_else((error) -> panic("run generic-module shadowing program: {error}"))
+        assert(output.status.success(), "generic-module shadowing failed (release={release}):\n{String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "5\n5\n", "generic-module local bindings must shadow substitutions (release={release})")
+    }
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/generics.rs:635
+#Test("generic_examples_build_and_run") {
+    loop name in ["Examples/features/types/traits.jet", "Examples/features/types/generic_types.jet", "Examples/features/basics/printable.jet"] {
+        out :: Command.new(common.jet_bin()).arg("run").arg(name).output().unwrap_or_else((e) -> panic("failed to run {name}: {e}"))
+        assert(out.status.success(), "example {name} failed:\n{String.from_utf8_lossy(out.stdout)}\n{String.from_utf8_lossy(out.stderr)}")
+    }
+}
+// Rust: tests/generics.rs:656
+#Test("generic_scalar_matrix") {
+    types :: ["1", "2.5", "true", "\"hi\"", "'a'"]
+    loop lit in types {
+        src :: "\nfn twice<T>(x: ^T, y: ^T) -> Pair<T> {{\n    return Pair<T>{{ first: x, second: y }}\n}}\n\nstruct Pair<T> {{\n    first: T\n    second: T\n}}\n\nfn run() {{\n    p :: twice({lit}, {lit})\n    print(p.first)\n}}\n"
+        diags :: jet.compile(src)
+        assert(diags.is_ok(), "scalar {lit} failed: {diags.err():?}")
+    }
+}
+// Rust: tests/generics.rs:682
+#Test("generic_fn_with_scalar_types") {
+    src :: """
+fn twice<T>(x: ^T, y: ^T) -> Pair<T> {
+    return Pair<T>{ first: x, second: y }
+}
+
+struct Pair<T> {
+    first: T
+    second: T
+}
+
+fn run() {
+    a :: twice(1, 1)
+    b :: twice(2.5, 2.5)
+    print(a.first)
+    print(b.first)
+}
+"""
+    diags :: jet.compile(src)
+    assert(diags.is_ok(), "{diags.err():?}")
+}
+// Rust: tests/generics.rs:707
+#Test("multi_char_type_param_struct") {
+    src :: """
+struct Wrap<Kind> {
+    val: Kind
+}
+
+fn wrap<Kind>(x: ^Kind) -> Wrap<Kind> {
+    return Wrap<Kind>{ val: x }
+}
+
+fn run() {
+    b :: wrap(42)
+    print(b.val)
+}
+"""
+    diags :: jet.compile(src)
+    assert(diags.is_ok(), "multi-char type param (struct) failed: {diags.err():?}")
+}
+// Rust: tests/generics.rs:733
+#Test("multi_char_type_param_fn_only") {
+    src :: """
+fn identity<Elem>(x: ^Elem) -> Elem {
+    return x
+}
+
+fn run() {
+    n :: identity(7)
+    s :: identity("hello")
+    print(n)
+    print(s)
+}
+"""
+    diags :: jet.compile(src)
+    assert(diags.is_ok(), "multi-char type param (fn) failed: {diags.err():?}")
+}
+// Rust: tests/generics.rs:756
+#Test("multi_char_matches_single_char") {
+    src :: """
+fn twice<Elem>(x: ^Elem, y: ^Elem) -> Pair<Elem> {
+    return Pair<Elem>{ first: x, second: y }
+}
+
+struct Pair<Elem> {
+    first: Elem
+    second: Elem
+}
+
+fn run() {
+    p :: twice(1, 1)
+    print(p.first)
+}
+"""
+    diags :: jet.compile(src)
+    assert(diags.is_ok(), "multi-char matches single-char failed: {diags.err():?}")
+}
+
+// Rust: tests/generics.rs:784
+#Test("explicit_generic_calls_cover_value_and_result_only_arguments") {
+    src :: """
+fn identity<T>(value: ^T) -> T {
+    return value
+}
+
+fn empty<T>() -> [T] {
+    ignored :: input()
+    return []
+}
+
+fn run() {
+    text :: identity<String>(input() ?? "ok")
+    values :: empty<Int>()
+    print(text)
+    print(values.len())
+}
+"""
+    root :: env.temp_dir().join("jet_explicit_generic_calls_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create explicit generic-call directory")
+    fs.write(root.join("package.jet"), "name: \"explicit_generic_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n").expect("write explicit generic-call package")
+    path :: root.join("main.jet")
+    fs.write(path, src).expect("write explicit generic-call source")
+    output :: common.jet_cli_output_with_stdin(["run", path.to_str().expect("explicit generic-call path")], "ok\n\n")
+    assert(output.status.success(), "explicit generic calls failed:\n{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "ok\n0\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/generics.rs:827
+#Test("generic_call_formatter_keeps_adjacent_angles") {
+    source :: "fn run() {\n    value :: identity<Int>(1)\n    nested :: empty<Map<String, Wrap<Int>>>()\n    comparison :: 1 < 2\n    json.decode<Wrap<Int>>(text)\n}"
+    formatted :: jet.format_source(source).expect("generic call syntax should format")
+    assert(formatted.contains("identity<Int>(1)"), "{formatted}")
+    assert(formatted.contains("empty<Map<String, Wrap<Int>>>()"), "nested generic call arguments must keep both closing angles: {formatted}")
+    assert(formatted.contains("comparison :: 1 < 2"), "spaced angles must remain a comparison: {formatted}")
+    assert(formatted.contains("json.decode<Wrap<Int>>(text)"), "{formatted}")
+    assert_eq(formatted, jet.format_source(formatted).expect("formatted generic calls should reformat"))
+}
+// Rust: tests/generics.rs:850
+#Test("namespaced_generic_calls_support_explicit_and_inferred_arguments") {
+    source :: """
+module helpers {
+    pub fn identity<T>(value: ^T) -> T {
+        return value
+    }
+}
+
+fn run() {
+    text :: helpers.identity<String>("ok")
+    number :: helpers.identity(7)
+    print(text)
+    print(number)
+}
+"""
+    root :: env.temp_dir().join("jet_namespaced_generic_calls_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create namespaced generic-call directory")
+    fs.write(root.join("package.jet"), "name: \"namespaced_generic_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n").expect("write namespaced generic-call package")
+    path :: root.join("main.jet")
+    fs.write(path, source).expect("write namespaced generic-call source")
+    output :: Command.new(common.jet_bin()).arg("run").arg(path).output().expect("run namespaced generic calls")
+    assert(output.status.success(), "namespaced generic calls failed:\n{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "ok\n7\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/generics.rs:893
+#Test("generic_call_diagnostics_cover_arity_and_bound_failures") {
+    wrong_arity :: """
+fn identity<T>(value: ^T) -> T { return value }
+fn run() { value :: identity<Int, String>(1) }
+"""
+    arity_diags :: jet.compile(wrong_arity).expect_err("wrong generic arity must fail")
+    arity :: arity_diags.iter().find((diagnostic) -> diagnostic.code == "E0119").unwrap_or_else(() -> panic("expected generic arity E0119: {arity_diags:#?}"))
+    assert(!arity.what.is_empty() && !arity.why.is_empty() && !arity.fix.is_empty())
+    wrong_bound :: """
+#!Comparable
+struct NotComparable { value: Int }
+fn choose<T: Comparable>(value: ^T) -> T { return value }
+fn run() {
+    value :: choose<NotComparable>(NotComparable{ value: 1 })
+}
+"""
+    bound_diags :: jet.compile(wrong_bound).expect_err("failed generic bound must fail")
+    bound :: bound_diags.iter().find((diagnostic) -> diagnostic.code == "E0905").unwrap_or_else(() -> panic("expected generic bound E0905: {bound_diags:#?}"))
+    assert(!bound.what.is_empty() && !bound.why.is_empty() && !bound.fix.is_empty())
+    non_generic :: """
+fn plain(value: Int) -> Int { return value }
+fn run() { value :: plain<Int>(1) }
+"""
+    non_generic_diags :: jet.compile(non_generic).expect_err("non-generic functions must reject explicit call type arguments")
+    assert(non_generic_diags.iter().any((diagnostic) -> diagnostic.code == "E0119"), "expected non-generic call E0119: {non_generic_diags:#?}")
+    spaced :: """
+fn identity<T>(value: ^T) -> T { return value }
+fn run() { value :: identity < Int > (1) }
+"""
+    assert(jet.compile(spaced).is_err(), "spaced angle brackets must not become an explicit generic call")
+    extra_decode_type :: """
+use core.encoding.json as json
+fn run() { value :: json.decode<Int, String>("1") }
+"""
+    decode_diags :: jet.compile(extra_decode_type).expect_err("typed decode must reject extra call type arguments")
+    assert(decode_diags.iter().any((diagnostic) -> diagnostic.code == "E0119"), "expected typed decode E0119: {decode_diags:#?}")
+}
+
+// Rust: tests/generics.rs:957
+#Test("free_generic_calls_execute_in_the_resident_jit") {
+    source :: """
+fn identity<T>(value: ^T) -> T { return value }
+fn empty<T>() -> [T] { return [] }
+fn run() {
+    text :: identity<String>("ok")
+    values :: empty<Int>()
+    print(text)
+    print(values.len())
+}
+"""
+    root :: env.temp_dir().join("jet_generic_free_calls_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create generic-free test directory")
+    fs.write(root.join("package.jet"), "name: \"generic_free_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n").expect("write generic-free test package")
+    path :: root.join("main.jet")
+    fs.write(path, source).expect("write generic-free test source")
+    bundle := Loader.load_entry(path.to_str().unwrap()).expect("generic-free test source should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != Severity.Error), "generic-free test source should type-check: {diagnostics:?}")
+    // Resident JIT compile/trace representation is retired: execute every retained tier.
+    // GATE #4494: actual canonical tier execution, not a Rust backend callback.
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        if common.run_entry_tier(path, tier, false) == {
+            .Ran(exit_code, stdout, stderr) -> {
+                assert_eq(exit_code, 0, "generic free call {tier} run failed: {stderr}")
+                assert_eq(stderr, "")
+                assert_eq(stdout, "ok\n0\n")
+            }
+            other -> panic("generic free call {tier} run did not complete: {other:?}")
+        }
+    }
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/generics.rs:1010
+#Test("generic_method_calls_keep_owner_and_method_arguments_separate") {
+    source :: """
+struct Box<T> {
+    value: T
+}
+
+impl Box {
+    fn new(value: ^T) -> Box<T> {
+        return Box<T>{ value: value }
+    }
+
+    fn convert<U>(self, value: ^U, *, note: String{"unused"}) -> U {
+        return value
+    }
+
+    fn make<U>(value: ^U) -> U {
+        return value
+        }
+    }
+
+fn run() {
+    box :: Box<Int>.new(3)
+    value :: box.convert<String>(note: "explicit", value: "ok")
+    inferred :: box.convert(note: "inferred", value: "again")
+    static_value :: Box.make<String>("static")
+    static_inferred :: Box.make("inferred")
+    print(value)
+    print(inferred)
+    print(static_value)
+    print(static_inferred)
+}
+"""
+    root :: env.temp_dir().join("jet_generic_method_calls_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create generic-method test directory")
+    fs.write(root.join("package.jet"), "name: \"generic_method_calls\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").expect("write generic-method test package")
+    path :: root.join("main.jet")
+    fs.write(path, source).expect("write generic-method test source")
+    bundle := Loader.load_entry(path.to_str().unwrap()).expect("generic-method test source should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != Severity.Error), "generic-method test source should type-check: {diagnostics:?}")
+    // Retired resident compile/trace assertions become all-tier behavioral identity.
+    // GATE #4494: canonical retained O0/O1/O2/Web providers.
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        if common.run_entry_tier(path, tier, false) == {
+            .Ran(exit_code, stdout, stderr) -> {
+                assert_eq(exit_code, 0, "generic method {tier} run failed: {stderr}")
+                assert_eq(stderr, "")
+                assert_eq(stdout, "ok\nagain\nstatic\ninferred\n")
+            }
+            other -> panic("generic method {tier} run did not complete: {other:?}")
+        }
+    }
+    _ :: fs.remove_dir_all(root)
+}

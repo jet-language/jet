@@ -1,0 +1,85 @@
+use jet_foundation.Tests.Integration.BuildEntryEpoch4.*
+use jet_comptime.Comptime.Build.[BuildPolicy]
+use jet_driver.Driver.[compile_bundle_path_build, compile_programmable_build_opts]
+use jet_driver.Policy.[GateSet, PolicyKey]
+use jetpack.[WorkspaceFile, MemberSelect]
+use std.fs
+// Rust: tests/build_entry_epoch4.rs:95
+#Test("ci_denies_legacy_before_reading_a_missing_manifest") {
+    root :: project("ci-policy-order")
+    entry :: write_entry(&root, source("[\"Cargo.toml\"]", "[\"target/debug/cli\"]", "[\"cargo\", \"build\", \"--bin\", \"cli\"]"))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), options(BuildPolicy.ci_default())).unwrap_err()
+    assert(errors.iter().any(fn(d) -> d.what.contains("legacy build wrappers are disabled in CI")), "CI policy must win over missing canonical manifest: {errors.debug()}")
+    assert(!errors.iter().any(fn(d) -> d.what.contains("requires `Cargo.toml`")), "denied wrappers must not attempt canonical import: {errors.debug()}")
+}
+// Rust: tests/build_entry_epoch4.rs:124
+#Test("allowed_legacy_bridge_rejects_stale_canonical_facts") {
+    cases :: [(String, String, String, String, String)]{
+        ("argv", "[\"Cargo.toml\"]", "[\"target/debug/cli\"]", "[\"cargo\", \"check\"]", "argv does not match"),
+        ("inputs", "[\"Cargo.toml\", \"extra.txt\"]", "[\"target/debug/cli\"]", "[\"cargo\", \"build\", \"--bin\", \"cli\"]", "inputs must exactly match"),
+        ("outputs", "[\"Cargo.toml\"]", "[\"target/debug/other\"]", "[\"cargo\", \"build\", \"--bin\", \"cli\"]", "outputs must exactly match")
+    }
+    loop (name, inputs, outputs, argv, expected) in cases {
+        root :: project("stale-{name}")
+        fs.write(root.join("Cargo.toml"), "[package]\nname = \"legacy-contract\"\n\n[[bin]]\nname = \"cli\"\n").unwrap()
+        entry :: write_entry(&root, source(inputs, outputs, argv))
+        errors :: compile_bundle_path_build(entry.to_str().unwrap(), options(BuildPolicy.allow_all())).unwrap_err()
+        assert(errors.iter().any(fn(d) -> d.what.contains(expected)), "stale {name} declaration must be rejected: {errors.debug()}")
+    }
+}
+// Rust: tests/build_entry_epoch4.rs:168
+#Test("workspace_build_observes_dependency_order_and_execution_chain") {
+    root :: project("workspace-dependency-order")
+    packages :: root.join("packages")
+    fs.create_dir_all(packages.join("a")).unwrap()
+    fs.create_dir_all(packages.join("b")).unwrap()
+    workspace_source :: """
+use b
+module workspace {
+    members: ["./packages/a", "./packages/b"]
+}
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("workspace must observe member b") {
+        action :: b.action("workspace-order", [], ["workspace-stamp"], ["sh", "-c", "printf workspace > workspace-stamp"], ["Exec"])
+        app :: b.add_executable("workspace", ["workspace.jet"], [action])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+"""
+    fs.write(root.join("workspace.jet"), workspace_source).unwrap()
+    fs.write(root.join("package.jet"), "name: \"workspace\"\nversion: \"0.1.0\"\ndeps: { b: ./packages/b }\n").unwrap()
+    fs.write(packages.join("a/package.jet"), "name: \"a\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n").unwrap()
+    fs.write(packages.join("b/package.jet"), "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\nbuild: { allow: #(Exec) }\n").unwrap()
+    fs.write(packages.join("a/run.jet"), """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("member a records execution") {
+        action :: b.action("a-order", [], ["a/a.jet"], ["sh", "-c", "printf 'fn a_ready() -> Int { 1 }' > a/a.jet"], ["Exec"])
+        target :: b.add_library("a", ["run.jet"], [action])
+        return b.plan(target)
+    }
+    return b.plan()
+}
+fn run() -> {}
+""").unwrap()
+    fs.write(packages.join("b/run.jet"), """
+use a
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("member b records its realized package") {
+        action :: b.action("b-order", [], ["b/b.jet"], ["sh", "-c", "printf 'fn b_ready() -> Int { 1 }' > b/b.jet"], ["Exec"])
+        target :: b.add_library("b", ["run.jet"], [action])
+        return b.plan(target)
+    }
+    return b.plan()
+}
+fn run() -> {}
+""").unwrap()
+    plan :: WorkspaceFile.load(&root).expect("workspace manifest should be found").expect("workspace manifest should parse")
+    ordered :: MemberSelect.dependency_order(&root, &plan.members).unwrap()
+    names :: ordered.iter().map(fn(member) -> member.name).collect()
+    assert_eq(names, [String]{"a", "b"})
+    compile_programmable_build_opts(root.join("workspace.jet").to_str().unwrap(), &[String]{"exec"}, false, GateSet.allow(PolicyKey.Impure), false, false, false, None).expect("workspace and member entries should run through the production driver")
+    assert(packages.join("a/a/a.jet").is_file())
+    assert(packages.join("b/b/b.jet").is_file())
+    assert_eq(fs.read_to_string(root.join("workspace-stamp")).unwrap(), "workspace")
+}

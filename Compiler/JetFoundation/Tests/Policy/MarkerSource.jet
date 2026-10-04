@@ -1,0 +1,44 @@
+use jet_foundation.Policy.MarkerSource.[read, split_top_level, split_default]
+use jet_foundation.Policy.AppliedRules.[TAppliedRuleArgKind as RuleArgType, TAppliedRuleStatus as RuleStatus]
+use jet_foundation.Syntax
+
+// Rust: crates/jet-foundation/src/Policy/MarkerSource.rs:321
+#Test("a_row_carries_its_parameters_and_its_facts") {
+    rows :: read()
+    unsafe_row :: rows.find(row -> row.name == "Unsafe").expect("#Unsafe")
+    assert(unsafe_row.signature.params.len() == 2)
+    assert(unsafe_row.signature.params[0].name == "reason")
+    assert(unsafe_row.signature.params[0].kind == RuleArgType.String)
+    assert(unsafe_row.signature.params[1].source_type == "ObligationMode")
+    assert(unsafe_row.signature.params[1].default_source == Val(".None"))
+    assert(unsafe_row.sites.contains("Operation"))
+    fx :: rows.find(row -> row.name == Syntax.KW_FX).expect("#FX")
+    assert(fx.signature.variadic == Val(RuleArgType.Ident))
+    assert(fx.signature.variadic_source_type == Val("Effect"))
+    pre :: rows.find(row -> row.name == "Pre").expect("#Pre")
+    assert(pre.repeatable)
+    doc :: rows.find(row -> row.name == "Doc").expect("#Doc")
+    companion :: doc.companion_site.expect("#Doc rides #Job")
+    assert(companion.rule == "Job")
+    assert(companion.site == "Function")
+    policy :: rows.find(row -> row.name == "Policy").expect("#Policy")
+    assert(policy.inherits)
+    assert(policy.resolution == "Tighten")
+    assert(policy.policy_scopes.contains("Module"))
+}
+
+// Rust: crates/jet-foundation/src/Policy/MarkerSource.rs:360
+#Test("a_retired_row_keeps_its_replacement") {
+    rows :: read()
+    suppress :: rows.find(row -> row.name == "Suppress").expect("#Suppress")
+    assert(suppress.status == RuleStatus.Retired(".drop(\"reason\")"))
+    known :: rows.find(row -> row.name == "Known").expect("#Known")
+    assert(known.sites.is_empty())
+}
+
+// Rust: crates/jet-foundation/src/Policy/MarkerSource.rs:378
+#Test("separators_inside_brackets_and_strings_are_not_separators") {
+    assert(split_top_level("a: [x, y], b: \"p, q\"") == ["a: [x, y]", "b: \"p, q\""])
+    assert(split_default("String{\"a = b\"}") == Val(("String", "\"a = b\"")))
+    assert(split_default("Duration | String") == None)
+}

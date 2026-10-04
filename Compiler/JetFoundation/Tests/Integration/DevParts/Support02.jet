@@ -1,1854 +1,678 @@
-// PORT-PENDING 1036 tests-dev-parts-support-slice-1807: tests/dev_parts/support.rs:1807-3656
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS fn print_jit_op_report() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let mut ops: std::collections::BTreeMap<String, (usize, usize)> =
-//RS         std::collections::BTreeMap::new();
-//RS     for path in topic_jet_files(&root) {
-//RS         let file = path.to_string_lossy();
-//RS         let mut bundle = match jet::Loader::load_entry(&file) {
-//RS             Ok(b) => b,
-//RS             Err(_) => continue,
-//RS         };
-//RS         let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS         if diags
-//RS             .iter()
-//RS             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let covered =
-//RS             common::compile_cranelift_bundle(&bundle, &common::development_policy()).is_ok();
-//RS         for tag in common::cranelift_main_ops(&bundle) {
-//RS             let entry = ops.entry(tag).or_default();
-//RS             if covered {
-//RS                 entry.0 += 1;
-//RS             } else {
-//RS                 entry.1 += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     eprintln!("jit observed TIR op compile coverage:");
-//RS     for (op, (covered, gaps)) in ops {
-//RS         eprintln!("  {op}: compile_covered_examples={covered} gap_examples={gaps}");
-//RS     }
-//RS }
-//RS 
-//RS /// The recognized honest-boundary / terminal codes the interpreter may stop at
-//RS /// instead of producing run-to-completion stdout (c77 / D-DEV1):
-//RS ///   - E2202 / E0952: the step/fuel budget was exhausted,
-//RS ///   - E0956: a construct not yet supported at comptime (hit during execution),
-//RS ///   - E0953: a deliberate user-authored panic (`assert(false, …)`), which is
-//RS ///     the program legitimately failing, not a silent skip.
-//RS ///   - E3410 / E3411: a D-CTEFFECT1 Tier-2 comptime effect (`core.files`/`core.term`/
-//RS ///     `core.sys`/…) reached with no `#Impure` gate, or a gate present but
-//RS ///     `--gate impure=allow` not passed — an honest, named boundary (the golden
-//RS ///     corpus runs with neither), not a silent skip.
-//RS ///   - E1265 (U13, D-JPK-SECRETCRYPTO1): `core.crypto.vault.get` reached through the
-//RS ///     same comptime/interpreter evaluation path — unconditionally denied
-//RS ///     (no `#Impure` escape hatch), so an example exercising it always stops
-//RS ///     here under the interpreter/JIT tiers even though the AOT-compiled
-//RS ///     binary runs it fine (it never goes through this evaluator).
-//RS const BOUNDARY_CODES: &[&str] = &[
-//RS     "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E3412", "E1265",
-//RS     // Front-end / sema codes that surface when the interpreter can't load a
-//RS     // construct the AOT path still accepts (splice/generics gaps).
-//RS     "E0102", "E0857", "E0107", "E0501",
-//RS     // Frontend-rejected examples (corpus gate) may still appear in manifested lists.
-//RS     "E0308", "E0504", "E0302", "E0505", "E0915", "E0311", "E1004",
-//RS ];
-//RS 
-//RS const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: &[&str] = &["collections/list_bounds"];
-//RS 
-//RS #[derive(Default, Clone)]
-//RS struct DevBatteryStats {
-//RS     ran: usize,
-//RS     boundary: usize,
-//RS     deopt: usize,
-//RS     manifested: usize,
-//RS     boundary_stems: Vec<String>,
-//RS }
-//RS 
-//RS impl DevBatteryStats {
-//RS     fn add(&mut self, mut other: DevBatteryStats) {
-//RS         self.ran += other.ran;
-//RS         self.boundary += other.boundary;
-//RS         self.deopt += other.deopt;
-//RS         self.manifested += other.manifested;
-//RS         self.boundary_stems.append(&mut other.boundary_stems);
-//RS     }
-//RS }
-//RS 
-//RS fn assert_default_dev_jit_gap(stem: &str, file: &str) {
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     match dev_iteration_with_timeout(stem, file, false) {
-//RS         RunOutcome::Ran { .. } => {
-//RS             assert!(
-//RS                 jet_jit::deopt_invoked_for_test() || jet_jit::jit_executed_for_test(),
-//RS                 "`{stem}` must run via tiered JIT or interpreter deopt"
-//RS             );
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             // Real effect boundaries (FFI) may still stop; coverage gaps must not.
-//RS             assert!(
-//RS                 !diags.iter().any(|diagnostic| diagnostic.code == "E2211"),
-//RS                 "`{stem}` must not emit retired E2211: {diags:?}"
-//RS             );
-//RS             assert!(
-//RS                 is_named_dev_boundary(stem, &diags),
-//RS                 "`{stem}` unexpected Problems under tiered run: {diags:?}"
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn is_named_dev_boundary(stem: &str, diags: &[jet::Diagnostics::Diagnostic]) -> bool {
-//RS     diags.iter().any(|d| BOUNDARY_CODES.contains(&d.code.as_str()))
-//RS         // D-DBDRIVER1/D-DBMIGRATE1: the checked-SQL DB example is an AOT-backed
-//RS         // core.db surface today; the dev default tier stops before execution.
-//RS         || (stem == "io/db_checked_sql" && diags.iter().all(|d| d.code == "E1004"))
-//RS }
-//RS 
-//RS /// #2017: corpus batteries compared no-input runs when a stem had answers.
-//RS /// `dev_iteration_with_timeout` cannot take a per-run fd 0, so those stems
-//RS /// leave the in-process path and compare a child CLI against AOT, both fed
-//RS /// `common::example_stdin`.
-//RS fn check_interactive_stem_cli_vs_aot(
-//RS     i: usize,
-//RS     stem: &str,
-//RS     dir: &std::path::Path,
-//RS     file: &str,
-//RS     answers: &str,
-//RS     interpret: bool,
-//RS     tag: &str,
-//RS     manifested_divergences: &[String],
-//RS ) -> DevBatteryStats {
-//RS     let left = normalize_for_parity(
-//RS         stem,
-//RS         cli_tier_program_output(file, stem, answers, interpret),
-//RS     );
-//RS     let compiled = normalize_for_parity(
-//RS         stem,
-//RS         compiled_binary_output_with_stdin(dir, tag, i, stem, file, Some(answers)),
-//RS     );
-//RS     if left != compiled {
-//RS         if is_manifested_parity_divergence(stem, manifested_divergences) {
-//RS             eprintln!("manifested parity divergence: {stem}");
-//RS             return DevBatteryStats {
-//RS                 ran: 1,
-//RS                 manifested: 1,
-//RS                 ..DevBatteryStats::default()
-//RS             };
-//RS         }
-//RS         assert_eq!(
-//RS             left, compiled,
-//RS             "DIVERGENCE for `{stem}` with the answers its golden was recorded with: CLI and compiled binary disagree"
-//RS         );
-//RS     }
-//RS     DevBatteryStats {
-//RS         ran: 1,
-//RS         ..DevBatteryStats::default()
-//RS     }
-//RS }
-//RS 
-//RS fn check_dev_default_stem(
-//RS     i: usize,
-//RS     stem: &str,
-//RS     dir: &std::path::Path,
-//RS     manifested_divergences: &[String],
-//RS ) -> DevBatteryStats {
-//RS     let file = example_path(stem);
-//RS     eprintln!("dev-default checking {stem}");
-//RS     if let Some(answers) = common::example_stdin(stem) {
-//RS         return check_interactive_stem_cli_vs_aot(
-//RS             i,
-//RS             stem,
-//RS             dir,
-//RS             &file,
-//RS             answers.piped,
-//RS             false,
-//RS             "dev_default_diff",
-//RS             manifested_divergences,
-//RS         );
-//RS     }
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let interpreted = match dev_iteration_with_timeout(stem, &file, false) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(diags) => {
-//RS             // Coverage gaps deopt; only named boundaries remain.
-//RS             assert!(
-//RS                 !diags.iter().any(|diagnostic| diagnostic.code == "E2211"),
-//RS                 "`{stem}` must not emit retired E2211: {diags:?}"
-//RS             );
-//RS             eprintln!(
-//RS                 "default boundary: {stem}: {}",
-//RS                 diags
-//RS                     .iter()
-//RS                     .map(|d| d.code.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",")
-//RS             );
-//RS             assert!(
-//RS                 is_named_dev_boundary(stem, &diags),
-//RS                 "`{}` neither ran nor stopped at a named boundary {:?} under the default \
-//RS                  jet dev backend; codes were {:?}",
-//RS                 stem,
-//RS                 BOUNDARY_CODES,
-//RS                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-//RS             );
-//RS             return DevBatteryStats {
-//RS                 boundary: 1,
-//RS                 boundary_stems: vec![stem.to_string()],
-//RS                 ..DevBatteryStats::default()
-//RS             };
-//RS         }
-//RS     };
-//RS 
-//RS     // Host AOT may fail (missing -lbz2, rawptr cast gaps) even when tiered
-//RS     // deopt ran. Skip parity when rustc can't build the oracle — not a P0
-//RS     // tier bug.
-//RS     let Some(compiled) = try_compiled_binary_output(dir, "dev_default_diff", i, stem, &file) else {
-//RS         eprintln!("aot unavailable (skip parity): {stem}");
-//RS         return DevBatteryStats {
-//RS             ran: 1,
-//RS             deopt: usize::from(jet_jit::deopt_invoked_for_test()),
-//RS             ..DevBatteryStats::default()
-//RS         };
-//RS     };
-//RS     let interpreted = normalize_for_parity(stem, interpreted);
-//RS     let compiled = normalize_for_parity(stem, compiled);
-//RS     if interpreted != compiled {
-//RS         if is_manifested_parity_divergence(stem, manifested_divergences) {
-//RS             eprintln!("manifested parity divergence: {stem}");
-//RS             return DevBatteryStats {
-//RS                 ran: 1,
-//RS                 manifested: 1,
-//RS                 ..DevBatteryStats::default()
-//RS             };
-//RS         }
-//RS         assert_eq!(
-//RS             interpreted, compiled,
-//RS             "DIVERGENCE for `{}` under the default jet dev backend: JIT/fallback and compiled \
-//RS              binary disagree on stdout/stderr/exit code — this is a P0 miscompile",
-//RS             stem
-//RS         );
-//RS     }
-//RS     DevBatteryStats {
-//RS         ran: 1,
-//RS         deopt: usize::from(jet_jit::deopt_invoked_for_test()),
-//RS         ..DevBatteryStats::default()
-//RS     }
-//RS }
-//RS 
-//RS fn run_dev_default_battery_parallel(
-//RS     stems: Vec<String>,
-//RS     dir: PathBuf,
-//RS     manifested_divergences: Vec<String>,
-//RS ) -> DevBatteryStats {
-//RS     let jobs = Arc::new(Mutex::new(
-//RS         stems
-//RS             .into_iter()
-//RS             .enumerate()
-//RS             .collect::<std::collections::VecDeque<_>>(),
-//RS     ));
-//RS     let dir = Arc::new(dir);
-//RS     let manifested_divergences = Arc::new(manifested_divergences);
-//RS     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
-//RS     let worker_count = test_worker_count(16);
-//RS     let mut handles = Vec::new();
-//RS     for _ in 0..worker_count {
-//RS         let jobs = Arc::clone(&jobs);
-//RS         let dir = Arc::clone(&dir);
-//RS         let manifested_divergences = Arc::clone(&manifested_divergences);
-//RS         let failures = Arc::clone(&failures);
-//RS         handles.push(
-//RS             std::thread::Builder::new()
-//RS                 .spawn(move || {
-//RS                     let mut stats = DevBatteryStats::default();
-//RS                     loop {
-//RS                         let Some((i, stem)) =
-//RS                             lock_recovered(&jobs, "dev default work queue").pop_front()
-//RS                         else {
-//RS                             break;
-//RS                         };
-//RS                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                             check_dev_default_stem(i, &stem, &dir, &manifested_divergences)
-//RS                         }));
-//RS                         match result {
-//RS                             Ok(next) => stats.add(next),
-//RS                             Err(payload) => lock_recovered(&failures, "dev default failure report")
-//RS                                 .push(format!("{stem}: {}", panic_message(payload))),
-//RS                         }
-//RS                     }
-//RS                     stats
-//RS                 })
-//RS                 .expect("dev default worker"),
-//RS         );
-//RS     }
-//RS 
-//RS     let mut stats = DevBatteryStats::default();
-//RS     for handle in handles {
-//RS         stats.add(
-//RS             handle
-//RS                 .join()
-//RS                 .expect("dev default worker panicked outside harness"),
-//RS         );
-//RS     }
-//RS     let failures = judged_report(&failures, "dev default failure report");
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "dev default parity failures:\n{}",
-//RS         failures.join("\n\n")
-//RS     );
-//RS     report_oracle_cache_counts();
-//RS     stats
-//RS }
-//RS 
-//RS fn check_interpreter_stem(
-//RS     i: usize,
-//RS     stem: &str,
-//RS     dir: &std::path::Path,
-//RS     manifested_divergences: &[String],
-//RS ) -> DevBatteryStats {
-//RS     if uses_ffi_bridge(stem) {
-//RS         return DevBatteryStats::default();
-//RS     }
-//RS     let file = example_path(stem);
-//RS     eprintln!("interpreter checking {stem}");
-//RS     if let Some(answers) = common::example_stdin(stem) {
-//RS         return check_interactive_stem_cli_vs_aot(
-//RS             i,
-//RS             stem,
-//RS             dir,
-//RS             &file,
-//RS             answers.piped,
-//RS             true,
-//RS             "dev_diff",
-//RS             manifested_divergences,
-//RS         );
-//RS     }
-//RS     let interpreted = match dev_iteration_with_timeout(stem, &file, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(diags) => {
-//RS             assert!(
-//RS                 is_named_dev_boundary(stem, &diags),
-//RS                 "`{}` neither ran nor stopped at a named boundary {:?}; codes were {:?}",
-//RS                 stem,
-//RS                 BOUNDARY_CODES,
-//RS                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-//RS             );
-//RS             return DevBatteryStats {
-//RS                 boundary: 1,
-//RS                 ..DevBatteryStats::default()
-//RS             };
-//RS         }
-//RS     };
-//RS 
-//RS     let Some(compiled) = try_compiled_binary_output(dir, "dev_diff", i, stem, &file) else {
-//RS         eprintln!("aot unavailable (skip parity): {stem}");
-//RS         return DevBatteryStats {
-//RS             ran: 1,
-//RS             ..DevBatteryStats::default()
-//RS         };
-//RS     };
-//RS     let interpreted = normalize_for_parity(stem, interpreted);
-//RS     let compiled = normalize_for_parity(stem, compiled);
-//RS     if interpreted != compiled {
-//RS         if is_manifested_parity_divergence(stem, manifested_divergences) {
-//RS             eprintln!("manifested parity divergence: {stem}");
-//RS             return DevBatteryStats {
-//RS                 ran: 1,
-//RS                 manifested: 1,
-//RS                 ..DevBatteryStats::default()
-//RS             };
-//RS         }
-//RS         assert_eq!(
-//RS             interpreted, compiled,
-//RS             "DIVERGENCE for `{}`: interpreter and compiled binary disagree on stdout/stderr/exit code — this is a P0 miscompile",
-//RS             stem
-//RS         );
-//RS     }
-//RS     DevBatteryStats {
-//RS         ran: 1,
-//RS         ..DevBatteryStats::default()
-//RS     }
-//RS }
-//RS 
-//RS fn run_interpreter_battery_parallel(
-//RS     stems: Vec<String>,
-//RS     dir: PathBuf,
-//RS     manifested_divergences: Vec<String>,
-//RS ) -> DevBatteryStats {
-//RS     let jobs = Arc::new(Mutex::new(
-//RS         stems
-//RS             .into_iter()
-//RS             .enumerate()
-//RS             .collect::<std::collections::VecDeque<_>>(),
-//RS     ));
-//RS     let dir = Arc::new(dir);
-//RS     let manifested_divergences = Arc::new(manifested_divergences);
-//RS     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
-//RS     let worker_count = test_worker_count(16);
-//RS     let mut handles = Vec::new();
-//RS     for _ in 0..worker_count {
-//RS         let jobs = Arc::clone(&jobs);
-//RS         let dir = Arc::clone(&dir);
-//RS         let manifested_divergences = Arc::clone(&manifested_divergences);
-//RS         let failures = Arc::clone(&failures);
-//RS         handles.push(
-//RS             std::thread::Builder::new()
-//RS                 .spawn(move || {
-//RS                     let mut stats = DevBatteryStats::default();
-//RS                     loop {
-//RS                         let Some((i, stem)) =
-//RS                             lock_recovered(&jobs, "interpreter work queue").pop_front()
-//RS                         else {
-//RS                             break;
-//RS                         };
-//RS                         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                             check_interpreter_stem(i, &stem, &dir, &manifested_divergences)
-//RS                         }));
-//RS                         match result {
-//RS                             Ok(next) => stats.add(next),
-//RS                             Err(payload) => lock_recovered(&failures, "interpreter failure report")
-//RS                                 .push(format!("{stem}: {}", panic_message(payload))),
-//RS                         }
-//RS                     }
-//RS                     stats
-//RS                 })
-//RS                 .expect("interpreter worker"),
-//RS         );
-//RS     }
-//RS 
-//RS     let mut stats = DevBatteryStats::default();
-//RS     for handle in handles {
-//RS         stats.add(
-//RS             handle
-//RS                 .join()
-//RS                 .expect("interpreter worker panicked outside harness"),
-//RS         );
-//RS     }
-//RS     let failures = judged_report(&failures, "interpreter failure report");
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "interpreter parity failures:\n{}",
-//RS         failures.join("\n\n")
-//RS     );
-//RS     report_oracle_cache_counts();
-//RS     stats
-//RS }
-//RS 
-//RS /// A scratch index no other in-flight oracle build can be using.
-//RS ///
-//RS /// #2020: `assert_cranelift_three_way` hard-coded index 0, so every stem's
-//RS /// generated `.rs` landed on the same file name. That was invisible while the
-//RS /// battery judged one stem at a time; two stems judged at once would overwrite
-//RS /// each other's source. One counter, so every oracle build names its own
-//RS /// scratch no matter which thread asked for it.
-//RS fn next_oracle_index() -> usize {
-//RS     static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-//RS     NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
-//RS }
-//RS 
-//RS /// Judge one curated stem list, each stem in its own child run of `test_name`.
-//RS ///
-//RS /// #2020: ten tests carried a private copy of this loop and every copy spawned
-//RS /// its children strictly one at a time. That put ~160 optimized `rustc` builds
-//RS /// in series inside `--test dev`, which is most of why the 900s suite guard
-//RS /// aborted the binary before ~30 of its declared tests ever started. The
-//RS /// children were already isolated — own process, own pid-keyed scratch, own
-//RS /// thread-local JIT state — so the serialization bought nothing.
-//RS ///
-//RS /// The FFI bridge is the one build artifact the children share, and the product
-//RS /// locks that cache per key across processes (#2075), so a bridge stem needs no
-//RS /// suite-level serialization. Ten copies of one loop is also why their timeouts
-//RS /// had already drifted apart with nothing naming the difference (AGENTS.md I8);
-//RS /// the timeout is a parameter now.
-//RS fn run_child_stem_battery(
-//RS     test_name: &str,
-//RS     child_env: &str,
-//RS     label: &str,
-//RS     timeout: Duration,
-//RS     stems: &[&str],
-//RS     extra_env: &[(&str, &str)],
-//RS ) {
-//RS     let jobs = Arc::new(Mutex::new(
-//RS         stems
-//RS             .iter()
-//RS             .map(|stem| (*stem).to_string())
-//RS             .collect::<std::collections::VecDeque<_>>(),
-//RS     ));
-//RS     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
-//RS     let mut handles = Vec::new();
-//RS     for worker in 0..test_worker_count(8) {
-//RS         let jobs = Arc::clone(&jobs);
-//RS         let failures = Arc::clone(&failures);
-//RS         let test_name = test_name.to_string();
-//RS         let child_env = child_env.to_string();
-//RS         let label = label.to_string();
-//RS         let extra_env: Vec<(String, String)> = extra_env
-//RS             .iter()
-//RS             .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
-//RS             .collect();
-//RS         handles.push(
-//RS             std::thread::Builder::new()
-//RS                 .name(format!("child-stem-battery-{worker}"))
-//RS                 .spawn(move || loop {
-//RS                     let Some(stem) = lock_recovered(&jobs, "child stem battery queue").pop_front()
-//RS                     else {
-//RS                         break;
-//RS                     };
-//RS                     // Every sibling battery in this file already does this
-//RS                     // (`dev default`, `interpreter`, `three-way`, `corpus
-//RS                     // gate`): a per-stem panic becomes THIS stem's failure
-//RS                     // line, so the run keeps going and the report names the
-//RS                     // stem and its real message. Letting the panic ride the
-//RS                     // thread out instead cost the batch twice — `join()`
-//RS                     // re-panicked with a `Box<dyn Any>` that `expect` renders
-//RS                     // as `Any { .. }`, and every stem still queued behind the
-//RS                     // first casualty was never judged at all.
-//RS                     let judged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                         let mut command =
-//RS                             Command::new(std::env::current_exe().expect("current dev test binary"));
-//RS                         command
-//RS                             .args(["--exact", test_name.as_str(), "--nocapture"])
-//RS                             .env(&child_env, &stem)
-//RS                             .env("NO_COLOR", "1");
-//RS                         for (key, value) in &extra_env {
-//RS                             command.env(key, value);
-//RS                         }
-//RS                         command_output_with_timeout(command, timeout, &format!("{label} `{stem}`"))
-//RS                     }));
-//RS                     match judged {
-//RS                         Ok(output) if output.status.success() => {}
-//RS                         Ok(output) => {
-//RS                             lock_recovered(&failures, "child stem battery failures").push(format!(
-//RS                                 "{stem}: status={:?}\nstdout:\n{}\nstderr:\n{}",
-//RS                                 output.status,
-//RS                                 String::from_utf8_lossy(&output.stdout),
-//RS                                 String::from_utf8_lossy(&output.stderr)
-//RS                             ));
-//RS                         }
-//RS                         Err(payload) => lock_recovered(&failures, "child stem battery failures")
-//RS                             .push(format!("{stem}: {}", panic_message(payload))),
-//RS                     }
-//RS                 })
-//RS                 .expect("child stem battery worker"),
-//RS         );
-//RS     }
-//RS     for handle in handles {
-//RS         handle
-//RS             .join()
-//RS             .expect("child stem battery worker panicked outside the per-stem guard");
-//RS     }
-//RS     let failures = judged_report(&failures, "child stem battery failures");
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "{label} failures:\n{}",
-//RS         failures.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS /// Judge the three-way universe in a bounded pool instead of one stem at a time.
-//RS ///
-//RS /// #2020: this battery pays an optimized `rustc` build per stem over ~350 stems,
-//RS /// so on its own it outlasted the whole 900s suite budget and the binary never
-//RS /// reached its own summary. Every leg is per-thread state — `jet_jit` keeps the
-//RS /// trace flags, the program args and the resident module in thread-locals — and
-//RS /// `collect_corpus_gate_records` already judges the same corpus with
-//RS /// `test_worker_count(8)` workers doing the same three legs, so serial execution
-//RS /// was never what kept the legs honest.
-//RS ///
-//RS /// Each worker enters `with_jit_test_scope` per stem: that is the product
-//RS /// boundary that installs the sized compiler stack on THIS thread, which a
-//RS /// default 2 MiB worker stack does not have.
-//RS ///
-//RS /// A failing stem is named and the rest are still judged, exactly as
-//RS /// `run_interpreter_battery_parallel` does. The old walk stopped at the first
-//RS /// divergence, so one failure hid every other one.
-//RS fn run_three_way_battery_parallel(stems: Vec<String>) -> usize {
-//RS     let total = stems.len();
-//RS     let jobs = Arc::new(Mutex::new(std::collections::VecDeque::from(stems)));
-//RS     let failures = Arc::new(Mutex::new(Vec::<String>::new()));
-//RS     let ran = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-//RS     let mut handles = Vec::new();
-//RS     for worker in 0..test_worker_count(8) {
-//RS         let jobs = Arc::clone(&jobs);
-//RS         let failures = Arc::clone(&failures);
-//RS         let ran = Arc::clone(&ran);
-//RS         handles.push(
-//RS             std::thread::Builder::new()
-//RS                 .name(format!("three-way-{worker}"))
-//RS                 .spawn(move || loop {
-//RS                     let Some(stem) = lock_recovered(&jobs, "three-way work queue").pop_front()
-//RS                     else {
-//RS                         break;
-//RS                     };
-//RS                     eprintln!("three-way battery: checking `{stem}`");
-//RS                     let judged = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-//RS                         with_jit_test_scope(|| {
-//RS                             assert_cranelift_three_way(&example_path(&stem), &stem)
-//RS                         })
-//RS                     }));
-//RS                     match judged {
-//RS                         Ok(()) => {
-//RS                             ran.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-//RS                         }
-//RS                         Err(payload) => lock_recovered(&failures, "three-way failure report")
-//RS                             .push(format!("{stem}: {}", panic_message(payload))),
-//RS                     }
-//RS                 })
-//RS                 .expect("three-way battery worker"),
-//RS         );
-//RS     }
-//RS     for handle in handles {
-//RS         handle.join().expect("three-way battery worker panicked");
-//RS     }
-//RS     let failures = judged_report(&failures, "three-way failure report");
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "three-way differential failures ({} of {total} stem(s)):\n{}",
-//RS         failures.len(),
-//RS         failures.join("\n\n")
-//RS     );
-//RS     ran.load(std::sync::atomic::Ordering::Relaxed)
-//RS }
-//RS 
-//RS fn check_job_runner_interpreter(root: &PathBuf, file: &str) {
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("job_runner loads");
-//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "job_runner front end: {errors:?}");
-//RS     for (job, expected_name) in [
-//RS         ("greet", "job_runner.greet"),
-//RS         ("seed_data", "job_runner.seed_data"),
-//RS     ] {
-//RS         let expected = fs::read_to_string(root.join(format!(
-//RS             "Examples/features/expected/devloop/{expected_name}.out"
-//RS         )))
-//RS         .unwrap_or_else(|_| panic!("missing expected/devloop/{expected_name}.out"));
-//RS         let policy = common::development_policy();
-//RS         match common::run_interpreter_named_job(&bundle, file, job, false, &policy) {
-//RS             RunOutcome::Ran { stdout, .. } => assert_eq!(
-//RS                 stdout, expected,
-//RS                 "interpreter job `{job}` differs from golden"
-//RS             ),
-//RS             RunOutcome::Problems(diags) => panic!(
-//RS                 "interpreter job `{job}` did not run: {:?}",
-//RS                 diags.iter().map(|d| d.code.as_str()).collect::<Vec<_>>()
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Load + check a fixture on the canonical compiler worker.
-//RS ///
-//RS /// `Loader::load_entry` and `Sema::check_bundle` are the same unbounded-depth
-//RS /// recursive descent every compile entry runs, and reaching them directly --
-//RS /// as this helper does, and as any embedder holding its own bundle would --
-//RS /// skips the driver's own boundary. Without it a 2 MiB libtest worker aborts
-//RS /// the whole binary and reports every other in-flight test as failed.
-//RS fn checked_bundle_from_path(file: &str) -> jet::AST::ProgramBundle {
-//RS     jet::run_compiler_work(|| {
-//RS         let mut b = jet::Loader::load_entry(file).expect("bundle should load");
-//RS         let diags = jet::Sema::check_bundle(&mut b, jet::Sema::CompileMode::Run);
-//RS         let errors: Vec<_> = diags
-//RS             .into_iter()
-//RS             .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS             .collect();
-//RS         assert!(errors.is_empty(), "fixture must type-check: {errors:?}");
-//RS         b
-//RS     })
-//RS }
-//RS 
-//RS fn assert_cranelift_matches_interpreter(src: &str, tag: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let p = std::env::temp_dir().join(format!("jet_jit_m3_{tag}.jet"));
-//RS     fs::write(&p, src).unwrap();
-//RS     let shown = p.to_string_lossy().to_string();
-//RS 
-//RS     let expected = match dev_iteration(&shown, false, true) {
-//RS         RunOutcome::Ran { stdout, .. } => stdout,
-//RS         RunOutcome::Problems(ds) => {
-//RS             panic!("interpreter baseline must run `{tag}`, got diagnostics: {ds:?}")
-//RS         }
-//RS     };
-//RS 
-//RS     let bundle = checked_bundle_from_path(&shown);
-//RS     let policy = common::development_policy();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let got = match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-//RS         RunOutcome::Ran { stdout, .. } => stdout,
-//RS         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{tag}`: {ds:?}"),
-//RS     };
-//RS     assert_eq!(
-//RS         got, expected,
-//RS         "cranelift output drifted from interpreter for `{tag}`"
-//RS     );
-//RS }
-//RS 
-//RS fn run_cranelift_outcome(src: &str, tag: &str) -> ProgramOutput {
-//RS     let p = std::env::temp_dir().join(format!("jet_jit_result_{tag}.jet"));
-//RS     fs::write(&p, src).unwrap();
-//RS     let shown = p.to_string_lossy().to_string();
-//RS     let bundle = checked_bundle_from_path(&shown);
-//RS     // #778: tiered Cranelift + silent deopt (E2211 retired).
-//RS     let policy = common::development_policy();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     match common::run_cranelift_bundle(&mut backend, &bundle, false, &policy) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
-//RS     }
-//RS }
-//RS 
-//RS fn run_cranelift_outcome_without_fallback(src: &str, tag: &str) -> RunOutcome {
-//RS     let p = std::env::temp_dir().join(format!("jet_jit_no_fallback_{tag}.jet"));
-//RS     fs::create_dir_all(p.parent().unwrap()).unwrap();
-//RS     fs::write(&p, src).unwrap();
-//RS     let shown = p.to_string_lossy().to_string();
-//RS     let bundle = checked_bundle_from_path(&shown);
-//RS     // #778: coverage gaps silent-deopt; preserve the shared helper's existing
-//RS     // tiered behavior for unrelated dev tests.
-//RS     let policy = common::development_policy();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     common::run_cranelift_bundle(&mut backend, &bundle, false, &policy)
-//RS }
-//RS 
-//RS fn run_cranelift_without_fallback(src: &str, tag: &str) -> ProgramOutput {
-//RS     match run_cranelift_outcome_without_fallback(src, tag) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(ds) => panic!("`{tag}` JIT returned diagnostics: {ds:?}"),
-//RS     }
-//RS }
-//RS 
-//RS fn run_cranelift_resident_file_outcome(file: &str, tag: &str) -> RunOutcome {
-//RS     let bundle = checked_bundle_from_path(file);
-//RS     common::cranelift_strict_run(&bundle, &common::development_policy())
-//RS         .unwrap_or_else(|reason| panic!("`{tag}` resident JIT failed: {reason}"))
-//RS }
-//RS 
-//RS /// Run one resident-JIT fixture on the JIT test state scope. A successful
-//RS /// interpreter result is not resident-JIT evidence.
-//RS fn run_cranelift_resident(src: &str, tag: &str) -> ProgramOutput {
-//RS     let p = std::env::temp_dir().join(format!("jet_jit_resident_{tag}.jet"));
-//RS     fs::create_dir_all(p.parent().unwrap()).unwrap();
-//RS     fs::write(&p, src).unwrap();
-//RS     let shown = p.to_string_lossy().to_string();
-//RS     run_cranelift_resident_file(&shown, tag)
-//RS }
-//RS 
-//RS fn run_cranelift_resident_file(file: &str, tag: &str) -> ProgramOutput {
-//RS     let file = file.to_owned();
-//RS     let tag = tag.to_owned();
-//RS     with_jit_test_scope(move || {
-//RS         jet_jit::reset_jit_trace_for_test();
-//RS         let outcome = run_cranelift_resident_file_outcome(&file, &tag);
-//RS         assert!(
-//RS             jet_jit::jit_executed_for_test(),
-//RS             "`{tag}` must execute resident Cranelift"
-//RS         );
-//RS         assert!(
-//RS             !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS             "`{tag}` must not deopt to the interpreter or use fallback"
-//RS         );
-//RS         match outcome {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => {
-//RS                 panic!("`{tag}` resident JIT returned diagnostics: {ds:?}")
-//RS             }
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn run_default_dev_resident(file: &str, tag: &str) -> ProgramOutput {
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let outcome = dev_iteration_with_timeout(tag, file, false);
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "default dev `{tag}` must execute resident Cranelift"
-//RS     );
-//RS     if jet_jit::deopt_invoked_for_test() || jet_jit::fallback_invoked_for_test() {
-//RS         let bundle = checked_bundle_from_path(file);
-//RS         panic!(
-//RS             "default dev `{tag}` must not deopt to the interpreter or use fallback; tier plan: {:?}",
-//RS             common::cranelift_tier_plan(&bundle)
-//RS         );
-//RS     }
-//RS     match outcome {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(ds) => panic!("default dev `{tag}` returned diagnostics: {ds:?}"),
-//RS     }
-//RS }
-//RS 
-//RS /// Drive the real CLI default backend. `--trace-tiers` is the observable
-//RS /// proof that this child process stayed in resident Cranelift.
-//RS fn run_cli_default_resident(command: &str, file: &str, tag: &str) -> ProgramOutput {
-//RS     let cache = common::unique_tmp(&format!("jet_{tag}_cache"));
-//RS     fs::create_dir_all(&cache).unwrap();
-//RS     let mut args = vec![command, file, "--trace-tiers"];
-//RS     if command == "dev" {
-//RS         args.extend(["--watch=off", "--quiet"]);
-//RS     }
-//RS     let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
-//RS     cmd.args(args)
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1")
-//RS         .env("JET_RUN_CACHE_DIR", &cache)
-//RS         .env("JET_STORE_DIR", cache.join("build"));
-//RS     let output = command_output_with_timeout(
-//RS         cmd,
-//RS         *DEV_DIFF_TIMEOUT,
-//RS         &format!("default CLI {command} for `{tag}`"),
-//RS     );
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "default CLI {command} failed for `{tag}`:\nstdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     let trace = String::from_utf8_lossy(&output.stderr);
-//RS     assert!(
-//RS         trace.contains("tier1 native"),
-//RS         "default CLI {command} did not report native Cranelift for `{tag}`:\n{trace}"
-//RS     );
-//RS     assert!(
-//RS         !trace.contains("tier0 interp"),
-//RS         "default CLI {command} deopted to the interpreter for `{tag}`:\n{trace}"
-//RS     );
-//RS     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-//RS     let stdout = match stdout.find("✓ ran in ") {
-//RS         Some(end) => stdout[..end].to_string(),
-//RS         None => stdout,
-//RS     };
-//RS     let _ = fs::remove_dir_all(&cache);
-//RS     ProgramOutput::ran(stdout, String::new(), output.status.code().unwrap_or(1))
-//RS }
-//RS 
-//RS fn assert_cli_diagnostic_snapshot(command: &str, fixture: &str, snapshot: &str) {
-//RS     let mut args = vec![command, fixture];
-//RS     if command == "dev" {
-//RS         args.extend(["--watch=off", "--quiet"]);
-//RS     }
-//RS     let mut cmd = Command::new(env!("CARGO_BIN_EXE_jet"));
-//RS     cmd.args(args)
-//RS         .current_dir(env!("CARGO_MANIFEST_DIR"))
-//RS         .env("NO_COLOR", "1");
-//RS     let output = command_output_with_timeout(
-//RS         cmd,
-//RS         *DEV_DIFF_TIMEOUT,
-//RS         &format!("default CLI {command} diagnostic"),
-//RS     );
-//RS     assert!(
-//RS         !output.status.success(),
-//RS         "default CLI {command} unexpectedly accepted `{fixture}`"
-//RS     );
-//RS     let rendered = format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     assert!(
-//RS         rendered.starts_with(snapshot),
-//RS         "default CLI {command} diagnostic drifted from UI snapshot:\n{rendered}"
-//RS     );
-//RS }
-//RS 
-//RS fn golden_stdout(stem: &str) -> String {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     fs::read_to_string(root.join(format!("Examples/features/expected/{stem}.out")))
-//RS         .unwrap_or_else(|e| panic!("missing golden for `{stem}`: {e}"))
-//RS }
-//RS 
-//RS fn conformance_application_authority() -> jet_foundation::Authority::ApplicationAuthority {
-//RS     let mut allow = jet_foundation::Authority::Effect::all();
-//RS     allow.extend(
-//RS         jet_foundation::Authority::ApplicationAuthority::AMBIENT_BASIC_EFFECTS
-//RS             .iter()
-//RS             .map(|effect| (*effect).to_string()),
-//RS     );
-//RS     let allow = allow.into_iter().collect::<Vec<_>>();
-//RS     jet_foundation::Authority::ApplicationAuthority::from_policy(
-//RS         Some(&allow),
-//RS         None,
-//RS         "core conformance harness",
-//RS     )
-//RS }
-//RS 
-//RS fn assert_cranelift_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let is_core_conformance = stem.starts_with("conformance/");
-//RS     if is_core_conformance {
-//RS         // The corpus proves I9 tier parity for Core surfaces, not application
-//RS         // policy. Authority/E1803 suites prove that policy separately; leaving
-//RS         // the ambient default here would make effect-carrying Core surfaces
-//RS         // untestable.
-//RS         bundle.package_guarantees.application_authority = conformance_application_authority();
-//RS     }
-//RS     // Same single build-fact snapshot the corpus gate seeds before sema (see
-//RS     // `corpus_gate_record`). The conformance AOT path consumes this checked
-//RS     // bundle directly; ordinary feature oracles retain `compile_with_path`.
-//RS     // Without it this harness builds a DIFFERENT bundle from the gate, so the
-//RS     // two differential oracles disagree on every `@build.*` read and the
-//RS     // weaker one silently passes (I9: engines marshal one snapshot).
-//RS     jet::Driver::seed_build_facts(
-//RS         &mut bundle,
-//RS         "dev",
-//RS         false,
-//RS         &std::collections::BTreeMap::new(),
-//RS     )
-//RS     .unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "`{stem}` build facts should seed: {}",
-//RS             diags
-//RS                 .iter()
-//RS                 .map(|d| format!("{}: {}", d.code, d.what))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("; ")
-//RS         )
-//RS     });
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check: {errors:?}");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     // Run the interpreter against the exact checked bundle above. Reloading
-//RS     // through `dev_iteration` re-applies the repository application's
-//RS     // authority manifest, which is unrelated to these standalone generated
-//RS     // witnesses and can reject otherwise valid Core calls before interpretation.
-//RS     // AOT's argv[0] is the compiled witness name. Give the in-process tiers
-//RS     // the same witness identity instead of an empty synthetic argument vector.
-//RS     let program_args = [file.to_string()];
-//RS     let interpreted = {
-//RS         use jet::JitBackend::{InterpreterBackend, JitBackend as _};
-//RS         let mut backend =
-//RS             InterpreterBackend::new(jet::Interpreter::InterpreterInvocation::DevInterpret);
-//RS         match jet_jit::with_program_args(&program_args, || {
-//RS             common::run_interpreter_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             )
-//RS         }) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-//RS             RunOutcome::Problems(diags)
-//RS                 if diags
-//RS                     .iter()
-//RS                     .any(|d| d.code == "E0956" || d.code == "E1265") =>
-//RS             {
-//RS                 if is_core_conformance {
-//RS                     panic!(
-//RS                         "Core conformance witness must run in the forced interpreter `{stem}`, got: {diags:?}"
-//RS                     );
-//RS                 }
-//RS                 None
-//RS             }
-//RS             RunOutcome::Problems(ds) => {
-//RS                 panic!(
-//RS                     "interpreter baseline must run `{stem}` or stop at E0956/E1265, got: {ds:?}"
-//RS                 )
-//RS             }
-//RS         }
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit = jet_jit::with_program_args(&program_args, || {
-//RS         match common::run_cranelift_bundle(&mut backend, &bundle, false, &common::development_policy()) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS         }
-//RS     });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS     let jit = normalize_for_parity(stem, jit);
-//RS     if let Some(interpreted) = interpreted {
-//RS         let interpreted = normalize_for_parity(stem, interpreted);
-//RS         assert_eq!(
-//RS             jit, interpreted,
-//RS             "JIT vs interpreter divergence for `{stem}`"
-//RS         );
-//RS     }
-//RS 
-//RS     let dir = aot_scratch_dir("jit_3way", stem);
-//RS     let aot = normalize_for_parity(
-//RS         stem,
-//RS         if is_core_conformance {
-//RS             compiled_binary_output_from_bundle(
-//RS                 &dir,
-//RS                 "jit_3way",
-//RS                 next_oracle_index(),
-//RS                 stem,
-//RS                 file,
-//RS                 &bundle,
-//RS             )
-//RS         } else {
-//RS             compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file)
-//RS         },
-//RS     );
-//RS     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
-//RS }
-//RS 
-//RS fn assert_ui_and_web_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     let expected = if stem == "web/web_wasm_callback" {
-//RS         // Native `run()` is empty; golden is the wasm/node harness (`42`).
-//RS         ProgramOutput::ran(String::new(), String::new(), 0)
-//RS     } else {
-//RS         ProgramOutput::ran(golden_stdout(stem), String::new(), 0)
-//RS     };
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-//RS         RunOutcome::Problems(diags)
-//RS             if diags
-//RS                 .iter()
-//RS                 .any(|d| d.code == "E0956" || d.code == "E1265") =>
-//RS         {
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!("interpreter baseline must run `{stem}` or stop at E0956/E1265, got: {diags:?}")
-//RS         }
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit =
-//RS         jet_jit::with_program_args(&[file.to_string()], || {
-//RS             match common::run_cranelift_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             ) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS             }
-//RS         });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1225", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1225", 0, stem, file);
-//RS 
-//RS     if let Some(interpreted) = interpreted {
-//RS         assert_eq!(
-//RS             interpreted, expected,
-//RS             "interpreter drifted from golden for `{stem}`"
-//RS         );
-//RS         assert_eq!(
-//RS             jit, interpreted,
-//RS             "JIT vs interpreter divergence for `{stem}`"
-//RS         );
-//RS     } else {
-//RS         assert_eq!(jit, expected, "JIT drifted from golden for `{stem}`");
-//RS     }
-//RS     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
-//RS }
-//RS 
-//RS fn assert_concurrency_and_game_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     let expected = if stem == "concurrency/deadline_context" {
-//RS         let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS         let mut stderr = fs::read_to_string(
-//RS             root.join("Examples/features/expected/concurrency/deadline_context.err.out"),
-//RS         )
-//RS         .expect("deadline_context.err.out");
-//RS         if !stderr.ends_with('\n') {
-//RS             stderr.push('\n');
-//RS         }
-//RS         ProgramOutput::ran(golden_stdout(stem), stderr, 70)
-//RS     } else {
-//RS         ProgramOutput::ran(golden_stdout(stem), String::new(), 0)
-//RS     };
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-//RS         RunOutcome::Problems(diags)
-//RS             if diags
-//RS                 .iter()
-//RS                 .any(|d| d.code == "E0956" || d.code == "E1265") =>
-//RS         {
-//RS             // Native concurrency/game surfaces may stop at a canonical
-//RS             // evaluator boundary; golden + resident JIT + AOT carry parity.
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!("interpreter baseline must run `{stem}` or stop at E0956/E1265, got: {diags:?}")
-//RS         }
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit =
-//RS         jet_jit::with_program_args(&[file.to_string()], || {
-//RS             match common::run_cranelift_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             ) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS             }
-//RS         });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1218", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1218", 0, stem, file);
-//RS 
-//RS     if let Some(interpreted) = interpreted {
-//RS         assert_eq!(
-//RS             interpreted, expected,
-//RS             "interpreter drifted from golden for `{stem}`"
-//RS         );
-//RS         assert_eq!(
-//RS             jit, interpreted,
-//RS             "JIT vs interpreter divergence for `{stem}`"
-//RS         );
-//RS     } else {
-//RS         assert_eq!(jit, expected, "JIT drifted from golden for `{stem}`");
-//RS     }
-//RS     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
-//RS }
-//RS 
-//RS fn assert_crypto_auth_vault_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-//RS         RunOutcome::Problems(diags)
-//RS             if diags.iter().any(|d| d.code == "E1265") =>
-//RS         {
-//RS             // Native crypto/auth/vault surfaces may stop at a canonical
-//RS             // evaluator boundary; golden + resident JIT + AOT carry parity.
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!("interpreter baseline must run `{stem}` or stop at E1265, got: {diags:?}")
-//RS         }
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit =
-//RS         jet_jit::with_program_args(&[file.to_string()], || {
-//RS             match common::run_cranelift_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             ) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS             }
-//RS         });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1222", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1222", 0, stem, file);
-//RS 
-//RS     if let Some(interpreted) = interpreted {
-//RS         assert_eq!(
-//RS             interpreted, expected,
-//RS             "interpreter drifted from golden for `{stem}`"
-//RS         );
-//RS         assert_eq!(
-//RS             jit, interpreted,
-//RS             "JIT vs interpreter divergence for `{stem}`"
-//RS         );
-//RS     } else {
-//RS         assert_eq!(jit, expected, "JIT drifted from golden for `{stem}`");
-//RS     }
-//RS     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
-//RS }
-//RS 
-//RS fn assert_network_http_browser_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     let expected = ProgramOutput::ran(golden_stdout(stem), String::new(), 0);
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-//RS         RunOutcome::Problems(diags)
-//RS             if diags
-//RS                 .iter()
-//RS                 .any(|d| d.code == "E0956" || d.code == "E1265") =>
-//RS         {
-//RS             // Live network/HTTP/WS may stop at their canonical evaluator
-//RS             // boundary (E0956/E1265); golden + resident JIT + AOT carry
-//RS             // ProgramOutput parity.
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!(
-//RS                 "interpreter baseline must run `{stem}` or stop at E0956/E1265, got: {diags:?}"
-//RS             )
-//RS         }
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit =
-//RS         jet_jit::with_program_args(&[file.to_string()], || {
-//RS             match common::run_cranelift_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             ) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS             }
-//RS         });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1221", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1221", 0, stem, file);
-//RS 
-//RS     if let Some(interpreted) = interpreted {
-//RS         assert_eq!(
-//RS             interpreted, expected,
-//RS             "interpreter drifted from golden for `{stem}`"
-//RS         );
-//RS         assert_eq!(
-//RS             jit, interpreted,
-//RS             "JIT vs interpreter divergence for `{stem}`"
-//RS         );
-//RS     } else {
-//RS         assert_eq!(jit, expected, "JIT drifted from golden for `{stem}`");
-//RS     }
-//RS     assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
-//RS }
-//RS 
-//RS fn golden_program_output(stem: &str) -> ProgramOutput {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     if example_has_err_golden(stem) {
-//RS         let stderr =
-//RS             fs::read_to_string(root.join(format!("Examples/features/expected/{stem}.err.out")))
-//RS                 .unwrap_or_else(|e| panic!("missing err golden for `{stem}`: {e}"));
-//RS         return ProgramOutput::ran(String::new(), stderr, 70);
-//RS     }
-//RS     ProgramOutput::ran(golden_stdout(stem), String::new(), 0)
-//RS }
-//RS 
-//RS fn strip_panic_locals(stderr: &str) -> String {
-//RS     stderr
-//RS         .lines()
-//RS         .filter(|line| !line.starts_with("locals:"))
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS         + if stderr.ends_with('\n') { "\n" } else { "" }
-//RS }
-//RS 
-//RS fn assert_data_pipelines_parsing_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     let expected = golden_program_output(stem);
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => Some(ProgramOutput::ran(stdout, stderr, exit_code)),
-//RS         RunOutcome::Problems(diags)
-//RS             if diags
-//RS                 .iter()
-//RS                 .any(|d| d.code == "E1265" || d.code == "E0956") =>
-//RS         {
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!(
-//RS                 "interpreter baseline must run `{stem}` or stop at known boundary, got: {diags:?}"
-//RS             )
-//RS         }
-//RS     };
-//RS 
-//RS     if stem == "reflection/reflect-value" {
-//RS         assert_eq!(
-//RS             interpreted.as_ref(),
-//RS             Some(&expected),
-//RS             "reflection example must match its golden output in the interpreter"
-//RS         );
-//RS     }
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit =
-//RS         jet_jit::with_program_args(&[file.to_string()], || {
-//RS             match common::run_cranelift_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             ) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS             }
-//RS         });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1223", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1223", 0, stem, file);
-//RS 
-//RS     // Golden + resident JIT + AOT own ProgramOutput. Interpreter is compared when
-//RS     // it already matches the golden (DataError Display / panic locals may differ).
-//RS     assert_eq!(jit, expected, "JIT drifted from golden for `{stem}`");
-//RS     if stem == "tooling/panic_report" {
-//RS         let body = |out: &ProgramOutput| {
-//RS             ProgramOutput::ran(
-//RS                 out.stdout.clone(),
-//RS                 strip_panic_locals(&out.stderr),
-//RS                 out.exit_code,
-//RS             )
-//RS         };
-//RS         assert_eq!(
-//RS             body(&jit),
-//RS             body(&aot),
-//RS             "JIT vs AOT panic body divergence for `{stem}`"
-//RS         );
-//RS         if let Some(interpreted) = &interpreted {
-//RS             assert_eq!(
-//RS                 body(interpreted),
-//RS                 body(&expected),
-//RS                 "interpreter panic body drifted from golden for `{stem}`"
-//RS             );
-//RS         }
-//RS     } else {
-//RS         assert_eq!(jit, aot, "JIT vs AOT divergence for `{stem}`");
-//RS         if let Some(interpreted) = &interpreted {
-//RS             if interpreted == &expected {
-//RS                 assert_eq!(
-//RS                     jit, *interpreted,
-//RS                     "JIT vs interpreter divergence for `{stem}`"
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn core_os_examples_match_interpreter_jit_and_aot_inner() {
-//RS     let _guard = lock_recovered(dev_diff_lock(), "dev_diff_lock");
-//RS     for stem in ["io/os_facts", "io/os_process_control"] {
-//RS         assert_io_cli_terminal_time_three_way(&example_path(stem), stem);
-//RS     }
-//RS }
-//RS 
-//RS fn golden_stderr(stem: &str) -> String {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let path = root.join(format!("Examples/features/expected/{stem}.stderr.out"));
-//RS     if path.is_file() {
-//RS         fs::read_to_string(path).unwrap_or_else(|e| panic!("read stderr golden for `{stem}`: {e}"))
-//RS     } else {
-//RS         String::new()
-//RS     }
-//RS }
-//RS 
-//RS /// #2017: the three-tier differential for an example that reads stdin.
-//RS ///
-//RS /// The same claim its caller makes — interpreter, resident JIT and AOT all
-//RS /// reproduce the checked-in golden byte for byte — with the one difference that
-//RS /// makes the claim true here: every tier is a child, and every child is fed the
-//RS /// answers the golden was recorded with, from `common::example_stdin`.
-//RS ///
-//RS /// Each tier gets its own file of answers rather than one shared pipe, because
-//RS /// the first reader would otherwise drain it and the other two would silently
-//RS /// run with no input — a pass that means "three tiers agree about nothing".
-//RS fn assert_interactive_example_three_way(file: &str, stem: &str, answers: &str) {
-//RS     let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
-//RS 
-//RS     // Which tier answered, then what it printed. Two runs, because the trace
-//RS     // that proves the tier lands on the stderr the golden pins.
-//RS     assert_cli_tier_answered(file, stem, answers, true);
-//RS     let interpreted = cli_tier_program_output(file, stem, answers, true);
-//RS     assert_eq!(
-//RS         interpreted, golden,
-//RS         "forced interpreter drifted from the golden for `{stem}` with the answers it was \
-//RS          recorded with"
-//RS     );
-//RS 
-//RS     assert_cli_tier_answered(file, stem, answers, false);
-//RS     let jit = cli_tier_program_output(file, stem, answers, false);
-//RS     assert_eq!(
-//RS         jit, golden,
-//RS         "resident JIT drifted from the golden for `{stem}` with the answers it was recorded with"
-//RS     );
-//RS 
-//RS     if !have_rustc() {
-//RS         eprintln!("note: rustc not found; `{stem}` compared on interpreter and resident JIT only");
-//RS         return;
-//RS     }
-//RS     let dir = aot_scratch_dir("stdin_three_way", stem);
-//RS     let aot =
-//RS         compiled_binary_output_with_stdin(&dir, "stdin_three_way", 0, stem, file, Some(answers));
-//RS     assert_eq!(
-//RS         aot, golden,
-//RS         "AOT drifted from the golden for `{stem}` with the answers it was recorded with"
-//RS     );
-//RS }
-//RS 
-//RS fn assert_io_cli_terminal_time_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     // #2017: an interactive example is only comparable against the answers its
-//RS     // golden was recorded with, and this battery fed NOTHING — so a pass here
-//RS     // meant the three tiers agreed on a no-input run while the golden described
-//RS     // a fed run. The answers come from `common::example_stdin`, the one home
-//RS     // for them (I8), and each tier gets its own child so each gets its own fd 0.
-//RS     // The in-process resident-JIT safety proof above still runs; the tier
-//RS     // attribution below moves to `--trace-tiers`, which is the out-of-process
-//RS     // form of the same claim (`run_cli_default_resident` already reads it).
-//RS     if let Some(answers) = common::example_stdin(stem) {
-//RS         assert_interactive_example_three_way(file, stem, answers.piped);
-//RS         return;
-//RS     }
-//RS 
-//RS     let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => {
-//RS             let out = ProgramOutput::ran(stdout, stderr, exit_code);
-//RS             if out == golden {
-//RS                 Some(out)
-//RS             } else {
-//RS                 None
-//RS             }
-//RS         }
-//RS         RunOutcome::Problems(diags)
-//RS             if diags
-//RS                 .iter()
-//RS                 .any(|d| d.code == "E1265" || d.code == "E0956") =>
-//RS         {
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!(
-//RS                 "interpreter baseline must run `{stem}` or stop at E1265/E0956, got: {diags:?}"
-//RS             )
-//RS         }
-//RS     };
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1219", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1219", 0, stem, file);
-//RS     let aot_bin = compiled_binary_path(&aot_scratch_dir("jit_1219", stem), "jit_1219", 0, file);
-//RS 
-//RS     // Watcher re-execs `os.executable() --watch-child`. Under resident JIT,
-//RS     // point argv[0] at the AOT binary so the child is the same program identity
-//RS     // AOT uses (not a `.jet` → `jet run` round-trip).
-//RS     let jit_argv0 = if stem == "io/watcher" {
-//RS         aot_bin.to_string_lossy().into_owned()
-//RS     } else {
-//RS         file.to_string()
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit = jet_jit::with_program_args(&[jit_argv0], || {
-//RS         match common::run_cranelift_bundle(&mut backend, &bundle, false, &common::development_policy()) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS         RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS         }
-//RS     });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     // AOT is the ProgramOutput oracle; golden pins stdout. Dev `?` traces may
-//RS     // land on stderr under JIT while release-flavored AOT goldens stay quiet.
-//RS     assert_eq!(
-//RS         aot.stdout, golden.stdout,
-//RS         "AOT stdout drifted from golden for `{stem}`"
-//RS     );
-//RS     assert_eq!(
-//RS         jit.stdout, aot.stdout,
-//RS         "JIT vs AOT stdout divergence for `{stem}`"
-//RS     );
-//RS     assert_eq!(
-//RS         jit.exit_code, aot.exit_code,
-//RS         "JIT vs AOT exit divergence for `{stem}`"
-//RS     );
-//RS     if let Some(interpreted) = interpreted {
-//RS         assert_eq!(
-//RS             interpreted.stdout, golden.stdout,
-//RS             "interpreter stdout drifted from golden for `{stem}`"
-//RS         );
-//RS     }
-//RS     // Prefer exact stderr when golden declares it; otherwise accept AOT stderr.
-//RS     let expected_stderr = if !golden.stderr.is_empty() {
-//RS         golden.stderr.clone()
-//RS     } else {
-//RS         aot.stderr.clone()
-//RS     };
-//RS     assert_eq!(
-//RS         jit.stderr, expected_stderr,
-//RS         "JIT stderr divergence for `{stem}`"
-//RS     );
-//RS     assert_eq!(
-//RS         aot.stderr, expected_stderr,
-//RS         "AOT stderr divergence for `{stem}`"
-//RS     );
-//RS }
-//RS 
-//RS fn assert_lowlevel_and_safety_three_way(file: &str, stem: &str) {
-//RS     if skip_if_cranelift_host_unsupported() {
-//RS         return;
-//RS     }
-//RS     let mut bundle = jet::Loader::load_entry(file).expect("bundle should load");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     let errors: Vec<_> = diags
-//RS         .into_iter()
-//RS         .filter(|d| matches!(d.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "`{stem}` must type-check: {errors:?}");
-//RS     let safety_detail = common::cranelift_resident_safe_detail(&bundle);
-//RS     let compile = common::compile_cranelift_bundle(&bundle, &common::development_policy());
-//RS     assert!(
-//RS         common::cranelift_resident_safe(&bundle) && compile.is_ok(),
-//RS         "`{stem}` must be resident-JIT safe for three-way differential: safety={safety_detail:?}, compile={compile:?}"
-//RS     );
-//RS 
-//RS     let golden = ProgramOutput::ran(golden_stdout(stem), golden_stderr(stem), 0);
-//RS 
-//RS     let interpreted = match dev_iteration(file, false, true) {
-//RS         RunOutcome::Ran {
-//RS             stdout,
-//RS             stderr,
-//RS             exit_code,
-//RS         } => {
-//RS             let out = ProgramOutput::ran(stdout, stderr, exit_code);
-//RS             if out.stdout == golden.stdout {
-//RS                 Some(out)
-//RS             } else {
-//RS                 // Interpreter may still stop short of release-flavored golden
-//RS                 // precision (F32 display); golden + JIT + AOT carry the oracle.
-//RS                 None
-//RS             }
-//RS         }
-//RS         RunOutcome::Problems(diags)
-//RS             if diags
-//RS                 .iter()
-//RS                 .any(|d| d.code == "E1265" || d.code == "E0956") =>
-//RS         {
-//RS             None
-//RS         }
-//RS         RunOutcome::Problems(diags) => {
-//RS             panic!(
-//RS                 "interpreter baseline must run `{stem}` or stop at E1265/E0956, got: {diags:?}"
-//RS             )
-//RS         }
-//RS     };
-//RS 
-//RS     jet_jit::reset_jit_trace_for_test();
-//RS     let mut backend = CraneliftBackend::new();
-//RS     let jit =
-//RS         jet_jit::with_program_args(&[file.to_string()], || {
-//RS             match common::run_cranelift_bundle(
-//RS                 &mut backend,
-//RS                 &bundle,
-//RS                 false,
-//RS                 &common::development_policy(),
-//RS             ) {
-//RS             RunOutcome::Ran {
-//RS                 stdout,
-//RS                 stderr,
-//RS                 exit_code,
-//RS             } => ProgramOutput::ran(stdout, stderr, exit_code),
-//RS             RunOutcome::Problems(ds) => panic!("cranelift backend did not run `{stem}`: {ds:?}"),
-//RS             }
-//RS         });
-//RS     assert!(
-//RS         jet_jit::jit_executed_for_test(),
-//RS         "`{stem}` did not execute in resident JIT"
-//RS     );
-//RS     assert!(
-//RS         !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS         "`{stem}` used deopt or fallback"
-//RS     );
-//RS 
-//RS     let dir = aot_scratch_dir("jit_1220", stem);
-//RS     let aot = compiled_binary_output(&dir, "jit_1220", 0, stem, file);
-//RS 
-//RS     if let Some(interpreted) = interpreted {
-//RS         assert_eq!(
-//RS             interpreted.stdout, golden.stdout,
-//RS             "interpreter stdout drifted from golden for `{stem}`"
-//RS         );
-//RS         assert_eq!(
-//RS             jit.stdout, interpreted.stdout,
-//RS             "JIT vs interpreter stdout divergence for `{stem}`"
-//RS         );
-//RS     } else {
-//RS         assert_eq!(
-//RS             jit.stdout, golden.stdout,
-//RS             "JIT stdout drifted from golden for `{stem}`"
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         aot.stdout, golden.stdout,
-//RS         "AOT stdout drifted from golden for `{stem}`"
-//RS     );
-//RS     assert_eq!(
-//RS         jit.stdout, aot.stdout,
-//RS         "JIT vs AOT stdout divergence for `{stem}`"
-//RS     );
-//RS     assert_eq!(
-//RS         jit.exit_code, aot.exit_code,
-//RS         "JIT vs AOT exit divergence for `{stem}`"
-//RS     );
-//RS }
-//RS 
-//RS /// Pin the CLIF Jet emits at a site that once produced verifier-invalid code
-//RS /// (#1989, #1990, #1991).
-//RS ///
-//RS /// This failure class is INVISIBLE from stdout alone. Cranelift's verifier
-//RS /// rejects the function, the tier silently deopts to the canonical
-//RS /// interpreter, and the program still prints the right answer — which is
-//RS /// exactly how the nine census members survived. Correct output is therefore
-//RS /// necessary but nowhere near sufficient; four facts have to hold together:
-//RS ///
-//RS ///   1. the repaired site is actually inside the emitted program, so a green
-//RS ///      run is evidence about *that* site (`jit_program_func_names`),
-//RS ///   2. every emitted function passes the verifier —
-//RS ///      `compile_cranelift_bundle` hands back the verifier's own text, so a
-//RS ///      regression names its own instruction and both disagreeing types instead of
-//RS ///      returning silently.
-//RS ///   3. the tier plan binds the whole program to resident Cranelift, and
-//RS ///   4. the run really executed native code: no deopt, no fallback.
-//RS ///
-//RS /// Invalid CLIF that Jet itself emitted is a compiler bug of I2's severity, so
-//RS /// every one of these is a hard failure rather than a recorded gap.
-// END-PORT-PENDING 1036 tests/dev_parts/support.rs:1807-3656
+// Private continuation of DevParts.Support; Main wires this fragment into that owner.
+use jet.[Loader, Sema, Diagnostics, AST, Driver, Interpreter]
+use jet_foundation.Tests.Integration.Common as common
+use std.[fs, env, process, sync, thread, panic, time, collections]
 
+// Retained execution providers replace retired resident-JIT representation checks.
+// GATE #4494: the provider builds and executes the selected native/Web artifact.
+fn support02_native_output(file: String, tier: String) -> ProgramOutput {
+    if tier == "Web" {
+        if common.run_entry_tier(OSPath(file), tier, false) == {
+            .Ran(exit_code, stdout, stderr) -> return ProgramOutput.ran(stdout, stderr, exit_code)
+            else -> panic("{tier} failed to execute `{file}`")
+        }
+    }
+    profile := match tier {
+        "O0" -> "debug"
+        "O1" -> "dev"
+        "O2" -> "release"
+        else -> panic("unknown execution tier {tier}")
+    }
+    mut cmd := process.Command.new(common.jet_bin())
+    cmd.args(["run", "--profile={profile}", file]).env("NO_COLOR", "1")
+    output := command_output_with_timeout(cmd, DEV_DIFF_TIMEOUT, "native {profile}: {file}")
+    ProgramOutput.ran(String.from_utf8_lossy(&output.stdout).into_owned(), String.from_utf8_lossy(&output.stderr).into_owned(), output.status.code().unwrap_or(1))
+}
+fn support02_checked_output(bundle: &AST.ProgramBundle, file: String, tier: String) -> ProgramOutput {
+    if common.run_checked_entry_tier(bundle, OSPath(file), tier, &[file], false) == {
+        .Ran(exit_code, stdout, stderr) -> ProgramOutput.ran(stdout, stderr, exit_code)
+        else -> panic("{tier} failed to execute checked bundle `{file}`")
+    }
+}
+fn support02_stdin_output(file: String, tier: String, answers: String) -> ProgramOutput {
+    if tier == "Web" {
+        if common.run_entry_tier_with_stdin(OSPath(file), tier, answers) == {
+            .Ran(exit_code, stdout, stderr) -> return ProgramOutput.ran(stdout, stderr, exit_code)
+            else -> panic("{tier} failed to execute `{file}` with stdin")
+        }
+    }
+    profile := match tier {
+        "O0" -> "debug"
+        "O1" -> "dev"
+        "O2" -> "release"
+        else -> panic("unknown execution tier {tier}")
+    }
+    dir := common.unique_tmp("jet_native_answers")
+    fs.create_dir_all(&dir).unwrap()
+    input := dir.join("answers")
+    fs.write(&input, answers).unwrap()
+    mut cmd := process.Command.new(common.jet_bin())
+    cmd.args(["run", "--profile={profile}", file]).env("NO_COLOR", "1").stdin(process.Stdio.from(fs.File.open(&input).unwrap()))
+    output := command_output_with_timeout(cmd, DEV_DIFF_TIMEOUT, "native {profile} with stdin: {file}")
+    _ :: fs.remove_dir_all(&dir)
+    ProgramOutput.ran(String.from_utf8_lossy(&output.stdout).into_owned(), String.from_utf8_lossy(&output.stderr).into_owned(), output.status.code().unwrap_or(1))
+}
+
+// Rust: tests/dev_parts/support.rs:1807
+fn print_jit_op_report() -> {
+    root := OSPath(env.manifest_dir())
+    ops: [String:(USize, USize)] = [:]
+    for path in topic_jet_files(&root) {
+        file := path.to_string_lossy()
+        mut bundle := match Loader.load_entry(&file) {
+            Ok(b) -> b
+            Err(_) -> continue
+        }
+        diags := Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+        if diags.iter().any(|d| -> d.severity == Diagnostics.Severity.Error) { continue }
+        covered := common.compile_entry_tier(&bundle, "O0").is_ok()
+        for tag in common.main_ops(&bundle) {
+            entry := ops.entry(tag).or_insert((0, 0))
+            if covered { entry.0 += 1 } else { entry.1 += 1 }
+        }
+    }
+    eprintln("native observed TIR op compile coverage:")
+    mut keys := ops.keys().collect()
+    keys.sort()
+    for op in keys {
+        (covered, gaps) := ops[op]
+        eprintln("  {op}: compile_covered_examples={covered} gap_examples={gaps}")
+    }
+}
+
+// Rust: tests/dev_parts/support.rs:1856
+// Honest execution boundaries: fuel, unsupported comptime constructs, user panic,
+// ungated effects, vault denial and frontend gaps retained by manifested corpora.
+const BOUNDARY_CODES: [String] = [
+    "E2202", "E0952", "E0956", "E0953", "E3410", "E3411", "E3412", "E1265",
+    "E0102", "E0857", "E0107", "E0501",
+    "E0308", "E0504", "E0302", "E0505", "E0915", "E0311", "E1004",
+]
+// Rust: tests/dev_parts/support.rs:1865
+const DEFAULT_BACKEND_EXPECTED_BOUNDARIES: [String] = ["collections/list_bounds"]
+
+// Rust: tests/dev_parts/support.rs:1868
+struct DevBatteryStats {
+    ran: USize = 0
+    boundary: USize = 0
+    deopt: USize = 0
+    manifested: USize = 0
+    boundary_stems: [String] = []
+    // Rust: tests/dev_parts/support.rs:1877
+    fn add(&self, mut other: DevBatteryStats) -> {
+        self.ran += other.ran
+        self.boundary += other.boundary
+        self.deopt += other.deopt
+        self.manifested += other.manifested
+        self.boundary_stems.append(&other.boundary_stems)
+    }
+}
+
+// Rust: tests/dev_parts/support.rs:1886
+fn assert_default_dev_jit_gap(stem: String, file: String) -> {
+    baseline := support02_native_output(file, "O0")
+    for tier in ["O1", "O2", "Web"] {
+        assert_eq(normalize_for_parity(stem, support02_native_output(file, tier)), normalize_for_parity(stem, baseline), "native coverage/output divergence for `{stem}` at {tier}")
+    }
+}
+// Rust: tests/dev_parts/support.rs:1909
+fn is_named_dev_boundary(stem: String, diags: &[Diagnostics.Diagnostic]) -> Bool {
+    diags.iter().any(|d| -> BOUNDARY_CODES.contains(&d.code)) ||
+        (stem == "io/db_checked_sql" && diags.iter().all(|d| -> d.code == "E1004"))
+}
+// Rust: tests/dev_parts/support.rs:1920
+fn check_interactive_stem_cli_vs_aot(i: USize, stem: String, dir: &OSPath, file: String, answers: String, interpret: Bool, tag: String, manifested_divergences: &[String]) -> DevBatteryStats {
+    left := normalize_for_parity(stem, cli_tier_program_output(file, stem, answers, interpret))
+    compiled := normalize_for_parity(stem, compiled_binary_output_with_stdin(dir, tag, i, stem, file, Some(answers)))
+    if left != compiled {
+        if is_manifested_parity_divergence(stem, manifested_divergences) {
+            eprintln("manifested parity divergence: {stem}")
+            return DevBatteryStats { ran: 1, manifested: 1 }
+        }
+        assert_eq(left, compiled, "DIVERGENCE for `{stem}` with the answers its golden was recorded with: CLI and compiled binary disagree")
+    }
+    DevBatteryStats { ran: 1 }
+}
+// Rust: tests/dev_parts/support.rs:1958
+fn check_dev_default_stem(i: USize, stem: String, dir: &OSPath, manifested_divergences: &[String]) -> DevBatteryStats {
+    file := example_path(stem)
+    eprintln("dev-default checking {stem}")
+    if Some(answers) := common.example_stdin(stem) {
+        return check_interactive_stem_cli_vs_aot(i, stem, dir, file, answers.piped, false, "dev_default_diff", manifested_divergences)
+    }
+    interpreted := match dev_iteration_with_timeout(stem, file, false) {
+        RunOutcome.Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        RunOutcome.Problems(diags) -> {
+            assert(!diags.iter().any(|diagnostic| -> diagnostic.code == "E2211"), "`{stem}` must not emit retired E2211: {diags:?}")
+            codes := diags.iter().map(|d| -> d.code).collect()
+            eprintln("default boundary: {stem}: {codes.join(",")}")
+            assert(is_named_dev_boundary(stem, &diags), "`{stem}` neither ran nor stopped at a named boundary {BOUNDARY_CODES:?} under the default jet dev backend; codes were {codes:?}")
+            return DevBatteryStats { boundary: 1, boundary_stems: [stem.to_string()] }
+        }
+    }
+    // Host AOT failure does not imply a tier bug; retain the oracle skip.
+    compiled := match try_compiled_binary_output(dir, "dev_default_diff", i, stem, file) {
+        Some(output) -> output
+        None -> {
+            eprintln("aot unavailable (skip parity): {stem}")
+            return DevBatteryStats { ran: 1 }
+        }
+    }
+    interpreted_normalized := normalize_for_parity(stem, interpreted)
+    compiled_normalized := normalize_for_parity(stem, compiled)
+    if interpreted_normalized != compiled_normalized {
+        if is_manifested_parity_divergence(stem, manifested_divergences) {
+            eprintln("manifested parity divergence: {stem}")
+            return DevBatteryStats { ran: 1, manifested: 1 }
+        }
+        assert_eq(interpreted_normalized, compiled_normalized, "DIVERGENCE for `{stem}` under the default jet dev backend: JIT/fallback and compiled binary disagree on stdout/stderr/exit code — this is a P0 miscompile")
+    }
+    DevBatteryStats { ran: 1 }
+}
+// Rust: tests/dev_parts/support.rs:2051
+fn run_dev_default_battery_parallel(stems: [String], dir: OSPath, manifested_divergences: [String]) -> DevBatteryStats {
+    // GATE #4494: shared synchronization, native worker spawning and panic capture.
+    jobs := sync.Arc.new(sync.Mutex.new(stems.into_iter().enumerate().collect<collections.VecDeque<(USize, String)>>()))
+    shared_dir := sync.Arc.new(dir)
+    divergences := sync.Arc.new(manifested_divergences)
+    failures := sync.Arc.new(sync.Mutex.new<[String]>([]))
+    worker_count := common.test_worker_count(16)
+    mut handles = []
+    for _ in 0..worker_count {
+        worker_jobs := jobs.clone()
+        worker_dir := shared_dir.clone()
+        worker_divergences := divergences.clone()
+        worker_failures := failures.clone()
+        handles.push(thread.Builder.new().spawn(move || -> {
+            mut stats := DevBatteryStats()
+            loop {
+                (i, stem) := match lock_recovered(&worker_jobs, "dev default work queue").pop_front() {
+                    Some(job) -> job
+                    None -> break
+                }
+                result := panic.catch_unwind(panic.AssertUnwindSafe(|| -> check_dev_default_stem(i, stem, &worker_dir, &worker_divergences)))
+                match result {
+                    Ok(next) -> stats.add(next)
+                    Err(payload) -> lock_recovered(&worker_failures, "dev default failure report").push("{stem}: {common.panic_message(payload)}")
+                }
+            }
+            stats
+        }).expect("dev default worker"))
+    }
+    mut stats := DevBatteryStats()
+    for handle in handles {
+        stats.add(handle.join().expect("dev default worker panicked outside harness"))
+    }
+    report := judged_report(&failures, "dev default failure report")
+    assert(report.is_empty(), "dev default parity failures:\n{report.join("\n\n")}")
+    report_oracle_cache_counts()
+    stats
+}
+// Rust: tests/dev_parts/support.rs:2115
+fn check_interpreter_stem(i: USize, stem: String, dir: &OSPath, manifested_divergences: &[String]) -> DevBatteryStats {
+    if uses_ffi_bridge(stem) { return DevBatteryStats() }
+    file := example_path(stem)
+    eprintln("interpreter checking {stem}")
+    if Some(answers) := common.example_stdin(stem) {
+        return check_interactive_stem_cli_vs_aot(i, stem, dir, file, answers.piped, true, "dev_diff", manifested_divergences)
+    }
+    interpreted := match dev_iteration_with_timeout(stem, file, true) {
+        RunOutcome.Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        RunOutcome.Problems(diags) -> {
+            codes := diags.iter().map(|d| -> d.code).collect()
+            assert(is_named_dev_boundary(stem, &diags), "`{stem}` neither ran nor stopped at a named boundary {BOUNDARY_CODES:?}; codes were {codes:?}")
+            return DevBatteryStats { boundary: 1 }
+        }
+    }
+    compiled := match try_compiled_binary_output(dir, "dev_diff", i, stem, file) {
+        Some(output) -> output
+        None -> {
+            eprintln("aot unavailable (skip parity): {stem}")
+            return DevBatteryStats { ran: 1 }
+        }
+    }
+    interpreted_normalized := normalize_for_parity(stem, interpreted)
+    compiled_normalized := normalize_for_parity(stem, compiled)
+    if interpreted_normalized != compiled_normalized {
+        if is_manifested_parity_divergence(stem, manifested_divergences) {
+            eprintln("manifested parity divergence: {stem}")
+            return DevBatteryStats { ran: 1, manifested: 1 }
+        }
+        assert_eq(interpreted_normalized, compiled_normalized, "DIVERGENCE for `{stem}`: interpreter and compiled binary disagree on stdout/stderr/exit code — this is a P0 miscompile")
+    }
+    DevBatteryStats { ran: 1 }
+}
+// Rust: tests/dev_parts/support.rs:2189
+fn run_interpreter_battery_parallel(stems: [String], dir: OSPath, manifested_divergences: [String]) -> DevBatteryStats {
+    // GATE #4494: shared synchronization, native worker spawning and panic capture.
+    jobs := sync.Arc.new(sync.Mutex.new(stems.into_iter().enumerate().collect<collections.VecDeque<(USize, String)>>()))
+    shared_dir := sync.Arc.new(dir)
+    divergences := sync.Arc.new(manifested_divergences)
+    failures := sync.Arc.new(sync.Mutex.new<[String]>([]))
+    worker_count := common.test_worker_count(16)
+    mut handles = []
+    for _ in 0..worker_count {
+        worker_jobs := jobs.clone()
+        worker_dir := shared_dir.clone()
+        worker_divergences := divergences.clone()
+        worker_failures := failures.clone()
+        handles.push(thread.Builder.new().spawn(move || -> {
+            mut stats := DevBatteryStats()
+            loop {
+                (i, stem) := match lock_recovered(&worker_jobs, "interpreter work queue").pop_front() {
+                    Some(job) -> job
+                    None -> break
+                }
+                result := panic.catch_unwind(panic.AssertUnwindSafe(|| -> check_interpreter_stem(i, stem, &worker_dir, &worker_divergences)))
+                match result {
+                    Ok(next) -> stats.add(next)
+                    Err(payload) -> lock_recovered(&worker_failures, "interpreter failure report").push("{stem}: {common.panic_message(payload)}")
+                }
+            }
+            stats
+        }).expect("interpreter worker"))
+    }
+    mut stats := DevBatteryStats()
+    for handle in handles { stats.add(handle.join().expect("interpreter worker panicked outside harness")) }
+    report := judged_report(&failures, "interpreter failure report")
+    assert(report.is_empty(), "interpreter parity failures:\n{report.join("\n\n")}")
+    report_oracle_cache_counts()
+    stats
+}
+// Rust: tests/dev_parts/support.rs:2260
+// A process-wide counter prevents concurrent oracle builds overwriting scratch.
+fn next_oracle_index() -> USize {
+    // GATE #4494: static atomic storage and relaxed fetch-add.
+    static NEXT: sync.atomic.AtomicUsize = sync.atomic.AtomicUsize.new(0)
+    NEXT.fetch_add(1, sync.atomic.Ordering.Relaxed)
+}
+// Rust: tests/dev_parts/support.rs:2279
+fn run_child_stem_battery(test_name: String, child_env: String, label: String, timeout: time.Duration, stems: &[String], extra_env: &[(String, String)]) -> {
+    // GATE #4494: child processes, worker threads, synchronization and unwind.
+    jobs := sync.Arc.new(sync.Mutex.new(stems.iter().map(|stem| -> stem.to_string()).collect<collections.VecDeque<String>>()))
+    failures := sync.Arc.new(sync.Mutex.new<[String]>([]))
+    mut handles = []
+    for worker in 0..common.test_worker_count(8) {
+        worker_jobs := jobs.clone()
+        worker_failures := failures.clone()
+        worker_test := test_name.to_string()
+        worker_env := child_env.to_string()
+        worker_label := label.to_string()
+        worker_extra := extra_env.iter().map(|(key, value)| -> (key.to_string(), value.to_string())).collect()
+        handles.push(thread.Builder.new().name("child-stem-battery-{worker}").spawn(move || -> {
+            loop {
+                stem := match lock_recovered(&worker_jobs, "child stem battery queue").pop_front() {
+                    Some(stem) -> stem
+                    None -> break
+                }
+                // A per-stem panic is reported without losing the queued siblings.
+                judged := panic.catch_unwind(panic.AssertUnwindSafe(|| -> {
+                    mut command := process.Command.new(env.current_exe().expect("current dev test binary"))
+                    command.args(["--exact", worker_test, "--nocapture"]).env(worker_env, stem).env("NO_COLOR", "1")
+                    for (key, value) in &worker_extra { command.env(key, value) }
+                    command_output_with_timeout(command, timeout, "{worker_label} `{stem}`")
+                }))
+                match judged {
+                    Ok(output) -> {
+                        if !output.status.success() {
+                            lock_recovered(&worker_failures, "child stem battery failures").push("{stem}: status={output.status:?}\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+                        }
+                    }
+                    Err(payload) -> lock_recovered(&worker_failures, "child stem battery failures").push("{stem}: {common.panic_message(payload)}")
+                }
+            }
+        }).expect("child stem battery worker"))
+    }
+    for handle in handles { handle.join().expect("child stem battery worker panicked outside the per-stem guard") }
+    report := judged_report(&failures, "child stem battery failures")
+    assert(report.is_empty(), "{label} failures:\n{report.join("\n")}")
+}
+// Rust: tests/dev_parts/support.rs:2381
+fn run_three_way_battery_parallel(stems: [String]) -> USize {
+    // GATE #4494: shared queue, relaxed atomic counts, workers and unwind capture.
+    total := stems.len()
+    jobs := sync.Arc.new(sync.Mutex.new(collections.VecDeque.from(stems)))
+    failures := sync.Arc.new(sync.Mutex.new<[String]>([]))
+    ran := sync.Arc.new(sync.atomic.AtomicUsize.new(0))
+    mut handles = []
+    for worker in 0..common.test_worker_count(8) {
+        worker_jobs := jobs.clone()
+        worker_failures := failures.clone()
+        worker_ran := ran.clone()
+        handles.push(thread.Builder.new().name("three-way-{worker}").spawn(move || -> {
+            loop {
+                stem := match lock_recovered(&worker_jobs, "three-way work queue").pop_front() {
+                    Some(stem) -> stem
+                    None -> break
+                }
+                eprintln("three-way battery: checking `{stem}`")
+                judged := panic.catch_unwind(panic.AssertUnwindSafe(|| -> {
+                    with_jit_test_scope(|| -> assert_cranelift_three_way(example_path(stem), stem))
+                }))
+                match judged {
+                    Ok(_) -> { _ :: worker_ran.fetch_add(1, sync.atomic.Ordering.Relaxed) }
+                    Err(payload) -> lock_recovered(&worker_failures, "three-way failure report").push("{stem}: {common.panic_message(payload)}")
+                }
+            }
+        }).expect("three-way battery worker"))
+    }
+    for handle in handles { handle.join().expect("three-way battery worker panicked") }
+    report := judged_report(&failures, "three-way failure report")
+    assert(report.is_empty(), "three-way differential failures ({report.len()} of {total} stem(s)):\n{report.join("\n\n")}")
+    ran.load(sync.atomic.Ordering.Relaxed)
+}
+// Rust: tests/dev_parts/support.rs:2429
+fn check_job_runner_interpreter(root: &OSPath, file: String) -> {
+    mut bundle := Loader.load_entry(file).expect("job_runner loads")
+    errors := Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(|d| -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "job_runner front end: {errors:?}")
+    for (job, expected_name) in [("greet", "job_runner.greet"), ("seed_data", "job_runner.seed_data")] {
+        expected := fs.read_to_string(root.join("Examples/features/expected/devloop/{expected_name}.out")).unwrap_or_else(|_| -> panic("missing expected/devloop/{expected_name}.out"))
+        policy := common.development_policy()
+        match common.run_interpreter_named_job(&bundle, file, job, false, &policy) {
+            RunOutcome.Ran { stdout, .. } -> assert_eq(stdout, expected, "interpreter job `{job}` differs from golden")
+            RunOutcome.Problems(diags) -> panic("interpreter job `{job}` did not run: {diags.iter().map(|d| -> d.code).collect():?}")
+        }
+    }
+}
+// Rust: tests/dev_parts/support.rs:2465
+fn checked_bundle_from_path(file: String) -> AST.ProgramBundle {
+    jet.run_compiler_work(|| -> {
+        mut b := Loader.load_entry(file).expect("bundle should load")
+        diags := Sema.check_bundle(&b, Sema.CompileMode.Run)
+        errors := diags.into_iter().filter(|d| -> d.severity == Diagnostics.Severity.Error).collect()
+        assert(errors.is_empty(), "fixture must type-check: {errors:?}")
+        b
+    })
+}
+// Rust: tests/dev_parts/support.rs:2478
+fn assert_cranelift_matches_interpreter(src: String, tag: String) -> {
+    p := env.temp_dir().join("jet_native_m3_{tag}.jet")
+    fs.write(&p, src).unwrap()
+    shown := p.to_string_lossy().to_string()
+    _ :: checked_bundle_from_path(shown)
+    expected := support02_native_output(shown, "O0")
+    for tier in ["O1", "O2", "Web"] {
+        got := support02_native_output(shown, tier)
+        assert_eq(got.stdout, expected.stdout, "{tier} output drifted from O0 for `{tag}`")
+    }
+}
+// Rust: tests/dev_parts/support.rs:2506
+fn run_cranelift_outcome(src: String, tag: String) -> ProgramOutput {
+    p := env.temp_dir().join("jet_jit_result_{tag}.jet")
+    fs.write(&p, src).unwrap()
+    shown := p.to_string_lossy().to_string()
+    _ :: checked_bundle_from_path(shown)
+    support02_native_output(shown, "O0")
+}
+// Rust: tests/dev_parts/support.rs:2524
+fn run_cranelift_outcome_without_fallback(src: String, tag: String) -> RunOutcome {
+    p := env.temp_dir().join("jet_jit_no_fallback_{tag}.jet")
+    fs.create_dir_all(p.parent().unwrap()).unwrap()
+    fs.write(&p, src).unwrap()
+    shown := p.to_string_lossy().to_string()
+    _ :: checked_bundle_from_path(shown)
+    output := support02_native_output(shown, "O0")
+    RunOutcome.Ran { stdout: output.stdout, stderr: output.stderr, exit_code: output.exit_code }
+}
+// Rust: tests/dev_parts/support.rs:2537
+fn run_cranelift_without_fallback(src: String, tag: String) -> ProgramOutput {
+    match run_cranelift_outcome_without_fallback(src, tag) {
+        RunOutcome.Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        RunOutcome.Problems(ds) -> panic("`{tag}` JIT returned diagnostics: {ds:?}")
+    }
+}
+// Rust: tests/dev_parts/support.rs:2548
+fn run_cranelift_resident_file_outcome(file: String, tag: String) -> RunOutcome {
+    _ :: checked_bundle_from_path(file)
+    output := support02_native_output(file, "O0")
+    RunOutcome.Ran { stdout: output.stdout, stderr: output.stderr, exit_code: output.exit_code }
+}
+// Rust: tests/dev_parts/support.rs:2556
+fn run_cranelift_resident(src: String, tag: String) -> ProgramOutput {
+    p := env.temp_dir().join("jet_jit_resident_{tag}.jet")
+    fs.create_dir_all(p.parent().unwrap()).unwrap()
+    fs.write(&p, src).unwrap()
+    shown := p.to_string_lossy().to_string()
+    run_cranelift_resident_file(shown, tag)
+}
+// Rust: tests/dev_parts/support.rs:2564
+fn run_cranelift_resident_file(file: String, tag: String) -> ProgramOutput {
+    match run_cranelift_resident_file_outcome(file, tag) {
+        RunOutcome.Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        RunOutcome.Problems(ds) -> panic("`{tag}` native execution returned diagnostics: {ds:?}")
+    }
+}
+// Rust: tests/dev_parts/support.rs:2591
+fn run_default_dev_resident(file: String, tag: String) -> ProgramOutput {
+    outcome := dev_iteration_with_timeout(tag, file, false)
+    match outcome {
+        RunOutcome.Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        RunOutcome.Problems(ds) -> panic("default dev `{tag}` returned diagnostics: {ds:?}")
+    }
+}
+// Rust: tests/dev_parts/support.rs:2617
+fn run_cli_default_resident(command: String, file: String, tag: String) -> ProgramOutput {
+    // GATE #4494: actual child CLI and process environment.
+    cache := common.unique_tmp("jet_{tag}_cache")
+    fs.create_dir_all(&cache).unwrap()
+    mut args := [command, file]
+    if command == "dev" { args.extend(["--watch=off", "--quiet"]) }
+    mut cmd := process.Command.new(env.bin_exe("jet"))
+    cmd.args(args).current_dir(env.manifest_dir()).env("NO_COLOR", "1").env("JET_RUN_CACHE_DIR", &cache).env("JET_STORE_DIR", cache.join("build"))
+    output := command_output_with_timeout(cmd, DEV_DIFF_TIMEOUT, "default CLI {command} for `{tag}`")
+    assert(output.status.success(), "default CLI {command} failed for `{tag}`:\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    mut stdout := String.from_utf8_lossy(&output.stdout).into_owned()
+    if Some(end) := stdout.find("✓ ran in ") { stdout = stdout[..end].to_string() }
+    _ :: fs.remove_dir_all(&cache)
+    ProgramOutput.ran(stdout, "", output.status.code().unwrap_or(1))
+}
+// Rust: tests/dev_parts/support.rs:2659
+fn assert_cli_diagnostic_snapshot(command: String, fixture: String, snapshot: String) -> {
+    // GATE #4494: actual child CLI and process environment.
+    mut args := [command, fixture]
+    if command == "dev" { args.extend(["--watch=off", "--quiet"]) }
+    mut cmd := process.Command.new(env.bin_exe("jet"))
+    cmd.args(args).current_dir(env.manifest_dir()).env("NO_COLOR", "1")
+    output := command_output_with_timeout(cmd, DEV_DIFF_TIMEOUT, "default CLI {command} diagnostic")
+    assert(!output.status.success(), "default CLI {command} unexpectedly accepted `{fixture}`")
+    rendered := "{String.from_utf8_lossy(&output.stdout)}{String.from_utf8_lossy(&output.stderr)}"
+    assert(rendered.starts_with(snapshot), "default CLI {command} diagnostic drifted from UI snapshot:\n{rendered}")
+}
+// Rust: tests/dev_parts/support.rs:2688
+fn golden_stdout(stem: String) -> String {
+    root := OSPath(env.manifest_dir())
+    fs.read_to_string(root.join("Examples/features/expected/{stem}.out")).unwrap_or_else(|e| -> panic("missing golden for `{stem}`: {e}"))
+}
+// Rust: tests/dev_parts/support.rs:2694
+fn conformance_application_authority() -> jet_foundation.Authority.ApplicationAuthority {
+    mut allow := jet_foundation.Authority.Effect.all()
+    allow.extend(jet_foundation.Authority.ApplicationAuthority.AMBIENT_BASIC_EFFECTS.iter().map(|effect| -> effect.to_string()))
+    allowed := allow.into_iter().collect()
+    jet_foundation.Authority.ApplicationAuthority.from_policy(Some(&allowed), None, "core conformance harness")
+}
+// Rust: tests/dev_parts/support.rs:2709
+fn assert_cranelift_three_way(file: String, stem: String) -> {
+    mut bundle := Loader.load_entry(file).expect("bundle should load")
+    is_core_conformance := stem.starts_with("conformance/")
+    if is_core_conformance {
+        bundle.package_guarantees.application_authority = conformance_application_authority()
+    }
+    Driver.seed_build_facts(&bundle, "dev", false, &[:]).unwrap_or_else(|diags| -> {
+        messages := diags.iter().map(|d| -> "{d.code}: {d.what}").collect()
+        panic("`{stem}` build facts should seed: {messages.join("; ")}")
+    })
+    diags := Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors := diags.into_iter().filter(|d| -> d.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "`{stem}` must type-check: {errors:?}")
+    baseline := normalize_for_parity(stem, support02_checked_output(&bundle, file, "O0"))
+    for tier in ["O1", "O2", "Web"] {
+        output := normalize_for_parity(stem, support02_checked_output(&bundle, file, tier))
+        assert_eq(output, baseline, "{tier} vs O0 divergence for `{stem}`")
+    }
+    dir := aot_scratch_dir("jit_3way", stem)
+    aot := normalize_for_parity(stem, if is_core_conformance -> compiled_binary_output_from_bundle(&dir, "jit_3way", next_oracle_index(), stem, file, &bundle) else -> compiled_binary_output(&dir, "jit_3way", next_oracle_index(), stem, file))
+    assert_eq(baseline, aot, "native vs AOT reference divergence for `{stem}`")
+}
+// Rust: tests/dev_parts/support.rs:2849
+fn assert_ui_and_web_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    expected := ProgramOutput.ran(golden_stdout(stem), "", 0)
+    for tier in ["O0", "O1", "O2", "Web"] {
+        // Native callback run is empty; its golden belongs to wasm/node.
+        golden := if stem == "web/web_wasm_callback" && tier != "Web" -> ProgramOutput.ran("", "", 0) else -> expected
+        assert_eq(support02_native_output(file, tier), golden, "{tier} drifted from golden for `{stem}`")
+    }
+    dir := aot_scratch_dir("jit_1225", stem)
+    aot := compiled_binary_output(&dir, "jit_1225", next_oracle_index(), stem, file)
+    native := support02_native_output(file, "O0")
+    assert_eq(native, aot, "native vs AOT reference divergence for `{stem}`")
+}
+// Rust: tests/dev_parts/support.rs:2937
+fn assert_concurrency_and_game_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    expected := if stem == "concurrency/deadline_context" {
+        root := OSPath(env.manifest_dir())
+        mut stderr := fs.read_to_string(root.join("Examples/features/expected/concurrency/deadline_context.err.out")).expect("deadline_context.err.out")
+        if !stderr.ends_with("\n") { stderr.push('\n') }
+        ProgramOutput.ran(golden_stdout(stem), stderr, 70)
+    } else { ProgramOutput.ran(golden_stdout(stem), "", 0) }
+    for tier in ["O0", "O1", "O2", "Web"] {
+        assert_eq(support02_native_output(file, tier), expected, "{tier} drifted from golden for `{stem}`")
+    }
+    dir := aot_scratch_dir("jit_1218", stem)
+    aot := compiled_binary_output(&dir, "jit_1218", next_oracle_index(), stem, file)
+    assert_eq(support02_native_output(file, "O0"), aot, "native vs AOT reference divergence for `{stem}`")
+}
+// Rust: tests/dev_parts/support.rs:3034
+fn assert_crypto_auth_vault_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    expected := ProgramOutput.ran(golden_stdout(stem), "", 0)
+    for tier in ["O0", "O1", "O2", "Web"] {
+        assert_eq(support02_native_output(file, tier), expected, "{tier} drifted from golden for `{stem}`")
+    }
+    dir := aot_scratch_dir("jit_1218", stem)
+    aot := compiled_binary_output(&dir, "jit_1218", next_oracle_index(), stem, file)
+    assert_eq(support02_native_output(file, "O0"), aot, "native vs AOT reference divergence for `{stem}`")
+}
+// Rust: tests/dev_parts/support.rs:3117
+fn assert_network_http_browser_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    expected := ProgramOutput.ran(golden_stdout(stem), "", 0)
+    for tier in ["O0", "O1", "O2", "Web"] {
+        assert_eq(support02_native_output(file, tier), expected, "{tier} drifted from golden for `{stem}`")
+    }
+    dir := aot_scratch_dir("jit_1221", stem)
+    aot := compiled_binary_output(&dir, "jit_1221", next_oracle_index(), stem, file)
+    assert_eq(support02_native_output(file, "O0"), aot, "native vs AOT reference divergence for `{stem}`")
+}
+// Rust: tests/dev_parts/support.rs:3205
+fn golden_program_output(stem: String) -> ProgramOutput {
+    root := OSPath(env.manifest_dir())
+    if example_has_err_golden(stem) {
+        stderr := fs.read_to_string(root.join("Examples/features/expected/{stem}.err.out")).unwrap_or_else(|e| -> panic("missing err golden for `{stem}`: {e}"))
+        return ProgramOutput.ran("", stderr, 70)
+    }
+    ProgramOutput.ran(golden_stdout(stem), "", 0)
+}
+// Rust: tests/dev_parts/support.rs:3216
+fn strip_panic_locals(stderr: String) -> String {
+    lines := stderr.lines().filter(|line| -> !line.starts_with("locals:")).collect()
+    lines.join("\n") + if stderr.ends_with("\n") -> "\n" else -> ""
+}
+// Rust: tests/dev_parts/support.rs:3225
+fn assert_data_pipelines_parsing_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    expected := golden_program_output(stem)
+    baseline := support02_native_output(file, "O0")
+    assert_eq(baseline, expected, "O0 drifted from golden for `{stem}`")
+    if stem == "reflection/reflect-value" {
+        assert_eq(baseline, expected, "reflection example must match its golden output")
+    }
+    dir := aot_scratch_dir("jit_1223", stem)
+    aot := compiled_binary_output(&dir, "jit_1223", next_oracle_index(), stem, file)
+    if stem == "tooling/panic_report" {
+        body := |out: &ProgramOutput| -> ProgramOutput.ran(out.stdout.clone(), strip_panic_locals(out.stderr), out.exit_code)
+        assert_eq(body(&baseline), body(&aot), "native vs AOT panic body divergence for `{stem}`")
+        for tier in ["O1", "O2", "Web"] {
+            assert_eq(body(&support02_native_output(file, tier)), body(&expected), "{tier} panic body drifted from golden for `{stem}`")
+        }
+    } else {
+        assert_eq(baseline, aot, "native vs AOT reference divergence for `{stem}`")
+        for tier in ["O1", "O2", "Web"] {
+            assert_eq(support02_native_output(file, tier), expected, "{tier} drifted from golden for `{stem}`")
+        }
+    }
+}
+// Rust: tests/dev_parts/support.rs:3339
+fn core_os_examples_match_interpreter_jit_and_aot_inner() -> {
+    guard := lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    for stem in ["io/os_facts", "io/os_process_control"] {
+        assert_io_cli_terminal_time_three_way(example_path(stem), stem)
+    }
+}
+// Rust: tests/dev_parts/support.rs:3346
+fn golden_stderr(stem: String) -> String {
+    root := OSPath(env.manifest_dir())
+    path := root.join("Examples/features/expected/{stem}.stderr.out")
+    if path.is_file() {
+        fs.read_to_string(path).unwrap_or_else(|e| -> panic("read stderr golden for `{stem}`: {e}"))
+    } else { "" }
+}
+// Rust: tests/dev_parts/support.rs:3366
+fn assert_interactive_example_three_way(file: String, stem: String, answers: String) -> {
+    golden := ProgramOutput.ran(golden_stdout(stem), golden_stderr(stem), 0)
+    for tier in ["O0", "O1", "O2", "Web"] {
+        assert_eq(support02_stdin_output(file, tier, answers), golden, "{tier} drifted from the golden for `{stem}` with the answers it was recorded with")
+    }
+    if !common.have_rustc() {
+        eprintln("note: rustc not found; `{stem}` compared on retained execution tiers only")
+        return
+    }
+    dir := aot_scratch_dir("stdin_three_way", stem)
+    aot := compiled_binary_output_with_stdin(&dir, "stdin_three_way", 0, stem, file, Some(answers))
+    assert_eq(aot, golden, "AOT drifted from the golden for `{stem}` with the answers it was recorded with")
+}
+// Rust: tests/dev_parts/support.rs:3399
+fn assert_io_cli_terminal_time_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    if Some(answers) := common.example_stdin(stem) {
+        assert_interactive_example_three_way(file, stem, answers.piped)
+        return
+    }
+    golden := ProgramOutput.ran(golden_stdout(stem), golden_stderr(stem), 0)
+    dir := aot_scratch_dir("jit_1219", stem)
+    index := next_oracle_index()
+    aot := compiled_binary_output(&dir, "jit_1219", index, stem, file)
+    assert_eq(aot.stdout, golden.stdout, "AOT stdout drifted from golden for `{stem}`")
+    // Each retained tier executes its own artifact, so watcher argv[0] naturally
+    // names that artifact rather than requiring a resident-engine argv override.
+    for tier in ["O0", "O1", "O2", "Web"] {
+        output := support02_native_output(file, tier)
+        assert_eq(output.stdout, aot.stdout, "{tier} vs AOT stdout divergence for `{stem}`")
+        assert_eq(output.exit_code, aot.exit_code, "{tier} vs AOT exit divergence for `{stem}`")
+        expected_stderr := if !golden.stderr.is_empty() -> &golden.stderr else -> &aot.stderr
+        assert_eq(output.stderr, expected_stderr, "{tier} stderr divergence for `{stem}`")
+        assert_eq(aot.stderr, expected_stderr, "AOT stderr divergence for `{stem}`")
+    }
+}
+// Rust: tests/dev_parts/support.rs:3529
+fn assert_lowlevel_and_safety_three_way(file: String, stem: String) -> {
+    _ :: checked_bundle_from_path(file)
+    golden := ProgramOutput.ran(golden_stdout(stem), golden_stderr(stem), 0)
+    dir := aot_scratch_dir("jit_1220", stem)
+    aot := compiled_binary_output(&dir, "jit_1220", next_oracle_index(), stem, file)
+    assert_eq(aot.stdout, golden.stdout, "AOT stdout drifted from golden for `{stem}`")
+    for tier in ["O0", "O1", "O2", "Web"] {
+        output := support02_native_output(file, tier)
+        assert_eq(output.stdout, golden.stdout, "{tier} stdout drifted from golden for `{stem}`")
+        assert_eq(output.stdout, aot.stdout, "{tier} vs AOT stdout divergence for `{stem}`")
+        assert_eq(output.exit_code, aot.exit_code, "{tier} vs AOT exit divergence for `{stem}`")
+    }
+}
+// Rust: tests/dev_parts/support.rs:3637-3656
+// The next fragment pins verifier-sensitive emitted sites (#1989/#1990/#1991).
+// Output alone cannot establish correctness: the repaired site must be emitted,
+// every function must verify, the tier plan must be resident-native, and execution
+// must actually be native without deopt or fallback. Invalid generated code is a
+// hard compiler failure, not a recorded coverage gap.

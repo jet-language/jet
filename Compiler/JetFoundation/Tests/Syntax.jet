@@ -1,0 +1,29 @@
+use jet_foundation.Syntax.NameCase.[canonical_name_case, name_has_case, NameCase]
+
+// Rust: crates/jet-foundation/src/Syntax.rs:888
+#Test("uncased_unicode_letters_obey_both_grammar_tiers") {
+    assert(name_has_case("日本語", .Pascal))
+    assert(name_has_case("日本語", .Snake))
+    assert_eq(canonical_name_case("日本語", .Pascal), "日本語")
+    assert_eq(canonical_name_case("日本語", .Snake), "日本語")
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:896
+#Test("cased_unicode_letters_follow_the_selected_tier") {
+    assert(name_has_case("Éclair", .Pascal))
+    assert(name_has_case("éclair", .Snake))
+    assert_eq(canonical_name_case("Éclair", .Snake), "éclair")
+    assert_eq(canonical_name_case("éclair", .Pascal), "Éclair")
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:904
+#Test("acronym_pascal_to_snake") {
+    assert_eq(canonical_name_case("HTTPHeader", .Snake), "http_header")
+    assert_eq(canonical_name_case("HTTP_API", .Snake), "http_api")
+    assert_eq(canonical_name_case("MacOS", .Snake), "mac_os")
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:913
+#Test("screaming_constants_use_all_caps") {
+    assert(name_has_case("MAX_RETRIES", .Screaming))
+    assert(!name_has_case("max_retries", .Screaming))
+    assert_eq(canonical_name_case("max_retries", .Screaming), "MAX_RETRIES")
+    assert_eq(canonical_name_case("HTTPHeader", .Screaming), "HTTP_HEADER")
+}

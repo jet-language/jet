@@ -1,0 +1,828 @@
+use std.[fs, env, process]
+use std.process.Command
+use core.sys.target.selected_os
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.Cffi.[build_c_lib, declare_local_c_dep, build_local_c_provider, add_ffi_bridge_args, build_c_lib_card436]
+use jet.AST.[ForeignLanguage, ForeignNamespace, ForeignAbiContract, ForeignProvider, ImportKind, binder_descriptor]
+use jet.Foreign.[binder_for, route_plan, BinderStatus, BinderSurface, BinderRuntime, BindingStubKind, ForeignHost, ForeignTarget]
+// GATE #4494: actual native processes and file providers. #4483: selected target OS gate.
+// Rust: tests/cffi.rs:20
+#Test("octave_sidecar_runs_real_matrix_round_trip") {
+    tool :: ["octave-cli", "octave"].iter().find(fn(candidate) { Command.new(candidate).arg("--version").output().map(fn(output) { output.status.success() }).unwrap_or(false) }).expect("jet-env full must provision Octave")
+    eprintln("using {tool} for Octave integration")
+    root :: env.temp_dir().join("jet_octave_e2e_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    example :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/interop/octave")
+    for file in ["scale.m", "run.jet", "expected.out"] { fs.copy(example.join(file), root.join(file)).unwrap() }
+    fs.write(root.join("package.jet"), "name: \"octave_e2e\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {{\n    holds: {{ allow: [GPU, IO, Mem.Alloc] }},\n}}\n").unwrap()
+    bind :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["inspect", "bind", "octave", "scale.m", "--pkg", "scale"]).current_dir(&root).output().unwrap()
+    assert(bind.status.success(), "Octave bind failed:\n{String.from_utf8_lossy(&bind.stderr)}")
+    generated :: fs.read_to_string(root.join(".jet/bindings/octave/scale.jet")).unwrap()
+    assert(generated.contains("Tensor"))
+    assert(generated.contains("FFI.Octave"))
+    assert_eq(generated.matches("fn decode_response(").count(), 1)
+    assert_eq(generated.matches("raw :: abi.scale(").count(), 1)
+    assert_eq(generated.matches("decode_response(raw, code)").count(), 1)
+    run :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "run.jet"]).current_dir(&root).output().unwrap()
+    assert(run.status.success(), "generated Octave binding did not run:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), fs.read_to_string(root.join("expected.out")).unwrap())
+    provenance :: fs.read_to_string(root.join(".jet/bindings/octave/scale.provenance")).unwrap()
+    assert(provenance.contains("transport=json"))
+    assert(provenance.contains("shape=rank-2"))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:82
+#Test("cobol_copybook_binder_runs_real_gnucobol_and_preserves_comp3") {
+    cobc :: Command.new("cobc").arg("--version").output().expect("jet-env full must provision cobc")
+    assert(cobc.status.success(), "provisioned cobc failed its version check")
+    root :: env.temp_dir().join("jet_cobol_e2e_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    repo :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/interop/cobol")
+    for file in ["payroll.cob", "payroll.cpy", "main.jet", "expected.out"] { fs.copy(repo.join(file), root.join(file)).unwrap() }
+    bind :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["inspect", "bind", "cobol", "payroll.cob", "--copybook", "payroll.cpy", "--pkg", "payroll"]).current_dir(&root).output().unwrap()
+    assert(bind.status.success(), "{String.from_utf8_lossy(&bind.stderr)}")
+    generated :: fs.read_to_string(root.join(".jet/bindings/cobol/payroll.jet")).unwrap()
+    assert(generated.contains("jet-ffi-descriptor="))
+    assert(generated.contains("gross_pay: Decimal\n"))
+    assert(generated.contains("offset=24 width=5 type=Decimal scale=2 encoding=COMP-3"))
+    assert(!generated.contains("gross_pay: Float"))
+    assert(generated.contains("-[FFI.Cobol]> Int !CobolError"))
+    assert(!generated.contains("=>"))
+    provenance :: fs.read_to_string(root.join(".jet/bindings/cobol/payroll.provenance")).unwrap()
+    assert(provenance.contains("schema=jet-cobol-bind-v1\n"))
+    assert(provenance.contains("descriptor=jet-ffi-descriptor-v1;"))
+    assert(provenance.contains("program_symbol=JETPAY\n"))
+    assert(provenance.contains("record_width=29\n"))
+    run :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "main.jet"]).current_dir(&root).output().unwrap()
+    assert(run.status.success(), "{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), fs.read_to_string(root.join("expected.out")).unwrap())
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:148
+#Test("forged_fortran_library_prefix_cannot_admit_list_abi") {
+    root :: env.temp_dir().join("jet_fortran_prefix_{process.id()}")
+    fs.create_dir_all(&root).unwrap()
+    main :: root.join("main.jet")
+    source :: """
+use c.jet_fortran_forged as raw
+#Import module c.jet_fortran_forged { fn probe(a: [Float]) -> Float = "probe" }
+fn run() { print(raw.probe([1.0])) }
+"""
+    fs.write(&main, source).unwrap()
+    diagnostics :: jet.compile_with_path(source, main.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3203" }), "forged prefix admitted a list ABI: {diagnostics:?}")
+}
+// Rust: tests/cffi.rs:164
+#Test("cffi_layout_mismatch_fails_before_the_foreign_call") {
+    root :: common.unique_tmp("jet_ffi_layout_mismatch")
+    fs.create_dir_all(&root).unwrap()
+    source :: """
+struct Point { x: Int
+    y: Int }
+#Import module c.demo { fn make_point() -> Point = "demo_make_point" }
+fn run() {}
+"""
+    path :: root.join("main.jet")
+    fs.write(&path, source).unwrap()
+    diagnostics :: jet.check_with_path(path.to_str().unwrap())
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3203" }), "a non-#Layout(c) aggregate must fail at the typed layout gate: {diagnostics:?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:190
+#Test("ffi_capability_boundary_is_safe_only_inside_unsafe") {
+    root :: common.unique_tmp("jet_ffi_capability_boundary")
+    fs.create_dir_all(&root).unwrap()
+    safe :: """
+extern rust "std" { fn borrow(s: &String) -> String = "std::mem::take" }
+fn run() {
+    value := "hi"
+    print(borrow(&value))
+}
+"""
+    safe_path :: root.join("safe.jet")
+    fs.write(&safe_path, safe).unwrap()
+    safe_diags :: jet.check_with_path(safe_path.to_str().unwrap())
+    assert(safe_diags.iter().any(fn(diagnostic) { diagnostic.code == "E0702" }), "safe raw capability call must be rejected with E0702: {safe_diags:?}")
+    assert(!safe_diags.iter().any(fn(diagnostic) { diagnostic.code == "E3103" }), "capability gate must use E0702, not E3103: {safe_diags:?}")
+    audited :: """
+extern rust "std" { fn borrow(s: &String) -> String = "std::mem::take" }
+fn run() {
+    value := "hi"
+    #Unsafe("the foreign call may write through the borrowed value") {
+        print(borrow(&value))
+    }
+}
+"""
+    audited_path :: root.join("audited.jet")
+    fs.write(&audited_path, audited).unwrap()
+    audited_diags :: jet.check_with_path(audited_path.to_str().unwrap())
+    assert(!audited_diags.iter().any(fn(diagnostic) { diagnostic.code == "E0702" }), "an audited raw capability call must clear the E0702 boundary gate: {audited_diags:?}")
+    audited_output :: jet.compile_with_path(audited, audited_path.to_str().unwrap()).expect("an audited capability call must lower through the checked wrapper")
+    assert(audited_output.rust.contains("jet_ffi_borrow(&mut"), "`&` must remain an exclusive borrow at the generated call edge")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:249
+#Test("ffi_capability_boundary_is_safe_for_qualified_c_calls") {
+    root :: common.unique_tmp("jet_ffi_qualified_capability_boundary")
+    fs.create_dir_all(&root).unwrap()
+    source :: """
+use c.cap as c
+#Import module c.cap { fn borrow(value: &Int) = "jet_cap_borrow" }
+fn run() {
+    value := 1
+    c.borrow(&value)
+}
+"""
+    path :: root.join("main.jet")
+    fs.write(&path, source).unwrap()
+    diagnostics :: jet.check_with_path(path.to_str().unwrap())
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0702" }), "a qualified raw capability call must be rejected with E0702: {diagnostics:?}")
+    assert(!diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3103" }), "a qualified capability gate must use E0702, not E3103: {diagnostics:?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:282
+#Test("cffi_write_capability_round_trips_through_the_native_c_boundary") {
+    if !common.have_rustc() { eprintln("note: skipping cffi_write_capability_round_trips (need rustc)"); return }
+    root :: common.unique_tmp("jet_ffi_c_write")
+    fs.create_dir_all(&root).unwrap()
+    declare_local_c_dep(&root, "cap")
+    build_local_c_provider(&root, "cap", """
+#include <stdint.h>
+typedef struct { int64_t x; int64_t y; } CapPair;
+void jet_cap_increment(int64_t *value) { *value += 1; }
+CapPair jet_cap_make(void) { return (CapPair){20, 22}; }
+int64_t jet_cap_consume(CapPair value) { return value.x + value.y; }
+""")
+    path :: root.join("main.jet")
+    source :: """
+use c.cap as c
+#Layout(c)
+struct Pair { x: Int
+    y: Int }
+#Import module c.cap {
+    fn increment(value: &Int) = "jet_cap_increment"
+    fn make() -> Pair = "jet_cap_make"
+    fn consume(value: ^Pair) -> Int = "jet_cap_consume"
+}
+fn run() {
+    value := 41
+    #Unsafe("the C function writes through the exclusive capability") { c.increment(&value) }
+    print(value)
+    pair :: c.make()
+    #Unsafe("the C function consumes the C-layout value") { print(c.consume(^pair)) }
+}
+"""
+    fs.write(&path, source).unwrap()
+    output :: jet.compile_with_path(source, path.to_str().unwrap()).unwrap_or_else(fn(diagnostics) { panic("C capability rejected:\n{diagnostics:?}") })
+    assert(output.ffi.is_none(), "capability C calls must stay on the native path")
+    assert(output.rust.contains("*mut std::os::raw::c_longlong"), "C `&` must lower to a mutable pointer:\n{output.rust}")
+    assert(output.rust.contains("&mut c0"), "C `&` must pass the exclusive temporary:\n{output.rust}")
+    assert(output.rust.contains("pub fn __jet_consume(a0: super::__jet_Pair)"), "C `^` must consume the C-layout value without a borrowed clone")
+    rs :: root.join("main.rs")
+    bin :: root.join("main_bin")
+    fs.write(&rs, &output.rust).unwrap()
+    built :: Command.new("rustc").args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={root.display()}").arg("-lcap").output().unwrap()
+    assert(built.status.success(), "rustc rejected the native C capability wrapper:\n{String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "native C capability call failed:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "42\n42\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:372
+#Test("cffi_close_capability_round_trips_through_the_native_c_boundary") {
+    if !common.have_rustc() { eprintln("note: skipping cffi_close_capability_round_trips (need rustc)"); return }
+    root :: common.unique_tmp("jet_ffi_c_close")
+    fs.create_dir_all(&root).unwrap()
+    declare_local_c_dep(&root, "close")
+    build_local_c_provider(&root, "close", """
+#include <stdint.h>
+typedef struct { int64_t value; } CloseHandle;
+static int64_t released;
+CloseHandle jet_close_acquire(void) { return (CloseHandle){41}; }
+void jet_close_release(CloseHandle handle) { released = handle.value; }
+int64_t jet_close_released(void) { return released; }
+""")
+    path :: root.join("main.jet")
+    source :: """
+use c.close as c
+#Layout(c)
+struct Handle { value: I64 }
+#Import module c.close {
+    #Close(release)
+    fn acquire() -> Handle = "jet_close_acquire"
+    fn release(handle: ^Handle) = "jet_close_release"
+    fn released() -> I64 = "jet_close_released"
+}
+fn run() {
+    handle := c.acquire()
+    close(^handle)
+    print(c.released())
+}
+"""
+    fs.write(&path, source).unwrap()
+    output :: jet.compile_with_path(source, path.to_str().unwrap()).unwrap_or_else(fn(d) { panic("C #Close fixture was rejected:\n{jet.render_diagnostics(path.to_str().unwrap(), source, &d)}") })
+    assert(output.rust.contains("impl __jet_Close for"))
+    assert(output.rust.contains("__jet_release(self)"))
+    assert(!output.rust.contains("jet_ffi_release(self)"))
+    rs :: root.join("main.rs")
+    bin :: root.join("main_bin")
+    fs.write(&rs, &output.rust).unwrap()
+    built :: Command.new("rustc").args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={root.display()}").arg("-lclose").output().unwrap()
+    assert(built.status.success(), "I2: rustc rejected the C #Close wrapper:\n{String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "41\n")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:443
+#Test("foreign_close_contract_registers_only_a_matching_consuming_function") {
+    root :: common.unique_tmp("jet_ffi_close_contract")
+    fs.create_dir_all(&root).unwrap()
+    valid :: """
+extern rust "std" {
+    #Close(release)
+    fn acquire() -> String = "std::string::String::new"
+    fn release(handle: ^String) = "std::mem::drop"
+}
+fn run() {
+    handle := acquire()
+    close(^handle)
+}
+"""
+    valid_path :: root.join("valid.jet")
+    fs.write(&valid_path, valid).unwrap()
+    valid_diags :: jet.check_with_path(valid_path.to_str().unwrap())
+    assert(valid_diags.is_empty(), "matching #Close(^handle) contract must pass: {valid_diags:?}")
+    compiled :: jet.compile_with_path(valid, valid_path.to_str().unwrap()).expect("validated foreign close contract must lower through production codegen")
+    assert(compiled.rust.contains("impl __jet_Close for String") && compiled.rust.contains("jet_ffi_release"), "the close contract must reach the generated bridge call: {compiled.rust}")
+    invalid :: valid.replace("handle: ^String", "handle: String")
+    invalid_path :: root.join("invalid.jet")
+    fs.write(&invalid_path, invalid).unwrap()
+    invalid_diags :: jet.check_with_path(invalid_path.to_str().unwrap())
+    assert(invalid_diags.iter().any(fn(diagnostic) { diagnostic.code == "E0702" }), "layout/ownership mismatch must fail as a typed FFI diagnostic: {invalid_diags:?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:488
+#Test("unified_foreign_binder_registry_routes_active_and_planned_languages") {
+    expected :: [
+        (ForeignLanguage.C, "c", "bindings/c", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Rust, "rust", "bindings/rust", BinderSurface.Namespace, BinderStatus.Planned),
+        (ForeignLanguage.Py, "py", "bindings/py", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.JS, "js", "bindings/js", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Swift, "swift", "bindings/swift", BinderSurface.Namespace, BinderStatus.Planned),
+        (ForeignLanguage.Fortran, "fortran", "bindings/fortran", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Cobol, "cobol", "bindings/cobol", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Java, "java", "bindings/java", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.DotNet, "cs", "bindings/cs", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Tcl, "tcl", "bindings/tcl", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Ada, "ada", "bindings/ada", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Pascal, "pascal", "bindings/pascal", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Dart, "dart", "bindings/dart", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.PowerShell, "pwsh", "bindings/pwsh", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Perl, "perl", "bindings/perl", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Ruby, "ruby", "bindings/ruby", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Php, "php", "bindings/php", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.R, "r", "bindings/r", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Octave, "octave", "bindings/octave", BinderSurface.Namespace, BinderStatus.Active),
+        (ForeignLanguage.Com, "com", "bindings/com", BinderSurface.Namespace, BinderStatus.Active)
+    ]
+    for (lang, root, bindings, surface, status) in expected {
+        assert_eq(ForeignLanguage.from_root(root), Val(lang))
+        assert_eq(lang.root(), root)
+        assert_eq(lang.bindings_subdir(), bindings)
+        binder :: binder_for(lang).expect("registered binder")
+        assert_eq(binder.surface, surface)
+        assert_eq(binder.status, status)
+    }
+}
+// Rust: tests/cffi.rs:646
+#Test("unified_foreign_namespace_model_recognizes_every_registered_root") {
+    roots :: [
+        ("c", ForeignLanguage.C), ("cpp", ForeignLanguage.Cpp), ("rust", ForeignLanguage.Rust),
+        ("py", ForeignLanguage.Py), ("js", ForeignLanguage.JS), ("swift", ForeignLanguage.Swift),
+        ("go", ForeignLanguage.Go), ("java", ForeignLanguage.Java), ("cs", ForeignLanguage.DotNet),
+        ("tcl", ForeignLanguage.Tcl), ("lua", ForeignLanguage.Lua), ("fortran", ForeignLanguage.Fortran),
+        ("cobol", ForeignLanguage.Cobol), ("ada", ForeignLanguage.Ada), ("pascal", ForeignLanguage.Pascal),
+        ("dart", ForeignLanguage.Dart), ("pwsh", ForeignLanguage.PowerShell), ("perl", ForeignLanguage.Perl),
+        ("ruby", ForeignLanguage.Ruby), ("php", ForeignLanguage.Php), ("r", ForeignLanguage.R),
+        ("octave", ForeignLanguage.Octave), ("com", ForeignLanguage.Com)
+    ]
+    assert_eq(roots.map(fn((_, language)) { language }), ForeignLanguage.ALL)
+    for (root, language) in roots {
+        path :: "{root}.lib"
+        namespace :: ForeignNamespace.from_module_path(&path).unwrap_or_else(fn() { panic("{root} namespace") })
+        assert_eq(namespace.language, language)
+        assert_eq(namespace.lib, "lib")
+        assert_eq(namespace.display(), path)
+        assert(ForeignNamespace.from_module_path(root).is_none())
+        assert(ForeignNamespace.from_module_path("{root}.").is_none())
+        assert(ForeignNamespace.from_module_path("{root}.lib.extra").is_none())
+    }
+    assert(ForeignNamespace.from_module_path("unknown.lib").is_none())
+}
+// Rust: tests/cffi.rs:692
+#Test("foreign_namespace_selective_imports_reuse_ordinary_parser_path") {
+    for language in ForeignLanguage.ALL {
+        source :: "use {language.root()}.[lib1 as first, lib2]\nfn run() {{ }}\n"
+        (tokens, lex_diagnostics) :: jet.Lexer.lex(&source)
+        assert(lex_diagnostics.is_empty(), "{language.root()}: {lex_diagnostics:?}")
+        program :: jet.Parser.parse(&tokens).unwrap_or_else(fn(diagnostics) { panic("{language.root()}: {diagnostics:?}") })
+        if &program.imports[0].kind == {
+            .Unqualified { module_alias, items, .. } -> {
+                assert_eq(module_alias, language.root())
+                assert_eq(items, &[("lib1", Val("first")), ("lib2", nil)])
+            }
+            _ -> panic("{language.root()} list took a foreign-only parser branch")
+        }
+    }
+}
+// Rust: tests/cffi.rs:728
+#Test("c_member_lists_resolve_each_library_and_alias_through_cffi") {
+    root :: common.unique_tmp("jet_cffi_member_list")
+    fs.create_dir_all(&root).unwrap()
+    main :: root.join("main.jet")
+    source :: """
+use c.[c as libc, m]
+#Import module c.c { fn clamp(left: Int, middle: Int, right: Int) -> Int = "libc_clamp" }
+#Import module c.m { fn version(left: Int, middle: Int, right: Int) -> Int = "libm_version" }
+module c_scope {
+    use c.[c as lib]
+    pub fn call() -> Int { return lib.clamp(1, 2, 3) }
+}
+module m_scope {
+    use c.[m as lib]
+    pub fn call() -> Int { return lib.version(1, 2, 3) }
+}
+fn run() { }
+"""
+    fs.write(root.join("package.jet"), "name: \"member_list\"\nversion: \"0.1.0\"\ndeps: {{ c: c@system, m: c@system }}\n").unwrap()
+    fs.write(&main, source).unwrap()
+    output :: jet.compile_with_path(source, main.to_str().unwrap()).unwrap_or_else(fn(diagnostics) { panic("C member list rejected: {diagnostics:?}") })
+    assert(output.rust.contains("libc_clamp"))
+    assert(output.rust.contains("libm_version"))
+    assert(output.rust.contains("__c_c"))
+    assert(output.rust.contains("__c_m"))
+    c_scope :: output.rust.find("fn __jet_c_scope__call").expect("inline C scope emitted")
+    m_scope :: output.rust.find("fn __jet_m_scope__call").expect("second inline C scope emitted")
+    assert(output.rust[c_scope..m_scope].contains("__c_c"), "c_scope resolved its local alias to the wrong C library")
+    assert(output.rust[m_scope..].contains("__c_m"), "m_scope resolved its local alias to the wrong C library")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:788
+#Test("foreign_member_list_rejects_one_invalid_member_without_partial_import") {
+    root :: common.unique_tmp("jet_foreign_member_list_fail_closed")
+    fs.create_dir_all(&root).unwrap()
+    main :: root.join("main.jet")
+    source :: "use c.[raylib.missing, sqlite3]\nfn run() {{ }}\n"
+    fs.write(&main, source).unwrap()
+    diagnostics :: jet.compile_with_path(source, main.to_str().unwrap()).expect_err("one malformed member must reject the entire foreign import group")
+    assert_eq(diagnostics.len(), 1)
+    assert_eq(diagnostics[0].code, "E0611")
+    assert(diagnostics[0].what.contains("foreign library namespace"))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:804
+#Test("inline_foreign_alias_collision_is_rejected_in_one_scope") {
+    root :: common.unique_tmp("jet_cffi_member_alias_collision")
+    fs.create_dir_all(&root).unwrap()
+    main :: root.join("main.jet")
+    source :: """
+use c.[c, m]
+#Import module c.c { fn first() -> Int = "libc_first" }
+#Import module c.m { fn second() -> Int = "libm_second" }
+module duplicate {
+    use c.[c as lib, m as lib]
+    pub fn call() -> Int { return lib.first() }
+}
+fn run() { }
+"""
+    fs.write(&main, source).unwrap()
+    diagnostics :: jet.compile_with_path(source, main.to_str().unwrap()).expect_err("two inline aliases with one name must fail")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0105" }))
+    rendered :: jet.render_diagnostics(main.to_str().unwrap(), source, &diagnostics)
+    assert(rendered.contains("the import name `lib` is used twice"))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:838
+#Test("foreign_active_js_import_is_accepted_while_planned_swift_stays_reserved") {
+    dir :: common.unique_tmp("jet_foreign_active_js")
+    fs.create_dir_all(&dir).unwrap()
+    cache :: dir.join(".jet/bindings/js")
+    fs.create_dir_all(&cache).unwrap()
+    descriptor :: binder_descriptor(ForeignLanguage.JS).unwrap().stamp()
+    fs.write(cache.join("plotly.jet"), "// jet-ffi-descriptor={descriptor}\npub fn scatter() -> Int {{\n    return 7\n}}\n").unwrap()
+    main :: dir.join("main.jet")
+    src :: "use js.plotly as plot\nfn run() {{ }}\n"
+    fs.write(&main, src).unwrap()
+    _ :: jet.compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("active js import rejected:\n{d:?}") })
+    reserved :: common.unique_tmp("jet_foreign_reserved")
+    fs.create_dir_all(&reserved).unwrap()
+    reserved_main :: reserved.join("main.jet")
+    reserved_src :: "use swift.foundation as foundation\nfn run() {{ }}\n"
+    fs.write(&reserved_main, reserved_src).unwrap()
+    diags :: jet.compile_with_path(reserved_src, reserved_main.to_str().unwrap()).expect_err("planned foreign roots must be reserved")
+    assert_eq(diags[0].code, "E1002")
+    rendered :: jet.render_diagnostics(reserved_main.to_str().unwrap(), reserved_src, &diags)
+    assert(rendered.contains("`swift` is reserved for first-party or foreign packages"))
+    list_dir :: common.unique_tmp("jet_foreign_reserved_list")
+    fs.create_dir_all(&list_dir).unwrap()
+    list_main :: list_dir.join("main.jet")
+    list_src :: "use swift.[foundation, ui]\nfn run() {{ }}\n"
+    fs.write(&list_main, list_src).unwrap()
+    list_diags :: jet.compile_with_path(list_src, list_main.to_str().unwrap()).expect_err("planned foreign member lists must be reserved")
+    assert_eq(list_diags[0].code, "E1002")
+}
+// Rust: tests/cffi.rs:885
+#Test("foreign_com_import_is_honestly_windows_gated") {
+    if selected_os() != "windows" {
+        dir :: common.unique_tmp("jet_foreign_com_gate")
+        fs.create_dir_all(&dir).unwrap()
+        main :: dir.join("main.jet")
+        src :: "use com.excel as excel\nfn run() {{ }}\n"
+        fs.write(&main, src).unwrap()
+        diags :: jet.compile_with_path(src, main.to_str().unwrap()).expect_err("COM import must reject a non-Windows host")
+        assert_eq(diags[0].code, "E3260")
+        rendered :: jet.render_diagnostics(main.to_str().unwrap(), src, &diags)
+        assert(rendered.contains("`com.*` needs a Windows host"))
+    }
+}
+// Rust: tests/cffi.rs:899
+#Test("foreign_js_import_uses_generated_binding_cache_for_symbols") {
+    dir :: common.unique_tmp("jet_foreign_js_cache")
+    cache_dir :: dir.join(".jet/bindings/js")
+    fs.create_dir_all(&cache_dir).unwrap()
+    fs.write(cache_dir.join("plotly.jet"), "pub fn scatter() -> Int {{\n    return 7\n}}\n").unwrap()
+    fs.write(cache_dir.join("d3.jet"), "pub fn select() -> Int {{\n    return 8\n}}\n").unwrap()
+    main :: dir.join("main.jet")
+    src :: "use js.plotly as plot\nuse js.[d3]\nfn run() {{\n    print(plot.scatter())\n    print(d3.select())\n}}\n"
+    fs.write(&main, src).unwrap()
+    _ :: jet.compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("js cache import rejected:\n{d:?}") })
+}
+// Rust: tests/cffi.rs:922
+#Test("foreign_js_inline_member_list_uses_the_same_binding_cache") {
+    dir :: common.unique_tmp("jet_foreign_js_inline_cache")
+    cache_dir :: dir.join(".jet/bindings/js")
+    fs.create_dir_all(&cache_dir).unwrap()
+    fs.write(cache_dir.join("plotly.jet"), "pub fn scatter() -> Int {{\n    return 7\n}}\n").unwrap()
+    fs.write(cache_dir.join("d3.jet"), "pub fn select() -> Int {{\n    return 8\n}}\n").unwrap()
+    main :: dir.join("main.jet")
+    src :: """
+use js.[d3]
+module nested {
+    use js.[plotly as inner_plot]
+    pub fn inner() -> Int { return inner_plot.scatter() }
+}
+fn run() {
+    print(d3.select())
+    print(nested.inner())
+}
+"""
+    fs.write(&main, src).unwrap()
+    _ :: jet.compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("inline js member list rejected:\n{d:?}") })
+}
+// Rust: tests/cffi.rs:945
+#Test("foreign_js_inline_pub_member_list_reexports_the_namespace") {
+    dir :: common.unique_tmp("jet_foreign_js_inline_pub_cache")
+    cache_dir :: dir.join(".jet/bindings/js")
+    fs.create_dir_all(&cache_dir).unwrap()
+    fs.write(cache_dir.join("plotly.jet"), "pub fn scatter() -> Int {{\n    return 7\n}}\n").unwrap()
+    main :: dir.join("main.jet")
+    src :: "module nested {{\n    pub use js.[plotly as plots]\n}}\nfn run() {{\n    print(nested.plots.scatter())\n}}\n"
+    fs.write(&main, src).unwrap()
+    _ :: jet.compile_with_path(src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("inline js pub member-list re-export rejected:\n{d:?}") })
+}
+// Rust: tests/cffi.rs:963
+#Test("foreign_js_import_without_cache_does_not_invent_symbols") {
+    dir :: common.unique_tmp("jet_foreign_js_no_cache")
+    fs.create_dir_all(&dir).unwrap()
+    main :: dir.join("main.jet")
+    src :: "use js.plotly as plot\nfn run() {{\n    print(plot.scatter())\n}}\n"
+    fs.write(&main, src).unwrap()
+    diags :: jet.compile_with_path(src, main.to_str().unwrap()).expect_err("missing js cache must not invent callable symbols")
+    rendered :: jet.render_diagnostics(main.to_str().unwrap(), src, &diags)
+    assert(rendered.contains("scatter") || rendered.contains("plot"), "unexpected diagnostics:\n{rendered}")
+}
+// Rust: tests/cffi.rs:980
+#Test("foreign_interop_routes_js_with_target_dispatched_host_and_dts_stub") {
+    root :: OSPath("/tmp/jet_foreign_route")
+    ns :: ForeignNamespace.from_module_path("js.plotly").expect("js namespace")
+    native :: route_plan(&root, ns.clone(), ForeignTarget.Native).expect("native js route")
+    web :: route_plan(&root, ^ns, ForeignTarget.Web).expect("web js route")
+    assert_eq(native.descriptor.language, ForeignLanguage.JS)
+    assert_eq(native.descriptor.status, BinderStatus.Active)
+    assert_eq(native.descriptor.runtime, BinderRuntime.TargetDispatchedJs)
+    assert_eq(native.descriptor.stub_kind, BindingStubKind.TypeScriptDeclarations)
+    assert_eq(native.host, ForeignHost.NativeJsWasmComponent)
+    assert_eq(web.host, ForeignHost.BrowserJsEngine)
+    assert_eq(native.binding_cache, root.join(".jet/bindings/js/plotly.jet"))
+    assert_eq(native.type_stub, Val(root.join(".jet/bindings/js/plotly.d.ts")))
+    assert_eq(native.provenance, root.join(".jet/bindings/js/plotly.provenance"))
+}
+// Rust: tests/cffi.rs:1015
+#Test("foreign_interop_routes_swift_as_planned_c_abi_bridge") {
+    root :: OSPath("/tmp/jet_foreign_route")
+    ns :: ForeignNamespace.from_module_path("swift.foundation").expect("swift namespace")
+    route :: route_plan(&root, ^ns, ForeignTarget.Native).expect("swift route")
+    assert_eq(route.descriptor.language, ForeignLanguage.Swift)
+    assert_eq(route.descriptor.status, BinderStatus.Planned)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SwiftCAbiBridge)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.SwiftModule)
+    assert_eq(route.host, ForeignHost.SwiftCAbiBridge)
+    assert_eq(route.binding_cache, root.join(".jet/bindings/swift/foundation.jet"))
+    assert_eq(route.type_stub, nil)
+    assert_eq(route.provenance, root.join(".jet/bindings/swift/foundation.provenance"))
+}
+// Rust: tests/cffi.rs:1042
+#Test("foreign_interop_routes_dart_as_active_api_dl_host") {
+    root :: OSPath("/tmp/jet_foreign_route")
+    route :: route_plan(&root, ForeignNamespace.from_module_path("dart.callbacks").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Dart)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.DartApiDl)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.DartContract)
+    assert_eq(route.host, ForeignHost.DartHostFfi)
+    assert_eq(route.type_stub, Val(root.join(".jet/bindings/dart/callbacks_host.dart")))
+}
+// Rust: tests/cffi.rs:1066
+#Test("foreign_interop_routes_powershell_as_active_supervised_worker") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("pwsh.inventory").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.PowerShell)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedPowerShell)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.PowerShellScript)
+    assert_eq(route.host, ForeignHost.SupervisedPowerShell)
+}
+// Rust: tests/cffi.rs:1091
+#Test("foreign_interop_routes_perl_as_active_supervised_worker") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("perl.text").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Perl)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedPerl)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.PerlScript)
+    assert_eq(route.host, ForeignHost.SupervisedPerl)
+}
+// Rust: tests/cffi.rs:1110
+#Test("foreign_interop_routes_ruby_as_active_supervised_worker") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("ruby.text").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Ruby)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedRuby)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.RubyScript)
+    assert_eq(route.host, ForeignHost.SupervisedRuby)
+}
+// Rust: tests/cffi.rs:1129
+#Test("foreign_interop_routes_php_as_active_supervised_pool") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("php.pricing").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Php)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedPhpPool)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.PhpScript)
+    assert_eq(route.host, ForeignHost.SupervisedPhpPool)
+}
+// Rust: tests/cffi.rs:1148
+#Test("foreign_interop_routes_r_as_active_supervised_worker") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("r.stats").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.R)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedR)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.RScript)
+    assert_eq(route.host, ForeignHost.SupervisedR)
+}
+// Rust: tests/cffi.rs:1167
+#Test("foreign_interop_routes_python_as_active_supervised_sidecar") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("py.math").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Py)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedPythonSidecar)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.PythonIntrospection)
+    assert_eq(route.host, ForeignHost.SupervisedPythonSidecar)
+    assert_eq(route.abi_contract, ForeignAbiContract.MESSAGE)
+    assert_eq(route.descriptor.provider, ForeignProvider.PyPi)
+}
+// Rust: tests/cffi.rs:1194
+#Test("foreign_interop_routes_octave_as_active_supervised_worker") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("octave.matrix").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Octave)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.SupervisedOctave)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.OctaveScript)
+    assert_eq(route.host, ForeignHost.SupervisedOctave)
+}
+// Rust: tests/cffi.rs:1213
+#Test("foreign_interop_routes_com_as_active_windows_automation") {
+    route :: route_plan(&OSPath("/tmp/jet_foreign_route"), ForeignNamespace.from_module_path("com.excel").unwrap(), ForeignTarget.Native).unwrap()
+    assert_eq(route.descriptor.language, ForeignLanguage.Com)
+    assert_eq(route.descriptor.status, BinderStatus.Active)
+    assert_eq(route.descriptor.runtime, BinderRuntime.WindowsComAutomation)
+    assert_eq(route.descriptor.stub_kind, BindingStubKind.ComTypeLibrary)
+    assert_eq(route.host, ForeignHost.WindowsComAutomation)
+}
+// Rust: tests/cffi.rs:1336
+#Test("jet_bind_native_backend_end_to_end") {
+    if !common.have_rustc() { eprintln("note: skipping jet_bind_native_backend (need rustc)"); return }
+    root :: env.temp_dir().join("jet_cbind_e2e_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache).unwrap()
+    (lib_dir, lib_name) :: build_c_lib(&root) ?? {
+        eprintln("note: skipping jet_bind_native_backend (no C compiler)")
+        return
+    }
+    declare_local_c_dep(&root, &lib_name)
+    header :: """
+#include <stdint.h>
+/* arithmetic */
+long long jetc_add_ints(long long a, long long b);
+const char *jetc_greeting(void);
+"""
+    result :: jet.CBind.generate(header, "jetc").expect("native bind backend")
+    assert(result.skipped.is_empty(), "unexpected skips: {result.skipped:?}")
+    assert_eq(result.bound.len(), 2)
+    assert(result.source.contains("fn jetc_add_ints(a: Int, b: Int) -> Int = \"jetc_add_ints\"\n"))
+    assert(result.source.contains("fn jetc_greeting() -> String = \"jetc_greeting\"\n"))
+    descriptor :: binder_descriptor(ForeignLanguage.C).unwrap().stamp()
+    assert(result.source.contains("// jet-ffi-descriptor={descriptor}"))
+    fs.write(cache.join("jetc.jet"), &result.source).unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.jetc as jc
+fn run() {
+    print(jc.jetc_add_ints(2, 40))
+    print(jc.jetc_greeting())
+}
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("front end rejected bind-generated program:\n{d:?}") })
+    rs :: root.join("main.rs")
+    fs.write(&rs, &out.rust).unwrap()
+    bin :: root.join("main_bin")
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={lib_dir.display()}").arg("-l").arg(&lib_name)
+    add_ffi_bridge_args(&rustc, out.ffi.as_ref().expect("C bind fixture needs its generated bridge"))
+    status :: rustc.output().unwrap()
+    assert(status.status.success(), "I2: rustc rejected bind-generated C-FFI code (jet bug):\n{String.from_utf8_lossy(&status.stderr)}")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "bind-generated program failed at runtime")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "42\nhi from C\n")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:1434
+#Test("cffi_end_to_end_links_and_runs") {
+    if !common.have_rustc() { eprintln("note: skipping cffi_end_to_end (need rustc)"); return }
+    root :: env.temp_dir().join("jet_cffi_e2e_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    cache :: root.join(".jet/bindings/c")
+    fs.create_dir_all(&cache).unwrap()
+    (lib_dir, lib_name) :: build_c_lib(&root) ?? {
+        eprintln("note: skipping cffi_end_to_end (no C compiler)")
+        return
+    }
+    declare_local_c_dep(&root, &lib_name)
+    manifest := fs.read_to_string(root.join("package.jet")).unwrap()
+    manifest.push_str("authority: {{\n    holds: {{ allow: [IO] }},\n}}\n")
+    fs.write(root.join("package.jet"), manifest).unwrap()
+    fs.write(cache.join("jetc.jet"), """
+#Bindgen module c.jetc.__bindgen__ {
+    fn reset() = "jetc_reset"
+    fn value() -> Int = "jetc_value_get"
+    fn store(value: Int) = "jetc_store"
+    fn twice(value: Int) -> Int = "jetc_twice"
+    fn add_ints(a: Int, b: Int) -> Int = "jetc_add_ints"
+    fn half(value: Float) -> Float = "jetc_half"
+    fn sum6(a: Float, b: Float, c: Float, d: Float, e: Float, f: Float) -> Float = "jetc_sum6"
+    fn echo(value: String) -> String = "jetc_echo"
+    fn greeting() -> String = "jetc_greeting"
+}
+""").unwrap()
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.jetc as jc
+fn run() {
+    print(jc.add_ints(2, 40))
+    print(jc.greeting())
+}
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("front end rejected C FFI program:\n{d:?}") })
+    assert(out.rust.contains("extern \"C\""), "expected an extern \"C\" block in generated code")
+    assert(out.rust.contains("jetc_add_ints"), "expected the C symbol name in generated code")
+    rs :: root.join("main.rs")
+    fs.write(&rs, &out.rust).unwrap()
+    bin :: root.join("main_bin")
+    cmd := Command.new("rustc")
+    cmd.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={lib_dir.display()}").arg("-l").arg(&lib_name)
+    add_ffi_bridge_args(&cmd, out.ffi.as_ref().expect("C FFI fixture needs its generated bridge"))
+    status :: cmd.output().unwrap()
+    assert(status.status.success(), "I2: rustc rejected generated C-FFI code (jet bug):\n{String.from_utf8_lossy(&status.stderr)}")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "C-FFI program failed at runtime")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "42\nhi from C\n")
+    jit :: root.join("jit.jet")
+    fs.write(&jit, """
+use c.jetc as jc
+fn run() {
+    jc.reset()
+    print(jc.value())
+    jc.store(9)
+    print(jc.value())
+    print(jc.twice(21))
+    print(jc.add_ints(2, 40))
+    print(jc.half(5.0))
+    print(jc.sum6(1.0, 2.0, 3.0, 4.0, 5.0, 6.0))
+    print(jc.echo("hi"))
+}
+""").unwrap()
+    jit_run :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "jit.jet", "--trace-tiers"]).current_dir(&root).env("JET_RUN_CACHE_DIR", root.join("run-cache")).env("NO_COLOR", "1").output().expect("run every admitted hidden C-bridge signature")
+    jit_stderr :: String.from_utf8_lossy(&jit_run.stderr)
+    assert_eq(jit_run.status.code(), Val(0), "{jit_stderr}")
+    assert_eq(String.from_utf8_lossy(&jit_run.stdout), "7\n9\n42\n42\n2.5\n21.0\nhi\n")
+    // Retired JIT/interpreter representation checks are replaced by the native journey above.
+    assert(!jit_stderr.contains("unbound wrapper"), "{jit_stderr}")
+    assert(!jit_stderr.contains("unsupported signature"), "{jit_stderr}")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/cffi.rs:1578
+#Test("default_int_outside_i64_stops_at_c_boundary_with_e1003") {
+    if !common.have_rustc() { return }
+    root :: common.unique_tmp("jet_cffi_exact_int_range")
+    fs.create_dir_all(&root).unwrap()
+    (lib_dir, lib_name) :: build_c_lib(&root) ?? return
+    declare_local_c_dep(&root, &lib_name)
+    main :: root.join("main.jet")
+    source :: """
+use c.jetc as c
+#Import module c.jetc { fn twice(value: Int) -> Int = "jetc_twice" }
+fn run() { print(c.twice(9223372036854775808)) }
+"""
+    fs.write(&main, source).unwrap()
+    out :: jet.compile_with_path(source, main.to_str().unwrap()).unwrap_or_else(fn(diagnostics) { panic("front end rejected exact Int C boundary:\n{diagnostics:?}") })
+    assert(out.rust.contains("jet_int_to_i64(a0).unwrap_or_else(|| super::jet_runtime_stop(\"E1003\""))
+    rust :: root.join("main.rs")
+    binary :: root.join("main_bin")
+    fs.write(&rust, &out.rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(&rust).arg("-o").arg(&binary).arg("-L").arg("native={lib_dir.display()}").arg("-l").arg(&lib_name)
+    add_ffi_bridge_args(&rustc, out.ffi.as_ref().expect("C boundary fixture needs its generated bridge"))
+    built :: rustc.output().unwrap()
+    assert(built.status.success(), "rustc rejected exact Int C boundary:\n{String.from_utf8_lossy(&built.stderr)}")
+    run :: Command.new(binary).output().unwrap()
+    stderr :: String.from_utf8_lossy(&run.stderr)
+    assert_eq(run.status.code(), Val(1), "{stderr}")
+    assert(stderr.contains("Error [E1003]: A default Int value does not fit in the C i64 range"), "{stderr}")
+    assert(!stderr.contains("panicked at"), "{stderr}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/cffi.rs:1717
+#Test("cffi_card436_c_abi_shapes_round_trip") {
+    if !common.have_rustc() { eprintln("note: skipping cffi_card436_c_abi_shapes_round_trip (need rustc)"); return }
+    root :: env.temp_dir().join("jet_cffi_c436_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    (lib_dir, lib_name) :: build_c_lib_card436(&root) ?? {
+        eprintln("note: skipping cffi_card436_c_abi_shapes_round_trip (no C compiler)")
+        return
+    }
+    declare_local_c_dep(&root, &lib_name)
+    main :: root.join("main.jet")
+    fs.write(&main, """
+use c.jetc436 as c436
+// Not the reserved builtin UI geometry name Point; exercise ordinary user struct layout.
+#Layout(c)
+struct Coord { x: Int
+    y: Int }
+Meters :: distinct Int
+#Import module c.jetc436 {
+    fn add_u8(a: U8, b: U8) -> U8 = "jetc436_add_u8"
+    fn add_i32(a: I32, b: I32) -> I32 = "jetc436_add_i32"
+    fn add_f32(a: F32, b: F32) -> F32 = "jetc436_add_f32"
+    fn make_point(x: Int, y: Int) -> Coord = "jetc436_make_point"
+    fn point_sum(p: Coord) -> Int = "jetc436_point_sum"
+    fn scale_meters(m: Meters) -> Meters = "jetc436_scale_meters"
+}
+fn run() {
+    print(c436.add_u8(200, 55))
+    print(c436.add_i32(1000000, 234567))
+    print(c436.add_f32(1.5, 2.25))
+    p :: c436.make_point(3, 4)
+    print(c436.point_sum(p))
+    print(c436.scale_meters(Meters.from_int(21)).raw())
+}
+""").unwrap()
+    src :: fs.read_to_string(&main).unwrap()
+    out :: jet.compile_with_path(&src, main.to_str().unwrap()).unwrap_or_else(fn(d) { panic("card #436 C-ABI shapes rejected by the front end:\n{jet.render_diagnostics(main.to_str().unwrap(), &src, &d)}") })
+    assert(out.ffi.is_none(), "unsupported resident-JIT signatures must not enter the hidden bridge")
+    assert(!out.rust.contains("/* unsupported"), "I2/I3: a sema-accepted C-ABI shape fell through to codegen's unsupported placeholder; got:\n{out.rust}")
+    rs :: root.join("main.rs")
+    fs.write(&rs, &out.rust).unwrap()
+    bin :: root.join("main_bin")
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).arg("-L").arg("native={lib_dir.display()}").arg("-l").arg(&lib_name)
+    status :: rustc.output().unwrap()
+    assert(status.status.success(), "I2: rustc rejected generated C-FFI code for card #436 shapes (jet bug):\n{String.from_utf8_lossy(&status.stderr)}")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "card #436 C-ABI round-trip program failed at runtime:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "255\n1234567\n3.75\n7\n42\n")
+    _ :: fs.remove_dir_all(&root)
+}

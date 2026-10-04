@@ -1,0 +1,437 @@
+use std.[fs, env, thread]
+use jet.[compile, run_compiler_work]
+use jet.Loader.load_entry
+use jet.Sema.[check_bundle, CompileMode]
+use jet.Diagnostics.Severity
+use JetFoundation.CompilerStack.[on_compiler_worker, run_on_compiler_stack]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.CompilerStack.[SHARED_SOURCE, COMPOSITE_IF_SOURCE, COMPOSITE_FALLBACK_SOURCE, LOCAL_CELL_SOURCE, JIT_ENTRY_SOURCE, PACKAGE_EDITION_PROGRAM, PACKAGE_EDITION_MANIFEST, compile_on_two_mib_stack, parenthesized_source]
+use jet_foundation.Tests.Integration.ComputeExtended.assert_aot_and_default_parity
+// GATE #4494: actual threads, TLS, subprocesses and filesystem providers.
+// Rust: tests/compiler_stack.rs:145
+#Test("compile_owns_enough_stack_for_a_two_mib_embedder_thread") {
+    compile_on_two_mib_stack(SHARED_SOURCE).expect("the Shared control program must compile")
+}
+// Rust: tests/compiler_stack.rs:150
+#Test("known_regressions_keep_their_results_on_a_two_mib_embedder_stack") {
+    for source in [COMPOSITE_IF_SOURCE, COMPOSITE_FALLBACK_SOURCE] {
+        diagnostics :: compile_on_two_mib_stack(source).expect_err("the capture conflict must remain E0204")
+        assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0204" }), "{diagnostics}")
+    }
+    compile_on_two_mib_stack(LOCAL_CELL_SOURCE).expect("the full local Cell surface must still compile")
+}
+// Rust: tests/compiler_stack.rs:200
+#Test("package_edition_survives_tir_eval_worker") {
+    dir :: common.unique_tmp("jet_compiler_stack_package_edition")
+    fs.create_dir_all(&dir).expect("create the fixture directory")
+    fs.write(dir.join("package.jet"), PACKAGE_EDITION_MANIFEST).expect("write the package manifest")
+    file :: dir.join("main.jet")
+    fs.write(&file, PACKAGE_EDITION_PROGRAM).expect("write the fixture")
+    path :: file.to_string_lossy().into_owned()
+    for tier in ["O0", "O1", "O2", "Web"] {
+        if common.run_entry_tier(&path, tier, false) == {
+            .Ran { exit_code, stdout, stderr } -> {
+                assert_eq(exit_code, 0, "{tier} must run: {stderr}")
+                assert(stderr.is_empty(), "{tier} emitted diagnostics: {stderr}")
+                assert_eq(stdout, "checked\nedition-sentinel\n", "{tier} lost the package edition")
+            }
+            .Problems(diagnostics) -> panic("{tier} rejected the edition fixture: {diagnostics}")
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/compiler_stack.rs:247
+// Retired JIT backend boundary is exercised through each canonical backend.
+#Test("the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread") {
+    dir :: common.unique_tmp("jet_compiler_stack_jit_entry")
+    fs.create_dir_all(&dir).expect("create the fixture directory")
+    file :: dir.join("main.jet")
+    fs.write(&file, JIT_ENTRY_SOURCE).expect("write the fixture")
+    path :: file.to_string_lossy().into_owned()
+    for tier in ["O0", "O1", "O2", "Web"] {
+        outcome :: thread.Builder.new().stack_size(2 * 1024 * 1024).spawn(fn() {
+            bundle :: run_compiler_work(fn() {
+                bundle := load_entry(&path).expect("the fixture should load")
+                diagnostics :: check_bundle(&bundle, CompileMode.Run)
+                assert(!diagnostics.iter().any(fn(d) { d.severity == Severity.Error }), "{diagnostics}")
+                bundle
+            })
+            common.run_checked_bundle_tier(&bundle, tier, false, &common.development_policy())
+        }).expect("spawn the embedder thread").join().expect("the backend must not overflow the embedder thread")
+        if outcome == {
+            .Ran { stdout, .. } -> assert_eq(stdout, "42\n")
+            .Problems(diagnostics) -> panic("the fixture must run on {tier}: {diagnostics}")
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/compiler_stack.rs:291
+#Test("the_compiler_boundary_never_nests_a_second_worker") {
+    assert(!on_compiler_worker(), "a test thread is not a compiler worker")
+    (worker, driver_inside_driver, backend_inside_driver) :: run_compiler_work(fn() {
+        assert(on_compiler_worker(), "the flag must be set on the worker, not on the thread that spawned it")
+        (thread.current().id(), run_compiler_work(fn() { thread.current().id() }), run_on_compiler_stack(fn() { thread.current().id() }))
+    })
+    assert_eq(worker, driver_inside_driver, "a nested driver entry must reuse the active worker")
+    assert_eq(worker, backend_inside_driver, "a backend entry inside a driver entry must reuse the active worker")
+    (worker, driver_inside_backend) :: run_on_compiler_stack(fn() {
+        (thread.current().id(), run_compiler_work(fn() { thread.current().id() }))
+    })
+    assert_eq(worker, driver_inside_backend, "a driver entry inside a backend entry must reuse the active worker")
+    assert_ne(worker, thread.current().id(), "an outermost entry must actually leave the caller's thread")
+    assert(!on_compiler_worker(), "the flag must not leak back onto the caller")
+}
+// Rust: tests/compiler_stack.rs:348
+#Test("public_compile_accepts_depth_256_and_reports_depth_257") {
+    compile(&parenthesized_source(254)).expect("source nesting at the limit must compile")
+    diagnostics :: compile(&parenthesized_source(255)).expect_err("source nesting past the limit must fail")
+    diagnostic :: diagnostics.iter().find(fn(diagnostic) { diagnostic.code == "E1403" }).expect("source nesting must use the registered diagnostic")
+    assert(diagnostic.what.contains("257 levels deep"))
+    assert(diagnostic.what.contains("limit is 256"))
+}
+// Rust: tests/compute_cuda.rs:16
+#Test("cuda_public_precision_gate_is_identical_on_all_tiers") {
+    tir_support.assert_example_cli_tiers_agree("tooling/compute_cuda", "cuda:f64:rejected\n")
+}
+// Rust: tests/compute_cuda.rs:21
+#Test("cuda_f32_backend_runs_or_fails_closed_across_all_tiers") {
+    source :: jet_foundation.Tests.Integration.ComputeCuda.CUDA_BACKEND_SOURCE
+    (code, stdout, stderr) :: tir_support.run_default_multi("compute_cuda_backend", "main.jet", &[("main.jet", source)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert(stdout.contains("cuda:unavailable") || stdout.contains("cuda:available"), "CUDA branch did not execute: {stdout}")
+    tir_support.assert_tiers_agree("compute_cuda_backend", source, stdout)
+    dir :: common.unique_tmp("compute_cuda_full_parity")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(&file, source).unwrap()
+    for tier in ["O0", "O1", "O2", "Web"] {
+        if common.run_entry_tier(&file.to_string_lossy(), tier, false) == {
+            .Ran { exit_code, stdout: tier_stdout, stderr: tier_stderr } -> {
+                assert_eq(exit_code, code, "{tier}/default exit drift: {tier_stderr}")
+                assert_eq(tier_stdout, stdout, "{tier}/default output drift")
+                assert_eq(tier_stderr, stderr, "{tier}/default diagnostics drift")
+            }
+            .Problems(diagnostics) -> panic("{tier} rejected CUDA fixture: {diagnostics}")
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/compute_cuda.rs:171
+#Test("cuda_prelude_uses_global_thread_indices_and_real_driver_launches") {
+    // Retained Rust source is a peer comparator, never called from Jet.
+    prelude :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs")).unwrap()
+    assert(prelude.contains("cuLaunchKernel"))
+    assert(prelude.contains("mod jet_compute_cuda"))
+    cuda :: prelude.split("// JET_VETTED_UNSAFE_BEGIN: jet_compute_cuda\n").nth(1).and_then(fn(section) { section.split("// JET_VETTED_UNSAFE_END: jet_compute_cuda").next() }).expect("CUDA vetted module must be present")
+    assert(cuda.contains("const RTLD_LOCAL: c_int = 0;"))
+    assert(prelude.matches("mad.lo.u32 %r0, %r0, %ntid.x, %tid.x").count() >= 10, "per-element CUDA kernels must use global block-aware indices")
+    for entry in ["jet_copy", "jet_binary", "jet_unary", "jet_matmul", "jet_sum", "jet_mse", "jet_mse_grad", "jet_mse_jvp", "jet_sgd", "jet_scale"] {
+        needle :: ".visible .entry {entry}"
+        assert(prelude.contains(needle), "missing CUDA kernel {entry}")
+    }
+    for operation in ["jet_compute_cuda::copy", "jet_compute_cuda::binary", "jet_compute_cuda::unary", "jet_compute_cuda::matmul", "jet_compute_cuda::sum", "jet_compute_cuda::mse", "jet_compute_cuda::mse_grad", "jet_compute_cuda::mse_jvp", "jet_compute_cuda::sgd", "jet_compute_cuda::scale", "jet_compute_cuda::stream_new", "jet_compute_cuda::stream_sync"] {
+        assert(prelude.contains(operation), "missing CUDA dispatch {operation}")
+    }
+    assert(prelude.contains("check(unsafe { (api.init)(0) }, \"driver initialization\")"))
+    assert(prelude.contains("no CPU fallback was selected"))
+}
+// Rust: tests/compute_extended.rs:29
+#Test("linalg_and_fft_use_the_cpu_oracle") {
+    tir_support.assert_example_cli_tiers_agree_with_package("tooling/compute_linalg", None, fn(stdout) {
+        assert_eq(stdout, fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/expected/tooling/compute_linalg.out")).unwrap())
+    })
+}
+// Rust: tests/compute_extended.rs:43
+#Test("fft_preserves_prime_and_composite_length_inputs") {
+    tir_support.assert_tiers_agree("compute_fft_arbitrary_lengths", """
+use core.compute as compute
+use core.math as math
+fn verify(input: [Float], expected: [Float]) {
+    tensor :: compute.from_list(input) ?? panic("input")
+    spectrum :: compute.fft(tensor) ?? panic("fft")
+    actual :: compute.to_list(spectrum)
+    error := Float{0.0}
+    loop index in 0..<expected.len() { error += math.abs(actual[index] - expected[index]) }
+    print(actual.len() == expected.len() && error < 0.00001)
+}
+fn run() {
+    verify([Float{1.0}, Float{2.0}, Float{3.0}], [Float{6.0}, Float{0.0}, Float{-1.5}, Float{0.866025403784}, Float{-1.5}, Float{-0.866025403784}])
+    verify([Float{1.0}, Float{0.0}, Float{0.0}, Float{0.0}, Float{0.0}, Float{0.0}], [Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}])
+}
+""", "true\ntrue\n")
+}
+// Rust: tests/compute_extended.rs:71
+#Test("autodiff_sparse_simd_and_streams_use_real_paths") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    source :: fs.read_to_string(root.join("Examples/features/tooling/compute_autodiff.jet")).unwrap()
+    expected :: fs.read_to_string(root.join("Examples/features/expected/tooling/compute_autodiff.out")).unwrap()
+    bundle := load_entry("Examples/features/tooling/compute_autodiff.jet").expect("load compute autodiff example")
+    _ :: check_bundle(&bundle, CompileMode.Run)
+    // Retired resident-JIT representation assertions become real O0/O1/O2/Web runs.
+    tir_support.assert_tiers_agree("compute_autodiff_targeted", source, expected)
+}
+// Rust: tests/compute_extended.rs:92
+#Test("curried_autodiff_shapes_share_the_prelude_handle") {
+    tir_support.assert_tiers_agree("compute_curried_autodiff_shapes", """
+use core.compute as compute
+fn loss(w: Tensor, x: Tensor) -> Tensor { compute.mul(w, x) ?? panic("loss") }
+fn run() {
+    w :: compute.from_list([2.0]) ?? panic("w")
+    x :: compute.from_list([4.0]) ?? panic("x")
+    tangent_w :: compute.ones([1]) ?? panic("tangent_w")
+    tangent_x :: compute.ones([1]) ?? panic("tangent_x")
+    value_and_gradient :: compute.value_and_gradient(loss)
+    (value, gradients) :: value_and_gradient(w, x)
+    print("value:{compute.to_list(value)}")
+    print("value_gradient_w:{compute.to_list(gradients.w)}")
+    jvp :: compute.jvp(loss)
+    (jvp_value, jvp_tangent) :: jvp(w, x, tangent_w, tangent_x)
+    print("jvp_value:{compute.to_list(jvp_value)}")
+    print("jvp_tangent:{compute.to_list(jvp_tangent)}")
+    vjp :: compute.vjp(loss)
+    vjp_run :: vjp(w, x)
+    pull_fn :: vjp_run.pull
+    pull :: pull_fn(~tangent_w)
+    print("vjp_pull_w:{compute.to_list(pull.w)}")
+    print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
+}
+""", "value:[8.0]\nvalue_gradient_w:[4.0]\njvp_value:[8.0]\njvp_tangent:[6.0]\nvjp_pull_w:[4.0]\nvjp_grads_x:[2.0]\n")
+}
+// Rust: tests/compute_extended.rs:129
+#Test("autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss") {
+    pure :: """
+use core.compute as compute
+fn loss(value: Tensor) -> Tensor { return compute.mul(value, value) ?? panic("loss") }
+fn run() {
+    value :: compute.ones([1]) ?? panic("value")
+    gradient :: compute.gradient(loss, ~value)
+}
+"""
+    compile(pure).expect("a checked compute failure fallback must remain differentiable")
+    impure :: """
+use core.compute as compute
+fn loss(value: Tensor) -> Tensor {
+    print("side effect")
+    return compute.mul(value, value) ?? panic("loss")
+}
+fn run() {
+    value :: compute.ones([1]) ?? panic("value")
+    gradient :: compute.gradient(loss, ~value)
+    print(compute.to_list(gradient))
+}
+"""
+    diagnostics :: compile(impure).expect_err("an effectful loss must be rejected")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.what.contains("needs a pure Tensor function") }), "missing autodiff purity diagnostic: {diagnostics}")
+}
+// Rust: tests/compute_extended.rs:168
+#Test("f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle") {
+    tir_support.assert_tiers_agree("compute_f32_simd_autodiff", """
+use core.compute as compute
+fn tiled_loss(left: Tensor, right: Tensor) -> Tensor {
+    return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
+}
+fn run() {
+    left :: compute.full([1, 1], 2.0) ?? panic("left")
+    right :: compute.full([1, 1], 3.0) ?? panic("right")
+    (grad_left, grad_right) :: compute.gradient(tiled_loss, ~left, ~right)
+    print("grad_left:{compute.to_list(grad_left)}")
+    print("grad_right:{compute.to_list(grad_right)}")
+    tangent_left :: compute.full([1, 1], 1.0) ?? panic("tangent_left")
+    tangent_right :: compute.full([1, 1], 1.0) ?? panic("tangent_right")
+    tiled_jvp :: compute.jvp(tiled_loss)
+    (value, tangent) :: tiled_jvp(left, right, tangent_left, tangent_right)
+    print("value:{compute.to_list(value)}")
+    print("tangent:{compute.to_list(tangent)}")
+}
+""", "grad_left:[3.0]\ngrad_right:[2.0]\nvalue:[6.0]\ntangent:[5.0]\n")
+}
+// Rust: tests/compute_extended.rs:198
+#Test("ml_serialization_and_placement_failures_stay_in_the_same_tier") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    ml_source :: fs.read_to_string(root.join("Examples/features/tooling/compute_ml.jet")).unwrap()
+    ml_output :: fs.read_to_string(root.join("Examples/features/expected/tooling/compute_ml.out")).unwrap()
+    tir_support.assert_tiers_agree("compute_ml_targeted", ml_source, ml_output)
+    (code, stdout, stderr) :: tir_support.run_default_multi("compute_ml_resident", "main.jet", &[("main.jet", ml_source)])
+    assert_eq(code, 0, "ML `jet run` failed: {stderr}")
+    assert_eq(stdout, ml_output, "ML output drifted: {stderr}")
+    tir_support.assert_tiers_agree("compute_ml_f32_wire", """
+use core.compute as compute
+fn run() {
+    left :: compute.matrix(1, 1, 2.0) ?? panic("left")
+    right :: compute.matrix(1, 1, 3.0) ?? panic("right")
+    model :: compute.matmul_f32_tile(left, right) ?? panic("model")
+    wire :: compute.serialize(model) ?? panic("wire")
+    print("wire:{wire}")
+    round :: compute.deserialize(wire) ?? panic("round")
+    print("round:{compute.to_list(round)}")
+}
+""", "wire:shape=1,1;data=6.0;profile=F32Strict+Reproducible;checksum=4593129c0b16d781\nround:[6.0]\n")
+    assert_aot_and_default_parity("compute_device_targeted", fs.read_to_string(root.join("Examples/features/tooling/compute_device.jet")).unwrap(), &["device:CPU", "placement:Placement", "transfer:Transfer("])
+    assert_aot_and_default_parity("compute_metal_targeted", fs.read_to_string(root.join("Examples/features/tooling/compute_metal.jet")).unwrap(), &["metal:f64:rejected", "stream:cpu-ok"])
+}
+// Rust: tests/compute_extended.rs:253
+#Test("metal_public_path_matches_cpu_oracle_and_declared_failure") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    source :: fs.read_to_string(root.join("Examples/features/tooling/compute_metal.jet")).unwrap()
+    expected :: fs.read_to_string(root.join("Examples/features/expected/tooling/compute_metal.out")).unwrap()
+    tir_support.assert_tiers_agree("compute_metal_public_path", source, expected)
+}
+// Rust: tests/compute_extended.rs:260
+#Test("safe_kernel_boundary_and_f32_profile_are_explicit") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    assert_aot_and_default_parity("compute_kernel_targeted", fs.read_to_string(root.join("Examples/features/tooling/compute_kernel.jet")).unwrap(), &["kernel:42", "bounds:true"])
+    assert_aot_and_default_parity("compute_simd_targeted", fs.read_to_string(root.join("Examples/features/tooling/compute_simd.jet")).unwrap(), &["profile=F32Strict+Reproducible", "tile:[19.0, 22.0, 43.0, 50.0]"])
+}
+// Rust: tests/compute_extended.rs:277
+#Test("f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices") {
+    source :: """
+use core.compute as compute
+fn run() {
+    left :: compute.full([3, 13], 1.0) ?? panic("left")
+    right :: compute.full([13, 7], 2.0) ?? panic("right")
+    scalar :: compute.matmul(left, right) ?? panic("scalar")
+    tiled :: compute.matmul_f32_tile(left, right) ?? panic("tiled")
+    print("scalar:{compute.to_list(scalar)}")
+    print("tiled:{compute.to_list(tiled)}")
+    wrong :: compute.full([14, 7], 2.0) ?? panic("wrong")
+    if compute.matmul_f32_tile(left, wrong) == {
+        .Ok(_) -> { print("bad_shape:accepted") }
+        .Err(_) -> { print("bad_shape:rejected") }
+    }
+    wide :: compute.full([1, 1], 1e40) ?? panic("wide")
+    if compute.matmul_f32_tile(wide, wide) == {
+        .Ok(_) -> { print("bad_f32:accepted") }
+        .Err(_) -> { print("bad_f32:rejected") }
+    }
+    if compute.matrix(9223372036854775807, 2, 0.0) == {
+        .Ok(_) -> { print("overflow:accepted") }
+        .Err(_) -> { print("overflow:rejected") }
+    }
+}
+"""
+    tir_support.assert_tiers_agree("compute_f32_tile_hostile", source, "scalar:[26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0]\ntiled:[26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0]\nbad_shape:rejected\nbad_f32:rejected\noverflow:rejected\n")
+}
+// Rust: tests/compute_extended.rs:321
+#Test("safe_kernel_rejects_effectful_bodies_before_codegen") {
+    diagnostics :: compile("#Kernel(.parallel) fn noisy(value: Int) -[IO]> Int { print(value)\n    return value }\n").expect_err("a safe kernel must not lower an effectful body")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E1102" }), "missing E1102: {diagnostics}")
+}
+// Rust: tests/compute_extended.rs:335
+#Test("raw_kernel_contract_cannot_be_forged_without_a_provider") {
+    diagnostics :: compile("use core.compute as compute\nfn run() { compute.raw_kernel_contract(\"no gate\", 1) }\n").expect_err("the CPU compute module must not expose a raw-contract constructor")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.what.contains("raw_kernel_contract") || diagnostic.fix.contains("core.compute") }), "missing provider-boundary diagnostic: {diagnostics}")
+}
+// Rust: tests/compute_extended.rs:350
+#Test("data_series_feeds_the_same_compute_tensor_path") {
+    assert_aot_and_default_parity("compute_data_integration", """
+use core.compute as compute
+fn run() {
+    values :: [Float]{1.0, 2.0, 3.0}
+    tensor :: compute.from_list(values) ?? panic("tensor")
+    doubled :: compute.mul(tensor, compute.full([3], 2.0) ?? panic("factor")) ?? panic("doubled")
+    print("data_tensor:{compute.to_list(doubled)}")
+}
+""", &["data_tensor:[2.0, 4.0, 6.0]"])
+}
+// Rust: tests/compute_extended.rs:369
+#Test("portable_accelerator_devices_are_registered_at_the_compute_seam") {
+    compile("""
+use core.compute as compute
+fn run() {
+    vulkan :: compute.device_vulkan()
+    webgpu :: compute.device_webgpu()
+    tensor :: compute.full([1], 1.0) ?? panic("tensor")
+    vulkan_tensor :: compute.on_device(tensor, vulkan) ?? panic("vulkan")
+    webgpu_tensor :: compute.on_device(tensor, webgpu) ?? panic("webgpu")
+    print(compute.device(vulkan_tensor))
+    print(compute.device(webgpu_tensor))
+}
+""").expect("Vulkan and WebGPU devices must be public core.compute seams")
+}
+// Rust: tests/compute_extended.rs:389
+#Test("portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu") {
+    tir_support.assert_example_cli_tiers_agree_with_package("tooling/compute_vulkan_webgpu", tir_support.TIR_TEST_PACKAGE, fn(stdout) {
+        lines :: stdout.lines().collect()
+        assert_eq(lines.len(), 2, "unexpected accelerator example output: {stdout}")
+        assert(lines[0] == "vulkan:accepted" || lines[0] == "vulkan:rejected", "Vulkan must report its real availability: {stdout}")
+        assert_eq(lines[1], "webgpu:rejected")
+    })
+}
+// Rust: tests/compute_extended.rs:410
+#Test("portable_accelerator_vulkan_operations_match_cpu_across_tiers") {
+    source :: """
+use core.compute as compute
+fn loss(left: Tensor, right: Tensor) -> Tensor { compute.mse_loss(left, right) ?? panic("loss") }
+fn run() {
+    left_cpu :: compute.full([2, 2], 2.0) ?? panic("left")
+    right_cpu :: compute.full([2, 2], 3.0) ?? panic("right")
+    left_f32 :: compute.matmul_f32_tile(left_cpu, compute.eye(2) ?? panic("eye")) ?? panic("left f32")
+    right_f32 :: compute.matmul_f32_tile(right_cpu, compute.eye(2) ?? panic("eye")) ?? panic("right f32")
+    if compute.on_device(left_f32, compute.device_vulkan()) == {
+        .Err(_) -> print("vulkan:unavailable")
+        .Ok(left) -> {
+            right :: compute.on_device(right_f32, compute.device_vulkan()) ?? panic("right Vulkan")
+            if !compute.placement(left).contains("backend=vulkan") -> panic("Vulkan receipt")
+            print("receipt:vulkan")
+            added :: compute.add(left, right) ?? panic("add")
+            print("add:{compute.to_list(added)}")
+            reduced :: compute.sum_axis(right, 1) ?? panic("sum")
+            print("sum:{compute.to_list(reduced)}")
+            prediction :: compute.mse_loss(left, right) ?? panic("mse")
+            print("mse:{compute.to_list(prediction)}")
+            (gradient_left, gradient_right) :: compute.gradient(loss, ~left, ~right)
+            print("grad:{compute.to_list(gradient_left)}:{compute.to_list(gradient_right)}")
+            tangent_cpu :: compute.ones([2, 2]) ?? panic("tangent")
+            tangent :: compute.on_device(compute.matmul_f32_tile(tangent_cpu, compute.eye(2) ?? panic("eye")) ?? panic("tangent f32"), compute.device_vulkan()) ?? panic("tangent Vulkan")
+            jvp :: compute.jvp(loss)
+            (jvp_value, jvp_tangent) :: jvp(left, right, tangent, tangent)
+            print("jvp:{compute.to_list(jvp_value)}:{compute.to_list(jvp_tangent)}")
+            stream :: compute.stream_new_on(compute.device_vulkan()) ?? panic("stream")
+            compute.stream_sync(stream) ?? panic("sync")
+            cpu :: compute.transfer(left, compute.device_cpu()) ?? panic("transfer")
+            if !compute.transfer_show(cpu).contains("from=Vulkan") -> panic("transfer receipt")
+            print("receipt:transfer")
+            print("transfer:{compute.to_list(cpu)}")
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: tir_support.run_default_multi("compute_vulkan_probe", "main.jet", &[("main.jet", source)])
+    assert_eq(code, 0, "Vulkan probe failed: {stderr}")
+    if stdout == "vulkan:unavailable\n" {
+        if env.var_os("JET_REQUIRE_VULKAN").is_some() { panic("Vulkan production path was not available: {stderr}") }
+        return
+    }
+    expected :: "receipt:vulkan\nadd:[5.0, 5.0, 5.0, 5.0]\nsum:[6.0, 6.0]\nmse:[1.0]\ngrad:[-0.5, -0.5, -0.5, -0.5]:[0.5, 0.5, 0.5, 0.5]\njvp:[1.0]:[0.0]\nreceipt:transfer\ntransfer:[2.0, 2.0, 2.0, 2.0]\n"
+    assert_eq(stdout, expected, "Vulkan result drifted from the CPU oracle")
+    tir_support.assert_tiers_agree("compute_vulkan_operations", source, expected)
+}
+// Rust: tests/compute_extended.rs:468
+#Test("portable_accelerator_vulkan_rejects_nonfinite_kernel_output") {
+    source :: """
+use core.compute as compute
+fn run() {
+    seed :: compute.matrix(1, 1, 100.0) ?? panic("seed")
+    one :: compute.matrix(1, 1, 1.0) ?? panic("one")
+    f32_seed :: compute.matmul_f32_tile(seed, one) ?? panic("f32")
+    if compute.on_device(f32_seed, compute.device_vulkan()) == {
+        .Err(_) -> print("vulkan:unavailable")
+        .Ok(value) -> {
+            if compute.exp(value) == {
+                .Ok(_) -> print("nonfinite:accepted")
+                .Err(_) -> print("nonfinite:rejected")
+            }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: tir_support.run_default_multi("compute_vulkan_nonfinite", "main.jet", &[("main.jet", source)])
+    assert_eq(code, 0, "Vulkan non-finite probe failed: {stderr}")
+    if stdout == "vulkan:unavailable\n" {
+        if env.var_os("JET_REQUIRE_VULKAN").is_some() { panic("Vulkan production path was not available: {stderr}") }
+        return
+    }
+    assert_eq(stdout, "nonfinite:rejected\n")
+    tir_support.assert_tiers_agree("compute_vulkan_nonfinite", source, &stdout)
+}

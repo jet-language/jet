@@ -1,0 +1,237 @@
+use std.collections.BTreeSet
+use jet_foundation.Tests.Integration.Parity.[Surface, Class, Entry, Classified, KNOWN_OPEN_GAPS, discover_inventory, classify_inventory, validate_records, record, comptime_sequence_methods, render_inventory, stable_hash, direct_dispatch_names, extract_pairs, guarded_static_methods]
+
+// Rust: tests/parity.rs:1420
+#Test("canonical_builtin_inventory_is_complete_and_stable") {
+    discovered :: discover_inventory()
+    records :: classify_inventory(&discovered).unwrap_or_else(fn(errors) -> panic("{errors.join("\n")}"))
+    validate_records(&discovered, &records).unwrap()
+    fixed :: records.iter().filter(fn(record) -> record.entry.surface == Surface.Fixed).count()
+    direct_static :: records.iter().filter(fn(record) -> record.entry.surface == Surface.DirectStatic).count()
+    value :: records.iter().filter(fn(record) -> record.entry.surface == Surface.Value).count()
+    bespoke :: records.iter().filter(fn(record) -> record.entry.surface == Surface.Bespoke).count()
+    // #747 / D-RANGE-EXCL1=C: indexed + indexes replaced enumerate.
+    assert_eq((fixed, direct_static, value, bespoke), (512, 151, 531, 57))
+    assert_eq(record(&records, Surface.Fixed, "core.math", "round").class, Class.Covered)
+    assert_eq(record(&records, Surface.Fixed, "core.encoding.json", "to_string_pretty").class, Class.Covered)
+    loop method in ["idle", "loading", "loaded", "failed"] {
+        assert_eq(record(&records, Surface.Bespoke, "core.reactive.loadable", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.DirectStatic, "Int", "parse").class, Class.Covered)
+    assert_eq(record(&records, Surface.DirectStatic, "Clock", "new").class, Class.Covered)
+    assert_eq(record(&records, Surface.DirectStatic, "Set", "from").class, Class.Covered)
+    assert_eq(record(&records, Surface.DirectStatic, "ExpiringValue", "new").class, Class.Boundary)
+    loop (owner, method) in [("Rank", "from"), ("Rank", "new"), ("PriorityQueue", "from"), ("PriorityQueue", "new"), ("Cache", "new"), ("Queue", "new"), ("Bits", "new"), ("Bytes", "from"), ("Bytes", "new")] {
+        assert_eq(record(&records, Surface.DirectStatic, owner, method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.DirectStatic, "Tally", "new").class, Class.Covered)
+    assert_eq(record(&records, Surface.DirectStatic, "Secret", "from_text").class, Class.Boundary)
+    assert_eq(record(&records, Surface.DirectStatic, "Secret", "from_bytes").class, Class.Covered)
+    assert_eq(record(&records, Surface.DirectStatic, "WrappedVaultKey", "from_bytes").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Value, "WrappedVaultKey", "bytes").class, Class.Boundary)
+    assert_eq(record(&records, Surface.DirectStatic, "String", "from_bytes").class, Class.Covered)
+    loop method in ["Decimal", "Vec3", "wrapping", "consume"] {
+        assert_eq(record(&records, Surface.DirectStatic, "direct", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "String", "trim").class, Class.Covered)
+    loop method in ["after", "before", "bytes", "slice"] {
+        assert_eq(record(&records, Surface.Value, "String", method).class, Class.Covered)
+    }
+    loop method in ["is_nan", "is_infinite", "is_finite"] {
+        assert_eq(record(&records, Surface.Value, "Float", method).class, Class.Covered)
+        assert_eq(record(&records, Surface.Value, "F32", method).class, Class.Covered)
+    }
+    // D-FLOATW1: F32 width is preserved by CtFloat.
+    assert_eq(record(&records, Surface.Value, "F32", "to_string").class, Class.Covered)
+    loop owner in ["I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
+        assert_eq(record(&records, Surface.Value, owner, "to_string").class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "Float", "origin").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Value, "Stopwatch", "elapsed_millis").class, Class.Boundary)
+    loop owner in ["Int", "I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
+        loop method in ["count_ones", "count_zeros", "leading_zeros", "trailing_zeros"] {
+            assert_eq(record(&records, Surface.Value, owner, method).class, Class.Covered)
+        }
+    }
+    assert_eq(record(&records, Surface.Value, "Decimal", "to_string").class, Class.Covered)
+    assert_eq(record(&records, Surface.Value, "Decimal", "add").class, Class.Covered)
+    assert_eq(record(&records, Surface.Fixed, "core.math", "decimal").class, Class.Covered)
+    loop method in ["add", "add_new", "clear", "each", "has_key"] {
+        assert_eq(record(&records, Surface.Value, "Map", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "List", "filter").class, Class.Covered)
+    assert_eq(record(&records, Surface.Value, "List", "clear").class, Class.Covered)
+    sequence_methods :: comptime_sequence_methods()
+    assert_eq(sequence_methods.len(), 40, "SequenceParity method-set drift")
+    loop owner in ["List", "FixedList"] {
+        loop method in &sequence_methods {
+            expected :: if owner == "FixedList" && method == "insert" { Class.Boundary } else { Class.Covered }
+            assert_eq(record(&records, Surface.Value, owner, method).class, expected)
+        }
+        assert_eq(record(&records, Surface.Value, owner, "view").class, Class.Boundary)
+    }
+    loop owner in ["View", "ViewMut"] {
+        loop method in ["contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len", "map"] {
+            assert_eq(record(&records, Surface.Value, owner, method).class, Class.Covered)
+        }
+    }
+    assert_eq(record(&records, Surface.Value, "BuildContext", "generate").class, Class.Covered)
+    assert_eq(record(&records, Surface.Value, "Duration", "in").class, Class.Covered)
+    loop method in ["int", "float", "float_range", "bool", "normal", "exponential", "bytes", "split", "pick", "weighted_pick", "sample", "shuffle"] {
+        assert_eq(record(&records, Surface.Value, "RNG", method).class, Class.Covered)
+    }
+    loop method in ["len", "is_empty", "clear", "to_bytes", "write_u8", "write_u16_le", "write_u16_be", "write_u32_le", "write_u32_be", "write_u64_le", "write_u64_be", "write_bytes"] {
+        assert_eq(record(&records, Surface.Value, "Bytes", method).class, Class.Covered)
+    }
+    loop method in ["add", "add_new", "get", "remove", "has_key", "keys", "capacity", "len", "is_empty", "clear"] {
+        assert_eq(record(&records, Surface.Value, "Cache", method).class, Class.Covered)
+    }
+    loop method in ["push_front", "push_back", "pop_front", "pop_back", "peek_front", "peek_back", "len", "is_empty", "clear"] {
+        assert_eq(record(&records, Surface.Value, "Queue", method).class, Class.Covered)
+    }
+    loop method in ["add", "remove", "has", "first", "last", "union", "to_list", "len", "is_empty", "clear"] {
+        assert_eq(record(&records, Surface.Value, "Rank", method).class, Class.Covered)
+    }
+    loop method in ["add", "remove", "has", "count", "len", "is_empty", "clear", "to_list"] {
+        assert_eq(record(&records, Surface.Value, "Bits", method).class, Class.Covered)
+    }
+    loop method in ["push", "pop", "peek", "to_sorted_list", "len", "is_empty", "clear"] {
+        assert_eq(record(&records, Surface.Value, "PriorityQueue", method).class, Class.Covered)
+    }
+    loop method in ["add", "remove", "has", "union", "to_list", "len", "is_empty", "clear"] {
+        assert_eq(record(&records, Surface.Value, "Set", method).class, Class.Covered)
+    }
+    loop method in ["add", "remove", "has", "count", "len", "is_empty", "any"] {
+        assert_eq(record(&records, Surface.Value, "Tally", method).class, Class.Covered)
+    }
+    loop method in ["media_type", "subtype", "essence", "to_string", "param", "params"] {
+        assert_eq(record(&records, Surface.Value, "MIME", method).class, Class.Covered)
+    }
+    loop owner in ["Date", "LocalDate"] {
+        loop method in ["year", "month", "day", "to_string", "add_days", "add_months", "add_period", "day_of_year", "diff_days", "format", "iso_week", "iso_weekday", "truncate", "weekday"] {
+            assert_eq(record(&records, Surface.Value, owner, method).class, Class.Covered)
+        }
+    }
+    loop method in ["hour", "minute", "second", "to_string"] {
+        assert_eq(record(&records, Surface.Value, "LocalTime", method).class, Class.Covered)
+    }
+    loop method in ["to_timestamp", "to_unix_ms", "to_string"] {
+        assert_eq(record(&records, Surface.Value, "DateTime", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "DateTime", "in_zone").class, Class.Covered)
+    assert_eq(record(&records, Surface.Value, "Zone", "name").class, Class.Covered)
+    loop method in ["add_duration", "add_period", "date", "format", "offset_seconds", "time", "to_datetime", "to_string", "zone"] {
+        assert_eq(record(&records, Surface.Value, "ZonedDateTime", method).class, Class.Covered)
+    }
+    loop method in ["utc", "zone", "zoned", "zoned_local"] {
+        assert_eq(record(&records, Surface.Fixed, "core.time", method).class, Class.Covered)
+    }
+    loop method in ["date", "format", "format_rfc3339", "hour", "minute", "plus_duration", "round", "second", "time", "truncate"] {
+        assert_eq(record(&records, Surface.Value, "DateTime", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "Period", "to_string").class, Class.Covered)
+    loop method in ["value", "uncertainty"] {
+        assert_eq(record(&records, Surface.Value, "Measurement", method).class, Class.Covered)
+    }
+    loop method in ["add", "sub", "mul", "div"] {
+        assert_eq(record(&records, Surface.Value, "Measurement", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "Instant", "elapsed_millis").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Value, "Task", "detach").class, Class.Boundary)
+    loop method in ["inner_join", "left_join", "pivot_sum", "schema", "json"] {
+        assert_eq(record(&records, Surface.Fixed, "core.data", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Fixed, "core.testing", "fake_rng").class, Class.Covered)
+    assert_eq(record(&records, Surface.Fixed, "core.testing", "fake_clock").class, Class.Covered)
+    loop method in ["corpus", "fixture", "golden", "snap", "temp_dir"] {
+        assert_eq(record(&records, Surface.Fixed, "core.testing", method).class, Class.Boundary)
+    }
+    loop method in ["create", "tar_add", "tar_get", "tar_names_json", "zip_decompress"] {
+        assert_eq(record(&records, Surface.Fixed, "core.archive", method).class, Class.Covered)
+    }
+    loop method in ["compress", "decompress"] {
+        assert_eq(record(&records, Surface.Fixed, "core.archive.gzip", method).class, Class.Covered)
+        assert_eq(record(&records, Surface.Fixed, "core.archive.zstd", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Fixed, "core.args", "spec").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Fixed, "core.game", "run").class, Class.Boundary)
+    loop (module, method) in [("core.data.sketch.hll", "new"), ("core.data.sketch.tdigest", "new"), ("core.data.sketch.cms", "new"), ("core.data.sketch.reservoir", "new")] {
+        assert_eq(record(&records, Surface.Bespoke, module, method).class, Class.Covered)
+    }
+    loop owner in ["Signal", "Shared", "Effect", "Computed", "Derived", "DecisionHook"] {
+        method :: match owner { "Signal" -> "get"; "Shared" -> "read"; "Effect" -> "unsubscribe"; "Computed" | "Derived" -> "get"; "DecisionHook" -> "run"; _ -> unreachable() }
+        assert_eq(record(&records, Surface.Value, owner, method).class, Class.Boundary)
+    }
+    loop method in ["add", "remove", "ids"] {
+        assert_eq(record(&records, Surface.Value, "Pool", method).class, Class.Covered)
+    }
+    assert_eq(record(&records, Surface.Value, "Solver", "status").class, Class.Covered)
+    assert_eq(record(&records, Surface.DirectStatic, "Solver", "new").class, Class.Covered)
+    assert_eq(record(&records, Surface.Value, "Solver", "require").class, Class.Covered)
+    assert_eq(record(&records, Surface.Value, "Solver", "failure_count").class, Class.Covered)
+    assert_eq(record(&records, Surface.Fixed, "core.time", "now").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Fixed, "core.crypto.expert", "open_v1").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Fixed, "core.crypto.expert", "migrate_v1").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Fixed, "core.crypto.vault", "prepare_import_signing").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Fixed, "core.crypto.vault", "commit_import_x25519").class, Class.Boundary)
+    // #721 / #392 C3: exact pure and ambient per-call classification.
+    loop method in ["point", "size", "rect", "constraint", "node", "text", "button", "box", "key_event", "resize_event", "node_role", "node_color", "aria_role_button", "aria_role_text_input", "aria_role_label", "aria_role_container"] {
+        assert_eq(record(&records, Surface.Fixed, "core.ui", method).class, Class.Covered, "core.ui.{method}")
+    }
+    loop method in ["null_backend", "tui_backend", "gtk_backend"] {
+        assert_eq(record(&records, Surface.Fixed, "core.ui", method).class, Class.Boundary, "core.ui.{method}")
+    }
+    assert_eq(record(&records, Surface.Bespoke, "core.ui", "reactive_render").class, Class.Boundary)
+    assert_eq(record(&records, Surface.Fixed, "core.game.raylib", "color").class, Class.Covered)
+    loop method in ["ed25519_verify_strict", "ed25519_sign", "hkdf_sha256_raw", "x25519_raw", "xchacha20poly1305_seal", "xchacha20poly1305_open", "aes256gcm_seal", "aes256gcm_open", "argon2id", "secret_bytes", "signing_key_bytes", "x25519_secret_bytes", "shared_secret_bytes"] {
+        assert_eq(record(&records, Surface.Fixed, "core.crypto.expert", method).class, Class.Covered, "core.crypto.expert.{method}")
+    }
+    loop method in ["attribute", "content", "decode", "decode_bytes", "expanded_name", "root"] {
+        assert_eq(record(&records, Surface.Fixed, "core.encoding.xml", method).class, Class.Covered, "core.encoding.xml.{method}")
+    }
+    loop (module, method) in KNOWN_OPEN_GAPS {
+        assert_eq(record(&records, Surface.Fixed, module, method).class, Class.PurePending, "{module}.{method} must remain PurePending (not swallowed by a module boundary)")
+    }
+    assert_eq(record(&records, Surface.Value, "View", "join").class, Class.Covered, "View.join Covered (JoinSep)")
+    assert_eq(record(&records, Surface.Value, "ViewMut", "join").class, Class.Covered, "ViewMut.join Covered (JoinSep)")
+    assert_eq(record(&records, Surface.Fixed, "core.crypto.random", "bytes").class, Class.Boundary)
+    rendered :: render_inventory(&records)
+    reversed := records.clone()
+    reversed.reverse()
+    assert_eq(render_inventory(&reversed), rendered, "inventory rendering must be order-stable")
+    covered :: records.iter().filter(fn(record) -> record.class == Class.Covered).count()
+    pending :: records.iter().filter(fn(record) -> record.class == Class.PurePending).count()
+    boundaries :: records.iter().filter(fn(record) -> record.class == Class.Boundary).count()
+    // #722/#743: View.join + Iter.* covered; zero effect-free backlog.
+    assert_eq((records.len(), covered, pending, boundaries), (1_251, 904, 0, 347))
+    eprintln("builtin parity inventory: {records.len()} total, {covered} covered, {pending} pure pending, {boundaries} boundaries")
+    hash :: stable_hash(&rendered)
+    assert_eq(hash, 14619055002375487292 as U64, "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}")
+}
+
+// Rust: tests/parity.rs:2211
+#Test("inventory_validator_rejects_duplicate_stale_and_unclassified_entries") {
+    live :: Entry { surface: Surface.Value, owner: "String", method: "trim" }
+    stale_covered :: Entry { surface: Surface.Fixed, owner: "core.fake", method: "covered" }
+    stale_pending :: Entry { surface: Surface.Fixed, owner: "core.fake", method: "pending" }
+    stale_boundary :: Entry { surface: Surface.Fixed, owner: "core.fake", method: "boundary" }
+    discovered: BTreeSet<Entry> :: [live.clone()].into_iter().collect()
+    duplicate :: Classified { entry: live.clone(), class: Class.Covered, reason: "proof" }
+    records :: [duplicate.clone(), duplicate, Classified { entry: stale_covered, class: Class.Covered, reason: "old" }, Classified { entry: stale_pending, class: Class.PurePending, reason: "old" }, Classified { entry: stale_boundary, class: Class.Boundary, reason: "old" }]
+    errors :: validate_records(&discovered, &records).unwrap_err().join("\n")
+    assert(errors.contains("duplicate classification: value String.trim"), "{errors}")
+    assert(errors.contains("stale covered classification: fixed core.fake.covered"), "{errors}")
+    assert(errors.contains("stale pure_pending classification: fixed core.fake.pending"), "{errors}")
+    assert(errors.contains("stale boundary classification: fixed core.fake.boundary"), "{errors}")
+    errors :: validate_records(&discovered, &[]).unwrap_err().join("\n")
+    assert(errors.contains("unclassified: value String.trim"), "{errors}")
+    direct :: direct_dispatch_names("if name == \"require\" { dispatch(); } fn helper() { let name = \"require_eq\"; }")
+    assert(direct.contains("require"))
+    assert(!direct.contains("require_eq"), "helper-only string must not prove dispatch coverage")
+    fake_core :: "// (\"core.fake\", \"comment\")\nlet text = \"(\\\"core.fake\\\", \\\"string\\\")\";"
+    assert(extract_pairs(fake_core).is_empty(), "comment/string tuples must not prove dispatch coverage")
+    fake_statics :: "\n// if type_name == crate::Syntax::TYPE_SET && method == \"from\" {\n/* if type_name == crate::Syntax::TYPE_BITS && method == \"new\" { */\nlet example = r#\"if type_name == crate::Syntax::TYPE_QUEUE && method == \"new\" {\"#;\n"
+    assert(guarded_static_methods(fake_statics).is_empty(), "comment/raw-string guards must not prove static dispatch coverage")
+    commented_method :: "\nif type_name == crate::Syntax::TYPE_SET // method == \"from\"\n{\n    disabled_example()\n}\n"
+    assert(guarded_static_methods(commented_method).is_empty(), "a commented method must not complete an active type guard")
+}

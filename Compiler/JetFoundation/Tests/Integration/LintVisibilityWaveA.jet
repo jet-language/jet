@@ -1,924 +1,196 @@
-// PORT-PENDING 1107 tests-lint-visibility-wave-a-module-group: tests/lint_visibility_wave_a.rs:1-249
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #3420: execution advisory visibility is separate from enforcement.
-//RS //!
-//RS //! This fixture keeps a known unused-binding advisory while the program still
-//RS //! runs successfully. The command matrix checks/builds expose it, execution
-//RS //! hides it by default, and explicit verbosity requests it before `--`.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::Path;
-//RS use std::process::{Command, Output};
-//RS 
-//RS const SOURCE: &str = "fn run() {\n    unused_binding :: 1\n    print(\"ok\")\n}\n";
-//RS 
-//RS fn run_jet(root: &Path, args: &[&str]) -> Output {
-//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(args)
-//RS         .current_dir(root)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("run jet {args:?}: {error}"))
-//RS }
-//RS 
-//RS fn combined(output: &Output) -> String {
-//RS     format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     )
-//RS }
-//RS 
-//RS fn allow_io(root: &Path) {
-//RS     fs::write(
-//RS         root.join("package.jet"),
-//RS         "name: \"lint-visibility\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n",
-//RS     )
-//RS     .expect("write IO authority for lint visibility fixture");
-//RS }
-//RS 
-//RS fn assert_advisory_visible(label: &str, output: &Output) {
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "{label} failed:\n{}",
-//RS         combined(output)
-//RS     );
-//RS     assert!(
-//RS         combined(output).contains("[L0101]"),
-//RS         "{label} should expose the unused-binding advisory:\n{}",
-//RS         combined(output)
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn check_and_build_show_advisories_while_execution_can_request_them() {
-//RS     let scratch = common::Scratch::new("lint-visibility-wave-a");
-//RS     fs::write(scratch.join("main.jet"), SOURCE).expect("write lint visibility fixture");
-//RS     allow_io(&scratch.path);
-//RS 
-//RS     assert_advisory_visible("check", &run_jet(&scratch.path, &["check", "main.jet"]));
-//RS     assert_advisory_visible(
-//RS         "build",
-//RS         &run_jet(&scratch.path, &["build", "--profile=debug", "main.jet"]),
-//RS     );
-//RS 
-//RS     let quiet_run = run_jet(&scratch.path, &["run", "main.jet"]);
-//RS     assert!(
-//RS         quiet_run.status.success(),
-//RS         "default run failed:\n{}",
-//RS         combined(&quiet_run)
-//RS     );
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&quiet_run.stdout),
-//RS         "ok\n",
-//RS         "application stdout must remain intact"
-//RS     );
-//RS     assert!(
-//RS         !combined(&quiet_run).contains("[L0101]"),
-//RS         "default run should hide ordinary advisories:\n{}",
-//RS         combined(&quiet_run)
-//RS     );
-//RS 
-//RS     let verbose_run = run_jet(&scratch.path, &["run", "--verbose", "main.jet"]);
-//RS     assert_advisory_visible("verbose run", &verbose_run);
-//RS     assert_eq!(String::from_utf8_lossy(&verbose_run.stdout), "ok\n");
-//RS 
-//RS     let program_arg_run = run_jet(
-//RS         &scratch.path,
-//RS         &["run", "main.jet", "--", "--verbose", "--json"],
-//RS     );
-//RS     assert!(
-//RS         program_arg_run.status.success(),
-//RS         "program-argument run failed:\n{}",
-//RS         combined(&program_arg_run)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&program_arg_run.stdout), "ok\n");
-//RS     assert!(
-//RS         !combined(&program_arg_run).contains("[L0101]"),
-//RS         "program arguments after -- must not enable advisories:\n{}",
-//RS         combined(&program_arg_run)
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn dev_watch_off_hides_advisories_by_default_and_verbose_requests_them() {
-//RS     let scratch = common::Scratch::new("lint-visibility-wave-a-dev");
-//RS     fs::write(scratch.join("main.jet"), SOURCE).expect("write dev lint fixture");
-//RS     allow_io(&scratch.path);
-//RS 
-//RS     let quiet_dev = run_jet(&scratch.path, &["dev", "main.jet", "--watch=off"]);
-//RS     assert!(
-//RS         quiet_dev.status.success(),
-//RS         "default dev failed:\n{}",
-//RS         combined(&quiet_dev)
-//RS     );
-//RS     assert!(
-//RS         !combined(&quiet_dev).contains("[L0101]"),
-//RS         "default dev should hide ordinary advisories:\n{}",
-//RS         combined(&quiet_dev)
-//RS     );
-//RS 
-//RS     let verbose_dev = run_jet(
-//RS         &scratch.path,
-//RS         &["dev", "--verbose", "main.jet", "--watch=off"],
-//RS     );
-//RS     assert_advisory_visible("verbose dev", &verbose_dev);
-//RS }
-//RS 
-//RS const TESTED_SOURCE: &str = "fn run() {\n    unused_binding :: 1\n    print(\"ok\")\n}\n\n#Test(\"adds\") {\n    assert_eq(1 + 1, 2)\n}\n";
-//RS 
-//RS fn package(root: &Path, allow: &str, extra: &str) {
-//RS     fs::write(
-//RS         root.join("package.jet"),
-//RS         format!(
-//RS             "name: \"lint-visibility\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n{extra}"
-//RS         ),
-//RS     )
-//RS     .expect("write lint visibility package");
-//RS }
-//RS 
-//RS fn assert_fails_with(label: &str, output: &Output, code: &str) {
-//RS     assert!(!output.status.success(), "{label} must fail:\n{}", combined(output));
-//RS     assert!(
-//RS         combined(output).contains(&format!("[{code}]")),
-//RS         "{label} must report {code}:\n{}",
-//RS         combined(output)
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn test_hides_advisories_unless_verbose() {
-//RS     let scratch = common::Scratch::new("lint-visibility-wave-a-test");
-//RS     fs::write(scratch.join("main.jet"), TESTED_SOURCE).expect("write test lint fixture");
-//RS     allow_io(&scratch.path);
-//RS 
-//RS     let quiet = run_jet(&scratch.path, &["test", "--capture=all", "main.jet"]);
-//RS     assert!(quiet.status.success(), "default test failed:\n{}", combined(&quiet));
-//RS     assert!(
-//RS         !combined(&quiet).contains("[L0101]"),
-//RS         "default test should hide ordinary advisories:\n{}",
-//RS         combined(&quiet)
-//RS     );
-//RS     assert!(combined(&quiet).contains("1 passed, 0 failed"), "{}", combined(&quiet));
-//RS 
-//RS     // The default run above stored a cached result; the verbose run must
-//RS     // still show the advisory and aggregate the same pass count.
-//RS     let verbose = run_jet(&scratch.path, &["test", "--verbose", "--capture=all", "main.jet"]);
-//RS     assert_advisory_visible("verbose test", &verbose);
-//RS     assert!(combined(&verbose).contains("1 passed, 0 failed"), "{}", combined(&verbose));
-//RS }
-//RS 
-//RS #[test]
-//RS fn enforcement_survives_hidden_advisories() {
-//RS     let deny = common::Scratch::new("lint-visibility-wave-a-deny");
-//RS     fs::write(deny.join("main.jet"), TESTED_SOURCE).expect("write deny fixture");
-//RS     package(
-//RS         &deny.path,
-//RS         "IO",
-//RS         "policy: { lints: { deny: [unused_local_binding] } }\n",
-//RS     );
-//RS     for args in [
-//RS         &["run", "main.jet"][..],
-//RS         &["run", "--verbose", "main.jet"],
-//RS         &["test", "main.jet"],
-//RS         &["test", "--verbose", "main.jet"],
-//RS     ] {
-//RS         assert_fails_with(&format!("denied lint {args:?}"), &run_jet(&deny.path, args), "E1293");
-//RS     }
-//RS 
-//RS     let sema = common::Scratch::new("lint-visibility-wave-a-sema");
-//RS     fs::write(
-//RS         sema.join("main.jet"),
-//RS         TESTED_SOURCE.replace("    print(\"ok\")", "    x :: 1 + \"a\"\n    print(\"ok\")"),
-//RS     )
-//RS     .expect("write sema fixture");
-//RS     allow_io(&sema.path);
-//RS     for args in [&["run", "main.jet"][..], &["test", "main.jet"]] {
-//RS         assert_fails_with(&format!("sema error {args:?}"), &run_jet(&sema.path, args), "E0109");
-//RS     }
-//RS 
-//RS     let runtime = common::Scratch::new("lint-visibility-wave-a-runtime");
-//RS     fs::write(
-//RS         runtime.join("main.jet"),
-//RS         "fn boom() {\n    panic(\"boom\")\n}\n\nfn run() {\n    unused_binding :: 1\n    boom()\n}\n\n#Test(\"stops\") {\n    boom()\n}\n",
-//RS     )
-//RS     .expect("write runtime fixture");
-//RS     allow_io(&runtime.path);
-//RS     for args in [&["run", "main.jet"][..], &["run", "--verbose", "main.jet"]] {
-//RS         assert_fails_with(&format!("runtime stop {args:?}"), &run_jet(&runtime.path, args), "E3001");
-//RS     }
-//RS     let failing_test = run_jet(&runtime.path, &["test", "main.jet"]);
-//RS     assert!(!failing_test.status.success(), "{}", combined(&failing_test));
-//RS     assert!(combined(&failing_test).contains("0 passed, 1 failed"), "{}", combined(&failing_test));
-//RS 
-//RS     let authority = common::Scratch::new("lint-visibility-wave-a-authority");
-//RS     fs::write(authority.join("main.jet"), TESTED_SOURCE).expect("write authority fixture");
-//RS     package(&authority.path, "", "");
-//RS     for args in [&["run", "main.jet"][..], &["run", "--verbose", "main.jet"]] {
-//RS         assert_fails_with(&format!("authority {args:?}"), &run_jet(&authority.path, args), "E1220");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn json_output_keeps_structure_with_hidden_advisories() {
-//RS     let scratch = common::Scratch::new("lint-visibility-wave-a-json");
-//RS     fs::write(scratch.join("main.jet"), TESTED_SOURCE).expect("write json fixture");
-//RS     allow_io(&scratch.path);
-//RS 
-//RS     let run = run_jet(&scratch.path, &["run", "--json", "main.jet"]);
-//RS     assert!(run.status.success(), "{}", combined(&run));
-//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), "ok\n", "application stdout stays clean");
-//RS     assert!(!combined(&run).contains("[L0101]"), "{}", combined(&run));
-//RS 
-//RS     // A warnings-only check exits 0, so its envelope must not say it failed.
-//RS     let check = run_jet(&scratch.path, &["check", "--json", "main.jet"]);
-//RS     let stdout = String::from_utf8_lossy(&check.stdout);
-//RS     assert!(check.status.success(), "{}", combined(&check));
-//RS     assert!(stdout.contains("L0101"), "check --json must report the advisory:\n{stdout}");
-//RS     assert!(
-//RS         stdout.contains("\"ok\":true") && !stdout.contains("\"ok\":false"),
-//RS         "warnings-only check --json must report ok:true:\n{stdout}"
-//RS     );
-//RS 
-//RS     let test = run_jet(&scratch.path, &["test", "--json", "main.jet"]);
-//RS     let stdout = String::from_utf8_lossy(&test.stdout);
-//RS     assert!(test.status.success(), "{}", combined(&test));
-//RS     assert!(stdout.trim_start().starts_with('{'), "{stdout}");
-//RS     assert!(stdout.contains("\"action\":\"test\"") && stdout.contains("\"ok\":true"), "{stdout}");
-//RS     assert!(!combined(&test).contains("L0101"), "{}", combined(&test));
-//RS }
-// END-PORT-PENDING 1107 tests/lint_visibility_wave_a.rs:1-249
+use std.[fs, env, thread]
+use std.process.[Command, Output, Child, Stdio]
+use std.time.[Duration, Instant]
+use jet.DevServer.LiveInspect
+use jet_foundation.Tests.Integration.Common
+use jet_foundation.Tests.Integration.TirSupport
 
-// PORT-PENDING 1107 tests-lint-visibility-wave-a-module-group: tests/live_inspect.rs:1-195
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-OBSERVE-LIVE1=A executable proof: attach to a running generated program,
-//RS //! not a replay, fixture snapshot, or completed trace.
-//RS 
-//RS use std::fs;
-//RS use std::process::{Child, Command, Stdio};
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS mod common;
-//RS 
-//RS struct ChildGuard(Child);
-//RS 
-//RS impl Drop for ChildGuard {
-//RS     fn drop(&mut self) {
-//RS         let _ = self.0.kill();
-//RS         let _ = self.0.wait();
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn live_inspector_reads_running_tasks_channels_and_resources_without_payloads() {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let dir = common::unique_tmp("jet_live_inspect");
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let source = dir.join("live.jet");
-//RS     fs::write(
-//RS         &source,
-//RS         r#"use core.tasks as tasks
-//RS use core.time as time
-//RS 
-//RS fn run() {
-//RS     (secret_sender, _secrets) :: channel<String>(1)
-//RS     secret_sender.send("TOP_SECRET_CHANNEL_PAYLOAD")
-//RS     (ready_sender, ready) :: channel<Int>()
-//RS     (_sender, blocked) :: channel<Int>(1)
-//RS     child :: task {
-//RS         ready_sender.send(1)
-//RS         blocked.receive() ?? panic("closed")
-//RS     }
-//RS     child.detach()
-//RS     ready.receive() ?? panic("closed")
-//RS     time.sleep(30000ms)
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let jet = env!("CARGO_BIN_EXE_jet");
-//RS     let build = Command::new(jet)
-//RS         .args(["build", source.to_str().unwrap()])
-//RS         .current_dir(&dir)
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         build.status.success(),
-//RS         "build failed:\n{}",
-//RS         String::from_utf8_lossy(&build.stderr)
-//RS     );
-//RS     let binary = dir
-//RS         .join(".jet")
-//RS         .join("build")
-//RS         .join(format!("live{}", std::env::consts::EXE_SUFFIX));
-//RS     let child = Command::new(&binary)
-//RS         .env("JET_OBSERVE", "1")
-//RS         .stdout(Stdio::null())
-//RS         .stderr(Stdio::null())
-//RS         .spawn()
-//RS         .unwrap();
-//RS     let pid = child.id();
-//RS     let guard = ChildGuard(child);
-//RS 
-//RS     let deadline = Instant::now() + Duration::from_secs(5);
-//RS     let snapshot = loop {
-//RS         match jet::DevServer::LiveInspect::read(pid) {
-//RS             Ok(snapshot)
-//RS                 if snapshot.contains("\"wait\":\"channel receive\"")
-//RS                     && snapshot.contains("\"depth\":1,\"capacity\":1") =>
-//RS             {
-//RS                 break snapshot;
-//RS             }
-//RS             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-//RS             other => panic!("live scheduler snapshot never became observable: {other:?}"),
-//RS         }
-//RS     };
-//RS     assert!(snapshot.contains("\"parent\":1"));
-//RS     assert!(snapshot.contains("\"label\":\"task@"));
-//RS     assert!(snapshot.contains("\"spawn_site\":"));
-//RS     assert!(snapshot.contains("\"effects\":"));
-//RS     assert!(snapshot.contains("\"arena_bytes\":"));
-//RS     assert!(!snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"));
-//RS     assert!(!snapshot.contains("payload"));
-//RS     assert!(!snapshot.contains("locals"));
-//RS 
-//RS     let cli = Command::new(jet)
-//RS         .args([
-//RS             "inspect",
-//RS             "live",
-//RS             "--attach",
-//RS             &pid.to_string(),
-//RS             "--once",
-//RS             "--json",
-//RS         ])
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         cli.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&cli.stderr)
-//RS     );
-//RS     let cli_snapshot = String::from_utf8(cli.stdout).unwrap();
-//RS     assert!(cli_snapshot.contains(&format!("\"pid\":{pid}")));
-//RS     assert!(cli_snapshot.contains("\"wait\":\"channel receive\""));
-//RS     assert!(!cli_snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"));
-//RS 
-//RS     drop(guard);
-//RS     let _ = fs::remove_file(jet::DevServer::LiveInspect::snapshot_path(pid));
-//RS     let _ = fs::remove_dir_all(dir);
-//RS }
-//RS 
-//RS fn live_inspector_reads_tasks_without_payloads(args: &[&str], tag: &str) {
-//RS     if !common::have_rustc() {
-//RS         return;
-//RS     }
-//RS     let dir = common::unique_tmp(tag);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let source = dir.join("live.jet");
-//RS     fs::write(
-//RS         &source,
-//RS         r#"use core.tasks as tasks
-//RS use core.time as time
-//RS 
-//RS fn run() {
-//RS     (secret_sender, _secrets) :: channel<String>(1)
-//RS     secret_sender.send("TOP_SECRET_CHANNEL_PAYLOAD")
-//RS     (ready_sender, ready) :: channel<Int>()
-//RS     (_sender, blocked) :: channel<Int>(1)
-//RS     child :: task {
-//RS         ready_sender.send(1)
-//RS         blocked.receive() ?? panic("closed")
-//RS     }
-//RS     child.detach()
-//RS     ready.receive() ?? panic("closed")
-//RS     time.sleep(30000ms)
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let jet = env!("CARGO_BIN_EXE_jet");
-//RS     let mut command = Command::new(jet);
-//RS     command
-//RS         .args(args)
-//RS         .arg(source.to_str().unwrap())
-//RS         .current_dir(&dir)
-//RS         .stdout(Stdio::null())
-//RS         .stderr(Stdio::null());
-//RS     let child = command.spawn().unwrap();
-//RS     let pid = child.id();
-//RS     let guard = ChildGuard(child);
-//RS 
-//RS     let deadline = Instant::now() + Duration::from_secs(5);
-//RS     let snapshot = loop {
-//RS         match jet::DevServer::LiveInspect::read(pid) {
-//RS             Ok(snapshot) if snapshot.contains("\"wait\":\"channel receive\"") => {
-//RS                 break snapshot;
-//RS             }
-//RS             _ if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(25)),
-//RS             other => panic!("{tag} snapshot never became observable: {other:?}"),
-//RS         }
-//RS     };
-//RS     assert!(snapshot.contains("\"parent\":1"));
-//RS     assert!(snapshot.contains("\"effects\":"));
-//RS     assert!(snapshot.contains("\"arena_bytes\":"));
-//RS     assert!(!snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"));
-//RS     assert!(!snapshot.contains("payload"));
-//RS     assert!(!snapshot.contains("locals"));
-//RS 
-//RS     drop(guard);
-//RS     let _ = fs::remove_file(jet::DevServer::LiveInspect::snapshot_path(pid));
-//RS     let _ = fs::remove_dir_all(dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn live_inspector_reads_default_resident_jit_tasks_without_payloads() {
-//RS     live_inspector_reads_tasks_without_payloads(&["run", "--observe"], "jet_live_inspect_jit");
-//RS }
-//RS 
-//RS #[test]
-//RS fn live_inspector_reads_ambient_interpreter_tasks_without_payloads() {
-//RS     live_inspector_reads_tasks_without_payloads(
-//RS         &["run", "--interpret", "--observe"],
-//RS         "jet_live_inspect_interpreter",
-//RS     );
-//RS }
-// END-PORT-PENDING 1107 tests/live_inspect.rs:1-195
+// Rust: tests/lint_visibility_wave_a.rs:13
+SOURCE :: "fn run() {{\n    unused_binding :: 1\n    print(\"ok\")\n}}\n"
+// Rust: tests/lint_visibility_wave_a.rs:15
+fn run_jet(root: OSPath, args: [String]) -> Output {
+    // GATE #4494: actual compiler process.
+    return Command.new(env.var("JET_BIN").unwrap()).args(args).current_dir(root).env("NO_COLOR", "1").output().unwrap_or_else(error -> panic("run jet {args:?}: {error}"))
+}
+// Rust: tests/lint_visibility_wave_a.rs:24
+fn combined(output: Output) -> String { "{String.from_utf8_lossy(output.stdout)}{String.from_utf8_lossy(output.stderr)}" }
+// Rust: tests/lint_visibility_wave_a.rs:32
+fn allow_io(root: OSPath) -> {
+    fs.write(root.join("package.jet"), "name: \"lint-visibility\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n").expect("write IO authority for lint visibility fixture")
+}
+// Rust: tests/lint_visibility_wave_a.rs:40
+fn assert_advisory_visible(label: String, output: Output) -> {
+    assert(output.status.success(), "{label} failed:\n{combined(output)}")
+    assert(combined(output).contains("[L0101]"), "{label} should expose the unused-binding advisory:\n{combined(output)}")
+}
+// Rust: tests/lint_visibility_wave_a.rs:128
+TESTED_SOURCE :: "fn run() {{\n    unused_binding :: 1\n    print(\"ok\")\n}}\n\n#Test(\"adds\") {{\n    assert_eq(1 + 1, 2)\n}}\n"
+// Rust: tests/lint_visibility_wave_a.rs:130
+fn package(root: OSPath, allow: String, extra: String) -> {
+    fs.write(root.join("package.jet"), "name: \"lint-visibility\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [{allow}] }} }}\n{extra}").expect("write lint visibility package")
+}
+// Rust: tests/lint_visibility_wave_a.rs:140
+fn assert_fails_with(label: String, output: Output, code: String) -> {
+    assert(!output.status.success(), "{label} must fail:\n{combined(output)}")
+    assert(combined(output).contains("[{code}]"), "{label} must report {code}:\n{combined(output)}")
+}
 
-// PORT-PENDING 1107 tests-lint-visibility-wave-a-module-group: tests/local_cell_tiers.rs:1-468
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS use std::fs;
-//RS 
-//RS use tir_support::{build_and_run, have_rustc};
-//RS 
-//RS const SOURCE: &str = r#"
-//RS struct Pair {
-//RS     left: Int,
-//RS     right: Int,
-//RS }
-//RS 
-//RS struct ValueCache {
-//RS     value: Cell<String?>,
-//RS }
-//RS 
-//RS struct LineCache {
-//RS     value: Cell<[Int]?>,
-//RS }
-//RS 
-//RS fn mapped_read(cell: Cell<Pair>) {
-//RS     left :: cell.guard_read().map(pair -> pair.left)
-//RS     print(left.get())
-//RS }
-//RS 
-//RS fn split_read(cell: Cell<Pair>) {
-//RS     (left, right) :: cell.guard_read().split(
-//RS         pair -> pair.left,
-//RS         pair -> pair.right
-//RS     )
-//RS     print(left.get() + right.get())
-//RS }
-//RS 
-//RS fn mapped_edit(cell: Cell<Pair>) {
-//RS     left :: cell.guard_edit().map(pair -> pair.left)
-//RS     &left.set(9)
-//RS }
-//RS 
-//RS fn split_edit(cell: Cell<Pair>) {
-//RS     (left, right) :: cell.guard_edit().split(
-//RS         pair -> pair.left,
-//RS         pair -> pair.right
-//RS     )
-//RS     &left.set(10)
-//RS     &right.set(11)
-//RS }
-//RS 
-//RS fn make_edit_guards(cell: Cell<Pair>) -> (
-//RS     first: CellEditGuard<Int>,
-//RS     second: CellEditGuard<Int>
-//RS ) {
-//RS     return cell.guard_edit().split(
-//RS         pair -> pair.left,
-//RS         pair -> pair.right
-//RS     )
-//RS }
-//RS 
-//RS fn edit_returned_split(cell: Cell<Pair>) {
-//RS     (left, right) :: make_edit_guards(cell)
-//RS     &left.set(12)
-//RS     &right.set(13)
-//RS }
-//RS 
-//RS fn edit_then_return(cell: Cell<Int>) {
-//RS     guard :: cell.guard_edit()
-//RS     &guard.set(4)
-//RS     return
-//RS }
-//RS 
-//RS fn run() {
-//RS     cell :: Cell.new(Pair{ left: 1, right: 2 })
-//RS     print(cell.read(pair -> pair.left + pair.right))
-//RS     &cell.edit(pair -> pair.left += 3)
-//RS     print(cell.get().left)
-//RS     old :: &cell.replace(Pair{ left: 5, right: 6 })
-//RS     print(old.left)
-//RS     &cell.set(Pair{ left: 7, right: 8 })
-//RS     mapped_read(cell)
-//RS     split_read(cell)
-//RS     mapped_edit(cell)
-//RS     print(cell.get().left)
-//RS     split_edit(cell)
-//RS     print(cell.get().left + cell.get().right)
-//RS     edit_returned_split(cell)
-//RS     print(cell.get().left + cell.get().right)
-//RS 
-//RS     cache :: ValueCache{ value: Cell.new(None) }
-//RS     print(cache.value.get_or_set(() -> "built"))
-//RS     print(cache.value.get_or_set(() -> "unused"))
-//RS 
-//RS     lines :: LineCache{ value: Cell.new(None) }
-//RS     print(lines.value.get_or_set(() -> [0, 8, 15]).len())
-//RS     print(lines.value.get_or_set(() -> [99]).len())
-//RS 
-//RS     early :: Cell.new(1)
-//RS     edit_then_return(early)
-//RS     print(early.get())
-//RS     &early.edit(value -> value += 1)
-//RS     print(early.get())
-//RS 
-//RS     wide :: Cell.new(U16{0})
-//RS     &wide.set(U8{7})
-//RS     print(wide.get() == U16{7})
-//RS 
-//RS     decimal :: Cell.new(Float{0.0})
-//RS     &decimal.set(Int{42})
-//RS     print(decimal.get() == 42.0)
-//RS }
-//RS "#;
-//RS 
-//RS const EXPECTED: &str = "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\ntrue\ntrue\n";
-//RS 
-//RS const GENERIC_SOURCE: &str = r#"
-//RS #Error
-//RS enum CellResultError {
-//RS     Failed
-//RS }
-//RS 
-//RS struct Box<T> {
-//RS     value: T,
-//RS }
-//RS 
-//RS struct Number {
-//RS     value: Int,
-//RS }
-//RS 
-//RS struct Reverse<Value, Alpha> {
-//RS     first: Value,
-//RS     second: Alpha,
-//RS }
-//RS 
-//RS impl Box {
-//RS     fn new(value: ^T) -> Box<T> {
-//RS         return Box<T>{ value: value }
-//RS     }
-//RS }
-//RS 
-//RS fn keep_result(value: ^(Int CellResultError!)) {
-//RS     cell :: Cell.new(value)
-//RS     print(cell.read(result -> result ?? 0))
-//RS }
-//RS 
-//RS fn ok_result() -> Int CellResultError! {
-//RS     return Ok(7)
-//RS }
-//RS 
-//RS fn run() {
-//RS     counts := [String:Int]{}
-//RS     counts["jet"] = 3
-//RS     map_cell :: Cell.new(^counts)
-//RS     print(map_cell.read(values -> values.get("jet") ?? 0))
-//RS 
-//RS     keep_result(ok_result())
-//RS 
-//RS     handle :: shared 9
-//RS     shared_cell :: Cell.new(handle)
-//RS     print(shared_cell.read(inner -> inner.guard_read().value))
-//RS 
-//RS     nested :: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
-//RS     projected :: nested.guard_read().map(value -> value.value.value)
-//RS     print(projected.get())
-//RS 
-//RS     reverse :: Cell.new(Reverse<Float, Number>{
-//RS         first: 1.5,
-//RS         second: Number{ value: 13 },
-//RS     })
-//RS     print(reverse.get().first)
-//RS     print(reverse.get().second.value)
-//RS 
-//RS }
-//RS "#;
-//RS 
-//RS const GENERIC_EXPECTED: &str = "3\n7\n9\n11\n1.5\n13\n";
-//RS 
-//RS const INT_MAP_SOURCE: &str = r#"
-//RS fn run() {
-//RS     values := [Int:Int]{}
-//RS     values[1] = 2
-//RS     cell :: Cell.new(^values)
-//RS     print(cell.read(items -> items.get(1) ?? 0))
-//RS }
-//RS "#;
-//RS 
-//RS 
-//RS #[test]
-//RS fn local_cell_full_surface_runs_through_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("local_cell_aot", SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, EXPECTED);
-//RS }
-//RS 
-//RS #[test]
-//RS fn local_cell_full_surface_runs_through_default_tier() {
-//RS     std::thread::Builder::new()
-//RS         .stack_size(2 * 1024 * 1024)
-//RS         .spawn(|| {
-//RS             let dir =
-//RS                 std::env::temp_dir().join(format!("jet_local_cell_parity_{}", std::process::id()));
-//RS             fs::create_dir_all(&dir).unwrap();
-//RS             let path = dir.join("main.jet");
-//RS             fs::write(&path, SOURCE).unwrap();
-//RS             let shown = path.to_string_lossy().into_owned();
-//RS 
-//RS             for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-//RS                 jet_jit::reset_jit_trace_for_test();
-//RS                 match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
-//RS                     jet::Interpreter::RunOutcome::Ran {
-//RS                         stdout,
-//RS                         stderr,
-//RS                         exit_code,
-//RS                     } => {
-//RS                         assert_eq!(exit_code, 0, "{tier} exit drift: {stderr}");
-//RS                         assert_eq!(stderr, "", "{tier} stderr drift");
-//RS                         assert_eq!(stdout, EXPECTED, "{tier} output drift");
-//RS                     }
-//RS                     jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS                         panic!("{tier} rejected Cell: {diagnostics:?}")
-//RS                     }
-//RS                 }
-//RS                 if force_interpreter {
-//RS                     continue;
-//RS                 }
-//RS                 assert!(
-//RS                     jet_jit::jit_executed_for_test(),
-//RS                     "Cell must execute native resident JIT code"
-//RS                 );
-//RS                 assert!(
-//RS                     !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS                     "Cell must not deopt or use fallback"
-//RS                 );
-//RS             }
-//RS         })
-//RS         .expect("spawn 2 MiB local Cell embedder")
-//RS         .join()
-//RS         .expect("local Cell embedder must not overflow");
-//RS }
-//RS 
-//RS #[test]
-//RS fn local_cell_generic_shapes_run_through_aot() {
-//RS     if !have_rustc() {
-//RS         return;
-//RS     }
-//RS     let (code, stdout) = build_and_run("local_cell_generic_aot", GENERIC_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, GENERIC_EXPECTED);
-//RS }
-//RS 
-//RS #[test]
-//RS fn local_cell_generic_shapes_run_through_default_tier() {
-//RS     std::thread::Builder::new()
-//RS         .stack_size(2 * 1024 * 1024)
-//RS         .spawn(|| {
-//RS             let dir = std::env::temp_dir().join(format!(
-//RS                 "jet_local_cell_generic_parity_{}",
-//RS                 std::process::id()
-//RS             ));
-//RS             fs::create_dir_all(&dir).unwrap();
-//RS             let path = dir.join("main.jet");
-//RS             fs::write(&path, GENERIC_SOURCE).unwrap();
-//RS             let shown = path.to_string_lossy().into_owned();
-//RS 
-//RS             for (tier, force_interpreter) in [("resident JIT", false), ("interpreter", true)] {
-//RS                 jet_jit::reset_jit_trace_for_test();
-//RS                 match jet::Interpreter::dev_iteration(&shown, false, force_interpreter) {
-//RS                     jet::Interpreter::RunOutcome::Ran {
-//RS                         stdout,
-//RS                         stderr,
-//RS                         exit_code,
-//RS                     } => {
-//RS                         assert_eq!(exit_code, 0, "{tier} exit drift: {stderr}");
-//RS                         assert_eq!(stderr, "", "{tier} stderr drift");
-//RS                         assert_eq!(stdout, GENERIC_EXPECTED, "{tier} output drift");
-//RS                     }
-//RS                     jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS                         panic!("{tier} rejected generic Cell: {diagnostics:?}")
-//RS                     }
-//RS                 }
-//RS                 if force_interpreter {
-//RS                     continue;
-//RS                 }
-//RS                 assert!(
-//RS                     jet_jit::jit_executed_for_test(),
-//RS                     "generic Cell shapes must execute native resident JIT code"
-//RS                 );
-//RS                 assert!(
-//RS                     !jet_jit::deopt_invoked_for_test() && !jet_jit::fallback_invoked_for_test(),
-//RS                     "generic Cell shapes must not deopt or use fallback"
-//RS                 );
-//RS             }
-//RS         })
-//RS         .expect("spawn 2 MiB generic Cell embedder")
-//RS         .join()
-//RS         .expect("generic Cell embedder must not overflow");
-//RS }
-//RS 
-//RS #[test]
-//RS fn local_cell_non_string_map_uses_default_evaluator() {
-//RS     std::thread::Builder::new()
-//RS         .stack_size(2 * 1024 * 1024)
-//RS         .spawn(|| {
-//RS             let dir =
-//RS                 std::env::temp_dir().join(format!("jet_local_cell_int_map_{}", std::process::id()));
-//RS             fs::create_dir_all(&dir).unwrap();
-//RS             let path = dir.join("main.jet");
-//RS             fs::write(&path, INT_MAP_SOURCE).unwrap();
-//RS             let shown = path.to_string_lossy().into_owned();
-//RS 
-//RS             jet_jit::reset_jit_trace_for_test();
-//RS             let outcome = jet::Interpreter::dev_iteration(&shown, false, false);
-//RS             match outcome {
-//RS                 jet::Interpreter::RunOutcome::Ran {
-//RS                     stdout,
-//RS                     stderr,
-//RS                     exit_code,
-//RS                 } => {
-//RS                     assert_eq!(exit_code, 0);
-//RS                     assert_eq!(stderr, "");
-//RS                     assert_eq!(stdout, "2\n");
-//RS                 }
-//RS                 jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS                     panic!("default tier rejected Cell<[Int:Int]>: {diagnostics:?}")
-//RS                 }
-//RS             }
-//RS             assert!(
-//RS                 !jet_jit::jit_executed_for_test(),
-//RS                 "Cell<[Int:Int]> must not claim resident-native execution"
-//RS             );
-//RS 
-//RS             jet_jit::reset_jit_trace_for_test();
-//RS             let outcome = jet::Interpreter::dev_iteration(&shown, false, true);
-//RS             match outcome {
-//RS                 jet::Interpreter::RunOutcome::Ran {
-//RS                     stdout,
-//RS                     stderr,
-//RS                     exit_code,
-//RS                 } => {
-//RS                     assert_eq!(exit_code, 0);
-//RS                     assert_eq!(stderr, "");
-//RS                     assert_eq!(stdout, "2\n");
-//RS                 }
-//RS                 jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS                     panic!("interpreter rejected Cell<[Int:Int]>: {diagnostics:?}")
-//RS                 }
-//RS             }
-//RS         })
-//RS         .expect("spawn 2 MiB non-string map Cell embedder")
-//RS         .join()
-//RS         .expect("non-string map Cell embedder must not overflow");
-//RS }
-//RS 
-//RS #[test]
-//RS fn local_cell_guards_are_linear_before_codegen() {
-//RS     let source = r#"
-//RS fn run() {
-//RS     cell :: Cell.new(1)
-//RS     guard :: cell.guard_read()
-//RS     copied :: ~guard
-//RS     print(copied.get())
-//RS }
-//RS "#;
-//RS     let diagnostics =
-//RS         jet::compile(source).expect_err("Cell guards must be rejected by sema before codegen");
-//RS     assert!(
-//RS         diagnostics
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "E0211"),
-//RS         "expected E0211 for explicit Cell guard copy: {diagnostics:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn local_cell_guard_storage_boundary_reports_once_per_site() {
-//RS     let cases = [
-//RS         (
-//RS             "struct field",
-//RS             r#"
-//RS struct Held {
-//RS     guard: CellReadGuard<Int>,
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS         ),
-//RS         (
-//RS             "enum payload",
-//RS             r#"
-//RS enum Held {
-//RS     Guard(CellReadGuard<Int>)
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS         ),
-//RS         (
-//RS             "list binding",
-//RS             r#"
-//RS fn run() {
-//RS     cell :: Cell.new(1)
-//RS     guard :: cell.guard_read()
-//RS     held :: [guard]
-//RS }
-//RS "#,
-//RS         ),
-//RS         (
-//RS             "lambda capture",
-//RS             r#"
-//RS fn hold(cell: Cell<Int>) -> fn() -> Int {
-//RS     guard :: cell.guard_read()
-//RS     return () -> guard.get()
-//RS }
-//RS 
-//RS fn run() {}
-//RS "#,
-//RS         ),
-//RS         (
-//RS             "immediate lambda capture",
-//RS             r#"
-//RS fn run() {
-//RS     cell :: Cell.new(1)
-//RS     guard :: cell.guard_read()
-//RS     read :: (() -> guard.get()).call()
-//RS }
-//RS "#,
-//RS         ),
-//RS         (
-//RS             "generic struct temporary",
-//RS             r#"
-//RS struct Held<T> {
-//RS     value: T,
-//RS }
-//RS 
-//RS fn consume<T>(held: Held<T>) {}
-//RS 
-//RS fn run() {
-//RS     cell :: Cell.new(1)
-//RS     consume(Held<CellReadGuard<Int>>{ value: cell.guard_read() })
-//RS }
-//RS "#,
-//RS         ),
-//RS         (
-//RS             "list call argument",
-//RS             r#"
-//RS fn consume<T>(held: T) {}
-//RS 
-//RS fn run() {
-//RS     cell :: Cell.new(1)
-//RS     consume([cell.guard_read()])
-//RS }
-//RS "#,
-//RS         ),
-//RS     ];
-//RS 
-//RS     for (case, source) in cases {
-//RS         let diagnostics = jet::compile(source)
-//RS             .expect_err("unsupported Cell guard storage must be rejected before codegen");
-//RS         let count = diagnostics
-//RS             .iter()
-//RS             .filter(|diagnostic| diagnostic.code == "E0217")
-//RS             .count();
-//RS         assert_eq!(count, 1, "{case} must report one E0217: {diagnostics:?}");
-//RS     }
-//RS }
-// END-PORT-PENDING 1107 tests/local_cell_tiers.rs:1-468
+// Rust: tests/live_inspect.rs:10
+struct ChildGuard { child: Child }
+// Rust: tests/live_inspect.rs:12
+impl Drop for ChildGuard {
+    // Rust: tests/live_inspect.rs:13
+    fn drop(&self) -> {
+        // GATE #4494: kill and reap the native child even on assertion unwind.
+        _ :: self.child.kill()
+        _ :: self.child.wait()
+    }
+}
+// Rust: tests/live_inspect.rs:29,130
+LIVE_SOURCE :: "use core.tasks as tasks\nuse core.time as time\n\nfn run() {{\n    (secret_sender, _secrets) :: channel<String>(1)\n    secret_sender.send(\"TOP_SECRET_CHANNEL_PAYLOAD\")\n    (ready_sender, ready) :: channel<Int>()\n    (_sender, blocked) :: channel<Int>(1)\n    child :: task {{\n        ready_sender.send(1)\n        blocked.receive() ?? panic(\"closed\")\n    }}\n    child.detach()\n    ready.receive() ?? panic(\"closed\")\n    time.sleep(30000ms)\n}}\n"
+// Rust: tests/live_inspect.rs:121
+fn live_inspector_reads_tasks_without_payloads(args: [String], tag: String) -> {
+    if !Common.have_rustc() { return }
+    dir :: Common.unique_tmp(tag)
+    fs.create_dir_all(dir).unwrap()
+    source :: dir.join("live.jet")
+    fs.write(source, LIVE_SOURCE).unwrap()
+    // GATE #4494: native spawn, clock and sleep.
+    child :: Command.new(env.var("JET_BIN").unwrap()).args(args).arg(source.to_str().unwrap()).current_dir(dir).stdout(Stdio.null()).stderr(Stdio.null()).spawn().unwrap()
+    pid :: child.id()
+    guard :: ChildGuard{child: ^child}
+    deadline :: Instant.now() + Duration.from_secs(5)
+    snapshot :: loop {
+        observed :: LiveInspect.read(pid)
+        if observed == Ok(value) {
+            if value.contains("\"wait\":\"channel receive\"") { break value }
+        }
+        if Instant.now() < deadline { thread.sleep(Duration.from_millis(25)) }
+        else { panic("{tag} snapshot never became observable: {observed:?}") }
+    }
+    assert(snapshot.contains("\"parent\":1"))
+    assert(snapshot.contains("\"effects\":"))
+    assert(snapshot.contains("\"arena_bytes\":"))
+    assert(!snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"))
+    assert(!snapshot.contains("payload"))
+    assert(!snapshot.contains("locals"))
+    drop(^guard)
+    _ :: fs.remove_file(LiveInspect.snapshot_path(pid))
+    _ :: fs.remove_dir_all(dir)
+}
 
+// Rust: tests/local_cell_tiers.rs:10
+LOCAL_SOURCE :: """
+struct Pair {{
+    left: Int,
+    right: Int,
+}}
+struct ValueCache {{
+    value: Cell<String?>,
+}}
+struct LineCache {{
+    value: Cell<[Int]?>,
+}}
+fn mapped_read(cell: Cell<Pair>) {{
+    left :: cell.guard_read().map(pair -> pair.left)
+    print(left.get())
+}}
+fn split_read(cell: Cell<Pair>) {{
+    (left, right) :: cell.guard_read().split(pair -> pair.left, pair -> pair.right)
+    print(left.get() + right.get())
+}}
+fn mapped_edit(cell: Cell<Pair>) {{
+    left :: cell.guard_edit().map(pair -> pair.left)
+    &left.set(9)
+}}
+fn split_edit(cell: Cell<Pair>) {{
+    (left, right) :: cell.guard_edit().split(pair -> pair.left, pair -> pair.right)
+    &left.set(10)
+    &right.set(11)
+}}
+fn make_edit_guards(cell: Cell<Pair>) -> (first: CellEditGuard<Int>, second: CellEditGuard<Int>) {{
+    return cell.guard_edit().split(pair -> pair.left, pair -> pair.right)
+}}
+fn edit_returned_split(cell: Cell<Pair>) {{
+    (left, right) :: make_edit_guards(cell)
+    &left.set(12)
+    &right.set(13)
+}}
+fn edit_then_return(cell: Cell<Int>) {{
+    guard :: cell.guard_edit()
+    &guard.set(4)
+    return
+}}
+fn run() {{
+    cell :: Cell.new(Pair{{ left: 1, right: 2 }})
+    print(cell.read(pair -> pair.left + pair.right))
+    &cell.edit(pair -> pair.left += 3)
+    print(cell.get().left)
+    old :: &cell.replace(Pair{{ left: 5, right: 6 }})
+    print(old.left)
+    &cell.set(Pair{{ left: 7, right: 8 }})
+    mapped_read(cell)
+    split_read(cell)
+    mapped_edit(cell)
+    print(cell.get().left)
+    split_edit(cell)
+    print(cell.get().left + cell.get().right)
+    edit_returned_split(cell)
+    print(cell.get().left + cell.get().right)
+    cache :: ValueCache{{ value: Cell.new(None) }}
+    print(cache.value.get_or_set(() -> "built"))
+    print(cache.value.get_or_set(() -> "unused"))
+    lines :: LineCache{{ value: Cell.new(None) }}
+    print(lines.value.get_or_set(() -> [0, 8, 15]).len())
+    print(lines.value.get_or_set(() -> [99]).len())
+    early :: Cell.new(1)
+    edit_then_return(early)
+    print(early.get())
+    &early.edit(value -> value += 1)
+    print(early.get())
+    wide :: Cell.new(U16{{0}})
+    &wide.set(U8{{7}})
+    print(wide.get() == U16{{7}})
+    decimal :: Cell.new(Float{{0.0}})
+    &decimal.set(Int{{42}})
+    print(decimal.get() == 42.0)
+}}
+"""
+// Rust: tests/local_cell_tiers.rs:114
+LOCAL_EXPECTED :: "3\n4\n4\n7\n15\n9\n21\n25\nbuilt\nbuilt\n3\n3\n4\n5\ntrue\ntrue\n"
+// Rust: tests/local_cell_tiers.rs:116
+GENERIC_SOURCE :: """
+#Error
+enum CellResultError {{ Failed }}
+struct Box<T> {{ value: T, }}
+struct Number {{ value: Int, }}
+struct Reverse<Value, Alpha> {{ first: Value, second: Alpha, }}
+impl Box {{
+    fn new(value: ^T) -> Box<T> {{ return Box<T>{{ value: value }} }}
+}}
+fn keep_result(value: ^(Int CellResultError!)) {{
+    cell :: Cell.new(value)
+    print(cell.read(result -> result ?? 0))
+}}
+fn ok_result() -> Int CellResultError! {{ return Ok(7) }}
+fn run() {{
+    counts := [String:Int]{{}}
+    counts["jet"] = 3
+    map_cell :: Cell.new(^counts)
+    print(map_cell.read(values -> values.get("jet") ?? 0))
+    keep_result(ok_result())
+    handle :: shared 9
+    shared_cell :: Cell.new(handle)
+    print(shared_cell.read(inner -> inner.guard_read().value))
+    nested :: Cell.new(Box<Box<Int>>.new(Box<Int>.new(11)))
+    projected :: nested.guard_read().map(value -> value.value.value)
+    print(projected.get())
+    reverse :: Cell.new(Reverse<Float, Number>{{ first: 1.5, second: Number{{ value: 13 }}, }})
+    print(reverse.get().first)
+    print(reverse.get().second.value)
+}}
+"""
+// Rust: tests/local_cell_tiers.rs:176
+GENERIC_EXPECTED :: "3\n7\n9\n11\n1.5\n13\n"
+// Rust: tests/local_cell_tiers.rs:178
+INT_MAP_SOURCE :: "fn run() {{\n    values := [Int:Int]{{}}\n    values[1] = 2\n    cell :: Cell.new(^values)\n    print(cell.read(items -> items.get(1) ?? 0))\n}}\n"

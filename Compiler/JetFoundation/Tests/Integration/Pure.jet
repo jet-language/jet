@@ -1,0 +1,74 @@
+use jet
+use jet.[AST, Sema, Diagnostics]
+use std.[fs, env]
+use std.sync.Mutex
+use core.path.OSPath
+
+// Rust: tests/pure.rs:10
+pub fn provenance_cell(map: &AST.ViewProvenanceMap?) -> AST.ViewProvenanceCell {
+    cell :: AST.ViewProvenanceCell.new()
+    if map is Some(map) { cell.set(map.clone()) }
+    cell
+}
+// Rust: tests/pure.rs:20
+// GATE #4494: process-global environment changes require native mutex serialization.
+STORE_LOCK :: Mutex<Unit>.new(())
+// Rust: tests/pure.rs:24
+pub fn with_store<T>(dir: &OSPath, f: fn() -> T) -> T {
+    _guard :: STORE_LOCK.lock().unwrap_or_else(fn(e) { e.into_inner() })
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    prev :: env.var("JET_PACKAGE_STORE_DIR").ok()
+    env.set_var("JET_PACKAGE_STORE_DIR", dir)
+    result :: f()
+    match prev {
+        Some(v) -> env.set_var("JET_PACKAGE_STORE_DIR", v)
+        None -> env.remove_var("JET_PACKAGE_STORE_DIR")
+    }
+    _ :: fs.remove_dir_all(dir)
+    result
+}
+
+// Rust: tests/pure.rs:277; tests/pure.rs:379; tests/pure.rs:470
+// The three tests construct the same full function-signature and AST maps.
+pub fn purity_diagnostics(src: String) -> [Diagnostics.Diag] {
+    (toks, _) :: jet.Lexer.lex(src)
+    prog :: jet.Parser.parse(&toks).expect("parse ok")
+    funcs_sig := [String: Sema.FuncSig]{}
+    ast_funcs_owned := [(String, AST.Func)]{}
+    for item in &prog.items {
+        if item is AST.Item.Func(f) {
+            funcs_sig.insert(f.name.clone(), Sema.FuncSig{
+                params: f.params.iter().map(fn(p) { (p.convention.clone(), p.ty.clone()) }).collect(),
+                root_param: f.params.first().is_some_and(fn(p) { p.root }),
+                return_type: f.return_type.clone(),
+                deprecation: None,
+                return_view_provenance: provenance_cell(&f.return_view_provenance),
+                is_extern: false,
+                is_c_abi: false,
+                c_abi_name: None,
+                callback_transport: None,
+                callback_plan_digest: None,
+                callback_identity: None,
+                foreign_effect_root: None,
+                undo: None,
+                is_unsafe: f.is_unsafe,
+                is_pure: f.is_pure,
+                memo_bound: AST.memo_bound_from_markers(&f.markers),
+                is_sanitizer: f.is_sanitizer,
+                param_info: f.params.iter().map(fn(p) { (p.name.clone(), p.default.is_some()) }).collect(),
+                param_call: f.params.iter().map(fn(p) { (p.call_label().to_string(), p.zone) }).collect(),
+                defaults: f.params.iter().map(fn(p) { p.default.as_ref().map(fn(d) { d.clone() }) }).collect(),
+                param_variadic: f.params.iter().map(fn(p) { p.variadic }).collect(),
+                variadic_bounds: f.params.last().and_then(fn(p) { p.variadic_bound_list.clone() }),
+                param_view_from_names: f.params.iter().map(fn(p) { p.declared_view_from_names.clone() }).collect(),
+                callable_policies: Default.default(),
+                is_must_use: f.is_must_use,
+                is_foreign_thread_safe: false,
+            })
+            ast_funcs_owned.push((f.name.clone(), f.clone()))
+        }
+    }
+    ast_funcs :: ast_funcs_owned.iter().map(fn((n, f)) { (n.clone(), &f) }).collect<[String: &AST.Func]>()
+    jet.check_pure_program_root("run", &funcs_sig, &ast_funcs)
+}

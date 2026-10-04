@@ -1,0 +1,211 @@
+// Rust: tests/web_browser.rs:1
+// Real Chromium acceptance against AOT web artifacts: DOM, reactivity,
+// event/Wasm callbacks, compute, bundles, maps and console parity.
+use std.[fs, env, process, thread]
+use std.process.[Child, Command, Stdio]
+use std.net.[TcpListener, TcpStream, Shutdown]
+use std.time.[Duration, Instant]
+use jet_foundation.Tests.Integration.Common.Mod.Scratch
+use jet.SHA256.sha256_hex
+// GATE #4494: actual process spawn, pipes, TCP, clocks and thread sleep.
+
+// Rust: tests/web_browser.rs:21
+const NEST_P001_FORM: String = #include_str("tests/fixtures/nest_p001_form.jet")
+// Rust: tests/web_browser.rs:22
+const NEST_P001_INPUT_SHA256: String = "e5c1707a9ab751897c662ece76a9047622a999c58eb56b4d03c853101f74deca"
+
+// Rust: tests/web_browser.rs:25
+fn assert_nest_p001_form_stages() -> {
+    assert_eq(NEST_P001_FORM.len(), 298)
+    assert_eq(sha256_hex(NEST_P001_FORM.as_bytes()), NEST_P001_INPUT_SHA256)
+    scratch :: Scratch.new("nest-p001-form")
+    fs.write(scratch.join("run.jet"), NEST_P001_FORM).expect("write NEST-P001 fixture")
+    fs.write(scratch.join("package.jet"), "name: \"nest-p001\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: {\n    holds: {\n        allow: [IO, Mem.Alloc, Panic]\n    }\n}\n").expect("write NEST-P001 authority")
+    stages: [(String, [String])] = [
+        ("default", ["run", "run.jet"]),
+        ("interpreter", ["run", "--interpret", "run.jet"]),
+        ("profile-debug", ["run", "--profile=debug", "run.jet"])
+    ]
+    for (stage, args) in stages {
+        output :: Command.new(jet_bin()).current_dir(&scratch.path).args(args).env("NO_COLOR", "1").output().unwrap_or_else(fn(error) { panic("run NEST-P001 {stage} stage: {error}") })
+        stdout :: String.from_utf8_lossy(&output.stdout)
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert(output.status.success(), "NEST-P001 {stage} stage failed:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        assert(stdout.contains("name=Ada"), "NEST-P001 {stage} stage did not execute the typed field:\n{stdout}")
+        assert(stdout.contains("<form method=\"post\" action=\"/actions/save\" aria-busy=\"false\">"), "NEST-P001 {stage} stage lost the generated form action:\n{stdout}")
+        assert(stdout.contains("<input name=\"name\" id=\"Input-name\" type=\"text\" aria-label=\"name\" aria-invalid=\"false\" required value=\"Ada\">"), "NEST-P001 {stage} stage lost the generated typed field:\n{stdout}")
+        assert(stdout.contains("<button type=\"submit\">Submit</button>"), "NEST-P001 {stage} stage lost the generated submit control:\n{stdout}")
+        combined :: "{stdout}{stderr}"
+        assert(!combined.contains("source bytes 0..0") && !combined.contains("selected entry is not a top-level function"), "NEST-P001 {stage} stage regressed to the old source-less lowering ICE:\n{combined}")
+    }
+}
+
+// Rust: tests/web_browser.rs:158
+fn have_tool(name: &String) -> Bool { Command.new(name).arg("--version").output().is_ok() }
+// Rust: tests/web_browser.rs:162
+fn jet_bin() -> OSPath { OSPath.from(env.var_os("CARGO_BIN_EXE_jet").expect("jet executable")) }
+// Rust: tests/web_browser.rs:166
+fn repo_root() -> OSPath { OSPath.from(env.var_os("CARGO_MANIFEST_DIR").expect("repository root")) }
+// Rust: tests/web_browser.rs:170
+fn unused_local_port() -> U16 {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).expect("bind ephemeral port")
+    listener.local_addr().expect("local addr").port()
+}
+// Rust: tests/web_browser.rs:178
+fn resolve_executable(candidate: &OSPath) -> OSPath? {
+    if candidate.components().count() > 1 {
+        if candidate.is_file() { return Some(candidate.to_path_buf()) }
+        return None
+    }
+    path :: env.var_os("PATH").ok()?
+    env.split_paths(&path).map(fn(dir) { dir.join(candidate) }).find(fn(path) { path.is_file() })
+}
+// Rust: tests/web_browser.rs:188
+fn web_tools() -> (OSPath, OSPath)? {
+    chromium_name :: env.var_os("JET_WEB_CHROMIUM").ok().or_else(fn() { env.var_os("CHROMIUM").ok() }).unwrap_or("chromium")
+    chromium :: resolve_executable(&OSPath.from(chromium_name))?
+    node_name :: env.var_os("JET_WEB_NODE").ok().or_else(fn() { env.var_os("NODE").ok() }).unwrap_or("node")
+    node :: resolve_executable(&OSPath.from(node_name))?
+    chromium_ok :: Command.new(&chromium).arg("--version").output().ok().map(fn(out) {
+        version :: "{String.from_utf8_lossy(&out.stdout)}{String.from_utf8_lossy(&out.stderr)}"
+        version.contains("Chromium") || version.contains("Chrome")
+    }).unwrap_or(false)
+    node_ok :: Command.new(&node).arg("--version").output().ok().map(fn(out) {
+        version :: String.from_utf8_lossy(&out.stdout)
+        version.starts_with('v') && version.as_bytes().get(1).is_some_and(fn(byte) { byte.is_ascii_digit() })
+    }).unwrap_or(false)
+    if chromium_ok && node_ok { Some((chromium, node)) } else { None }
+}
+// Rust: tests/web_browser.rs:222
+fn wait_for_server(port: U16, marker: &String, timeout: Duration) -> {
+    start :: Instant.now()
+    while start.elapsed() < timeout {
+        if TcpStream.connect(("127.0.0.1", port)) == {
+            .Ok(stream) -> {
+                req :: "GET /click/web.manifest.json HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                if stream.write_all(req.as_bytes()).is_ok() {
+                    raw := String.new()
+                    if stream.read_to_string(&raw).is_ok() && raw.contains("200 OK") { return }
+                }
+            }
+            .Err(_) -> {}
+        }
+        thread.sleep(Duration.from_millis(50))
+    }
+    panic("timed out waiting for {marker} on port {port}")
+}
+// Rust: tests/web_browser.rs:239
+struct StaticServer { child: Child }
+impl StaticServer {
+    // Rust: tests/web_browser.rs:244
+    fn start(node: &OSPath, root: &OSPath, port: U16) -> StaticServer {
+        child :: Command.new(node).arg(repo_root().join("Tools/web-test/serve.mjs")).arg("--port").arg(port.to_string()).arg("--root").arg(root).stdout(Stdio.null()).stderr(Stdio.piped()).spawn().expect("start static web server")
+        wait_for_server(port, "static web server", Duration.from_secs(10))
+        StaticServer { child }
+    }
+}
+impl Drop for StaticServer {
+    // Rust: tests/web_browser.rs:261
+    fn drop(self: &Self) -> {
+        _ :: self.child.kill()
+        _ :: self.child.wait()
+    }
+}
+// Rust: tests/web_browser.rs:267
+struct NativeAppServer { child: Child }
+impl NativeAppServer {
+    // Rust: tests/web_browser.rs:272
+    fn start(port: U16) -> Self {
+        child := Command.new(jet_bin()).current_dir(repo_root()).args(["run", "Examples/features/web/forms_table.jet"]).env("JET_APP_PORT", port.to_string()).env("NO_COLOR", "1").stdout(Stdio.null()).stderr(Stdio.piped()).spawn().expect("start forms table app")
+        deadline :: Instant.now() + Duration.from_secs(30)
+        loop {
+            if TcpStream.connect(("127.0.0.1", port)) == {
+                .Ok(stream) -> {
+                    _ :: stream.set_read_timeout(Some(Duration.from_millis(250)))
+                    request :: "GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+                    if stream.write_all(request.as_bytes()).is_ok() {
+                        _ :: stream.shutdown(Shutdown.Write)
+                        response := String.new()
+                        if stream.read_to_string(&response).is_ok() && response.starts_with("HTTP/1.1 200") { return Self { child } }
+                    }
+                }
+                .Err(_) -> {}
+            }
+            if child.try_wait() == {
+                .Ok(Some(status)) -> {
+                    stderr := String.new()
+                    if child.stderr.take() == {
+                        .Some(pipe) -> { _ :: pipe.read_to_string(&stderr) }
+                        .None -> {}
+                    }
+                    panic("forms table app exited before listening ({status}): {stderr}")
+                }
+                _ -> {}
+            }
+            if Instant.now() >= deadline { panic("timed out waiting for forms table app on port {port}") }
+            thread.sleep(Duration.from_millis(50))
+        }
+    }
+}
+impl Drop for NativeAppServer {
+    // Rust: tests/web_browser.rs:314
+    fn drop(self: &Self) -> {
+        _ :: self.child.kill()
+        _ :: self.child.wait()
+    }
+}
+// Rust: tests/web_browser.rs:321
+fn jet_build_web(cwd: &OSPath, entry: &String) -> {
+    out :: Command.new(jet_bin()).current_dir(cwd).args(["build", "--target=web", entry]).output().expect("jet build --target=web")
+    assert(out.status.success(), "jet build --target=web failed in {cwd.display()}:\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+}
+// Rust: tests/web_browser.rs:336
+fn publish_build(case_dir: &OSPath, serve_name: &String, serve_root: &OSPath) -> {
+    build :: case_dir.join(".jet/build")
+    dest :: serve_root.join(serve_name)
+    _ :: fs.remove_dir_all(&dest)
+    fs.create_dir_all(&dest).expect("create serve dir")
+    for entry in fs.read_dir(&build).expect("read build dir") {
+        entry :: entry.expect("build entry")
+        fs.copy(entry.path(), dest.join(entry.file_name())).expect("copy build artifact")
+    }
+}
+// Rust: tests/web_browser.rs:348
+fn write_callback_source(dest: &OSPath) -> {
+    src := String.from("#Target(Web)\n#HTML(\"index.html\")\n")
+    src.push_str(#include_str("Examples/features/web/web_wasm_callback.jet"))
+    fs.write(dest, src).expect("write callback source")
+}
+// Rust: tests/web_browser.rs:356
+fn prepare_acceptance_root(root: &OSPath) -> {
+    repo :: repo_root()
+    click :: root.join("click_src")
+    fs.create_dir_all(&click).unwrap()
+    fs.copy(repo.join("Examples/features/web/ui_web_click.jet"), click.join("app.jet")).unwrap()
+    fs.copy(repo.join("Examples/features/web/ui_web_click.html"), click.join("ui_web_click.html")).unwrap()
+    jet_build_web(&click, "app.jet")
+    publish_build(&click, "click", root)
+    reactive :: root.join("reactive_src")
+    fs.create_dir_all(&reactive).unwrap()
+    fs.write(reactive.join("app.jet"), #include_str("Examples/features/web/ui_web_reactive.jet")).unwrap()
+    jet_build_web(&reactive, "app.jet")
+    publish_build(&reactive, "reactive", root)
+    compute :: root.join("compute_src")
+    fs.create_dir_all(&compute).unwrap()
+    fs.write(compute.join("app.jet"), #include_str("Examples/features/web/web_compute.jet")).unwrap()
+    jet_build_web(&compute, "app.jet")
+    publish_build(&compute, "compute", root)
+    callback :: root.join("callback_src")
+    fs.create_dir_all(&callback).unwrap()
+    write_callback_source(&callback.join("app.jet"))
+    fs.write(callback.join("index.html"), #include_str("tests/fixtures/web_browser_callback.html")).unwrap()
+    jet_build_web(&callback, "app.jet")
+    publish_build(&callback, "callback", root)
+    lifecycle :: root.join("lifecycle_src")
+    fs.create_dir_all(&lifecycle).unwrap()
+    lifecycle_src :: "#HTML(\"index.html\")\n{#include_str(\"tests/fixtures/web_browser_lifecycle.jet\")}"
+    fs.write(lifecycle.join("app.jet"), lifecycle_src).unwrap()
+    fs.write(lifecycle.join("index.html"), #include_str("tests/fixtures/web_browser_lifecycle.html")).unwrap()
+    jet_build_web(&lifecycle, "app.jet")
+    publish_build(&lifecycle, "lifecycle", root)
+}

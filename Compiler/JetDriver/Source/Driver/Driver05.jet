@@ -1,1567 +1,535 @@
-// PORT-PENDING 2023 crates-jet-driver-src-driver-mod-slice-7201: crates/jet-driver/src/Driver/mod.rs:7201-8763
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         lints,
-//RS         ffi,
-//RS         clinks: Vec::new(),
-//RS         comptime_inputs,
-//RS         web,
-//RS         web_partition_report: bundle.web_partition_report.clone(),
-//RS         plugin: None,
-//RS         library: None,
-//RS         library_config: None,
-//RS         inferred_layer: bundle.inferred_layer,
-//RS         layer_ceiling: bundle.layer_ceiling,
-//RS     })
-//RS }
-//RS 
-//RS /// Check-only from file (+ optional in-memory overlay).
-//RS ///
-//RS /// The `overlay` pair is `(canonical_path, text)` — the same shape
-//RS /// `Loader::load_entry_with_overlay` expects. Pass `None` for a plain
-//RS /// on-disk check; pass `Some((&abs, text))` for an LSP unsaved-buffer check.
-//RS /// `is_lsp` is forwarded as the `for_check` flag to the loader.
-//RS pub fn check_file(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS ) -> (Vec<Diagnostic>, Option<crate::AST::ProgramBundle>) {
-//RS     let (diags, bundle, _facts) = check_file_with_effect_facts(file, overlay, is_lsp);
-//RS     (diags, bundle)
-//RS }
-//RS 
-//RS /// Like `check_file` but also returns effect facts for D-SEMINDEX1.
-//RS pub fn check_file_with_effect_facts(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     check_file_with_effect_facts_and_settings(file, overlay, is_lsp, &BTreeMap::new())
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_and_settings(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     check_file_with_effect_facts_profile_and_settings(
-//RS         file,
-//RS         overlay,
-//RS         is_lsp,
-//RS         "dev",
-//RS         setting_overrides,
-//RS     )
-//RS }
-//RS 
-//RS /// Like `check_file_with_effect_facts`, with an explicitly selected build
-//RS /// profile for tooling that must explain profile-dependent specialization.
-//RS pub fn check_file_with_effect_facts_profile(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS     profile: &str,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     check_file_with_effect_facts_profile_and_settings(
-//RS         file,
-//RS         overlay,
-//RS         is_lsp,
-//RS         profile,
-//RS         &BTreeMap::new(),
-//RS     )
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_profile_and_settings(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = overlay.into_iter().collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         &overlays,
-//RS         is_lsp,
-//RS         None,
-//RS         None,
-//RS         profile,
-//RS         setting_overrides,
-//RS         None,
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_profile_and_settings_with_source_closure(
-//RS     file: &str,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = source_closure
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         &overlays,
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         profile,
-//RS         setting_overrides,
-//RS         None,
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS /// Like `check_file_with_effect_facts_profile`, but retain Run-mode Output
-//RS /// selection facts for read-only tooling that explains the selected Output.
-//RS pub fn check_file_with_effect_facts_for_run(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     check_file_with_effect_facts_for_run_and_entry(file, profile, setting_overrides, None)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_for_run_and_entry(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let (diagnostics, bundle, facts, _) =
-//RS         check_file_with_effect_facts_impl_for_run(file, profile, setting_overrides, entry_fn);
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS /// Run-mode effect check for an entry whose source is supplied by an in-memory
-//RS /// overlay. The overlay is authoritative for the entry while ordinary imports
-//RS /// still resolve through the loader's normal authority checks.
-//RS pub fn check_file_with_effect_facts_for_run_and_entry_with_overlay(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = overlay.into_iter().collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
-//RS         file,
-//RS         &overlays,
-//RS         profile,
-//RS         setting_overrides,
-//RS         entry_fn,
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_for_run_and_entry_with_source_closure(
-//RS     file: &str,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = source_closure
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
-//RS         file,
-//RS         &overlays,
-//RS         profile,
-//RS         setting_overrides,
-//RS         entry_fn,
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS /// Resolve and snapshot every module in one entry closure.
-//RS ///
-//RS /// Later compiler stages consume these bytes as overlays instead of reopening
-//RS /// source paths selected by the authority check.
-//RS pub fn load_immutable_source_closure(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> Result<Vec<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         crate::Loader::load_entry_with_overlays(file, overlays, false)
-//RS             .map(|bundle| bundle_source_closure(&bundle))
-//RS     })
-//RS }
-//RS /// Immutable checked source closure used by authority-sensitive consumers.
-//RS ///
-//RS /// Every module source comes from the bundle that produced the semantic facts.
-//RS /// Consumers must pass this value onward instead of reopening module paths.
-//RS pub struct CheckedSourceBundle {
-//RS     pub bundle: crate::AST::ProgramBundle,
-//RS     pub effect_facts: crate::Sema::SemIndexEffectFacts,
-//RS     pub project_root: std::path::PathBuf,
-//RS     pub source_closure: Vec<(std::path::PathBuf, String)>,
-//RS }
-//RS 
-//RS impl CheckedSourceBundle {
-//RS     pub fn new(
-//RS         bundle: crate::AST::ProgramBundle,
-//RS         effect_facts: crate::Sema::SemIndexEffectFacts,
-//RS     ) -> Self {
-//RS         let project_root = bundle.project_root.clone();
-//RS         let mut source_closure = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .map(|module| (module.path.clone(), module.source.clone()))
-//RS             .collect::<Vec<_>>();
-//RS         source_closure.sort_by(|left, right| left.0.cmp(&right.0));
-//RS         source_closure.dedup_by(|left, right| left.0 == right.0);
-//RS         Self {
-//RS             bundle,
-//RS             effect_facts,
-//RS             project_root,
-//RS             source_closure,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn overlays(&self) -> Vec<(&std::path::Path, &str)> {
-//RS         self.source_closure
-//RS             .iter()
-//RS             .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS /// Run-mode check that returns the complete immutable source closure together
-//RS /// with the semantic effect facts used to check it.
-//RS pub fn check_file_with_checked_source_bundle_for_run_and_entry(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (Vec<Diagnostic>, Option<CheckedSourceBundle>) {
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl_for_run_with_overlays(
-//RS         file,
-//RS         overlays,
-//RS         profile,
-//RS         setting_overrides,
-//RS         entry_fn,
-//RS     );
-//RS     let checked = bundle.map(|bundle| CheckedSourceBundle::new(bundle, facts));
-//RS     (diagnostics, checked)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_for_output(
-//RS     file: &str,
-//RS     output: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         &[],
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         profile,
-//RS         setting_overrides,
-//RS         Some(output),
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS /// Output-selection effect check from an entry source overlay.
-//RS ///
-//RS /// The overlay pair is `(canonical_path, text)`, and is used for the entry
-//RS /// instead of reopening the mutable path after the caller has checked it.
-//RS pub fn check_file_with_effect_facts_for_output_with_overlay(
-//RS     file: &str,
-//RS     output: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = overlay.into_iter().collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         &overlays,
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         profile,
-//RS         setting_overrides,
-//RS         Some(output),
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_for_output_with_source_closure(
-//RS     file: &str,
-//RS     output: &str,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = source_closure
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         &overlays,
-//RS         false,
-//RS         None,
-//RS         None,
-//RS         profile,
-//RS         setting_overrides,
-//RS         Some(output),
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_incremental(
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS     cache: &mut crate::Sema::IncrementalSemaCache,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let overlays = overlay.into_iter().collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         &overlays,
-//RS         is_lsp,
-//RS         Some(cache),
-//RS         None,
-//RS         "dev",
-//RS         &BTreeMap::new(),
-//RS         None,
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS pub fn check_file_with_effect_facts_incremental_overlays(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS     cache: &mut crate::Sema::IncrementalSemaCache,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     check_file_with_effect_facts_impl(
-//RS         file,
-//RS         overlays,
-//RS         is_lsp,
-//RS         Some(cache),
-//RS         None,
-//RS         "dev",
-//RS         &BTreeMap::new(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Check an edited source through the incremental bundle pipeline and attach
-//RS /// the sema-owned hot-swap verdict to the resulting semantic facts.
-//RS ///
-//RS /// `old` is the resident generation's bundle. The returned decision carries
-//RS /// canonical changed-function identities and the cache's measured recheck
-//RS /// cone; adapters must consume those facts instead of re-deriving invalidation.
-//RS pub fn check_file_with_hot_swap_incremental(
-//RS     old: &crate::AST::ProgramBundle,
-//RS     file: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     is_lsp: bool,
-//RS     module_name: &str,
-//RS     cache: &mut crate::Sema::IncrementalSemaCache,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Option<jet_foundation::HotSwap::HotSwapDecision>,
-//RS ) {
-//RS     let overlays = overlay.into_iter().collect::<Vec<_>>();
-//RS     let (diagnostics, bundle, facts, decision, _) = check_file_with_hot_swap_incremental_overlays(
-//RS         old,
-//RS         file,
-//RS         &overlays,
-//RS         is_lsp,
-//RS         module_name,
-//RS         cache,
-//RS     );
-//RS     (diagnostics, bundle, facts, decision)
-//RS }
-//RS 
-//RS /// Overlay-aware form of [`check_file_with_hot_swap_incremental`].
-//RS pub fn check_file_with_hot_swap_incremental_overlays(
-//RS     old: &crate::AST::ProgramBundle,
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS     module_name: &str,
-//RS     cache: &mut crate::Sema::IncrementalSemaCache,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Option<jet_foundation::HotSwap::HotSwapDecision>,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     cache.clear_measurement();
-//RS     let (mut diagnostics, bundle, facts, source_closure) =
-//RS         check_file_with_effect_facts_incremental_overlays(file, overlays, is_lsp, cache);
-//RS     let rechecked_items = cache.stats().recomputed_items;
-//RS     let decision =
-//RS         bundle.as_ref().and_then(|new| {
-//RS             match crate::Sema::HotSwap::type_stable_decision(old, new, module_name) {
-//RS                 Ok(decision) => Some(decision.with_rechecked_items(rechecked_items)),
-//RS                 Err(errors) => {
-//RS                     diagnostics.extend(errors);
-//RS                     None
-//RS                 }
-//RS             }
-//RS         });
-//RS     (diagnostics, bundle, facts, decision, source_closure)
-//RS }
-//RS 
-//RS pub(crate) fn check_file_with_effect_facts_incremental_overlays_prepared(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS     cache: &mut crate::Sema::IncrementalSemaCache,
-//RS     prepared_frontend: &mut crate::Loader::PreparedFrontend,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     check_file_with_effect_facts_impl(
-//RS         file,
-//RS         overlays,
-//RS         is_lsp,
-//RS         Some(cache),
-//RS         Some(prepared_frontend),
-//RS         "dev",
-//RS         &BTreeMap::new(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn check_file_with_effect_facts_impl(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
-//RS     prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     explicit_output: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     crate::run_compiler_work(|| {
-//RS         check_file_on_compiler_stack(
-//RS             file,
-//RS             overlays,
-//RS             is_lsp,
-//RS             incremental,
-//RS             prepared_frontend,
-//RS             profile,
-//RS             setting_overrides,
-//RS             explicit_output,
-//RS             false,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn check_file_with_effect_facts_impl_for_run(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     check_file_with_effect_facts_impl_for_run_with_overlays(
-//RS         file,
-//RS         &[],
-//RS         profile,
-//RS         setting_overrides,
-//RS         entry_fn,
-//RS     )
-//RS }
-//RS 
-//RS fn check_file_with_effect_facts_impl_for_run_with_overlays(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     crate::run_compiler_work(|| {
-//RS         check_file_on_compiler_stack_with_entry(
-//RS             file,
-//RS             overlays,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             profile,
-//RS             setting_overrides,
-//RS             None,
-//RS             true,
-//RS             entry_fn,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn check_file_on_compiler_stack(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
-//RS     prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     explicit_output: Option<&str>,
-//RS     run_mode: bool,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     check_file_on_compiler_stack_with_entry(
-//RS         file,
-//RS         overlays,
-//RS         is_lsp,
-//RS         incremental,
-//RS         prepared_frontend,
-//RS         profile,
-//RS         setting_overrides,
-//RS         explicit_output,
-//RS         run_mode,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn check_file_on_compiler_stack_with_entry(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS     incremental: Option<&mut crate::Sema::IncrementalSemaCache>,
-//RS     prepared_frontend: Option<&mut crate::Loader::PreparedFrontend>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     explicit_output: Option<&str>,
-//RS     run_mode: bool,
-//RS     entry_fn: Option<&str>,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS     Vec<std::path::PathBuf>,
-//RS ) {
-//RS     let (loaded, dependencies, loader_diagnostics) = match prepared_frontend {
-//RS         Some(prepared_frontend) => {
-//RS             crate::Loader::load_entry_with_overlays_and_prepared_frontend_with_diagnostics(
-//RS                 file,
-//RS                 overlays,
-//RS                 is_lsp,
-//RS                 prepared_frontend,
-//RS             )
-//RS         }
-//RS         None => crate::Loader::load_entry_with_overlays_and_dependencies_with_diagnostics(
-//RS             file, overlays, is_lsp,
-//RS         ),
-//RS     };
-//RS     match loaded {
-//RS         Ok(mut bundle) => {
-//RS             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-//RS             if let Err(fact_diags) =
-//RS                 seed_build_facts(&mut bundle, profile, false, setting_overrides)
-//RS             {
-//RS                 diags.extend(fact_diags);
-//RS                 return (
-//RS                     diags,
-//RS                     None,
-//RS                     crate::Sema::SemIndexEffectFacts::default(),
-//RS                     dependencies,
-//RS                 );
-//RS             }
-//RS             if let Some(entry_fn) = entry_fn {
-//RS                 swap_entry_point(&mut bundle, entry_fn);
-//RS             }
-//RS             let (check_diags, facts) = if let Some(output) = explicit_output {
-//RS                 crate::Sema::check_bundle_for_output_opts_with_effect_facts(
-//RS                     &mut bundle,
-//RS                     crate::Sema::CompileMode::Run,
-//RS                     output,
-//RS                     false,
-//RS                     crate::Policy::GateSet::default(),
-//RS                 )
-//RS             } else if run_mode {
-//RS                 crate::Sema::check_bundle_with_effect_facts(
-//RS                     &mut bundle,
-//RS                     crate::Sema::CompileMode::Run,
-//RS                 )
-//RS             } else {
-//RS                 match incremental {
-//RS                     Some(cache) => crate::Sema::check_bundle_with_effect_facts_incremental(
-//RS                         &mut bundle,
-//RS                         crate::Sema::CompileMode::Check,
-//RS                         cache,
-//RS                     ),
-//RS                     None => crate::Sema::check_bundle_with_effect_facts(
-//RS                         &mut bundle,
-//RS                         crate::Sema::CompileMode::Check,
-//RS                     ),
-//RS                 }
-//RS             };
-//RS             diags.extend(check_diags);
-//RS             if let Some(crate::AST::Item::Func(build)) = bundle.modules[bundle.entry]
-//RS                 .items
-//RS                 .iter()
-//RS                 .find(|item| {
-//RS                     matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))
-//RS                 })
-//RS             {
-//RS                 if !valid_build_signature(build) {
-//RS                     diags.push(bad_build_signature(build.name_span));
-//RS                 }
-//RS             }
-//RS             let extension_diags =
-//RS                 crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&facts), &diags);
-//RS             diags.extend(extension_diags);
-//RS             let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
-//RS                 Ok(diags) => diags,
-//RS                 Err(diags) => return (diags, None, facts, dependencies),
-//RS             };
-//RS             match apply_package_lint_policy(&bundle, diags) {
-//RS                 Ok(diags) => (diags, Some(bundle), facts, dependencies),
-//RS                 Err(diags) => (diags, None, facts, dependencies),
-//RS             }
-//RS         }
-//RS         Err(diags) => {
-//RS             let mut facts = crate::Sema::SemIndexEffectFacts::default();
-//RS             for entry in loader_diagnostics {
-//RS                 if let Some(fact) = entry.structure_fact {
-//RS                     facts.name_ledger.record_structure_fact(fact);
-//RS                 }
-//RS             }
-//RS             (diags, None, facts, dependencies)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Check a staged multi-file tree. This is the authoritative compiler path;
-//RS /// callers do not need to mirror parser, loader, or sema behavior.
-//RS pub fn check_file_with_overlays(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     is_lsp: bool,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let (diagnostics, bundle, facts, _) = check_file_with_effect_facts_impl(
-//RS         file,
-//RS         overlays,
-//RS         is_lsp,
-//RS         None,
-//RS         None,
-//RS         "dev",
-//RS         &BTreeMap::new(),
-//RS         None,
-//RS     );
-//RS     (diagnostics, bundle, facts)
-//RS }
-//RS 
-//RS /// Structural tools check a staged file in its actual output directory and
-//RS /// load adjacent modules referenced by unqualified imports. This retains the
-//RS /// same parser/sema authority as ordinary checking.
-//RS pub fn check_file_with_overlays_and_import_root(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     crate::run_compiler_work(|| check_file_with_import_root_on_compiler_stack(file, overlays))
-//RS }
-//RS 
-//RS fn check_file_with_import_root_on_compiler_stack(
-//RS     file: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     match crate::Loader::load_entry_with_overlays_and_import_root(file, overlays, false) {
-//RS         Ok(mut bundle) => {
-//RS             let mut diags = std::mem::take(&mut bundle.parse_teaching);
-//RS             if let Err(fact_diags) = seed_build_facts(&mut bundle, "dev", false, &BTreeMap::new()) {
-//RS                 diags.extend(fact_diags);
-//RS                 return (diags, None, crate::Sema::SemIndexEffectFacts::default());
-//RS             }
-//RS             let (check_diags, facts) = crate::Sema::check_bundle_with_effect_facts(
-//RS                 &mut bundle,
-//RS                 crate::Sema::CompileMode::Check,
-//RS             );
-//RS             diags.extend(check_diags);
-//RS             let extension_diags =
-//RS                 crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&facts), &diags);
-//RS             diags.extend(extension_diags);
-//RS             let diags = match apply_package_effect_budget(&bundle, &facts, diags) {
-//RS                 Ok(diags) => diags,
-//RS                 Err(diags) => return (diags, None, facts),
-//RS             };
-//RS             match apply_package_lint_policy(&bundle, diags) {
-//RS                 Ok(diags) => (diags, Some(bundle), facts),
-//RS                 Err(diags) => (diags, None, facts),
-//RS             }
-//RS         }
-//RS         Err(diags) => (diags, None, crate::Sema::SemIndexEffectFacts::default()),
-//RS     }
-//RS }
-//RS 
-//RS /// Check-only from source text (eval mode), retaining the checked bundle and
-//RS /// the same effect facts used by the semantic-index and build reflection
-//RS /// consumers. This is the in-memory counterpart of
-//RS /// `check_file_with_effect_facts`; it performs no filesystem I/O.
-//RS pub fn check_eval_with_effect_facts(
-//RS     src: &str,
-//RS     file: &str,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     crate::run_compiler_work(|| check_eval_on_compiler_stack(src, file))
-//RS }
-//RS 
-//RS fn check_eval_on_compiler_stack(
-//RS     src: &str,
-//RS     file: &str,
-//RS ) -> (
-//RS     Vec<Diagnostic>,
-//RS     Option<crate::AST::ProgramBundle>,
-//RS     crate::Sema::SemIndexEffectFacts,
-//RS ) {
-//RS     let source_for_parse = match crate::Package::mask_inline_package_source(src) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(error) => {
-//RS             return (
-//RS                 vec![error.diagnostic()],
-//RS                 None,
-//RS                 crate::Sema::SemIndexEffectFacts::default(),
-//RS             );
-//RS         }
-//RS     };
-//RS     let (toks, lex_diags) = crate::Lexer::lex(&source_for_parse);
-//RS     if !lex_diags.is_empty() {
-//RS         return (lex_diags, None, crate::Sema::SemIndexEffectFacts::default());
-//RS     }
-//RS     let mut prog = match crate::Parser::parse_with_source(&toks, &source_for_parse) {
-//RS         Ok(p) => p,
-//RS         Err(ds) => return (ds, None, crate::Sema::SemIndexEffectFacts::default()),
-//RS     };
-//RS     let mut bundle = crate::AST::ProgramBundle {
-//RS         entry: 0,
-//RS         project_root: std::path::PathBuf::from(
-//RS             std::path::Path::new(file)
-//RS                 .parent()
-//RS                 .unwrap_or(std::path::Path::new(".")),
-//RS         ),
-//RS         modules: vec![crate::AST::LoadedModule {
-//RS             path: std::path::PathBuf::from(file),
-//RS             display: file.to_string(),
-//RS             alias: "main".to_string(),
-//RS             imports: std::mem::take(&mut prog.imports),
-//RS             items: std::mem::take(&mut prog.items),
-//RS             script_body: std::mem::take(&mut prog.script_body),
-//RS             block_spans: std::mem::take(&mut prog.block_spans),
-//RS             source: src.to_string(),
-//RS             web_target_ceiling: prog.web_target_ceiling,
-//RS             pub_file: prog.pub_file,
-//RS             no_prelude: prog.no_prelude,
-//RS             default_target: prog.default_target,
-//RS             html_path: prog.html_path.clone(),
-//RS             policy_declarations: prog.policy_declarations.clone(),
-//RS             user_policy_declarations: prog.user_policy_declarations.clone(),
-//RS             rule_facts: std::mem::take(&mut prog.rule_facts),
-//RS         }],
-//RS         devtools_registry: crate::AST::DevtoolsRegistry::default(),
-//RS         parse_teaching: Vec::new(),
-//RS         used_core: std::collections::HashSet::new(),
-//RS         ffi_callback_fns: std::collections::HashSet::new(),
-//RS         cffi: crate::CFFI::CFfi::default(),
-//RS         comptime_inputs: Vec::new(),
-//RS         name_ledger: crate::AST::NameLedger::default(),
-//RS         layer_ceiling: None,
-//RS         inferred_layer: crate::Syntax::RuntimeLayer::Core,
-//RS         web_partitions: std::collections::HashMap::new(),
-//RS         web_partition_enforced: false,
-//RS         web_partition_report: None,
-//RS         dep_roots: std::collections::HashMap::new(),
-//RS         package_guarantees: Default::default(),
-//RS         program_allocator: Default::default(),
-//RS         active_os: crate::Syntax::OSTarget::host(),
-//RS         build_facts: Default::default(),
-//RS         edition: crate::Manifest::latest_edition().to_string(),
-//RS     };
-//RS     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-//RS         return (diags, None, crate::Sema::SemIndexEffectFacts::default());
-//RS     }
-//RS     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
-//RS         Ok(c) => c,
-//RS         Err(diags) => return (diags, None, crate::Sema::SemIndexEffectFacts::default()),
-//RS     };
-//RS     let (diags, facts) =
-//RS         crate::Sema::check_bundle_with_effect_facts(&mut bundle, crate::Sema::CompileMode::Eval);
-//RS     (diags, Some(bundle), facts)
-//RS }
-//RS 
-//RS /// Check-only from source text (eval mode). Returns only error-severity diagnostics.
-//RS pub fn check_eval(src: &str, file: &str) -> Vec<Diagnostic> {
-//RS     let (diags, _, _) = check_eval_with_effect_facts(src, file);
-//RS     diags
-//RS         .into_iter()
-//RS         .filter(|d| d.severity == Severity::Error)
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Test harness pipeline.
-//RS pub fn compile_tests(
-//RS     file: &str,
-//RS     coverage: bool,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-//RS     compile_tests_with_profile(file, coverage, "dev", &BTreeMap::new())
-//RS         .map(|(rust, ffi, _lints)| (rust, ffi))
-//RS }
-//RS 
-//RS /// Compile a test harness with the selected named profile. Success carries
-//RS /// the checked advisory lints so `jet test --verbose` can show them
-//RS /// (D-LINT-VISIBILITY2=A).
-//RS pub fn compile_tests_with_profile(
-//RS     file: &str,
-//RS     coverage: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_tests_on_compiler_stack(file, coverage, profile, setting_overrides)
-//RS     })
-//RS }
-//RS 
-//RS fn compile_tests_on_compiler_stack(
-//RS     file: &str,
-//RS     coverage: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-//RS     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
-//RS     let mode = crate::Sema::CompileMode::Test;
-//RS     let diags = crate::Sema::check_bundle(&mut bundle, mode);
-//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS     let lints = classify_diagnostics(
-//RS         &bundle,
-//RS         parse_teaching.into_iter().chain(diags).collect(),
-//RS         false,
-//RS     )?;
-//RS     let ffi = match crate::FFI::prepare(&bundle) {
-//RS         Ok(link) => link,
-//RS         Err(ffi_diags) => return Err(ffi_diags),
-//RS     };
-//RS     let build_mode = if coverage {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Coverage
-//RS     } else {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Test
-//RS     };
-//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
-//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS         jet_foundation::MIR::MirArtifactKind::TestExecutable,
-//RS         build_mode,
-//RS     );
-//RS     let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = false;
-//RS     execution.emit_runtime = true;
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::host(),
-//RS             target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     Ok((rust, ffi, lints))
-//RS }
-//RS 
-//RS /// D-CMD-OVERRIDE1=C: compile an expert `fn test(...)` command override.
-//RS /// The checked TestOverride artifact selects that callable as its entry; the
-//RS /// canonical MIRRust adapter owns the outer command harness.
-//RS pub fn compile_test_override(
-//RS     file: &str,
-//RS     coverage: bool,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>), Vec<Diagnostic>> {
-//RS     compile_test_override_with_profile(file, coverage, "dev", &BTreeMap::new())
-//RS         .map(|(rust, ffi, _lints)| (rust, ffi))
-//RS }
-//RS 
-//RS /// Compile a command override with the selected named profile; success
-//RS /// carries the checked advisory lints like `compile_tests_with_profile`.
-//RS pub fn compile_test_override_with_profile(
-//RS     file: &str,
-//RS     coverage: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_test_override_on_compiler_stack(file, coverage, profile, setting_overrides)
-//RS     })
-//RS }
-//RS 
-//RS /// D-TESTKIT1=A (c308 pass 2, gap #1): a CLI-level error selecting the `jet
-//RS /// fuzz` target — no property test, an ambiguous set, or a named test that
-//RS /// doesn't exist / isn't a property test. Same tier as a CLI argument error's
-//RS /// "can't find the file" message: argument validation, not a compiler diagnostic.
-//RS pub enum FuzzCompileError {
-//RS     Diagnostics(Vec<Diagnostic>),
-//RS     Target(String),
-//RS }
-//RS 
-//RS fn select_fuzz_test_name(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     wanted: Option<&str>,
-//RS ) -> Result<String, String> {
-//RS     let mut all_tests = Vec::new();
-//RS     let mut properties = Vec::new();
-//RS     for module in &bundle.modules {
-//RS         for item in &module.items {
-//RS             let crate::AST::Item::Test(test) = item else {
-//RS                 continue;
-//RS             };
-//RS             let name = test
-//RS                 .name
-//RS                 .clone()
-//RS                 .unwrap_or_else(|| "anonymous".to_string());
-//RS             let is_property = !test.params.is_empty();
-//RS             all_tests.push((name.clone(), is_property));
-//RS             if is_property {
-//RS                 properties.push(name);
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some(wanted) = wanted {
-//RS         if let Some((name, true)) = all_tests
-//RS             .iter()
-//RS             .find(|(name, _)| name == wanted)
-//RS         {
-//RS             return Ok(name.clone());
-//RS         }
-//RS         if all_tests
-//RS             .iter()
-//RS             .any(|(name, is_property)| name == wanted && !is_property)
-//RS         {
-//RS             return Err(format!("`{wanted}` is not a property test"));
-//RS         }
-//RS         return Err(format!("can't find property test `{wanted}`"));
-//RS     }
-//RS     match properties.as_slice() {
-//RS         [] => Err("no property `#Test fn` found in the target".to_string()),
-//RS         [name] => Ok(name.clone()),
-//RS         names => Err(format!(
-//RS             "multiple property tests found: {}; fix: `jet test --grade=generated <file> <name>`",
-//RS             names.join(", ")
-//RS         )),
-//RS     }
-//RS }
-//RS 
-//RS /// `jet fuzz <file> [<name>]` pipeline: same front end as `compile_tests`
-//RS /// (sema runs in `Test` mode — a property test's body is checked exactly as
-//RS /// `jet test` checks it), but codegen emits the fuzz driver harness instead.
-//RS pub fn compile_fuzz(
-//RS     file: &str,
-//RS     test_name: Option<&str>,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
-//RS     crate::run_compiler_work(|| compile_fuzz_on_compiler_stack(file, test_name))
-//RS }
-//RS 
-//RS fn compile_fuzz_on_compiler_stack(
-//RS     file: &str,
-//RS     test_name: Option<&str>,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>), FuzzCompileError> {
-//RS     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)
-//RS         .map_err(FuzzCompileError::Diagnostics)?;
-//RS     let diags = crate::Sema::check_bundle(&mut bundle, crate::Sema::CompileMode::Test);
-//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS     let _lints = classify_diagnostics(
-//RS         &bundle,
-//RS         parse_teaching.into_iter().chain(diags).collect(),
-//RS         false,
-//RS     )
-//RS     .map_err(FuzzCompileError::Diagnostics)?;
-//RS     let selected_name =
-//RS         select_fuzz_test_name(&bundle, test_name).map_err(FuzzCompileError::Target)?;
-//RS     let ffi = match crate::FFI::prepare(&bundle) {
-//RS         Ok(link) => link,
-//RS         Err(ffi_diags) => return Err(FuzzCompileError::Diagnostics(ffi_diags)),
-//RS     };
-//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
-//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS         jet_foundation::MIR::MirArtifactKind::FuzzExecutable,
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
-//RS     )
-//RS     .with_name(selected_name);
-//RS     let (mir, artifact) = crate::Codegen::TIR::lower_checked_mir_program_for(&bundle, request)
-//RS         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
-//RS     mir.validate().unwrap_or_else(|error| {
-//RS         jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
-//RS     });
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::host(),
-//RS             target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     Ok((rust, ffi))
-//RS }
-//RS 
-//RS /// c-devserver (owner-directed 2026-07-01): `jet dev <file>` when the file
-//RS /// defines a top-level `fn dev()` — compiles NATIVELY with `dev()` as the
-//RS /// program's real entry instead of `run()`. Mechanically: before sema runs,
-//RS /// park any existing `fn run` and inject a synthetic `fn run() { entry_fn() }`
-//RS /// (I3: codegen stays dumb; sema never special-cases any entry name other
-//RS /// than `"run"` — see `Registration.rs`/`Bundle.rs`'s `funcs.get("run")`).
-//RS /// The selected function keeps its source name so callers (D-JPK-TASKRUN1
-//RS /// plain-call job deps) still resolve. The same entry-swap seam serves
-//RS /// `jet dev` and dev-tier job argv.
-//RS /// Native only — never no-OS/impure/web (those toggles don't apply to
-//RS /// the `fn dev()` entry path; a `dev()` function's job is to configure and run
-//RS /// an ordinary value like `core.web.devserver`, nothing more).
-//RS pub fn compile_bundle_path_with_entry(
-//RS     file: &str,
-//RS     entry_fn: &str,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_with_entry_and_settings(file, entry_fn, "dev", &BTreeMap::new())
-//RS }
-//RS 
-//RS pub fn compile_bundle_path_with_entry_and_settings(
-//RS     file: &str,
-//RS     entry_fn: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_bundle_path_with_entry_on_compiler_stack(
-//RS             file,
-//RS             entry_fn,
-//RS             profile,
-//RS             setting_overrides,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn compile_bundle_path_with_entry_on_compiler_stack(
-//RS     file: &str,
-//RS     entry_fn: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-//RS     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
-//RS     swap_entry_point(&mut bundle, entry_fn);
-//RS     let mode = crate::Sema::CompileMode::Run;
-//RS     let (diags, effect_facts) = crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode);
-//RS     let extension_diags =
-//RS         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
-//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS     let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
-//RS     let ffi = match crate::FFI::prepare(&bundle) {
-//RS         Ok(link) => link,
-//RS         Err(ffi_diags) => return Err(ffi_diags),
-//RS     };
-//RS     // D-OSTARGET1=A: `jet dev`'s entry-swap path never cross-compiles — host OS.
-//RS     let request = mir_artifact_request_for_build(&bundle, mode, profile, false, false, false);
-//RS     let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = false;
-//RS     execution.emit_runtime = true;
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::host(),
-//RS             target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-//RS     Ok(crate::CompileOutput {
-//RS         rust,
-//RS         lints,
-//RS         ffi,
-//RS         clinks: Vec::new(),
-//RS         comptime_inputs,
-//RS         web: None,
-//RS         web_partition_report: bundle.web_partition_report.clone(),
-//RS         plugin: None,
-//RS         library: None,
-//RS         library_config: None,
-//RS         inferred_layer: bundle.inferred_layer,
-//RS         layer_ceiling: bundle.layer_ceiling,
-//RS     })
-//RS }
-//RS 
-//RS fn qualified_entry_call_name(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     target_module: usize,
-//RS     entry_fn: &str,
-//RS ) -> Option<String> {
-//RS     if target_module == bundle.entry {
-//RS         return Some(entry_fn.to_string());
-//RS     }
-//RS 
-//RS     let mut pending = std::collections::VecDeque::from([(bundle.entry, Vec::new())]);
-//RS     let mut visited = std::collections::HashSet::new();
-//RS     while let Some((module, path)) = pending.pop_front() {
-//RS         if !visited.insert(module) {
-//RS             continue;
-//RS         }
-//RS         for import in &bundle.modules[module].imports {
-//RS             let Some(target) = bundle.name_ledger.import_target(module, import.span) else {
-//RS                 continue;
-//RS             };
-//RS             let mut next = path.clone();
-//RS             next.push(import.import_alias());
-//RS             if target == target_module {
-//RS                 next.push(entry_fn.to_string());
-//RS                 return Some(next.join("."));
-//RS             }
-//RS             pending.push_back((target, next));
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// D-JOB-SUBCMD1=C / D-CLI-GLOBAL1=E: a job's parameters are its subcommand
-//RS /// inputs. The default tier binds command input through the one `#CLI` record
-//RS /// entry path, so a job whose parameters are not already that record is given
-//RS /// a compiler-generated `#CLI` record. Its fields carry exactly the parameter
-//RS /// names, types, and defaults of the checked job schema
-//RS /// (`CLISchema::JobArgumentSchema`) that the AOT job table parses, so both
-//RS /// tiers accept the same argv. Parameter markers stay off the record because
-//RS /// the job schema does not export them either.
-//RS fn job_argument_record(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     target: &crate::AST::Func,
-//RS ) -> Option<crate::AST::StructDef> {
-//RS     use crate::AST::{Field, Item, StructDef, Type};
-//RS     if !target.is_job || target.params.is_empty() {
-//RS         return None;
-//RS     }
-//RS     if target.params.iter().any(|param| param.variadic) {
-//RS         return None;
-//RS     }
-//RS     if let [param] = target.params.as_slice() {
-//RS         if let Type::Named(name) = &param.ty {
-//RS             let leaf = name.rsplit(['.', ':']).next().unwrap_or(name);
-//RS             let is_cli_record = bundle
-//RS                 .modules
-//RS                 .iter()
-//RS                 .flat_map(|module| module.items.iter())
-//RS                 .any(|item| {
-//RS                     matches!(item, Item::Struct(structure)
-//RS                         if structure.name == leaf
-//RS                             && structure
-//RS                                 .derives
-//RS                                 .iter()
-//RS                                 .any(|(derive, _)| derive == jet_foundation::Syntax::MARKER_CLI))
-//RS                 });
-//RS             if is_cli_record {
-//RS                 return None;
-//RS             }
-//RS         }
-//RS     }
-//RS     let zero = crate::Diagnostics::Span::new(0, 0);
-//RS     Some(StructDef {
-//RS         span: zero,
-//RS         is_pub: false,
-//RS         is_package_pub: false,
-//RS         name: jet_foundation::Names::mangle_generated(&format!("job_args_{}", target.name)),
-//RS         name_span: zero,
-//RS         type_params: Vec::new(),
-//RS         fields: target
-//RS             .params
-//RS             .iter()
-//RS             .map(|param| Field {
-//RS                 is_pub: false,
-//RS                 is_package_pub: false,
-//RS                 name: param.name.clone(),
-//RS                 name_span: param.name_span,
-//RS                 ty: param.ty.clone(),
-//RS                 ty_span: param.ty_span,
-//RS                 serde_markers: Vec::new(),
-//RS                 redact: false,
-//RS                 computed: None,
-//RS                 default: param.default.clone(),
-//RS                 default_ct: None,
-//RS             })
-//RS             .collect(),
-//RS         state: None,
-//RS         methods: Vec::new(),
-//RS         cli_bindings: Vec::new(),
-//RS         trait_impls: Vec::new(),
-//RS         // Compiler-owned binder: it declares the decoder the entry needs
-//RS         // (`#[CLI, Decode]`) instead of depending on the package's
-//RS         // auto-derive policy, which the loader applies only to source items.
-//RS         derives: vec![
-//RS             (jet_foundation::Syntax::MARKER_CLI.to_string(), zero),
-//RS             (jet_foundation::Syntax::MARKER_DECODE.to_string(), zero),
-//RS         ],
-//RS         auto_derive_default: false,
-//RS         is_published_schema: false,
-//RS         published_schema_span: None,
-//RS         is_single_use: false,
-//RS         single_use_span: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         layout: None,
-//RS         layout_span: None,
-//RS         serde_markers: Vec::new(),
-//RS         type_markers: Vec::new(),
-//RS         validate_block: Vec::new(),
-//RS         validate_span: None,
-//RS     })
-//RS }
-//RS 
-//RS /// Make `entry_fn` the program entry without renaming it for name resolution.
-//RS ///
-//RS /// Sema/codegen still require a literal `fn run` (Registration/Bundle
-//RS /// `funcs.get("run")`). D-JPK-TASKRUN1 also says a cross-task dependency is a
-//RS /// plain call — so renaming `#Job fn greet` → `run` would break
-//RS /// `seed()`'s `greet()` with E0102. Fix: park any existing `fn run` as
-//RS /// `__jet___unused_run`, then inject a synthetic `fn run(…) { entry_fn(…) }`
-//RS /// that forwards params (and return) while leaving `entry_fn` callable.
-//RS ///
-//RS /// The wrapper is never `#Job` (avoids E0928 on reserved lifecycle name
-//RS /// `run`). A no-op when `entry_fn` is already `"run"`, or when no function
-//RS /// named `entry_fn` exists (caller surfaces E0101 / E1294 separately).
-//RS pub fn swap_entry_point(bundle: &mut crate::AST::ProgramBundle, entry_fn: &str) {
-//RS     use crate::Diagnostics::Span;
-//RS     use crate::AST::{Call, CallArg, CallArgFlags, Expr, Func, Item, Stmt};
-//RS 
-//RS     if entry_fn == "run" {
-//RS         return;
-//RS     }
-//RS     // Keep an invalid loose-statement file unchanged when it already has an
-//RS     // explicit `fn run`; sema reports the ordinary-file entry diagnostic.
-//RS     let entry_module = &bundle.modules[bundle.entry];
-//RS     if !entry_module.script_body.is_empty()
-//RS         && entry_module
-//RS             .items
-//RS             .iter()
-//RS             .any(|item| matches!(item, Item::Func(func) if func.name == "run"))
-//RS     {
-//RS         return;
-//RS     }
-//RS 
-//RS     let Some((target_module, target)) =
-//RS         bundle
-//RS             .modules
-//RS             .iter()
-//RS             .enumerate()
-//RS             .find_map(|(index, module)| {
-//RS                 module.items.iter().find_map(|item| match item {
-//RS                     Item::Func(f) if f.name == entry_fn => Some((index, f.clone())),
-//RS                     _ => None,
-//RS                 })
-//RS             })
-//RS     else {
-//RS         return;
-//RS     };
-//RS     let Some(call_name) = qualified_entry_call_name(bundle, target_module, entry_fn) else {
-//RS         return;
-//RS     };
-//RS     let job_record = job_argument_record(bundle, &target);
-//RS     let items = &mut bundle.modules[bundle.entry].items;
-//RS 
-//RS     for item in items.iter_mut() {
-//RS         if let Item::Func(f) = item {
-//RS             if f.name == "run" {
-//RS                 f.name = jet_foundation::Names::mangle_generated("unused_run");
-//RS                 // The shared script seam gives the synthetic entry a fallible
-//RS                 // unit return so ordinary `jet run` can report a
-//RS                 // default error. When `jet dev` selects another function,
-//RS                 // that parked function is not an entry and must not retain a
-//RS                 // fallthrough obligation (E0114).
-//RS                 if f.span == f.name_span {
-//RS                     f.return_type = None;
-//RS                     f.return_type_span = None;
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let zero = Span::new(0, 0);
-//RS     let record_param = job_record.as_ref().map(|record| {
-//RS         let mut param = target.params[0].clone();
-//RS         param.convention = crate::AST::AccessConvention::Read;
-//RS         param.root = false;
-//RS         param.name = jet_foundation::Names::mangle_generated("job_args");
-//RS         param.name_span = zero;
-//RS         param.public_label = None;
-//RS         param.zone = crate::AST::ParamZone::Either;
-//RS         param.ty = crate::AST::Type::Named(record.name.clone());
-//RS         param.ty_span = zero;
-//RS         param.default = None;
-//RS         param.variadic = false;
-//RS         param.variadic_bound_list = None;
-//RS         param.declared_view_from_names = None;
-//RS         param
-//RS     });
-//RS     let args: Vec<CallArg> = target
-//RS         .params
-//RS         .iter()
-//RS         .map(|p| CallArg {
-//RS             convention: p.convention,
-//RS             expr: match &record_param {
-//RS                 Some(record) => Expr::Field(
-//RS                     Box::new(Expr::Ident(record.name.clone(), zero)),
-//RS                     p.name.clone(),
-//RS                     p.name_span,
-//RS                 ),
-//RS                 None => Expr::Ident(p.name.clone(), p.name_span),
-//RS             },
-//RS             span: p.name_span,
-//RS             flags: CallArgFlags::default(),
-//RS             label: (record_param.is_some() && p.zone == crate::AST::ParamZone::LabelOnly)
-//RS                 .then(|| (p.call_label().to_string(), zero)),
-//RS             spread: p.variadic,
-//RS         })
-//RS         .collect();
-//RS     let call = Expr::Call(Call {
-//RS         name: call_name,
-//RS         name_span: zero,
-//RS         type_args: Vec::new(),
-//RS         args,
-//RS         resolved_ret: None,
-//RS         range_checked: false,
-//RS         widen_approx: false,
-//RS     });
-//RS     let body = vec![Stmt::Return(Some(call), zero)];
-//RS 
-//RS     items.push(Item::Func(Func {
-//RS         span: zero,
-//RS         is_pub: false,
-//RS         is_comptime: false,
-//RS         is_package_pub: false,
-//RS         external_type: None,
-//RS         name: "run".to_string(),
-//RS         name_span: zero,
-//RS         meta: None,
-//RS         type_params: target.type_params.clone(),
-//RS         head_pattern: None,
-//RS         params: match &record_param {
-//RS             Some(param) => vec![param.clone()],
-//RS             None => target.params.clone(),
-//RS         },
-//RS         return_type: target.return_type.clone(),
-//RS         return_type_span: target.return_type_span,
-//RS         return_view_provenance: None,
-//RS         declared_return_view_provenance: None,
-//RS         gc_return: false,
-//RS         diverges: false,
-//RS         gc_scope: false,
-//RS         is_unsafe: false,
-//RS         unsafe_reason: None,
-//RS         unsafe_span: None,
-//RS         is_pure: false,
-//RS         is_sanitizer: false,
-//RS         scrub_tag: None,
-//RS         declared_effects: None,
-//RS         effect_via: None,
-//RS         state_requires: None,
-//RS         state_transition: None,
-//RS         is_reactive: false,
-//RS         reactive_upgrades: Vec::new(),
-//RS         is_replayable: false,
-//RS         replayable_span: None,
-//RS         is_job: false,
-//RS         job_span: None,
-//RS         every: None,
-//RS         job_metadata: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         maturity: None,
-//RS         maturity_span: None,
-//RS         kernel: None,
-//RS         is_inline: false,
-//RS         is_inline_always: false,
-//RS         inline_span: None,
-//RS         web_marker: None,
-//RS         pre: Vec::new(),
-//RS         post: Vec::new(),
-//RS         inline_foreign: None,
-//RS         undo: None,
-//RS         markers: Vec::new(),
-//RS         compiler_generated: true,
-//RS         body,
-//RS     }));
-//RS     if let Some(record) = job_record {
-//RS         items.push(Item::Struct(record));
-//RS     }
-//RS }
-//RS 
-//RS fn compile_test_override_on_compiler_stack(
-//RS     file: &str,
-//RS     coverage: bool,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(String, Option<crate::FFI::FfiLink>, Vec<Diagnostic>), Vec<Diagnostic>> {
-//RS     let mut bundle = crate::Loader::load_entry_with_overlay(file, None, false)?;
-//RS     seed_build_facts(&mut bundle, profile, false, setting_overrides)?;
-//RS     let mode = crate::Sema::CompileMode::TestOverride;
-//RS     let diags = crate::Sema::check_bundle(&mut bundle, mode);
-//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS     let lints = classify_diagnostics(
-//RS         &bundle,
-//RS         parse_teaching.into_iter().chain(diags).collect(),
-//RS         false,
-//RS     )?;
-//RS     let ffi = match crate::FFI::prepare(&bundle) {
-//RS         Ok(link) => link,
-//RS         Err(ffi_diags) => return Err(ffi_diags),
-//RS     };
-//RS     let build_mode = if coverage {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Coverage
-//RS     } else {
-//RS         jet_foundation::MIR::MirArtifactBuildMode::Test
-//RS     };
-//RS     let request = jet_foundation::MIR::MirArtifactRequest::new(
-//RS         jet_foundation::MIR::MirArtifactTarget::RustAot,
-//RS         jet_foundation::MIR::MirArtifactKind::TestOverride,
-//RS         build_mode,
-//RS     );
-//RS     let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = false;
-//RS     execution.emit_runtime = true;
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::host(),
-//RS             target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     Ok((rust, ffi, lints))
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::build_execution_diagnostic;
-//RS     use crate::Comptime::Build::BuildExecutionError;
-//RS 
-//RS     #[test]
-//RS     fn e3504_fix_text_snapshot_uses_canonical_effect_flag() {
-//RS         let diagnostic = build_execution_diagnostic(BuildExecutionError::MissingGrant {
-//RS             action: "compile".to_string(),
-//RS             capability: jet_foundation::BuildEffect::GPU,
-//RS         });
-//RS         assert_eq!(
-//RS             diagnostic.fix,
-//RS             "Pass `--allow-gpu` for this run, or grant it in package/workspace policy"
-//RS         );
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2023 crates/jet-driver/src/Driver/mod.rs:7201-8763
+use jet_foundation.Diagnostics.[Diagnostic, Severity, Span]
+use jet_foundation.AST.*
+use jet_foundation.HotSwap.HotSwapDecision
+use jet_foundation.MIR.*
+use jet_foundation.Layout.TargetLayout
+use jet_foundation.Syntax.[RuntimeLayer, OSTarget, MARKER_CLI, MARKER_DECODE]
+use jet_foundation.Names.mangle_generated
+use jet_driver.[run_compiler_work, CompileOutput, CompilerExtensionHook]
+use jet_driver.Driver.[seed_build_facts, valid_build_signature, bad_build_signature, apply_package_effect_budget, apply_package_lint_policy, classify_diagnostics, gate_diagnostics, release_devtools_policy_for_bundle, mir_artifact_request_for_build, lower_checked_mir_program_for, bundle_source_closure]
+use jet_driver.Loader as Loader
+use jet_driver.Package as Package
+use jet_driver.Foreign as Foreign
+use jet_driver.CFFI as CFFI
+use jet_driver.FFI as FFI
+use jet_driver.Policy as Policy
+use jet_driver.Manifest as Manifest
+use jet_lexer as Lexer
+use jet_parser as Parser
+use jet_sema as Sema
+use jet_sema.[SemIndexEffectFacts, IncrementalSemaCache]
+use jet_codegen.Codegen.MIRRust as MIRRust
+use jet_codegen.Codegen.TIR as TIR
+use std.collections.[VecDeque, HashSet]
+// GATE #4494: retained overlay/cache/frontend references on the canonical compiler work stack.
+// GATE #4483: explicit native host target for test/fuzz/dev; checked facts select ordinary builds.
+// GATE #4499: exact source-path and canonical changed-function identities.
+// Rust7201-7213 CompileOutput tail is completed by packet2022.
 
+// Rust: crates/jet-driver/src/Driver/mod.rs:7221
+pub fn check_file(file: String, overlay: (OSPath, String)?, is_lsp: Bool) -> ([Diagnostic], ProgramBundle?) {
+    (diags, bundle, _) :: check_file_with_effect_facts(file, overlay, is_lsp)
+    (diags, bundle)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7231
+pub fn check_file_with_effect_facts(file: String, overlay: (OSPath, String)?, is_lsp: Bool) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    check_file_with_effect_facts_and_settings(file, overlay, is_lsp, [String: String]{})
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7243
+pub fn check_file_with_effect_facts_and_settings(file: String, overlay: (OSPath, String)?, is_lsp: Bool, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    check_file_with_effect_facts_profile_and_settings(file, overlay, is_lsp, "dev", setting_overrides)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7264
+pub fn check_file_with_effect_facts_profile(file: String, overlay: (OSPath, String)?, is_lsp: Bool, profile: String) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    check_file_with_effect_facts_profile_and_settings(file, overlay, is_lsp, profile, [String: String]{})
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7283
+pub fn check_file_with_effect_facts_profile_and_settings(file: String, overlay: (OSPath, String)?, is_lsp: Bool, profile: String, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: overlay.into_iter().collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, overlays, is_lsp, nil, nil, profile, setting_overrides, nil)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7308
+pub fn check_file_with_effect_facts_profile_and_settings_with_source_closure(file: String, source_closure: [(OSPath, String)], profile: String, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: source_closure.iter().map((pair) -> (pair.0.as_path(), pair.1.as_str())).collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, overlays, false, nil, nil, profile, setting_overrides, nil)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7336
+pub fn check_file_with_effect_facts_for_run(file: String, profile: String, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    check_file_with_effect_facts_for_run_and_entry(file, profile, setting_overrides, nil)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7348
+pub fn check_file_with_effect_facts_for_run_and_entry(file: String, profile: String, setting_overrides: [String: String], entry_fn: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl_for_run(file, profile, setting_overrides, entry_fn)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7365
+pub fn check_file_with_effect_facts_for_run_and_entry_with_overlay(file: String, overlay: (OSPath, String)?, profile: String, setting_overrides: [String: String], entry_fn: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: overlay.into_iter().collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl_for_run_with_overlays(file, overlays, profile, setting_overrides, entry_fn)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7387
+pub fn check_file_with_effect_facts_for_run_and_entry_with_source_closure(file: String, source_closure: [(OSPath, String)], profile: String, setting_overrides: [String: String], entry_fn: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: source_closure.iter().map((pair) -> (pair.0.as_path(), pair.1.as_str())).collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl_for_run_with_overlays(file, overlays, profile, setting_overrides, entry_fn)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7416
+// Snapshot every module in the authority-selected closure; never reopen it later.
+pub fn load_immutable_source_closure(file: String, overlays: [(OSPath, String)]) -> [(OSPath, String)] [Diagnostic]! {
+    run_compiler_work(() -> Loader.load_entry_with_overlays(file, overlays, false).map((bundle) -> bundle_source_closure(&bundle)))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7429
+pub struct CheckedSourceBundle {
+    pub bundle: ProgramBundle
+    pub effect_facts: SemIndexEffectFacts
+    pub project_root: OSPath
+    pub source_closure: [(OSPath, String)]
+}
+impl CheckedSourceBundle {
+    // Rust: crates/jet-driver/src/Driver/mod.rs:7437
+    pub fn new(bundle: ProgramBundle, effect_facts: SemIndexEffectFacts) -> Self {
+        project_root :: bundle.project_root.clone()
+        source_closure := bundle.modules.iter().map((module) -> (module.path.clone(), module.source.clone())).collect::<[(OSPath, String)]>()
+        source_closure.sort_by((left, right) -> left.0.cmp(&right.0))
+        source_closure.dedup_by((left, right) -> left.0 == right.0)
+        Self(bundle: ^bundle, effect_facts: ^effect_facts, project_root: ^project_root, source_closure: ^source_closure)
+    }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:7457
+    pub fn overlays(self) -> [(OSPath, String)] {
+        self.source_closure.iter().map((pair) -> (pair.0.as_path(), pair.1.as_str())).collect()
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7467
+pub fn check_file_with_checked_source_bundle_for_run_and_entry(file: String, overlays: [(OSPath, String)], profile: String, setting_overrides: [String: String], entry_fn: String?) -> ([Diagnostic], CheckedSourceBundle?) {
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl_for_run_with_overlays(file, overlays, profile, setting_overrides, entry_fn)
+    checked :: bundle.map((bundle) -> CheckedSourceBundle.new(^bundle, ^facts))
+    (diagnostics, checked)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7485
+pub fn check_file_with_effect_facts_for_output(file: String, output: String, profile: String, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, [], false, nil, nil, profile, setting_overrides, Val(output))
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7511
+pub fn check_file_with_effect_facts_for_output_with_overlay(file: String, output: String, overlay: (OSPath, String)?, profile: String, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: overlay.into_iter().collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, overlays, false, nil, nil, profile, setting_overrides, Val(output))
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7536
+pub fn check_file_with_effect_facts_for_output_with_source_closure(file: String, output: String, source_closure: [(OSPath, String)], profile: String, setting_overrides: [String: String]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: source_closure.iter().map((pair) -> (pair.0.as_path(), pair.1.as_str())).collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, overlays, false, nil, nil, profile, setting_overrides, Val(output))
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7564
+pub fn check_file_with_effect_facts_incremental(file: String, overlay: (OSPath, String)?, is_lsp: Bool, cache: &IncrementalSemaCache) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    overlays :: overlay.into_iter().collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, overlays, is_lsp, Val(&cache), nil, "dev", [String: String]{}, nil)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7588
+pub fn check_file_with_effect_facts_incremental_overlays(file: String, overlays: [(OSPath, String)], is_lsp: Bool, cache: &IncrementalSemaCache) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    check_file_with_effect_facts_impl(file, overlays, is_lsp, Val(&cache), nil, "dev", [String: String]{}, nil)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7617
+// Consume sema's measured recheck cone and canonical changed-function decision.
+pub fn check_file_with_hot_swap_incremental(old: ProgramBundle, file: String, overlay: (OSPath, String)?, is_lsp: Bool, module_name: String, cache: &IncrementalSemaCache) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, HotSwapDecision?) {
+    overlays :: overlay.into_iter().collect::<[(OSPath, String)]>()
+    (diagnostics, bundle, facts, decision, _) :: check_file_with_hot_swap_incremental_overlays(old, file, overlays, is_lsp, module_name, cache)
+    (diagnostics, bundle, facts, decision)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7643
+pub fn check_file_with_hot_swap_incremental_overlays(old: ProgramBundle, file: String, overlays: [(OSPath, String)], is_lsp: Bool, module_name: String, cache: &IncrementalSemaCache) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, HotSwapDecision?, [OSPath]) {
+    cache.clear_measurement()
+    (diagnostics_initial, bundle, facts, source_closure) :: check_file_with_effect_facts_incremental_overlays(file, overlays, is_lsp, cache)
+    diagnostics := ^diagnostics_initial
+    rechecked_items :: cache.stats().recomputed_items
+    decision :: bundle.as_ref().and_then((new) -> {
+        if Sema.HotSwap.type_stable_decision(old, new, module_name) == {
+            Ok(decision) -> Val(decision.with_rechecked_items(rechecked_items))
+            Err(errors) -> { diagnostics.extend(errors); nil }
+        }
+    })
+    (diagnostics, bundle, facts, decision, source_closure)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7674
+pub fn check_file_with_effect_facts_incremental_overlays_prepared(file: String, overlays: [(OSPath, String)], is_lsp: Bool, cache: &IncrementalSemaCache, prepared_frontend: &Loader.PreparedFrontend) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    check_file_with_effect_facts_impl(file, overlays, is_lsp, Val(&cache), Val(&prepared_frontend), "dev", [String: String]{}, nil)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7698
+fn check_file_with_effect_facts_impl(file: String, overlays: [(OSPath, String)], is_lsp: Bool, incremental: (&IncrementalSemaCache)?, prepared_frontend: (&Loader.PreparedFrontend)?, profile: String, setting_overrides: [String: String], explicit_output: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    run_compiler_work(() -> check_file_on_compiler_stack(file, overlays, is_lsp, incremental, prepared_frontend, profile, setting_overrides, explicit_output, false))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7728
+fn check_file_with_effect_facts_impl_for_run(file: String, profile: String, setting_overrides: [String: String], entry_fn: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    check_file_with_effect_facts_impl_for_run_with_overlays(file, [], profile, setting_overrides, entry_fn)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7748
+fn check_file_with_effect_facts_impl_for_run_with_overlays(file: String, overlays: [(OSPath, String)], profile: String, setting_overrides: [String: String], entry_fn: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    run_compiler_work(() -> check_file_on_compiler_stack_with_entry(file, overlays, false, nil, nil, profile, setting_overrides, nil, true, entry_fn))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7776
+fn check_file_on_compiler_stack(file: String, overlays: [(OSPath, String)], is_lsp: Bool, incremental: (&IncrementalSemaCache)?, prepared_frontend: (&Loader.PreparedFrontend)?, profile: String, setting_overrides: [String: String], explicit_output: String?, run_mode: Bool) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    check_file_on_compiler_stack_with_entry(file, overlays, is_lsp, incremental, prepared_frontend, profile, setting_overrides, explicit_output, run_mode, nil)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7806
+fn check_file_on_compiler_stack_with_entry(file: String, overlays: [(OSPath, String)], is_lsp: Bool, incremental: (&IncrementalSemaCache)?, prepared_frontend: (&Loader.PreparedFrontend)?, profile: String, setting_overrides: [String: String], explicit_output: String?, run_mode: Bool, entry_fn: String?) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts, [OSPath]) {
+    (loaded, dependencies, loader_diagnostics) :: if prepared_frontend == {
+        Val(frontend) -> Loader.load_entry_with_overlays_and_prepared_frontend_with_diagnostics(file, overlays, is_lsp, frontend)
+        nil -> Loader.load_entry_with_overlays_and_dependencies_with_diagnostics(file, overlays, is_lsp)
+    }
+    if loaded == {
+        Ok(loaded_bundle) -> {
+            bundle := ^loaded_bundle
+            diags := std.mem.take(&bundle.parse_teaching)
+            if seed_build_facts(&bundle, profile, false, setting_overrides) == Err(fact_diags) {
+                diags.extend(fact_diags)
+                return (diags, nil, SemIndexEffectFacts.default(), dependencies)
+            }
+            if entry_fn == Val(entry) { swap_entry_point(&bundle, entry) }
+            (check_diags, facts) :: if explicit_output == Val(output) -> Sema.check_bundle_for_output_opts_with_effect_facts(&bundle, Sema.CompileMode.Run, output, false, Policy.GateSet.default())
+                else if run_mode -> Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Run)
+                else -> if incremental == { Val(cache) -> Sema.check_bundle_with_effect_facts_incremental(&bundle, Sema.CompileMode.Check, cache); nil -> Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check) }
+            diags.extend(check_diags)
+            if bundle.modules[bundle.entry].items.iter().find((item) -> if item == .Func(func) -> Sema.is_build_entry(func) else -> false) == Val(.Func(build)) {
+                if !valid_build_signature(build) { diags.push(bad_build_signature(build.name_span)) }
+            }
+            extension_diags :: CompilerExtensionHook.post_sema_diagnostics(&bundle, Val(&facts), &diags)
+            diags.extend(extension_diags)
+            budgeted :: if apply_package_effect_budget(&bundle, &facts, ^diags) == { Ok(value) -> value; Err(errors) -> return (errors, nil, facts, dependencies) }
+            if apply_package_lint_policy(&bundle, budgeted) == { Ok(value) -> (value, Val(^bundle), facts, dependencies); Err(errors) -> (errors, nil, facts, dependencies) }
+        }
+        Err(diags) -> {
+            facts := SemIndexEffectFacts.default()
+            loop entry in loader_diagnostics {
+                if entry.structure_fact == Val(fact) { facts.name_ledger.record_structure_fact(fact) }
+            }
+            (diags, nil, facts, dependencies)
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7917
+pub fn check_file_with_overlays(file: String, overlays: [(OSPath, String)], is_lsp: Bool) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    (diagnostics, bundle, facts, _) :: check_file_with_effect_facts_impl(file, overlays, is_lsp, nil, nil, "dev", [String: String]{}, nil)
+    (diagnostics, bundle, facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7942
+pub fn check_file_with_overlays_and_import_root(file: String, overlays: [(OSPath, String)]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    run_compiler_work(() -> check_file_with_import_root_on_compiler_stack(file, overlays))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7953
+fn check_file_with_import_root_on_compiler_stack(file: String, overlays: [(OSPath, String)]) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    if Loader.load_entry_with_overlays_and_import_root(file, overlays, false) == {
+        Ok(loaded_bundle) -> {
+            bundle := ^loaded_bundle
+            diags := std.mem.take(&bundle.parse_teaching)
+            if seed_build_facts(&bundle, "dev", false, [String: String]{}) == Err(fact_diags) {
+                diags.extend(fact_diags)
+                return (diags, nil, SemIndexEffectFacts.default())
+            }
+            (check_diags, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Check)
+            diags.extend(check_diags)
+            extension_diags :: CompilerExtensionHook.post_sema_diagnostics(&bundle, Val(&facts), &diags)
+            diags.extend(extension_diags)
+            budgeted :: if apply_package_effect_budget(&bundle, &facts, ^diags) == { Ok(value) -> value; Err(errors) -> return (errors, nil, facts) }
+            if apply_package_lint_policy(&bundle, budgeted) == { Ok(value) -> (value, Val(^bundle), facts); Err(errors) -> (errors, nil, facts) }
+        }
+        Err(diags) -> (diags, nil, SemIndexEffectFacts.default())
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7993
+pub fn check_eval_with_effect_facts(src: String, file: String) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    run_compiler_work(() -> check_eval_on_compiler_stack(src, file))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8004
+fn check_eval_on_compiler_stack(src: String, file: String) -> ([Diagnostic], ProgramBundle?, SemIndexEffectFacts) {
+    source_for_parse :: if Package.mask_inline_package_source(src) == { Ok((masked, _)) -> masked; Err(error) -> return ([error.diagnostic()], nil, SemIndexEffectFacts.default()) }
+    (toks, lex_diags) :: Lexer.lex(&source_for_parse)
+    if !lex_diags.is_empty() { return (lex_diags, nil, SemIndexEffectFacts.default()) }
+    prog := if Parser.parse_with_source(&toks, &source_for_parse) == { Ok(p) -> p; Err(ds) -> return (ds, nil, SemIndexEffectFacts.default()) }
+    bundle := ProgramBundle(
+        entry: 0,
+        project_root: OSPath(file).parent().unwrap_or(OSPath(".")).to_path_buf(),
+        modules: [LoadedModule(
+            path: OSPath(file), display: file.to_string(), alias: "main",
+            imports: std.mem.take(&prog.imports), items: std.mem.take(&prog.items),
+            script_body: std.mem.take(&prog.script_body), block_spans: std.mem.take(&prog.block_spans),
+            source: src.to_string(), web_target_ceiling: prog.web_target_ceiling,
+            pub_file: prog.pub_file, no_prelude: prog.no_prelude, default_target: prog.default_target,
+            html_path: prog.html_path.clone(), policy_declarations: prog.policy_declarations.clone(),
+            user_policy_declarations: prog.user_policy_declarations.clone(), rule_facts: std.mem.take(&prog.rule_facts)
+        )],
+        devtools_registry: DevtoolsRegistry.default(), parse_teaching: [],
+        used_core: HashSet.new(), ffi_callback_fns: HashSet.new(), cffi: CFFI.CFfi.default(),
+        comptime_inputs: [], name_ledger: NameLedger.default(), layer_ceiling: nil,
+        inferred_layer: RuntimeLayer.Core, web_partitions: [:], web_partition_enforced: false,
+        web_partition_report: nil, dep_roots: [:], package_guarantees: Default.default(),
+        program_allocator: Default.default(), active_os: OSTarget.host(), build_facts: Default.default(),
+        edition: Manifest.latest_edition().to_string()
+    )
+    if Foreign.assemble_active_namespaces(&bundle) == Err(diags) { return (diags, nil, SemIndexEffectFacts.default()) }
+    bundle.cffi = if CFFI.assemble(&bundle) == { Ok(c) -> c; Err(diags) -> return (diags, nil, SemIndexEffectFacts.default()) }
+    (diags, facts) :: Sema.check_bundle_with_effect_facts(&bundle, Sema.CompileMode.Eval)
+    (diags, Val(^bundle), facts)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8087
+pub fn check_eval(src: String, file: String) -> [Diagnostic] {
+    (diags, _, _) :: check_eval_with_effect_facts(src, file)
+    diags.into_iter().filter((d) -> d.severity == Severity.Error).collect()
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8096
+pub fn compile_tests(file: String, coverage: Bool) -> (String, FFI.FfiLink?) [Diagnostic]! {
+    compile_tests_with_profile(file, coverage, "dev", [String: String]{}).map((value) -> (value.0, value.1))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8107
+pub fn compile_tests_with_profile(file: String, coverage: Bool, profile: String, setting_overrides: [String: String]) -> (String, FFI.FfiLink?, [Diagnostic]) [Diagnostic]! {
+    run_compiler_work(() -> compile_tests_on_compiler_stack(file, coverage, profile, setting_overrides))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8118
+fn compile_tests_on_compiler_stack(file: String, coverage: Bool, profile: String, setting_overrides: [String: String]) -> (String, FFI.FfiLink?, [Diagnostic]) [Diagnostic]! {
+    bundle := Loader.load_entry_with_overlay(file, nil, false)?
+    seed_build_facts(&bundle, profile, false, setting_overrides)?
+    mode :: Sema.CompileMode.Test
+    diags :: Sema.check_bundle(&bundle, mode)
+    parse_teaching :: std.mem.take(&bundle.parse_teaching)
+    lints :: classify_diagnostics(&bundle, parse_teaching.into_iter().chain(diags).collect(), false)?
+    ffi :: FFI.prepare(&bundle)?
+    build_mode :: if coverage -> MirArtifactBuildMode.Coverage else -> MirArtifactBuildMode.Test
+    request :: MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.TestExecutable, build_mode)
+    (mir, artifact) :: lower_checked_mir_program_for(&bundle, request)
+    execution := MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref()
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile)
+    execution.emit_types = true
+    execution.emit_foreign = true
+    execution.emit_metadata = false
+    execution.emit_debug_linemap = false
+    execution.emit_runtime = true
+    rust :: MIRRust.emit_mir_program(&mir, &MIRRust.MirRustConfig(target: TargetLayout.host(), target_kind: MIRRust.MirRustTarget.Native, root_prefix: "", execution: ^execution))
+    Ok((rust, ffi, lints))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8172
+pub fn compile_test_override(file: String, coverage: Bool) -> (String, FFI.FfiLink?) [Diagnostic]! {
+    compile_test_override_with_profile(file, coverage, "dev", [String: String]{}).map((value) -> (value.0, value.1))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8182
+pub fn compile_test_override_with_profile(file: String, coverage: Bool, profile: String, setting_overrides: [String: String]) -> (String, FFI.FfiLink?, [Diagnostic]) [Diagnostic]! {
+    run_compiler_work(() -> compile_test_override_on_compiler_stack(file, coverage, profile, setting_overrides))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8197
+#Error
+pub enum FuzzCompileError {
+    Diagnostics([Diagnostic])
+    Target(String)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8202
+fn select_fuzz_test_name(bundle: ProgramBundle, wanted: String?) -> String Err! {
+    all_tests := [(String, Bool)]()
+    properties := [String]()
+    loop module in &bundle.modules {
+        loop item in &module.items {
+            test :: if item == .Test(test) -> test else -> next
+            name :: test.name.clone().unwrap_or_else(() -> "anonymous")
+            is_property :: !test.params.is_empty()
+            all_tests.push((name.clone(), is_property))
+            if is_property { properties.push(name) }
+        }
+    }
+    if wanted == Val(wanted_name) {
+        if all_tests.iter().find((pair) -> pair.0 == wanted_name) == Val((name, true)) { return Ok(name.clone()) }
+        if all_tests.iter().any((pair) -> pair.0 == wanted_name && !pair.1) { return Err("`{wanted_name}` is not a property test") }
+        return Err("can't find property test `{wanted_name}`")
+    }
+    if properties.len() == 0 -> Err("no property `#Test fn` found in the target")
+    else if properties.len() == 1 -> Ok(properties[0].clone())
+    else -> Err("multiple property tests found: {properties.join(", ")}; fix: `jet test --grade=generated <file> <name>`")
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8252
+pub fn compile_fuzz(file: String, test_name: String?) -> (String, FFI.FfiLink?) FuzzCompileError! {
+    run_compiler_work(() -> compile_fuzz_on_compiler_stack(file, test_name))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8259
+fn compile_fuzz_on_compiler_stack(file: String, test_name: String?) -> (String, FFI.FfiLink?) FuzzCompileError! {
+    bundle := Loader.load_entry_with_overlay(file, nil, false).map_err(FuzzCompileError.Diagnostics)?
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Test)
+    parse_teaching :: std.mem.take(&bundle.parse_teaching)
+    _lints :: classify_diagnostics(&bundle, parse_teaching.into_iter().chain(diags).collect(), false).map_err(FuzzCompileError.Diagnostics)?
+    selected_name :: select_fuzz_test_name(&bundle, test_name).map_err(FuzzCompileError.Target)?
+    ffi :: FFI.prepare(&bundle).map_err(FuzzCompileError.Diagnostics)?
+    request :: MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.FuzzExecutable, MirArtifactBuildMode.Fuzz).with_name(selected_name)
+    (mir, artifact) :: TIR.lower_checked_mir_program_for(&bundle, request).unwrap_or_else((error) -> jet_foundation.ice(Val(error.span), "{error}"))
+    _ :: mir.validate().unwrap_or_else((error) -> jet_foundation.ice(nil, "canonical MIR validation failed: {error}"))
+    execution := MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref()
+    rust :: MIRRust.emit_mir_program(&mir, &MIRRust.MirRustConfig(target: TargetLayout.host(), target_kind: MIRRust.MirRustTarget.Native, root_prefix: "", execution: ^execution))
+    Ok((rust, ffi))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8316
+pub fn compile_bundle_path_with_entry(file: String, entry_fn: String) -> CompileOutput [Diagnostic]! {
+    compile_bundle_path_with_entry_and_settings(file, entry_fn, "dev", [String: String]{})
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8323
+pub fn compile_bundle_path_with_entry_and_settings(file: String, entry_fn: String, profile: String, setting_overrides: [String: String]) -> CompileOutput [Diagnostic]! {
+    run_compiler_work(() -> compile_bundle_path_with_entry_on_compiler_stack(file, entry_fn, profile, setting_overrides))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8339
+fn compile_bundle_path_with_entry_on_compiler_stack(file: String, entry_fn: String, profile: String, setting_overrides: [String: String]) -> CompileOutput [Diagnostic]! {
+    bundle := Loader.load_entry_with_overlay(file, nil, false)?
+    seed_build_facts(&bundle, profile, false, setting_overrides)?
+    swap_entry_point(&bundle, entry_fn)
+    mode :: Sema.CompileMode.Run
+    (diags, effect_facts) :: Sema.check_bundle_with_effect_facts(&bundle, mode)
+    extension_diags :: CompilerExtensionHook.post_sema_diagnostics(&bundle, Val(&effect_facts), &diags)
+    parse_teaching :: std.mem.take(&bundle.parse_teaching)
+    lints :: gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?
+    ffi :: FFI.prepare(&bundle)?
+    // D-OSTARGET1=A: dev's entry-swap path is native host, never a cross compile.
+    request :: mir_artifact_request_for_build(&bundle, mode, profile, false, false, false)
+    (mir, artifact) :: lower_checked_mir_program_for(&bundle, request)
+    execution := MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref()
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile)
+    execution.emit_types = true
+    execution.emit_foreign = true
+    execution.emit_metadata = false
+    execution.emit_debug_linemap = false
+    execution.emit_runtime = true
+    rust :: MIRRust.emit_mir_program(&mir, &MIRRust.MirRustConfig(target: TargetLayout.host(), target_kind: MIRRust.MirRustTarget.Native, root_prefix: "", execution: ^execution))
+    comptime_inputs :: std.mem.take(&bundle.comptime_inputs)
+    Ok(CompileOutput(rust: ^rust, lints: ^lints, ffi: ^ffi, clinks: [], comptime_inputs: ^comptime_inputs, web: nil, web_partition_report: bundle.web_partition_report.clone(), plugin: nil, library: nil, library_config: nil, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8395
+fn qualified_entry_call_name(bundle: ProgramBundle, target_module: USize, entry_fn: String) -> String? {
+    if target_module == bundle.entry { return Val(entry_fn.to_string()) }
+    pending := VecDeque.from([(bundle.entry, [String]())])
+    visited := HashSet.new()
+    loop {
+        (module, path) :: pending.pop_front() ?? break
+        if !visited.insert(module) { next }
+        loop import in &bundle.modules[module].imports {
+            target :: bundle.name_ledger.import_target(module, import.span) ?? next
+            next_path := path.clone()
+            next_path.push(import.import_alias())
+            if target == target_module { next_path.push(entry_fn.to_string()); return Val(next_path.join(".")) }
+            pending.push_back((target, next_path))
+        }
+    }
+    nil
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8434
+// Compiler-owned CLI/Decode record mirrors the checked job argument schema.
+fn job_argument_record(bundle: ProgramBundle, target: Func) -> StructDef? {
+    if !target.is_job || target.params.is_empty() { return nil }
+    if target.params.iter().any((param) -> param.variadic) { return nil }
+    if target.params.len() == 1 {
+        if target.params[0].ty == .Named(name) {
+            leaf :: name.rsplit(['.', ':']).next().unwrap_or(name)
+            is_cli_record :: bundle.modules.iter().flat_map((module) -> module.items.iter()).any((item) -> if item == .Struct(structure) -> structure.name == leaf && structure.derives.iter().any((pair) -> pair.0 == MARKER_CLI) else -> false)
+            if is_cli_record { return nil }
+        }
+    }
+    zero :: Span.new(0, 0)
+    fields :: target.params.iter().map((param) -> Field(
+        is_pub: false, is_package_pub: false, name: param.name.clone(), name_span: param.name_span,
+        ty: param.ty.clone(), ty_span: param.ty_span, serde_markers: [], redact: false,
+        computed: nil, default: param.default.clone(), default_ct: nil
+    )).collect::<[Field]>()
+    Val(StructDef(
+        span: zero, is_pub: false, is_package_pub: false,
+        name: mangle_generated(&"job_args_{target.name}"), name_span: zero,
+        type_params: [], fields: ^fields, state: nil, methods: [], cli_bindings: [], trait_impls: [],
+        derives: [(MARKER_CLI.to_string(), zero), (MARKER_DECODE.to_string(), zero)],
+        auto_derive_default: false, is_published_schema: false, published_schema_span: nil,
+        is_single_use: false, single_use_span: nil, is_must_use: false, must_use_span: nil,
+        layout: nil, layout_span: nil, serde_markers: [], type_markers: [], validate_block: [], validate_span: nil
+    ))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8529
+// Park run and inject a forwarding entry, leaving the selected job plainly callable.
+pub fn swap_entry_point(bundle: &ProgramBundle, entry_fn: String) -> {
+    if entry_fn == "run" { return }
+    entry_module :: &bundle.modules[bundle.entry]
+    if !entry_module.script_body.is_empty() && entry_module.items.iter().any((item) -> if item == .Func(func) -> func.name == "run" else -> false) { return }
+    (target_module, target) :: bundle.modules.iter().enumerate().find_map((pair) -> pair.1.items.iter().find_map((item) -> if item == .Func(f) && f.name == entry_fn -> Val((pair.0, f.clone())) else -> nil)) ?? return
+    call_name :: qualified_entry_call_name(bundle, target_module, entry_fn) ?? return
+    job_record :: job_argument_record(bundle, &target)
+    items :: &bundle.modules[bundle.entry].items
+    loop item in items.iter_mut() {
+        if item == .Func(f) {
+            if f.name == "run" {
+                f.name = mangle_generated("unused_run")
+                // Synthetic fallible script entry must not leave E0114 on parked run.
+                if f.span == f.name_span { f.return_type = nil; f.return_type_span = nil }
+            }
+        }
+    }
+    zero :: Span.new(0, 0)
+    record_param :: job_record.as_ref().map((record) -> {
+        param := target.params[0].clone()
+        param.convention = AccessConvention.Read
+        param.root = false
+        param.name = mangle_generated("job_args")
+        param.name_span = zero
+        param.public_label = nil
+        param.zone = ParamZone.Either
+        param.ty = Type.Named(record.name.clone())
+        param.ty_span = zero
+        param.default = nil
+        param.variadic = false
+        param.variadic_bound_list = nil
+        param.declared_view_from_names = nil
+        param
+    })
+    args :: target.params.iter().map((p) -> CallArg(
+        convention: p.convention,
+        expr: if record_param == { Val(record) -> Expr.Field(Expr.Ident(record.name.clone(), zero), p.name.clone(), p.name_span); nil -> Expr.Ident(p.name.clone(), p.name_span) },
+        span: p.name_span, flags: CallArgFlags.default(),
+        label: if record_param.is_some() && p.zone == ParamZone.LabelOnly -> Val((p.call_label().to_string(), zero)) else -> nil,
+        spread: p.variadic
+    )).collect::<[CallArg]>()
+    call :: Expr.Call(Call(name: call_name, name_span: zero, type_args: [], args: ^args, resolved_ret: nil, range_checked: false, widen_approx: false))
+    body :: [Stmt.Return(Val(call), zero)]
+    items.push(Item.Func(Func(
+        span: zero, is_pub: false, is_comptime: false, is_package_pub: false, external_type: nil,
+        name: "run", name_span: zero, meta: nil, type_params: target.type_params.clone(), head_pattern: nil,
+        params: if record_param == { Val(param) -> [param.clone()]; nil -> target.params.clone() },
+        return_type: target.return_type.clone(), return_type_span: target.return_type_span,
+        return_view_provenance: nil, declared_return_view_provenance: nil,
+        gc_return: false, diverges: false, gc_scope: false, is_unsafe: false,
+        unsafe_reason: nil, unsafe_span: nil, is_pure: false, is_sanitizer: false, scrub_tag: nil,
+        declared_effects: nil, effect_via: nil, state_requires: nil, state_transition: nil,
+        is_reactive: false, reactive_upgrades: [], is_replayable: false, replayable_span: nil,
+        is_job: false, job_span: nil, every: nil, job_metadata: nil,
+        is_must_use: false, must_use_span: nil, maturity: nil, maturity_span: nil, kernel: nil,
+        is_inline: false, is_inline_always: false, inline_span: nil, web_marker: nil,
+        pre: [], post: [], inline_foreign: nil, undo: nil, markers: [], compiler_generated: true, body: ^body
+    )))
+    if job_record == Val(record) { items.push(Item.Struct(record)) }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:8695
+fn compile_test_override_on_compiler_stack(file: String, coverage: Bool, profile: String, setting_overrides: [String: String]) -> (String, FFI.FfiLink?, [Diagnostic]) [Diagnostic]! {
+    bundle := Loader.load_entry_with_overlay(file, nil, false)?
+    seed_build_facts(&bundle, profile, false, setting_overrides)?
+    mode :: Sema.CompileMode.TestOverride
+    diags :: Sema.check_bundle(&bundle, mode)
+    parse_teaching :: std.mem.take(&bundle.parse_teaching)
+    lints :: classify_diagnostics(&bundle, parse_teaching.into_iter().chain(diags).collect(), false)?
+    ffi :: FFI.prepare(&bundle)?
+    build_mode :: if coverage -> MirArtifactBuildMode.Coverage else -> MirArtifactBuildMode.Test
+    request :: MirArtifactRequest.new(MirArtifactTarget.RustAot, MirArtifactKind.TestOverride, build_mode)
+    (mir, artifact) :: lower_checked_mir_program_for(&bundle, request)
+    execution := MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref()
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile)
+    execution.emit_types = true
+    execution.emit_foreign = true
+    execution.emit_metadata = false
+    execution.emit_debug_linemap = false
+    execution.emit_runtime = true
+    rust :: MIRRust.emit_mir_program(&mir, &MIRRust.MirRustConfig(target: TargetLayout.host(), target_kind: MIRRust.MirRustTarget.Native, root_prefix: "", execution: ^execution))
+    Ok((rust, ffi, lints))
+}

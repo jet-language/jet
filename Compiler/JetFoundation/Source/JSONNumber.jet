@@ -1,293 +1,144 @@
-// PORT-PENDING 2157 crates-jet-foundation-src-jsonnumber: crates/jet-foundation/src/JSONNumber.rs:1-289
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS // Dependency-free, lossless JSON-number projection shared by every execution
-//RS // tier. The JSON tokenizer validates token grammar once. These helpers preserve
-//RS // the original token text, enforce common resource limits, and project it into
-//RS // the existing exact `Int` and `Decimal` carriers without a binary-float round
-//RS // trip. This file is also `include!`-embedded inside Prelude modules.
-//RS 
-//RS pub const JSON_NUMBER_MAX_DIGITS: usize = 1_000_000;
-//RS pub const JSON_NUMBER_MAX_EXPONENT: i64 = 1_000_000;
-//RS 
-//RS pub fn validate_json_number(text: &str) -> Result<(), String> {
-//RS     let digits = text.bytes().filter(|byte| byte.is_ascii_digit()).count();
-//RS     if digits > JSON_NUMBER_MAX_DIGITS {
-//RS         return Err(format!(
-//RS             "JSON number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
-//RS         ));
-//RS     }
-//RS     let exponent = text
-//RS         .find(|ch| ch == 'e' || ch == 'E')
-//RS         .map(|index| text[index + 1..].parse::<i64>())
-//RS         .transpose()
-//RS         .map_err(|_| "JSON number exponent is out of range".to_string())?
-//RS         .unwrap_or(0);
-//RS     if exponent.unsigned_abs() > JSON_NUMBER_MAX_EXPONENT as u64 {
-//RS         return Err(format!(
-//RS             "JSON number exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Return sign, integer mantissa digits, and decimal scale for one exact
-//RS /// decimal lexeme. The caller owns whether leading `+` is legal at its surface.
-//RS pub fn json_decimal_lexeme(s: &str) -> Result<(bool, Vec<u8>, u32), String> {
-//RS     let t = s.trim();
-//RS     if t.is_empty() {
-//RS         return Err("empty decimal number".to_string());
-//RS     }
-//RS     let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
-//RS         (true, rest)
-//RS     } else if let Some(rest) = t.strip_prefix('+') {
-//RS         (false, rest)
-//RS     } else {
-//RS         (false, t)
-//RS     };
-//RS     let (mantissa, exponent) = body
-//RS         .find(|ch| ch == 'e' || ch == 'E')
-//RS         .map(|index| {
-//RS             let exponent = body[index + 1..]
-//RS                 .parse::<i64>()
-//RS                 .map_err(|_| "decimal exponent is out of range".to_string())?;
-//RS             Ok::<(&str, i64), String>((&body[..index], exponent))
-//RS         })
-//RS         .transpose()?
-//RS         .unwrap_or((body, 0));
-//RS     let mut parts = mantissa.split('.');
-//RS     let int_part = parts.next().unwrap_or("");
-//RS     let frac_part = parts.next().unwrap_or("");
-//RS     if parts.next().is_some()
-//RS         || int_part.is_empty() && frac_part.is_empty()
-//RS         || !int_part.bytes().all(|byte| byte.is_ascii_digit())
-//RS         || !frac_part.bytes().all(|byte| byte.is_ascii_digit())
-//RS     {
-//RS         return Err(format!("invalid decimal number `{s}`"));
-//RS     }
-//RS     let raw_digits = int_part.len().saturating_add(frac_part.len());
-//RS     if raw_digits > JSON_NUMBER_MAX_DIGITS {
-//RS         return Err(format!(
-//RS             "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
-//RS         ));
-//RS     }
-//RS     if exponent.unsigned_abs() > JSON_NUMBER_MAX_EXPONENT as u64 {
-//RS         return Err(format!(
-//RS             "decimal exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
-//RS         ));
-//RS     }
-//RS     let scale = i64::try_from(frac_part.len())
-//RS         .map_err(|_| "decimal scale is out of range".to_string())?
-//RS         .checked_sub(exponent)
-//RS         .ok_or_else(|| "decimal scale is out of range".to_string())?;
-//RS     let mut digits: Vec<u8> = int_part
-//RS         .bytes()
-//RS         .chain(frac_part.bytes())
-//RS         .map(|byte| byte - b'0')
-//RS         .collect();
-//RS     if digits.is_empty() {
-//RS         digits.push(0);
-//RS     }
-//RS     if scale < 0 {
-//RS         let zeros =
-//RS             usize::try_from(-scale).map_err(|_| "decimal scale is out of range".to_string())?;
-//RS         let total = digits
-//RS             .len()
-//RS             .checked_add(zeros)
-//RS             .ok_or_else(|| "decimal number is too large".to_string())?;
-//RS         if total > JSON_NUMBER_MAX_DIGITS {
-//RS             return Err(format!(
-//RS                 "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
-//RS             ));
-//RS         }
-//RS         digits.resize(total, 0);
-//RS     }
-//RS     if let Some(first_nonzero) = digits.iter().position(|digit| *digit != 0) {
-//RS         if first_nonzero > 0 {
-//RS             digits.drain(..first_nonzero);
-//RS         }
-//RS     } else {
-//RS         digits.truncate(1);
-//RS     }
-//RS     let scale =
-//RS         u32::try_from(scale.max(0)).map_err(|_| "decimal scale is out of range".to_string())?;
-//RS     let negative = negative && digits.iter().any(|digit| *digit != 0);
-//RS     Ok((negative, digits, scale))
-//RS }
-//RS /// Project a decimal lexeme directly into the native small Decimal carrier.
-//RS /// `None` means the lexeme is valid but its canonical mantissa needs the
-//RS /// arbitrary-precision path. Validation and resource-limit errors are kept
-//RS /// identical to `json_decimal_lexeme`, while successful small values allocate
-//RS /// nothing.
-//RS pub fn json_decimal_small(s: &str) -> Result<Option<(bool, i128, u32)>, String> {
-//RS     let t = s.trim();
-//RS     if t.is_empty() {
-//RS         return Err("empty decimal number".to_string());
-//RS     }
-//RS     let (negative, body) = if let Some(rest) = t.strip_prefix('-') {
-//RS         (true, rest)
-//RS     } else if let Some(rest) = t.strip_prefix('+') {
-//RS         (false, rest)
-//RS     } else {
-//RS         (false, t)
-//RS     };
-//RS     let (mantissa, exponent) = body
-//RS         .find(|ch| ch == 'e' || ch == 'E')
-//RS         .map(|index| {
-//RS             let exponent = body[index + 1..]
-//RS                 .parse::<i64>()
-//RS                 .map_err(|_| "decimal exponent is out of range".to_string())?;
-//RS             Ok::<(&str, i64), String>((&body[..index], exponent))
-//RS         })
-//RS         .transpose()?
-//RS         .unwrap_or((body, 0));
-//RS     let mut parts = mantissa.split('.');
-//RS     let int_part = parts.next().unwrap_or("");
-//RS     let frac_part = parts.next().unwrap_or("");
-//RS     if parts.next().is_some() || int_part.is_empty() && frac_part.is_empty() {
-//RS         return Err(format!("invalid decimal number `{s}`"));
-//RS     }
-//RS 
-//RS     let mut valid = true;
-//RS     let mut value = 0i128;
-//RS     let mut significant = 0usize;
-//RS     let mut nonzero = false;
-//RS     let mut fits = true;
-//RS     for digit in int_part.bytes().chain(frac_part.bytes()) {
-//RS         if !digit.is_ascii_digit() {
-//RS             valid = false;
-//RS             continue;
-//RS         }
-//RS         if !nonzero {
-//RS             if digit == b'0' {
-//RS                 continue;
-//RS             }
-//RS             nonzero = true;
-//RS         }
-//RS         significant += 1;
-//RS         if fits {
-//RS             let Some(next) = value
-//RS                 .checked_mul(10)
-//RS                 .and_then(|value| value.checked_add(i128::from(digit - b'0')))
-//RS             else {
-//RS                 fits = false;
-//RS                 continue;
-//RS             };
-//RS             value = next;
-//RS         }
-//RS     }
-//RS     if !valid {
-//RS         return Err(format!("invalid decimal number `{s}`"));
-//RS     }
-//RS 
-//RS     let raw_digits = int_part.len().saturating_add(frac_part.len());
-//RS     if raw_digits > JSON_NUMBER_MAX_DIGITS {
-//RS         return Err(format!(
-//RS             "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
-//RS         ));
-//RS     }
-//RS     if exponent.unsigned_abs() > JSON_NUMBER_MAX_EXPONENT as u64 {
-//RS         return Err(format!(
-//RS             "decimal exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
-//RS         ));
-//RS     }
-//RS     let mut scale = i64::try_from(frac_part.len())
-//RS         .map_err(|_| "decimal scale is out of range".to_string())?
-//RS         .checked_sub(exponent)
-//RS         .ok_or_else(|| "decimal scale is out of range".to_string())?;
-//RS     if scale < 0 {
-//RS         let zeros =
-//RS             usize::try_from(-scale).map_err(|_| "decimal scale is out of range".to_string())?;
-//RS         let total = raw_digits
-//RS             .checked_add(zeros)
-//RS             .ok_or_else(|| "decimal number is too large".to_string())?;
-//RS         if total > JSON_NUMBER_MAX_DIGITS {
-//RS             return Err(format!(
-//RS                 "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
-//RS             ));
-//RS         }
-//RS     }
-//RS     if !nonzero {
-//RS         let scale =
-//RS             u32::try_from(scale.max(0)).map_err(|_| "decimal scale is out of range".to_string())?;
-//RS         return Ok(Some((false, 0, scale)));
-//RS     }
-//RS     if !fits {
-//RS         return Ok(None);
-//RS     }
-//RS     if scale < 0 {
-//RS         let zeros =
-//RS             usize::try_from(-scale).map_err(|_| "decimal scale is out of range".to_string())?;
-//RS         if significant
-//RS             .checked_add(zeros)
-//RS             .map_or(true, |digits| digits > 39)
-//RS         {
-//RS             return Ok(None);
-//RS         }
-//RS         for _ in 0..zeros {
-//RS             let Some(next) = value.checked_mul(10) else {
-//RS                 return Ok(None);
-//RS             };
-//RS             value = next;
-//RS         }
-//RS         scale = 0;
-//RS     }
-//RS     let scale =
-//RS         u32::try_from(scale).map_err(|_| "decimal scale is out of range".to_string())?;
-//RS     Ok(Some((negative && value != 0, value, scale)))
-//RS }
-//RS 
-//RS /// Return signed integer text for a mathematically integral JSON number.
-//RS /// Default `Int` and fixed-width destinations share this projection; only the
-//RS /// destination range check differs.
-//RS pub fn json_exact_integer_text(s: &str) -> Result<String, String> {
-//RS     let (negative, digits, scale) = json_decimal_lexeme(s)?;
-//RS     let fractional = usize::try_from(scale).unwrap_or(usize::MAX);
-//RS     if fractional > 0
-//RS         && digits
-//RS             .iter()
-//RS             .rev()
-//RS             .take(fractional)
-//RS             .any(|digit| *digit != 0)
-//RS     {
-//RS         return Err(format!("JSON number `{s}` is not an exact integer"));
-//RS     }
-//RS     let keep = digits.len().saturating_sub(fractional);
-//RS     let mut integer = String::with_capacity(keep.max(1) + usize::from(negative));
-//RS     if negative {
-//RS         integer.push('-');
-//RS     }
-//RS     if keep == 0 {
-//RS         integer.push('0');
-//RS     } else {
-//RS         integer.extend(digits[..keep].iter().map(|digit| (b'0' + *digit) as char));
-//RS     }
-//RS     Ok(integer)
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{json_decimal_lexeme, json_exact_integer_text};
-//RS 
-//RS     #[test]
-//RS     fn exact_projection_keeps_scale_exponents_and_adjacent_integers() {
-//RS         assert_eq!(
-//RS             json_decimal_lexeme("12.340").unwrap(),
-//RS             (false, vec![1, 2, 3, 4, 0], 3)
-//RS         );
-//RS         assert_eq!(json_decimal_lexeme("1E-5").unwrap(), (false, vec![1], 5));
-//RS         assert_eq!(
-//RS             json_exact_integer_text("9007199254740993").unwrap(),
-//RS             "9007199254740993"
-//RS         );
-//RS         assert_eq!(
-//RS             json_exact_integer_text("1e30").unwrap(),
-//RS             "1000000000000000000000000000000"
-//RS         );
-//RS         assert!(json_exact_integer_text("1.5").is_err());
-//RS         assert!(json_decimal_lexeme("NaN").is_err());
-//RS         assert!(json_decimal_lexeme("1e1000001").is_err());
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2157 crates/jet-foundation/src/JSONNumber.rs:1-289
+// Dependency-free, lossless JSON-number projection shared by execution tiers.
+// Token grammar is checked by the tokenizer; these helpers preserve exact text
+// and enforce shared resource limits without a binary-float round trip.
 
+// Rust: crates/jet-foundation/src/JSONNumber.rs:7
+pub const JSON_NUMBER_MAX_DIGITS: Int = 1_000_000
+// Rust: crates/jet-foundation/src/JSONNumber.rs:8
+pub const JSON_NUMBER_MAX_EXPONENT: I64 = 1_000_000
+
+// Rust: crates/jet-foundation/src/JSONNumber.rs:10
+pub fn validate_json_number(text: String) -> Err! {
+    digits :: text.bytes().filter(fn(byte) { byte.is_ascii_digit() }).count()
+    if digits > JSON_NUMBER_MAX_DIGITS -> throw "JSON number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+    exponent := I64{0}
+    if text.find(fn(ch) { ch == 'e' || ch == 'E' }) == .Val(index) {
+        exponent = try { I64.parse(text[index + 1..])! } catch _ { throw "JSON number exponent is out of range" }
+    }
+    if exponent.unsigned_abs() > U64{JSON_NUMBER_MAX_EXPONENT} -> throw "JSON number exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
+}
+
+// Rust: crates/jet-foundation/src/JSONNumber.rs:33
+// Return sign, integer mantissa digits and decimal scale. Caller owns '+' law.
+pub fn json_decimal_lexeme(s: String) -> (Bool, [U8], U32) Err! {
+    t := s.trim() // #4303: retain trim view.
+    if t.is_empty() -> throw "empty decimal number"
+    negative :: t.starts_with('-')
+    body := if negative || t.starts_with('+') -> t[1..] else -> t // #4303
+    mantissa := body // #4303
+    exponent := I64{0}
+    if body.find(fn(ch) { ch == 'e' || ch == 'E' }) == .Val(index) {
+        exponent = try { I64.parse(body[index + 1..])! } catch _ { throw "decimal exponent is out of range" }
+        mantissa = body[..index] // #4303
+    }
+    parts := mantissa.split('.')
+    int_part := parts.next() ?? "" // #4303
+    frac_part := parts.next() ?? "" // #4303
+    if parts.next().is_some() || int_part.is_empty() && frac_part.is_empty() || !int_part.bytes().all(fn(byte) { byte.is_ascii_digit() }) || !frac_part.bytes().all(fn(byte) { byte.is_ascii_digit() }) -> throw "invalid decimal number `{s}`"
+    raw_digits :: int_part.len().saturating_add(frac_part.len())
+    if raw_digits > JSON_NUMBER_MAX_DIGITS -> throw "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+    if exponent.unsigned_abs() > U64{JSON_NUMBER_MAX_EXPONENT} -> throw "decimal exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
+    frac_len :: I64.try_from(frac_part.len()) ?? throw "decimal scale is out of range"
+    scale :: frac_len.checked_sub(exponent) ?? throw "decimal scale is out of range"
+    digits := int_part.bytes().chain(frac_part.bytes()).map(fn(byte) { byte - U8{48} }).collect<[U8]>()
+    if digits.is_empty() -> &digits.push(U8{0})
+    if scale < 0 {
+        zeros :: Int.try_from(-scale) ?? throw "decimal scale is out of range"
+        total :: digits.len().checked_add(zeros) ?? throw "decimal number is too large"
+        if total > JSON_NUMBER_MAX_DIGITS -> throw "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+        &digits.resize(total, U8{0})
+    }
+    if digits.iter().position(fn(digit) { digit != U8{0} }) == .Val(first_nonzero) {
+        if first_nonzero > 0 -> _ :: &digits.drain(..first_nonzero)
+    } else {
+        &digits.truncate(1)
+    }
+    checked_scale :: U32.try_from(scale.max(I64{0})) ?? throw "decimal scale is out of range"
+    checked_negative :: negative && digits.iter().any(fn(digit) { digit != U8{0} })
+    (checked_negative, ^digits, checked_scale)
+}
+
+// Rust: crates/jet-foundation/src/JSONNumber.rs:119
+// Native small Decimal projection. None selects arbitrary precision; successful
+// small values allocate nothing, and validation matches json_decimal_lexeme.
+pub fn json_decimal_small(s: String) -> (Bool, I128, U32)? Err! {
+    t := s.trim() // #4303
+    if t.is_empty() -> throw "empty decimal number"
+    negative :: t.starts_with('-')
+    body := if negative || t.starts_with('+') -> t[1..] else -> t // #4303
+    mantissa := body // #4303
+    exponent := I64{0}
+    if body.find(fn(ch) { ch == 'e' || ch == 'E' }) == .Val(index) {
+        exponent = try { I64.parse(body[index + 1..])! } catch _ { throw "decimal exponent is out of range" }
+        mantissa = body[..index] // #4303
+    }
+    parts := mantissa.split('.')
+    int_part := parts.next() ?? "" // #4303
+    frac_part := parts.next() ?? "" // #4303
+    if parts.next().is_some() || int_part.is_empty() && frac_part.is_empty() -> throw "invalid decimal number `{s}`"
+    valid := true
+    value := I128{0}
+    significant := 0
+    nonzero := false
+    fits := true
+    loop digit in int_part.bytes().chain(frac_part.bytes()) {
+        if !digit.is_ascii_digit() {
+            valid = false
+            continue
+        }
+        if !nonzero {
+            if digit == U8{48} -> continue
+            nonzero = true
+        }
+        significant += 1
+        if fits {
+            next :: value.checked_mul(I128{10}).and_then(fn(current) { current.checked_add(I128{digit - U8{48}}) }) ?? {
+                fits = false
+                continue
+            }
+            value = next
+        }
+    }
+    if !valid -> throw "invalid decimal number `{s}`"
+    raw_digits :: int_part.len().saturating_add(frac_part.len())
+    if raw_digits > JSON_NUMBER_MAX_DIGITS -> throw "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+    if exponent.unsigned_abs() > U64{JSON_NUMBER_MAX_EXPONENT} -> throw "decimal exponent exceeds the ±{JSON_NUMBER_MAX_EXPONENT} limit"
+    frac_len :: I64.try_from(frac_part.len()) ?? throw "decimal scale is out of range"
+    scale := frac_len.checked_sub(exponent) ?? throw "decimal scale is out of range"
+    if scale < 0 {
+        zeros :: Int.try_from(-scale) ?? throw "decimal scale is out of range"
+        total :: raw_digits.checked_add(zeros) ?? throw "decimal number is too large"
+        if total > JSON_NUMBER_MAX_DIGITS -> throw "decimal number exceeds the {JSON_NUMBER_MAX_DIGITS}-digit limit"
+    }
+    if !nonzero {
+        checked_scale :: U32.try_from(scale.max(I64{0})) ?? throw "decimal scale is out of range"
+        return Val((false, I128{0}, checked_scale))
+    }
+    if !fits -> return None
+    if scale < 0 {
+        zeros :: Int.try_from(-scale) ?? throw "decimal scale is out of range"
+        if significant.checked_add(zeros).map_or(true, fn(digits) { digits > 39 }) -> return None
+        loop _ in 0..zeros {
+            next :: value.checked_mul(I128{10}) ?? return None
+            value = next
+        }
+        scale = I64{0}
+    }
+    checked_scale :: U32.try_from(scale) ?? throw "decimal scale is out of range"
+    Val((negative && value != I128{0}, value, checked_scale))
+}
+
+// Rust: crates/jet-foundation/src/JSONNumber.rs:240
+// Signed integer text for mathematically integral JSON numbers. Only destination
+// range checks differ between default Int and fixed-width integer consumers.
+pub fn json_exact_integer_text(s: String) -> String Err! {
+    (negative, digits, scale) :: json_decimal_lexeme(s)!
+    fractional :: Int.try_from(scale) ?? Int.MAX
+    if fractional > 0 && digits.iter().rev().take(fractional).any(fn(digit) { digit != U8{0} }) -> throw "JSON number `{s}` is not an exact integer"
+    keep :: digits.len().saturating_sub(fractional)
+    integer := String.with_capacity(keep.max(1) + if negative -> 1 else -> 0)
+    if negative -> &integer.push('-')
+    if keep == 0 { &integer.push('0') }
+    else { &integer.extend(digits[..keep].iter().map(fn(digit) { Char.from_u32(U32{U8{48} + digit}) ?? unreachable() })) }
+    ^integer
+}

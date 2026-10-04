@@ -1,0 +1,283 @@
+use Compiler.JetFoundation.Tests.Integration.CorelibParts.PlatformEmail.[build_and_run, core_conformance_shard]
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.DevParts.Support.*
+use jet.Interpreter.[dev_iteration, RunOutcome]
+use jet.Comptime as Comptime
+use jet.Compiler as Compiler
+use core.fs as fs
+use std.process.[Command]
+use std.thread.[Builder]
+use std.time.[Instant]
+use std.collections.[HashSet]
+
+// Rust: tests/corelib_parts/platform_email.rs:2
+#Test("core_email_address_and_mime_are_bounded_and_deterministic") {
+    scratch :: common.Scratch.new("email-mime")
+    dir :: scratch.path
+    src :: """
+use core.email as email
+
+fn run() -> {
+    sender :: email.address("Mara ☕ <mara@example.com>") ?? panic("unicode address")
+    recipient :: email.address("Ada <ada@example.net>") ?? panic("recipient")
+    hidden :: email.address("audit@example.org") ?? panic("bcc")
+    if email.address("attacker@example.com\nBcc: stolen@example.com") == {
+        .Ok(_) -> panic("address injection accepted")
+        .Err(_) -> print("address-rejected")
+    }
+    if email.message(~sender, [~recipient], [Address]{}, "hello\nBcc := stolen@example.com", "text", HTML{""}, [Attachment]{}) == {
+        .Ok(_) -> panic("header injection accepted")
+        .Err(_) -> print("header-rejected")
+    }
+    recipients := [~recipient]
+    count := 1
+    loop count < 101 {
+        &recipients.push(~recipient)
+        count += 1
+    }
+    if email.message(~sender, recipients, [Address]{}, "subject", "text", HTML{""}, [Attachment]{}) == {
+        .Ok(_) -> panic("recipient bound ignored")
+        .Err(_) -> print("recipient-bound")
+    }
+    too_large := "x".repeat(26214401).bytes()
+    if email.attachment("large.bin", "application/octet-stream", too_large) == {
+        .Ok(_) -> panic("attachment bound ignored")
+        .Err(_) -> print("attachment-bound")
+    }
+    attachment :: email.attachment("notes.txt", "text/plain", [104, 105]) ?? panic("attachment")
+    message :: email.message(sender, [recipient], [hidden], "Welcome ☕", "plain", HTML{"<b>html</b>"}, [attachment]) ?? panic("message")
+    first :: email.serialize(~message) ?? panic("serialize")
+    second :: email.serialize(message) ?? panic("serialize twice")
+    print(first == second)
+    print(first.len())
+}
+"""
+    (code, stdout, stderr) :: build_and_run(dir, "email_mime", src, [], .None)
+    assert_eq(code, 0, "stderr: {stderr}")
+    assert(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{stdout}")
+    file :: dir.join("email_mime.jet")
+    fs.write(file, src).unwrap()
+    loop (tier, use_interpreter) in [("default dev", false), ("forced interpreter", true)] {
+        if dev_iteration(file.to_str().unwrap(), false, use_interpreter) == {
+            .Ran { stdout, stderr, exit_code } -> {
+                assert_eq(exit_code, 0, "email MIME failed in {tier}: {stderr}")
+                assert(stdout.starts_with("address-rejected\nheader-rejected\nrecipient-bound\nattachment-bound\ntrue\n"), "{tier}: {stdout}")
+            }
+            other -> panic("email MIME did not run in {tier}: {other:?}")
+        }
+    }
+}
+
+// Rust: tests/dev_parts/corpus.rs:15
+// Shared observation remains memoised in DevParts.Support; do not fork the corpus walk.
+#Test("jit_coverage_audit") { with_jit_test_scope(jit_coverage_audit_inner) }
+// Rust: tests/dev_parts/corpus.rs:29
+#Test("cranelift_three_way_differential_battery") { with_jit_test_scope(cranelift_three_way_differential_battery_inner) }
+
+// Rust: tests/dev_parts/corpus_gate.rs:15
+#Test("corpus_gate_manifest_accounts_for_every_example") { assert_corpus_gate_manifest_covers_corpus() }
+
+// Rust: tests/dev_parts/corpus_gate.rs:28
+#Test("corpus_gate_ledger_audit_fires_on_a_missing_row") {
+    manifest :: [
+        CorpusGateRecord { stem: "basics/hello", class: CorpusGateClass.ResidentJit, detail: "" },
+        CorpusGateRecord { stem: "basics/twice", class: CorpusGateClass.ResidentJit, detail: "" },
+        CorpusGateRecord { stem: "basics/twice", class: CorpusGateClass.DeoptInterp, detail: "" },
+        CorpusGateRecord { stem: "tooling/data_line", class: CorpusGateClass.ResidentJit, detail: "" },
+        CorpusGateRecord { stem: "net/http_server", class: CorpusGateClass.GateExcluded, detail: "" }
+    ]
+    corpus :: ["basics/hello", "basics/twice", "net/http_server", "tooling/data_plot"]
+    audit :: audit_corpus_gate_ledger(manifest, corpus)
+    assert_eq(audit.unclassified, ["tooling/data_plot"], "a stem in no section must be named, not counted away")
+    assert_eq(audit.ghosts, ["tooling/data_line"], "a row with no file must read as a stale row, never as a class change")
+    assert_eq(audit.duplicated.len(), 1, "{audit.duplicated:?}")
+    assert(audit.duplicated[0].contains("basics/twice") && audit.duplicated[0].contains("resident_jit") && audit.duplicated[0].contains("deopt_interp"), "the duplicate must name both claiming sections: {audit.duplicated:?}")
+    assert_eq(audit.reasonless.len(), 1, "{audit.reasonless:?}")
+    assert(audit.reasonless[0].contains("net/http_server") && audit.reasonless[0].contains("gate_excluded"), "a held-out row with no reason must be named with its section: {audit.reasonless:?}")
+    // Ghost rows classify nothing and cannot pay for omitted real stems.
+    assert_eq(audit.classified, 3, "only stems that exist count toward the floor")
+    assert_eq(audit.classified + audit.unclassified.len(), corpus.len(), "the identity the two pins rest on must hold on synthetic input too")
+    assert_eq(audit.excluded, 1)
+}
+
+// Rust: tests/dev_parts/corpus_gate.rs:160
+#Test("core_conformance_corpus_uses_strict_three_tier_gate") {
+    census :: std.env.var("JET_CORE_CONFORMANCE_CENSUS").as_deref() == .Ok("1")
+    if census && std.env.var("JET_CORE_CONFORMANCE_FILTER").map_or(true, (filter) -> { trimmed := filter.trim(); trimmed.is_empty() }) {
+        gate :: Command.new("node").arg("Tools/agent/closeout-gate.mjs").arg("check").current_dir(std.env.compile_time_var("CARGO_MANIFEST_DIR")).output().expect("node must run the milestone closeout gate") // GATE #4494
+        assert(gate.status.success(), "unfiltered Core conformance census is milestone-closeout-only:\nstdout:\n{String.from_utf8_lossy(gate.stdout)}\nstderr:\n{String.from_utf8_lossy(gate.stderr)}")
+    }
+    denominator :: Command.new("node").arg("Tools/agent/core-conformance.mjs").arg("--check").current_dir(std.env.compile_time_var("CARGO_MANIFEST_DIR")).output().expect("node must run the Core conformance denominator checker")
+    assert(denominator.status.success(), "Core conformance denominator is incomplete or malformed:\nstdout:\n{String.from_utf8_lossy(denominator.stdout)}\nstderr:\n{String.from_utf8_lossy(denominator.stderr)}")
+    denominator_stdout :: String.from_utf8_lossy(denominator.stdout)
+    expected_programs :: denominator_stdout.split("; ").find_map((field) -> {
+        trimmed := field.trim() // #4303
+        if trimmed.strip_suffix(" program(s)") == .Some(count) { count.parse[USize]().ok() } else { .None }
+    }).expect("Core conformance denominator must report its program count")
+    with_jit_test_scope(() -> {
+        if skip_if_cranelift_host_unsupported() { return }
+        all_entries :: core_conformance_corpus_entries()
+        assert_eq(all_entries.len(), expected_programs, "strict tier gate must discover exactly the denominator's witness programs")
+        entries :: core_conformance_shard(^all_entries)
+        assert(!entries.is_empty(), "Core conformance corpus must have witnesses")
+        failures := [(String, String)]{}
+        if census { std.panic.set_hook((_) -> {}) } // GATE #4494: unwind/hook substrate
+        loop (stem, file) in entries {
+            run :: () -> Comptime.with_ambient(.Some(Compiler.eval_core_call_with_type), .None, .None, () -> assert_cranelift_three_way(file, stem))
+            if !census { run(); continue }
+            if std.panic.catch_unwind(std.panic.AssertUnwindSafe(run)) == .Err(payload) {
+                message :: payload.downcast_ref[String]().cloned().or_else(() -> payload.downcast_ref[StringView]().map((s) -> s.to_string())).unwrap_or_else(() -> "non-string panic")
+                &failures.push((stem.clone(), message))
+            }
+        }
+        if census {
+            _ :: std.panic.take_hook()
+            loop (stem, message) in failures {
+                line :: message.replace('\n', " ")
+                eprintln("CENSUS {stem}\t{line[0..line.len().min(600)]}")
+            }
+            assert(failures.is_empty(), "Core conformance census: {failures.len()} witness(es) failed the strict three-tier gate")
+        }
+    })
+}
+
+// Rust: tests/dev_parts/corpus_gate.rs:264
+#Test("core_conformance_checker_rejects_structural_false_greens") {
+    output :: Command.new("node").arg("Tools/agent/core-conformance.mjs").arg("--hostile-fixtures").current_dir(std.env.compile_time_var("CARGO_MANIFEST_DIR")).output().expect("node must run the Core conformance checker") // GATE #4494
+    assert(output.status.success(), "Core conformance hostile fixture was accepted:\nstdout:\n{String.from_utf8_lossy(output.stdout)}\nstderr:\n{String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("rejected bind-and-discard result"), "hostile fixture output must state the result-consumption guard")
+    assert(String.from_utf8_lossy(output.stdout).contains("denominator rows"), "hostile fixture output must state the denominator guard")
+}
+
+// Rust: tests/dev_parts/corpus_gate.rs:315
+#Test("example_corpus_strict_jit_aot_differential_gate") {
+    started :: Instant.now()
+    if skip_if_cranelift_host_unsupported() { return }
+    shard :: corpus_gate_shard_config()
+    filter :: std.env.var("JET_CORPUS_GATE_FILTER").ok()
+    selected_stems :: corpus_gate_selected_stems()
+    records :: collect_corpus_gate_records()
+    covered_stems :: records.iter().map((record) -> record.stem.clone()).collect[[String]]()
+    assert_eq(covered_stems, selected_stems, "corpus gate shard did not classify its exact selected stem set")
+    if std.env.var("JET_DUMP_CORPUS_GATE").as_deref() == .Ok("1") {
+        print_corpus_gate_manifest(records)
+        if shard.is_some() {
+            assert(std.env.var_os("JET_CORPUS_GATE_REPORT_DIR").is_some(), "a sharded corpus dump needs JET_CORPUS_GATE_REPORT_DIR; compose shard reports instead of overwriting the canonical ledger")
+        } else if std.env.var("JET_WRITE_CORPUS_GATE").as_deref() == .Ok("1") {
+            manifest :: corpus_gate_manifest_from_records(records)
+            fs.write(OSPath.from(std.env.compile_time_var("CARGO_MANIFEST_DIR")).join("tests/jit_corpus_gate.txt"), manifest).expect("write tests/jit_corpus_gate.txt")
+        }
+        write_corpus_gate_report(records, started.elapsed())
+        eprintln("c727 corpus gate: shard {shard.map_or(0, ((index, _)) -> index)}/{shard.map_or(1, ((_, count)) -> count)} classified {records.len()} examples ({records.iter().filter((r) -> r.class == CorpusGateClass.ResidentJit).count()} resident JIT, {records.iter().filter((r) -> r.class == CorpusGateClass.DeoptInterp).count()} deopt-interp, {records.iter().filter((r) -> r.class == CorpusGateClass.RunTierBroken).count()} run-tier-broken, {records.iter().filter((r) -> r.class == CorpusGateClass.TierDivergent).count()} tier-divergent)")
+        return
+    }
+    expected := parse_corpus_gate_manifest()
+    if filter.is_some() || shard.is_some() {
+        selected :: selected_stems.iter().map((s) -> s.as_str()).collect[HashSet[StringView]]()
+        &expected.retain((record) -> selected.contains(record.stem.as_str()))
+    } else {
+        assert_eq(records.len(), all_example_stems().len(), "corpus gate must classify every discovered example")
+        assert_corpus_gate_manifest_covers_corpus()
+    }
+    broken :: records.iter().filter((r) -> r.class == CorpusGateClass.RunTierBroken).map((r) -> (r.stem.as_str(), r.detail.as_str())).collect[[(StringView, StringView)]]()
+    oracle_reached :: records.iter().filter((r) -> r.class != CorpusGateClass.OracleUnavailable).map((r) -> r.stem.as_str()).collect[HashSet[StringView]]()
+    held_out :: RUN_TIER_BROKEN_HELD_OUT.iter().filter(((stem, _, _)) -> oracle_reached.contains(stem)).map(((stem, codes, _)) -> (stem, codes)).collect[[(StringView, StringView)]]()
+    why_broken :: RUN_TIER_BROKEN_HELD_OUT.iter().map(((stem, codes, why)) -> "{stem} ({codes}) — {why}").collect[[String]]().join("; ")
+    assert_eq(broken, held_out, "JIT/AOT run-tier regression: the AOT-green example(s) whose default `jet run` REFUSES to run them are not the held-out set. New entries are the defect; a vanished entry is fixed and must leave RUN_TIER_BROKEN_HELD_OUT in the same diff. Held out: {why_broken}")
+    aot_broken :: records.iter().filter((r) -> r.class == CorpusGateClass.AotBroken).map((r) -> (r.stem.as_str(), r.detail.as_str())).collect[[(StringView, StringView)]]()
+    aot_held_out :: AOT_BROKEN_HELD_OUT.iter().filter(((stem, _, _)) -> oracle_reached.contains(stem)).map(((stem, detail, _)) -> (stem, detail)).collect[[(StringView, StringView)]]()
+    why_aot :: AOT_BROKEN_HELD_OUT.iter().map(((stem, detail, why)) -> "{stem} ({detail}) — {why}").collect[[String]]().join("; ")
+    assert_eq(aot_broken, aot_held_out, "AOT oracle regression: the example(s) whose optimized AOT build or run FAILED are not the held-out set, so the three-tier differential silently covers a different set than the one this gate claims. New entries are the defect — a failed AOT build of generated code is an I2 internal compiler error; a vanished entry is fixed and must leave AOT_BROKEN_HELD_OUT in the same diff. Held out: {why_aot}")
+    divergent :: records.iter().filter((r) -> r.class == CorpusGateClass.TierDivergent).map((r) -> "{r.stem} ({r.detail})").collect[[String]]()
+    assert(divergent.is_empty(), "JIT/AOT tier divergence: AOT-green example(s) also ran under default `jet run`, but the named stream(s) disagree with the optimized AOT oracle (tier_divergent must stay empty): {divergent.join(", ")}")
+    assert_eq(records, expected, "corpus gate manifest drifted; update tests/jit_corpus_gate.txt only for an intentional ratchet move (D-VERDICT-1254-1: run_tier_broken may only shrink). Refresh with JET_CORPUS_GATE_REPORT_DIR=jit-aot-parity-report JET_WRITE_CORPUS_GATE=1 bash Tools/ci/jit-aot-parity.sh")
+    aot_oracle :: records.iter().filter((r) -> r.class == CorpusGateClass.ResidentJit || r.class == CorpusGateClass.DeoptInterp).collect()
+    eprintln("c727 corpus gate: {records.len()} classified, {aot_oracle.len()} AOT-oracle ({records.iter().filter((r) -> r.class == CorpusGateClass.ResidentJit).count()} resident JIT, {records.iter().filter((r) -> r.class == CorpusGateClass.DeoptInterp).count()} deopt-interp), {records.iter().filter((r) -> r.class == CorpusGateClass.RunTierBroken).count()} run-tier-broken, {records.iter().filter((r) -> r.class == CorpusGateClass.TierDivergent).count()} tier-divergent, {records.iter().filter((r) -> r.class == CorpusGateClass.AotBroken).count()} aot-broken")
+    write_corpus_gate_report(records, started.elapsed())
+}
+
+// Rust: tests/dev_parts/default_parity.rs:10
+#Test("dev_default_matches_compiled_binary") {
+    handle :: Builder.new().name("dev-default-battery").spawn(() -> { // GATE #4494
+        guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+        if !have_rustc() {
+            eprintln("note: rustc not found; skipping jet dev (default backend) differential battery")
+            return
+        }
+        dir :: std.env.temp_dir().join("jet_dev_default_diff_{std.process.id()}")
+        fs.create_dir_all(dir).unwrap()
+        manifested_divergences :: []
+        (stems, sema_rejected) :: typechecked_example_stems()
+        loop row in sema_rejected { eprintln("  sema-rejected, NOT tested by this battery: {row}") }
+        assert(sema_rejected.len() <= SEMA_REJECTED_CEILING, "{sema_rejected.len()} shipped example(s) fail the run-path front end (ceiling {SEMA_REJECTED_CEILING}), so the default `jet dev` battery never tested them, and the count may only fall:\n{sema_rejected.join("\n")}")
+        stats :: run_dev_default_battery_parallel(^stems, dir, manifested_divergences)
+        eprintln("c125 default-backend battery: {stats.ran} ran ({stats.ran - stats.manifested} default==compiled, {stats.manifested} manifested divergences), {stats.deopt} deopt, {stats.boundary} boundary-asserted, {stats.ran + stats.boundary} total")
+        assert(stats.ran > 0, "expected at least some examples to run via the default jet dev backend")
+        assert(stats.deopt > 0, "expected tiered deopt for uncovered examples instead of transparent AOT fallback")
+        observed_boundaries := stats.boundary_stems
+        &observed_boundaries.sort()
+        &observed_boundaries.dedup()
+        loop required in DEFAULT_BACKEND_EXPECTED_BOUNDARIES {
+            assert(observed_boundaries.iter().any((s) -> s == required), "missing expected boundary `{required}` in {observed_boundaries:?}")
+        }
+        assert_eq(stats.manifested, 0, "default jet dev must not carry manifested stdout/stderr/exit-code divergences")
+    }).expect("spawn default-backend battery")
+    handle.join().expect("default-backend battery thread panicked")
+}
+
+// Rust: tests/dev_parts/interp_parity.rs:12
+#Test("interpreter_matches_compiled_binary") {
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    if !have_rustc() {
+        eprintln("note: rustc not found; skipping jet dev differential battery")
+        return
+    }
+    dir :: std.env.temp_dir().join("jet_dev_diff_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    manifested_divergences :: []
+    stats :: run_interpreter_battery_parallel(interpreter_example_stems(), dir, manifested_divergences)
+    eprintln("c77 battery: {stats.ran} ran ({stats.ran - stats.manifested} interp==compiled, {stats.manifested} manifested divergences), {stats.boundary} boundary-asserted, {stats.ran + stats.boundary} total")
+    assert(stats.ran > 0, "expected at least some examples to run in the interpreter")
+}
+
+// Rust: tests/dev_parts/interp_parity.rs:45
+#Test("interpreter_matches_expected_golden") {
+    root :: OSPath.from(std.env.compile_time_var("CARGO_MANIFEST_DIR"))
+    checked := 0
+    loop stem in interpreter_example_stems() {
+        file :: example_path(stem)
+        // Named jobs, rather than the run() usage hint, are the executable goldens.
+        if stem == "devloop/job_runner" {
+            check_job_runner_interpreter(root, file)
+            checked += 2
+            continue
+        }
+        if uses_ffi_bridge(stem) { continue }
+        if stem.starts_with("web/web_wasm_") { continue }
+        // Feed canonical recorded answers in a child: in-process fd 0 is shared.
+        if common.example_stdin(stem) == .Some(answers) {
+            interpreted :: cli_tier_program_output(file, stem, answers.piped, true)
+            assert_eq(interpreted.stdout, golden_stdout(stem), "`{stem}`: forced interpreter differs from the golden recorded with its answers")
+            checked += 1
+            continue
+        }
+        expected_path :: root.join("Examples/features/expected/{stem}.out")
+        if dev_iteration_with_timeout(stem, file, true) == {
+            .Ran { stdout, .. } -> {
+                if host_expected_stdout(stem) == .Some(expected) {
+                    assert_eq(stdout, expected, "`{stem}`: interpreter output differs from host expected output")
+                    checked += 1
+                } else if fs.read_to_string(expected_path) == .Ok(expected) {
+                    assert_eq(stdout, expected, "`{stem}`: interpreter output differs from expected golden")
+                    checked += 1
+                }
+                // No golden: the compiled-binary battery still covers this stem.
+            }
+            .Problems(diags) -> {
+                codes :: diags.iter().map((d) -> d.code.as_str()).collect[[StringView]]()
+                assert(is_named_dev_boundary(stem, diags), "`{stem}` neither ran nor stopped at a named boundary; codes were {codes:?}")
+            }
+        }
+    }
+    assert(checked > 0, "expected at least some golden comparisons")
+}

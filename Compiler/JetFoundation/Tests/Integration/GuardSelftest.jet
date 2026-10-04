@@ -1,1059 +1,192 @@
-// PORT-PENDING 1067 tests-guard-selftest-module-group: tests/guard_selftest.rs:1-83
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Guard self-test (Tower #1850): explicit, small-window proofs that the
-//RS //! allocation cap and wall-clock watchdog installed by `tests/common/mod.rs`
-//RS //! actually trip. The two failure-mode tests are `#[ignore]`d and must be run
-//RS //! individually with a tiny cap/deadline, e.g.:
-//RS //!
-//RS //!   JET_TEST_ALLOC_CAP_GB=1 timeout 120 Tools/agent/jet-env \
-//RS //!     cargo test --test guard_selftest -- --ignored alloc_cap --test-threads=1
-//RS //!
-//RS //!   JET_TEST_DEADLINE_SECS=3 timeout 60 Tools/agent/jet-env \
-//RS //!     cargo test --test guard_selftest -- --ignored deadline --test-threads=1
-//RS //!
-//RS //! Both are expected to abort the whole process (SIGABRT / non-zero exit)
-//RS //! with the guard's stderr line — they do not "pass" in the normal sense.
-//RS 
-//RS mod common;
-//RS #[path = "unsafe_ratchet.rs"]
-//RS mod unsafe_ratchet;
-//RS 
-//RS #[test]
-//RS fn guards_stay_quiet_on_a_healthy_run() {
-//RS     // A normal, bounded allocation pattern well under any sane cap, and a
-//RS     // runtime far under any sane deadline — proves the guard rails add no
-//RS     // observable behavior to a healthy test.
-//RS     let mut v: Vec<u8> = Vec::new();
-//RS     for _ in 0..1024 {
-//RS         v.extend_from_slice(&[0u8; 1024]);
-//RS     }
-//RS     assert_eq!(v.len(), 1024 * 1024);
-//RS }
-//RS 
-//RS #[test]
-//RS fn persistent_test_scratch_stays_off_system_temp() {
-//RS     let scratch = common::test_scratch_root("guard-selftest");
-//RS     common::assert_test_path_on_disk(&scratch, "test scratch");
-//RS }
-//RS 
-//RS #[test]
-//RS #[should_panic(expected = "RAM-backed temp storage")]
-//RS fn test_path_guard_rejects_system_temp() {
-//RS     common::assert_test_path_on_disk(
-//RS         &std::env::temp_dir().join("jet-test-path-guard"),
-//RS         "test scratch",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn unsafe_region_ratchet_trips_on_seeded_growth() {
-//RS     unsafe_ratchet::ratchet_trips_on_seeded_growth();
-//RS }
-//RS 
-//RS #[test]
-//RS fn unsafe_region_ratchet_allows_shrink() {
-//RS     unsafe_ratchet::ratchet_allows_shrink();
-//RS }
-//RS 
-//RS #[test]
-//RS fn generated_ffi_does_not_move_unsafe_baseline() {
-//RS     unsafe_ratchet::generated_ffi_does_not_move_baseline();
-//RS }
-//RS 
-//RS #[test]
-//RS #[ignore = "trips the allocation-cap guard on purpose; run explicitly with a small JET_TEST_ALLOC_CAP_GB"]
-//RS fn alloc_cap_guard_trips() {
-//RS     let mut chunks: Vec<Vec<u8>> = Vec::new();
-//RS     loop {
-//RS         chunks.push(vec![0u8; 16 * 1024 * 1024]); // 16 MiB per step
-//RS         if chunks.len() > 4096 {
-//RS             // 64 GiB in — the guard should have aborted the process long
-//RS             // before this, even with the default 10 GB cap.
-//RS             panic!(
-//RS                 "guard did not abort before allocating {} chunks",
-//RS                 chunks.len()
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS #[ignore = "trips the wall-clock watchdog on purpose; run explicitly with a small JET_TEST_DEADLINE_SECS"]
-//RS fn deadline_guard_trips() {
-//RS     std::thread::sleep(std::time::Duration::from_secs(120));
-//RS     panic!("guard did not abort before the sleep finished");
-//RS }
-// END-PORT-PENDING 1067 tests/guard_selftest.rs:1-83
+use jet.[compile, compile_with_path]
+use jet.Diagnostics.Diagnostic
+use std.[fs, env, process]
 
-// PORT-PENDING 1067 tests-guard-selftest-module-group: tests/hardening.rs:1-477
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Regression tests for the 2026-06 hardening audit: every case here either
-//RS //! ICE'd (rustc rejected generated code, invariant I2) or silently
-//RS //! type-checked wrong programs before the fixes. Each test pins the new
-//RS //! behavior: a clean front-end diagnostic, or generated Rust that compiles.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS 
-//RS fn expect_error(src: &str, code: &str) {
-//RS     let diags = jet::compile(src).expect_err("front end should reject this");
-//RS     assert!(
-//RS         diags.iter().any(|d| d.code == code),
-//RS         "expected {code}, got: {:?}",
-//RS         diags
-//RS             .iter()
-//RS             .map(|d| (d.code.clone(), d.what.clone()))
-//RS             .collect::<Vec<_>>()
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn deeply_nested_expression_gets_diagnostic() {
-//RS     let src = format!(
-//RS         "fn run() {{\n    print({}1{})\n}}\n",
-//RS         "(".repeat(600),
-//RS         ")".repeat(600)
-//RS     );
-//RS     expect_error(&src, "E1403");
-//RS }
-//RS 
-//RS #[test]
-//RS fn list_index_assign_requires_var() {
-//RS     expect_error(
-//RS         r#"
-//RS fn run() {
-//RS     xs :: [1, 2, 3]
-//RS     xs[0] = 9
-//RS }
-//RS "#,
-//RS         "E0202",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn instance_method_args_keep_read_convention() {
-//RS     let src = r#"
-//RS struct Greeter {
-//RS     prefix: String
-//RS 
-//RS     fn greet(self, name: String) -> String {
-//RS         return "{self.prefix} {name}"
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     g :: Greeter{ prefix: "hi" }
-//RS     name :: "bob"
-//RS     print(g.greet(name))
-//RS }
-//RS "#;
-//RS     let out = jet::compile(src).expect("should compile");
-//RS     assert!(
-//RS         out.rust.contains("__jet_greet(&("),
-//RS         "read-convention method arg must be borrowed: {}",
-//RS         out.rust
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn field_read_clones_instead_of_moving() {
-//RS     let src = r#"
-//RS struct P {
-//RS     name: String
-//RS }
-//RS 
-//RS fn run() {
-//RS     p :: P{ name: "x" }
-//RS     s :: p.name
-//RS     t :: p.name
-//RS     print(s)
-//RS     print(t)
-//RS }
-//RS "#;
-//RS     let out = jet::compile(src).expect("should compile");
-//RS     assert!(
-//RS         out.rust.contains("__jet_name).clone()"),
-//RS         "field reads in owning position must clone: {}",
-//RS         out.rust
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn or_fallback_keeps_sema_rewrites() {
-//RS     let src = r#"
-//RS fn maybe() -> (Int?) {
-//RS     return None
-//RS }
-//RS 
-//RS fn run() {
-//RS     m := [String:Int]{}
-//RS     m["k"] = 7
-//RS     x :: maybe() ?? m["k"]
-//RS     print(x)
-//RS }
-//RS "#;
-//RS     let out = jet::compile(src).expect("should compile");
-//RS     assert!(
-//RS         out.rust.contains("jet_index_map"),
-//RS         "map index inside `or` fallback must use the map helper: {}",
-//RS         out.rust
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn bare_question_return_uses_default_error() {
-//RS     let src = r#"
-//RS fn parse_count(raw: String) -> Int {
-//RS     if raw == "" {
-//RS         return Err("empty")
-//RS     }
-//RS     return Ok(1)
-//RS }
-//RS 
-//RS fn run() {
-//RS     n :: parse_count("") ?? 0
-//RS     print(n)
-//RS }
-//RS "#;
-//RS     let out = jet::compile(src).expect("default Err fallible return should compile");
-//RS     assert!(
-//RS         out.rust.contains("Result<i64, JetErr>"),
-//RS         "default Err should lower to the Prelude value: {}",
-//RS         out.rust
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn map_assign_through_field_uses_map_helper() {
-//RS     let src = r#"
-//RS struct S {
-//RS     scores: [String:Int]
-//RS }
-//RS 
-//RS fn run() {
-//RS     s := S{ scores: [] }
-//RS     s.scores["a"] = 1
-//RS     print(s.scores["a"])
-//RS }
-//RS "#;
-//RS     let out = jet::compile(src).expect("should compile");
-//RS     assert!(
-//RS         out.rust.contains("jet_map_insert"),
-//RS         "indexed assign through a field must resolve to the map helper: {}",
-//RS         out.rust
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn struct_literal_field_knows_expected_type() {
-//RS     // `[]` in a struct literal used to fail with a spurious E0501.
-//RS     let src = r#"
-//RS struct S {
-//RS     scores: [String:Int]
-//RS }
-//RS 
-//RS fn run() {
-//RS     s := S{ scores: [] }
-//RS     print(s.scores.len())
-//RS }
-//RS "#;
-//RS     jet::compile(src).expect("empty map literal in field position should typecheck");
-//RS }
-//RS 
-//RS #[test]
-//RS fn mut_self_method_requires_var_receiver() {
-//RS     expect_error(
-//RS         r#"
-//RS struct Crate {
-//RS     n: Int
-//RS 
-//RS     fn poke(&self) {
-//RS         x :: self.n
-//RS         print(x)
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     b :: Crate{ n: 1 }
-//RS     b.poke()
-//RS }
-//RS "#,
-//RS         "E0202",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn take_self_on_borrowed_param_is_error() {
-//RS     expect_error(
-//RS         r#"
-//RS struct Token {
-//RS     s: String
-//RS 
-//RS     fn consume(^self) {
-//RS         print(0)
-//RS     }
-//RS }
-//RS 
-//RS fn use_it(t: Token) {
-//RS     &t.consume()
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(0)
-//RS }
-//RS "#,
-//RS         "E0120",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn if_pattern_binding_moves_subject() {
-//RS     expect_error(
-//RS         r#"
-//RS fn run() {
-//RS o :: Val("hi")
-//RS     if o == Val(n) {
-//RS         print(n)
-//RS     }
-//RS     print(o ?? "none")
-//RS }
-//RS "#,
-//RS         "E0121",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn switch_pattern_binding_moves_subject() {
-//RS     expect_error(
-//RS         r#"
-//RS enum Shape {
-//RS     Circle(String)
-//RS     Empty
-//RS }
-//RS 
-//RS fn run() {
-//RS     s :: Shape.Circle("big")
-//RS     if s == {
-//RS         Circle(label) -> {
-//RS             print(label)
-//RS         }
-//RS         Empty -> {
-//RS             print("empty")
-//RS         }
-//RS     }
-//RS     if s == {
-//RS         Circle(label2) -> {
-//RS             print(label2)
-//RS         }
-//RS         Empty -> {
-//RS             print("still empty")
-//RS         }
-//RS     }
-//RS }
-//RS "#,
-//RS         "E0121",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn statement_can_start_with_self() {
-//RS     let src = r#"
-//RS struct Crate {
-//RS     items: [Int]
-//RS 
-//RS     fn add(&self, n: Int) {
-//RS         &self.items.push(n)
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     b := Crate{ items: [0] }
-//RS     b.add(5)
-//RS     print(b.items.len())
-//RS }
-//RS "#;
-//RS     jet::compile(src).expect("`self.items.push(n);` should be a valid statement");
-//RS }
-//RS 
-//RS #[test]
-//RS fn builtin_mutator_on_read_self_is_error() {
-//RS     expect_error(
-//RS         r#"
-//RS struct Crate {
-//RS     items: [Int]
-//RS 
-//RS     fn add(self, n: Int) {
-//RS         &self.items.push(n)
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     print(0)
-//RS }
-//RS "#,
-//RS         "E0202",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn user_struct_named_noclone_is_still_cloneable() {
-//RS     // A user type literally named `NoClone` must not hit a hidden magic name —
-//RS     // it's an Int-only struct, so it's cloneable, and passing it to a Move
-//RS     // param without `^` is E0209 (D-MEM1/S2), not E0201 (can't-be-copied).
-//RS     let src = r#"
-//RS struct NoClone {
-//RS     n: Int
-//RS }
-//RS 
-//RS fn eat(v: ^NoClone) {
-//RS     print(v.n)
-//RS }
-//RS 
-//RS fn run() {
-//RS     v :: NoClone{ n: 1 }
-//RS     eat(v)
-//RS }
-//RS "#;
-//RS     let diags = jet::compile(src).expect_err("should error");
-//RS     assert!(diags.iter().any(|d| d.code == "E0209"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn int_where_struct_expected_is_error() {
-//RS     // This mismatch was silently accepted (and ICE'd in codegen).
-//RS     expect_error(
-//RS         r#"
-//RS struct P {
-//RS     n: Int
-//RS }
-//RS 
-//RS fn show(p: P) {
-//RS     print(p.n)
-//RS }
-//RS 
-//RS fn run() {
-//RS     show(7)
-//RS }
-//RS "#,
-//RS         "E0112",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn mut_arg_must_be_plain_name() {
-//RS     expect_error(
-//RS         r#"
-//RS struct S {
-//RS     n: Int
-//RS }
-//RS 
-//RS fn bump(n: &Int) {
-//RS     n = n + 1
-//RS }
-//RS 
-//RS fn run() {
-//RS     s :: S{ n: 1 }
-//RS     bump(&s.n)
-//RS }
-//RS "#,
-//RS         "E0202",
-//RS     );
-//RS }
-//RS 
-//RS // --- multi-file (loader + bundle) -------------------------------------
-//RS 
-//RS fn temp_project(name: &str) -> PathBuf {
-//RS     let dir = std::env::temp_dir().join(format!("jet_hardening_{name}_{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     dir
-//RS }
-//RS 
-//RS fn compile_bundle(entry: &PathBuf) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
-//RS     let src = fs::read_to_string(entry).unwrap();
-//RS     jet::compile_with_path(&src, entry.to_str().unwrap()).map(|o| o.rust)
-//RS }
-//RS 
-//RS #[test]
-//RS fn hyphenated_file_name_gets_sane_module_alias() {
-//RS     let dir = temp_project("hyphen");
-//RS     fs::write(
-//RS         dir.join("my-utils.jet"),
-//RS         "pub fn helper() -> Int {\n    return 42\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         dir.join("main.jet"),
-//RS         "use \"my-utils\" as util\nfn run() {\n    print(util.helper())\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
-//RS     assert!(
-//RS         rust.contains("mod __jet_my_utils"),
-//RS         "module alias must be a valid Rust identifier: {rust}"
-//RS     );
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn imported_struct_constructs_and_reads_fields() {
-//RS     let dir = temp_project("structs");
-//RS     fs::write(
-//RS         dir.join("shapes.jet"),
-//RS         "pub struct Point {\n    pub x: Int\n    pub y: Int\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         dir.join("main.jet"),
-//RS         "use \"shapes\"\nfn run() {\n    p :: shapes.Point{ x: 1, y: 2 }\n    print(p.x)\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
-//RS     assert!(
-//RS         rust.contains("__jet_shapes::__jet_Point { __jet_x:")
-//RS             || rust.contains("__jet_shapes::__jet_Point{__jet_x:"),
-//RS         "cross-module struct literal must match the declaration: {rust}"
-//RS     );
-//RS     assert!(
-//RS         rust.contains("pub struct __jet_Point"),
-//RS         "module items must be reachable from the entry: {rust}"
-//RS     );
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn duplicate_file_stems_get_unique_module_names() {
-//RS     let dir = temp_project("dup");
-//RS     fs::create_dir_all(dir.join("a")).unwrap();
-//RS     fs::create_dir_all(dir.join("b")).unwrap();
-//RS     fs::write(
-//RS         dir.join("a/util.jet"),
-//RS         "pub fn one() -> Int {\n    return 1\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         dir.join("b/util.jet"),
-//RS         "pub fn two() -> Int {\n    return 2\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         dir.join("main.jet"),
-//RS         "use \"a/util\" as autil\nuse \"b/util\" as butil\nfn run() {\n    print(autil.one())\n    print(butil.two())\n}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let rust = compile_bundle(&dir.join("main.jet")).expect("should compile");
-//RS     assert!(
-//RS         rust.contains("mod __jet_util") && rust.contains("mod __jet_util_2"),
-//RS         "same-stem modules must get unique mod names: {rust}"
-//RS     );
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[test]
-//RS fn value_is_identifier_not_keyword() {
-//RS     let src = r#"
-//RS fn show(label: String, value: Int) {
-//RS     print("{label}: {value}")
-//RS }
-//RS 
-//RS fn run() {
-//RS     show("score", 42)
-//RS }
-//RS "#;
-//RS     jet::compile(src).expect("`value` may name a binding; only `val` is reserved");
-//RS }
-// END-PORT-PENDING 1067 tests/hardening.rs:1-477
+// Rust: tests/hardening.rs:11
+pub fn expect_error(src: String, code: String) -> {
+    diags :: compile(src).expect_err("front end should reject this")
+    assert(diags.iter().any(|d| -> d.code == code),
+        "expected {code}, got: {diags.iter().map(|d| -> (d.code.clone(), d.what.clone())).collect():?}")
+}
+// Rust: tests/hardening.rs:378
+pub fn temp_project(name: String) -> OSPath {
+    // GATE #4494: native temporary directory and process identity.
+    dir :: env.temp_dir().join("jet_hardening_{name}_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    dir
+}
+// Rust: tests/hardening.rs:385
+pub fn compile_bundle(entry: OSPath) -> String [Diagnostic]! {
+    src :: fs.read_to_string(entry).unwrap()
+    compile_with_path(&src, entry.to_str().unwrap()).map(|o| -> o.rust)
+}
 
-// PORT-PENDING 1067 tests-guard-selftest-module-group: tests/harness_tools.rs:1-57
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS use common::{
-//RS     unified_diff, UNIFIED_DIFF_MAX_INPUT_BYTES, UNIFIED_DIFF_MAX_INPUT_LINES,
-//RS     UNIFIED_DIFF_MAX_OUTPUT_BYTES,
-//RS };
-//RS 
-//RS #[test]
-//RS fn unified_diff_keeps_small_diffs_complete() {
-//RS     let diff = unified_diff("expected", "actual", "same\nold\n", "same\nnew\n");
-//RS     assert!(diff.starts_with("--- expected\n+++ actual\n@@"));
-//RS     assert!(diff.contains(" same\n"));
-//RS     assert!(diff.contains("-old\n"));
-//RS     assert!(diff.contains("+new\n"));
-//RS     assert!(!diff.contains("truncated"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn unified_diff_bounds_hostile_output_and_names_every_truncation() {
-//RS     let expected_line = format!("{}\n", "e".repeat(1024));
-//RS     let actual_line = format!("{}\n", "a".repeat(1024));
-//RS     let expected = expected_line.repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 2);
-//RS     let actual = actual_line.repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 2);
-//RS 
-//RS     let diff = unified_diff("expected", "actual", &expected, &actual);
-//RS 
-//RS     assert!(diff.starts_with("--- expected\n+++ actual\n"));
-//RS     assert!(diff.contains("@@"));
-//RS     assert!(
-//RS         diff.contains("diff input truncated: expected"),
-//RS         "expected input truncation must be explicit"
-//RS     );
-//RS     assert!(
-//RS         diff.contains("diff input truncated: actual"),
-//RS         "actual input truncation must be explicit"
-//RS     );
-//RS     assert!(
-//RS         diff.contains("diff output truncated; remaining compared edits omitted"),
-//RS         "render truncation must be explicit"
-//RS     );
-//RS     assert!(diff.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES);
-//RS     assert!(expected.len() > UNIFIED_DIFF_MAX_INPUT_BYTES);
-//RS     assert!(actual.len() > UNIFIED_DIFF_MAX_INPUT_BYTES);
-//RS }
-//RS 
-//RS #[test]
-//RS fn unified_diff_line_limit_is_reported_without_scanning_all_lines() {
-//RS     let expected = "old\n".repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 4);
-//RS     let actual = "new\n".repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 4);
-//RS     let diff = unified_diff("expected", "actual", &expected, &actual);
-//RS 
-//RS     assert!(diff.contains(&format!(
-//RS         "limits are {} bytes/{} lines",
-//RS         UNIFIED_DIFF_MAX_INPUT_BYTES, UNIFIED_DIFF_MAX_INPUT_LINES
-//RS     )));
-//RS     assert!(diff.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES);
-//RS }
-// END-PORT-PENDING 1067 tests/harness_tools.rs:1-57
-
-// PORT-PENDING 1067 tests-guard-selftest-module-group: tests/hostile_closeout_ledger.rs:1-426
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! The #2394 closeout ledger must account for every observed diagnostic owned
-//RS //! by a hostile-audit card before that card can be closed.
-//RS 
-//RS use std::collections::BTreeMap;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS const LEDGER: &str = include_str!("../Docs/audits/dogfood-jet-experience-5-of-5.md");
-//RS 
-//RS struct EvidenceFile {
-//RS     path: &'static str,
-//RS     markers: &'static [&'static str],
-//RS }
-//RS 
-//RS struct CloseoutFinding {
-//RS     code: Option<&'static str>,
-//RS     finding: &'static str,
-//RS     owner: &'static str,
-//RS     raw_witness: &'static str,
-//RS     fixture: &'static str,
-//RS     evidence: &'static [EvidenceFile],
-//RS     row_requirements: &'static [&'static str],
-//RS }
-//RS 
-//RS // Keep this table limited to findings that have a dedicated #2394 owner.
-//RS // Raw receipt codes, compiler ICEs, and malformed-input coverage all stay in
-//RS // one table so a missing or mismatched disposition row fails closed.
-//RS const HOSTILE_CLOSEOUT_FINDINGS: &[CloseoutFinding] = &[
-//RS     CloseoutFinding {
-//RS         code: Some("L0520"),
-//RS         finding: "F50",
-//RS         owner: "#2417",
-//RS         raw_witness: "Docs/audits/raw/2393-r1/A03/T4/jet.json",
-//RS         fixture: "tests/ui/ioerror_display_migration.jet",
-//RS         evidence: &[
-//RS             EvidenceFile {
-//RS                 path: "Docs/audits/raw/2393-r1/A03/T4/jet.json",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/ui/ioerror_display_migration.jet",
-//RS                 markers: &[],
-//RS             },
-//RS         ],
-//RS         row_requirements: &[],
-//RS     },
-//RS     CloseoutFinding {
-//RS         code: Some("L0503"),
-//RS         finding: "F51",
-//RS         owner: "#2416",
-//RS         raw_witness: "Docs/audits/raw/2393-r1/A01/T2/jet.json",
-//RS         fixture: "tests/ui_lint/prefer_compound_assign.jet",
-//RS         evidence: &[
-//RS             EvidenceFile {
-//RS                 path: "Docs/audits/raw/2393-r1/A01/T2/jet.json",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/ui_lint/prefer_compound_assign.jet",
-//RS                 markers: &[],
-//RS             },
-//RS         ],
-//RS         row_requirements: &[],
-//RS     },
-//RS     CloseoutFinding {
-//RS         code: None,
-//RS         finding: "F52",
-//RS         owner: "#2415",
-//RS         raw_witness: "Docs/audits/raw/2393-r1/A01/T1/jet.json",
-//RS         fixture: "tests/marker_declarations.rs",
-//RS         evidence: &[
-//RS             EvidenceFile {
-//RS                 path: "Docs/audits/raw/2393-r1/A01/T1/jet.json",
-//RS                 markers: &[
-//RS                     "fact registry law violation: `Scheduler` is registered twice; one table means one row per name",
-//RS                 ],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/marker_declarations.rs",
-//RS                 markers: &[
-//RS                     "repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic",
-//RS                     "fact Scheduler($name: \"Scheduler\"",
-//RS                     "fact TargetScheduler($name: \"Target.Scheduler\"",
-//RS                 ],
-//RS             },
-//RS         ],
-//RS         row_requirements: &[
-//RS             "duplicate Scheduler fact registration",
-//RS             "Scheduler",
-//RS             "Target.Scheduler",
-//RS             "check",
-//RS             "AOT",
-//RS             "default",
-//RS             "dev",
-//RS             "interpreter",
-//RS             "no ICE",
-//RS             "byte-identical output",
-//RS             "#2393",
-//RS             "#2394",
-//RS         ],
-//RS     },
-//RS     CloseoutFinding {
-//RS         code: None,
-//RS         finding: "F53",
-//RS         owner: "#2419",
-//RS         raw_witness: "Docs/audits/raw/2393-r1/A10/T4/jet.json",
-//RS         fixture: "tests/fixtures/fresh_agent_t4/**",
-//RS         evidence: &[
-//RS             EvidenceFile {
-//RS                 path: "Docs/audits/raw/2393-r1/A10/T4/jet.json",
-//RS                 markers: &[
-//RS                     "\"participant\": \"A10\"",
-//RS                     "\"task\": \"T4\"",
-//RS                     "\"arm\": \"Jet\"",
-//RS                 ],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/package.jet",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/run.jet",
-//RS                 markers: &[
-//RS                     "what=malformed TSV row",
-//RS                     "what=empty TSV key",
-//RS                     "what=unknown TSV key",
-//RS                     "what=duplicate TSV key",
-//RS                     "what=invalid count value",
-//RS                     "what=missing required TSV key",
-//RS                 ],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/report.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/truncated.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv",
-//RS                 markers: &[],
-//RS             },
-//RS             EvidenceFile {
-//RS                 path: "tests/fresh_agent_t4.rs",
-//RS                 markers: &[
-//RS                     "fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers",
-//RS                     "MALFORMED_CASES",
-//RS                     "truncated.tsv",
-//RS                     "empty-key.tsv",
-//RS                     "extra-column.tsv",
-//RS                     "unknown-key.tsv",
-//RS                     "duplicate-key.tsv",
-//RS                     "invalid-count.tsv",
-//RS                     "missing-required-key.tsv",
-//RS                     "has_rustc",
-//RS                     "(\"aot\", &[\"run\", \"--release\"])",
-//RS                     "malformed.stdout.is_empty()",
-//RS                 ],
-//RS             },
-//RS         ],
-//RS         row_requirements: &[
-//RS             "truncated.tsv",
-//RS             "empty-key.tsv",
-//RS             "extra-column.tsv",
-//RS             "unknown-key.tsv",
-//RS             "duplicate-key.tsv",
-//RS             "invalid-count.tsv",
-//RS             "missing-required-key.tsv",
-//RS             "default/dev/interpreter/AOT",
-//RS             "AOT when `rustc` exists",
-//RS             "exits 1",
-//RS             "empty stdout",
-//RS             "deterministic line-aware stderr",
-//RS             "matched Jet/Rust",
-//RS             "#2393",
-//RS             "#2394",
-//RS         ],
-//RS     },
-//RS ];
-//RS 
-//RS fn root() -> PathBuf {
-//RS     PathBuf::from(option_env!("CARGO_MANIFEST_DIR").unwrap_or("."))
-//RS }
-//RS 
-//RS fn collect_jet_receipts(dir: &Path, out: &mut Vec<PathBuf>) {
-//RS     for entry in fs::read_dir(dir)
-//RS         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
-//RS         .flatten()
-//RS     {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             collect_jet_receipts(&path, out);
-//RS         } else if path.file_name().and_then(|name| name.to_str()) == Some("jet.json") {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn raw_code_counts() -> BTreeMap<String, usize> {
-//RS     let raw_root = root().join("Docs/audits/raw/2393-r1");
-//RS     let mut files = Vec::new();
-//RS     collect_jet_receipts(&raw_root, &mut files);
-//RS     files.sort();
-//RS 
-//RS     let mut counts = BTreeMap::new();
-//RS     for path in files {
-//RS         let text = fs::read_to_string(&path)
-//RS             .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display()));
-//RS         let mut in_codes = false;
-//RS         for line in text.lines() {
-//RS             let trimmed = line.trim();
-//RS             if !in_codes {
-//RS                 if trimmed.starts_with("\"codes\": [") {
-//RS                     in_codes = true;
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             if trimmed == "]" || trimmed == "]," {
-//RS                 in_codes = false;
-//RS                 continue;
-//RS             }
-//RS             let Some(code) = trimmed.strip_prefix('"').and_then(|rest| rest.split('"').next())
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             *counts.entry(code.to_string()).or_insert(0) += 1;
-//RS         }
-//RS     }
-//RS     counts
-//RS }
-//RS 
-//RS fn ledger_rows<'a>(ledger: &'a str, finding: &str) -> Vec<&'a str> {
-//RS     ledger
-//RS         .lines()
-//RS         .filter(|line| {
-//RS             let mut columns = line.split('|');
-//RS             let _empty = columns.next();
-//RS             columns
-//RS                 .next()
-//RS                 .is_some_and(|column| column.trim().starts_with(finding))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn validate_evidence(spec: &CloseoutFinding) -> Result<(), String> {
-//RS     for evidence in spec.evidence {
-//RS         let path = root().join(evidence.path);
-//RS         let text = fs::read_to_string(&path)
-//RS             .map_err(|error| format!("cannot read {}: {error}", evidence.path))?;
-//RS         for marker in evidence.markers.iter().copied() {
-//RS             if !text.contains(marker) {
-//RS                 return Err(format!(
-//RS                     "evidence {} for {} lacks {marker:?}",
-//RS                     evidence.path, spec.finding
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_hostile_closeout_ledger(
-//RS     ledger: &str,
-//RS     observed: &BTreeMap<String, usize>,
-//RS ) -> Result<(), String> {
-//RS     for spec in HOSTILE_CLOSEOUT_FINDINGS {
-//RS         let observed_name = spec.code.unwrap_or(spec.finding);
-//RS         if let Some(code) = spec.code {
-//RS             let count = observed.get(code).copied().unwrap_or(0);
-//RS             if count == 0 {
-//RS                 return Err(format!(
-//RS                     "closeout diagnostic {code} was not observed in the fresh-agent receipts"
-//RS                 ));
-//RS             }
-//RS         }
-//RS         validate_evidence(spec)?;
-//RS 
-//RS         let rows = ledger_rows(ledger, spec.finding);
-//RS         if rows.is_empty() {
-//RS             return Err(format!(
-//RS                 "observed finding {observed_name} has no canonical ledger row {}",
-//RS                 spec.finding
-//RS             ));
-//RS         }
-//RS         if rows.len() != 1 {
-//RS             return Err(format!(
-//RS                 "observed finding {} must have one canonical ledger row, found {}",
-//RS                 spec.finding,
-//RS                 rows.len()
-//RS             ));
-//RS         }
-//RS         let row = rows[0];
-//RS         let base_requirements = [spec.owner, spec.raw_witness, spec.fixture];
-//RS         for required in base_requirements
-//RS             .iter()
-//RS             .copied()
-//RS             .chain(spec.row_requirements.iter().copied())
-//RS         {
-//RS             if !row.contains(required) {
-//RS                 return Err(format!(
-//RS                     "ledger row {} for observed {} lacks {required:?}",
-//RS                     spec.finding, observed_name
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let closed_by_owner = format!("Closed by `{}`", spec.owner);
-//RS         if !row.contains("State: `open`") && !row.contains(&closed_by_owner) {
-//RS             return Err(format!(
-//RS                 "ledger row {} for observed {} must stay open until focused proof or close under {}",
-//RS                 spec.finding, observed_name, spec.owner
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn every_observed_hostile_closeout_finding_has_one_owner_row() {
-//RS     let observed = raw_code_counts();
-//RS     validate_hostile_closeout_ledger(LEDGER, &observed)
-//RS         .unwrap_or_else(|error| panic!("hostile closeout ledger is incomplete: {error}"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn closeout_rejects_an_observed_finding_when_its_owner_row_is_missing() {
-//RS     let observed = raw_code_counts();
-//RS     for spec in HOSTILE_CLOSEOUT_FINDINGS {
-//RS         let without_row = LEDGER
-//RS             .lines()
-//RS             .filter(|line| !line.contains(&format!("| {} ", spec.finding)))
-//RS             .collect::<Vec<_>>()
-//RS             .join("\n");
-//RS         let error = validate_hostile_closeout_ledger(&without_row, &observed)
-//RS             .expect_err("an observed finding without its owner row must fail closed");
-//RS         let observed_name = spec.code.unwrap_or(spec.finding);
-//RS         assert!(
-//RS             error.contains(observed_name) && error.contains(spec.finding),
-//RS             "missing-row error lost identity for {}: {error}",
-//RS             spec.finding
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn closeout_rejects_a_mismatched_owner_or_witness() {
-//RS     let observed = raw_code_counts();
-//RS     for spec in HOSTILE_CLOSEOUT_FINDINGS {
-//RS         let row = ledger_rows(LEDGER, spec.finding)
-//RS             .into_iter()
-//RS             .next()
-//RS             .expect("every finding has a source row");
-//RS         for required in [spec.owner, spec.raw_witness, spec.fixture] {
-//RS             let mismatched_row = row.replace(required, "__mismatched__");
-//RS             let mismatched_ledger = LEDGER
-//RS                 .lines()
-//RS                 .map(|line| {
-//RS                     if line == row {
-//RS                         mismatched_row.as_str()
-//RS                     } else {
-//RS                         line
-//RS                     }
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join("\n");
-//RS             let error = validate_hostile_closeout_ledger(&mismatched_ledger, &observed)
-//RS                 .expect_err("a mismatched owner or witness must fail closed");
-//RS             assert!(
-//RS                 error.contains(spec.finding) && error.contains(required),
-//RS                 "mismatch error lost {} identity: {error}",
-//RS                 spec.finding
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn l0503_current_fixture_keeps_subject_span_and_teaching_snapshot() {
-//RS     let fixture = fs::read_to_string(root().join("tests/ui_lint/prefer_compound_assign.jet"))
-//RS         .expect("L0503 fixture");
-//RS     let snapshot = fs::read_to_string(root().join("tests/ui_lint/prefer_compound_assign.warn"))
-//RS         .expect("L0503 snapshot");
-//RS 
-//RS     for expected in [
-//RS         "p.hp = p.hp - amount",
-//RS         "n = (n + 1)",
-//RS         "Indexed compound is E0164",
-//RS     ] {
-//RS         assert!(fixture.contains(expected), "L0503 fixture lost {expected:?}");
-//RS     }
-//RS     assert_eq!(
-//RS         snapshot.matches("Warning [L0503]").count(),
-//RS         4,
-//RS         "L0503 snapshot warning count changed: {snapshot}"
-//RS     );
-//RS     for expected in [
-//RS         "prefer `p.hp -= …` instead of repeating the left side",
-//RS         "prefer `p.hp += …` instead of repeating the left side",
-//RS         "Why: compound assignment updates a place in one step without restating it",
-//RS         "Fix: write `p.hp -= …`",
-//RS         "More: jet-lang.dev/e/L0503",
-//RS     ] {
-//RS         assert!(snapshot.contains(expected), "L0503 snapshot lost {expected:?}");
-//RS     }
-//RS }
-// END-PORT-PENDING 1067 tests/hostile_closeout_ledger.rs:1-426
-
+// The #2394 closeout ledger accounts for every observed hostile-audit diagnostic.
+// Rust: tests/hostile_closeout_ledger.rs:8
+pub LEDGER :: include_str!("../Docs/audits/dogfood-jet-experience-5-of-5.md")
+// Rust: tests/hostile_closeout_ledger.rs:10
+pub struct EvidenceFile {
+    path: String
+    markers: [String]
+}
+// Rust: tests/hostile_closeout_ledger.rs:15
+pub struct CloseoutFinding {
+    code: String?
+    finding: String
+    owner: String
+    raw_witness: String
+    fixture: String
+    evidence: [EvidenceFile]
+    row_requirements: [String]
+}
+// Rust: tests/hostile_closeout_ledger.rs:28
+// Dedicated #2394 owners only; receipts, ICEs and malformed input share one table.
+pub HOSTILE_CLOSEOUT_FINDINGS: [CloseoutFinding] :: [
+    CloseoutFinding{
+        code: Some("L0520"), finding: "F50", owner: "#2417",
+        raw_witness: "Docs/audits/raw/2393-r1/A03/T4/jet.json",
+        fixture: "tests/ui/ioerror_display_migration.jet",
+        evidence: [
+            EvidenceFile{path: "Docs/audits/raw/2393-r1/A03/T4/jet.json", markers: []},
+            EvidenceFile{path: "tests/ui/ioerror_display_migration.jet", markers: []}
+        ], row_requirements: []
+    },
+    CloseoutFinding{
+        code: Some("L0503"), finding: "F51", owner: "#2416",
+        raw_witness: "Docs/audits/raw/2393-r1/A01/T2/jet.json",
+        fixture: "tests/ui_lint/prefer_compound_assign.jet",
+        evidence: [
+            EvidenceFile{path: "Docs/audits/raw/2393-r1/A01/T2/jet.json", markers: []},
+            EvidenceFile{path: "tests/ui_lint/prefer_compound_assign.jet", markers: []}
+        ], row_requirements: []
+    },
+    CloseoutFinding{
+        code: None, finding: "F52", owner: "#2415",
+        raw_witness: "Docs/audits/raw/2393-r1/A01/T1/jet.json",
+        fixture: "tests/marker_declarations.rs",
+        evidence: [
+            EvidenceFile{path: "Docs/audits/raw/2393-r1/A01/T1/jet.json", markers: [
+                "fact registry law violation: `Scheduler` is registered twice; one table means one row per name"
+            ]},
+            EvidenceFile{path: "tests/marker_declarations.rs", markers: [
+                "repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic",
+                "fact Scheduler($name: \"Scheduler\"", "fact TargetScheduler($name: \"Target.Scheduler\""
+            ]}
+        ],
+        row_requirements: ["duplicate Scheduler fact registration", "Scheduler", "Target.Scheduler", "check", "AOT", "default", "dev", "interpreter", "no ICE", "byte-identical output", "#2393", "#2394"]
+    },
+    CloseoutFinding{
+        code: None, finding: "F53", owner: "#2419",
+        raw_witness: "Docs/audits/raw/2393-r1/A10/T4/jet.json",
+        fixture: "tests/fixtures/fresh_agent_t4/**",
+        evidence: [
+            EvidenceFile{path: "Docs/audits/raw/2393-r1/A10/T4/jet.json", markers: ["\"participant\": \"A10\"", "\"task\": \"T4\"", "\"arm\": \"Jet\""]},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/package.jet", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/run.jet", markers: ["what=malformed TSV row", "what=empty TSV key", "what=unknown TSV key", "what=duplicate TSV key", "what=invalid count value", "what=missing required TSV key"]},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/report.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/truncated.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/empty-key.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/extra-column.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/unknown-key.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/duplicate-key.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/invalid-count.tsv", markers: []},
+            EvidenceFile{path: "tests/fixtures/fresh_agent_t4/inputs/missing-required-key.tsv", markers: []},
+            EvidenceFile{path: "tests/fresh_agent_t4.rs", markers: [
+                "fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers", "MALFORMED_CASES",
+                "truncated.tsv", "empty-key.tsv", "extra-column.tsv", "unknown-key.tsv", "duplicate-key.tsv", "invalid-count.tsv", "missing-required-key.tsv",
+                "has_rustc", "(\"aot\", &[\"run\", \"--release\"])", "malformed.stdout.is_empty()"
+            ]}
+        ],
+        row_requirements: ["truncated.tsv", "empty-key.tsv", "extra-column.tsv", "unknown-key.tsv", "duplicate-key.tsv", "invalid-count.tsv", "missing-required-key.tsv", "default/dev/interpreter/AOT", "AOT when `rustc` exists", "exits 1", "empty stdout", "deterministic line-aware stderr", "matched Jet/Rust", "#2393", "#2394"]
+    }
+]
+// Rust: tests/hostile_closeout_ledger.rs:202
+pub fn root() -> OSPath {
+    OSPath.from(env.var("CARGO_MANIFEST_DIR").unwrap_or("."))
+}
+// Rust: tests/hostile_closeout_ledger.rs:206
+pub fn collect_jet_receipts(dir: OSPath, out: &[OSPath]) -> {
+    for entry in fs.read_dir(dir).unwrap_or_else(|error| -> panic("cannot read {dir.display()}: {error}")).flatten() {
+        path :: entry.path()
+        if path.is_dir() {
+            collect_jet_receipts(&path, &out)
+        } else if path.file_name().and_then(|name| -> name.to_str()) == Some("jet.json") {
+            out.push(^path)
+        }
+    }
+}
+// Rust: tests/hostile_closeout_ledger.rs:220
+pub fn raw_code_counts() -> [String:Int] {
+    raw_root :: root().join("Docs/audits/raw/2393-r1")
+    files: [OSPath] := []
+    collect_jet_receipts(&raw_root, &files)
+    files.sort()
+    counts: [String:Int] := [:]
+    for path in files {
+        text :: fs.read_to_string(&path).unwrap_or_else(|error| -> panic("cannot read {path.display()}: {error}"))
+        in_codes := false
+        for line in text.lines() {
+            trimmed := line.trim() // #4303
+            if !in_codes {
+                if trimmed.starts_with("\"codes\": [") { in_codes = true }
+                continue
+            }
+            if trimmed == "]" || trimmed == "]," { in_codes = false; continue }
+            code :: trimmed.strip_prefix('"').and_then(|rest| -> rest.split('"').next())
+            if code == Some(value) {
+                key :: value.to_string()
+                counts[key] = counts.get(key).copied().unwrap_or(0) + 1
+            }
+        }
+    }
+    counts
+}
+// Rust: tests/hostile_closeout_ledger.rs:253
+pub fn ledger_rows(ledger: String, finding: String) -> [String] {
+    ledger.lines().filter(|line| -> {
+        columns := line.split('|')
+        _empty :: columns.next()
+        columns.next().is_some_and(|column| -> {
+            trimmed := column.trim() // #4303
+            trimmed.starts_with(finding)
+        })
+    }).map(|line| -> line.to_string()).collect()
+}
+// Rust: tests/hostile_closeout_ledger.rs:266
+pub fn validate_evidence(spec: CloseoutFinding) -> Err! {
+    for evidence in spec.evidence {
+        path :: root().join(evidence.path)
+        text :: fs.read_to_string(&path).map_err(|error| -> "cannot read {evidence.path}: {error}")?
+        for marker in evidence.markers {
+            if !text.contains(marker) {
+                return Err("evidence {evidence.path} for {spec.finding} lacks {marker:?}")
+            }
+        }
+    }
+    Ok(())
+}
+// Rust: tests/hostile_closeout_ledger.rs:283
+pub fn validate_hostile_closeout_ledger(ledger: String, observed: [String:Int]) -> Err! {
+    for spec in HOSTILE_CLOSEOUT_FINDINGS {
+        observed_name :: spec.code.unwrap_or(spec.finding)
+        if spec.code == Some(code) {
+            count :: observed.get(code).copied().unwrap_or(0)
+            if count == 0 { return Err("closeout diagnostic {code} was not observed in the fresh-agent receipts") }
+        }
+        validate_evidence(spec)?
+        rows :: ledger_rows(ledger, spec.finding)
+        if rows.is_empty() { return Err("observed finding {observed_name} has no canonical ledger row {spec.finding}") }
+        if rows.len() != 1 { return Err("observed finding {spec.finding} must have one canonical ledger row, found {rows.len()}") }
+        row :: rows[0]
+        base_requirements :: [spec.owner, spec.raw_witness, spec.fixture]
+        for required in base_requirements.iter().chain(spec.row_requirements.iter()) {
+            if !row.contains(required) { return Err("ledger row {spec.finding} for observed {observed_name} lacks {required:?}") }
+        }
+        closed_by_owner :: "Closed by `{spec.owner}`"
+        if !row.contains("State: `open`") && !row.contains(&closed_by_owner) {
+            return Err("ledger row {spec.finding} for observed {observed_name} must stay open until focused proof or close under {spec.owner}")
+        }
+    }
+    Ok(())
+}

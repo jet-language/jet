@@ -1,0 +1,803 @@
+use jet_foundation.Tests.Integration.CliParts.Commands.*
+use jet_foundation.Tests.Integration.CliParts.Support.*
+use jet_foundation.JSON.[parse_json]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.MachineOutput.[read_machine_output, MachineRecord]
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_driver.ReceiptStore.[ReceiptStore]
+use std.fs
+use std.env
+use std.process.[Command] // GATE #4494: native processes and permissions.
+use core.sys.target // GATE #4483: selected target facts.
+
+// Rust: tests/cli_parts/commands.rs:4
+#Test("eval_unit_run_prints_only_program_output") {
+    dir :: isolated_cwd("eval_unit_output")
+    fs.write(dir.join("run.jet"), "fn run() -> {\n    print(\"hello\")\n}\n").unwrap()
+    output :: Command.new(jet()).args(["eval", "run.jet"]).current_dir(&dir).env("JET_STORE_DIR", dir.join(".jet/store")).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(0), "{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(output.stdout, "hello\n".as_bytes())
+    assert(output.stderr.is_empty(), "unit eval wrote diagnostics: {String.from_utf8_lossy(&output.stderr)}")
+}
+// Rust: tests/cli_parts/commands.rs:29
+#Test("status_renders_no_claim_without_a_receipt") {
+    dir :: isolated_cwd("status_missing_receipts")
+    fs.write(dir.join("run.jet"), "fn run() -> { print(\"status\") }\n").unwrap()
+    output :: Command.new(jet()).args(["status", "run.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(0), "{String.from_utf8_lossy(&output.stderr)}")
+    json :: String.from_utf8(output.stdout).unwrap()
+    assert_eq(read_machine_output(&json).unwrap(), [MachineRecord.Status])
+    assert(json.starts_with("{\"schema\":\"jet.status/v1\""), "{json}")
+    assert(!json.contains("\"status_report\""), "{json}")
+    assert(json.contains("\"claims\":[]"), "{json}")
+}
+// Rust: tests/cli_parts/commands.rs:55
+#Test("status_renders_each_receipt_verb_without_a_claim_inventory") {
+    dir :: isolated_cwd("status_receipt_verbs")
+    source :: dir.join("run.jet")
+    fs.write(&source, "fn run() -> { print(\"status\") }\n").unwrap()
+    store :: ReceiptStore.new(dir.join(".jet/receipts"))
+    loop verb in ["custom-api", "custom-test"] {
+        argv :: [verb, "run.jet"]
+        store.record(verb, &argv, &[source], 0, "ok".as_bytes(), "".as_bytes()).unwrap()
+    }
+    output :: Command.new(jet()).args(["status", "run.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(0), "{String.from_utf8_lossy(&output.stderr)}")
+    json :: String.from_utf8(output.stdout).unwrap()
+    assert(json.contains("\"claim\":\"custom-api\""), "{json}")
+    assert(json.contains("\"claim\":\"custom-test\""), "{json}")
+    assert(json.contains("\"action\":\"jet custom-api run.jet\""), "{json}")
+    assert(json.contains("\"action\":\"jet custom-test run.jet\""), "{json}")
+}
+// Rust: tests/cli_parts/commands.rs:93
+#Test("status_never_promotes_stale_receipt_to_proven") {
+    dir :: isolated_cwd("status_stale_receipt")
+    source :: dir.join("run.jet")
+    fs.write(&source, "fn run() -> { print(\"status\") }\n").unwrap()
+    receipt_dir :: dir.join(".jet/receipts")
+    store :: ReceiptStore.new(&receipt_dir)
+    argv :: ["prove", "run.jet"]
+    store.record("prove", &argv, &[source], 0, "proof".as_bytes(), "".as_bytes()).unwrap()
+    current :: Command.new(jet()).args(["status", "run.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(current.status.code(), Some(0), "{String.from_utf8_lossy(&current.stderr)}")
+    assert(String.from_utf8_lossy(&current.stdout).contains("\"state\":\"proven\""))
+    fs.write(&source, "fn run() -> { print(\"changed\") }\n").unwrap()
+    stale :: Command.new(jet()).args(["status", "run.jet", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(stale.status.code(), Some(0), "{String.from_utf8_lossy(&stale.stderr)}")
+    json :: String.from_utf8(stale.stdout).unwrap()
+    assert(json.contains("\"state\":\"stale\""), "{json}")
+    assert(!json.contains("\"state\":\"proven\""), "{json}")
+    assert(json.contains("\"action\":\"jet prove run.jet\""), "{json}")
+}
+// Rust: tests/cli_parts/commands.rs:144
+#Test("check_receipt_invalidates_when_higher_priority_entry_appears") {
+    dir :: isolated_cwd("check_receipt_entry_candidate")
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"entry-candidate\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("src/run.jet"), "fn run() -> { }\n").unwrap()
+    receipt_dir :: dir.join(".jet/receipts")
+    // Rust: tests/cli_parts/commands.rs:154
+    run_check :: fn() -> Command.new(jet()).args(["check", "--verbose"]).current_dir(&dir).env("JET_RECEIPT_DIR", &receipt_dir).env_remove("JET_RECEIPT_BYPASS").env("NO_COLOR", "1").env("TERM", "dumb").output().unwrap()
+    first :: run_check()
+    assert(first.status.success(), "initial check failed:\n{String.from_utf8_lossy(&first.stderr)}")
+    second :: run_check()
+    second_stderr :: String.from_utf8_lossy(&second.stderr)
+    assert(second.status.success() && second_stderr.contains("ok: check current"), "unchanged check did not replay:\n{second_stderr}")
+    fs.write(dir.join("run.jet"), "fn run() -> { }\n").unwrap()
+    third :: run_check()
+    third_stderr :: String.from_utf8_lossy(&third.stderr)
+    assert(third.status.success(), "check after adding a higher-priority entry failed:\n{third_stderr}")
+    assert(!third_stderr.contains("ok: check current"), "stale receipt replayed after higher-priority entry appeared:\n{third_stderr}")
+    assert(third_stderr.contains("receipt: check invalidated") && third_stderr.contains("input changed"), "entry-candidate invalidation was not reported:\n{third_stderr}")
+}
+// Rust: tests/cli_parts/commands.rs:234
+#Test("test_passes_when_optional_history_cannot_persist") {
+    if target.selected_family() != "unix" || !common.have_rustc() { return }
+    dir :: read_only_history_project("optional_history_read_only")
+    output :: run_history_test(&dir, &["--capture=all"])
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert_eq(output.status.code(), Some(0), "stdout:\n{stdout}\nstderr:\n{stderr}")
+    assert(stdout.contains("1 passed, 0 failed"), "{stdout}")
+    assert(!stderr.contains("E2105"), "optional history failed the run:\n{stderr}")
+    notices :: stderr.lines().filter(fn(line) -> line.starts_with("history: ")).collect()
+    fixes := Set<String>.new()
+    loop notice in notices {
+        fix :: notice.strip_prefix("history: optional persistence failed while ").and_then(fn(rest) -> rest.split_once("; fix: ")).map(fn(parts) -> parts.1).unwrap_or_else(fn() -> panic("notice must name its cause and fix: {notice}"))
+        assert(fixes.insert(fix), "a notice repeated its fix:\n{stderr}")
+    }
+}
+// Rust: tests/cli_parts/commands.rs:265
+#Test("test_json_result_unchanged_on_optional_history_failure") {
+    if target.selected_family() != "unix" || !common.have_rustc() { return }
+    dir :: read_only_history_project("optional_history_json")
+    output :: run_history_test(&dir, &["--json"])
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert_eq(output.status.code(), Some(0), "{String.from_utf8_lossy(&output.stderr)}")
+    assert(!stdout.contains("history:"), "notice leaked into the JSON result:\n{stdout}")
+    assert(stdout.trim_start().starts_with('{'), "{stdout}")
+}
+// Rust: tests/cli_parts/commands.rs:281
+#Test("explicit_record_save_still_fails_closed") {
+    if target.selected_family() != "unix" || !common.have_rustc() { return }
+    dir :: read_only_history_project("explicit_record_read_only")
+    output :: run_history_test(&dir, &["--record=keep"])
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert_ne(output.status.code(), Some(0), "explicit save ignored a storage failure:\n{stderr}")
+    assert(stderr.contains("E2105"), "{stderr}")
+}
+// Rust: tests/cli_parts/commands.rs:294
+#Test("inspect_provenance_human_and_json_agree") {
+    dir :: isolated_cwd("inspect_provenance")
+    fs.write(dir.join("package.jet"), "name: \"provenance\"\nversion: \"0.1.0\"\nauthority: { trust: { require: attested } }\n").unwrap()
+    fs.write(dir.join("run.jet"), "fn run() -> {}\n").unwrap()
+    fs.create_dir_all(dir.join(".jet")).unwrap()
+    fs.write(dir.join(".jet/lock"), """
+version = 1
+
+[[package]]
+name = "provenance"
+version = "0.1.0"
+source = { root = "." }
+fingerprint = "fp-root"
+dependencies = ["textkit"]
+
+[[package]]
+name = "textkit"
+version = "1.2.0"
+source = { registry = "main", reference = "textkit#1.2.0", output = ".jet/store/textkit", source-hash = "sha256-source", repository = "https://registry.example.test", authority = "jet-registry-index" }
+fingerprint = "sha256-plan"
+content-hash = "sha256:4be1…"
+dependencies = []
+provenance-transparency = "logged 2026-08-01, registry log #48122"
+provenance-publisher = "ed25519:ak3f… \"textkit team\""
+provenance-build = "slsa v1.0 — github.com/acme/textkit@8c00d1"
+
+[root]
+dependencies = ["textkit"]
+""").unwrap()
+    human_output :: Command.new(jet()).args(["inspect", "provenance"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(human_output.status.code(), Some(0), "{String.from_utf8_lossy(&human_output.stderr)}")
+    human :: String.from_utf8(human_output.stdout).unwrap()
+    assert(human.contains("sha256:4be1…") && human.contains("logged 2026-08-01") && human.contains("ed25519:ak3f… \"textkit team\"") && human.contains("slsa v1.0"), "{human}")
+    assert(human.contains("enforced") && human.contains("verified") && human.contains("recorded"), "{human}")
+    check_snapshot("inspect_provenance.txt", &human)
+    json_output :: Command.new(jet()).args(["inspect", "provenance", "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(json_output.status.code(), Some(0), "{String.from_utf8_lossy(&json_output.stderr)}")
+    json :: String.from_utf8(json_output.stdout).unwrap()
+    assert(parse_json(&json).is_ok(), "provenance report JSON must parse: {json}")
+    loop field in ["integrity", "transparency", "publisher", "build"] { assert(json.contains("\"{field}\""), "missing {field}: {json}") }
+    assert(json.contains("\"evidence\":\"E1204\"") && json.contains("\"status\":\"enforced\""), "{json}")
+    check_snapshot("inspect_provenance.json", &json)
+}
+// Rust: tests/cli_parts/commands.rs:388
+#Test("perl_bind_launders_parse_failure_as_e3208") {
+    if Command.new("perl").arg("-v").output().is_err() { return }
+    dir :: isolated_cwd("perl_bind_invalid")
+    script :: dir.join("broken.pl")
+    fs.write(&script, "sub Broken { if ( }\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "perl"]).arg(&script).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(!stderr.contains("syntax error at"))
+    assert(!stderr.contains("broken.pl line"))
+    check_snapshot("bind_perl_invalid_e3208.txt", &scrub(&stderr, &script))
+}
+// Rust: tests/cli_parts/commands.rs:412
+#Test("ruby_bind_round_trips_datatree_state_timeout_and_cancellation") {
+    if Command.new("ruby").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("ruby_bind_round_trip")
+    script :: dir.join("ops.rb")
+    example :: OSPath.new(env.manifest_dir()).join("Examples/interop/ruby")
+    fs.copy(example.join("ops.rb"), &script).unwrap()
+    bind :: Command.new(jet()).args(["inspect", "bind", "ruby"]).arg(&script).args(["--pkg", "ops"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(bind.status.success(), "Ruby bind failed:\n{String.from_utf8_lossy(&bind.stderr)}")
+    cache :: dir.join(".jet/bindings/ruby")
+    assert(cache.join("libjet_ruby_ops.a").is_file())
+    assert(cache.join("ops_worker.rb").is_file())
+    assert(cache.join("ops.provenance").is_file())
+    fs.copy(example.join("main.jet"), dir.join("main.jet")).unwrap()
+    run :: run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(run.status.success(), "generated Ruby binding did not run:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), fs.read_to_string(example.join("expected.out")).unwrap())
+    fs.write(dir.join("cancel.c"), """
+#include <pthread.h>
+#include <stdint.h>
+#include <unistd.h>
+extern int64_t jet_ruby_ops_open(void);
+extern const char* jet_ruby_ops_invoke_sleep_call(int64_t,const char*,int64_t);
+extern void jet_ruby_ops_cancel(int64_t);
+extern void jet_ruby_ops_close(int64_t);
+extern int64_t jet_ruby_ops_take_error(void);
+static int64_t handle;static int64_t code;
+static void* call(void*unused){(void)unused;jet_ruby_ops_invoke_sleep_call(handle,"null",60000);code=jet_ruby_ops_take_error();return 0;}
+int main(void){handle=jet_ruby_ops_open();if(!handle)return 1;pthread_t thread;if(pthread_create(&thread,0,call,0))return 2;usleep(100000);jet_ruby_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 3;int64_t fresh=jet_ruby_ops_open();if(!fresh)return 4;jet_ruby_ops_close(fresh);return 0;}
+""").unwrap()
+    cc :: Command.new("cc").arg("cancel.c").args(["-L.jet/bindings/ruby", "-l:libjet_ruby_ops.a", "-lpthread", "-o", "cancel"]).current_dir(&dir).output().unwrap()
+    assert(cc.status.success(), "Ruby cancellation probe link failed:\n{String.from_utf8_lossy(&cc.stderr)}")
+    cancel :: Command.new(dir.join("cancel")).current_dir(&dir).output().unwrap()
+    assert(cancel.status.success(), "Ruby cancellation did not clean the worker: {cancel.status.code().debug()}")
+}
+// Rust: tests/cli_parts/commands.rs:493
+#Test("ruby_bind_launders_parse_failure_as_e3208") {
+    if Command.new("ruby").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("ruby_bind_invalid")
+    script :: dir.join("broken.rb")
+    fs.write(&script, "def broken(input)\n  if input\nend\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "ruby"]).arg(&script).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(!stderr.contains("syntax error"))
+    assert(!stderr.contains("broken.rb:"))
+    check_snapshot("bind_ruby_invalid_e3208.txt", &scrub(&stderr, &script))
+}
+// Rust: tests/cli_parts/commands.rs:517
+#Test("php_bind_runs_a_persistent_bounded_worker_pool") {
+    if Command.new("php").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("php_bind_pool")
+    script :: dir.join("ops.php")
+    example :: OSPath.new(env.manifest_dir()).join("Examples/interop/php")
+    fs.copy(example.join("ops.php"), &script).unwrap()
+    bind :: Command.new(jet()).args(["inspect", "bind", "php"]).arg(&script).args(["--pkg", "ops"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(bind.status.success(), "PHP bind failed:\n{String.from_utf8_lossy(&bind.stderr)}")
+    cache :: dir.join(".jet/bindings/php")
+    assert(cache.join("libjet_php_ops.a").is_file())
+    assert(cache.join("ops_worker.php").is_file())
+    provenance :: fs.read_to_string(cache.join("ops.provenance")).unwrap()
+    assert(provenance.contains("pool_workers=4"))
+    fs.copy(example.join("main.jet"), dir.join("main.jet")).unwrap()
+    run :: run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(run.status.success(), "generated PHP binding did not run:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), fs.read_to_string(example.join("expected.out")).unwrap())
+    fs.write(dir.join("pool.c"), """
+#include <pthread.h>
+#include <stdint.h>
+#include <time.h>
+#include <unistd.h>
+extern int64_t jet_php_ops_open(void);
+extern const char* jet_php_ops_invoke_pooled_sleep(int64_t,const char*,int64_t);
+extern const char* jet_php_ops_invoke_sleep_call(int64_t,const char*,int64_t);
+extern const char* jet_php_ops_invoke_transform(int64_t,const char*,int64_t);
+extern void jet_php_ops_cancel(int64_t);
+extern void jet_php_ops_close(int64_t);
+extern int64_t jet_php_ops_take_error(void);
+static int64_t pool;static int64_t codes[4];
+static void* parallel_call(void*arg){intptr_t i=(intptr_t)arg;jet_php_ops_invoke_pooled_sleep(pool,"null",5000);codes[i]=jet_php_ops_take_error();return 0;}
+static void* cancel_call(void*unused){(void)unused;jet_php_ops_invoke_sleep_call(pool,"null",60000);codes[0]=jet_php_ops_take_error();return 0;}
+static int64_t millis(void){struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (int64_t)t.tv_sec*1000+t.tv_nsec/1000000;}
+int main(void){const char*valid="{\"nested\":{},\"list\":[],\"scalar\":1,\"nothing\":null}";pool=jet_php_ops_open();if(!pool)return 1;pthread_t threads[4];int64_t start=millis();for(intptr_t i=0;i<4;i++)if(pthread_create(&threads[i],0,parallel_call,(void*)i))return 2;for(int i=0;i<4;i++)pthread_join(threads[i],0);if(millis()-start>2500)return 3;for(int i=0;i<4;i++)if(codes[i])return 4;jet_php_ops_invoke_sleep_call(pool,"null",100);if(jet_php_ops_take_error()!=2)return 5;jet_php_ops_invoke_transform(pool,valid,5000);int64_t recovery=jet_php_ops_take_error();if(recovery)return 20+(int)recovery;pthread_t cancelled;if(pthread_create(&cancelled,0,cancel_call,0))return 7;usleep(100000);jet_php_ops_cancel(pool);pthread_join(cancelled,0);if(codes[0]!=3)return 8;for(int i=0;i<4;i++){jet_php_ops_invoke_transform(pool,valid,5000);int64_t code=jet_php_ops_take_error();if(code)return 30+(int)code;}jet_php_ops_close(pool);int64_t pools[8];for(int i=0;i<8;i++)if(!(pools[i]=jet_php_ops_open()))return 40+i;if(jet_php_ops_open()!=0||jet_php_ops_take_error()!=1)return 49;for(int i=0;i<8;i++)jet_php_ops_close(pools[i]);return 0;}
+""").unwrap()
+    cc :: Command.new("cc").arg("pool.c").args(["-L.jet/bindings/php", "-l:libjet_php_ops.a", "-lpthread", "-o", "pool"]).current_dir(&dir).output().unwrap()
+    assert(cc.status.success(), "PHP pool probe link failed:\n{String.from_utf8_lossy(&cc.stderr)}")
+    pool :: Command.new(dir.join("pool")).current_dir(&dir).output().unwrap()
+    assert(pool.status.success(), "PHP worker-pool probe failed: {pool.status.code().debug()}")
+}
+// Rust: tests/cli_parts/commands.rs:604
+#Test("php_bind_launders_parse_failure_as_e3208") {
+    if Command.new("php").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("php_bind_invalid")
+    script :: dir.join("broken.php")
+    fs.write(&script, "<?php function broken($input) { if ( }\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "php"]).arg(&script).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(!stderr.contains("Parse error"))
+    assert(!stderr.contains("broken.php on line"))
+    check_snapshot("bind_php_invalid_e3208.txt", &scrub(&stderr, &script))
+}
+// Rust: tests/cli_parts/commands.rs:628
+#Test("r_bind_round_trips_datatree_state_and_worker_lifecycle") {
+    if Command.new("Rscript").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("r_bind_round_trip")
+    script :: dir.join("ops.R")
+    example :: OSPath.new(env.manifest_dir()).join("Examples/interop/r")
+    fs.copy(example.join("ops.R"), &script).unwrap()
+    fs.OpenOptions.new().append(true).open(&script).unwrap().write_all("""
+
+replace_plot <- function(value) {
+  device <- dev.cur()
+  dev.off(device)
+  writeChar(value, file.path(Sys.getenv("JET_BIND_TEMP"), "plot.svg"), eos = NULL, useBytes = TRUE)
+}
+hostile_plot <- function(input) {
+  kind <- input$kind
+  value <- switch(kind,
+    script = '<svg xmlns="http://www.w3.org/2000/svg"><script>raw secret script</script></svg>',
+    event = '<svg xmlns="http://www.w3.org/2000/svg" onload="raw secret event"><path d="M0 0"/></svg>',
+    foreign = '<svg xmlns="http://www.w3.org/2000/svg"><foreignObject>raw secret foreign</foreignObject></svg>',
+    external = '<svg xmlns="http://www.w3.org/2000/svg"><use href="https://evil.invalid/raw-secret"/></svg>',
+    css = '<svg xmlns="http://www.w3.org/2000/svg"><path style="fill:url(https://evil.invalid/raw-secret)"/></svg>',
+    doctype = '<!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///raw-secret">]><svg xmlns="http://www.w3.org/2000/svg">&xxe;</svg>',
+    malformed = '<svg xmlns="http://www.w3.org/2000/svg"><path></svg>',
+    oversize = paste0('<svg xmlns="http://www.w3.org/2000/svg"><desc>', strrep('x', 524288), '</desc></svg>'),
+    stop('unknown hostile plot'))
+  replace_plot(value)
+}
+""".as_bytes()).unwrap()
+    bind :: Command.new(jet()).args(["inspect", "bind", "r"]).arg(&script).args(["--pkg", "ops"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(bind.status.success(), "R bind failed:\n{String.from_utf8_lossy(&bind.stderr)}")
+    cache :: dir.join(".jet/bindings/r")
+    assert(cache.join("libjet_r_ops.a").is_file())
+    assert(cache.join("ops_worker.R").is_file())
+    provenance :: fs.read_to_string(cache.join("ops.provenance")).unwrap()
+    assert(provenance.contains("workers_per_session=1\nmax_sessions=32\ntransport=jsonlite\n"))
+    assert(!provenance.to_ascii_lowercase().contains("cran"))
+    fs.copy(example.join("main.jet"), dir.join("main.jet")).unwrap()
+    run :: run_debug_aot("main.jet").current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(run.status.success(), "generated R binding did not run:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), fs.read_to_string(example.join("expected.out")).unwrap())
+    fs.write(dir.join("lifecycle.c"), """
+#include <pthread.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <unistd.h>
+extern int64_t jet_r_ops_open(void);
+extern const char* jet_r_ops_invoke_sleep_call(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_sleep_call_plot(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_plot_scores_plot(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_hostile_plot_plot(int64_t,const char*,int64_t);
+extern const char* jet_r_ops_invoke_transform(int64_t,const char*,int64_t);
+extern void jet_r_ops_cancel(int64_t);
+extern void jet_r_ops_close(int64_t);
+extern int64_t jet_r_ops_take_error(void);
+static int64_t handle;static int64_t code;
+static void* call(void*unused){(void)unused;jet_r_ops_invoke_sleep_call_plot(handle,"1",60000);code=jet_r_ops_take_error();return 0;}
+static int hostile(int64_t h,const char*kind){char input[64];snprintf(input,sizeof(input),"{\"kind\":\"%s\"}",kind);const char*response=jet_r_ops_invoke_hostile_plot_plot(h,input,5000);if(jet_r_ops_take_error()!=0||!response||!strstr(response,"\"ok\":false")||strstr(response,"secret"))return 1;return 0;}
+int main(void){handle=jet_r_ops_open();if(!handle)return 1;const char*svg=jet_r_ops_invoke_plot_scores_plot(handle,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true")||!strstr(svg,"<svg height=\\\"")||strstr(svg,"<?xml")||strstr(svg,"<script"))return 2;const char*kinds[]={"script","event","foreign","external","css","doctype","malformed","oversize"};for(int i=0;i<8;i++)if(hostile(handle,kinds[i]))return 10+i;const char*recovered=jet_r_ops_invoke_transform(handle,"{\"nested\":{},\"vector\":[1,2],\"scalar\":1,\"nothing\":null}",5000);if(jet_r_ops_take_error()!=0||!recovered||!strstr(recovered,"\"ok\":true"))return 20;jet_r_ops_invoke_sleep_call_plot(handle,"1",100);if(jet_r_ops_take_error()!=2)return 21;int64_t timed=jet_r_ops_open();if(!timed)return 22;svg=jet_r_ops_invoke_plot_scores_plot(timed,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true"))return 23;jet_r_ops_close(timed);handle=jet_r_ops_open();if(!handle)return 24;pthread_t thread;if(pthread_create(&thread,0,call,0))return 25;usleep(100000);jet_r_ops_cancel(handle);pthread_join(thread,0);if(code!=3)return 26;int64_t fresh=jet_r_ops_open();if(!fresh)return 27;svg=jet_r_ops_invoke_plot_scores_plot(fresh,"{\"values\":[2,5,3]}",5000);if(jet_r_ops_take_error()!=0||!svg||!strstr(svg,"\"ok\":true"))return 28;jet_r_ops_close(fresh);int64_t sessions[32];for(int i=0;i<32;i++)if(!(sessions[i]=jet_r_ops_open()))return 40+i;if(jet_r_ops_open()!=0||jet_r_ops_take_error()!=1)return 72;for(int i=0;i<32;i++)jet_r_ops_close(sessions[i]);return 0;}
+""").unwrap()
+    cc :: Command.new("cc").arg("lifecycle.c").args(["-L.jet/bindings/r", "-l:libjet_r_ops.a", "-lpthread", "-o", "lifecycle"]).current_dir(&dir).output().unwrap()
+    assert(cc.status.success(), "R lifecycle probe link failed:\n{String.from_utf8_lossy(&cc.stderr)}")
+    lifecycle :: Command.new(dir.join("lifecycle")).current_dir(&dir).output().unwrap()
+    assert(lifecycle.status.success(), "R lifecycle probe failed: {lifecycle.status.code().debug()}")
+}
+// Rust: tests/cli_parts/commands.rs:739
+#Test("r_bind_discovers_functions_without_executing_source") {
+    if Command.new("Rscript").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("r_bind_static_discovery")
+    script :: dir.join("static.R")
+    fs.write(&script, """
+stop("discovery executed source")
+# fake <- function(input) input
+text <- "also_fake <- function(input) input"
+outer <- function(input) {
+  nested <- function(input) input
+  input
+}
+""").unwrap()
+    bind :: Command.new(jet()).args(["inspect", "bind", "r"]).arg(&script).args(["--pkg", "static_ops"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(bind.status.success(), "static R discovery failed:\n{String.from_utf8_lossy(&bind.stderr)}")
+    generated :: fs.read_to_string(dir.join(".jet/bindings/r/static_ops.jet")).unwrap()
+    assert(generated.contains("pub fn outer("))
+    assert(!generated.contains("pub fn fake("))
+    assert(!generated.contains("pub fn also_fake("))
+    assert(!generated.contains("pub fn nested("))
+}
+// Rust: tests/cli_parts/commands.rs:779
+#Test("r_bind_launders_parse_failure_as_e3208") {
+    if Command.new("Rscript").arg("--version").output().is_err() { return }
+    dir :: isolated_cwd("r_bind_invalid")
+    script :: dir.join("broken.R")
+    fs.write(&script, "broken <- function(input) { if ( }\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "r"]).arg(&script).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(!stderr.contains("unexpected '}'"))
+    assert(!stderr.contains("broken.R:"))
+    check_snapshot("bind_r_invalid_e3208.txt", &scrub(&stderr, &script))
+}
+// Rust: tests/cli_parts/commands.rs:803
+#Test("octave_bind_reports_checked_diagnostic_for_unsupported_shape") {
+    dir :: isolated_cwd("octave_bind_invalid")
+    script :: dir.join("broken.m")
+    fs.write(&script, "function [left, right] = split(input)\n  left = input; right = input;\nend\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "octave"]).arg(&script).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(stderr.contains("multiple-output"))
+    assert(stderr.contains(" Why:"))
+    assert(stderr.contains(" Fix:"))
+    assert(!stderr.contains("broken.m:"))
+}
+// Rust: tests/cli_parts/commands.rs:830
+#Test("com_bind_rejects_non_windows_before_reading_input") {
+    if target.selected_os() == "windows" { return }
+    output :: Command.new(jet()).args(["inspect", "bind", "com", "missing.tlb", "--pkg", "excel"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(1))
+    assert(output.stdout.is_empty())
+    check_snapshot("bind_com_non_windows_e3260.txt", &String.from_utf8_lossy(&output.stderr))
+}
+// Rust: tests/cli_parts/commands.rs:845
+#Test("ada_bind_launders_gnat_failure_as_e3208") {
+    if !Command.new("gnatmake").arg("--version").output().is_ok() {
+        eprintln("note: skipping Ada binding compiler test (rerun under jet-env full)")
+        return
+    }
+    dir :: isolated_cwd("ada_bind_failure")
+    spec :: dir.join("broken.ads")
+    fs.write(&spec, "package Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer with Export, Convention => C, External_Name => \"broken_value\"; end Broken;\n").unwrap()
+    fs.write(dir.join("broken.adb"), "package body Broken is function Value (N : Long_Long_Integer) return Long_Long_Integer is begin return N +; end Value; end Broken;\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "ada"]).arg(&spec).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(stderr.contains(" Why:"))
+    assert(stderr.contains(" Fix:"))
+    assert(!stderr.contains("broken.adb:"))
+    check_snapshot("bind_ada_invalid_e3208.txt", &scrub(&stderr, &spec))
+}
+// Rust: tests/cli_parts/commands.rs:872
+#Test("tcl_bind_missing_source_is_laundered_e3208") {
+    dir :: isolated_cwd("tcl_bind_missing")
+    source :: dir.join("missing.tcl")
+    output :: Command.new(jet()).args(["inspect", "bind", "tcl"]).arg(&source).args(["--pkg", "missing"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(stderr.contains(" Why:"))
+    assert(stderr.contains(" Fix:"))
+    check_snapshot("bind_tcl_missing_e3208.txt", &scrub(&stderr, &source))
+}
+// Rust: tests/cli_parts/commands.rs:892
+#Test("fortran_bind_launders_foreign_compiler_failure_as_e3208") {
+    if !Command.new("gfortran").arg("--version").output().is_ok() {
+        eprintln("note: skipping Fortran binding compiler test (rerun under jet-env full)")
+        return
+    }
+    dir :: isolated_cwd("fortran_bind_failure")
+    source :: dir.join("broken.f90")
+    fs.write(&source, """
+module broken_math
+  use iso_c_binding
+contains
+  function broken(a) result(value) bind(C, name="broken")
+    integer(c_int64_t), value :: a
+    integer(c_int64_t) :: value
+    value = a +
+  end function broken
+end module broken_math
+""").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "fortran"]).arg(&source).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"), "missing Jet diagnostic:\n{stderr}")
+    assert(stderr.contains(" Why:"), "missing reason:\n{stderr}")
+    assert(stderr.contains(" Fix:"), "missing fix:\n{stderr}")
+    assert(!stderr.contains("broken.f90:"), "raw gfortran location leaked:\n{stderr}")
+    assert(!stderr.contains("    7 |"), "raw gfortran source frame leaked:\n{stderr}")
+    check_snapshot("bind_fortran_invalid_e3208.txt", &scrub(&stderr, &source))
+}
+// Rust: tests/cli_parts/commands.rs:942
+#Test("cobol_bind_launders_foreign_compiler_failure_as_e3208") {
+    if !Command.new("cobc").arg("--version").output().is_ok() {
+        eprintln("note: skipping Cobol binding compiler test (rerun under jet-env full)")
+        return
+    }
+    dir :: isolated_cwd("cobol_bind_failure")
+    source :: dir.join("broken.cob")
+    copybook :: dir.join("record.cpy")
+    fs.write(&source, "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. BROKEN.\n       THIS IS NOT COBOL.\n").unwrap()
+    fs.write(&copybook, "       01 RECORD.\n          05 AMOUNT PIC S9(7)V99 COMP-3.\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "cobol"]).arg(&source).arg("--copybook").arg(&copybook).args(["--pkg", "broken"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"))
+    assert(stderr.contains(" Why:"))
+    assert(stderr.contains(" Fix:"))
+    assert(!stderr.contains("broken.cob:"), "raw cobc location leaked:\n{stderr}")
+    check_snapshot("bind_cobol_invalid_e3208.txt", &scrub(&stderr, &source))
+}
+// Rust: tests/cli_parts/commands.rs:983
+#Test("cobol_bind_rejects_unknown_copybook_usage_as_e3208") {
+    dir :: isolated_cwd("cobol_bind_unknown_usage")
+    source :: dir.join("program.cob")
+    copybook :: dir.join("record.cpy")
+    fs.write(&source, "       IDENTIFICATION DIVISION.\n       PROGRAM-ID. PROGRAM.\n").unwrap()
+    fs.write(&copybook, "       01 RECORD.\n          05 AMOUNT PIC 9(4) BINARY.\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "bind", "cobol"]).arg(&source).arg("--copybook").arg(&copybook).args(["--pkg", "record"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success())
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3208]:"), "missing E3208:\n{stderr}")
+    assert(stderr.contains("unsupported PIC/usage"), "missing copybook cause:\n{stderr}")
+    assert(stderr.contains(" Why:") && stderr.contains(" Fix:"), "incomplete diagnostic:\n{stderr}")
+    assert(!stderr.contains("record.cpy:"), "raw copybook location leaked:\n{stderr}")
+}
+// Rust: tests/cli_parts/commands.rs:1028
+#Test("unknown_cross_target_is_e3302") {
+    src :: env.temp_dir().join("jet_unknown_cross_target.jet")
+    fs.write(&src, "fn run() -> { print(\"target\") }\n").unwrap()
+    out :: Command.new(jet()).arg("build").arg(&src).arg("--target=definitely-not-a-rust-target").env("NO_COLOR", "1").output().unwrap()
+    stderr :: scrub(&String.from_utf8_lossy(&out.stderr), &src)
+    assert_eq(out.status.code(), Some(1), "unexpected stderr:\n{stderr}")
+    assert(stderr.contains("Error [E3302]:"), "missing target diagnostic:\n{stderr}")
+    assert(stderr.contains("Why:"), "missing E3302 reason:\n{stderr}")
+    assert(stderr.contains("Fix:"), "missing E3302 fix:\n{stderr}")
+    check_snapshot("unknown_target_e3302.txt", &stderr)
+}
+// Rust: tests/cli_parts/commands.rs:1050
+#Test("prove_unknown_lens_is_e2941") {
+    root :: env.temp_dir().join("jet_cli_prove_unknown_lens")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("plain.jet"), "fn run() -> {}\n").unwrap()
+    out :: Command.new(jet()).current_dir(&root).args(["prove", "plain.jet", "--lens", "test"]).env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Some(2), "unexpected stderr:\n{stderr}")
+    assert(stderr.contains("Error [E2941]:"), "missing lens diagnostic:\n{stderr}")
+    assert(stderr.contains("Why:"), "missing E2941 reason:\n{stderr}")
+    assert(stderr.contains("Fix:"), "missing E2941 fix:\n{stderr}")
+    check_snapshot("prove_unknown_lens_e2941.txt", &stderr)
+}
+// Rust: tests/cli_parts/commands.rs:1073
+#Test("completions_generate_for_every_shell") {
+    loop shell in ["bash", "zsh", "fish", "powershell"] {
+        out :: Command.new(jet()).args(["self", "completions"]).arg(shell).output().unwrap()
+        assert_eq(out.status.code(), Some(0), "completions {shell} should exit 0")
+        s :: String.from_utf8_lossy(&out.stdout)
+        loop flag in ["structural", "out", "repo"] {
+            spelling :: if shell == "fish" { "-l {flag}" } else { "--{flag}" }
+            assert(s.contains(spelling), "{shell} completion missing {spelling}")
+        }
+        check_snapshot("completions_{shell}.txt", &s)
+    }
+}
+// Rust: tests/cli_parts/commands.rs:1103
+#Test("man_page_golden") {
+    out :: Command.new(jet()).args(["self", "man"]).output().unwrap()
+    s := String.from_utf8_lossy(&out.stdout).into_owned()
+    s = s.replace(env.package_version(), "VERSION")
+    loop flag in ["--structural", "--out", "--repo"] { assert(s.contains(flag), "man page missing {flag}") }
+    check_snapshot("man.txt", &s)
+}
+// Rust: tests/cli_parts/commands.rs:1115
+#Test("retired_emit_rust_flag_teaches_canonical_command") {
+    out :: Command.new(jet()).args(["run", "Examples/features/basics/hello.jet", "--emit-rust"]).env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert_eq(out.status.code(), Some(2), "unexpected stderr:\n{stderr}")
+    assert(stderr.contains("Error [E2102]: `--emit-rust` isn't a flag"))
+    assert(stderr.contains("Fix: run `jet emit --rust <file.jet>`"))
+}
+// Rust: tests/cli_parts/commands.rs:1128
+#Test("duplicate_authority_right_is_e2102") {
+    dir :: isolated_cwd("authority_duplicate_right")
+    fs.write(dir.join("run.jet"), "fn run() -> { print(\"ok\") }\n").unwrap()
+    output :: Command.new(jet()).args(["run", "run.jet", "--allow=Net", "--deny=Net"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(2), "duplicate authority right must be a usage error: {String.from_utf8_lossy(&output.stderr)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E2102]"), "{stderr}")
+    assert(stderr.contains("authority right `Net` is both allowed and denied"), "{stderr}")
+    assert(stderr.contains("remove one of `--allow=Net` or `--deny=Net`"), "{stderr}")
+}
+// Rust: tests/cli_parts/commands.rs:1159
+// Invocation authority must work at each retained native optimization level.
+#Test("allow_time_wait_runs_on_every_engine_from_a_repository_subdirectory") {
+    root :: isolated_cwd("authority_allow_time_wait")
+    fs.create_dir_all(root.join(".git")).unwrap()
+    app :: root.join("app")
+    fs.create_dir_all(&app).unwrap()
+    fs.write(app.join("wait.jet"), "use core.time as time\n\nfn run() -> {\n    time.sleep(1ms)\n    print(\"waited\")\n}\n").unwrap()
+    // Retired JIT/interpreter representation checks migrate to O0/O1/O2 behavior.
+    loop (engine, flags) in [("o0", ["--profile=debug"]), ("o1", ["--profile=dev"]), ("o2", ["--release"])] {
+        output :: Command.new(jet()).arg("run").args(flags).args(["--allow=Time.Wait", "wait.jet"]).current_dir(&app).env("NO_COLOR", "1").output().unwrap()
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert(output.status.success(), "{engine}: --allow=Time.Wait must run:\n{stderr}")
+        assert_eq(String.from_utf8_lossy(&output.stdout), "waited\n", "{engine}: {stderr}")
+    }
+}
+// Rust: tests/cli_parts/commands.rs:1193
+#Test("fix_dry_run_does_not_write") {
+    p :: env.temp_dir().join("jet_cli_fix.jet")
+    original :: "fn run() -> {\n    println(\"hi\")\n}\n"
+    fs.write(&p, original).unwrap()
+    out :: Command.new(jet()).arg("fix").arg(&p).arg("--dry-run").output().unwrap()
+    s :: String.from_utf8_lossy(&out.stdout)
+    assert(s.contains("dry run"), "dry-run should say so:\n{s}")
+    assert(s.contains("print"), "diff should show the fix:\n{s}")
+    assert_eq(fs.read_to_string(&p).unwrap(), original, "dry-run must not write")
+    out2 :: Command.new(jet()).arg("fix").arg(&p).output().unwrap()
+    assert_eq(out2.status.code(), Some(0))
+    assert(fs.read_to_string(&p).unwrap().contains("print(\"hi\")"), "fix should rewrite the file")
+}
+// Rust: tests/cli_parts/commands.rs:1225
+#Test("external_subcommand_is_discovered") {
+    dir :: env.temp_dir().join("jet_ext_test_bin")
+    fs.create_dir_all(&dir).unwrap()
+    script :: dir.join("jet-greet")
+    fs.write(&script, "#!/bin/sh\necho \"hi from plugin $1\"\n").unwrap()
+    if target.selected_family() == "unix" {
+        perm := fs.metadata(&script).unwrap().permissions()
+        perm.set_mode(0o755)
+        fs.set_permissions(&script, perm).unwrap()
+    }
+    ambient_path :: env.var("PATH").unwrap_or_default()
+    path :: "{dir.display()}:{ambient_path}"
+    out :: Command.new(jet()).arg("greet").arg("world").env("PATH", path).output().unwrap()
+    s :: String.from_utf8_lossy(&out.stdout)
+    assert(s.contains("hi from plugin world"), "external subcommand not forwarded:\n{s}")
+}
+// Rust: tests/cli_parts/commands.rs:1258
+#Test("osc8_hyperlinks_only_when_forced_on") {
+    p :: bad_file("1259")
+    piped :: Command.new(jet()).arg("check").arg(&p).env("NO_COLOR", "1").output().unwrap()
+    s :: String.from_utf8_lossy(&piped.stderr)
+    assert(!s.contains("\x1b]8;;"), "piped output must have no OSC 8 links:\n{s.debug()}")
+    src :: "fn run() -> {}\n"
+    d :: Diagnostic.error("E0001", "x", "y", "z", Some(Span.new(3, 7)))
+    linked :: d.render_linked("a.jet", src, true, true)
+    assert(linked.contains("\x1b]8;;"), "render_linked(hyperlinks=true) should emit OSC 8")
+    plain :: d.render_linked("a.jet", src, true, false)
+    assert(!plain.contains("\x1b]8;;"), "render_linked(hyperlinks=false) must not")
+}
+// Rust: tests/cli_parts/commands.rs:1296
+#Test("ext_optional_check_resolves_dot_jet") {
+    stem :: env.temp_dir().join("jet_cli_extopt_check")
+    file :: stem.with_extension("jet")
+    fs.write(&file, "fn run() -> {\n    print(\"ok\")\n}\n").unwrap()
+    out :: Command.new(jet()).arg("check").arg(&stem).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "ext-optional check should resolve {stem.display()}.jet and exit 0; stderr: {String.from_utf8_lossy(&out.stderr)}")
+}
+// Rust: tests/cli_parts/commands.rs:1317
+#Test("run_rejected_collection_body_reports_only_frontend_diagnostics") {
+    dir :: isolated_cwd("run_rejected_collection_body")
+    fs.write(dir.join("main.jet"), """
+use core.files as fs
+
+struct Row {
+    name: String
+    count: Int
+}
+
+fn run() -> {
+    fs.write("/tmp/jet_1271.csv", "alpha,1\n") ?? panic("write failed")
+    text :: fs.read("/tmp/jet_1271.csv") ?? ""
+    rows := [Row]{}
+    loop line in text.split("\n") {
+        parts :: line.split(",")
+        &rows.push(Row{ name: parts.get(0), count: missing })
+    }
+    &rows.sort_by((row: Row) -> row.name)
+}
+""").unwrap()
+    rejected :: Command.new(jet()).args(["run", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(rejected.status.code(), Some(1))
+    assert(rejected.stdout.is_empty(), "{rejected.stdout.debug()}")
+    stderr :: scrub(&String.from_utf8(rejected.stderr).unwrap(), &dir.join("main.jet"))
+    assert_eq(stderr,
+        "Error [E0102]: `Iter` has no method `get`\n" +
+        "  --> BAD.jet:14:36\n" +
+        "    |\n" +
+        " 14 |         rows.push(Row{ name: parts.get(0), count: missing })\n" +
+        "    |                                    ^^^\n" +
+        " Why: `Iter` is a one-pass source; `get` needs a materialized list, so collection consumes the source and allocates the list\n" +
+        " Fix: Materialize it first with `.to_list()`; this consumes the source and allocates a list\n" +
+        "More: jet-lang.dev/e/E0102\n\n" +
+        "Error [E0107]: Nothing named `missing` exists here\n" +
+        "  --> BAD.jet:14:51\n" +
+        "    |\n" +
+        " 14 |         rows.push(Row{ name: parts.get(0), count: missing })\n" +
+        "    |                                                   ^^^^^^^\n" +
+        " Why: A name must be declared before it's used\n" +
+        " Fix: Declare it first: `missing :: ...`\n" +
+        "More: jet-lang.dev/e/E0107\n\n" +
+        "2 problems found\n" +
+        "run `jet explain E0102` to learn more\n")
+}
+// Rust: tests/cli_parts/commands.rs:1383
+#Test("check_fixed_dynamic_size_reports_e0103_without_internal_failure") {
+    root :: OSPath.new(env.manifest_dir())
+    invalid :: root.join("tests/fuzz/sema/invalid/ui_fixed_dynamic_size.E0103.jet")
+    rejected :: Command.new(jet()).args(["check", invalid.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(rejected.status.code(), Some(1))
+    stderr :: String.from_utf8_lossy(&rejected.stderr)
+    assert(stderr.contains("Error [E0103]"), "{stderr}")
+    loop leaked in ["panicked at", "entered unreachable code", "internal error", "generated Rust"] {
+        assert(!stderr.contains(leaked), "`{leaked}` leaked:\n{stderr}")
+    }
+    dir :: isolated_cwd("check_fixed_comptime_size")
+    fs.write(dir.join("mixed.jet"), "use core.mem\nfn fixed_size() -> Int { return 32 }\nfn bad(size: Int) -> {\n fixed :: mem.Fixed.new(size: size)\n close(^fixed)\n}\nfn run() -> {\n fixed :: mem.Fixed.new(size: fixed_size())\n close(^fixed)\n}\n").unwrap()
+    mixed :: Command.new(jet()).args(["check", "mixed.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(mixed.status.code(), Some(1))
+    mixed_stderr :: String.from_utf8_lossy(&mixed.stderr)
+    assert(mixed_stderr.contains("Error [E0103]"), "{mixed_stderr}")
+    assert(!mixed_stderr.contains("panicked at") && !mixed_stderr.contains("internal error"), "{mixed_stderr}")
+    fs.write(dir.join("compare_chain.jet"), "fn helper() -> Int { return 1 }\nfn run() -> {\n if 0 < helper() < 2 {\n  print(\"reachable\")\n }\n}\n").unwrap()
+    compare_chain :: Command.new(jet()).args(["check", "compare_chain.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(compare_chain.status.code(), Some(0), "{String.from_utf8_lossy(&compare_chain.stderr)}")
+    fs.write(dir.join("higher_order_valid.jet"), "use core.mem\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn fixed_size() -> Int { return 32 }\nfn run() -> {\n fixed :: mem.Fixed.new(size: apply(fixed_size))\n close(^fixed)\n}\n").unwrap()
+    higher_order_valid :: Command.new(jet()).args(["check", "higher_order_valid.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(higher_order_valid.status.code(), Some(0), "{String.from_utf8_lossy(&higher_order_valid.stderr)}")
+    fs.write(dir.join("higher_order_isolation.jet"), "use core.mem\nfn apply(f: fn() -> Int) -> Int { return f() }\nfn fixed_size() -> Int { return 32 }\nfn bad(size: Int) -> {\n fixed :: mem.Fixed.new(size: size)\n close(^fixed)\n}\nfn run() -> {\n fixed :: mem.Fixed.new(size: apply(fixed_size))\n close(^fixed)\n}\n").unwrap()
+    higher_order_isolation :: Command.new(jet()).args(["check", "higher_order_isolation.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(higher_order_isolation.status.code(), Some(1))
+    isolated_stderr :: String.from_utf8_lossy(&higher_order_isolation.stderr)
+    assert_eq(isolated_stderr.matches("Error [E0103]").count(), 1, "{isolated_stderr}")
+    loop leaked in ["panicked at", "entered unreachable code", "internal error"] {
+        assert(!isolated_stderr.contains(leaked), "`{leaked}` leaked:\n{isolated_stderr}")
+    }
+    fs.write(dir.join("lambda_value.jet"), "fn run() -> {\n callback :: prep { () -> print(\"not called\") }\n print(\"ok\")\n}\n").unwrap()
+    lambda_value :: Command.new(jet()).args(["check", "lambda_value.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(lambda_value.status.code(), Some(0), "{String.from_utf8_lossy(&lambda_value.stderr)}")
+    fs.write(dir.join("helper.jet"), "use core.mem\nfn fixed_size() -> Int { return 32 }\nfn run() -> {\n fixed :: mem.Fixed.new(size: fixed_size())\n close(^fixed)\n}\n").unwrap()
+    helper :: Command.new(jet()).args(["check", "helper.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(helper.status.code(), Some(0))
+    helper_stderr :: String.from_utf8_lossy(&helper.stderr)
+    assert(!helper_stderr.contains("panicked at") && !helper_stderr.contains("internal error"), "{helper_stderr}")
+    fs.write(dir.join("main.jet"), "use core.mem\nfn run() -> {\n fixed :: mem.Fixed.new(size: 16 + 16)\n close(^fixed)\n}\n").unwrap()
+    accepted :: Command.new(jet()).args(["check", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(accepted.status.code(), Some(0), "{String.from_utf8_lossy(&accepted.stderr)}")
+    accepted_stderr :: String.from_utf8_lossy(&accepted.stderr)
+    assert(!accepted_stderr.contains("panicked at") && !accepted_stderr.contains("internal error"), "{accepted_stderr}")
+}
+// Rust: tests/cli_parts/commands.rs:1538
+#Test("check_reports_soft_public_lints_without_failing") {
+    dir :: isolated_cwd("check_soft_public")
+    fs.write(dir.join("library.jet"), "pub fn _legacy() -> Int { return 1 }\n").unwrap()
+    fs.write(dir.join("main.jet"), "use \"library\"\nfn run() -> { print(library._legacy()) }\n").unwrap()
+    output :: Command.new(jet()).args(["check", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(0))
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert_eq(stderr.matches("[L0601]").count(), 1, "{stderr}")
+    assert(!String.from_utf8_lossy(&output.stdout).contains("has no problems"), "{String.from_utf8_lossy(&output.stdout)}")
+}
+// Rust: tests/cli_parts/commands.rs:1567
+#Test("ext_optional_run_resolves_dot_jet") {
+    stem :: env.temp_dir().join("jet_cli_extopt_run")
+    file :: stem.with_extension("jet")
+    fs.write(&file, "fn run() -> {\n    print(\"hello-extopt\")\n}\n").unwrap()
+    out :: Command.new(jet()).arg("run").arg(&stem).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "ext-optional run should exit 0; stderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(String.from_utf8_lossy(&out.stdout).contains("hello-extopt"), "stdout: {String.from_utf8_lossy(&out.stdout)}")
+}
+// Rust: tests/cli_parts/commands.rs:1587
+#Test("ext_optional_missing_path_keeps_original_name") {
+    stem :: env.temp_dir().join("jet_cli_extopt_absent_xyz")
+    out :: Command.new(jet()).arg("check").arg(&stem).output().unwrap()
+    assert_ne(out.status.code(), Some(0))
+    err :: String.from_utf8_lossy(&out.stderr)
+    assert(err.contains("jet_cli_extopt_absent_xyz"), "error should name the original path; stderr: {err}")
+}
+// Rust: tests/cli_parts/commands.rs:1605
+#Test("simple_exec_runs_without_a_manifest") {
+    path :: OSPath.new(env.manifest_dir()).join("tests/fixtures/simple_exec/run.jet")
+    out :: Command.new(jet()).arg("run").arg(&path).current_dir(isolated_cwd("simple_exec")).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "stderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(String.from_utf8_lossy(&out.stdout).contains("simple exec, no manifest"), "stdout: {String.from_utf8_lossy(&out.stdout)}")
+}
+// Rust: tests/cli_parts/commands.rs:1631
+#Test("passthrough_forwards_tokens_after_separator") {
+    p :: args_fixture("1634")
+    out :: Command.new(jet()).args(["run", "--profile=debug", p.to_str().unwrap(), "--", "--port", "8080", "x"]).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "stderr: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    trimmed := stdout.trim() // #4303
+    assert(trimmed == "4", "expected 4 args (argv[0] + 3 forwarded), got: {stdout}")
+}
+// Rust: tests/cli_parts/commands.rs:1661
+#Test("passthrough_forwards_version_flag_and_value_after_separator") {
+    p :: args_fixture("1664")
+    out :: Command.new(jet()).args(["run", "--profile=debug", p.to_str().unwrap(), "--", "--version", "1.0.0"]).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "stderr: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    trimmed := stdout.trim() // #4303
+    assert_eq(trimmed, "3", "expected argv[0] plus --version and its value, got: {stdout}")
+    version :: Command.new(jet()).arg("--version").output().unwrap()
+    assert(version.status.success(), "jet --version failed: {String.from_utf8_lossy(&version.stderr)}")
+    banner :: String.from_utf8_lossy(&version.stdout)
+    assert(banner.starts_with("Jet "), "version banner: {banner}")
+    assert(banner.contains("supported editions:"), "version banner missing editions: {banner}")
+    assert(banner.contains("registry protocol: v"), "version banner missing registry protocol: {banner}")
+}
+// Rust: tests/cli_parts/commands.rs:1708
+#Test("bare_separator_gives_empty_passthrough") {
+    p :: args_fixture("1710")
+    out :: Command.new(jet()).args(["run", "--profile=debug", p.to_str().unwrap(), "--"]).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "stderr: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    trimmed := stdout.trim() // #4303
+    assert(trimmed == "1", "expected 1 arg (just argv[0]), got: {stdout}")
+}

@@ -1,0 +1,721 @@
+use jet.[Package, Compiler, Lexer, Parser, Formatter, format_source, format_source_with_options, render_diagnostics]
+use jet_foundation.Tests.Integration.Fmt.[collect_jet_files, assert_fmt_stable]
+use jet_foundation.Tests.Integration.Common as common
+use std.[fs, env, process]
+
+// Rust: tests/fmt.rs:9
+#Test("package_transition_surface_formats_canonically_and_idempotently") {
+    sources := ["name: \"demo\"\noutputs: { app: .Executable{ entry: run } }\n", "pub development :: Config{ environments: { development: .Environment{ tools: [\"git\"] } } }\n", "pub app :: Config{ version: \"1\" }\n"]
+    for source in sources {
+        once := Package.format_source(source, "package.jet").expect("canonical package source should format")
+        twice := Package.format_source(once, "package.jet").expect("formatted package source should reformat")
+        assert_eq(once, twice, "canonical package formatting must be stable")
+        assert(once.contains("Executable") || once.contains("Config"), "formatter dropped package contribution:\n{once}")
+    }
+    formatted := Package.format_source("name : \"demo\"\n", "package.jet").expect("package field spacing should format")
+    assert(formatted.contains("name: \"demo\""), "{formatted}")
+    assert(!formatted.contains("name :"), "{formatted}")
+}
+// Rust: tests/fmt.rs:35
+#Test("package_cli_migrates_retired_record_heads_before_validation") {
+    // GATE #4494: real CLI, scoped scratch and filesystem.
+    scratch := common.Scratch.new("package-fmt-retired-record-heads")
+    path := scratch.join("package.jet")
+    fs.write(&path, "name: \"demo\"\nauthority: { holds: { allow: [IO] } }\n").unwrap()
+    output := process.Command.new(common.jet_bin()).args(["fmt", path.to_str().unwrap()]).output().unwrap()
+    assert(output.status.success(), "stderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    formatted := fs.read_to_string(path).unwrap()
+    assert(formatted.contains("authority: {"), "{formatted}")
+    assert(!formatted.contains(".{"), "{formatted}")
+}
+// Rust: tests/fmt.rs:59
+#Test("type_alias_binding_sigils_are_canonical_and_idempotent") {
+    source := "alias Result<T> :: T Int!;\nfn run() -> {}\n"
+    once := format_source(source).expect("canonical alias spelling should format")
+    assert(once.contains("alias Result<T> :: T Int!"), "{once}")
+    assert(!once.contains("alias Result<T> ="), "{once}")
+    twice := format_source(once).expect("canonical alias spelling should reformat")
+    assert_eq(once, twice, "alias formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:69
+#Test("fmt_preserves_module_declaration_and_function_source_order") {
+    source := "MESSAGE :: \"module global\"\n\nfn helper() -> Int {\n    return 42\n}\n\nfn run() -> {\n    print(MESSAGE)\n    print(helper())\n}\n"
+    once := format_source(source).expect("module globals should format")
+    message := once.find("MESSAGE ::").expect("module binding should remain")
+    helper := once.find("fn helper").expect("declaration should remain")
+    assert(message < helper, "formatter reordered source items:\n{once}")
+    twice := format_source(once).expect("formatted source should reformat")
+    assert_eq(once, twice, "module-global formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:86
+#Test("fmt_separates_core_functions_with_exactly_two_newlines") {
+    source := "fn first() -> {}\n\n\n/// Documents the second function.\nfn second() -> {}\nfn third() -> {}\n"
+    once := format_source(source).expect("core-style functions should format")
+    assert(once.contains("}\n\n/// Documents the second function.\nfn second()"), "{once}")
+    assert(once.contains("}\n\nfn third()"), "{once}")
+    assert(!once.contains("}\n\n\n"), "{once}")
+    assert_eq(once, format_source(once).expect("formatting should be idempotent"))
+}
+// Rust: tests/fmt.rs:103
+#Test("fmt_returned_function_calls_use_call_and_are_stable") {
+    source := "\nfn make_adder() -> fn(Int) -> Int { (value: Int) -> value + 1 }\n\nfn run() -> {\n    result :: make_adder().call(2)\n}\n"
+    once := format_source(source).expect("returned function call should format")
+    assert(once.contains("make_adder().call(2)"), "formatter lost `.call`:\n{once}")
+    twice := format_source(once).expect("formatted returned function call should reformat")
+    assert_eq(once, twice, "returned function call formatting must be stable")
+}
+// Rust: tests/fmt.rs:125
+#Test("fmt_arithmetic_policy_scope_is_canonical_and_idempotent") {
+    source := "\nfn run() -> {\n    #Arithmetic(.Wrapping) {\n        value :: U8{250} + U8{10}\n        print(value)\n    }\n}\n"
+    once := format_source(source).expect("arithmetic policy block should format")
+    assert(once.contains("#Arithmetic(.Wrapping)"), "{once}")
+    assert(!once.contains("wrapping("), "retired expression wrapper leaked:\n{once}")
+    twice := format_source(once).expect("formatted arithmetic policy should reformat")
+    assert_eq(once, twice, "arithmetic policy formatting must be stable")
+}
+// Rust: tests/fmt.rs:145
+#Test("package_formatter_fails_closed_on_comments") {
+    error := Package.format_source("name: \"demo\" // comment ownership is not typed yet\n", "package.jet").expect_err("typed formatter must not report commented source as clean")
+    assert(error.contains("cannot safely rewrite comments"), "{error}")
+}
+// Rust: tests/fmt.rs:155
+#Test("checked_text_bodies_keep_raw_backslashes") {
+    src := "fn run() -> {\n    pattern :: Pattern{\"\\d+\"}\n    text :: \"a\\nb\"\n    page :: Pattern{\"<p>{{name}}</p>\"}\n}\n"
+    once := format_source(src).expect("checked text type should format")
+    assert(once.contains("Pattern{\"\\d+\"}"), "formatter decoded a checked-text slash:\n{once}")
+    assert(once.contains("\"a\\nb\""), "formatter lost the plain-string newline escape:\n{once}")
+    assert(once.contains("{{name}}"), "formatter dropped a checked-text hole:\n{once}")
+    twice := format_source(once).expect("checked text type should reformat")
+    assert_eq(once, twice, "checked-text formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:180
+#Test("fixed_interpolation_selector_is_stable") {
+    src := "fn run()->{price::1234.5\nprint(\"{{price:Fixed(2)}}\")}\n"
+    once := format_source(src).expect("fixed interpolation should format")
+    assert_eq(once, "fn run() -> {\n    price :: 1234.5\n    print(\"{{price:Fixed(2)}}\")\n}\n")
+    twice := format_source(once).expect("fixed interpolation should re-format")
+    assert_eq(twice, once)
+}
+// Rust: tests/fmt.rs:192
+#Test("grouped_interpolation_selector_is_stable") {
+    src := "fn run()->{price::1234.5\nprint(\"{{price:Grouped(2)}}\") }\n"
+    once := format_source(src).expect("grouped interpolation should format")
+    assert_eq(once, "fn run() -> {\n    price :: 1234.5\n    print(\"{{price:Grouped(2)}}\")\n}\n")
+}
+// Rust: tests/fmt.rs:202
+#Test("fmt_migrates_each_retired_print_spelling_to_one_canonical_job") {
+    source := "use core.term as io\n\nfn run() -> {\n    io.println(\"line\")\n    value :: \"value\"\n    io.sprint(value)\n    io.repr(value)\n}\n"
+    edits := Formatter.retired_print_family_edits(source)
+    assert_eq(edits.len(), 3, "one migration edit per retired spelling")
+    once := format_source(source).expect("retired print family should format")
+    assert_eq(once, "use core.term as io\n\nfn run() -> {\n    io.print(\"line\")\n    value :: \"value\"\n    print(\"{{value}}\")\n    print(\"{{value:Debug}}\")\n}\n")
+    assert(Formatter.retired_print_family_edits(once).is_empty())
+    assert_eq(format_source(once).expect("canonical print family should reformat"), once)
+}
+// Rust: tests/fmt.rs:220
+#Test("print_family_migration_ignores_unrelated_import_bindings") {
+    source := "use helper as io\n\nfn run() -> {\n    io.sprint(value)\n}\n"
+    assert(Formatter.retired_print_family_edits(source).is_empty())
+}
+// Rust: tests/fmt.rs:226
+#Test("fmt_preserves_root_receiver_declarations") {
+    src := "fn show(#Root value: Int) -> { print(value) }\n"
+    once := format_source(src).expect("#Root declaration should format")
+    assert(once.contains("fn show(#Root value: Int)"), "formatter dropped the #Root marker:\n{once}")
+    twice := format_source(once).expect("formatted #Root declaration should re-format")
+    assert_eq(once, twice, "#Root formatting must be stable")
+}
+// Rust: tests/fmt.rs:238
+#Test("fmt_canonicalizes_unit_return_types") {
+    src := "fn run() -> Err! { return Err(\"boom\") }\n"
+    once := format_source(src).expect("unit return type should format")
+    assert(once.contains("fn run() -> Err!"), "formatter lost the unit-fallible return:\n{once}")
+    twice := format_source(once).expect("formatted unit return should re-format")
+    assert_eq(once, twice, "unit return formatting must be idempotent")
+    assert(format_source("fn run() ? { return Err(\"boom\") }\n").is_err(), "retired bare unit-fallible spelling must not be accepted by the formatter")
+    assert(format_source("fn run() => Void ! { return Err(\"boom\") }\n").is_err(), "retired Void must not be accepted by the formatter")
+}
+// Rust: tests/fmt.rs:258
+#Test("fmt_parallel_collection_adapters_are_stable") {
+    src := "fn run() -> {\n    values := [1, 2, 3, 4]\n    doubled :: values.para_map((n: Int) -> n * 2)\n    even :: values.para_filter((n: Int) -> n % 2 == 0)\n    split :: values.para_partition((n: Int) -> n % 2 == 0)\n    total :: values.para_fold(() -> 0, (acc: Int, n: Int) -> acc + n, (left: Int, right: Int) -> left + right)\n}\n"
+    once := format_source(src).expect("parallel collection adapters should format")
+    for spelling in ["para_map", "para_filter", "para_partition", "para_fold"] { assert(once.contains(spelling), "formatter dropped `{spelling}`:\n{once}") }
+    twice := format_source(once).expect("formatted parallel adapters should parse")
+    assert_eq(once, twice, "parallel adapter formatting must be stable")
+}
+// Rust: tests/fmt.rs:279
+#Test("repr_c_enum_surface_is_stable") {
+    src := "#Layout(c, tag: U8)\nenum Packet { Ping(Int) = 3; Data(x: I32, y: I32) = 7 }\n"
+    once := format_source(src).expect("C-layout enum should format")
+    assert(once.contains("#Layout(c, tag: U8)"))
+    assert(once.contains("Ping(Int) = 3"))
+    assert(once.contains("Data(x: I32, y: I32) = 7"))
+    twice := format_source(once).expect("formatted C-layout enum should parse")
+    assert_eq(once, twice, "C-layout enum formatting must be stable")
+}
+// Rust: tests/fmt.rs:290
+#Test("computed_declaration_values_format_stably") {
+    src := "LANES :: prep { 2 }\nBASE :: prep { 40 }\nstruct Frame { values: [Int#(LANES * 2)] }\n#Layout(c, tag: U8) enum Code { First = BASE + 1 Second }\n"
+    once := format_source(src).expect("computed declaration values should format")
+    assert(once.contains("[Int#(LANES * 2)]"), "fixed-list expression was lost:\n{once}")
+    assert(once.contains("First = BASE + 1"), "enum expression was lost:\n{once}")
+    twice := format_source(once).expect("formatted computed values should re-format")
+    assert_eq(once, twice, "computed declaration formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:309
+#Test("multi_head_function_surface_round_trips") {
+    src := "enum Shape { Circle(Float) Rect(w: Float, h: Float) }\n\nfn area(Circle(r: Float)) -> Float { r * r }\nfn area(Rect(w: Float, h: Float)) -> Float { w * h }\n"
+    once := format_source(src).expect("multi-head functions should format")
+    assert(once.contains("fn area(Circle(r: Float)) -> Float { r * r }"))
+    assert(once.contains("fn area(Rect(w: Float, h: Float)) -> Float { w * h }"))
+    twice := format_source(once).expect("formatted multi-head functions should parse")
+    assert_eq(once, twice, "multi-head formatting must be stable")
+}
+// Rust: tests/fmt.rs:319
+#Test("bar_formatting_is_stable") {
+    src := "enum State { Ready Waiting }\n\nfn run() -> {\n    state :: State.Ready\n    if state == {\n        .Ready | .Waiting -> print(\"known\")\n    }\n}\n"
+    once := format_source(src).expect("choice alternatives should format")
+    assert(once.contains(".Ready | .Waiting ->"), "formatter lost the alternatives-only bar:\n{once}")
+    twice := format_source(once).expect("formatted alternatives should parse")
+    assert_eq(once, twice, "alternative formatting must be stable")
+    bit_or := format_source("fn run() -> { value :: 1 | 2 }").expect("formatter should preserve value-position bitwise OR")
+    assert(bit_or.contains("value :: 1 | 2"), "formatter lost bitwise OR:\n{bit_or}")
+    assert_eq(bit_or, format_source(bit_or).unwrap(), "bitwise-OR formatting must be stable")
+    assert(format_source("fn run() -> { value :: 1 |> print }").is_err(), "formatter must not invent a flow path")
+}
+// Rust: tests/fmt.rs:347
+#Test("typestate_section_stays_inside_its_struct") {
+    src := "struct Door { state { Open, Closed } value: Int }\nfn run() -> {}\n"
+    formatted := format_source(src).expect("nested state section should format")
+    assert(formatted.contains("state { Open, Closed }"), "{formatted}")
+    assert(!formatted.contains("\nstate Door"), "{formatted}")
+    assert_eq(formatted, format_source(formatted).unwrap())
+}
+// Rust: tests/fmt.rs:360
+#Test("fmt_rejects_retired_annotated_uninit_binding") {
+    src := fs.read_to_string(OSPath(env.manifest_dir()).join("tests/ui/uninit_annotated_retired.jet")).unwrap()
+    parsed := Compiler.parse_source(src)
+    assert(parsed.diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0003"), "retired annotated binding must remain an ordinary parse error: {parsed.diagnostics:?}")
+    assert(format_source(src).is_err(), "formatter must reject the parser-invalid retired annotated binding")
+}
+// Rust: tests/fmt.rs:390
+#Test("fmt_is_idempotent_on_examples") {
+    root := OSPath(env.manifest_dir())
+    for path in collect_jet_files(&root.join("Examples")) {
+        src := fs.read_to_string(&path).unwrap()
+        once := format_source(src).unwrap_or_else(|d| -> panic("fmt failed on {path.display()}:\n{render_diagnostics(path.display().to_string(), src, &d)}"))
+        twice := format_source(once).expect("second fmt should succeed")
+        assert_eq(once, twice, "fmt is not idempotent on {path.display()}")
+    }
+}
+// Rust: tests/fmt.rs:407
+#Test("fmt_preserves_binary_pattern_holes") {
+    src := "fn run() -> {\n    packet :: [0x45]\n    if packet == {\n        [U8]{\"{{version:U4}}{{ihl:U4}}{{tos:U8}}{{len:U16be}}{{rest:...}}\"} -> { print(\"ok\") }\n        else -> { print(\"no\") }\n    }\n}\n"
+    once := format_source(src).expect("binary pattern should format")
+    assert(once.contains("[U8]{\"{{version:U4}}{{ihl:U4}}{{tos:U8}}{{len:U16be}}{{rest:...}}\"}"), "formatter dropped or garbled the binary pattern:\n{once}")
+    twice := format_source(once).expect("formatted binary pattern should parse")
+    assert_eq(once, twice, "binary pattern formatting must be stable")
+}
+// Rust: tests/fmt.rs:420
+#Test("fmt_preserves_typed_performance_budget_role") {
+    src := "module perf.release{compile_workloads:{rename_route:CompilerWorkload.Edit{target:\"cli\",patch:\"edits/rename-route.patch\"}}budgets:[Budget{name:\"compile\",scope:.Target(\"cli\"),metric:.CompileTime(.P95),provider:.CompilerProbe(.Edit(\"rename_route\")),comparison:.RelativeTo(\"ci/linux-x64\"),limit:.RegressionAtMost(5pct)}]}"
+    once := format_source(src).expect("perf budget role should format")
+    for token in ["module perf.release", "compile_workloads:", "CompilerWorkload.Edit{", "patch: \"edits/rename-route.patch\"", "budgets:", "Budget{", ".Target(\"cli\")", ".CompileTime(.P95)", ".CompilerProbe(.Edit(\"rename_route\"))", ".RegressionAtMost(5pct)"] { assert(once.contains(token), "formatter dropped `{token}`:\n{once}") }
+    twice := format_source(once).expect("formatted perf role should parse")
+    assert_eq(once, twice, "perf budget formatting must be stable")
+}
+// Rust: tests/fmt.rs:442
+#Test("fmt_preserves_rate_count_literal_spelling") {
+    src := "fn run() -> {\n    rate :: Rate{ count: 000_100, per: 2s }\n}\n"
+    once := format_source(src).expect("Rate count spelling should format")
+    assert(once.contains("count: 000_100"), "formatter rewrote Rate count:\n{once}")
+    twice := format_source(once).expect("formatted Rate count should parse")
+    assert_eq(once, twice, "Rate count formatting must be stable")
+}
+// Rust: tests/fmt.rs:454
+#Test("fmt_preserves_s61_call_labels") {
+    src := "fn area(width: Int, height: Int) -> Int {\n    return width * height\n}\n\nfn run() -> {\n    print(area(width: 3, height: 4))\n}\n"
+    out := format_source(src).expect("fmt should succeed on labeled calls")
+    assert(out.contains("width: 3") && out.contains("height: 4"), "fmt must preserve S61 call labels, got:\n{out}")
+    twice := format_source(out).expect("labeled-call fmt should re-fmt")
+    assert_eq(out, twice, "labeled-call fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:469
+#Test("fmt_off_debug_only_statement_attributes_stability") {
+    src := "fn run() -> {\n    #Off print(\"off\")\n    #DebugOnly print(\"debug\")\n    #Off if true {\n        print(\"off block\")\n    }\n}\n"
+    out := format_source(src).expect("fmt should accept statement switch attributes")
+    for needle in ["#Off print(\"off\")", "#DebugOnly print(\"debug\")", "#Off if true {", "print(\"off block\")"] { assert(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}") }
+    twice := format_source(out).expect("statement switch attributes should re-fmt")
+    assert_eq(out, twice, "statement switch attribute formatting must be stable")
+}
+// Rust: tests/fmt.rs:495
+#Test("fmt_meta_attribute_stability") {
+    src := "#Meta(category: \"Movement\", tunable)\nfn step_speed(speed: Int) -> Int {\n    #Meta(category: \"Movement\", tunable)\n    next :: speed + 1\n    return next\n}\n"
+    out := format_source(src).expect("fmt should accept #Meta attributes")
+    for needle in ["#Meta(category: \"Movement\", tunable)", "fn step_speed(speed: Int) -> Int {", "next :: speed + 1"] { assert(out.contains(needle), "fmt dropped `{needle}`, got:\n{out}") }
+    twice := format_source(out).expect("#Meta output should re-fmt")
+    assert_eq(out, twice, "#Meta formatting must be stable")
+}
+// Rust: tests/fmt.rs:516
+#Test("fmt_preserves_block_comments") {
+    src := "/* a leading block comment */\nfn run() -> {\n    /* explains the next line, /* with a nested comment */ inside */\n    x :: 5\n    print(\"{{x}}\")\n}\n"
+    out := format_source(src).expect("fmt should keep block comments")
+    assert(out.contains("/* a leading block comment */"), "leading block comment dropped:\n{out}")
+    assert(out.contains("/* with a nested comment */ inside */"), "nested block comment dropped:\n{out}")
+    twice := format_source(out).expect("formatted output should re-fmt")
+    assert_eq(out, twice, "block-comment fmt must be idempotent")
+}
+// Rust: tests/fmt.rs:539
+#Test("fmt_keeps_transaction_comment_inside_transaction_block") {
+    src := "fn transfer(from: Shared<Account>, amount: Int) -> {\n    #Transact(tx) {\n        from.balance -= amount  // both land, or neither\n    }\n}\n"
+    out := format_source(src).expect("transaction with trailing comment should format")
+    comment := out.find("// both land, or neither").expect("formatter should preserve the trailing comment")
+    assert(comment < out.rfind('}').unwrap(), "trailing transaction comment moved outside its block:\n{out}")
+    twice := format_source(out).expect("formatted transaction should re-format")
+    assert_eq(out, twice, "transaction comment formatting must be stable")
+}
+// Rust: tests/fmt.rs:559
+#Test("fmt_keeps_optional_return_sugar") {
+    src := "fn parse_count(raw: String) -> Int? {\n    return Err(\"empty\")\n}\n"
+    out := format_source(src).expect("fmt should parse optional return")
+    assert(out.contains("fn parse_count(raw: String) -> Int? {"), "expected optional return to stay canonical, got:\n{out}")
+    fallible := "fn parse_count(raw: String) -> Int Err! {\n    return Err(\"empty\")\n}\n"
+    fallible_out := format_source(fallible).expect("fmt should parse fallible return")
+    assert(fallible_out.contains("fn parse_count(raw: String) -> Int Err! {"), "expected fallible return to stay canonical, got:\n{fallible_out}")
+    assert(format_source("fn save() ! IOError {\n}\n").is_err(), "retired infix unit failure form must not be accepted")
+    assert(format_source("fn parse_count(raw: String) Int ? String {\n    return Err(\"empty\");\n}\n").is_err(), "retired suffix failure form must not be accepted")
+}
+// Rust: tests/fmt.rs:600
+#Test("fmt_comptime_os_dispatch_round_trips") {
+    src := "fn run() -> {\n    prep if $build.os == {\n        .Linux -> {\n            b :: LinuxBackend{ name: \"gtk\" }\n            print(b.label())\n        }\n        .MacOS -> print(\"mac\")\n        else -> print(\"other\")\n    }\n}\n"
+    out := format_source(src).expect("fmt should accept a comptime OS dispatch")
+    assert(out.contains("prep if $build.os == {"), "expected OS-target dispatch head, got:\n{out}")
+    assert(out.contains(".Linux -> {") && out.contains(".MacOS -> { print(\"mac\") }"), "expected OS arms preserved, got:\n{out}")
+    assert(out.contains("print(\"mac\")") && out.contains("print(b.label())"), "expected arm bodies preserved, got:\n{out}")
+    assert(out.contains("else -> { print(\"other\") }"), "expected the else arm preserved, got:\n{out}")
+    twice := format_source(out).expect("comptime OS dispatch output should re-fmt")
+    assert_eq(out, twice, "comptime OS dispatch formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:642
+#Test("fmt_preserves_concise_dispatch_arms") {
+    src := "fn run() -> {\n    value :: 2\n    if value == {\n        1 -> print(\"one\")\n        2 -> { print(\"two\") }\n        else -> print(\"other\")\n    }\n}\n"
+    assert_fmt_stable(src, "concise dispatch arms")
+}
+// Rust: tests/fmt.rs:658
+#Test("fmt_preserves_value_table_with_alternatives_in_first_arm") {
+    source := "fn canonical_device(device: String) -> String? {\n    if device == {\n        \"CPU\" | \"cpu\" -> Val(\"CPU\")\n        \"Auto\" | \"auto\" -> Val(\"Auto\")\n        else -> None\n    }\n}\n"
+    once := format_source(source).expect("value table should format")
+    assert(once.contains("if device == {\n"), "{once}")
+    assert(once.contains("\"CPU\" | \"cpu\" -> Val(\"CPU\")"), "{once}")
+    assert(!once.contains("else if"), "{once}")
+    assert_eq(once, format_source(once).expect("value table should reformat"))
+}
+// Rust: tests/fmt.rs:678
+#Test("fmt_keeps_dispatch_return_arms_parseable_before_leading_dot_arms") {
+    jet_foundation.CompilerStack.run_on_compiler_stack(|| -> {
+        source := "fn run() -> {\n    if result == {\n        .Err(error) -> return error_result(error.message)\n        .Ok(value) -> {\n            if nested == {\n                .Err(error) -> return error_result(error.message)\n                .Ok(inner) -> print(inner)\n            }\n        }\n    }\n}\n"
+        formatted := format_source(source).expect("dispatch return arms should format")
+        assert(formatted.contains(".Err(error) -> return error_result(error.message)"), "direct return arm should stay canonical:\n{formatted}")
+        (tokens, lex_diagnostics) := Lexer.lex(formatted)
+        assert(lex_diagnostics.is_empty(), "{lex_diagnostics:?}")
+        _ :: Parser.parse_for_fmt(&tokens).unwrap_or_else(|diagnostics| -> panic("fmt wrote source it cannot read:\n{formatted}\n{diagnostics:?}"))
+        twice := format_source(formatted).expect("formatted dispatch should reformat")
+        assert_eq(formatted, twice, "dispatch return-arm formatting must be idempotent")
+    })
+}
+// Rust: tests/fmt.rs:715
+#Test("fmt_keeps_empty_dispatch_arms_compact_and_stable") {
+    src := "fn run() -> {\n    if \"ready\" == {\n        \"ready\" -> print(\"ready\")\n        else -> {}\n    }\n    print(\"done\")\n}\n"
+    out := format_source(src).expect("empty dispatch arm should format")
+    assert(out.contains("else -> {}"), "empty dispatch arm should stay compact, got:\n{out}")
+    twice := format_source(out).expect("empty dispatch arm should reformat")
+    assert_eq(out, twice, "empty dispatch arm must be stable")
+}
+// Rust: tests/fmt.rs:734
+#Test("fmt_preserves_predicate_arms_under_eq_table") {
+    src := "fn handle(code: Int) -> {\n    if code == {\n        200 -> print(\"ok\")\n        code >= 500 -> print(\"retry\")\n        else -> print(\"other\")\n    }\n}\n\nfn run() -> {\n    handle(503)\n}\n"
+    out := format_source(src).expect("predicate arm dispatch should format")
+    assert(out.contains("if code =="), "table marker lost or rewritten:\n{out}")
+    assert(out.contains("code >= 500"), "predicate arm stripped to a bare atom:\n{out}")
+    assert_fmt_stable(out, "predicate arms under == table")
+}
+// Rust: tests/fmt.rs:762
+#Test("fmt_keeps_trailing_dispatch_arm_comments_attached") {
+    src := "fn run() -> {\n    value :: 1\n    if value == {\n        1 -> print(\"one\") // The common case.\n        else -> print(\"other\")\n    }\n}\n"
+    once := format_source(src).expect("commented dispatch arm should format")
+    assert(once.contains("print(\"one\")  // The common case."), "formatter moved or dropped the arm comment:\n{once}")
+    twice := format_source(once).expect("commented dispatch arm should reformat")
+    assert_eq(once, twice, "commented dispatch arm must be idempotent")
+}
+// Rust: tests/fmt.rs:781
+#Test("fmt_expands_multiline_lambda_dispatch_arms_without_losing_comments") {
+    src := "fn run() -> {\n    value :: 1\n    if value == {\n        1 -> apply(x -> {\n            // Keep this explanation with the lambda.\n            return x + 1\n        })\n        else -> print(\"other\")\n    }\n}\n"
+    once := format_source(src).expect("multiline lambda arm should format")
+    assert(once.contains("// Keep this explanation with the lambda."), "formatter dropped the lambda comment:\n{once}")
+    twice := format_source(once).expect("multiline lambda arm should reformat")
+    assert_eq(once, twice, "multiline lambda arm must be idempotent")
+}
+// Rust: tests/fmt.rs:803
+#Test("fmt_preserves_multiline_collection_literals") {
+    src := "fn run() -> {\n    values :: [\n        1,\n        2,\n        3\n    ]\n    typed :: [Int]{\n        4,\n        5,\n        6\n    }\n    lookup :: [\n        \"a\": 1,\n        \"b\": 2\n    ]\n    point :: (\n        x: 7,\n        y: 8\n    )\n    record :: Point{\n        x: 9,\n        y: 10\n    }\n    print(values.len() + typed.len() + lookup.len() + point.x + point.y + record.x)\n}\n"
+    assert_fmt_stable(src, "multiline collection literals")
+}
+// Rust: tests/fmt.rs:836
+#Test("fmt_preserves_comments_inside_multiline_collection_literals") {
+    src := "fn run() -> {\n    values :: [\n        // Primary value.\n        1,\n        2  // Secondary value.\n    ]\n    point :: (\n        // Horizontal coordinate.\n        x: /* coordinate value */ 7,\n        y: 8\n    )\n    lookup :: [\n        // Stable key.\n        \"a\": /* mapped value */ 1,\n        \"b\": 2\n    ]\n    typed :: [Int]{\n        // First typed value.\n        3,\n        4\n    }\n    record :: Point{\n        // Named field.\n        x: /* field value */ 9,\n        y: 10\n    }\n    typed_lookup :: [String:Int]{\n        \"c\": /* typed mapped value */ 5,\n        \"d\": 6\n    }\n    empty :: [\n        // Intentionally empty.\n    ]\n    typed_empty :: [Int]{\n        /* Typed sentinel. */\n    }\n    print(values.len() + point.x + lookup.len() + typed.len())\n}\n"
+    once := format_source(src).expect("commented collection literals should format")
+    for comment in ["// Primary value.", "// Secondary value.", "// Horizontal coordinate.", "/* coordinate value */", "// Stable key.", "/* mapped value */", "// First typed value.", "// Named field.", "/* field value */", "/* typed mapped value */", "// Intentionally empty.", "/* Typed sentinel. */"] { assert(once.contains(comment), "formatter dropped `{comment}`:\n{once}") }
+    twice := format_source(once).expect("commented collection literals should reformat")
+    assert_eq(once, twice, "commented collection literals must be idempotent")
+}
+// Rust: tests/fmt.rs:904
+#Test("fmt_preserves_blank_lines_between_statement_sections") {
+    src := "fn run() -> {\n    first()\n\n    // Second phase.\n    second()\n\n    third()\n}\n"
+    assert_fmt_stable(src, "statement section breaks")
+}
+// Rust: tests/fmt.rs:918
+#Test("fmt_keeps_section_break_after_leading_comment") {
+    src := "fn run() -> {\n    first()\n    // First phase is complete.\n\n    second()\n}\n"
+    assert_fmt_stable(src, "section break after a leading comment")
+}
+// Rust: tests/fmt.rs:930
+#Test("fmt_keeps_section_break_between_leading_comment_groups") {
+    src := "fn run() -> {\n    first()\n    // First phase is complete.\n\n    // Second phase starts here.\n    second()\n}\n"
+    assert_fmt_stable(src, "section break between leading comment groups")
+}
+// Rust: tests/fmt.rs:943
+#Test("fmt_if_expression_preserves_condition_parens") {
+    src := "fn run() -> {\n    m :: if (a > b) -> {\n        a\n    } else -> {\n        b\n    }\n    if (a > b) {\n        print(\"hi\")\n    }\n}\n"
+    out := format_source(src).expect("fmt should accept an if-expression")
+    assert(out.contains("m :: if (a > b) -> {"), "expected parens preserved in if-expression condition, got:\n{out}")
+    assert(out.contains("    if (a > b) {"), "expected parens preserved in statement-if condition, got:\n{out}")
+    assert(out.contains("} else -> {"), "expected else branch, got:\n{out}")
+    twice := format_source(out).expect("if-expression output should re-fmt")
+    assert_eq(out, twice, "if-expression formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:975
+#Test("fmt_preserves_author_placed_chain_breaks") {
+    src := "fn run() -> {\n    raw :: \"  hi  \"\n    out :: raw\n        .trim()  // strip padding\n        .to_upper()  // shout it\n    print(\"{{out}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept a broken dot-chain")
+    assert(out.contains(".trim()  // strip padding"), "expected the break and per-step comment to survive, got:\n{out}")
+    assert(out.contains(".to_upper()  // shout it"), "expected the final step's comment to stay after the chain, got:\n{out}")
+    twice := format_source(out).expect("broken-chain output should re-fmt")
+    assert_eq(out, twice, "chain-break formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1001
+#Test("fmt_preserves_triple_quoted_strings") {
+    src := "fn run() -> {\n    who :: \"Jet\"\n    banner :: \"\"\"\n    hello, {{who}}\n        indented\n    \"\"\"\n    print(\"{{banner}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept a triple-quoted string")
+    assert(out.contains("banner :: \"\"\"\n"), "expected the opening triple quote to stay on its own, got:\n{out}")
+    assert(out.contains("    hello, {{who}}\n"), "expected interpolation and indentation preserved, got:\n{out}")
+    assert(out.contains("        indented\n"), "expected relative indentation preserved, got:\n{out}")
+    twice := format_source(out).expect("triple-quoted output should re-fmt")
+    assert_eq(out, twice, "triple-quoted formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1031
+#Test("fmt_preserves_destructuring_targets") {
+    src := "struct Point { x: Int, y: Int }\n\nfn run() -> {\n    Point.{ x, y } :: make()\n    [a, b, c] := nums()\n    print(\"{{x}}{{y}}{{a}}{{b}}{{c}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept destructuring targets")
+    assert(out.contains("Point{x, y} :: make()"), "expected dotless struct destructuring (D-LIT-DOT1), got:\n{out}")
+    assert(out.contains("[a, b, c] := nums()"), "expected list destructuring preserved, got:\n{out}")
+    twice := format_source(out).expect("destructuring output should re-fmt")
+    assert_eq(out, twice, "destructuring formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1057
+#Test("fmt_flush_construction") {
+    src := "struct Point { x: Int, y: Int }\n\nfn run() -> {\n    p :: Point.{ x: 1, y: 2 }\n    print(\"{{p.x}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept struct construction")
+    assert(out.contains("Point{x: 1, y: 2}"), "expected dotless construction (D-LIT-DOT1), got:\n{out}")
+    assert(!out.contains("Point {x: 1"), "construction must not keep the space before the brace, got:\n{out}")
+    twice := format_source(out).expect("construction output should re-fmt")
+    assert_eq(out, twice, "construction formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1081
+#Test("fmt_preserves_named_tuples") {
+    src := "fn bounds() -> (min: Int, max: Int) {\n    return (min: 0, max: 10)\n}\n\nfn run() -> {\n    p :: (x: 1, y: 2)\n    (a, b) :: p\n    print(\"{{p.x}}{{a}}{{b}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept named tuples")
+    assert(out.contains("p :: (x: 1, y: 2)"), "expected named tuple literal preserved, got:\n{out}")
+    assert(out.contains("fn bounds() -> (max: Int, min: Int) {"), "expected canonical named tuple return type preserved, got:\n{out}")
+    assert(out.contains("(a, b) :: p"), "expected tuple destructuring preserved, got:\n{out}")
+    twice := format_source(out).expect("named tuple output should re-fmt")
+    assert_eq(out, twice, "named tuple formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1111
+#Test("fmt_preserves_optional_chaining") {
+    src := "fn run() -> {\n    n :: o.mid?.inner?.name\n    print(\"{{n}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept optional chaining")
+    assert(out.contains("o.mid?.inner?.name"), "expected optional chain preserved, got:\n{out}")
+    twice := format_source(out).expect("optional-chain output should re-fmt")
+    assert_eq(out, twice, "optional-chain formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1128
+#Test("fmt_canonicalizes_collection_type_sugar") {
+    src := "fn shell() -> [JSON] {\n    return [\n        JSON.Null;\n    ];\n}\n\nfn use_collections(items: [String], counts: [String:Int]) -> {}\n"
+    out := format_source(src).expect("fmt should accept collection type sugar")
+    assert(out.contains("fn shell() -> [JSON]"), "expected list return shorthand, got:\n{out}")
+    assert(out.contains("items: [String], counts: [String:Int]"), "expected bracket collection type formatting, got:\n{out}")
+    assert(out.contains("JSON.Null") && out.contains("return ["), "expected semicolon-separated list input to format cleanly, got:\n{out}")
+    twice := format_source(out).expect("collection shorthand output should re-fmt")
+    assert_eq(out, twice, "collection shorthand formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1158
+#Test("fmt_simplify_one_line_return_is_ast_equal_and_stable") {
+    source := "fn answer() -> Int {\n    return 42\n}\n"
+    plain := format_source(source).expect("plain fmt should format")
+    assert(plain.contains("fn answer() -> Int { return 42 }"), "{plain}")
+    assert(!plain.contains(":: 42"), "plain fmt must not simplify:\n{plain}")
+    options := Formatter.FormatOptions { simplify: true }
+    once := format_source_with_options(source, options).expect("simplify fmt should format")
+    // ONE-arrow owner ruling: simplify removes return but retains a braced body.
+    assert_eq(once, "fn answer() -> Int { 42 }\n")
+    (before_tokens, before_lex_diags) := Lexer.lex(source)
+    assert(before_lex_diags.is_empty(), "{before_lex_diags:?}")
+    before := Parser.parse_for_fmt(&before_tokens).expect("source should parse")
+    (after_tokens, after_lex_diags) := Lexer.lex(once)
+    assert(after_lex_diags.is_empty(), "{after_lex_diags:?}")
+    after := Parser.parse_for_fmt(&after_tokens).expect("simplified source should parse")
+    assert_eq(Formatter.canonical_program(&before), Formatter.canonical_program(&after), "simplify must preserve the parsed AST")
+    assert_eq(once, format_source_with_options(once, options).expect("second simplify pass should work"))
+    wide_name := "wide_value".repeat(12)
+    wide := "fn wide() -> Int {{ return {wide_name} }}\n"
+    wide_out := format_source_with_options(wide, options).expect("wide simplify input should format")
+    assert(!wide_out.contains(" :: "), "wide bodies must stay braced:\n{wide_out}")
+    commented := "fn noted() -> Int {\n    // keep this note\n    return 42\n}\n"
+    commented_out := format_source_with_options(commented, options).expect("commented simplify input should format")
+    assert(!commented_out.contains(" :: 42"), "commented bodies must stay braced:\n{commented_out}")
+    nested_commented := "fn noted() -> Point {\n    return Point{x: 1, y: 2} // keep this note\n}\n"
+    nested_commented_out := format_source_with_options(nested_commented, options).expect("nested commented simplify input should format")
+    assert(!nested_commented_out.contains(" :: "), "comments after nested literals must keep bodies braced:\n{nested_commented_out}")
+    assert(nested_commented_out.contains("// keep this note"), "nested literal comment was lost:\n{nested_commented_out}")
+}
+// Rust: tests/fmt.rs:1223
+#Test("fmt_simplify_leaves_a_recovered_parse_alone") {
+    options := Formatter.FormatOptions { simplify: true }
+    broken := fs.read_to_string(OSPath(env.manifest_dir()).join("tests/ui/control_body_needs_braces.jet")).unwrap()
+    source := "fn answer() -> Int {{\n    return 42\n}}\n\n{broken}"
+    plain := format_source(source).expect("a recovered parse still formats")
+    simplified := format_source_with_options(source, options).expect("a recovered parse must not reach the identity assertion")
+    assert_eq(simplified, plain, "simplify must be a no-op on a parse-invalid source:\n{simplified}")
+    assert(!simplified.contains(":: 42"), "simplify rewrote a source whose parse only recovered:\n{simplified}")
+}
+// Rust: tests/fmt.rs:1246
+#Test("fmt_simplify_keeps_a_routed_value_loop_binding") {
+    options := Formatter.FormatOptions { simplify: true }
+    source := "fn answer() -> Int {\n    return 42\n}\n\nfn search() -> Int {\n    values :: [Int]{1, 2, 3, 4}\n    first :: loop value in values {\n        if value > 2 { break value }\n    } ?? -1\n    return first\n}\n"
+    plain := format_source(source).expect("a routed value loop should format")
+    simplified := format_source_with_options(plain, options).expect("a routed value loop must not reach the identity assertion")
+    assert(simplified.contains("fn answer() -> Int { 42 }"), "R1 did not fire ahead of the value loop, so nothing moved:\n{simplified}")
+    tail := |text: String| -> {
+        start := text.find("fn search").expect("the search fn survives fmt")
+        text[start..].to_string()
+    }
+    assert_eq(tail(simplified), tail(plain), "simplify changed the routed value-loop binding:\n{simplified}")
+    assert_eq(simplified, format_source_with_options(simplified, options).expect("second simplify pass should work"), "simplify output must be stable")
+}
+// Rust: tests/fmt.rs:1282
+#Test("fmt_marks_only_value_returning_braced_callables_with_an_arrow") {
+    source := "fn value() Int { return 1 }\nfn concise() -> Int { 1 }\nfn record() -> Rect { { width: 1, height: 2 } }\nfn impure() -> { print(1) }\nfn explicit() -> () { print(1) }\nfn fail() -> Err! { }\nfn bounded() -[IO]> Int { return 1 }\nfn pure() -[]> Int { return 1 }\ntrait Value { fn get(self) Int { return 1 } fn bounded(self) -[IO]> Int { return 1 } }\n"
+    once := format_source(source).expect("callable body shapes should format")
+    assert(once.contains("fn value() -> Int { return 1 }"), "{once}")
+    assert(once.contains("fn concise() -> Int { 1 }"), "{once}")
+    assert(once.contains("fn record() -> Rect { {width: 1, height: 2} }"), "{once}")
+    assert(once.contains("fn impure() -> { print(1) }"), "{once}")
+    assert(once.contains("fn explicit() -> () { print(1) }"), "{once}")
+    assert(once.contains("fn fail() -> Err! {}"), "{once}")
+    assert(once.contains("fn bounded() -[IO]> Int { return 1 }"), "{once}")
+    assert(once.contains("fn pure() -[]> Int { return 1 }"), "{once}")
+    assert(once.contains("fn get(self) -> Int {"), "{once}")
+    assert(once.contains("fn bounded(self) -[IO]> Int {"), "{once}")
+    assert_eq(once, format_source(once).expect("formatted callables should be stable"))
+}
+// Rust: tests/fmt.rs:1308
+#Test("fmt_value_tail_blocks_keep_values_and_early_returns_distinct") {
+    source := "\nfn label(value: Int) -> String {\n    if value == {\n        1 -> { \"one\" }\n        else -> { \"other\" }\n    }\n}\n\nfn early(flag: Bool) -> String {\n    if flag { return \"early\" }\n    \"late\"\n}\n"
+    once := format_source(source).expect("value-tail blocks should format")
+    assert(once.contains("\"one\""), "{once}")
+    assert(once.contains("\"other\""), "{once}")
+    assert(once.contains("return \"early\""), "{once}")
+    assert(once.contains("\"late\""), "{once}")
+    assert_eq(once, format_source(once).expect("formatted value-tail blocks should be stable"))
+}
+// Rust: tests/fmt.rs:1334
+#Test("parser_rejects_arrowless_value_callable_and_offers_insertion_fix") {
+    // E0080 now inserts the sole signature arrow, not a second body arrow.
+    source := "fn value() Int { return 1 }\n"
+    (tokens, lex_diagnostics) := Lexer.lex(source)
+    assert(lex_diagnostics.is_empty(), "{lex_diagnostics:?}")
+    diagnostics := Parser.parse(&tokens).expect_err("the signature arrow is required")
+    diagnostic := diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0080").expect("missing callable signature arrow diagnostic")
+    assert_eq(diagnostic.edit.as_ref().map(|edit| -> edit.new_text), Some("-> "))
+    (canonical_tokens, canonical_lex_diagnostics) := Lexer.lex("fn value() -> Int { return 1 }\n")
+    assert(canonical_lex_diagnostics.is_empty(), "{canonical_lex_diagnostics:?}")
+    _ :: Parser.parse(&canonical_tokens).expect("the canonical signature arrow should parse")
+}
+// Rust: tests/fmt.rs:1358
+#Test("fmt_simplify_keeps_a_struct_literal_return_braced") {
+    options := Formatter.FormatOptions { simplify: true }
+    source := "struct Rect {\n    width: Int,\n    height: Int\n}\n\nfn make(width: Int, height: Int) -> Rect {\n    return Rect{width: width, height: height}\n}\n\nfn run() -> {}\n"
+    once := format_source_with_options(source, options).expect("a struct-literal return must stay parseable under simplify")
+    assert(once.contains("fn make(width: Int, height: Int) -> Rect { return {"), "the braced struct-literal return did not survive simplify:\n{once}")
+    assert(!once.contains(":: Rect{") && !once.contains(":: {"), "R1 collapsed a body the retired concise form cannot hold:\n{once}")
+    assert_eq(once, format_source_with_options(once, options).expect("second simplify pass should work"), "simplify output must be stable")
+}
+// Rust: tests/fmt.rs:1385
+#Test("fmt_simplify_rewrites_listed_fence_integers_to_a_range") {
+    options := Formatter.FormatOptions { simplify: true }
+    source := "fn run() -> {\n    print(<:0, 1, 2, 3:>)\n}\n"
+    once := format_source_with_options(source, options).expect("simplify fmt should format")
+    assert(once.contains("<: 0..3 :>") || once.contains("<:0..3:>"), "R4 did not emit a fence range:\n{once}")
+    assert(!once.contains("0, 1, 2, 3"), "R4 left the listed integer run:\n{once}")
+    (before_tokens, before_lex_diags) := Lexer.lex(source)
+    assert(before_lex_diags.is_empty(), "{before_lex_diags:?}")
+    before := Parser.parse_for_fmt(&before_tokens).expect("source should parse")
+    (after_tokens, after_lex_diags) := Lexer.lex(once)
+    assert(after_lex_diags.is_empty(), "{after_lex_diags:?}")
+    after := Parser.parse_for_fmt(&after_tokens).expect("simplified source should parse")
+    assert_eq(Formatter.canonical_program(&before), Formatter.canonical_program(&after), "simplify must preserve the parsed AST")
+    assert_eq(once, format_source_with_options(once, options).expect("second simplify pass should work"))
+}
+// Rust: tests/fmt.rs:1417
+#Test("fmt_simplify_rewrites_a_classic_else_if_chain_to_an_arm_table") {
+    options := Formatter.FormatOptions { simplify: true }
+    source := "fn grade(score: Int) -> String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n"
+    once := format_source_with_options(source, options).expect("R2 must emit source the parser reads back")
+    assert(once.contains("if {") && !once.contains("else if"), "R2 did not collapse the chain into one arm table:\n{once}")
+    assert_eq(once, format_source_with_options(once, options).expect("second simplify pass should work"), "simplify output must be stable")
+}
+// Rust: tests/fmt.rs:1438
+#Test("fmt_simplify_drops_a_redundant_val_only_in_optional_returns") {
+    options := Formatter.FormatOptions { simplify: true }
+    source := "fn count() -> Int {\n    return 1\n}\n\nfn find(n: Int) -> Int? {\n    wrap :: (x) -> Val(x)\n    if n > 0 {\n        return Val(n)\n    }\n    if n == 0 {\n        return Val(count())\n    }\n    Val(n)\n}\n"
+    once := format_source_with_options(source, options).expect("a redundant Val must simplify to parseable source")
+    assert(once.contains("return n") && !once.contains("Val(n)"), "the redundant return wrapper survived:\n{once}")
+    assert(once.contains("Val(count())") && once.contains("(x) -> Val(x)"), "a call or lambda wrapper was dropped:\n{once}")
+    assert_eq(once, format_source_with_options(once, options).expect("second simplify pass should work"), "simplify output must be stable")
+}
+// Rust: tests/fmt.rs:1464
+#Test("fmt_output_for_a_classic_else_if_chain_parses_again") {
+    source := "fn grade(score: Int) -> String {\n    if score >= 90 {\n        return \"a\"\n    } else if score >= 80 {\n        return \"b\"\n    } else {\n        return \"c\"\n    }\n}\n"
+    once := format_source(source).expect("the chain formats")
+    (tokens, lex_diags) := Lexer.lex(once)
+    assert(lex_diags.is_empty(), "{lex_diags:?}")
+    _ :: Parser.parse_for_fmt(&tokens).unwrap_or_else(|diags| -> panic("fmt wrote source it cannot read:\n{once}\n{diags:?}"))
+    assert_eq(once, format_source(once).expect("second pass formats"), "fmt must be idempotent on the chain")
+}
+// Rust: tests/fmt.rs:1482
+#Test("fmt_map_type_spacing_is_canonical_and_value_spacing_stays") {
+    source := "fn read(values: [String: Int]) -> [String: Int] {\n    return [\"key\": 1]\n}\n"
+    once := format_source(source).expect("map type should format")
+    assert(once.contains("values: [String:Int]"), "{once}")
+    assert(once.contains(") -> [String:Int] {"), "{once}")
+    assert(once.contains("[\"key\": 1]"), "map value spacing changed:\n{once}")
+    assert(!once.contains("[String: Int]"), "retired map type spacing remains:\n{once}")
+    assert_eq(once, format_source(once).expect("map type output should be stable"))
+}
+// Rust: tests/fmt.rs:1502
+#Test("fmt_still_errors_on_real_parse_problems") {
+    assert(format_source("fn run() -> { x :: ; }\n").is_err(), "fmt must not run when the AST is not recoverable")
+}
+// Rust: tests/fmt.rs:1511
+#Test("fmt_is_idempotent_on_ui_fixes") {
+    root := OSPath(env.manifest_dir())
+    ui := root.join("tests/ui")
+    for entry in fs.read_dir(&ui).unwrap() {
+        path := entry.unwrap().path()
+        if path.file_name().and_then(|n| -> n.to_str()).is_some_and(|n| -> n.ends_with(".fixed.jet")) {
+            src := fs.read_to_string(&path).unwrap()
+            once := format_source(src).unwrap_or_else(|d| -> panic("fmt failed on {path.display()}:\n{render_diagnostics(path.display().to_string(), src, &d)}"))
+            twice := format_source(once).expect("second fmt should succeed")
+            assert_eq(once, twice, "fmt is not idempotent on {path.display()}")
+        }
+    }
+}
+// Rust: tests/fmt.rs:1538
+#Test("fmt_canonicalizes_subject_first_refutable_test_bind") {
+    src := "fn run()->{\n    (parse()) == .Ok(value) ?? return\n    ((left + right).parse()) == .Ok(other) ?? return\n    print(value)\n    print(other)\n}\n"
+    once := format_source(src).expect("subject-first test-bind should format")
+    assert(once.contains("parse() == .Ok(value) ?? return"), "{once}")
+    assert(once.contains("(left + right).parse() == .Ok(other) ?? return"), "{once}")
+    assert(!once.contains("((left + right).parse())"), "only receiver-required grouping should remain:\n{once}")
+    assert_eq(once, format_source(once).unwrap())
+}
+// Rust: tests/fmt.rs:1554
+#Test("fmt_preserves_leading_dot_enum_lit") {
+    src := "enum Color {\n    Red\n    Blue\n}\n\nfn paint(c: Color) -> {\n    print(c)\n}\nfn run() -> {\n    c := .Red\n    paint(.Blue)\n    paint(c)\n}\n"
+    out := format_source(src).expect("fmt should accept leading-dot enum literals")
+    assert(out.contains(".Red"), "expected `.Red` preserved, got:\n{out}")
+    assert(out.contains(".Blue"), "expected `.Blue` preserved, got:\n{out}")
+    twice := format_source(out).expect("leading-dot output should re-fmt")
+    assert_eq(out, twice, "leading-dot enum literal formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1588
+#Test("fmt_preserves_optional_result_variants") {
+    src := "fn f(flag: Bool) -> Int String! {\n    maybe :: .Val(1)\n    empty :: .None\n    if maybe == {\n        .Val(n) -> { print(n) }\n        .None -> { print(0) }\n    }\n    if flag { return .Ok(1) }\n    return .Err(\"no\")\n}\n"
+    once := format_source(src).expect("variant forms should format")
+    for spelling in [".Val(1)", ".None", ".Val(n)", ".Ok(1)", ".Err(\"no\")"] { assert(once.contains(spelling), "formatter dropped `{spelling}`:\n{once}") }
+    twice := format_source(once).expect("variant output should re-format")
+    assert_eq(once, twice, "variant formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1612
+#Test("fmt_canonicalizes_anonymous_union_types") {
+    src := "fn hold(v: String | Int) -> Int | String {\n    return v\n}\nfn parse(raw: String) -> Int (String | Bool)! {\n    return .Err(false)\n}\n"
+    once := format_source(src).expect("anonymous unions should format")
+    assert(once.contains("Int | String"), "expected canonical union spelling, got:\n{once}")
+    assert(once.contains("Int (Bool | String)!"), "expected fallible error-side union, got:\n{once}")
+    twice := format_source(once).expect("union fmt must be idempotent")
+    assert_eq(once, twice, "anonymous union formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1635
+#Test("fmt_preserves_ambiguous_codable_union_source_order") {
+    for fixture in ["union_codable_ambiguous.jet", "union_codable_enum_ambiguous.jet"] {
+        src := fs.read_to_string(OSPath(env.manifest_dir()).join("tests/ui/{fixture}")).unwrap()
+        once := format_source(src).expect("ambiguous Codable union should format")
+        twice := format_source(once).expect("ambiguous Codable union output should re-format")
+        assert_eq(once, twice, "ambiguous Codable union formatting must be idempotent")
+    }
+}
+// Rust: tests/fmt.rs:1651
+#Test("fmt_preserves_comments_in_ambiguous_decode_unions") {
+    for (src, label) in [("#Decode\nstruct Row {\n    value: String /* Text */ | Char\n}\n", "block comment inside ambiguous Decode union"), ("#Decode\nstruct Row {\n    value: String | Char // note\n}\n", "line comment after ambiguous Decode union")] { assert_fmt_stable(src, label) }
+}
+// Rust: tests/fmt.rs:1667
+#Test("fmt_still_canonicalizes_valid_codable_union") {
+    src := "#Codable\nstruct Row {\n    value: String | Int\n}\n"
+    once := format_source(src).expect("valid Codable union should format")
+    assert(once.contains("value: Int | String"), "valid Codable union should retain canonical member order:\n{once}")
+    twice := format_source(once).expect("valid Codable union output should re-format")
+    assert_eq(once, twice, "valid Codable union formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1682
+#Test("fmt_canonicalizes_skipped_decode_union") {
+    src := "#Decode\nstruct Row {\n    #Skip value: String | Char\n}\n"
+    once := format_source(src).expect("skipped Decode union should format")
+    assert(once.contains("#Skip value: Char | String"), "skipped Decode field should retain canonical union order:\n{once}")
+    twice := format_source(once).expect("skipped Decode union output should re-format")
+    assert_eq(once, twice, "skipped Decode union formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1697
+#Test("fmt_preserves_named_payload_variant_dot_brace") {
+    src := "enum View {\n    Text(text: String)\n    Box(width: Int)\n}\nfn run() -> {\n    a :: .Text.{ text: \"hi\" }\n    b :: .Box.{ width: 10 }\n}\n"
+    out := format_source(src).expect("fmt should accept named-payload dot-brace enum literals")
+    assert(out.contains(".Text{"), "expected Text construction preserved, got:\n{out}")
+    assert(out.contains(".Box{"), "expected Box construction preserved, got:\n{out}")
+    twice := format_source(out).expect("named-payload dot-brace output should re-fmt")
+    assert_eq(out, twice, "named-payload dot-brace enum literal formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1728
+#Test("fmt_preserves_take_pattern_literal") {
+    src := "fn run() -> {\n    c :: Cursor.over(\"inc-4411 sev 3: disk full\")\n    &c.skip_ws()\n    m :: c.take_pattern(\"inc-{{id:Int}} sev {{sev:Int}}: \") ?? panic(\"no match\")\n    raw :: c.take_pattern(String{\"inc-\\d-{{id:Int}} \"}) ?? panic(\"no match\")\n    rest :: c.take_pattern(\"disk \") ?? panic(\"no match\")\n    print(\"{{m.id}} {{m.sev}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept take_pattern literals")
+    assert_eq(out, src, "take_pattern literal formatting must be stable")
+    twice := format_source(out).expect("take_pattern output should re-fmt")
+    assert_eq(out, twice, "take_pattern formatting must be idempotent")
+}
+// Rust: tests/fmt.rs:1748
+#Test("fmt_preserves_bin_take_pattern_literal") {
+    src := "fn run() -> {\n    header :: [69, 0, 0, 40]\n    r :: Reader.over(header)\n    parsed :: r.take_pattern([U8]{\"prefix-{{{{literal}}}}-{{version:U4}}{{ihl:U4}}{{tos:U8}}{{len:U16be}}\"}) ?? panic(\"no match\")\n    print(\"{{parsed.version}} {{parsed.ihl}} {{parsed.tos}} {{parsed.len}}\")\n}\n"
+    out := format_source(src).expect("fmt should accept binary take_pattern literals")
+    assert_eq(out, src, "binary take_pattern literal formatting must be stable")
+    twice := format_source(out).expect("binary take_pattern output should re-fmt")
+    assert_eq(out, twice, "binary take_pattern formatting must be idempotent")
+}

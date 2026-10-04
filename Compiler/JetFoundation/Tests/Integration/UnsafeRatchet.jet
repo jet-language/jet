@@ -1,1125 +1,267 @@
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/unsafe_ratchet.rs:1-127
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS use std::process::{Command, Output};
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
-//RS 
-//RS struct Fixture {
-//RS     root: PathBuf,
-//RS }
-//RS 
-//RS impl Fixture {
-//RS     fn new(tag: &str) -> Self {
-//RS         let sequence = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
-//RS         let root = std::env::temp_dir().join(format!(
-//RS             "jet-unsafe-ratchet-{tag}-{}-{sequence}",
-//RS             std::process::id()
-//RS         ));
-//RS         fs::create_dir_all(&root).unwrap();
-//RS         fs::write(
-//RS             root.join("package.jet"),
-//RS             "name: \"fixture\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(root.join("safety.md"), "# Safety\n").unwrap();
-//RS         Self { root }
-//RS     }
-//RS 
-//RS     fn write(&self, path: &str, source: &str) {
-//RS         let path = self.root.join(path);
-//RS         fs::create_dir_all(path.parent().unwrap()).unwrap();
-//RS         fs::write(path, source).unwrap();
-//RS     }
-//RS 
-//RS     fn baseline(&self) -> PathBuf {
-//RS         self.root.join("safety.md")
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for Fixture {
-//RS     fn drop(&mut self) {
-//RS         let _ = fs::remove_dir_all(&self.root);
-//RS     }
-//RS }
-//RS 
-//RS fn ratchet(fixture: &Fixture, update: bool) -> Output {
-//RS     let script =
-//RS         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("Tools/agent/check-unsafe-ratchet.mjs");
-//RS     let mut command = Command::new("node");
-//RS     command
-//RS         .arg(script)
-//RS         .args(["--root", fixture.root.to_str().unwrap()])
-//RS         .args(["--baseline", fixture.baseline().to_str().unwrap()]);
-//RS     if update {
-//RS         command.arg("--update");
-//RS     }
-//RS     command.output().unwrap()
-//RS }
-//RS 
-//RS fn seed(fixture: &Fixture) {
-//RS     let output = ratchet(fixture, true);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "baseline seed failed: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS }
-//RS 
-//RS pub fn ratchet_trips_on_seeded_growth() {
-//RS     let fixture = Fixture::new("growth");
-//RS     fixture.write(
-//RS         "main.jet",
-//RS         r##"// #Unsafe("comment only")
-//RS TEXT :: "#Unsafe(\"string only\")"
-//RS #Unsafe("seed region") {}
-//RS #[Unsafe("function region"), FFI(c)] fn foreign() {}
-//RS "##,
-//RS     );
-//RS     seed(&fixture);
-//RS     fixture.write("new.jet", "#Unsafe(\"new region reason\") {}\n");
-//RS 
-//RS     let output = ratchet(&fixture, false);
-//RS     assert!(!output.status.success(), "growth must fail");
-//RS     let stderr = String::from_utf8_lossy(&output.stderr);
-//RS     assert!(stderr.contains("fixture: 2 -> 3"), "{stderr}");
-//RS     assert!(stderr.contains("new.jet"), "{stderr}");
-//RS     assert!(stderr.contains("new region reason"), "{stderr}");
-//RS }
-//RS 
-//RS pub fn ratchet_allows_shrink() {
-//RS     let fixture = Fixture::new("shrink");
-//RS     fixture.write(
-//RS         "main.jet",
-//RS         "#Unsafe(\"keep this region\") {}\n#Unsafe(\"remove this region\") {}\n",
-//RS     );
-//RS     seed(&fixture);
-//RS     fixture.write("main.jet", "#Unsafe(\"keep this region\") {}\n");
-//RS 
-//RS     let output = ratchet(&fixture, false);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "shrink must pass: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     let baseline = fs::read_to_string(fixture.baseline()).unwrap();
-//RS     assert!(baseline.contains("\"total\": 1"), "{baseline}");
-//RS     assert!(!baseline.contains("remove this region"), "{baseline}");
-//RS }
-//RS 
-//RS pub fn generated_ffi_does_not_move_baseline() {
-//RS     let fixture = Fixture::new("generated-ffi");
-//RS     fixture.write("main.jet", "#Unsafe(\"authored region\") {}\n");
-//RS     seed(&fixture);
-//RS     let before = fs::read_to_string(fixture.baseline()).unwrap();
-//RS     fixture.write(
-//RS         ".jet/bindings/c/generated.jet",
-//RS         "#Bindgen module c.fixture.__bindgen__ {\n    #Unsafe(\"generated FFI region\") fn foreign() {}\n}\n",
-//RS     );
-//RS 
-//RS     let output = ratchet(&fixture, false);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "generated FFI must not grow baseline: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     assert_eq!(before, fs::read_to_string(fixture.baseline()).unwrap());
-//RS }
-// END-PORT-PENDING 1183 tests/unsafe_ratchet.rs:1-127
+use core.fs as fs
+use std.env
+use std.process.[Command, Output, Child, Stdio, id]
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.net.[TcpListener, TcpStream, Shutdown]
+use std.time.[Duration, Instant]
+use std.thread
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use jet_foundation.MIR.[MirType, MirTypeKind, MirNominalRef, MirTypeId, MirProgram, MirArtifactRequest, MirArtifactTarget, MirArtifactKind, MirArtifactBuildMode]
+use jet
 
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/unsafe_sentries.rs:1-28
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use jet_foundation::MemSentry::{jet_sentry_check, jet_sentry_reset, jet_sentry_scope};
-//RS 
-//RS #[test]
-//RS fn dev_sentry_faults_feed_the_shared_memory_ledger_without_engine_policy() {
-//RS     let root = std::env::temp_dir().join(format!("jet_sentry_ledger_{}", std::process::id()));
-//RS     let ledger = root.join("ledger.jsonl");
-//RS     std::fs::create_dir_all(&root).unwrap();
-//RS     std::env::set_var("JET_MEMORY_LEDGER", &ledger);
-//RS 
-//RS     jet_sentry_reset();
-//RS     let gate = jet_sentry_scope(true, "unsafe.jet", 12, "reads raw storage");
-//RS     let fault = jet_sentry_check(1, 8, 1, "read", "live allocation").unwrap();
-//RS     assert_eq!(fault.code, "R0801");
-//RS     assert_eq!(fault.file, "unsafe.jet");
-//RS     drop(gate);
-//RS     jet_sentry_reset();
-//RS     std::env::remove_var("JET_MEMORY_LEDGER");
-//RS 
-//RS     let witness = std::fs::read_to_string(&ledger).unwrap();
-//RS     assert!(witness.contains("\"schema\":\"jet.memory.ledger\""));
-//RS     assert!(witness.contains("\"kind\":\"sentry\""));
-//RS     assert!(witness.contains("\"code\":\"R0801\""));
-//RS     assert!(witness.contains("\"source\":\"unsafe.jet\""));
-//RS     assert!(witness.contains("\"provenance\":\"source #Unsafe gate\""));
-//RS     assert!(witness.contains("derive the pointer from live storage inside this gate"));
-//RS 
-//RS     let _ = std::fs::remove_dir_all(root);
-//RS }
-// END-PORT-PENDING 1183 tests/unsafe_sentries.rs:1-28
+// Rust: tests/unsafe_ratchet.rs:6
+// GATE #4494: native atomic fixture sequencing.
+NEXT_FIXTURE :: AtomicU64.new(0)
+// Rust: tests/unsafe_ratchet.rs:8
+pub struct Fixture {
+    root: OSPath
+    // Rust: tests/unsafe_ratchet.rs:13
+    pub fn new(tag: String) -> Fixture {
+        sequence :: NEXT_FIXTURE.fetch_add(1, Ordering.Relaxed)
+        root :: env.temp_dir().join("jet-unsafe-ratchet-{tag}-{id()}-{sequence}")
+        fs.create_dir_all(&root).unwrap()
+        fs.write(root.join("package.jet"), "name: \"fixture\"\nversion: \"0.1.0\"\n").unwrap()
+        fs.write(root.join("safety.md"), "# Safety\n").unwrap()
+        Fixture{root: ^root}
+    }
+    // Rust: tests/unsafe_ratchet.rs:29
+    pub fn write(self, path: String, source: String) -> {
+        path :: self.root.join(path)
+        fs.create_dir_all(path.parent().unwrap()).unwrap()
+        fs.write(path, source).unwrap()
+    }
+    // Rust: tests/unsafe_ratchet.rs:35
+    pub fn baseline(self) -> OSPath { self.root.join("safety.md") }
+}
+// Rust: tests/unsafe_ratchet.rs:40
+impl Fixture.Drop {
+    // Rust: tests/unsafe_ratchet.rs:41
+    fn drop(&self) -> { _ :: fs.remove_dir_all(&self.root) }
+}
+// Rust: tests/unsafe_ratchet.rs:46
+pub fn ratchet(fixture: &Fixture, update: Bool) -> Output {
+    // GATE #4494: native child execution.
+    script :: env.manifest_dir().join("Tools/agent/check-unsafe-ratchet.mjs")
+    command := Command.new("node")
+    command.arg(script).args(["--root", fixture.root.to_str().unwrap()]).args(["--baseline", fixture.baseline().to_str().unwrap()])
+    if update { command.arg("--update") }
+    command.output().unwrap()
+}
+// Rust: tests/unsafe_ratchet.rs:60
+pub fn seed(fixture: &Fixture) -> {
+    output :: ratchet(fixture, true)
+    assert(output.status.success(), "baseline seed failed: {String.from_utf8_lossy(&output.stderr)}")
+}
+// Rust: tests/unsafe_ratchet.rs:69
+pub fn ratchet_trips_on_seeded_growth() -> {
+    fixture :: Fixture.new("growth")
+    fixture.write("main.jet", """// #Unsafe("comment only")
+TEXT :: "#Unsafe(\"string only\")"
+#Unsafe("seed region") {}
+#[Unsafe("function region"), FFI(c)] fn foreign() -> {}
+""")
+    seed(&fixture)
+    fixture.write("new.jet", "#Unsafe(\"new region reason\") {}\n")
+    output :: ratchet(&fixture, false)
+    assert(!output.status.success(), "growth must fail")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("fixture: 2 -> 3"), "{stderr}")
+    assert(stderr.contains("new.jet"), "{stderr}")
+    assert(stderr.contains("new region reason"), "{stderr}")
+}
+// Rust: tests/unsafe_ratchet.rs:90
+pub fn ratchet_allows_shrink() -> {
+    fixture :: Fixture.new("shrink")
+    fixture.write("main.jet", "#Unsafe(\"keep this region\") {}\n#Unsafe(\"remove this region\") {}\n")
+    seed(&fixture)
+    fixture.write("main.jet", "#Unsafe(\"keep this region\") {}\n")
+    output :: ratchet(&fixture, false)
+    assert(output.status.success(), "shrink must pass: {String.from_utf8_lossy(&output.stderr)}")
+    baseline :: fs.read_to_string(fixture.baseline()).unwrap()
+    assert(baseline.contains("\"total\": 1"), "{baseline}")
+    assert(!baseline.contains("remove this region"), "{baseline}")
+}
+// Rust: tests/unsafe_ratchet.rs:110
+pub fn generated_ffi_does_not_move_baseline() -> {
+    fixture :: Fixture.new("generated-ffi")
+    fixture.write("main.jet", "#Unsafe(\"authored region\") {}\n")
+    seed(&fixture)
+    before :: fs.read_to_string(fixture.baseline()).unwrap()
+    fixture.write(".jet/bindings/c/generated.jet", "#Bindgen module c.fixture.__bindgen__ {\n    #Unsafe(\"generated FFI region\") fn foreign() -> {}\n}\n")
+    output :: ratchet(&fixture, false)
+    assert(output.status.success(), "generated FFI must not grow baseline: {String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(before, fs.read_to_string(fixture.baseline()).unwrap())
+}
 
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/user_policies.rs:1-83
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use jet::{Formatter, Lexer, Parser, Syntax, AST};
-//RS 
-//RS mod common;
-//RS 
-//RS #[test]
-//RS fn user_policy_declaration_and_custom_chain_parse_together() {
-//RS     let source = r#"
-//RS pub policy audit(topic: String) {
-//RS     wrap(call) { return call() }
-//RS }
-//RS 
-//RS #Policy(audit("users.load"))
-//RS fn load_user() -> Int -> 7
-//RS "#;
-//RS     let (tokens, lexer_diagnostics) = Lexer::lex(source);
-//RS     assert!(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}");
-//RS     let program = Parser::parse(&tokens).expect("user policy source should parse");
-//RS 
-//RS     let declaration = program
-//RS         .user_policy_declarations
-//RS         .first()
-//RS         .expect("the package policy declaration");
-//RS     assert!(declaration.is_pub);
-//RS     assert_eq!(declaration.name, "audit");
-//RS     assert_eq!(declaration.params.len(), 1);
-//RS     assert_eq!(declaration.params[0].name, "topic");
-//RS 
-//RS     let AST::Item::Func(function) = &program.items[0] else {
-//RS         panic!("expected the policy-decorated function");
-//RS     };
-//RS     let marker = function
-//RS         .markers
-//RS         .iter()
-//RS         .find(|marker| marker.name == Syntax::MARKER_POLICY)
-//RS         .expect("the callable policy marker");
-//RS     assert!(matches!(
-//RS         marker.args[0].as_expr(),
-//RS         Some(AST::Expr::Call(call)) if call.name == "audit"
-//RS     ));
-//RS 
-//RS     let formatted = Formatter::format_source(source).expect("user policy source should format");
-//RS     assert!(formatted.contains("pub policy audit(topic: String)"));
-//RS     assert!(formatted.contains("wrap(call)"));
-//RS }
-//RS 
-//RS #[test]
-//RS fn user_policy_apply_keeps_a_callable_binding() {
-//RS     let dir = common::unique_tmp("jet_user_policy_apply");
-//RS     std::fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("main.jet");
-//RS     std::fs::write(
-//RS         &file,
-//RS         r#"pub policy audit(topic: String) {
-//RS     wrap(call) { return "{topic}:{call()}" }
-//RS }
-//RS 
-//RS fn load_user() -> String -> "ok"
-//RS 
-//RS fn run() {
-//RS     selected :: apply(audit("users.load"), load_user)
-//RS     print(selected())
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let mut bundle = jet::Loader::load_entry(file.to_str().unwrap()).unwrap();
-//RS     let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-//RS     match jet::Interpreter::dev_iteration(file.to_str().unwrap(), false, true) {
-//RS         jet::Interpreter::RunOutcome::Ran {
-//RS             exit_code,
-//RS             stdout,
-//RS             stderr,
-//RS         } => {
-//RS             assert_eq!(exit_code, 0);
-//RS             assert_eq!(stdout, "users.load:ok\n");
-//RS             assert_eq!(stderr, "");
-//RS         }
-//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS             panic!("interpreter rejected the user policy apply source: {diagnostics:#?}")
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 1183 tests/user_policies.rs:1-83
+// Rust: tests/view_copy_semantics.rs:13
+pub fn apply_type(name: String, args: [MirType]) -> MirType {
+    MirType.from_kind(MirTypeKind.Apply(name: MirNominalRef{id: MirTypeId(1), name: name.to_string()}, args: ^args))
+}
+// Rust: tests/view_copy_semantics.rs:23
+pub fn named_type(name: String) -> MirType { apply_type(name, []) }
+// Rust: tests/view_copy_semantics.rs:27
+pub fn view_of(element: MirType) -> MirType { apply_type("View", [^element]) }
+// Rust: tests/view_copy_semantics.rs:30
+pub fn lower_checked(source: String) -> MirProgram {
+    root :: common.unique_tmp("jet_view_copy_semantics")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("package.jet"), "name: \"view_copy_semantics\"\nversion: \"1.0.0\"\n").unwrap()
+    entry :: root.join("main.jet")
+    fs.write(&entry, source).unwrap()
+    bundle := jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter((diagnostic) -> diagnostic.severity == jet.Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "{errors:#?}")
+    jet.Codegen.TIR.lower_checked_mir_program_for(&bundle, MirArtifactRequest.new(MirArtifactTarget.Cranelift, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)).expect("checked source lowers through canonical MIR").0
+}
+// Rust: tests/view_copy_semantics.rs:57
+pub fn emitted_kernel_call(rust: String, symbol: String) -> Bool {
+    needle :: "{symbol}("
+    declaration :: "fn {symbol}"
+    rust.lines().any((line) -> !line.contains(&declaration) && line.contains(&needle))
+}
+// Rust: tests/view_copy_semantics.rs:237
+pub OWNED_WINDOW_SOURCE :: """
+fn own_first(values: [Int]) -> [Int] {
+    return ~values[0..0]
+}
 
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/vault_key_wrap.rs:1-53
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS #[test]
-//RS fn actual_vault_key_wrap_bridge_fixture_compiles_and_runs() {
-//RS     let root = std::env::current_dir().unwrap();
-//RS     let dir = std::env::temp_dir().join(format!("jet-vault-key-wrap-proof-{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(dir.join("src")).unwrap();
-//RS     let jet_codegen = root.join("crates/jet-codegen");
-//RS     std::fs::write(
-//RS         dir.join("Cargo.toml"),
-//RS         format!(
-//RS             r#"[package]
-//RS name = "jet-vault-key-wrap-proof"
-//RS version = "0.0.0"
-//RS edition = "2021"
-//RS 
-//RS [workspace]
-//RS 
-//RS [dependencies]
-//RS aes-gcm = "0.10"
-//RS age = "0.10"
-//RS argon2 = {{ version = "=0.5.3", default-features = false, features = ["alloc", "password-hash"] }}
-//RS blake3 = "1"
-//RS chacha20poly1305 = "0.10"
-//RS ed25519-dalek = "2"
-//RS hkdf = "0.12"
-//RS sha2 = "0.10"
-//RS subtle = "2"
-//RS x25519-dalek = "2"
-//RS jet-codegen = {{ path = "{}" }}
-//RS "#,
-//RS             jet_codegen.display()
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     let fixture = root.join("tests/fixtures/vault_key_wrap_runtime.rs");
-//RS     std::fs::write(dir.join("src/lib.rs"), format!("include!({fixture:?});\n")).unwrap();
-//RS     let output = std::process::Command::new("cargo")
-//RS         .args(["test", "--offline", "--quiet", "--manifest-path"])
-//RS         .arg(dir.join("Cargo.toml"))
-//RS         .args(["--", "--test-threads=1"])
-//RS         .env("CARGO_TARGET_DIR", dir.join("target"))
-//RS         .output()
-//RS         .unwrap();
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "vault key-wrap proof failed:\nstdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS }
-// END-PORT-PENDING 1183 tests/vault_key_wrap.rs:1-53
+fn run() -> {
+    values := [1, 2]
+    copied := own_first(values)
+    values[0] = 8
+    copied[0] = 9
+    print(values[0])
+    print(copied[0])
 
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/vault_keys.rs:1-47
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS #[test]
-//RS fn actual_typed_vault_bridge_fixture_compiles_and_runs() {
-//RS     let root = std::env::current_dir().unwrap();
-//RS     let dir = std::env::temp_dir().join(format!("jet-vault-key-proof-{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     std::fs::create_dir_all(dir.join("src")).unwrap();
-//RS     std::fs::write(
-//RS         dir.join("Cargo.toml"),
-//RS         r#"[package]
-//RS name = "jet-vault-key-proof"
-//RS version = "0.0.0"
-//RS edition = "2021"
-//RS 
-//RS [workspace]
-//RS 
-//RS [dependencies]
-//RS aes-gcm = "0.10"
-//RS age = "0.10"
-//RS argon2 = "0.5"
-//RS blake3 = "1"
-//RS chacha20poly1305 = "0.10"
-//RS ed25519-dalek = "2"
-//RS hkdf = "0.12"
-//RS sha2 = "0.10"
-//RS subtle = "2"
-//RS x25519-dalek = "2"
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let fixture = root.join("tests/fixtures/vault_key_runtime.rs");
-//RS     std::fs::write(dir.join("src/lib.rs"), format!("include!({fixture:?});\n")).unwrap();
-//RS     let output = std::process::Command::new("cargo")
-//RS         .args(["test", "--offline", "--quiet", "--manifest-path"])
-//RS         .arg(dir.join("Cargo.toml"))
-//RS         .env("CARGO_TARGET_DIR", dir.join("target"))
-//RS         .output()
-//RS         .unwrap();
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "vault runtime proof failed:\nstdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS }
-// END-PORT-PENDING 1183 tests/vault_keys.rs:1-47
+    nested := [[1, 2], [3, 4]]
+    nested_copy := ~nested[0..0]
+    nested[0][0] = 6
+    nested_copy[0][0] = 7
+    print(nested[0][0])
+    print(nested_copy[0][0])
+}
+"""
+// Rust: tests/view_copy_semantics.rs:259
+pub EMPTY_STRING_AND_LIST_SOURCE :: """
+fn run() -> {
+    empty_string := ""
+    empty_text_view :: empty_string.after("")
+    owned_empty_text :: ~empty_text_view
+    print(owned_empty_text.len())
 
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/view_copy_semantics.rs:1-386
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS use jet_foundation::MIR::{
-//RS     canonical_operation_identity, canonical_operation_payload, mir_program_digest,
-//RS     mir_view_copy_element_type, mir_view_copy_kind, MirArtifactBuildMode, MirArtifactKind,
-//RS     MirArtifactRequest, MirArtifactTarget, MirCopyFact, MirNominalRef, MirOperation,
-//RS     MirOptimizationPolicy, MirProgram, MirTagMarker, MirType, MirTypeId, MirTypeKind,
-//RS     MirViewCopyKind, MirValueId,
-//RS };
-//RS 
-//RS fn apply_type(name: &str, args: Vec<MirType>) -> MirType {
-//RS     MirType::from_kind(MirTypeKind::Apply {
-//RS         name: MirNominalRef {
-//RS             id: MirTypeId(1),
-//RS             name: name.to_string(),
-//RS         },
-//RS         args,
-//RS     })
-//RS }
-//RS 
-//RS fn named_type(name: &str) -> MirType {
-//RS     apply_type(name, Vec::new())
-//RS }
-//RS 
-//RS fn view_of(element: MirType) -> MirType {
-//RS     apply_type("View", vec![element])
-//RS }
-//RS fn lower_checked(source: &str) -> MirProgram {
-//RS     let root = common::unique_tmp("jet_view_copy_semantics");
-//RS     std::fs::create_dir_all(&root).unwrap();
-//RS     std::fs::write(
-//RS         root.join("package.jet"),
-//RS         "name: \"view_copy_semantics\"\nversion: \"1.0.0\"\n",
-//RS     )
-//RS     .unwrap();
-//RS     let entry = root.join("main.jet");
-//RS     std::fs::write(&entry, source).unwrap();
-//RS     let mut bundle = jet::Loader::load_entry(entry.to_str().unwrap()).unwrap();
-//RS     let errors: Vec<_> = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run)
-//RS         .into_iter()
-//RS         .filter(|diagnostic| matches!(diagnostic.severity, jet::Diagnostics::Severity::Error))
-//RS         .collect();
-//RS     assert!(errors.is_empty(), "{errors:#?}");
-//RS     jet::Codegen::TIR::lower_checked_mir_program_for(
-//RS         &bundle,
-//RS         MirArtifactRequest::new(
-//RS             MirArtifactTarget::Cranelift,
-//RS             MirArtifactKind::NativeExecutable,
-//RS             MirArtifactBuildMode::Dev,
-//RS         ),
-//RS     )
-//RS     .expect("checked source lowers through canonical MIR")
-//RS     .0
-//RS }
-//RS fn emitted_kernel_call(rust: &str, symbol: &str) -> bool {
-//RS     let needle = format!("{symbol}(");
-//RS     let declaration = format!("fn {symbol}");
-//RS     rust.lines().any(|line| {
-//RS         !line.contains(&declaration) && line.contains(&needle)
-//RS     })
-//RS }
-//RS 
-//RS #[test]
-//RS fn canonical_view_copy_kind_preserves_string_and_nested_shapes() {
-//RS     let string_view = view_of(named_type("str"));
-//RS     let owned_string_view = view_of(MirType::from_kind(MirTypeKind::String));
-//RS     let nested_view = view_of(MirType::from_kind(MirTypeKind::List(Box::new(
-//RS         MirType::from_kind(MirTypeKind::String),
-//RS     ))));
-//RS     let tagged_nested_view = MirType::from_kind(MirTypeKind::Tagged {
-//RS         marker: MirTagMarker::User("ReadAlias".to_string()),
-//RS         inner: Box::new(nested_view.clone()),
-//RS     });
-//RS 
-//RS     assert_eq!(mir_view_copy_kind(&string_view), Some(MirViewCopyKind::String));
-//RS     assert_eq!(mir_view_copy_kind(&owned_string_view), Some(MirViewCopyKind::List));
-//RS     assert_eq!(mir_view_copy_kind(&nested_view), Some(MirViewCopyKind::List));
-//RS     assert_eq!(mir_view_copy_kind(&tagged_nested_view), Some(MirViewCopyKind::List));
-//RS     assert!(mir_view_copy_element_type(&nested_view)
-//RS         .expect("nested view element")
-//RS         .is_list());
-//RS 
-//RS     let string_target = MirType::from_kind(MirTypeKind::String);
-//RS     let list_target = MirType::from_kind(MirTypeKind::List(Box::new(
-//RS         MirType::from_kind(MirTypeKind::List(Box::new(MirType::from_kind(
-//RS             MirTypeKind::String,
-//RS         )))),
-//RS     )));
-//RS     // These nominal spellings are already producer-normalized canonical forms.
-//RS     let canonical_string_target = named_type("String");
-//RS     let canonical_list_target = apply_type(
-//RS         "List",
-//RS         vec![MirType::from_kind(MirTypeKind::String)],
-//RS     );
-//RS     let tagged_canonical_string = MirType::from_kind(MirTypeKind::Tagged {
-//RS         marker: MirTagMarker::User("OwnedAlias".to_string()),
-//RS         inner: Box::new(canonical_string_target.clone()),
-//RS     });
-//RS     let fake_string_view = apply_type("foo.View", vec![named_type("str")]);
-//RS     let fake_list_view = apply_type("foo.ViewMut", vec![MirType::from_kind(MirTypeKind::Int)]);
-//RS     let malformed_view_placeholder = apply_type("View<>", vec![named_type("str")]);
-//RS     let fake_string_target = named_type("foo.String");
-//RS     let fake_list_target = apply_type(
-//RS         "foo.List",
-//RS         vec![MirType::from_kind(MirTypeKind::String)],
-//RS     );
-//RS     let malformed_list_placeholder = apply_type(
-//RS         "List<>",
-//RS         vec![MirType::from_kind(MirTypeKind::String)],
-//RS     );
-//RS 
-//RS     assert_eq!(mir_view_copy_kind(&fake_string_view), None);
-//RS     assert_eq!(mir_view_copy_kind(&fake_list_view), None);
-//RS     assert_eq!(mir_view_copy_kind(&malformed_view_placeholder), None);
-//RS     assert!(!MirViewCopyKind::String.target_matches(&fake_string_target));
-//RS     assert!(!MirViewCopyKind::List.target_matches(&fake_list_target));
-//RS     assert!(!MirViewCopyKind::List.target_matches(&malformed_list_placeholder));
-//RS     assert!(MirViewCopyKind::String.target_matches(&canonical_string_target));
-//RS     assert!(MirViewCopyKind::String.target_matches(&tagged_canonical_string));
-//RS     assert!(MirViewCopyKind::List.target_matches(&canonical_list_target));
-//RS     assert!(MirViewCopyKind::String.target_matches(&string_target));
-//RS     assert!(!MirViewCopyKind::String.target_matches(&list_target));
-//RS     assert!(MirViewCopyKind::List.target_matches(&list_target));
-//RS }
-//RS 
-//RS #[test]
-//RS fn copy_fact_changes_canonical_payload_and_identity() {
-//RS     let ordinary = MirOperation::Copy {
-//RS         value: MirValueId(7),
-//RS         fact: MirCopyFact::Materialize,
-//RS     };
-//RS     let materialized = MirOperation::Copy {
-//RS         value: MirValueId(7),
-//RS         fact: MirCopyFact::ViewMaterialize,
-//RS     };
-//RS     let ordinary_payload = canonical_operation_payload(&ordinary);
-//RS     let materialized_payload = canonical_operation_payload(&materialized);
-//RS     assert_ne!(ordinary_payload, materialized_payload);
-//RS     assert!(ordinary_payload.contains("\"copy_fact\":\"materialize\""));
-//RS     assert!(materialized_payload.contains("\"copy_fact\":\"view_materialize\""));
-//RS     assert_ne!(
-//RS         canonical_operation_identity(&ordinary),
-//RS         canonical_operation_identity(&materialized)
-//RS     );
-//RS }
-//RS #[test]
-//RS fn optimization_and_digest_preserve_materialization_marker() {
-//RS     let mir = lower_checked(OWNED_WINDOW_SOURCE);
-//RS     let optimized =
-//RS         jet_foundation::MIR::optimize_mir_program(mir, &MirOptimizationPolicy::conservative())
-//RS             .expect("MIR optimization preserves the checked operation schema");
-//RS     assert!(optimized.functions.iter().any(|function| {
-//RS         function.blocks.iter().any(|block| {
-//RS             block.instructions.iter().any(|instruction| {
-//RS                 matches!(
-//RS                     &instruction.operation,
-//RS                     MirOperation::Copy {
-//RS                         fact: MirCopyFact::ViewMaterialize,
-//RS                         ..
-//RS                     }
-//RS                 )
-//RS             })
-//RS         })
-//RS     }));
-//RS 
-//RS     let mut flipped = optimized.clone();
-//RS     let mut changed = false;
-//RS     for function in &mut flipped.functions {
-//RS         for block in &mut function.blocks {
-//RS             for instruction in &mut block.instructions {
-//RS                 if let MirOperation::Copy { fact, .. } = &mut instruction.operation {
-//RS                     if *fact == MirCopyFact::ViewMaterialize {
-//RS                         *fact = MirCopyFact::Materialize;
-//RS                         changed = true;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     assert!(changed, "fixture must contain a materializing Copy");
-//RS     assert_ne!(mir_program_digest(&optimized), mir_program_digest(&flipped));
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn checked_source_windows_lower_to_marked_mir() {
-//RS     let mir = lower_checked(EMPTY_STRING_AND_LIST_SOURCE);
-//RS     let marked = mir
-//RS         .functions
-//RS         .iter()
-//RS         .flat_map(|function| function.blocks.iter())
-//RS         .flat_map(|block| block.instructions.iter())
-//RS         .filter(|instruction| {
-//RS             matches!(
-//RS                 &instruction.operation,
-//RS                 MirOperation::Copy {
-//RS                     fact: MirCopyFact::ViewMaterialize,
-//RS                     ..
-//RS                 }
-//RS             )
-//RS         })
-//RS         .count();
-//RS     assert!(
-//RS         marked >= 4,
-//RS         "the checked fixture's four windows must lower to marked Copy operations: {marked}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn evaluator_view_materialization_helpers_use_checked_jet_route() {
-//RS     let source = include_str!("../Compiler/JetEval/Source/Evaluator.jet");
-//RS     for helper in [
-//RS         "jet_eval_materialize_string_window",
-//RS         "jet_eval_materialize_list_window",
-//RS         "jet_eval_materialize_bytes_window",
-//RS     ] {
-//RS         assert!(
-//RS             source.contains(&format!("fn {helper}(")),
-//RS             "Source/Evaluator.jet must define {helper}"
-//RS         );
-//RS     }
-//RS     assert!(
-//RS         source.contains("window :: value.after(\"\")\n    ~window"),
-//RS         "String evaluator materialization must lower through checked Jet `~`"
-//RS     );
-//RS     assert_eq!(
-//RS         source
-//RS             .matches("window :: value[0..<value.len()]\n    ~window")
-//RS             .count(),
-//RS         2,
-//RS         "List and Bytes evaluator materialization must use checked full windows"
-//RS     );
-//RS }
-//RS 
-//RS const OWNED_WINDOW_SOURCE: &str = r#"
-//RS fn own_first(values: [Int]) -> [Int] {
-//RS     return ~values[0..0]
-//RS }
-//RS 
-//RS fn run() {
-//RS     values := [1, 2]
-//RS     copied := own_first(values)
-//RS     values[0] = 8
-//RS     copied[0] = 9
-//RS     print(values[0])
-//RS     print(copied[0])
-//RS 
-//RS     nested := [[1, 2], [3, 4]]
-//RS     nested_copy := ~nested[0..0]
-//RS     nested[0][0] = 6
-//RS     nested_copy[0][0] = 7
-//RS     print(nested[0][0])
-//RS     print(nested_copy[0][0])
-//RS }
-//RS "#;
-//RS 
-//RS const EMPTY_STRING_AND_LIST_SOURCE: &str = r#"
-//RS fn run() {
-//RS     empty_string := ""
-//RS     empty_text_view :: empty_string.after("")
-//RS     owned_empty_text :: ~empty_text_view
-//RS     print(owned_empty_text.len())
-//RS 
-//RS     unicode_text := "π🙂"
-//RS     full_text_view :: unicode_text.after("")
-//RS     owned_unicode_text :: ~full_text_view
-//RS     print(owned_unicode_text == "π🙂")
-//RS 
-//RS     empty_values := [Int]{}
-//RS     empty_values_view :: empty_values[0..<empty_values.len()]
-//RS     owned_empty_values :: ~empty_values_view
-//RS     print(owned_empty_values.len())
-//RS 
-//RS     bytes := unicode_text.bytes()
-//RS     bytes_view :: bytes[0..<bytes.len()]
-//RS     owned_bytes :: ~bytes_view
-//RS     print(owned_bytes.len())
-//RS }
-//RS "#;
-//RS const LIST_STRING_SOURCE: &str = r#"
-//RS fn copy_values(values: [String]) -> [String] {
-//RS     return ~values[0..<values.len()]
-//RS }
-//RS 
-//RS fn run() {
-//RS     values := ["a", "b"]
-//RS     copied := copy_values(values)
-//RS     values[0] = "source"
-//RS     copied[0] = "copy"
-//RS     print(values[0])
-//RS     print(copied[0])
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn empty_unicode_and_bytes_windows_agree_across_native_tiers() {
-//RS     assert!(
-//RS         tir_support::have_rustc(),
-//RS         "view-copy native-tier acceptance requires AOT rustc proof"
-//RS     );
-//RS     tir_support::assert_tiers_agree(
-//RS         "view_copy_empty_unicode_bytes",
-//RS         EMPTY_STRING_AND_LIST_SOURCE,
-//RS         "0\ntrue\n0\n6\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn empty_unicode_and_bytes_windows_agree_on_awaited_web() {
-//RS     tir_support::assert_awaited_web_tier(
-//RS         "view_copy_empty_unicode_bytes_web",
-//RS         EMPTY_STRING_AND_LIST_SOURCE,
-//RS         "0\ntrue\n0\n6\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn owned_window_escape_and_nested_mutation_agree_across_native_tiers() {
-//RS     assert!(
-//RS         tir_support::have_rustc(),
-//RS         "view-copy native-tier acceptance requires AOT rustc proof"
-//RS     );
-//RS     tir_support::assert_tiers_agree("view_copy_owned_window", OWNED_WINDOW_SOURCE, "8\n9\n6\n7\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn owned_window_escape_and_nested_mutation_agree_on_awaited_web() {
-//RS     tir_support::assert_awaited_web_tier(
-//RS         "view_copy_owned_window_web",
-//RS         OWNED_WINDOW_SOURCE,
-//RS         "8\n9\n6\n7\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn string_view_materialization_uses_string_kernel_and_list_view_uses_list_kernel() {
-//RS     let string_source = r#"
-//RS fn run() {
-//RS     text := "  x  "
-//RS     view :: text.trim()
-//RS     print(~view)
-//RS }
-//RS "#;
-//RS     let string_compiled = jet::compile(string_source).expect("String View materializes");
-//RS     assert!(
-//RS         emitted_kernel_call(&string_compiled.rust, "jet_string_view_copy"),
-//RS         "String view lowering must emit a call-site use of jet_string_view_copy"
-//RS     );
-//RS     assert!(
-//RS         !emitted_kernel_call(&string_compiled.rust, "jet_view_copy"),
-//RS         "String view lowering must not call the List kernel"
-//RS     );
-//RS 
-//RS     let list_compiled = jet::compile(LIST_STRING_SOURCE).expect("View<String> materializes");
-//RS     assert!(
-//RS         emitted_kernel_call(&list_compiled.rust, "jet_view_copy"),
-//RS         "List<String> view lowering must emit a call-site use of jet_view_copy"
-//RS     );
-//RS     assert!(
-//RS         !emitted_kernel_call(&list_compiled.rust, "jet_string_view_copy"),
-//RS         "List<String> view lowering must not call the String kernel"
-//RS     );
-//RS }
-//RS #[test]
-//RS fn list_string_view_materialization_runs_across_native_tiers() {
-//RS     assert!(
-//RS         tir_support::have_rustc(),
-//RS         "List<String> view acceptance requires AOT rustc proof"
-//RS     );
-//RS     tir_support::assert_tiers_agree(
-//RS         "view_copy_list_string_runtime",
-//RS         LIST_STRING_SOURCE,
-//RS         "source\ncopy\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn list_string_view_materialization_runs_on_awaited_web() {
-//RS     tir_support::assert_awaited_web_tier(
-//RS         "view_copy_list_string_runtime_web",
-//RS         LIST_STRING_SOURCE,
-//RS         "source\ncopy\n",
-//RS     );
-//RS }
-// END-PORT-PENDING 1183 tests/view_copy_semantics.rs:1-386
+    unicode_text := "π🙂"
+    full_text_view :: unicode_text.after("")
+    owned_unicode_text :: ~full_text_view
+    print(owned_unicode_text == "π🙂")
 
-// PORT-PENDING 1183 tests-unsafe-ratchet-module-group: tests/web_app.rs:1-373
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Cards #1274/#1703 CLI/runtime smoke for D-WEBAPP1 / D-WEBAUTHOR1.
-//RS #![allow(non_snake_case)]
-//RS 
-//RS mod common;
-//RS use common::Scratch;
-//RS 
-//RS use std::fs;
-//RS use std::io::{Read, Write};
-//RS use std::net::{TcpListener, TcpStream};
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Child, Command, Stdio};
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS fn repo_root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//RS }
-//RS 
-//RS fn jet_bin() -> PathBuf {
-//RS     repo_root().join("target/debug/jet")
-//RS }
-//RS 
-//RS fn run_jet(args: &[&str]) -> (i32, String, String) {
-//RS     let out = Command::new(jet_bin())
-//RS         .current_dir(repo_root())
-//RS         .args(args)
-//RS         .output()
-//RS         .expect("spawn jet");
-//RS     (
-//RS         out.status.code().unwrap_or(1),
-//RS         String::from_utf8_lossy(&out.stdout).into_owned(),
-//RS         String::from_utf8_lossy(&out.stderr).into_owned(),
-//RS     )
-//RS }
-//RS 
-//RS struct ServerChild(Child);
-//RS impl ServerChild {
-//RS     fn diagnostic(&mut self) -> String {
-//RS         let status = match self.0.try_wait() {
-//RS             Ok(Some(status)) => format!("exited with {status}"),
-//RS             Ok(None) => "still running".to_string(),
-//RS             Err(error) => format!("status unavailable: {error}"),
-//RS         };
-//RS         let stderr = if status.starts_with("exited") {
-//RS             let mut stderr = String::new();
-//RS             if let Some(mut pipe) = self.0.stderr.take() {
-//RS                 let _ = pipe.read_to_string(&mut stderr);
-//RS             }
-//RS             stderr
-//RS         } else {
-//RS             String::new()
-//RS         };
-//RS         format!("{status}; stderr={stderr}")
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for ServerChild {
-//RS     fn drop(&mut self) {
-//RS         let _ = self.0.kill();
-//RS         let _ = self.0.wait();
-//RS     }
-//RS }
-//RS 
-//RS fn free_port() -> u16 {
-//RS     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
-//RS     listener.local_addr().unwrap().port()
-//RS }
-//RS 
-//RS fn request(port: u16, method: &str, path: &str, mut child: Option<&mut ServerChild>) -> String {
-//RS     let deadline = Instant::now() + Duration::from_secs(30);
-//RS     let mut stream = loop {
-//RS         match TcpStream::connect(("127.0.0.1", port)) {
-//RS             Ok(stream) => break stream,
-//RS             Err(error) if Instant::now() < deadline => {
-//RS                 let _ = error;
-//RS                 std::thread::sleep(Duration::from_millis(50));
-//RS             }
-//RS             Err(error) => {
-//RS                 let diagnostic = child
-//RS                     .as_deref_mut()
-//RS                     .map(ServerChild::diagnostic)
-//RS                     .unwrap_or_else(|| "child diagnostics unavailable".to_string());
-//RS                 panic!("web app did not listen on {port}: {error}; {diagnostic}");
-//RS             }
-//RS         }
-//RS     };
-//RS     write!(
-//RS         stream,
-//RS         "{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n"
-//RS     )
-//RS     .unwrap();
-//RS     stream.shutdown(std::net::Shutdown::Write).unwrap();
-//RS     let mut response = String::new();
-//RS     stream.read_to_string(&mut response).unwrap();
-//RS     response
-//RS }
-//RS 
-//RS fn spawn_server_with_program(program: &Path, args: &[&str], port: u16) -> ServerChild {
-//RS     ServerChild(
-//RS         Command::new(program)
-//RS             .current_dir(repo_root())
-//RS             .args(args)
-//RS             .env("JET_APP_PORT", port.to_string())
-//RS             .stdout(Stdio::piped())
-//RS             .stderr(Stdio::piped())
-//RS             .spawn()
-//RS             .expect("spawn web app server"),
-//RS     )
-//RS }
-//RS 
-//RS fn spawn_server(args: &[&str], port: u16) -> ServerChild {
-//RS     spawn_server_with_program(&jet_bin(), args, port)
-//RS }
-//RS 
-//RS fn response_body(response: &str) -> &str {
-//RS     response
-//RS         .split_once("\r\n\r\n")
-//RS         .map(|(_, body)| body)
-//RS         .expect("HTTP response body")
-//RS }
-//RS 
-//RS fn web_graph_facts_json() -> String {
-//RS     let (code, stdout, stderr) = run_jet(&[
-//RS         "explain",
-//RS         "--web-graph",
-//RS         "--json",
-//RS         "Examples/features/web/web_app.jet",
-//RS     ]);
-//RS     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-//RS     stdout.replace(
-//RS         &repo_root()
-//RS             .join("Examples/features/web/web_app.jet")
-//RS             .display()
-//RS             .to_string(),
-//RS         "Examples/features/web/web_app.jet",
-//RS     )
-//RS }
-//RS 
-//RS #[test]
-//RS fn app_graph_facts_json() {
-//RS     let stdout = web_graph_facts_json();
-//RS     let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();
-//RS     assert!(compact.contains("\"shared_tir\":true"), "{stdout}");
-//RS     assert!(compact.contains("\"path\":\"/\""), "{stdout}");
-//RS     assert!(compact.contains("csp-default"), "{stdout}");
-//RS     assert!(compact.contains("hydration"), "{stdout}");
-//RS     assert!(compact.contains("\"prefix\":\"/api\""), "{stdout}");
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn web_app_expand_facts_web() {
-//RS     let (code, stdout, stderr) = run_jet(&[
-//RS         "inspect",
-//RS         "expand",
-//RS         "--facts",
-//RS         "web",
-//RS         "Examples/features/web/web_app.jet",
-//RS     ]);
-//RS     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-//RS     assert!(
-//RS         stdout.contains("web application graph") || stdout.contains("shared TIR"),
-//RS         "{stdout}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn web_app_routes_from_exhaustive() {
-//RS     let scratch = Scratch::new("webapp-routes");
-//RS     let tmp = scratch.path.clone();
-//RS     fs::create_dir_all(tmp.join("routes/orders")).unwrap();
-//RS     fs::write(
-//RS         tmp.join("app.jet"),
-//RS         r#"
-//RS use core.web as web
-//RS 
-//RS fn run() -> App {
-//RS     return web.app().routes(from: "routes")
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(tmp.join("routes/index.jet"), "fn page() {}\n").unwrap();
-//RS     fs::write(tmp.join("routes/orders/[id].jet"), "fn page() {}\n").unwrap();
-//RS     fs::write(tmp.join("routes/_helper.jet"), "fn helper() {}\n").unwrap();
-//RS 
-//RS     let (code, stdout, stderr) = run_jet(&[
-//RS         "explain",
-//RS         "--web-graph",
-//RS         "--json",
-//RS         tmp.join("app.jet").to_str().unwrap(),
-//RS     ]);
-//RS     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-//RS     let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();
-//RS     assert!(compact.contains("\"path\":\"/\""), "{stdout}");
-//RS     assert!(compact.contains("/orders/:id"), "{stdout}");
-//RS     assert!(!compact.contains("_helper"), "{stdout}");
-//RS 
-//RS }
-//RS 
-//RS #[test]
-//RS fn web_app_run_serves_pages_actions_and_assets() {
-//RS     let port = free_port();
-//RS     let mut _server = spawn_server(&["run", "Examples/features/web/web_app.jet"], port);
-//RS 
-//RS     let page = request(port, "GET", "/", Some(&mut _server));
-//RS     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
-//RS     assert!(page.contains("<title>Home</title>"), "{page}");
-//RS     assert!(page.contains("hello from csr"), "{page}");
-//RS     assert!(!page.contains("jet-dev-server-functions"), "{page}");
-//RS     let expected = include_str!("../Examples/features/expected/web/web_app.harness.out");
-//RS     let (expected_page, expected_facts) = expected
-//RS         .split_once("\n\n--- facts_json ---\n")
-//RS         .expect("web app golden sections");
-//RS     assert_eq!(response_body(&page), expected_page);
-//RS     assert_eq!(web_graph_facts_json(), expected_facts);
-//RS 
-//RS     let action = request(port, "POST", "/actions/save", Some(&mut _server));
-//RS     assert!(action.starts_with("HTTP/1.1 200"), "{action}");
-//RS     assert!(action.contains("content-type: application/json"), "{action}");
-//RS     assert!(action.contains("content-security-policy: default-src 'self'"), "{action}");
-//RS     assert_eq!(response_body(&action), "\"saved\"");
-//RS     assert!(!action.contains("server function input is missing"), "{action}");
-//RS 
-//RS     let asset = request(port, "GET", "/assets/app.css", Some(&mut _server));
-//RS     assert!(asset.starts_with("HTTP/1.1 200"), "{asset}");
-//RS     assert!(asset.contains("font-family"), "{asset}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn typed_app_args_serve_in_default_and_aot_modes() {
-//RS     let port = free_port();
-//RS     let mut _server = spawn_server(
-//RS         &[
-//RS             "run",
-//RS             "Examples/features/web/app_typed_args.jet",
-//RS             "--",
-//RS             "--port=9000",
-//RS         ],
-//RS         port,
-//RS     );
-//RS     let response = request(port, "GET", "/", Some(&mut _server));
-//RS     assert!(
-//RS         response.starts_with("HTTP/1.1 404"),
-//RS         "default typed App: {response}"
-//RS     );
-//RS     drop(_server);
-//RS 
-//RS     let (code, stdout, stderr) = run_jet(&["build", "Examples/features/web/app_typed_args.jet"]);
-//RS     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-//RS     let port = free_port();
-//RS     let mut _server = spawn_server_with_program(
-//RS         &repo_root().join(".jet/build/app_typed_args"),
-//RS         &["--port=9000"],
-//RS         port,
-//RS     );
-//RS     let response = request(port, "GET", "/", Some(&mut _server));
-//RS     assert!(
-//RS         response.starts_with("HTTP/1.1 404"),
-//RS         "AOT typed App: {response}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn typed_app_args_report_invalid_port_with_shared_fix() {
-//RS     for args in [
-//RS         &[
-//RS             "run",
-//RS             "Examples/features/web/app_typed_args.jet",
-//RS             "--",
-//RS             "--port=nine",
-//RS         ][..],
-//RS         &[
-//RS             "run",
-//RS             "--interpret",
-//RS             "Examples/features/web/app_typed_args.jet",
-//RS             "--",
-//RS             "--port=nine",
-//RS         ][..],
-//RS         &[
-//RS             "run",
-//RS             "--release",
-//RS             "Examples/features/web/app_typed_args.jet",
-//RS             "--",
-//RS             "--port=nine",
-//RS         ][..],
-//RS     ] {
-//RS         let (code, stdout, stderr) = run_jet(args);
-//RS         assert_eq!(code, 2, "args={args:?}\nstdout={stdout}\nstderr={stderr}");
-//RS         assert!(stdout.is_empty(), "args={args:?}\nstdout={stdout}");
-//RS         assert!(
-//RS             stderr.contains("`--port` expects an Int, got `nine`"),
-//RS             "args={args:?}\nstderr={stderr}"
-//RS         );
-//RS         assert!(
-//RS             stderr.contains("fix: pass a whole number to `--port`"),
-//RS             "args={args:?}\nstderr={stderr}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn web_app_dev_forced_interpreter_serves_callbacks() {
-//RS     let port = free_port();
-//RS     let mut _server = spawn_server(
-//RS         &[
-//RS             "dev",
-//RS             "Examples/features/web/web_app.jet",
-//RS             "--interpret",
-//RS             &format!("--port={port}"),
-//RS         ],
-//RS         port,
-//RS     );
-//RS 
-//RS     let page = request(port, "GET", "/", Some(&mut _server));
-//RS     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
-//RS     assert!(page.contains("<title>Home</title>"), "{page}");
-//RS     assert!(page.contains("jet-dev-server-functions"), "{page}");
-//RS     assert!(page.contains("hello from csr"), "{page}");
-//RS 
-//RS     let action = request(port, "POST", "/actions/save", Some(&mut _server));
-//RS     assert!(action.starts_with("HTTP/1.1 200"), "{action}");
-//RS     assert_eq!(response_body(&action), "\"saved\"");
-//RS }
-//RS 
-//RS #[test]
-//RS fn web_app_dev_auto_serves_with_reload_without_dev_function() {
-//RS     let scratch = Scratch::new("webapp-reload");
-//RS     let tmp = scratch.path.clone();
-//RS     let source = fs::read_to_string(repo_root().join("Examples/features/web/web_app.jet")).unwrap();
-//RS     let app = tmp.join("app.jet");
-//RS     fs::write(&app, source).unwrap();
-//RS     fs::copy(
-//RS         repo_root().join("Examples/features/web/package.jet"),
-//RS         tmp.join("package.jet"),
-//RS     )
-//RS     .unwrap();
-//RS     let port = free_port();
-//RS     let mut _server = spawn_server(
-//RS         &["dev", app.to_str().unwrap(), &format!("--port={port}")],
-//RS         port,
-//RS     );
-//RS     let page = request(port, "GET", "/", Some(&mut _server));
-//RS     assert!(page.starts_with("HTTP/1.1 200"), "{page}");
-//RS     assert!(page.contains("EventSource(\"/__jet/reload\")"), "{page}");
-//RS     let (sent, received) = std::sync::mpsc::channel();
-//RS     std::thread::spawn(move || {
-//RS         sent.send(request(port, "GET", "/__jet/reload", None)).unwrap();
-//RS     });
-//RS     assert!(
-//RS         received.recv_timeout(Duration::from_millis(250)).is_err(),
-//RS         "reload endpoint fired without a source change"
-//RS     );
-//RS     let mut changed = fs::OpenOptions::new().append(true).open(&app).unwrap();
-//RS     writeln!(changed).unwrap();
-//RS     let reload = received.recv_timeout(Duration::from_secs(10)).unwrap();
-//RS     assert!(reload.starts_with("HTTP/1.1 200"), "{reload}");
-//RS     assert!(reload.contains("text/event-stream"), "{reload}");
-//RS     assert!(reload.contains("data: reload"), "{reload}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn app_hello_graph() {
-//RS     let (code, stdout, stderr) = run_jet(&[
-//RS         "explain",
-//RS         "--web-graph",
-//RS         "--json",
-//RS         "Examples/features/web/app_hello.jet",
-//RS     ]);
-//RS     assert_eq!(code, 0, "stderr={stderr}\nstdout={stdout}");
-//RS     let compact: String = stdout.chars().filter(|character| !character.is_whitespace()).collect();
-//RS     assert!(compact.contains("\"handler\":\"home\""), "{stdout}");
-//RS     assert!(compact.contains("csp"), "{stdout}");
-//RS }
-// END-PORT-PENDING 1183 tests/web_app.rs:1-373
+    empty_values := [Int]{}
+    empty_values_view :: empty_values[0..<empty_values.len()]
+    owned_empty_values :: ~empty_values_view
+    print(owned_empty_values.len())
 
+    bytes := unicode_text.bytes()
+    bytes_view :: bytes[0..<bytes.len()]
+    owned_bytes :: ~bytes_view
+    print(owned_bytes.len())
+}
+"""
+// Rust: tests/view_copy_semantics.rs:282
+pub LIST_STRING_SOURCE :: """
+fn copy_values(values: [String]) -> [String] {
+    return ~values[0..<values.len()]
+}
+
+fn run() -> {
+    values := ["a", "b"]
+    copied := copy_values(values)
+    values[0] = "source"
+    copied[0] = "copy"
+    print(values[0])
+    print(copied[0])
+}
+"""
+
+// Rust: tests/web_app.rs:14
+pub fn repo_root() -> OSPath { env.manifest_dir() }
+// Rust: tests/web_app.rs:18
+pub fn jet_bin() -> OSPath { repo_root().join("target/debug/jet") }
+// Rust: tests/web_app.rs:22
+pub fn run_jet(args: &[String]) -> (I32, String, String) {
+    // GATE #4494: process spawn and captured output.
+    out :: Command.new(jet_bin()).current_dir(repo_root()).args(args).output().expect("spawn jet")
+    (out.status.code().unwrap_or(1), String.from_utf8_lossy(&out.stdout).into_owned(), String.from_utf8_lossy(&out.stderr).into_owned())
+}
+// Rust: tests/web_app.rs:35
+pub struct ServerChild {
+    child: Child
+    // Rust: tests/web_app.rs:37
+    pub fn diagnostic(&self) -> String {
+        status :: if self.child.try_wait() == {
+            .Ok(Val(status)) -> "exited with {status}"
+            .Ok(None) -> "still running"
+            .Err(error) -> "status unavailable: {error}"
+        }
+        stderr := ""
+        if status.starts_with("exited") {
+            if self.child.stderr.take() == Val(pipe) {
+                _ :: pipe.read_to_string(&stderr)
+            }
+        }
+        "{status}; stderr={stderr}"
+    }
+}
+// Rust: tests/web_app.rs:56
+impl ServerChild.Drop {
+    // Rust: tests/web_app.rs:57
+    fn drop(&self) -> {
+        _ :: self.child.kill()
+        _ :: self.child.wait()
+    }
+}
+// Rust: tests/web_app.rs:63
+pub fn free_port() -> U16 {
+    // GATE #4494: native TCP listener.
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    listener.local_addr().unwrap().port()
+}
+// Rust: tests/web_app.rs:68
+pub fn request(port: U16, method: String, path: String, child: &ServerChild?) -> String {
+    // GATE #4494: native TCP, monotonic deadline and thread sleep.
+    deadline :: Instant.now() + Duration.from_secs(30)
+    stream := loop {
+        if TcpStream.connect(("127.0.0.1", port)) == {
+            .Ok(stream) -> break stream
+            .Err(error) -> {
+                if Instant.now() < deadline {
+                    _ :: error
+                    thread.sleep(Duration.from_millis(50))
+                } else {
+                    diagnostic :: child.map((child) -> child.diagnostic()).unwrap_or_else(() -> "child diagnostics unavailable")
+                    panic("web app did not listen on {port}: {error}; {diagnostic}")
+                }
+            }
+        }
+    }
+    stream.write_all("{method} {path} HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\nContent-Length: 0\r\n\r\n".as_bytes()).unwrap()
+    stream.shutdown(Shutdown.Write).unwrap()
+    response := ""
+    stream.read_to_string(&response).unwrap()
+    response
+}
+// Rust: tests/web_app.rs:97
+pub fn spawn_server_with_program(program: &OSPath, args: &[String], port: U16) -> ServerChild {
+    // GATE #4494: native server process and pipes.
+    ServerChild{child: Command.new(program).current_dir(repo_root()).args(args).env("JET_APP_PORT", port.to_string()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn web app server")}
+}
+// Rust: tests/web_app.rs:110
+pub fn spawn_server(args: &[String], port: U16) -> ServerChild { spawn_server_with_program(&jet_bin(), args, port) }
+// Rust: tests/web_app.rs:114
+pub fn response_body(response: String) -> String {
+    response.split_once("\r\n\r\n").map(((_, body)) -> body).expect("HTTP response body")
+}
+// Rust: tests/web_app.rs:121
+pub fn web_graph_facts_json() -> String {
+    (code, stdout, stderr) :: run_jet(&["explain", "--web-graph", "--json", "Examples/features/web/web_app.jet"])
+    assert_eq(code, 0, "stderr={stderr}\nstdout={stdout}")
+    stdout.replace(&repo_root().join("Examples/features/web/web_app.jet").display().to_string(), "Examples/features/web/web_app.jet")
+}

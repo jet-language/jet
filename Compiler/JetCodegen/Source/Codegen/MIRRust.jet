@@ -1,1804 +1,1034 @@
-// PORT-PENDING 2001 crates-jet-codegen-src-codegen-mirrust-slice-1: crates/jet-codegen/src/Codegen/MIRRust.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Rust source emission for optimized canonical MIR.
-//RS //!
-//RS //! This module is deliberately a printer, not a second lowering pipeline.  It
-//RS //! consumes the checked `MirProgram` rows and emits Rust items and a small CFG
-//RS //! machine.  Names, calls, ownership, failure edges, and target facts come from
-//RS //! MIR; the narrow Core path ABI adapter only projects canonical sema signature
-//RS //! metadata and performs no ad-hoc source or Core-name lookup.
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-//RS use std::fmt::Write as _;
-//RS 
-//RS use jet_foundation::CanonicalPass;
-//RS use jet_foundation::Layout::{LayoutFacts, TargetLayout};
-//RS use jet_foundation::MIROptimization::Acceleration::{AccelerationTransform, D_FRED1_FIXED_ORDER};
-//RS use jet_foundation::Names::{mangle, mangle_generated, mangle_path};
-//RS use jet_foundation::Shape::ShapeProjectionKind;
-//RS use jet_foundation::Syntax::CoreCallSymbol;
-//RS use jet_foundation::MIR::*;
-//RS 
-//RS /// Which MIR target partition this printer emits.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum MirRustTarget {
-//RS     Native,
-//RS     WebWasm,
-//RS }
-//RS #[derive(Clone, Copy)]
-//RS enum HistoryScalarKind {
-//RS     Integer,
-//RS     Boolean,
-//RS     Text,
-//RS     Char,
-//RS     SignedInteger,
-//RS     UnsignedInteger,
-//RS }
-//RS /// Where a native `Int` result's Rust shape is decided. A Core row's shape is
-//RS /// the registry's raw-machine-word fact; a native host slot (record field,
-//RS /// enum payload, Prelude route) is chosen by its declared Rust type.
-//RS #[derive(Clone, Copy, PartialEq, Eq)]
-//RS enum NativeIntSource {
-//RS     MachineWord,
-//RS     DeclaredSlot,
-//RS }
-//RS /// Prelude kernels whose listed argument positions take the owned exact
-//RS /// `Int` carrier rather than a raw machine word. Every engine that lowers a
-//RS /// Core call reads this one table; a row named here is never narrowed.
-//RS pub fn exact_prelude_adapter(bare: &str) -> Option<(&'static str, &'static [usize])> {
-//RS         Some(match bare {
-//RS             "jet_fraction_from_parts" => ("jet_fraction_from_owned_parts", &[0, 1]),
-//RS             "JetDate::new" => ("jet_local_date_owned", &[0, 1, 2]),
-//RS             "JetLocalTime::new" => ("jet_local_time_owned", &[0, 1, 2]),
-//RS             "JetPeriod::new" => ("jet_period_owned", &[0, 1, 2]),
-//RS             "jet_std::jet_int_abs" => ("jet_std::jet_int_owned_abs", &[0]),
-//RS             "jet_std::jet_int_add" => ("jet_std::jet_int_owned_add", &[0, 1]),
-//RS             "jet_std::jet_int_sub" => ("jet_std::jet_int_owned_sub", &[0, 1]),
-//RS             "jet_std::jet_int_mul" => ("jet_std::jet_int_owned_mul", &[0, 1]),
-//RS             "jet_std::jet_int_bit_and" => ("jet_std::jet_int_owned_bit_and", &[0, 1]),
-//RS             "jet_std::jet_int_bit_or" => ("jet_std::jet_int_owned_bit_or", &[0, 1]),
-//RS             "jet_std::jet_int_bit_xor" => ("jet_std::jet_int_owned_bit_xor", &[0, 1]),
-//RS             "jet_std::jet_int_neg" => ("jet_std::jet_int_owned_neg", &[0]),
-//RS             "jet_std::jet_int_not" => ("jet_std::jet_int_owned_not", &[0]),
-//RS             "jet_std::jet_int_div" => ("jet_std::jet_int_owned_div", &[0, 1]),
-//RS             "jet_std::jet_int_rem" => ("jet_std::jet_int_owned_rem", &[0, 1]),
-//RS             "jet_std::jet_int_div_euclid" => ("jet_std::jet_int_owned_div_euclid", &[0, 1]),
-//RS             "jet_std::jet_int_rem_euclid" => ("jet_std::jet_int_owned_rem_euclid", &[0, 1]),
-//RS             "jet_std::jet_int_floor_div" => ("jet_std::jet_int_owned_floor_div", &[0, 1]),
-//RS             "jet_std::jet_int_mod" => ("jet_std::jet_int_owned_mod", &[0, 1]),
-//RS             "jet_std::jet_int_pow" => ("jet_std::jet_int_owned_pow", &[0, 1]),
-//RS             "jet_std::jet_int_shl" => ("jet_std::jet_int_owned_shl", &[0, 1]),
-//RS             "jet_std::jet_int_shr" => ("jet_std::jet_int_owned_shr", &[0, 1]),
-//RS             "jet_std::jet_int_checked_widen" => ("jet_std::jet_int_owned_checked_widen", &[0]),
-//RS             "jet_std::jet_int_try_from_checked" => {
-//RS                 ("jet_std::jet_int_owned_try_from_checked", &[0])
-//RS             }
-//RS             "jet_std::jet_int_checked_fixed" => ("jet_std::jet_int_owned_checked_fixed", &[0]),
-//RS             "jet_numeric_int_bit_count" => ("jet_std::jet_int_owned_bit_count", &[0]),
-//RS             "jet_inline_range_from_int" => ("jet_std::jet_int_owned_inline_range", &[0]),
-//RS             "jet_std::jet_int_to_radix" => ("jet_std::jet_int_owned_to_radix", &[0, 1]),
-//RS             "jet_std::jet_int_from_radix" => ("jet_std::jet_int_owned_from_radix", &[1]),
-//RS             "jet_std::jet_int_parse" => ("jet_std::jet_int_owned_parse", &[]),
-//RS             "jet_fmt_decimal_int" => ("jet_std::jet_fmt_decimal_int_owned", &[0, 1]),
-//RS             "jet_fmt_grouped_int" => ("jet_std::jet_fmt_grouped_int_owned", &[0, 1]),
-//RS             "jet_fmt_hex" => ("jet_std::jet_fmt_hex_owned", &[0, 1]),
-//RS             "jet_fmt_bin" => ("jet_std::jet_fmt_bin_owned", &[0]),
-//RS             "jet_fmt_oct" => ("jet_std::jet_fmt_oct_owned", &[0]),
-//RS             _ => return None,
-//RS         })
-//RS }
-//RS fn quote_rust_string(value: &str) -> String {
-//RS     crate::Codegen::escape_rust_str(value)
-//RS }
-//RS 
-//RS fn allocator_view_inner(ty: &MirType) -> Option<&MirType> {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Tagged {
-//RS             marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
-//RS             inner,
-//RS         } => Some(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS /// The MIR nominal the TIR lowering gives a `#Transact` block's Shared STM
-//RS /// guard; generated Rust carries it as the root `JetSharedTransaction`.
-//RS const STM_TYPE: &str = "Stm";
-//RS 
-//RS fn is_shared_guard_type(ty: &MirType) -> bool {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Tagged { inner, .. } => is_shared_guard_type(inner),
-//RS         MirTypeKind::Apply { name, .. } => name.name == crate::Syntax::TYPE_SHARED_GUARD,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn is_allocator_result_type(ty: &MirType) -> bool {
-//RS     matches!(
-//RS         ty.kind(),
-//RS         MirTypeKind::Result { err, .. } if err.name().starts_with("AllocError")
-//RS     )
-//RS }
-//RS 
-//RS fn is_string_view_type(ty: &MirType) -> bool {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Apply { name, args }
-//RS             if matches!(name.name.as_str(), "View" | "ViewMut") && args.len() == 1 =>
-//RS         {
-//RS             matches!(
-//RS                 args[0].kind(),
-//RS                 MirTypeKind::Apply { name, args }
-//RS                     if args.is_empty() && name.name == "str"
-//RS             )
-//RS         }
-//RS         MirTypeKind::Tagged { inner, .. } => is_string_view_type(inner),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn is_view_type(ty: &MirType) -> bool {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Apply { name, .. } if matches!(name.name.as_str(), "View" | "ViewMut") => true,
-//RS         MirTypeKind::Tagged { inner, .. } => is_view_type(inner),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS /// Formatting-only policy for the MIR Rust adapter.
-//RS ///
-//RS /// All semantic choices are MIR facts.  The adapter may choose the generated
-//RS /// module root and whether item classes are included in this fragment, but it
-//RS /// cannot provide a semantic or symbol lookup table.
-//RS #[derive(Debug, Clone)]
-//RS pub struct MirRustConfig<'a> {
-//RS     pub target: TargetLayout,
-//RS     pub target_kind: MirRustTarget,
-//RS     pub root_prefix: String,
-//RS     pub execution: MirRustExecutionConfig<'a>,
-//RS }
-//RS /// Exact Rust-facing identity and type metadata for the ordinary AOT artifact.
-//RS ///
-//RS /// This is an integration descriptor, not a second symbol or type resolver.
-//RS /// Every string is produced by the same `RustEmitter` methods that emit the
-//RS /// corresponding item.  Private source-coupled host glue may use it to bind a
-//RS /// generated callable without guessing mangled names or assigning an
-//RS /// incompatible Rust function pointer.
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MirRustCallableMetadata {
-//RS     pub function: MirFunctionId,
-//RS     pub symbol: String,
-//RS     pub parameter_types: Vec<String>,
-//RS     pub parameter_access: Vec<MirAccess>,
-//RS     pub return_type: String,
-//RS     pub callable_type: String,
-//RS }
-//RS 
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MirRustTypeMetadata {
-//RS     pub ty: MirTypeId,
-//RS     pub symbol: String,
-//RS }
-//RS 
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MirRustFieldMetadata {
-//RS     pub field: MirFieldId,
-//RS     pub owner: MirTypeId,
-//RS     pub symbol: String,
-//RS }
-//RS 
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MirRustVariantMetadata {
-//RS     pub owner: MirTypeId,
-//RS     pub source_name: String,
-//RS     pub wire_name: String,
-//RS     pub symbol: String,
-//RS     pub payload_types: Vec<String>,
-//RS }
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MirRustTraitMetadata {
-//RS     pub trait_id: MirTraitId,
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub symbol: String,
-//RS }
-//RS 
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct MirRustTraitMethodMetadata {
-//RS     pub trait_id: MirTraitId,
-//RS     pub method_id: MirTraitMethodId,
-//RS     pub key: String,
-//RS     pub name: String,
-//RS     pub symbol: String,
-//RS     pub receiver_access: Option<MirAccess>,
-//RS     pub parameter_types: Vec<String>,
-//RS     pub parameter_access: Vec<MirAccess>,
-//RS     pub return_type: String,
-//RS }
-//RS 
-//RS #[doc(hidden)]
-//RS #[derive(Debug, Clone, PartialEq, Eq, Default)]
-//RS pub struct MirRustAotMetadata {
-//RS     pub callables: Vec<MirRustCallableMetadata>,
-//RS     pub types: Vec<MirRustTypeMetadata>,
-//RS     pub fields: Vec<MirRustFieldMetadata>,
-//RS     pub variants: Vec<MirRustVariantMetadata>,
-//RS     pub traits: Vec<MirRustTraitMetadata>,
-//RS     pub trait_methods: Vec<MirRustTraitMethodMetadata>,
-//RS }
-//RS 
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct MirRustExecutionConfig<'a> {
-//RS     /// The checked artifact plan whose rows this adapter is allowed to emit.
-//RS     pub artifact: MirArtifactId,
-//RS     /// Prepared physical bridge binding; language checks remain canonical MIR facts.
-//RS     pub ffi: Option<&'a crate::AST::FfiLink>,
-//RS     pub emit_types: bool,
-//RS     pub emit_foreign: bool,
-//RS     pub emit_metadata: bool,
-//RS     pub semantic_digest: Option<[u8; 32]>,
-//RS     pub emit_debug_linemap: bool,
-//RS     /// Include the complete cached Prelude/Core runtime in this artifact.
-//RS     ///
-//RS     /// Standalone MIR emission keeps this enabled. An enclosing target
-//RS     /// assembler may disable it only when that assembler supplies the same
-//RS     /// complete runtime closure.
-//RS     pub emit_runtime: bool,
-//RS     /// D-DX-PROD1: one typed release policy controls every emitted DevTools
-//RS     /// producer.  The code generator never reconstructs a parallel bool.
-//RS     pub release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy,
-//RS     /// Stage zero: skip derived serde impls no emitted body demands
-//RS     /// (`demanded_codec_impls`).
-//RS     pub prune_unreachable_codecs: bool,
-//RS }
-//RS 
-//RS impl<'a> MirRustExecutionConfig<'a> {
-//RS     pub fn for_artifact(artifact: MirArtifactId) -> Self {
-//RS         Self {
-//RS             artifact,
-//RS             ffi: None,
-//RS             emit_types: true,
-//RS             emit_foreign: true,
-//RS             emit_metadata: false,
-//RS             semantic_digest: None,
-//RS             emit_debug_linemap: false,
-//RS             emit_runtime: true,
-//RS             release_devtools_policy: jet_pkg_model::Package::ReleaseDevtoolsPolicy::development(),
-//RS             prune_unreachable_codecs: false,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Every nominal type name inside `ty`, including type arguments and
-//RS /// collection elements.
-//RS fn mir_type_nominals<'p>(ty: &'p MirType, names: &mut Vec<&'p str>) {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Apply { name, args } => {
-//RS             names.push(name.name.as_str());
-//RS             for arg in args {
-//RS                 mir_type_nominals(arg, names);
-//RS             }
-//RS         }
-//RS         MirTypeKind::TraitObject(bounds) => {
-//RS             names.extend(bounds.iter().map(|bound| bound.name.as_str()));
-//RS         }
-//RS         MirTypeKind::List(inner)
-//RS         | MirTypeKind::Shared(inner)
-//RS         | MirTypeKind::Option(inner)
-//RS         | MirTypeKind::FixedList { elem: inner, .. }
-//RS         | MirTypeKind::InlineRange { base: inner, .. }
-//RS         | MirTypeKind::Tagged { inner, .. }
-//RS         | MirTypeKind::Quantity { base: inner, .. } => mir_type_nominals(inner, names),
-//RS         MirTypeKind::Map { key, value }
-//RS         | MirTypeKind::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => {
-//RS             mir_type_nominals(key, names);
-//RS             mir_type_nominals(value, names);
-//RS         }
-//RS         MirTypeKind::Tuple(fields) => {
-//RS             for (_, field) in fields {
-//RS                 mir_type_nominals(field, names);
-//RS             }
-//RS         }
-//RS         MirTypeKind::Union(members) => {
-//RS             for member in members {
-//RS                 mir_type_nominals(member, names);
-//RS             }
-//RS         }
-//RS         MirTypeKind::Fn(signature) => {
-//RS             for param in &signature.params {
-//RS                 mir_type_nominals(param, names);
-//RS             }
-//RS             if let Some(ret) = signature.ret.as_deref() {
-//RS                 mir_type_nominals(ret, names);
-//RS             }
-//RS         }
-//RS         MirTypeKind::SendFn { params, ret, .. } => {
-//RS             for param in params {
-//RS                 mir_type_nominals(param, names);
-//RS             }
-//RS             if let Some(ret) = ret.as_deref() {
-//RS                 mir_type_nominals(ret, names);
-//RS             }
-//RS         }
-//RS         MirTypeKind::Int
-//RS         | MirTypeKind::Float
-//RS         | MirTypeKind::Bool
-//RS         | MirTypeKind::String
-//RS         | MirTypeKind::Char
-//RS         | MirTypeKind::IntN { .. }
-//RS         | MirTypeKind::Float32
-//RS         | MirTypeKind::Measure(_) => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Calls `found` with the trait name of every single-bound trait object
-//RS /// (`Box<dyn T>`) inside `ty`.
-//RS fn mir_type_single_trait_objects(ty: &MirType, found: &mut impl FnMut(&str)) {
-//RS     match ty.kind() {
-//RS         MirTypeKind::TraitObject(bounds) => {
-//RS             if let [bound] = bounds.as_slice() {
-//RS                 found(&bound.name);
-//RS             }
-//RS         }
-//RS         MirTypeKind::Apply { args: inner, .. } | MirTypeKind::Union(inner) => {
-//RS             for ty in inner {
-//RS                 mir_type_single_trait_objects(ty, found);
-//RS             }
-//RS         }
-//RS         MirTypeKind::List(inner)
-//RS         | MirTypeKind::Shared(inner)
-//RS         | MirTypeKind::Option(inner)
-//RS         | MirTypeKind::FixedList { elem: inner, .. }
-//RS         | MirTypeKind::InlineRange { base: inner, .. }
-//RS         | MirTypeKind::Tagged { inner, .. }
-//RS         | MirTypeKind::Quantity { base: inner, .. } => mir_type_single_trait_objects(inner, found),
-//RS         MirTypeKind::Map { key, value }
-//RS         | MirTypeKind::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => {
-//RS             mir_type_single_trait_objects(key, found);
-//RS             mir_type_single_trait_objects(value, found);
-//RS         }
-//RS         MirTypeKind::Tuple(fields) => {
-//RS             for (_, field) in fields {
-//RS                 mir_type_single_trait_objects(field, found);
-//RS             }
-//RS         }
-//RS         MirTypeKind::Fn(signature) => {
-//RS             for param in &signature.params {
-//RS                 mir_type_single_trait_objects(param, found);
-//RS             }
-//RS             if let Some(ret) = signature.ret.as_deref() {
-//RS                 mir_type_single_trait_objects(ret, found);
-//RS             }
-//RS         }
-//RS         MirTypeKind::SendFn { params, ret, .. } => {
-//RS             for param in params {
-//RS                 mir_type_single_trait_objects(param, found);
-//RS             }
-//RS             if let Some(ret) = ret.as_deref() {
-//RS                 mir_type_single_trait_objects(ret, found);
-//RS             }
-//RS         }
-//RS         MirTypeKind::Int
-//RS         | MirTypeKind::Float
-//RS         | MirTypeKind::Bool
-//RS         | MirTypeKind::String
-//RS         | MirTypeKind::Char
-//RS         | MirTypeKind::IntN { .. }
-//RS         | MirTypeKind::Float32
-//RS         | MirTypeKind::Measure(_) => {}
-//RS     }
-//RS }
-//RS 
-//RS /// Which `program.impls` rows to emit when stage zero prunes codecs. The
-//RS /// candidates are derived serde impls (`compiler_generated` with a codec) on
-//RS /// a nominal type; every other function is a root. A scanned body demands a
-//RS /// candidate by calling one of its methods, or by naming its nominal type
-//RS /// anywhere inside a call's type arguments: generic Prelude codecs such as
-//RS /// `jet_codec_decode_typed::<[T]>` reach the impl through Rust trait bounds.
-//RS /// A demanded impl's methods are scanned in turn. A missed demand fails
-//RS /// rustc with E0277; it never changes behavior.
-//RS fn demanded_codec_impls(program: &MirProgram) -> Vec<bool> {
-//RS     let mut keep = program
-//RS         .impls
-//RS         .iter()
-//RS         .map(|implementation| {
-//RS             !(implementation.compiler_generated
-//RS                 && implementation.serde.is_some()
-//RS                 && implementation.self_type.nominal_name().is_some())
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let mut by_method = BTreeMap::<MirFunctionId, usize>::new();
-//RS     let mut by_name = std::collections::HashMap::<&str, Vec<usize>>::new();
-//RS     for (index, implementation) in program.impls.iter().enumerate() {
-//RS         if keep[index] {
-//RS             continue;
-//RS         }
-//RS         for method in &implementation.methods {
-//RS             by_method.insert(*method, index);
-//RS         }
-//RS         if let Some(name) = implementation.self_type.nominal_name() {
-//RS             by_name.entry(name).or_default().push(index);
-//RS         }
-//RS     }
-//RS     let functions = program
-//RS         .functions
-//RS         .iter()
-//RS         .map(|function| (function.id, function))
-//RS         .collect::<BTreeMap<_, _>>();
-//RS     let mut pending = program
-//RS         .functions
-//RS         .iter()
-//RS         .filter(|function| !by_method.contains_key(&function.id))
-//RS         .collect::<Vec<_>>();
-//RS     let mut seen_names = std::collections::HashSet::<&str>::new();
-//RS     let mut demanded = Vec::new();
-//RS     while let Some(function) = pending.pop() {
-//RS         let mut names = Vec::new();
-//RS         for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
-//RS             match &instruction.operation {
-//RS                 MirOperation::Call {
-//RS                     callee, type_args, ..
-//RS                 } => {
-//RS                     if let MirCallee::User(id)
-//RS                     | MirCallee::Associated { function: id, .. }
-//RS                     | MirCallee::Method { function: id, .. } = callee
-//RS                     {
-//RS                         if let Some(&index) = by_method.get(id) {
-//RS                             demanded.push(index);
-//RS                         }
-//RS                     }
-//RS                     type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
-//RS                 }
-//RS                 MirOperation::IndirectCall { type_args, .. }
-//RS                 | MirOperation::CoreCall { type_args, .. } => {
-//RS                     type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
-//RS                 }
-//RS                 MirOperation::Semantic(MirSemanticOp::StaticPreludeCall {
-//RS                     owner_type_args,
-//RS                     type_args,
-//RS                     ..
-//RS                 }) => {
-//RS                     for type_arg in owner_type_args {
-//RS                         if let MirPreludeTypeArg::Type(ty) = type_arg {
-//RS                             mir_type_nominals(ty, &mut names);
-//RS                         }
-//RS                     }
-//RS                     type_args.iter().for_each(|ty| mir_type_nominals(ty, &mut names));
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         for name in names {
-//RS             if seen_names.insert(name) {
-//RS                 demanded.extend(by_name.get(name).into_iter().flatten().copied());
-//RS             }
-//RS         }
-//RS         for index in demanded.drain(..) {
-//RS             if !keep[index] {
-//RS                 keep[index] = true;
-//RS                 pending.extend(
-//RS                     program.impls[index]
-//RS                         .methods
-//RS                         .iter()
-//RS                         .filter_map(|method| functions.get(method).copied()),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     keep
-//RS }
-//RS 
-//RS fn mir_type_uses_atomic_word(ty: &MirType) -> bool {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Apply { name, args } => {
-//RS             name.name == "Atomic"
-//RS                 || name.name.ends_with("::Atomic")
-//RS                 || args.iter().any(mir_type_uses_atomic_word)
-//RS         }
-//RS         MirTypeKind::List(inner)
-//RS         | MirTypeKind::Shared(inner)
-//RS         | MirTypeKind::Option(inner)
-//RS         | MirTypeKind::FixedList { elem: inner, .. }
-//RS         | MirTypeKind::InlineRange { base: inner, .. }
-//RS         | MirTypeKind::Tagged { inner, .. }
-//RS         | MirTypeKind::Quantity { base: inner, .. } => mir_type_uses_atomic_word(inner),
-//RS         MirTypeKind::Map { key, value }
-//RS         | MirTypeKind::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => mir_type_uses_atomic_word(key) || mir_type_uses_atomic_word(value),
-//RS         MirTypeKind::Fn(signature) => {
-//RS             signature.params.iter().any(mir_type_uses_atomic_word)
-//RS                 || signature
-//RS                     .ret
-//RS                     .as_deref()
-//RS                     .is_some_and(mir_type_uses_atomic_word)
-//RS         }
-//RS         MirTypeKind::SendFn { params, ret, .. } => {
-//RS             params.iter().any(mir_type_uses_atomic_word)
-//RS                 || ret.as_deref().is_some_and(mir_type_uses_atomic_word)
-//RS         }
-//RS         MirTypeKind::Tuple(fields) => fields
-//RS             .iter()
-//RS             .any(|(_, field)| mir_type_uses_atomic_word(field)),
-//RS         MirTypeKind::Union(members) => members.iter().any(mir_type_uses_atomic_word),
-//RS         MirTypeKind::Int
-//RS         | MirTypeKind::Float
-//RS         | MirTypeKind::Bool
-//RS         | MirTypeKind::String
-//RS         | MirTypeKind::Char
-//RS         | MirTypeKind::TraitObject(_)
-//RS         | MirTypeKind::IntN { .. }
-//RS         | MirTypeKind::Float32
-//RS         | MirTypeKind::Measure(_) => false,
-//RS     }
-//RS }
-//RS /// A nominal scalar carrier is emitted inline and does not inherit the
-//RS /// structural Rust derives of its surrounding record.  Keep this layout-led:
-//RS /// sema already checked the ABI, so the emitter need not recognize a source
-//RS /// declaration by name.
-//RS fn mir_type_has_inline_nominal_word(ty: &MirType) -> bool {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Apply { args, .. } => {
-//RS             (matches!(ty.layout.abi, MirAbi::Scalar(_))
-//RS                 && matches!(ty.layout.size, MirSize::Static(8)))
-//RS                 || args.iter().any(mir_type_has_inline_nominal_word)
-//RS         }
-//RS         MirTypeKind::List(inner)
-//RS         | MirTypeKind::Shared(inner)
-//RS         | MirTypeKind::Option(inner)
-//RS         | MirTypeKind::FixedList { elem: inner, .. }
-//RS         | MirTypeKind::InlineRange { base: inner, .. }
-//RS         | MirTypeKind::Tagged { inner, .. }
-//RS         | MirTypeKind::Quantity { base: inner, .. } => mir_type_has_inline_nominal_word(inner),
-//RS         MirTypeKind::Map { key, value }
-//RS         | MirTypeKind::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => mir_type_has_inline_nominal_word(key) || mir_type_has_inline_nominal_word(value),
-//RS         MirTypeKind::Fn(signature) => {
-//RS             signature
-//RS                 .params
-//RS                 .iter()
-//RS                 .any(mir_type_has_inline_nominal_word)
-//RS                 || signature
-//RS                     .ret
-//RS                     .as_deref()
-//RS                     .is_some_and(mir_type_has_inline_nominal_word)
-//RS         }
-//RS         MirTypeKind::SendFn { params, ret, .. } => {
-//RS             params.iter().any(mir_type_has_inline_nominal_word)
-//RS                 || ret.as_deref().is_some_and(mir_type_has_inline_nominal_word)
-//RS         }
-//RS         MirTypeKind::Tuple(fields) => fields
-//RS             .iter()
-//RS             .any(|(_, field)| mir_type_has_inline_nominal_word(field)),
-//RS         MirTypeKind::Union(members) => members.iter().any(mir_type_has_inline_nominal_word),
-//RS         MirTypeKind::Int
-//RS         | MirTypeKind::Float
-//RS         | MirTypeKind::Bool
-//RS         | MirTypeKind::String
-//RS         | MirTypeKind::Char
-//RS         | MirTypeKind::TraitObject(_)
-//RS         | MirTypeKind::IntN { .. }
-//RS         | MirTypeKind::Float32
-//RS         | MirTypeKind::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS fn mir_program_uses_atomic_word(program: &MirProgram) -> bool {
-//RS     program.type_instances.iter().any(mir_type_uses_atomic_word)
-//RS }
-//RS 
-//RS fn mir_type_uses_shared_kernel(ty: &MirType) -> bool {
-//RS     match ty.kind() {
-//RS         MirTypeKind::Apply { name, args } => {
-//RS             matches!(name.name.as_str(), "Pool" | "ID" | "Shared")
-//RS                 || args.iter().any(mir_type_uses_shared_kernel)
-//RS         }
-//RS         MirTypeKind::List(inner)
-//RS         | MirTypeKind::Shared(inner)
-//RS         | MirTypeKind::Option(inner)
-//RS         | MirTypeKind::FixedList { elem: inner, .. }
-//RS         | MirTypeKind::InlineRange { base: inner, .. }
-//RS         | MirTypeKind::Tagged { inner, .. }
-//RS         | MirTypeKind::Quantity { base: inner, .. } => mir_type_uses_shared_kernel(inner),
-//RS         MirTypeKind::Map { key, value }
-//RS         | MirTypeKind::Result {
-//RS             ok: key,
-//RS             err: value,
-//RS         } => mir_type_uses_shared_kernel(key) || mir_type_uses_shared_kernel(value),
-//RS         MirTypeKind::Fn(signature) => {
-//RS             signature.params.iter().any(mir_type_uses_shared_kernel)
-//RS                 || signature
-//RS                     .ret
-//RS                     .as_deref()
-//RS                     .is_some_and(mir_type_uses_shared_kernel)
-//RS         }
-//RS         MirTypeKind::SendFn { params, ret, .. } => {
-//RS             params.iter().any(mir_type_uses_shared_kernel)
-//RS                 || ret.as_deref().is_some_and(mir_type_uses_shared_kernel)
-//RS         }
-//RS         MirTypeKind::Tuple(fields) => fields
-//RS             .iter()
-//RS             .any(|(_, field)| mir_type_uses_shared_kernel(field)),
-//RS         MirTypeKind::Union(members) => members.iter().any(mir_type_uses_shared_kernel),
-//RS         MirTypeKind::Int
-//RS         | MirTypeKind::Float
-//RS         | MirTypeKind::Bool
-//RS         | MirTypeKind::String
-//RS         | MirTypeKind::Char
-//RS         | MirTypeKind::TraitObject(_)
-//RS         | MirTypeKind::IntN { .. }
-//RS         | MirTypeKind::Float32
-//RS         | MirTypeKind::Measure(_) => false,
-//RS     }
-//RS }
-//RS 
-//RS fn mir_program_uses_shared_kernel(program: &MirProgram) -> bool {
-//RS     program
-//RS         .type_instances
-//RS         .iter()
-//RS         .any(mir_type_uses_shared_kernel)
-//RS         || program.prelude_calls.iter().any(|call| {
-//RS             let symbol = match &call.symbol {
-//RS                 MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol) => symbol.as_str(),
-//RS             };
-//RS             symbol.starts_with("jet_shared_")
-//RS         })
-//RS }
-//RS 
-//RS fn mir_program_uses_arrow(program: &MirProgram) -> bool {
-//RS     // `core_calls` is the static ABI registry, not the set of calls reached
-//RS     // by this package. Reachability is carried through checked package facts.
-//RS     program.facts.uses_arrow
-//RS }
-//RS 
-//RS /// Emit a complete Rust fragment from optimized canonical MIR.
-//RS pub fn emit_mir_program(program: &MirProgram, config: &MirRustConfig) -> String {
-//RS     let mut out = String::new();
-//RS     emit_mir_program_into(program, config, &mut out);
-//RS     out
-//RS }
-//RS 
-//RS /// Describe the exact ordinary-AOT names and carriers emitted for a checked
-//RS /// MIR artifact.  Callers that bind private source-coupled host glue must use
-//RS /// this descriptor instead of reconstructing symbols from source names.
-//RS #[doc(hidden)]
-//RS pub fn mir_rust_aot_metadata(
-//RS     program: &MirProgram,
-//RS     config: &MirRustConfig<'_>,
-//RS ) -> MirRustAotMetadata {
-//RS     let artifact_identity = program
-//RS         .artifact_identity(config.execution.artifact)
-//RS         .unwrap_or_else(|error| {
-//RS             panic!("MIR Rust metadata requires canonical artifact identity: {error}")
-//RS         });
-//RS     let emitter = RustEmitter::new(program, config, artifact_identity);
-//RS     let mut metadata = MirRustAotMetadata::default();
-//RS 
-//RS     for function in &program.functions {
-//RS         if !emitter.module_selected(function.module_id)
-//RS             || !emitter.selected_for_target(function)
-//RS             || !matches!(&function.form, MirFunctionForm::TopLevel)
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let parameters = emitter.declared_params(function);
-//RS         let parameter_types = parameters
-//RS             .iter()
-//RS             .map(|parameter| emitter.parameter_type(parameter))
-//RS             .collect::<Vec<_>>();
-//RS         let parameter_access = parameters
-//RS             .iter()
-//RS             .map(|parameter| parameter.access)
-//RS             .collect::<Vec<_>>();
-//RS         let callable_parameters = parameters
-//RS             .iter()
-//RS             .map(|parameter| parameter.ty.clone())
-//RS             .collect::<Vec<_>>();
-//RS         let callable_type = emitter.callable_type(
-//RS             &callable_parameters,
-//RS             Some(parameter_access.as_slice()),
-//RS             Some(&function.return_type),
-//RS         );
-//RS         metadata.callables.push(MirRustCallableMetadata {
-//RS             function: function.id,
-//RS             symbol: emitter.function_name(function.id),
-//RS             parameter_types,
-//RS             parameter_access,
-//RS             return_type: emitter.rust_type(&function.return_type),
-//RS             callable_type,
-//RS         });
-//RS     }
-//RS 
-//RS     if config.execution.emit_types {
-//RS         for definition in &program.traits {
-//RS             if !emitter.module_selected(definition.module) {
-//RS                 continue;
-//RS             }
-//RS             metadata.traits.push(MirRustTraitMetadata {
-//RS                 trait_id: definition.id,
-//RS                 key: definition.key.clone(),
-//RS                 name: definition.name.clone(),
-//RS                 symbol: emitter.trait_name(definition.id),
-//RS             });
-//RS             for method in &definition.methods {
-//RS                 let parameter_types = method
-//RS                     .params
-//RS                     .iter()
-//RS                     .map(|parameter| {
-//RS                         emitter.synthetic_rollback_parameter_type(definition, parameter)
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 let parameter_access = method
-//RS                     .params
-//RS                     .iter()
-//RS                     .map(|parameter| parameter.access)
-//RS                     .collect::<Vec<_>>();
-//RS                 metadata
-//RS                     .trait_methods
-//RS                     .push(MirRustTraitMethodMetadata {
-//RS                         trait_id: definition.id,
-//RS                         method_id: method.id,
-//RS                         key: emitter.trait_method_key(definition, method),
-//RS                         name: method.name.clone(),
-//RS                         symbol: emitter.trait_method_symbol(definition, method),
-//RS                         receiver_access: method.self_access,
-//RS                         parameter_types,
-//RS                         parameter_access,
-//RS                         return_type: emitter
-//RS                             .synthetic_rollback_type(definition, &method.return_type),
-//RS                     });
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     if config.execution.emit_types {
-//RS         for definition in &program.types {
-//RS             if !emitter.module_selected(definition.module) {
-//RS                 continue;
-//RS             }
-//RS             metadata.types.push(MirRustTypeMetadata {
-//RS                 ty: definition.id,
-//RS                 symbol: emitter.type_name(definition.id),
-//RS             });
-//RS             // Variant rows describe the enums this artifact declares; the
-//RS             // runtime's own carriers keep their payload spellings there.
-//RS             if !emitter.declares_type_def(definition) {
-//RS                 continue;
-//RS             }
-//RS             if let MirTypeDefKind::Enum { variants, .. } = &definition.kind {
-//RS                 emitter.push_generic_scope(&definition.generic_params);
-//RS                 for variant in variants {
-//RS                     let payload_types = match &variant.payload {
-//RS                         MirVariantPayload::Unit => Vec::new(),
-//RS                         MirVariantPayload::Single(payload) => {
-//RS                             vec![emitter.rust_type(payload)]
-//RS                         }
-//RS                         MirVariantPayload::Named(fields) => fields
-//RS                             .iter()
-//RS                             .map(|field| emitter.rust_type(&field.ty))
-//RS                             .collect(),
-//RS                     };
-//RS                     metadata.variants.push(MirRustVariantMetadata {
-//RS                         owner: definition.id,
-//RS                         source_name: variant.name.clone(),
-//RS                         wire_name: variant.wire_name.clone(),
-//RS                         symbol: emitter.variant_path(Some(definition.id), &variant.name, true),
-//RS                         payload_types,
-//RS                     });
-//RS                 }
-//RS                 emitter.pop_generic_scope();
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     for row in &program.fields {
-//RS         let symbol = emitter
-//RS             .fields
-//RS             .get(&row.id)
-//RS             .cloned()
-//RS             .unwrap_or_else(|| panic!("MIR field ID {:?} has no emitted field name", row.id));
-//RS         metadata.fields.push(MirRustFieldMetadata {
-//RS             field: row.id,
-//RS             owner: row.owner,
-//RS             symbol,
-//RS         });
-//RS     }
-//RS     metadata
-//RS }
-//RS 
-//RS /// The runtime and Core block for one artifact (gated by
-//RS /// `config.execution.emit_runtime`): decided by build facts only, never by user
-//RS /// source, so `jet_store::runtime::prepare` links it as the `jet_runtime` rlib.
-//RS /// Its Prelude sources' test-only items are left out: generated programs are
-//RS /// never built with `--test`, so they would only be written, hashed and parsed.
-//RS /// The cache identities (`cached_runtime_fingerprint`, the Core closure
-//RS /// fingerprint) hash the Prelude text before this deterministic removal.
-//RS fn emit_runtime_block(
-//RS     emitter: &RustEmitter<'_>,
-//RS     program: &MirProgram,
-//RS     config: &MirRustConfig<'_>,
-//RS     out: &mut String,
-//RS ) {
-//RS     let mut block = String::new();
-//RS     push_runtime_block(emitter, program, config, &mut block);
-//RS     out.push_str(&jet_foundation::RustSource::strip_test_items(&block));
-//RS }
-//RS 
-//RS fn push_runtime_block(
-//RS     emitter: &RustEmitter<'_>,
-//RS     program: &MirProgram,
-//RS     config: &MirRustConfig<'_>,
-//RS     out: &mut String,
-//RS ) {
-//RS     if config.execution.emit_runtime {
-//RS         if emitter.is_no_os() {
-//RS             out.push_str("#![no_std]\n#![no_main]\n");
-//RS             super::push_portable_corelib_prelude(out, program, emitter.artifact);
-//RS         } else {
-//RS             let uses_arrow = mir_program_uses_arrow(program)
-//RS                 || emitter
-//RS                     .artifact
-//RS                     .runtime_parts
-//RS                     .contains(&MirRuntimePartId::Data);
-//RS             let active_os = jet_foundation::OSTarget::OSTarget::parse(&program.facts.active_os)
-//RS                 .or_else(|| jet_foundation::OSTarget::OSTarget::from_triple(&config.target.triple))
-//RS                 .unwrap_or_else(jet_foundation::OSTarget::OSTarget::host);
-//RS             super::push_cached_runtime_begin_with_policy(
-//RS                 out,
-//RS                 config.execution.ffi,
-//RS                 uses_arrow,
-//RS                 &config.execution.release_devtools_policy,
-//RS             );
-//RS             out.push_str(super::CACHED_RUNTIME_END);
-//RS             out.push_str(super::CACHED_CORE_BEGIN);
-//RS             let test_harness = emitter.artifact.harness.is_some()
-//RS                 || matches!(
-//RS                     emitter.artifact.kind,
-//RS                     MirArtifactKind::TestExecutable
-//RS                         | MirArtifactKind::FuzzExecutable
-//RS                         | MirArtifactKind::TestOverride
-//RS                 );
-//RS             super::push_full_corelib_prelude_with_policy(
-//RS                 out,
-//RS                 active_os,
-//RS                 test_harness,
-//RS                 &program.facts.edition,
-//RS                 &emitter.artifact.runtime_parts,
-//RS                 mir_program_uses_shared_kernel(program),
-//RS                 uses_arrow,
-//RS                 &config.execution.release_devtools_policy,
-//RS             );
-//RS             out.push_str(super::CACHED_CORE_END);
-//RS             if let Some(link) = config.execution.ffi {
-//RS                 let needs_http_bridge = program.prelude_calls.iter().any(|call| {
-//RS                     let symbol = match &call.symbol {
-//RS                         MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol) => symbol.as_str(),
-//RS                     };
-//RS                     matches!(
-//RS                         symbol,
-//RS                         "jet_http_client_get"
-//RS                             | "jet_http_client_post"
-//RS                             | "jet_http_client_request_send"
-//RS                     )
-//RS                 });
-//RS                 if needs_http_bridge {
-//RS                     let _ = writeln!(out, "jet_http_client_bridge!({});", link.crate_name);
-//RS                 }
-//RS                 let needs_net_tls_client_bridge = program.prelude_calls.iter().any(|call| {
-//RS                     is_net_tls_client_bridge_call(&call.symbol)
-//RS                 });
-//RS                 if needs_net_tls_client_bridge {
-//RS                     let _ = writeln!(out, "jet_net_tls_client_bridge!({});", link.crate_name);
-//RS                 }
-//RS                 let needs_plugin_bridge = program.prelude_calls.iter().any(|call| {
-//RS                     matches!(&call.symbol, MirSymbol::Prelude(symbol) if symbol == "jet_plugin_load")
-//RS                 });
-//RS                 if needs_plugin_bridge {
-//RS                     let _ = writeln!(out, "jet_plugin_bridge!({});", link.crate_name);
-//RS                 }
-//RS                 let needs_db_bridge = program.prelude_calls.iter().any(|call| {
-//RS                     let symbol = match &call.symbol {
-//RS                         MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol) => symbol.as_str(),
-//RS                     };
-//RS                     symbol.starts_with("jet_db_")
-//RS                 });
-//RS                 if needs_db_bridge {
-//RS                     let _ = writeln!(out, "jet_db_bridge!({});", link.crate_name);
-//RS                 }
-//RS                 let needs_vault_display_bridge = program.prelude_calls.iter().any(|call| {
-//RS                     let symbol = match &call.symbol {
-//RS                         MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol) => symbol.as_str(),
-//RS                     };
-//RS                     symbol
-//RS                         .rsplit("::")
-//RS                         .next()
-//RS                         .is_some_and(|symbol| symbol.starts_with("jet_vault_"))
-//RS                 });
-//RS                 if needs_vault_display_bridge {
-//RS                     let _ = writeln!(out, "jet_vault_display_bridge!({});", link.crate_name);
-//RS                 }
-//RS             }
-//RS             out.push('\n');
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Runtime prefix of one artifact: the runtime/Core block plus the coverage
-//RS /// prelude. The self-hosted Jet emitter produces user items only; its host
-//RS /// prepends exactly this text so both compilers link the same `jet_runtime`
-//RS /// rlib through `jet_store::runtime::prepare`.
-//RS pub fn emit_mir_runtime_text(program: &MirProgram, config: &MirRustConfig<'_>) -> String {
-//RS     let artifact_identity = program
-//RS         .artifact_identity(config.execution.artifact)
-//RS         .unwrap_or_else(|error| {
-//RS             panic!("MIR runtime text requires canonical artifact identity: {error}")
-//RS         });
-//RS     let emitter = RustEmitter::new(program, config, artifact_identity);
-//RS     let mut out = String::new();
-//RS     emit_runtime_block(&emitter, program, config, &mut out);
-//RS     if emitter.coverage_enabled() {
-//RS         super::push_coverage_prelude(&mut out);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS /// Append a complete Rust fragment from optimized canonical MIR.
-//RS pub fn emit_mir_program_into(program: &MirProgram, config: &MirRustConfig, out: &mut String) {
-//RS     let canonical_input = CanonicalPass::enabled().then(|| canonical_payload(program));
-//RS     let canonical_input_identity = CanonicalPass::enabled().then(|| canonical_identity(program));
-//RS     if let Err(error) = program.cffi.validate_boundaries() {
-//RS         panic!("MIR Rust emission received invalid foreign boundary facts: {error}");
-//RS     }
-//RS     let artifact_identity = program
-//RS         .artifact_identity(config.execution.artifact)
-//RS         .unwrap_or_else(|error| {
-//RS             panic!("MIR Rust emission requires canonical artifact identity: {error}")
-//RS         });
-//RS     let emitter = RustEmitter::new(program, config, artifact_identity.clone());
-//RS     let target_supports_atomic =
-//RS         program
-//RS             .facts
-//RS             .target_dossier
-//RS             .machine
-//RS             .as_deref()
-//RS             .is_some_and(|machine| {
-//RS                 machine
-//RS                     .provides_capability(jet_foundation::TargetMachine::TargetCapability::Atomic64)
-//RS             });
-//RS     assert!(
-//RS         !mir_program_uses_atomic_word(program) || target_supports_atomic,
-//RS         "MIR Atomic<T> reached Rust emission without Target.Atomic64 sema admission for target `{}`",
-//RS         config.target.triple
-//RS     );
-//RS     let mut emitted_methods = BTreeSet::new();
-//RS     emit_runtime_block(&emitter, program, config, out);
-//RS     // Program items go to their build unit's section (see `EmissionUnits`);
-//RS     // without units every sink is `out` itself.
-//RS     let mut units = EmissionUnits::new(program);
-//RS     if emitter.coverage_enabled() {
-//RS         super::push_coverage_prelude(EmissionUnits::sink(&mut units, out, None));
-//RS     }
-//RS     emitter.emit_hardware_facts(EmissionUnits::sink(&mut units, out, None));
-//RS     EmissionUnits::sink(&mut units, out, None).push('\n');
-//RS 
-//RS     if config.execution.emit_metadata {
-//RS         emitter.emit_program_metadata(EmissionUnits::sink(&mut units, out, None));
-//RS         emitter.emit_modules_and_imports(EmissionUnits::sink(&mut units, out, None));
-//RS     }
-//RS     if config.execution.emit_types {
-//RS         for handle in &program.handles {
-//RS             if handle.payload.library != "core.process" {
-//RS                 emitter.emit_handle_type(handle, EmissionUnits::sink(&mut units, out, None));
-//RS             }
-//RS         }
-//RS         for def in &program.types {
-//RS             let unit = units.as_ref().map(|units| units.module_unit(def.module, def.span.start));
-//RS             if emitter.declares_type_def(def) {
-//RS                 emitter.emit_type_def(def, EmissionUnits::sink(&mut units, out, unit));
-//RS             } else if emitter.module_selected(def.module)
-//RS                 && !emitter.runtime_declares_type(def)
-//RS                 && is_canonical_core_native_type(&def.key)
-//RS                 && is_source_owned_core_web_query_enum(&def.key)
-//RS             {
-//RS                 emitter.emit_structural_show_impl(def, EmissionUnits::sink(&mut units, out, unit));
-//RS             }
-//RS         }
-//RS         emitter.emit_period_anchor_impls(EmissionUnits::sink(&mut units, out, None));
-//RS         emitter.emit_history_strategies(EmissionUnits::sink(&mut units, out, None));
-//RS         for trait_def in &program.traits {
-//RS             let emit_compiler_rollback = trait_def.name == crate::Syntax::TRAIT_ROLLBACK;
-//RS             if emitter.module_selected(trait_def.module)
-//RS                 && (emit_compiler_rollback
-//RS                     || (!crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
-//RS                         &trait_def.name,
-//RS                     ) && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
-//RS                         &trait_def.key,
-//RS                     )))
-//RS             {
-//RS                 let unit = units
-//RS                     .as_ref()
-//RS                     .map(|units| units.module_unit(trait_def.module, trait_def.span.start));
-//RS                 emitter.emit_trait_def(
-//RS                     trait_def,
-//RS                     &mut emitted_methods,
-//RS                     EmissionUnits::sink(&mut units, out, unit),
-//RS                 );
-//RS             }
-//RS         }
-//RS         // Card #4258: a constant whose every read was copied into its use
-//RS         // sites (TIR→MIR `inline_known_constant_reads`) needs no accessor;
-//RS         // storage cells and every constant still read through `Global` keep
-//RS         // their item.
-//RS         let global_reads = program
-//RS             .functions
-//RS             .iter()
-//RS             .flat_map(|function| &function.blocks)
-//RS             .flat_map(|block| &block.instructions)
-//RS             .filter_map(|instruction| match &instruction.operation {
-//RS                 MirOperation::Global { name } => Some(name.as_str()),
-//RS                 _ => None,
-//RS             })
-//RS             .collect::<HashSet<_>>();
-//RS         for constant in &program.constants {
-//RS             if emitter.module_selected(constant.module)
-//RS                 && (constant.is_storage || global_reads.contains(constant.key.as_str()))
-//RS             {
-//RS                 let unit = units
-//RS                     .as_ref()
-//RS                     .map(|units| units.module_unit(constant.module, constant.span.start));
-//RS                 emitter.emit_constant_def(constant, EmissionUnits::sink(&mut units, out, unit));
-//RS             }
-//RS         }
-//RS     }
-//RS     emitter.emit_link_closure(EmissionUnits::sink(&mut units, out, None));
-//RS     emitter.emit_c_abi_records(EmissionUnits::sink(&mut units, out, None));
-//RS     if config.execution.emit_foreign {
-//RS         for foreign in &program.foreign {
-//RS             if emitter.module_selected(foreign.module_id) {
-//RS                 let unit = units
-//RS                     .as_ref()
-//RS                     .map(|units| units.module_unit(foreign.module_id, foreign.span.start));
-//RS                 emitter.emit_foreign(foreign, EmissionUnits::sink(&mut units, out, unit));
-//RS             }
-//RS         }
-//RS     }
-//RS     emitter.emit_callback_trampolines(EmissionUnits::sink(&mut units, out, None));
-//RS     let codec_keep = config
-//RS         .execution
-//RS         .prune_unreachable_codecs
-//RS         .then(|| demanded_codec_impls(program));
-//RS     for (index, implementation) in program.impls.iter().enumerate() {
-//RS         if !emitter.module_selected(implementation.module)
-//RS             || !emitter.impl_selected_for_target(implementation)
-//RS         {
-//RS             continue;
-//RS         }
-//RS         if codec_keep.as_ref().is_some_and(|keep| !keep[index]) {
-//RS             emitted_methods.extend(implementation.methods.iter().copied());
-//RS             continue;
-//RS         }
-//RS         // Rust's orphan rule: an impl of a runtime trait must live in the
-//RS         // crate declaring its self type, so it follows the type's unit.
-//RS         let unit = units.as_ref().map(|units| match emitter.impl_self_type_def(implementation) {
-//RS             Some(def) => units.module_unit(def.module, def.span.start),
-//RS             None => units.module_unit(implementation.module, implementation.span.start),
-//RS         });
-//RS         emitter.emit_impl(
-//RS             implementation,
-//RS             &mut emitted_methods,
-//RS             EmissionUnits::sink(&mut units, out, unit),
-//RS         );
-//RS     }
-//RS     for function in &program.functions {
-//RS         if !emitter.module_selected(function.module_id) || !emitter.selected_for_target(function) {
-//RS             continue;
-//RS         }
-//RS         match &function.form {
-//RS             MirFunctionForm::TopLevel => {
-//RS                 let unit = units
-//RS                     .as_ref()
-//RS                     .map(|units| units.file_unit(function.source_file, function.span.start));
-//RS                 emitter.emit_function(function, EmissionUnits::sink(&mut units, out, unit));
-//RS             }
-//RS             MirFunctionForm::Method { .. } | MirFunctionForm::TraitMethod { .. } => {
-//RS                 if !emitted_methods.contains(&function.id) {
-//RS                     panic!(
-//RS                         "MIR method {:?} has no selected implementation row",
-//RS                         function.id
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     if let Some(units) = units {
-//RS         units.write_sections(out);
-//RS     }
-//RS     emitter.emit_web_data_type_registration(out);
-//RS     emitter.emit_exports(out);
-//RS     emitter.emit_entry(out);
-//RS     emitter.emit_harness(out);
-//RS     for encoder in emitter.history_capture_encoders.borrow().values() {
-//RS         out.push_str(encoder);
-//RS     }
-//RS     for arity in emitter.history_callable_arities.borrow().iter() {
-//RS         if matches!(*arity, 0 | 1 | 3) {
-//RS             continue;
-//RS         }
-//RS         let args = (0..*arity)
-//RS             .map(|index| format!(", A{index}"))
-//RS             .collect::<String>();
-//RS         let _ = writeln!(out, "jet_history_callable!(JetHistoryFn{arity}{args});");
-//RS     }
-//RS     for (arity, modes) in emitter.history_callable_modes.borrow().iter() {
-//RS         let args = modes
-//RS             .chars()
-//RS             .enumerate()
-//RS             .map(|(index, mode)| {
-//RS                 let mode = match mode {
-//RS                     'O' => "owned",
-//RS                     'R' => "read",
-//RS                     'W' => "write",
-//RS                     other => panic!("MIR history callable has unknown mode `{other}`"),
-//RS                 };
-//RS                 format!("A{index} => {mode}")
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "jet_history_callable!(JetHistoryFn{arity}B{modes}; {args});"
-//RS         );
-//RS     }
-//RS     if let (Some(canonical_input), Some(canonical_input_identity)) =
-//RS         (canonical_input, canonical_input_identity)
-//RS     {
-//RS         CanonicalPass::record(
-//RS             "lowering",
-//RS             "mir.rust-emitter",
-//RS             "crates/jet-codegen/src/Codegen/MIRRust.rs",
-//RS             "mir",
-//RS             canonical_input,
-//RS             canonical_input_identity,
-//RS             "mir",
-//RS             CanonicalPass::debug_payload(
-//RS                 "mir",
-//RS                 "mir.rust-emitter",
-//RS                 &(out, artifact_identity.clone(), &config.target.triple),
-//RS             ),
-//RS             format!(
-//RS                 "{{\"representation\":\"mir\",\"artifact_id\":\"{}\",\"target\":\"{}\"}}",
-//RS                 artifact_identity.artifact.0,
-//RS                 jet_foundation::JSON::json_escape(&config.target.triple),
-//RS             ),
-//RS             "checked",
-//RS         );
-//RS     }
-//RS     CanonicalPass::persist_process("emit");
-//RS }
-//RS 
-//RS /// Provenance line the bootstrap assembler (`Compiler/Bootstrap/assemble.mjs`)
-//RS /// writes before each original `Compiler/<Package>/…` file it concatenates
-//RS /// into the one compiler unit.
-//RS const UNIT_PROVENANCE_MARKER: &str = "// [jet-bootstrap source: ";
-//RS /// Opens one build-unit section of an emitted program; packaging builds each
-//RS /// section as its own crate. Single-crate consumers only see comments.
-//RS pub const UNIT_BEGIN_MARKER: &str = "// jet:unit-begin ";
-//RS /// Closes the build-unit section named after it.
-//RS pub const UNIT_END_MARKER: &str = "// jet:unit-end ";
-//RS /// The unit beneath every package: Core items, compiler-synthesized rows and
-//RS /// anything outside a marked source range.
-//RS const BASE_UNIT: &str = "base";
-//RS 
-//RS /// Build units of one emitted program. An item's unit is the package of the
-//RS /// original file whose provenance marker is in effect at the item's span, so
-//RS /// the assembled compiler splits into one crate per `Compiler/<Package>`.
-//RS /// Programs with fewer than two units are not split.
-//RS struct EmissionUnits {
-//RS     /// Per source file: (byte offset where a marked file's text starts, unit),
-//RS     /// in source order.
-//RS     starts: HashMap<MirSourceFileId, Vec<(usize, String)>>,
-//RS     module_files: HashMap<MirModuleId, MirSourceFileId>,
-//RS     sections: BTreeMap<String, String>,
-//RS }
-//RS 
-//RS impl EmissionUnits {
-//RS     fn new(program: &MirProgram) -> Option<Self> {
-//RS         let mut starts = HashMap::new();
-//RS         let mut names = BTreeSet::new();
-//RS         for file in &program.source_files {
-//RS             let mut rows = Vec::new();
-//RS             let mut offset = 0;
-//RS             for line in file.source.split_inclusive('\n') {
-//RS                 offset += line.len();
-//RS                 let Some(path) = line
-//RS                     .strip_prefix(UNIT_PROVENANCE_MARKER)
-//RS                     .and_then(|rest| rest.trim_end().strip_suffix(']'))
-//RS                 else {
-//RS                     continue;
-//RS                 };
-//RS                 let unit = path.split('/').nth(1).unwrap_or(BASE_UNIT).to_string();
-//RS                 names.insert(unit.clone());
-//RS                 rows.push((offset, unit));
-//RS             }
-//RS             if !rows.is_empty() {
-//RS                 starts.insert(file.id, rows);
-//RS             }
-//RS         }
-//RS         if names.len() < 2 {
-//RS             return None;
-//RS         }
-//RS         let module_files = program
-//RS             .modules
-//RS             .iter()
-//RS             .map(|module| (module.id, module.source_file))
-//RS             .collect();
-//RS         Some(Self {
-//RS             starts,
-//RS             module_files,
-//RS             sections: BTreeMap::new(),
-//RS         })
-//RS     }
-//RS 
-//RS     fn file_unit(&self, file: MirSourceFileId, span_start: usize) -> String {
-//RS         let Some(rows) = self.starts.get(&file) else {
-//RS             return BASE_UNIT.to_string();
-//RS         };
-//RS         let after = rows.partition_point(|(start, _)| *start <= span_start);
-//RS         after
-//RS             .checked_sub(1)
-//RS             .map_or(BASE_UNIT, |row| rows[row].1.as_str())
-//RS             .to_string()
-//RS     }
-//RS 
-//RS     fn module_unit(&self, module: MirModuleId, span_start: usize) -> String {
-//RS         match self.module_files.get(&module) {
-//RS             Some(file) => self.file_unit(*file, span_start),
-//RS             None => BASE_UNIT.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     /// Where an item goes: its unit's section, or `out` when the program is
-//RS     /// not split. `None` is the base unit.
-//RS     fn sink<'o>(units: &'o mut Option<Self>, out: &'o mut String, unit: Option<String>) -> &'o mut String {
-//RS         match units {
-//RS             Some(units) => units
-//RS                 .sections
-//RS                 .entry(unit.unwrap_or_else(|| BASE_UNIT.to_string()))
-//RS                 .or_default(),
-//RS             None => out,
-//RS         }
-//RS     }
-//RS 
-//RS     /// The base section first, then each package section, each between its
-//RS     /// begin/end markers.
-//RS     fn write_sections(mut self, out: &mut String) {
-//RS         let base = self.sections.remove(BASE_UNIT).unwrap_or_default();
-//RS         for (name, text) in std::iter::once((BASE_UNIT.to_string(), base)).chain(self.sections) {
-//RS             let _ = writeln!(out, "{UNIT_BEGIN_MARKER}{name}");
-//RS             out.push_str(&text);
-//RS             if !text.ends_with('\n') {
-//RS                 out.push('\n');
-//RS             }
-//RS             let _ = writeln!(out, "{UNIT_END_MARKER}{name}");
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn select_artifact(
-//RS     program: &MirProgram,
-//RS     id: MirArtifactId,
-//RS     target: MirRustTarget,
-//RS ) -> &MirArtifactPlan {
-//RS     let plan = program
-//RS         .artifacts
-//RS         .iter()
-//RS         .find(|plan| plan.id == id)
-//RS         .unwrap_or_else(|| panic!("MIR artifact ID {:?} has no plan row", id));
-//RS     let target_ok = match (target, plan.target) {
-//RS         (MirRustTarget::Native, MirArtifactTarget::RustAot) => true,
-//RS         (MirRustTarget::WebWasm, MirArtifactTarget::Web) => true,
-//RS         (
-//RS             MirRustTarget::Native,
-//RS             MirArtifactTarget::Cranelift | MirArtifactTarget::Interpreter | MirArtifactTarget::Web,
-//RS         )
-//RS         | (
-//RS             MirRustTarget::WebWasm,
-//RS             MirArtifactTarget::RustAot
-//RS             | MirArtifactTarget::Cranelift
-//RS             | MirArtifactTarget::Interpreter,
-//RS         ) => false,
-//RS     };
-//RS     let kind_ok = match (target, plan.kind) {
-//RS         (
-//RS             MirRustTarget::Native,
-//RS             MirArtifactKind::NativeExecutable
-//RS             | MirArtifactKind::NativeLibrary
-//RS             | MirArtifactKind::SandboxPlugin
-//RS             | MirArtifactKind::TestExecutable
-//RS             | MirArtifactKind::FuzzExecutable
-//RS             | MirArtifactKind::TestOverride,
-//RS         ) => true,
-//RS         (MirRustTarget::WebWasm, MirArtifactKind::WebApplication) => true,
-//RS         (MirRustTarget::Native, MirArtifactKind::WebApplication)
-//RS         | (
-//RS             MirRustTarget::WebWasm,
-//RS             MirArtifactKind::NativeExecutable
-//RS             | MirArtifactKind::NativeLibrary
-//RS             | MirArtifactKind::SandboxPlugin
-//RS             | MirArtifactKind::TestExecutable
-//RS             | MirArtifactKind::FuzzExecutable
-//RS             | MirArtifactKind::TestOverride,
-//RS         ) => false,
-//RS     };
-//RS     if !target_ok || !kind_ok {
-//RS         panic!(
-//RS             "MIR artifact {:?} kind {} is not applicable to {:?} Rust emission",
-//RS             id,
-//RS             plan.kind.as_str(),
-//RS             target
-//RS         );
-//RS     }
-//RS     if plan.modules.is_empty() {
-//RS         panic!("MIR artifact {:?} has no selected module rows", id);
-//RS     }
-//RS     plan
-//RS }
-//RS 
-//RS fn function_has_debug_only(function: &MirFunction) -> bool {
-//RS     function
-//RS         .scopes
-//RS         .iter()
-//RS         .any(|scope| scope.kind == MirScopeKind::DebugOnly)
-//RS }
-//RS 
-//RS fn debug_only_block_states(function: &MirFunction) -> BTreeMap<MirBlockId, bool> {
-//RS     let debug_scopes = function
-//RS         .scopes
-//RS         .iter()
-//RS         .filter(|scope| scope.kind == MirScopeKind::DebugOnly)
-//RS         .map(|scope| scope.id)
-//RS         .collect::<HashSet<_>>();
-//RS     let is_debug_scope = |scope_id: MirScopeId| debug_scopes.contains(&scope_id);
-//RS     let positions = block_positions(function);
-//RS     let mut states = BTreeMap::new();
-//RS     states.insert(function.entry, false);
-//RS     let mut pending = vec![function.entry];
-//RS     while let Some(block_id) = pending.pop() {
-//RS         let Some(position) = positions.get(&block_id) else {
-//RS             continue;
-//RS         };
-//RS         let block = &function.blocks[*position];
-//RS         let mut active = states.get(&block_id).copied().unwrap_or(false);
-//RS         for instruction in &block.instructions {
-//RS             match &instruction.operation {
-//RS                 MirOperation::ScopeEnter { scope, .. } if is_debug_scope(*scope) => active = true,
-//RS                 MirOperation::ScopeExit { scope } if is_debug_scope(*scope) => active = false,
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         for target in block.terminator.targets() {
-//RS             let next = states.get(&target).copied().unwrap_or(false) || active;
-//RS             if states.get(&target).copied() != Some(next) {
-//RS                 states.insert(target, next);
-//RS                 pending.push(target);
-//RS             }
-//RS         }
-//RS     }
-//RS     states
-//RS }
-//RS 
-//RS /// Position of each block in `function.blocks`, keyed by block id (the first
-//RS /// row wins, as a linear `find` would).
-//RS fn block_positions(function: &MirFunction) -> HashMap<MirBlockId, usize> {
-//RS     let mut positions = HashMap::with_capacity(function.blocks.len());
-//RS     for (position, block) in function.blocks.iter().enumerate() {
-//RS         positions.entry(block.id).or_insert(position);
-//RS     }
-//RS     positions
-//RS }
-//RS 
-//RS /// Per-function lookup tables, built once per function on first use so the
-//RS /// emitter's per-value queries never rescan the function body. MIR
-//RS /// validation rejects a value defined twice or given two metadata rows, so
-//RS /// each value has at most one row in `definitions` and `values`.
-//RS struct FunctionIndex {
-//RS     /// (block position, instruction position) of each value's definition.
-//RS     definitions: HashMap<MirValueId, (usize, usize)>,
-//RS     /// Position of each value's `function.values` row.
-//RS     values: HashMap<MirValueId, usize>,
-//RS     /// Every use of each value in body order: (block position, instruction
-//RS     /// position), or `None` for the block's terminator. One row per user.
-//RS     uses: HashMap<MirValueId, Vec<(usize, Option<usize>)>>,
-//RS     /// (block position, instruction position) of the first `ScopeEnter` that
-//RS     /// carries a test member, per scope.
-//RS     test_members: HashMap<MirScopeId, (usize, usize)>,
-//RS     /// Position of each scope's `function.scopes` row.
-//RS     scopes: HashMap<MirScopeId, usize>,
-//RS     /// Position of each place's `function.places` row.
-//RS     places: HashMap<MirPlaceId, usize>,
-//RS     /// The value of the first `Capture` instruction of each capture slot.
-//RS     capture_values: HashMap<usize, MirValueId>,
-//RS     /// Capture values some place moves out of (`access == Move`).
-//RS     moved_captures: HashSet<MirValueId>,
-//RS     /// (block position, coverage branch ordinals before the block) per
-//RS     /// block id: Branch terminators count once, Switch arms once each.
-//RS     blocks: HashMap<MirBlockId, (usize, usize)>,
-//RS     /// Positions of the blocks ending in `Jump` to each block, in body order.
-//RS     jump_sources: HashMap<MirBlockId, Vec<usize>>,
-//RS     /// Predecessor block positions of each block, along terminator edges.
-//RS     predecessors: Vec<Vec<usize>>,
-//RS     /// D-MEM-COPYSEM1: per local, the (block, instruction) positions of the
-//RS     /// operations that may change or release it: a write, move, replace, or
-//RS     /// write borrow of one of its places, a write or move call argument
-//RS     /// naming one, and any use of a write borrow taken from one.
-//RS     local_writes: HashMap<MirLocalId, Vec<(usize, usize)>>,
-//RS     /// Locals some operation reaches outside place reads and writes (a
-//RS     /// closure capture, a raw address, a by-identity entry list): an
-//RS     /// in-place read of one is never proven stable.
-//RS     escaped_locals: HashSet<MirLocalId>,
-//RS     /// Per parameter index, the (block, instruction) positions of the
-//RS     /// operations that may change one of its places, as `local_writes`
-//RS     /// counts them for a local, with the place each one changes.
-//RS     parameter_writes: HashMap<usize, Vec<(usize, usize, MirPlaceId)>>,
-//RS     /// Parameters some operation reaches outside place reads and writes, as
-//RS     /// `escaped_locals` counts them, or a drop action releases a place of.
-//RS     escaped_parameters: HashSet<usize>,
-//RS     /// `stable_local_read` answers per read value, computed on first query.
-//RS     stable_reads: std::cell::RefCell<HashMap<MirValueId, bool>>,
-//RS }
-//RS 
-//RS /// Coverage branch ordinals a terminator takes.
-//RS fn terminator_branch_count(terminator: &MirTerminator) -> usize {
-//RS     match terminator {
-//RS         MirTerminator::Branch { .. } => 1,
-//RS         MirTerminator::Switch { arms, .. } => arms.len(),
-//RS         MirTerminator::Jump { .. }
-//RS         | MirTerminator::Return { .. }
-//RS         | MirTerminator::Yield { .. }
-//RS         | MirTerminator::Break { .. }
-//RS         | MirTerminator::Continue { .. }
-//RS         | MirTerminator::Unreachable { .. } => 0,
-//RS     }
-//RS }
-//RS 
-//RS /// Whether two places of one root, given by their projections, may share
-//RS /// storage: only a field of one record that differs from the other's field
-//RS /// at the same depth keeps them apart. An index, payload or other projection
-//RS /// is taken to overlap whatever it meets.
-//RS fn places_overlap(left: &[MirProjection], right: &[MirProjection]) -> bool {
-//RS     for (left, right) in left.iter().zip(right) {
-//RS         match (left, right) {
-//RS             (MirProjection::Field { field: left, .. }, MirProjection::Field { field: right, .. }) => {
-//RS                 if left != right {
-//RS                     return false;
-//RS                 }
-//RS             }
-//RS             _ => return true,
-//RS         }
-//RS     }
-//RS     true
-//RS }
-//RS 
-//RS impl FunctionIndex {
-//RS     fn new(function: &MirFunction) -> Self {
-//RS         let mut definitions = HashMap::new();
-//RS         let mut uses: HashMap<MirValueId, Vec<(usize, Option<usize>)>> = HashMap::new();
-//RS         let mut test_members = HashMap::new();
-//RS         let mut capture_values = HashMap::new();
-//RS         let mut add_use = |value: MirValueId, at: (usize, Option<usize>)| {
-//RS             let rows = uses.entry(value).or_default();
-//RS             if rows.last() != Some(&at) {
-//RS                 rows.push(at);
-//RS             }
-//RS         };
-//RS         let mut blocks = HashMap::new();
-//RS         let mut jump_sources: HashMap<MirBlockId, Vec<usize>> = HashMap::new();
-//RS         let mut branch_ordinal = 0;
-//RS         for (block_position, block) in function.blocks.iter().enumerate() {
-//RS             blocks
-//RS                 .entry(block.id)
-//RS                 .or_insert((block_position, branch_ordinal));
-//RS             branch_ordinal += terminator_branch_count(&block.terminator);
-//RS             if let MirTerminator::Jump { target } = &block.terminator {
-//RS                 jump_sources.entry(*target).or_default().push(block_position);
-//RS             }
-//RS             for (position, instruction) in block.instructions.iter().enumerate() {
-//RS                 if let Some(result) = instruction.result {
-//RS                     definitions.entry(result).or_insert((block_position, position));
-//RS                 }
-//RS                 if let MirOperation::ScopeEnter { scope, test_member: Some(_) } =
-//RS                     &instruction.operation
-//RS                 {
-//RS                     test_members.entry(*scope).or_insert((block_position, position));
-//RS                 }
-//RS                 if let (MirOperation::Capture { slot }, Some(result)) =
-//RS                     (&instruction.operation, instruction.result)
-//RS                 {
-//RS                     capture_values.entry(*slot).or_insert(result);
-//RS                 }
-//RS                 for value in instruction.operation.value_uses() {
-//RS                     add_use(value, (block_position, Some(position)));
-//RS                 }
-//RS             }
-//RS             for value in block.terminator.value_uses() {
-//RS                 add_use(value, (block_position, None));
-//RS             }
-//RS         }
-//RS         let mut values = HashMap::with_capacity(function.values.len());
-//RS         for (position, (value, ..)) in function.values.iter().enumerate() {
-//RS             values.entry(*value).or_insert(position);
-//RS         }
-//RS         let mut scopes = HashMap::with_capacity(function.scopes.len());
-//RS         for (position, scope) in function.scopes.iter().enumerate() {
-//RS             scopes.entry(scope.id).or_insert(position);
-//RS         }
-//RS         let mut places = HashMap::with_capacity(function.places.len());
-//RS         let mut moved_captures = HashSet::new();
-//RS         for (position, place) in function.places.iter().enumerate() {
-//RS             places.entry(place.id).or_insert(position);
-//RS             if let (MirAccess::Move, MirPlaceBase::Capture(captured)) = (place.access, &place.base) {
-//RS                 moved_captures.insert(*captured);
-//RS             }
-//RS         }
-//RS         let mut predecessors: Vec<Vec<usize>> = vec![Vec::new(); function.blocks.len()];
-//RS         for (block_position, block) in function.blocks.iter().enumerate() {
-//RS             for target in block.terminator.targets().iter() {
-//RS                 if let Some((target, _)) = blocks.get(target) {
-//RS                     predecessors[*target].push(block_position);
-//RS                 }
-//RS             }
-//RS         }
-//RS         let place_local = |place: &MirPlaceId| match places.get(place).map(|row| &function.places[*row].base) {
-//RS             Some(MirPlaceBase::Local(local)) => Some(*local),
-//RS             _ => None,
-//RS         };
-//RS         // The parameter index of a place rooted at a parameter, with the place.
-//RS         let place_parameter = |place: &MirPlaceId| -> Option<(usize, MirPlaceId)> {
-//RS             let MirPlaceBase::Parameter(value) = &function.places[*places.get(place)?].base else {
-//RS                 return None;
-//RS             };
-//RS             let (block, position) = definitions.get(value)?;
-//RS             match function.blocks[*block].instructions[*position].operation {
-//RS                 MirOperation::Parameter { index, .. } => Some((index, *place)),
-//RS                 _ => None,
-//RS             }
-//RS         };
-//RS         let write_borrow = |value: MirValueId| {
-//RS             values
-//RS                 .get(&value)
-//RS                 .is_some_and(|row| function.values[*row].3.mode == MirOwnershipMode::WriteBorrow)
-//RS         };
-//RS         let mut local_writes: HashMap<MirLocalId, Vec<(usize, usize)>> = HashMap::new();
-//RS         let mut escaped_locals = HashSet::new();
-//RS         let mut borrow_roots: HashMap<MirValueId, MirLocalId> = HashMap::new();
-//RS         let mut parameter_writes: HashMap<usize, Vec<(usize, usize, MirPlaceId)>> = HashMap::new();
-//RS         let mut escaped_parameters = HashSet::new();
-//RS         let mut parameter_borrow_roots: HashMap<MirValueId, (usize, MirPlaceId)> = HashMap::new();
-//RS         // Two passes: a write borrow's definition may sit in a block listed
-//RS         // after one of its uses.
-//RS         for pass in 0..2 {
-//RS             local_writes.clear();
-//RS             parameter_writes.clear();
-//RS             for (block_position, block) in function.blocks.iter().enumerate() {
-//RS                 for (position, instruction) in block.instructions.iter().enumerate() {
-//RS                     let mut touched: Vec<MirLocalId> = Vec::new();
-//RS                     let mut changed: Vec<(usize, MirPlaceId)> = Vec::new();
-//RS                     match &instruction.operation {
-//RS                         MirOperation::ReadPlace(place) => {
-//RS                             if instruction.result.is_some_and(write_borrow) {
-//RS                                 touched.extend(place_local(place));
-//RS                                 changed.extend(place_parameter(place));
-//RS                             }
-//RS                         }
-//RS                         MirOperation::AddressOf { place, access } => {
-//RS                             if *access == MirAccess::Move {
-//RS                                 // A move through an address (a partial move):
-//RS                                 // later reads go through partial-move slots.
-//RS                                 escaped_locals.extend(place_local(place));
-//RS                                 escaped_parameters.extend(place_parameter(place).map(|(index, _)| index));
-//RS                             } else if *access != MirAccess::Read {
-//RS                                 touched.extend(place_local(place));
-//RS                                 changed.extend(place_parameter(place));
-//RS                             }
-//RS                         }
-//RS                         MirOperation::MovePlace { place }
-//RS                             if places
-//RS                                 .get(place)
-//RS                                 .is_some_and(|row| !function.places[*row].projections.is_empty()) =>
-//RS                         {
-//RS                             escaped_locals.extend(place_local(place));
-//RS                             escaped_parameters.extend(place_parameter(place).map(|(index, _)| index));
-//RS                         }
-//RS                         MirOperation::MovePlace { place }
-//RS                         | MirOperation::InitializeUninit { place }
-//RS                         | MirOperation::WritePlace { place, .. }
-//RS                         | MirOperation::ReplacePlace { place, .. }
-//RS                         | MirOperation::Semantic(MirSemanticOp::BuiltinMethod {
-//RS                             receiver_place: Some(place),
-//RS                             ..
-//RS                         }) => {
-//RS                             touched.extend(place_local(place));
-//RS                             changed.extend(place_parameter(place));
-//RS                         }
-//RS                         // A pattern scan advances its receiver in place.
-//RS                         MirOperation::Semantic(
-//RS                             MirSemanticOp::CursorTakePattern { receiver_place: place, .. }
-//RS                             | MirSemanticOp::ReaderTakePattern { receiver_place: place, .. },
-//RS                         ) => changed.extend(place_parameter(place)),
-//RS                         MirOperation::RawAddressOf { place } => {
-//RS                             escaped_locals.extend(place_local(place));
-//RS                             escaped_parameters.extend(place_parameter(place).map(|(index, _)| index));
-//RS                         }
-//RS                         MirOperation::Closure { captures, .. } => {
-//RS                             for capture in captures {
-//RS                                 if let MirCaptureOperand::Place(place) = capture {
-//RS                                     escaped_locals.extend(place_local(place));
-//RS                                     escaped_parameters.extend(place_parameter(place).map(|(index, _)| index));
-//RS                                 }
-//RS                             }
-//RS                         }
-//RS                         MirOperation::Semantic(MirSemanticOp::DataEntriesToMap { local, .. }) => {
-//RS                             escaped_locals.insert(*local);
-//RS                         }
-//RS                         _ => {}
-//RS                     }
-//RS                     let args: &[MirCallArg] = match &instruction.operation {
-//RS                         MirOperation::Call { args, .. }
-//RS                         | MirOperation::CoreCall { args, .. }
-//RS                         | MirOperation::IndirectCall { args, .. }
-//RS                         | MirOperation::Semantic(
-//RS                             MirSemanticOp::StaticPreludeCall { args, .. }
-//RS                             | MirSemanticOp::HardwareCall { args, .. }
-//RS                             | MirSemanticOp::ClosureMethod { args, .. }
-//RS                             | MirSemanticOp::HostCall { args, .. },
-//RS                         ) => args.as_slice(),
-//RS                         _ => &[],
-//RS                     };
-//RS                     for arg in args {
-//RS                         if arg.access != MirAccess::Read {
-//RS                             touched.extend(arg.place.as_ref().and_then(place_local));
-//RS                             changed.extend(arg.place.as_ref().and_then(place_parameter));
-//RS                         }
-//RS                     }
-//RS                     for value in instruction.operation.value_uses() {
-//RS                         touched.extend(borrow_roots.get(&value).copied());
-//RS                         changed.extend(parameter_borrow_roots.get(&value).copied());
-//RS                     }
-//RS                     if let Some(result) = instruction.result.filter(|result| write_borrow(*result)) {
-//RS                         if let Some(local) = touched.first() {
-//RS                             borrow_roots.insert(result, *local);
-//RS                         }
-//RS                         if let Some(root) = changed.first() {
-//RS                             parameter_borrow_roots.insert(result, *root);
-//RS                         }
-//RS                     }
-//RS                     if pass == 1 {
-//RS                         for local in touched {
-//RS                             local_writes.entry(local).or_default().push((block_position, position));
-//RS                         }
-//RS                         for (parameter, place) in changed {
-//RS                             parameter_writes
-//RS                                 .entry(parameter)
-//RS                                 .or_default()
-//RS                                 .push((block_position, position, place));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         for action in &function.drops {
-//RS             escaped_parameters.extend(place_parameter(&action.place).map(|(index, _)| index));
-//RS         }
-//RS         Self {
-//RS             definitions,
-//RS             values,
-//RS             uses,
-//RS             test_members,
-//RS             scopes,
-//RS             places,
-//RS             capture_values,
-//RS             moved_captures,
-//RS             blocks,
-//RS             jump_sources,
-//RS             predecessors,
-//RS             local_writes,
-//RS             escaped_locals,
-//RS             parameter_writes,
-//RS             escaped_parameters,
-//RS             stable_reads: std::cell::RefCell::new(HashMap::new()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Deepest indentation (in columns) a structured body may reach before the
-//RS /// function falls back to the dispatch loop; rustc's recursive passes overflow
-//RS /// their stack on a few thousand nested blocks.
-//RS const MAX_STRUCTURED_INDENT: usize = 4 * 256;
-//RS 
-//RS /// Structured-emission plan of one MIR CFG (the Jet emitter's
-//RS /// `jet_rust_emit_cfg_plan`): reverse postorder, loop headers, and the merge
-//RS /// blocks each block immediately dominates.
-//RS struct MirCfgPlan {
-//RS     positions: BTreeMap<MirBlockId, usize>,
-//RS     entry: usize,
-//RS     /// Reverse postorder number per position; `usize::MAX` when unreachable.
-//RS     order: Vec<usize>,
-//RS     headers: Vec<bool>,
-//RS     merges: Vec<bool>,
-//RS     /// The merge blocks each position immediately dominates, latest first.
-//RS     follows: Vec<Vec<usize>>,
-//RS }
-//RS 
-//RS /// Control-flow state of the function body being printed.
-//RS struct MirCfgState {
-//RS     /// Present while the body is emitted as structured Rust.
-//RS     plan: Option<std::rc::Rc<MirCfgPlan>>,
-//RS     /// Blocks whose phi reads the dispatch predecessor.
-//RS     phi_targets: BTreeSet<MirBlockId>,
-//RS     /// Edges whose target subtree is printed in place: (offset in the block
-//RS     /// text, target position, indent).
-//RS     inline_edges: Vec<(usize, usize, usize)>,
-//RS }
-//RS 
-//RS /// A phi whose every incoming value is the same value does not depend on the
-//RS /// predecessor.
-//RS fn phi_is_trivial(incoming: &[(MirBlockId, MirValueId)]) -> bool {
-//RS     incoming
-//RS         .split_first()
-//RS         .is_some_and(|((_, first), rest)| rest.iter().all(|(_, value)| value == first))
-//RS }
-//RS 
-//RS fn phi_target_blocks(function: &MirFunction) -> BTreeSet<MirBlockId> {
-//RS     function
-//RS         .blocks
-//RS         .iter()
-//RS         .filter(|block| {
-//RS             block.instructions.iter().any(|instruction| {
-//RS                 matches!(&instruction.operation, MirOperation::Phi { incoming } if !phi_is_trivial(incoming))
-//RS             })
-//RS         })
-//RS         .map(|block| block.id)
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Calls `visit(line, column, id)` for every `__jet_v_<id>` slot mention in
-//RS /// `text`, with `line` counted from the start of `text`.
-//RS fn for_each_value_mention(text: &str, mut visit: impl FnMut(usize, usize, u64)) {
-//RS     const PREFIX: &str = "__jet_v_";
-//RS     for (line_index, line) in text.split_inclusive('\n').enumerate() {
-//RS         let mut search = 0;
-//RS         while let Some(found) = line[search..].find(PREFIX) {
-//RS             let at = search + found;
-//RS             let digits_start = at + PREFIX.len();
-//RS             let digits = line[digits_start..]
-//RS                 .bytes()
-//RS                 .take_while(|byte| byte.is_ascii_digit())
-//RS                 .count();
-//RS             search = digits_start + digits;
-//RS             let joined = line[..at]
-//RS                 .bytes()
-//RS                 .next_back()
-//RS                 .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_');
-//RS             if digits == 0 || joined {
-//RS                 continue;
-//RS             }
-//RS             if let Ok(id) = line[digits_start..digits_start + digits].parse::<u64>() {
-//RS                 visit(line_index, at, id);
-//RS             }
-//RS         }
-// END-PORT-PENDING 2001 crates/jet-codegen/src/Codegen/MIRRust.rs:1-1800
+// Rust source emission for optimized canonical MIR. This is a printer, not
+// another lowering pipeline; symbols, ownership and target facts come from MIR.
+use jet_foundation.MIR.*
+use jet_foundation.[CanonicalPass]
+use jet_foundation.Layout.[LayoutFacts, TargetLayout]
+use jet_foundation.MIROptimization.Acceleration.[AccelerationTransform, D_FRED1_FIXED_ORDER]
+use jet_foundation.Names.[mangle, mangle_generated, mangle_path]
+use jet_foundation.Shape.[ShapeProjectionKind]
+use jet_foundation.Syntax.[CoreCallSymbol]
+use jet_foundation.OSTarget.[OSTarget]
+use jet_foundation.TargetMachine.[TargetCapability]
+use jet_foundation.RustSource.[strip_test_items]
+use jet_foundation.JSON.[json_escape]
+use jet_pkg_model.Package.[ReleaseDevtoolsPolicy]
+use jet_codegen.AST.[FfiLink]
+use jet_codegen.Codegen.*
+use jet_codegen.Codegen.TIR.tir_to_mir_types.[is_compiler_owned_trait]
+use jet_codegen.Syntax.[TYPE_SHARED_GUARD, TRAIT_ROLLBACK]
+use jet_codegen.Codegen.MIRRust02.[RustEmitter, canonical_payload, canonical_identity]
+use std.cell.[RefCell] // GATE #4500: retained interior write-borrow primitive.
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:22
+pub enum MirRustTarget { Native WebWasm }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:27
+enum HistoryScalarKind { Integer Boolean Text Char SignedInteger UnsignedInteger }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:39
+// Core rows use the raw machine-word fact; native slots use their declared type.
+enum NativeIntSource { MachineWord DeclaredSlot }
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:46
+pub fn exact_prelude_adapter(bare: String) -> (String, [USize])? {
+    if bare == {
+        "jet_fraction_from_parts" -> ("jet_fraction_from_owned_parts", [0, 1])
+        "JetDate::new" -> ("jet_local_date_owned", [0, 1, 2])
+        "JetLocalTime::new" -> ("jet_local_time_owned", [0, 1, 2])
+        "JetPeriod::new" -> ("jet_period_owned", [0, 1, 2])
+        "jet_std::jet_int_abs" -> ("jet_std::jet_int_owned_abs", [0])
+        "jet_std::jet_int_add" -> ("jet_std::jet_int_owned_add", [0, 1])
+        "jet_std::jet_int_sub" -> ("jet_std::jet_int_owned_sub", [0, 1])
+        "jet_std::jet_int_mul" -> ("jet_std::jet_int_owned_mul", [0, 1])
+        "jet_std::jet_int_bit_and" -> ("jet_std::jet_int_owned_bit_and", [0, 1])
+        "jet_std::jet_int_bit_or" -> ("jet_std::jet_int_owned_bit_or", [0, 1])
+        "jet_std::jet_int_bit_xor" -> ("jet_std::jet_int_owned_bit_xor", [0, 1])
+        "jet_std::jet_int_neg" -> ("jet_std::jet_int_owned_neg", [0])
+        "jet_std::jet_int_not" -> ("jet_std::jet_int_owned_not", [0])
+        "jet_std::jet_int_div" -> ("jet_std::jet_int_owned_div", [0, 1])
+        "jet_std::jet_int_rem" -> ("jet_std::jet_int_owned_rem", [0, 1])
+        "jet_std::jet_int_div_euclid" -> ("jet_std::jet_int_owned_div_euclid", [0, 1])
+        "jet_std::jet_int_rem_euclid" -> ("jet_std::jet_int_owned_rem_euclid", [0, 1])
+        "jet_std::jet_int_floor_div" -> ("jet_std::jet_int_owned_floor_div", [0, 1])
+        "jet_std::jet_int_mod" -> ("jet_std::jet_int_owned_mod", [0, 1])
+        "jet_std::jet_int_pow" -> ("jet_std::jet_int_owned_pow", [0, 1])
+        "jet_std::jet_int_shl" -> ("jet_std::jet_int_owned_shl", [0, 1])
+        "jet_std::jet_int_shr" -> ("jet_std::jet_int_owned_shr", [0, 1])
+        "jet_std::jet_int_checked_widen" -> ("jet_std::jet_int_owned_checked_widen", [0])
+        "jet_std::jet_int_try_from_checked" -> ("jet_std::jet_int_owned_try_from_checked", [0])
+        "jet_std::jet_int_checked_fixed" -> ("jet_std::jet_int_owned_checked_fixed", [0])
+        "jet_numeric_int_bit_count" -> ("jet_std::jet_int_owned_bit_count", [0])
+        "jet_inline_range_from_int" -> ("jet_std::jet_int_owned_inline_range", [0])
+        "jet_std::jet_int_to_radix" -> ("jet_std::jet_int_owned_to_radix", [0, 1])
+        "jet_std::jet_int_from_radix" -> ("jet_std::jet_int_owned_from_radix", [1])
+        "jet_std::jet_int_parse" -> ("jet_std::jet_int_owned_parse", [])
+        "jet_fmt_decimal_int" -> ("jet_std::jet_fmt_decimal_int_owned", [0, 1])
+        "jet_fmt_grouped_int" -> ("jet_std::jet_fmt_grouped_int_owned", [0, 1])
+        "jet_fmt_hex" -> ("jet_std::jet_fmt_hex_owned", [0, 1])
+        "jet_fmt_bin" -> ("jet_std::jet_fmt_bin_owned", [0])
+        "jet_fmt_oct" -> ("jet_std::jet_fmt_oct_owned", [0])
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:88
+fn quote_rust_string(value: String) -> String { escape_rust_str(value) }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:92
+fn allocator_view_inner(ty: MirType) -> MirType? {
+    if ty.kind() == {
+        MirTypeKind.Tagged(marker: MirTagMarker.Internal(MirInternalTag.AllocatorView), inner: inner) -> inner
+        else -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:103
+STM_TYPE :: "Stm"
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:105
+fn is_shared_guard_type(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Tagged(inner: inner) -> is_shared_guard_type(inner)
+        MirTypeKind.Apply(name: name) -> name.name == TYPE_SHARED_GUARD
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:113
+fn is_allocator_result_type(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Result(err: err) -> err.name().starts_with("AllocError")
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:120
+fn is_string_view_type(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Apply(name: name, args: args) -> {
+            if (name.name == "View" || name.name == "ViewMut") && args.len() == 1 {
+                if args[0].kind() == {
+                    MirTypeKind.Apply(name: name, args: args) -> args.is_empty() && name.name == "str"
+                    else -> false
+                }
+            } else { false }
+        }
+        MirTypeKind.Tagged(inner: inner) -> is_string_view_type(inner)
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:136
+fn is_view_type(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Apply(name: name) -> name.name == "View" || name.name == "ViewMut"
+        MirTypeKind.Tagged(inner: inner) -> is_view_type(inner)
+        else -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:150
+// Formatting policy only; this descriptor cannot supply a symbol lookup table.
+pub struct MirRustConfig {
+    pub target: TargetLayout
+    pub target_kind: MirRustTarget
+    pub root_prefix: String
+    pub execution: MirRustExecutionConfig
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:165
+pub struct MirRustCallableMetadata {
+    pub function: MirFunctionId
+    pub symbol: String
+    pub parameter_types: [String]
+    pub parameter_access: [MirAccess]
+    pub return_type: String
+    pub callable_type: String
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:176
+pub struct MirRustTypeMetadata { pub ty: MirTypeId; pub symbol: String }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:183
+pub struct MirRustFieldMetadata { pub field: MirFieldId; pub owner: MirTypeId; pub symbol: String }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:191
+pub struct MirRustVariantMetadata {
+    pub owner: MirTypeId
+    pub source_name: String
+    pub wire_name: String
+    pub symbol: String
+    pub payload_types: [String]
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:200
+pub struct MirRustTraitMetadata {
+    pub trait_id: MirTraitId
+    pub key: String
+    pub name: String
+    pub symbol: String
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:209
+pub struct MirRustTraitMethodMetadata {
+    pub trait_id: MirTraitId
+    pub method_id: MirTraitMethodId
+    pub key: String
+    pub name: String
+    pub symbol: String
+    pub receiver_access: MirAccess?
+    pub parameter_types: [String]
+    pub parameter_access: [MirAccess]
+    pub return_type: String
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:223
+pub struct MirRustAotMetadata {
+    pub callables: [MirRustCallableMetadata] = []
+    pub types: [MirRustTypeMetadata] = []
+    pub fields: [MirRustFieldMetadata] = []
+    pub variants: [MirRustVariantMetadata] = []
+    pub traits: [MirRustTraitMetadata] = []
+    pub trait_methods: [MirRustTraitMethodMetadata] = []
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:234
+pub struct MirRustExecutionConfig {
+    pub artifact: MirArtifactId
+    pub ffi: FfiLink? // GATE #4500: retained descriptor borrow.
+    pub emit_types: Bool
+    pub emit_foreign: Bool
+    pub emit_metadata: Bool
+    pub semantic_digest: [U8 #32]?
+    pub emit_debug_linemap: Bool
+    pub emit_runtime: Bool
+    pub release_devtools_policy: ReleaseDevtoolsPolicy
+    pub prune_unreachable_codecs: Bool
+}
+impl MirRustExecutionConfig {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:259
+    pub fn for_artifact(artifact: MirArtifactId) -> MirRustExecutionConfig {
+        MirRustExecutionConfig{
+            artifact: artifact, ffi: None, emit_types: true, emit_foreign: true,
+            emit_metadata: false, semantic_digest: None, emit_debug_linemap: false,
+            emit_runtime: true, release_devtools_policy: ReleaseDevtoolsPolicy.development(),
+            prune_unreachable_codecs: false,
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:277
+fn mir_type_nominals(ty: MirType, names: &[String]) -> {
+    if ty.kind() == {
+        MirTypeKind.Apply(name: name, args: args) -> {
+            names.push(name.name)
+            for arg in args { mir_type_nominals(arg, &names) }
+        }
+        MirTypeKind.TraitObject(bounds) -> { for bound in bounds { names.push(bound.name) } }
+        MirTypeKind.List(inner) | MirTypeKind.Shared(inner) | MirTypeKind.Option(inner) |
+        MirTypeKind.FixedList(elem: inner) | MirTypeKind.InlineRange(base: inner) |
+        MirTypeKind.Tagged(inner: inner) | MirTypeKind.Quantity(base: inner) -> mir_type_nominals(inner, &names)
+        MirTypeKind.Map(key: key, value: value) | MirTypeKind.Result(ok: key, err: value) -> {
+            mir_type_nominals(key, &names)
+            mir_type_nominals(value, &names)
+        }
+        MirTypeKind.Tuple(fields) -> { for (_, field) in fields { mir_type_nominals(field, &names) } }
+        MirTypeKind.Union(members) -> { for member in members { mir_type_nominals(member, &names) } }
+        MirTypeKind.Fn(signature) -> {
+            for param in signature.params { mir_type_nominals(param, &names) }
+            if ret := signature.ret { mir_type_nominals(ret, &names) }
+        }
+        MirTypeKind.SendFn(params: params, ret: ret) -> {
+            for param in params { mir_type_nominals(param, &names) }
+            if ret := ret { mir_type_nominals(ret, &names) }
+        }
+        MirTypeKind.Int | MirTypeKind.Float | MirTypeKind.Bool | MirTypeKind.String |
+        MirTypeKind.Char | MirTypeKind.IntN | MirTypeKind.Float32 | MirTypeKind.Measure(_) -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:342
+fn mir_type_single_trait_objects(ty: MirType, found: &(String) -> Void) -> {
+    if ty.kind() == {
+        MirTypeKind.TraitObject(bounds) -> { if bounds.len() == 1 { found(bounds[0].name) } }
+        MirTypeKind.Apply(args: inner) | MirTypeKind.Union(inner) -> {
+            for ty in inner { mir_type_single_trait_objects(ty, &found) }
+        }
+        MirTypeKind.List(inner) | MirTypeKind.Shared(inner) | MirTypeKind.Option(inner) |
+        MirTypeKind.FixedList(elem: inner) | MirTypeKind.InlineRange(base: inner) |
+        MirTypeKind.Tagged(inner: inner) | MirTypeKind.Quantity(base: inner) -> mir_type_single_trait_objects(inner, &found)
+        MirTypeKind.Map(key: key, value: value) | MirTypeKind.Result(ok: key, err: value) -> {
+            mir_type_single_trait_objects(key, &found)
+            mir_type_single_trait_objects(value, &found)
+        }
+        MirTypeKind.Tuple(fields) -> { for (_, field) in fields { mir_type_single_trait_objects(field, &found) } }
+        MirTypeKind.Fn(signature) -> {
+            for param in signature.params { mir_type_single_trait_objects(param, &found) }
+            if ret := signature.ret { mir_type_single_trait_objects(ret, &found) }
+        }
+        MirTypeKind.SendFn(params: params, ret: ret) -> {
+            for param in params { mir_type_single_trait_objects(param, &found) }
+            if ret := ret { mir_type_single_trait_objects(ret, &found) }
+        }
+        MirTypeKind.Int | MirTypeKind.Float | MirTypeKind.Bool | MirTypeKind.String |
+        MirTypeKind.Char | MirTypeKind.IntN | MirTypeKind.Float32 | MirTypeKind.Measure(_) -> {}
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:409
+// Scan all noncandidate roots, then demanded codec methods; nominal demands are indexed.
+fn demanded_codec_impls(program: MirProgram) -> [Bool] {
+    keep := program.impls.map((implementation) -> !(implementation.compiler_generated &&
+        implementation.serde != None && implementation.self_type.nominal_name() != None))
+    by_method := [MirFunctionId: USize]{}
+    by_name := [String: [USize]]{}
+    for (index, implementation) in program.impls.enumerate() {
+        if keep[index] { continue }
+        for method in implementation.methods { by_method[method] = index }
+        if name := implementation.self_type.nominal_name() { by_name.entry(name).or_default().push(index) }
+    }
+    functions := [MirFunctionId: MirFunction]{}
+    pending := [MirFunction][]
+    for function in program.functions {
+        functions[function.id] = function
+        if !by_method.contains_key(function.id) { pending.push(function) }
+    }
+    seen_names := [String: Bool]{}
+    demanded := [USize][]
+    while function := pending.pop() {
+        names := [String][]
+        for block in function.blocks {
+            for instruction in block.instructions {
+                if instruction.operation == {
+                    MirOperation.Call(callee: callee, type_args: type_args) -> {
+                        if callee == {
+                            MirCallee.User(id) | MirCallee.Associated(function: id) | MirCallee.Method(function: id) -> {
+                                if index := by_method.get(id) { demanded.push(index) }
+                            }
+                            else -> {}
+                        }
+                        for ty in type_args { mir_type_nominals(ty, &names) }
+                    }
+                    MirOperation.IndirectCall(type_args: type_args) | MirOperation.CoreCall(type_args: type_args) -> {
+                        for ty in type_args { mir_type_nominals(ty, &names) }
+                    }
+                    MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(owner_type_args: owner_type_args, type_args: type_args)) -> {
+                        for arg in owner_type_args {
+                            if arg == { MirPreludeTypeArg.Type(ty) -> mir_type_nominals(ty, &names); else -> {} }
+                        }
+                        for ty in type_args { mir_type_nominals(ty, &names) }
+                    }
+                    else -> {}
+                }
+            }
+        }
+        for name in names {
+            if !seen_names.contains_key(name) {
+                seen_names[name] = true
+                if indices := by_name.get(name) { demanded.extend(indices) }
+            }
+        }
+        for index in demanded.drain() {
+            if !keep[index] {
+                keep[index] = true
+                for method in program.impls[index].methods {
+                    if function := functions.get(method) { pending.push(function) }
+                }
+            }
+        }
+    }
+    keep
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:500
+fn mir_type_uses_atomic_word(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Apply(name: name, args: args) -> name.name == "Atomic" || name.name.ends_with("::Atomic") || args.any(mir_type_uses_atomic_word)
+        MirTypeKind.List(inner) | MirTypeKind.Shared(inner) | MirTypeKind.Option(inner) |
+        MirTypeKind.FixedList(elem: inner) | MirTypeKind.InlineRange(base: inner) |
+        MirTypeKind.Tagged(inner: inner) | MirTypeKind.Quantity(base: inner) -> mir_type_uses_atomic_word(inner)
+        MirTypeKind.Map(key: key, value: value) | MirTypeKind.Result(ok: key, err: value) -> mir_type_uses_atomic_word(key) || mir_type_uses_atomic_word(value)
+        MirTypeKind.Fn(signature) -> signature.params.any(mir_type_uses_atomic_word) || signature.ret.is_some_and(mir_type_uses_atomic_word)
+        MirTypeKind.SendFn(params: params, ret: ret) -> params.any(mir_type_uses_atomic_word) || ret.is_some_and(mir_type_uses_atomic_word)
+        MirTypeKind.Tuple(fields) -> fields.any((field) -> mir_type_uses_atomic_word(field.1))
+        MirTypeKind.Union(members) -> members.any(mir_type_uses_atomic_word)
+        MirTypeKind.Int | MirTypeKind.Float | MirTypeKind.Bool | MirTypeKind.String | MirTypeKind.Char |
+        MirTypeKind.TraitObject(_) | MirTypeKind.IntN | MirTypeKind.Float32 | MirTypeKind.Measure(_) -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:549
+fn mir_type_has_inline_nominal_word(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Apply(args: args) -> {
+            scalar :: if ty.layout.abi == { MirAbi.Scalar(_) -> true; else -> false }
+            size8 :: if ty.layout.size == { MirSize.Static(8) -> true; else -> false }
+            (scalar && size8) || args.any(mir_type_has_inline_nominal_word)
+        }
+        MirTypeKind.List(inner) | MirTypeKind.Shared(inner) | MirTypeKind.Option(inner) |
+        MirTypeKind.FixedList(elem: inner) | MirTypeKind.InlineRange(base: inner) |
+        MirTypeKind.Tagged(inner: inner) | MirTypeKind.Quantity(base: inner) -> mir_type_has_inline_nominal_word(inner)
+        MirTypeKind.Map(key: key, value: value) | MirTypeKind.Result(ok: key, err: value) -> mir_type_has_inline_nominal_word(key) || mir_type_has_inline_nominal_word(value)
+        MirTypeKind.Fn(signature) -> signature.params.any(mir_type_has_inline_nominal_word) || signature.ret.is_some_and(mir_type_has_inline_nominal_word)
+        MirTypeKind.SendFn(params: params, ret: ret) -> params.any(mir_type_has_inline_nominal_word) || ret.is_some_and(mir_type_has_inline_nominal_word)
+        MirTypeKind.Tuple(fields) -> fields.any((field) -> mir_type_has_inline_nominal_word(field.1))
+        MirTypeKind.Union(members) -> members.any(mir_type_has_inline_nominal_word)
+        MirTypeKind.Int | MirTypeKind.Float | MirTypeKind.Bool | MirTypeKind.String | MirTypeKind.Char |
+        MirTypeKind.TraitObject(_) | MirTypeKind.IntN | MirTypeKind.Float32 | MirTypeKind.Measure(_) -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:598
+fn mir_program_uses_atomic_word(program: MirProgram) -> Bool { program.type_instances.any(mir_type_uses_atomic_word) }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:602
+fn mir_type_uses_shared_kernel(ty: MirType) -> Bool {
+    if ty.kind() == {
+        MirTypeKind.Apply(name: name, args: args) -> name.name == "Pool" || name.name == "ID" || name.name == "Shared" || args.any(mir_type_uses_shared_kernel)
+        MirTypeKind.List(inner) | MirTypeKind.Shared(inner) | MirTypeKind.Option(inner) |
+        MirTypeKind.FixedList(elem: inner) | MirTypeKind.InlineRange(base: inner) |
+        MirTypeKind.Tagged(inner: inner) | MirTypeKind.Quantity(base: inner) -> mir_type_uses_shared_kernel(inner)
+        MirTypeKind.Map(key: key, value: value) | MirTypeKind.Result(ok: key, err: value) -> mir_type_uses_shared_kernel(key) || mir_type_uses_shared_kernel(value)
+        MirTypeKind.Fn(signature) -> signature.params.any(mir_type_uses_shared_kernel) || signature.ret.is_some_and(mir_type_uses_shared_kernel)
+        MirTypeKind.SendFn(params: params, ret: ret) -> params.any(mir_type_uses_shared_kernel) || ret.is_some_and(mir_type_uses_shared_kernel)
+        MirTypeKind.Tuple(fields) -> fields.any((field) -> mir_type_uses_shared_kernel(field.1))
+        MirTypeKind.Union(members) -> members.any(mir_type_uses_shared_kernel)
+        MirTypeKind.Int | MirTypeKind.Float | MirTypeKind.Bool | MirTypeKind.String | MirTypeKind.Char |
+        MirTypeKind.TraitObject(_) | MirTypeKind.IntN | MirTypeKind.Float32 | MirTypeKind.Measure(_) -> false
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:647
+fn mir_program_uses_shared_kernel(program: MirProgram) -> Bool {
+    program.type_instances.any(mir_type_uses_shared_kernel) || program.prelude_calls.any((call) -> {
+        symbol :: if call.symbol == { MirSymbol.Prelude(symbol) | MirSymbol.Runtime(symbol) -> symbol }
+        symbol.starts_with("jet_shared_")
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:660
+fn mir_program_uses_arrow(program: MirProgram) -> Bool { program.facts.uses_arrow }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:667
+pub fn emit_mir_program(program: MirProgram, config: MirRustConfig) -> String {
+    out := ""
+    emit_mir_program_into(program, config, &out)
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:677
+pub fn mir_rust_aot_metadata(program: MirProgram, config: MirRustConfig) -> MirRustAotMetadata {
+    artifact_identity :: program.artifact_identity(config.execution.artifact).unwrap_or_else((error) ->
+        panic("MIR Rust metadata requires canonical artifact identity: {error}"))
+    emitter :: RustEmitter.new(program, config, artifact_identity)
+    metadata := MirRustAotMetadata{}
+    for function in program.functions {
+        top_level :: if function.form == { MirFunctionForm.TopLevel -> true; else -> false }
+        if !emitter.module_selected(function.module_id) || !emitter.selected_for_target(function) || !top_level { continue }
+        parameters :: emitter.declared_params(function)
+        parameter_types :: parameters.map((parameter) -> emitter.parameter_type(parameter))
+        parameter_access :: parameters.map((parameter) -> parameter.access)
+        callable_parameters :: parameters.map((parameter) -> parameter.ty)
+        callable_type :: emitter.callable_type(callable_parameters, parameter_access, function.return_type)
+        metadata.callables.push(MirRustCallableMetadata{
+            function: function.id, symbol: emitter.function_name(function.id),
+            parameter_types: parameter_types, parameter_access: parameter_access,
+            return_type: emitter.rust_type(function.return_type), callable_type: callable_type,
+        })
+    }
+    if config.execution.emit_types {
+        for definition in program.traits {
+            if !emitter.module_selected(definition.module) { continue }
+            metadata.traits.push(MirRustTraitMetadata{
+                trait_id: definition.id, key: definition.key, name: definition.name,
+                symbol: emitter.trait_name(definition.id),
+            })
+            for method in definition.methods {
+                parameter_types :: method.params.map((parameter) -> emitter.synthetic_rollback_parameter_type(definition, parameter))
+                parameter_access :: method.params.map((parameter) -> parameter.access)
+                metadata.trait_methods.push(MirRustTraitMethodMetadata{
+                    trait_id: definition.id, method_id: method.id,
+                    key: emitter.trait_method_key(definition, method), name: method.name,
+                    symbol: emitter.trait_method_symbol(definition, method), receiver_access: method.self_access,
+                    parameter_types: parameter_types, parameter_access: parameter_access,
+                    return_type: emitter.synthetic_rollback_type(definition, method.return_type),
+                })
+            }
+        }
+    }
+    if config.execution.emit_types {
+        for definition in program.types {
+            if !emitter.module_selected(definition.module) { continue }
+            metadata.types.push(MirRustTypeMetadata{ty: definition.id, symbol: emitter.type_name(definition.id)})
+            if !emitter.declares_type_def(definition) { continue }
+            if definition.kind == {
+                MirTypeDefKind.Enum(variants: variants) -> {
+                    emitter.push_generic_scope(definition.generic_params)
+                    for variant in variants {
+                        payload_types :: if variant.payload == {
+                            MirVariantPayload.Unit -> []
+                            MirVariantPayload.Single(payload) -> [emitter.rust_type(payload)]
+                            MirVariantPayload.Named(fields) -> fields.map((field) -> emitter.rust_type(field.ty))
+                        }
+                        metadata.variants.push(MirRustVariantMetadata{
+                            owner: definition.id, source_name: variant.name, wire_name: variant.wire_name,
+                            symbol: emitter.variant_path(definition.id, variant.name, true), payload_types: payload_types,
+                        })
+                    }
+                    emitter.pop_generic_scope()
+                }
+                else -> {}
+            }
+        }
+    }
+    for row in program.fields {
+        symbol :: emitter.fields.get(row.id).unwrap_or_else(() -> panic("MIR field ID {row.id:?} has no emitted field name"))
+        metadata.fields.push(MirRustFieldMetadata{field: row.id, owner: row.owner, symbol: symbol})
+    }
+    metadata
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:828
+fn emit_runtime_block(emitter: RustEmitter, program: MirProgram, config: MirRustConfig, out: &String) -> {
+    block := ""
+    push_runtime_block(emitter, program, config, &block)
+    out.push_str(strip_test_items(block))
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:839
+fn push_runtime_block(emitter: RustEmitter, program: MirProgram, config: MirRustConfig, out: &String) -> {
+    if config.execution.emit_runtime {
+        if emitter.is_no_os() {
+            out.push_str("#![no_std]\n#![no_main]\n")
+            push_portable_corelib_prelude(&out, program, emitter.artifact)
+        } else {
+            uses_arrow :: mir_program_uses_arrow(program) || emitter.artifact.runtime_parts.contains(MirRuntimePartId.Data)
+            active_os :: OSTarget.parse(program.facts.active_os).or_else(() -> OSTarget.from_triple(config.target.triple)).unwrap_or_else(OSTarget.host)
+            push_cached_runtime_begin_with_policy(&out, config.execution.ffi, uses_arrow, config.execution.release_devtools_policy)
+            out.push_str(CACHED_RUNTIME_END)
+            out.push_str(CACHED_CORE_BEGIN)
+            test_harness :: emitter.artifact.harness != None || if emitter.artifact.kind == {
+                MirArtifactKind.TestExecutable | MirArtifactKind.FuzzExecutable | MirArtifactKind.TestOverride -> true
+                else -> false
+            }
+            push_full_corelib_prelude_with_policy(&out, active_os, test_harness, program.facts.edition,
+                emitter.artifact.runtime_parts, mir_program_uses_shared_kernel(program), uses_arrow, config.execution.release_devtools_policy)
+            out.push_str(CACHED_CORE_END)
+            if link := config.execution.ffi {
+                needs_http_bridge :: program.prelude_calls.any((call) -> {
+                    symbol :: if call.symbol == { MirSymbol.Prelude(symbol) | MirSymbol.Runtime(symbol) -> symbol }
+                    symbol == "jet_http_client_get" || symbol == "jet_http_client_post" || symbol == "jet_http_client_request_send"
+                })
+                if needs_http_bridge { out.push_str("jet_http_client_bridge!({link.crate_name});\n") }
+                if program.prelude_calls.any((call) -> is_net_tls_client_bridge_call(call.symbol)) {
+                    out.push_str("jet_net_tls_client_bridge!({link.crate_name});\n")
+                }
+                needs_plugin_bridge :: program.prelude_calls.any((call) -> if call.symbol == {
+                    MirSymbol.Prelude(symbol) -> symbol == "jet_plugin_load"
+                    else -> false
+                })
+                if needs_plugin_bridge { out.push_str("jet_plugin_bridge!({link.crate_name});\n") }
+                needs_db_bridge :: program.prelude_calls.any((call) -> {
+                    symbol :: if call.symbol == { MirSymbol.Prelude(symbol) | MirSymbol.Runtime(symbol) -> symbol }
+                    symbol.starts_with("jet_db_")
+                })
+                if needs_db_bridge { out.push_str("jet_db_bridge!({link.crate_name});\n") }
+                needs_vault_display_bridge :: program.prelude_calls.any((call) -> {
+                    symbol :: if call.symbol == { MirSymbol.Prelude(symbol) | MirSymbol.Runtime(symbol) -> symbol }
+                    symbol.rsplit("::").next().is_some_and((symbol) -> symbol.starts_with("jet_vault_"))
+                })
+                if needs_vault_display_bridge { out.push_str("jet_vault_display_bridge!({link.crate_name});\n") }
+            }
+            out.push('\n')
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:942
+pub fn emit_mir_runtime_text(program: MirProgram, config: MirRustConfig) -> String {
+    artifact_identity :: program.artifact_identity(config.execution.artifact).unwrap_or_else((error) ->
+        panic("MIR runtime text requires canonical artifact identity: {error}"))
+    emitter :: RustEmitter.new(program, config, artifact_identity)
+    out := ""
+    emit_runtime_block(emitter, program, config, &out)
+    if emitter.coverage_enabled() { push_coverage_prelude(&out) }
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:958
+pub fn emit_mir_program_into(program: MirProgram, config: MirRustConfig, out: &String) -> {
+    canonical_input :: if CanonicalPass.enabled() { canonical_payload(program) } else { None }
+    canonical_input_identity :: if CanonicalPass.enabled() { canonical_identity(program) } else { None }
+    if error := program.cffi.validate_boundaries().err() {
+        panic("MIR Rust emission received invalid foreign boundary facts: {error}")
+    }
+    artifact_identity :: program.artifact_identity(config.execution.artifact).unwrap_or_else((error) ->
+        panic("MIR Rust emission requires canonical artifact identity: {error}"))
+    emitter :: RustEmitter.new(program, config, artifact_identity)
+    target_supports_atomic :: program.facts.target_dossier.machine.is_some_and((machine) -> machine.provides_capability(TargetCapability.Atomic64))
+    assert(!mir_program_uses_atomic_word(program) || target_supports_atomic,
+        "MIR Atomic<T> reached Rust emission without Target.Atomic64 sema admission for target `{config.target.triple}`")
+    emitted_methods := [MirFunctionId: Bool]{}
+    emit_runtime_block(emitter, program, config, &out)
+    units := EmissionUnits.new(program)
+    if emitter.coverage_enabled() { push_coverage_prelude(EmissionUnits.sink(&units, &out, None)) }
+    emitter.emit_hardware_facts(EmissionUnits.sink(&units, &out, None))
+    EmissionUnits.sink(&units, &out, None).push('\n')
+    if config.execution.emit_metadata {
+        emitter.emit_program_metadata(EmissionUnits.sink(&units, &out, None))
+        emitter.emit_modules_and_imports(EmissionUnits.sink(&units, &out, None))
+    }
+    if config.execution.emit_types {
+        for handle in program.handles {
+            if handle.payload.library != "core.process" { emitter.emit_handle_type(handle, EmissionUnits.sink(&units, &out, None)) }
+        }
+        for def in program.types {
+            unit :: units.map((units) -> units.module_unit(def.module, def.span.start))
+            if emitter.declares_type_def(def) {
+                emitter.emit_type_def(def, EmissionUnits.sink(&units, &out, unit))
+            } else if emitter.module_selected(def.module) && !emitter.runtime_declares_type(def) &&
+                is_canonical_core_native_type(def.key) && is_source_owned_core_web_query_enum(def.key) {
+                emitter.emit_structural_show_impl(def, EmissionUnits.sink(&units, &out, unit))
+            }
+        }
+        emitter.emit_period_anchor_impls(EmissionUnits.sink(&units, &out, None))
+        emitter.emit_history_strategies(EmissionUnits.sink(&units, &out, None))
+        for trait_def in program.traits {
+            emit_compiler_rollback :: trait_def.name == TRAIT_ROLLBACK
+            if emitter.module_selected(trait_def.module) && (emit_compiler_rollback ||
+                (!is_compiler_owned_trait(trait_def.name) && !is_compiler_owned_trait(trait_def.key))) {
+                unit :: units.map((units) -> units.module_unit(trait_def.module, trait_def.span.start))
+                emitter.emit_trait_def(trait_def, &emitted_methods, EmissionUnits.sink(&units, &out, unit))
+            }
+        }
+        // Constants with no remaining Global read require no accessor; storage cells do.
+        global_reads := [String: Bool]{}
+        for function in program.functions {
+            for block in function.blocks {
+                for instruction in block.instructions {
+                    if instruction.operation == { MirOperation.Global(name: name) -> { global_reads[name] = true }; else -> {} }
+                }
+            }
+        }
+        for constant in program.constants {
+            if emitter.module_selected(constant.module) && (constant.is_storage || global_reads.contains_key(constant.key)) {
+                unit :: units.map((units) -> units.module_unit(constant.module, constant.span.start))
+                emitter.emit_constant_def(constant, EmissionUnits.sink(&units, &out, unit))
+            }
+        }
+    }
+    emitter.emit_link_closure(EmissionUnits.sink(&units, &out, None))
+    emitter.emit_c_abi_records(EmissionUnits.sink(&units, &out, None))
+    if config.execution.emit_foreign {
+        for foreign in program.foreign {
+            if emitter.module_selected(foreign.module_id) {
+                unit :: units.map((units) -> units.module_unit(foreign.module_id, foreign.span.start))
+                emitter.emit_foreign(foreign, EmissionUnits.sink(&units, &out, unit))
+            }
+        }
+    }
+    emitter.emit_callback_trampolines(EmissionUnits.sink(&units, &out, None))
+    codec_keep :: if config.execution.prune_unreachable_codecs { demanded_codec_impls(program) } else { None }
+    for (index, implementation) in program.impls.enumerate() {
+        if !emitter.module_selected(implementation.module) || !emitter.impl_selected_for_target(implementation) { continue }
+        if codec_keep.is_some_and((keep) -> !keep[index]) {
+            for method in implementation.methods { emitted_methods[method] = true }
+            continue
+        }
+        // Runtime trait impls follow the crate declaring their self type (Rust orphan rule).
+        unit :: units.map((units) -> {
+            if def := emitter.impl_self_type_def(implementation) { units.module_unit(def.module, def.span.start) }
+            else { units.module_unit(implementation.module, implementation.span.start) }
+        })
+        emitter.emit_impl(implementation, &emitted_methods, EmissionUnits.sink(&units, &out, unit))
+    }
+    for function in program.functions {
+        if !emitter.module_selected(function.module_id) || !emitter.selected_for_target(function) { continue }
+        if function.form == {
+            MirFunctionForm.TopLevel -> {
+                unit :: units.map((units) -> units.file_unit(function.source_file, function.span.start))
+                emitter.emit_function(function, EmissionUnits.sink(&units, &out, unit))
+            }
+            MirFunctionForm.Method | MirFunctionForm.TraitMethod -> {
+                if !emitted_methods.contains_key(function.id) { panic("MIR method {function.id:?} has no selected implementation row") }
+            }
+        }
+    }
+    if units := units { units.write_sections(&out) }
+    emitter.emit_web_data_type_registration(&out)
+    emitter.emit_exports(&out)
+    emitter.emit_entry(&out)
+    emitter.emit_harness(&out)
+    encoder_keys := emitter.history_capture_encoders.borrow().keys().collect()
+    encoder_keys.sort()
+    for key in encoder_keys { out.push_str(emitter.history_capture_encoders.borrow()[key]) }
+    arities := emitter.history_callable_arities.borrow().keys().collect()
+    arities.sort()
+    for arity in arities {
+        if arity == 0 || arity == 1 || arity == 3 { continue }
+        args :: (0..arity).map((index) -> ", A{index}").collect().join("")
+        out.push_str("jet_history_callable!(JetHistoryFn{arity}{args});\n")
+    }
+    modes_keys := emitter.history_callable_modes.borrow().keys().collect()
+    modes_keys.sort()
+    for (arity, modes) in modes_keys {
+        args :: modes.chars().enumerate().map((entry) -> {
+            (index, mode) :: entry
+            mode :: if mode == {
+                'O' -> "owned"
+                'R' -> "read"
+                'W' -> "write"
+                other -> panic("MIR history callable has unknown mode `{other}`")
+            }
+            "A{index} => {mode}"
+        }).collect().join(", ")
+        out.push_str("jet_history_callable!(JetHistoryFn{arity}B{modes}; {args});\n")
+    }
+    if input := canonical_input {
+        if identity := canonical_input_identity {
+            target :: json_escape(config.target.triple)
+            CanonicalPass.record("lowering", "mir.rust-emitter", "crates/jet-codegen/src/Codegen/MIRRust.rs",
+                "mir", input, identity, "mir", CanonicalPass.debug_payload("mir", "mir.rust-emitter", (out, artifact_identity, config.target.triple)),
+                "{{\"representation\":\"mir\",\"artifact_id\":\"{artifact_identity.artifact.0}\",\"target\":\"{target}\"}}", "checked")
+        }
+    }
+    CanonicalPass.persist_process("emit")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1194
+UNIT_PROVENANCE_MARKER :: "// [jet-bootstrap source: "
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1197
+pub UNIT_BEGIN_MARKER :: "// jet:unit-begin "
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1199
+pub UNIT_END_MARKER :: "// jet:unit-end "
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1202
+BASE_UNIT :: "base"
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1208
+struct EmissionUnits {
+    starts: [MirSourceFileId: [(USize, String)]]
+    module_files: [MirModuleId: MirSourceFileId]
+    sections: [String: String]
+}
+impl EmissionUnits {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1217
+    fn new(program: MirProgram) -> EmissionUnits? {
+        starts := [MirSourceFileId: [(USize, String)]]{}
+        names := [String: Bool]{}
+        for file in program.source_files {
+            rows := [(USize, String)][]
+            offset := 0
+            for line in file.source.split_inclusive('\n') {
+                offset += line.len()
+                path :: line.strip_prefix(UNIT_PROVENANCE_MARKER).and_then((rest) -> {
+                    trimmed := rest.trim_end() // #4303
+                    trimmed.strip_suffix(']')
+                })
+                if path := path {
+                    unit :: path.split('/').nth(1).unwrap_or(BASE_UNIT).to_string()
+                    names[unit] = true
+                    rows.push((offset, unit))
+                }
+            }
+            if !rows.is_empty() { starts[file.id] = rows }
+        }
+        if names.len() < 2 { return None }
+        module_files := [MirModuleId: MirSourceFileId]{}
+        for module in program.modules { module_files[module.id] = module.source_file }
+        EmissionUnits{starts: starts, module_files: module_files, sections: [String: String]{}}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1254
+    fn file_unit(self, file: MirSourceFileId, span_start: USize) -> String {
+        if rows := self.starts.get(file) {
+            // Binary upper bound, as Rust partition_point; do not rescan source ranges.
+            low := 0
+            high := rows.len()
+            while low < high {
+                middle :: low + (high - low) / 2
+                if rows[middle].0 <= span_start { low = middle + 1 } else { high = middle }
+            }
+            if low > 0 { rows[low - 1].1 } else { BASE_UNIT }
+        } else { BASE_UNIT }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1265
+    fn module_unit(self, module: MirModuleId, span_start: USize) -> String {
+        if file := self.module_files.get(module) { self.file_unit(file, span_start) } else { BASE_UNIT }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1274
+    // GATE #4500: return a write borrow of a retained section or the caller's sink.
+    fn sink(units: &EmissionUnits?, out: &String, unit: String?) -> &String {
+        if units := &units { units.sections.entry(unit.unwrap_or(BASE_UNIT)).or_default() } else { &out }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1286
+    fn write_sections(&self, out: &String) -> {
+        base :: self.sections.remove(BASE_UNIT).unwrap_or("")
+        names := self.sections.keys().collect()
+        names.sort()
+        rows := [(BASE_UNIT, base)]
+        for name in names { rows.push((name, self.sections[name])) }
+        for (name, text) in rows {
+            out.push_str("{UNIT_BEGIN_MARKER}{name}\n")
+            out.push_str(text)
+            if !text.ends_with('\n') { out.push('\n') }
+            out.push_str("{UNIT_END_MARKER}{name}\n")
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1299
+fn select_artifact(program: MirProgram, id: MirArtifactId, target: MirRustTarget) -> MirArtifactPlan {
+    plan :: program.artifacts.find((plan) -> plan.id == id).unwrap_or_else(() -> panic("MIR artifact ID {id:?} has no plan row"))
+    target_ok :: if (target, plan.target) == {
+        (MirRustTarget.Native, MirArtifactTarget.RustAot) | (MirRustTarget.WebWasm, MirArtifactTarget.Web) -> true
+        else -> false
+    }
+    kind_ok :: if (target, plan.kind) == {
+        (MirRustTarget.Native, MirArtifactKind.NativeExecutable | MirArtifactKind.NativeLibrary |
+            MirArtifactKind.SandboxPlugin | MirArtifactKind.TestExecutable | MirArtifactKind.FuzzExecutable | MirArtifactKind.TestOverride) -> true
+        (MirRustTarget.WebWasm, MirArtifactKind.WebApplication) -> true
+        else -> false
+    }
+    if !target_ok || !kind_ok { panic("MIR artifact {id:?} kind {plan.kind.as_str()} is not applicable to {target:?} Rust emission") }
+    if plan.modules.is_empty() { panic("MIR artifact {id:?} has no selected module rows") }
+    plan
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1359
+fn function_has_debug_only(function: MirFunction) -> Bool { function.scopes.any((scope) -> scope.kind == MirScopeKind.DebugOnly) }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1366
+fn debug_only_block_states(function: MirFunction) -> [MirBlockId: Bool] {
+    debug_scopes := [MirScopeId: Bool]{}
+    for scope in function.scopes { if scope.kind == MirScopeKind.DebugOnly { debug_scopes[scope.id] = true } }
+    positions :: block_positions(function)
+    states := [MirBlockId: Bool]{function.entry: false}
+    pending := [function.entry]
+    while block_id := pending.pop() {
+        if position := positions.get(block_id) {
+            block :: function.blocks[position]
+            active := states.get(block_id).unwrap_or(false)
+            for instruction in block.instructions {
+                if instruction.operation == {
+                    MirOperation.ScopeEnter(scope: scope) -> { if debug_scopes.contains_key(scope) { active = true } }
+                    MirOperation.ScopeExit(scope: scope) -> { if debug_scopes.contains_key(scope) { active = false } }
+                    else -> {}
+                }
+            }
+            for target in block.terminator.targets() {
+                next :: states.get(target).unwrap_or(false) || active
+                if states.get(target) != Some(next) { states[target] = next; pending.push(target) }
+            }
+        }
+    }
+    states
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1404
+fn block_positions(function: MirFunction) -> [MirBlockId: USize] {
+    positions := [MirBlockId: USize]{}
+    for (position, block) in function.blocks.enumerate() { positions.entry(block.id).or_insert(position) }
+    positions
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1416
+struct FunctionIndex {
+    definitions: [MirValueId: (USize, USize)]
+    values: [MirValueId: USize]
+    uses: [MirValueId: [(USize, USize?)]]
+    test_members: [MirScopeId: (USize, USize)]
+    scopes: [MirScopeId: USize]
+    places: [MirPlaceId: USize]
+    capture_values: [USize: MirValueId]
+    moved_captures: [MirValueId: Bool]
+    blocks: [MirBlockId: (USize, USize)]
+    jump_sources: [MirBlockId: [USize]]
+    predecessors: [[USize]]
+    local_writes: [MirLocalId: [(USize, USize)]]
+    escaped_locals: [MirLocalId: Bool]
+    parameter_writes: [USize: [(USize, USize, MirPlaceId)]]
+    escaped_parameters: [USize: Bool]
+    stable_reads: RefCell<[MirValueId: Bool]>
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1463
+fn terminator_branch_count(terminator: MirTerminator) -> USize {
+    if terminator == {
+        MirTerminator.Branch -> 1
+        MirTerminator.Switch(arms: arms) -> arms.len()
+        MirTerminator.Jump | MirTerminator.Return | MirTerminator.Yield | MirTerminator.Break |
+        MirTerminator.Continue | MirTerminator.Unreachable -> 0
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1480
+fn places_overlap(left: [MirProjection], right: [MirProjection]) -> Bool {
+    for (left, right) in left.zip(right) {
+        if (left, right) == {
+            (MirProjection.Field(field: left), MirProjection.Field(field: right)) -> { if left != right { return false } }
+            else -> { return true }
+        }
+    }
+    true
+}
+impl FunctionIndex {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1495
+    fn new(function: MirFunction) -> FunctionIndex {
+        definitions := [MirValueId: (USize, USize)]{}
+        uses := [MirValueId: [(USize, USize?)]]{}
+        test_members := [MirScopeId: (USize, USize)]{}
+        capture_values := [USize: MirValueId]{}
+        add_use :: (value: MirValueId, at: (USize, USize?)) -> {
+            rows := &uses.entry(value).or_default()
+            if rows.last() != Some(at) { rows.push(at) }
+        }
+        blocks := [MirBlockId: (USize, USize)]{}
+        jump_sources := [MirBlockId: [USize]]{}
+        branch_ordinal := 0
+        for (block_position, block) in function.blocks.enumerate() {
+            blocks.entry(block.id).or_insert((block_position, branch_ordinal))
+            branch_ordinal += terminator_branch_count(block.terminator)
+            if block.terminator == { MirTerminator.Jump(target: target) -> { jump_sources.entry(target).or_default().push(block_position) }; else -> {} }
+            for (position, instruction) in block.instructions.enumerate() {
+                if result := instruction.result { definitions.entry(result).or_insert((block_position, position)) }
+                if instruction.operation == {
+                    MirOperation.ScopeEnter(scope: scope, test_member: Some(_)) -> { test_members.entry(scope).or_insert((block_position, position)) }
+                    MirOperation.Capture(slot: slot) -> { if result := instruction.result { capture_values.entry(slot).or_insert(result) } }
+                    else -> {}
+                }
+                for value in instruction.operation.value_uses() { add_use(value, (block_position, Some(position))) }
+            }
+            for value in block.terminator.value_uses() { add_use(value, (block_position, None)) }
+        }
+        values := [MirValueId: USize]{}
+        for (position, row) in function.values.enumerate() { values.entry(row.0).or_insert(position) }
+        scopes := [MirScopeId: USize]{}
+        for (position, scope) in function.scopes.enumerate() { scopes.entry(scope.id).or_insert(position) }
+        places := [MirPlaceId: USize]{}
+        moved_captures := [MirValueId: Bool]{}
+        for (position, place) in function.places.enumerate() {
+            places.entry(place.id).or_insert(position)
+            if (place.access, place.base) == {
+                (MirAccess.Move, MirPlaceBase.Capture(captured)) -> { moved_captures[captured] = true }
+                else -> {}
+            }
+        }
+        predecessors := [[USize]][]
+        for _ in 0..function.blocks.len() { predecessors.push([]) }
+        for (block_position, block) in function.blocks.enumerate() {
+            for target in block.terminator.targets() {
+                if row := blocks.get(target) { predecessors[row.0].push(block_position) }
+            }
+        }
+        place_local :: (place: MirPlaceId) -> {
+            if row := places.get(place) {
+                if function.places[row].base == { MirPlaceBase.Local(local) -> Some(local); else -> None }
+            } else { None }
+        }
+        place_parameter :: (place: MirPlaceId) -> (USize, MirPlaceId)? {
+            if row := places.get(place) {
+                if function.places[row].base == {
+                    MirPlaceBase.Parameter(value) -> {
+                        if definition := definitions.get(value) {
+                            (block, position) :: definition
+                            if function.blocks[block].instructions[position].operation == {
+                                MirOperation.Parameter(index: index) -> Some((index, place))
+                                else -> None
+                            }
+                        } else { None }
+                    }
+                    else -> None
+                }
+            } else { None }
+        }
+        write_borrow :: (value: MirValueId) -> values.get(value).is_some_and((row) -> function.values[row].3.mode == MirOwnershipMode.WriteBorrow)
+        local_writes := [MirLocalId: [(USize, USize)]]{}
+        escaped_locals := [MirLocalId: Bool]{}
+        borrow_roots := [MirValueId: MirLocalId]{}
+        parameter_writes := [USize: [(USize, USize, MirPlaceId)]]{}
+        escaped_parameters := [USize: Bool]{}
+        parameter_borrow_roots := [MirValueId: (USize, MirPlaceId)]{}
+        // Two passes: a write borrow's definition can follow its use in body order.
+        for pass in 0..2 {
+            local_writes.clear()
+            parameter_writes.clear()
+            for (block_position, block) in function.blocks.enumerate() {
+                for (position, instruction) in block.instructions.enumerate() {
+                    touched := [MirLocalId][]
+                    changed := [(USize, MirPlaceId)][]
+                    touch :: (place: MirPlaceId) -> {
+                        if local := place_local(place) { touched.push(local) }
+                        if parameter := place_parameter(place) { changed.push(parameter) }
+                    }
+                    escape :: (place: MirPlaceId) -> {
+                        if local := place_local(place) { escaped_locals[local] = true }
+                        if parameter := place_parameter(place) { escaped_parameters[parameter.0] = true }
+                    }
+                    if instruction.operation == {
+                        MirOperation.ReadPlace(place) -> { if instruction.result.is_some_and(write_borrow) { touch(place) } }
+                        MirOperation.AddressOf(place: place, access: access) -> {
+                            if access == MirAccess.Move { escape(place) }
+                            else if access != MirAccess.Read { touch(place) }
+                        }
+                        MirOperation.MovePlace(place: place) -> {
+                            if places.get(place).is_some_and((row) -> !function.places[row].projections.is_empty()) { escape(place) }
+                            else { touch(place) }
+                        }
+                        MirOperation.InitializeUninit(place: place) | MirOperation.WritePlace(place: place) |
+                        MirOperation.ReplacePlace(place: place) |
+                        MirOperation.Semantic(MirSemanticOp.BuiltinMethod(receiver_place: Some(place))) -> touch(place)
+                        MirOperation.Semantic(MirSemanticOp.CursorTakePattern(receiver_place: place) |
+                            MirSemanticOp.ReaderTakePattern(receiver_place: place)) -> {
+                            if parameter := place_parameter(place) { changed.push(parameter) }
+                        }
+                        MirOperation.RawAddressOf(place: place) -> escape(place)
+                        MirOperation.Closure(captures: captures) -> {
+                            for capture in captures {
+                                if capture == { MirCaptureOperand.Place(place) -> escape(place); else -> {} }
+                            }
+                        }
+                        MirOperation.Semantic(MirSemanticOp.DataEntriesToMap(local: local)) -> { escaped_locals[local] = true }
+                        else -> {}
+                    }
+                    args :: if instruction.operation == {
+                        MirOperation.Call(args: args) | MirOperation.CoreCall(args: args) | MirOperation.IndirectCall(args: args) |
+                        MirOperation.Semantic(MirSemanticOp.StaticPreludeCall(args: args) | MirSemanticOp.HardwareCall(args: args) |
+                            MirSemanticOp.ClosureMethod(args: args) | MirSemanticOp.HostCall(args: args)) -> args
+                        else -> []
+                    }
+                    for arg in args { if arg.access != MirAccess.Read { if place := arg.place { touch(place) } } }
+                    for value in instruction.operation.value_uses() {
+                        if local := borrow_roots.get(value) { touched.push(local) }
+                        if root := parameter_borrow_roots.get(value) { changed.push(root) }
+                    }
+                    if result := instruction.result {
+                        if write_borrow(result) {
+                            if local := touched.first() { borrow_roots[result] = local }
+                            if root := changed.first() { parameter_borrow_roots[result] = root }
+                        }
+                    }
+                    if pass == 1 {
+                        for local in touched { local_writes.entry(local).or_default().push((block_position, position)) }
+                        for (parameter, place) in changed { parameter_writes.entry(parameter).or_default().push((block_position, position, place)) }
+                    }
+                }
+            }
+        }
+        for action in function.drops { if parameter := place_parameter(action.place) { escaped_parameters[parameter.0] = true } }
+        FunctionIndex{
+            definitions: definitions, values: values, uses: uses, test_members: test_members,
+            scopes: scopes, places: places, capture_values: capture_values, moved_captures: moved_captures,
+            blocks: blocks, jump_sources: jump_sources, predecessors: predecessors,
+            local_writes: local_writes, escaped_locals: escaped_locals, parameter_writes: parameter_writes,
+            escaped_parameters: escaped_parameters, stable_reads: RefCell.new([MirValueId: Bool]{}),
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1728
+MAX_STRUCTURED_INDENT :: 4 * 256
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1733
+struct MirCfgPlan {
+    positions: [MirBlockId: USize]
+    entry: USize
+    order: [USize]
+    headers: [Bool]
+    merges: [Bool]
+    follows: [[USize]]
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1745
+struct MirCfgState {
+    plan: Shared<MirCfgPlan>?
+    phi_targets: [MirBlockId: Bool]
+    inline_edges: [(USize, USize, USize)]
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1757
+fn phi_is_trivial(incoming: [(MirBlockId, MirValueId)]) -> Bool {
+    if incoming.is_empty() { return false }
+    first :: incoming[0].1
+    incoming[1..].all((row) -> row.1 == first)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1763
+fn phi_target_blocks(function: MirFunction) -> [MirBlockId: Bool] {
+    targets := [MirBlockId: Bool]{}
+    for block in function.blocks {
+        if block.instructions.any((instruction) -> if instruction.operation == {
+            MirOperation.Phi(incoming: incoming) -> !phi_is_trivial(incoming)
+            else -> false
+        }) { targets[block.id] = true }
+    }
+    targets
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1778
+fn for_each_value_mention(text: String, visit: &(USize, USize, U64) -> Void) -> {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1779
+    PREFIX :: "__jet_v_"
+    for (line_index, line) in text.split_inclusive('\n').enumerate() {
+        search := 0
+        while found := line[search..].find(PREFIX) {
+            at :: search + found
+            digits_start :: at + PREFIX.len()
+            digits :: line[digits_start..].bytes().take_while((byte) -> byte.is_ascii_digit()).count()
+            search = digits_start + digits
+            joined :: line[..at].bytes().next_back().is_some_and((byte) -> byte.is_ascii_alphanumeric() || byte == 95)
+            if digits == 0 || joined { continue }
+            if id := line[digits_start..digits_start + digits].parse<U64>().ok() { visit(line_index, at, id) }
+        }
+    }
+}

@@ -1,1804 +1,490 @@
-// PORT-PENDING 2022 crates-jet-driver-src-driver-mod-slice-5401: crates/jet-driver/src/Driver/mod.rs:5401-7200
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             }
-//RS         }
-//RS     }
-//RS     if workspace_root.is_some() {
-//RS         return crate::Loader::authority_name_for_entry(&absolute)
-//RS             .map_err(|diagnostic| vec![diagnostic]);
-//RS     }
-//RS     Ok(absolute
-//RS         .file_stem()
-//RS         .and_then(|name| name.to_str())
-//RS         .filter(|name| !name.is_empty())
-//RS         .unwrap_or("app")
-//RS         .to_string())
-//RS }
-//RS 
-//RS fn package_build_entry_source(
-//RS     project_root: &std::path::Path,
-//RS ) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
-//RS     let resolver =
-//RS         AuthorityResolver::open(project_root).map_err(|error| vec![error.diagnostic()])?;
-//RS     let package = match crate::Loader::package_facts_for_root(project_root)? {
-//RS         Some(package) => package,
-//RS         None => return Ok(None),
-//RS     };
-//RS     let entry = package
-//RS         .resolve_build_entry_checked(&resolver)
-//RS         .map_err(|error| vec![build_entry_resolution_diagnostic(&error)])?;
-//RS     let Some(entry) = entry else {
-//RS         return Ok(None);
-//RS     };
-//RS     let raw_source = entry.text().map_err(|error| vec![error.diagnostic()])?;
-//RS     let source = if entry.path.file_name().and_then(|name| name.to_str())
-//RS         == Some(crate::Syntax::PACKAGE_FILE)
-//RS     {
-//RS         crate::Package::build_entry_source(&raw_source).unwrap_or(raw_source)
-//RS     } else {
-//RS         raw_source
-//RS     };
-//RS     if source_has_build_entry(&source) == Some(false) {
-//RS         return Ok(None);
-//RS     }
-//RS     resolver
-//RS         .revalidate_file(&entry)
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     resolver
-//RS         .revalidate_root()
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     Ok(Some((entry.path, source)))
-//RS }
-//RS 
-//RS fn build_entry_resolution_diagnostic(error: &str) -> Diagnostic {
-//RS     let code = if error.contains("two build entries for the package:") {
-//RS         "E3520"
-//RS     } else {
-//RS         "E1334"
-//RS     };
-//RS     let (why, fix) = if code == "E3520" {
-//RS         (
-//RS             "one package has exactly one build entry so policy and provenance have one auditable home",
-//RS             "keep one `fn build` and remove the other entry",
-//RS         )
-//RS     } else {
-//RS         (
-//RS             "package entry discovery uses the checked package authority",
-//RS             "repair the package source and try the build again",
-//RS         )
-//RS     };
-//RS     Diagnostic::error(
-//RS         code,
-//RS         error.to_string(),
-//RS         why.to_string(),
-//RS         fix.to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// D-BUILDENTRY1 / D-CONF-ENTRY1: does this program select a `fn build`?
-//RS /// Selection is exactly what `compile_bundle_path_build` stages — a `fn build`
-//RS /// among the entry file's own declarations, or the one the package authority
-//RS /// discovers for the whole package — so a command router asks here instead of
-//RS /// re-deriving the answer from source text.
-//RS ///
-//RS /// A selected build entry contributes computed facts (D-CONF-SPLIT1), may
-//RS /// generate modules, and records both in `.jet/lock`. A lane that cannot stage
-//RS /// it must therefore hand the program to the build pipeline instead of folding
-//RS /// `$build.*` from manifest declarations alone: otherwise one tier runs a
-//RS /// program built from the declared default while another runs the contributed
-//RS /// value, which is the tier split I9 forbids.
-//RS ///
-//RS /// Routing runs before any tier claims the program, so this answer costs one
-//RS /// lex and parse of the entry source that the caller already holds, and it
-//RS /// never walks the import closure. `project_root` is the package root when the
-//RS /// entry belongs to a package and `None` for a manifest-less single file, which
-//RS /// can only select its own `fn build`. A source the parser rejects is not a
-//RS /// routing answer: the pipeline that runs next reports the parse error.
-//RS pub fn selects_build_entry(source: &str, project_root: Option<&std::path::Path>) -> bool {
-//RS     if source_has_build_entry(source) == Some(true) {
-//RS         return true;
-//RS     }
-//RS     project_root.is_some_and(|root| matches!(package_build_entry_source(root), Ok(Some(_))))
-//RS }
-//RS 
-//RS /// Parse one already loaded source to distinguish the programmable-build
-//RS /// shape from an ordinary function that happens to be named `build`. `None`
-//RS /// preserves routing to the build pipeline for parser diagnostics.
-//RS fn source_has_build_entry(source: &str) -> Option<bool> {
-//RS     let source = crate::Package::mask_inline_package_source(source).ok()?.0;
-//RS     let (tokens, lex_diags) = crate::Lexer::lex(&source);
-//RS     if !lex_diags.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let (program, _) = crate::Parser::parse_for_check_with_source(&tokens, &source).ok()?;
-//RS     Some(program.items.iter().any(
-//RS         |item| matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func)),
-//RS     ))
-//RS }
-//RS 
-//RS /// Load the selected build entry from its checked source. A `fn build` may be
-//RS /// carried by an authority overlay or by `package.jet` itself, so the overlay
-//RS /// choice belongs to one place: the build staging loads this bundle first for
-//RS /// the build-entry check, then again for the runtime program, and both loads
-//RS /// must see the same bytes.
-//RS fn load_build_entry_bundle(
-//RS     file: &str,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     direct_package_overlay: Option<&(std::path::PathBuf, String)>,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-//RS     let mut overlays = source_closure
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     if let Some(overlay) = overlay {
-//RS         overlays.push(overlay);
-//RS     } else if let Some((path, source)) = direct_package_overlay {
-//RS         overlays.push((path.as_path(), source.as_str()));
-//RS     }
-//RS     crate::Loader::load_entry_with_overlays(file, &overlays, false)
-//RS }
-//RS 
-//RS fn package_manifest_build_overlay(
-//RS     file: &str,
-//RS ) -> Result<Option<(std::path::PathBuf, String)>, Vec<Diagnostic>> {
-//RS     let path = std::path::Path::new(file);
-//RS     if path.file_name().and_then(|name| name.to_str()) != Some(crate::Syntax::PACKAGE_FILE) {
-//RS         return Ok(None);
-//RS     }
-//RS     let absolute = if path.is_absolute() {
-//RS         path.to_path_buf()
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .map(|directory| directory.join(path))
-//RS             .map_err(|error| {
-//RS                 vec![Diagnostic::error(
-//RS                     "E1334",
-//RS                     "package manifest path cannot be resolved".to_string(),
-//RS                     error.to_string(),
-//RS                     "use an existing package.jet path".to_string(),
-//RS                     None,
-//RS                 )]
-//RS             })?
-//RS     };
-//RS     let root = absolute.parent().unwrap_or(std::path::Path::new("."));
-//RS     let resolver = AuthorityResolver::open(root).map_err(|error| vec![error.diagnostic()])?;
-//RS     let checked = resolver
-//RS         .checked_manifest(std::path::Path::new("."))
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     if normalize_project_path(root, &absolute) != normalize_project_path(root, &checked.file.path) {
-//RS         return Err(vec![Diagnostic::error(
-//RS             "E1334",
-//RS             "package manifest path changed during resolution".to_string(),
-//RS             "the requested manifest path is not the checked package.jet object".to_string(),
-//RS             "use the canonical package.jet path".to_string(),
-//RS             None,
-//RS         )]);
-//RS     }
-//RS     let source = checked
-//RS         .file
-//RS         .text()
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     resolver
-//RS         .revalidate_file(&checked.file)
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     let result = crate::Package::build_entry_source(&source)
-//RS         .map(|source| (checked.file.path.clone(), source));
-//RS     resolver
-//RS         .revalidate_file(&checked.file)
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     Ok(result)
-//RS }
-//RS 
-//RS fn validate_build_authority(
-//RS     plan: &crate::Comptime::Build::BuildPlan,
-//RS     declared: &std::collections::BTreeSet<crate::Comptime::Build::BuildCapability>,
-//RS     has_impure_gate: bool,
-//RS     options: &BuildRunOptions,
-//RS     dependency_name: Option<String>,
-//RS     span: crate::Diagnostics::Span,
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     let selected = plan
-//RS         .selected_action_ids()
-//RS         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-//RS     let mut required = plan
-//RS         .actions()
-//RS         .iter()
-//RS         .filter(|action| selected.contains(&action.id))
-//RS         .flat_map(|action| action.caps.iter().copied())
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     if !plan
-//RS         .selected_probe_ids()
-//RS         .map_err(|error| vec![build_plan_diagnostic(&error)])?
-//RS         .is_empty()
-//RS     {
-//RS         required.insert(crate::Comptime::Build::BuildCapability::Exec);
-//RS     }
-//RS     for effect in required {
-//RS         if !declared.contains(&effect) {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3503",
-//RS                 format!("this build uses `{}` without declaring it on `fn build`", effect.name()),
-//RS                 "the build signature is the static authority manifest audited before build code executes".to_string(),
-//RS                 format!("add `{}` to the build function's `-[...]>` effect row", effect.name()),
-//RS                 Some(span),
-//RS             )]);
-//RS         }
-//RS         if !has_impure_gate {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3502",
-//RS                 format!("build authority `{}` must be used inside `#Impure(\"reason\")`", effect.name()),
-//RS                 "ambient build effects need an audited source gate as well as a policy grant".to_string(),
-//RS                 "wrap the action or probe declarations in `#Impure(\"why this build needs ambient authority\")`".to_string(),
-//RS                 Some(span),
-//RS             )]);
-//RS         }
-//RS         // D-BUILDPOLICY1: three independent checks — the declaration above, the
-//RS         // `#Impure` source gate above, and the effective grant here. The
-//RS         // per-effect `--allow-<effect>` flag replaced the blanket impure gate,
-//RS         // so asking for both spelled one authorization twice and made the
-//RS         // E3503 fix text ("pass `--allow-fs`") false at the command line.
-//RS         if !options.inspect_only && !effective_grants(options).contains(&effect) {
-//RS             if let Some(dependency_name) = dependency_name.as_deref() {
-//RS                 return Err(vec![Diagnostic::error(
-//RS                     "E3504",
-//RS                     format!(
-//RS                         "dependency `{dependency_name}` build asks for `{}` not granted by the root",
-//RS                         effect.name()
-//RS                     ),
-//RS                     "dependency build code never gets ambient authority unless the workspace names it".to_string(),
-//RS                     format!("grant `{}` explicitly in workspace policy, or remove the dependency action", effect.name()),
-//RS                     Some(span),
-//RS                 )]);
-//RS             }
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3503",
-//RS                 format!("this build asks for `{}`, which effective policy has not granted", effect.name()),
-//RS                 "a source declaration and `#Impure` gate do not widen CLI, package, or workspace policy".to_string(),
-//RS                 format!("pass `--allow-{}` or grant it in package/workspace build policy", effect.flag()),
-//RS                 Some(span),
-//RS             )]);
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn validate_legacy_project_imports(
-//RS     plan: &crate::Comptime::Build::BuildPlan,
-//RS     project_root: &std::path::Path,
-//RS     span: crate::Diagnostics::Span,
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     let selected = plan
-//RS         .selected_action_ids()
-//RS         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-//RS     for action in plan
-//RS         .actions()
-//RS         .iter()
-//RS         .filter(|action| selected.contains(&action.id))
-//RS     {
-//RS         let import_marker = action.labels.get("legacy.import");
-//RS         let Some(project_file) = action.labels.get("legacy.project-file") else {
-//RS             if import_marker.is_some() {
-//RS                 return Err(vec![Diagnostic::error(
-//RS                     "E3502",
-//RS                     "legacy project-file import is missing its canonical path".to_string(),
-//RS                     "a project-file import has one reserved marker and one canonical path"
-//RS                         .to_string(),
-//RS                     "pass the wrapper's canonical project file as the final import argument"
-//RS                         .to_string(),
-//RS                     Some(span),
-//RS                 )]);
-//RS             }
-//RS             continue;
-//RS         };
-//RS         if import_marker.map(String::as_str) != Some("project-file") {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3502",
-//RS                 format!("legacy project file `{project_file}` has no canonical import marker"),
-//RS                 "only the typed legacy project-file importer may attach this path to an action"
-//RS                     .to_string(),
-//RS                 "declare the project file through the legacy wrapper import".to_string(),
-//RS                 Some(span),
-//RS             )]);
-//RS         }
-//RS         let Some(kind) = action.legacy_wrapper else {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3502",
-//RS                 format!(
-//RS                     "legacy import `{}` is not attached to a legacy wrapper",
-//RS                     project_file
-//RS                 ),
-//RS                 "a project-file import must be owned by the typed legacy wrapper that reads it"
-//RS                     .to_string(),
-//RS                 "declare the project file through the legacy wrapper import".to_string(),
-//RS                 Some(span),
-//RS             )]);
-//RS         };
-//RS         if project_file != kind.project_file()
-//RS             || crate::Comptime::Build::BuildPath::new(project_file.clone()).is_err()
-//RS             || !action
-//RS                 .inputs
-//RS                 .iter()
-//RS                 .any(|input| input.as_str() == project_file)
-//RS         {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3502",
-//RS                 format!("legacy import `{}` is not the canonical project file for {}", project_file, kind.as_str()),
-//RS                 "an imported legacy project file must be canonical, relative, and part of the typed action identity".to_string(),
-//RS                 format!("use `{}` through the legacy wrapper import", kind.project_file()),
-//RS                 Some(span),
-//RS             )]);
-//RS         }
-//RS         if let Err(error) =
-//RS             crate::Comptime::Build::LegacyWrapperSpec::read_legacy_project_file(project_root, kind)
-//RS         {
-//RS             let (what, fix) = match error {
-//RS                 crate::Comptime::Build::BuildError::LegacyProjectFileMissing(_) => (
-//RS                     format!("legacy project file `{project_file}` is missing"),
-//RS                     "restore the declared project file or remove the import".to_string(),
-//RS                 ),
-//RS                 crate::Comptime::Build::BuildError::LegacyProjectFileInvalid(path) => (
-//RS                     format!("legacy project file `{path}` is not a bounded UTF-8 regular file"),
-//RS                     "declare a regular UTF-8 project file no larger than 1 MiB inside the project root".to_string(),
-//RS                 ),
-//RS                 other => (
-//RS                     format!("legacy project file `{project_file}` could not be imported: {other:?}"),
-//RS                     "restore the declared project file or remove the import".to_string(),
-//RS                 ),
-//RS             };
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E3502",
-//RS                 what,
-//RS                 "legacy graph import rejects links and directories before a wrapper can run"
-//RS                     .to_string(),
-//RS                 fix,
-//RS                 Some(span),
-//RS             )]);
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn effective_grants(
-//RS     options: &BuildRunOptions,
-//RS ) -> std::collections::BTreeSet<crate::Comptime::Build::BuildCapability> {
-//RS     options.grants.clone()
-//RS }
-//RS 
-//RS pub fn program_semantic_facts(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     checked: &crate::Sema::SemIndexEffectFacts,
-//RS ) -> crate::Comptime::ProgramSemanticFacts {
-//RS     let mut effects = std::collections::HashMap::new();
-//RS     let mut arithmetic = std::collections::HashMap::new();
-//RS     let reaches_panic = checked.reachability.nodes_with("panic", "panic");
-//RS     for (module_idx, module) in bundle.modules.iter().enumerate() {
-//RS         for item in &module.items {
-//RS             let crate::AST::Item::Func(func) = item else {
-//RS                 continue;
-//RS             };
-//RS             let qualified = crate::Comptime::program_reflection_identity(
-//RS                 &checked.name_ledger,
-//RS                 module_idx,
-//RS                 &module.alias,
-//RS                 &func.name,
-//RS             );
-//RS             let values = checked
-//RS                 .solved
-//RS                 .get(&qualified)
-//RS                 .map(|set| set.iter().cloned().collect())
-//RS                 .unwrap_or_default();
-//RS             effects.insert(qualified.clone(), values);
-//RS             arithmetic.insert(qualified, crate::AST::arithmetic_policy_facts(&func.body));
-//RS         }
-//RS     }
-//RS     crate::Comptime::ProgramSemanticFacts {
-//RS         effects,
-//RS         arithmetic,
-//RS         reaches_panic,
-//RS         fact_registry: checked.fact_registry.clone(),
-//RS         name_ledger: checked.name_ledger.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn bad_build_signature(span: crate::Diagnostics::Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3501",
-//RS         "`fn build` must take one `BuildContext` and return `BuildPlan`".to_string(),
-//RS         "the build entry is a typed contract: its parameter is its authority and its result is the graph Jet executes".to_string(),
-//RS         "write `fn build(b: BuildContext) BuildPlan`".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS fn build_function_location(module: &crate::AST::LoadedModule, index: usize) -> String {
-//RS     let line = match module.items.get(index) {
-//RS         Some(crate::AST::Item::Func(function)) => {
-//RS             source_line_at(&module.source, function.name_span.start)
-//RS         }
-//RS         _ => 1,
-//RS     };
-//RS     format!("{}:{line}", module.path.display())
-//RS }
-//RS 
-//RS fn duplicate_build_entries(bundle: &crate::AST::ProgramBundle, indices: &[usize]) -> Diagnostic {
-//RS     let module = &bundle.modules[bundle.entry];
-//RS     let first = build_function_location(module, indices[0]);
-//RS     let second = build_function_location(module, indices[1]);
-//RS     let span = match module.items.get(indices[1]) {
-//RS         Some(crate::AST::Item::Func(function)) => Some(function.name_span),
-//RS         _ => None,
-//RS     };
-//RS     build_entry_conflict("the entry unit", &first, &second, span)
-//RS }
-//RS 
-//RS fn build_source_location(path: &std::path::Path, source: &str) -> String {
-//RS     let offset = source.find("fn build").unwrap_or(0);
-//RS     format!("{}:{}", path.display(), source_line_at(source, offset))
-//RS }
-//RS 
-//RS fn source_line_at(source: &str, offset: usize) -> usize {
-//RS     source.as_bytes()[..offset.min(source.len())]
-//RS         .iter()
-//RS         .filter(|byte| **byte == b'\n')
-//RS         .count()
-//RS         + 1
-//RS }
-//RS 
-//RS fn build_entry_conflict(
-//RS     unit: &str,
-//RS     first_location: &str,
-//RS     second_location: &str,
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3520",
-//RS         format!("two build entries for {unit}: {first_location} and {second_location}"),
-//RS         "one package has exactly one build entry so policy and provenance have one auditable home"
-//RS             .to_string(),
-//RS         format!(
-//RS             "keep the `fn build` in {first_location} and remove the entry in {second_location}"
-//RS         ),
-//RS         span,
-//RS     )
-//RS }
-//RS 
-//RS fn materialize_and_check_generated(
-//RS     modules: &[&crate::Comptime::Build::BuildGeneratedModule],
-//RS     root: &std::path::Path,
-//RS     existing_source_paths: &[std::path::PathBuf],
-//RS     action_outputs: &[String],
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
-//RS     let mut modules = modules.to_vec();
-//RS     modules.sort_by(|left, right| {
-//RS         left.path
-//RS             .as_str()
-//RS             .cmp(right.path.as_str())
-//RS             .then_with(|| left.name.cmp(&right.name))
-//RS     });
-//RS     let lock = crate::Lock::load(root);
-//RS     let existing_source_paths = existing_source_paths
-//RS         .iter()
-//RS         .map(|path| normalize_project_path(root, path))
-//RS         .collect::<Vec<_>>();
-//RS     let action_outputs = action_outputs
-//RS         .iter()
-//RS         .map(|path| normalize_project_path(root, std::path::Path::new(path)))
-//RS         .collect::<Vec<_>>();
-//RS 
-//RS     // Preflight every ownership decision before touching the tree. A failed
-//RS     // later module must not leave an earlier generated file visible to the
-//RS     // loader or to a concurrent observer.
-//RS     let mut planned_paths = std::collections::BTreeSet::new();
-//RS     for module in &modules {
-//RS         let path = normalize_project_path(root, std::path::Path::new(module.path.as_str()));
-//RS         if !planned_paths.insert(path.clone()) {
-//RS             return Err(vec![generated_cycle_diag(
-//RS                 &module.name,
-//RS                 module.path.as_str(),
-//RS                 "two generated modules claim the same managed path",
-//RS                 span,
-//RS             )]);
-//RS         }
-//RS         if action_outputs.iter().any(|output| output == &path) {
-//RS             return Err(vec![generated_cycle_diag(
-//RS                 &module.name,
-//RS                 module.path.as_str(),
-//RS                 "a selected build action and a generated module both own this path",
-//RS                 span,
-//RS             )]);
-//RS         }
-//RS         if has_symlinked_component(root, &path) {
-//RS             return Err(vec![generated_collision_diag(
-//RS                 &module.name,
-//RS                 module.path.as_str(),
-//RS                 span,
-//RS             )]);
-//RS         }
-//RS         let managed = managed_generated_file(lock.as_ref(), root, &path, &module.source_digest);
-//RS         if existing_source_paths.iter().any(|source| source == &path) && !managed {
-//RS             return Err(vec![generated_collision_diag(
-//RS                 &module.name,
-//RS                 module.path.as_str(),
-//RS                 span,
-//RS             )]);
-//RS         }
-//RS         if let Ok(metadata) = std::fs::symlink_metadata(&path) {
-//RS             if metadata.file_type().is_symlink() || (!metadata.is_file() && !managed) {
-//RS                 return Err(vec![generated_collision_diag(
-//RS                     &module.name,
-//RS                     module.path.as_str(),
-//RS                     span,
-//RS                 )]);
-//RS             }
-//RS             if metadata.is_file() && !managed {
-//RS                 return Err(vec![generated_collision_diag(
-//RS                     &module.name,
-//RS                     module.path.as_str(),
-//RS                     span,
-//RS                 )]);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let path_indices = modules
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(index, module)| {
-//RS             (
-//RS                 normalize_project_path(root, std::path::Path::new(module.path.as_str())),
-//RS                 index,
-//RS             )
-//RS         })
-//RS         .collect::<std::collections::BTreeMap<_, _>>();
-//RS     let dependencies = modules
-//RS         .iter()
-//RS         .map(|module| {
-//RS             generated_dependencies(
-//RS                 module,
-//RS                 &normalize_project_path(root, std::path::Path::new(module.path.as_str())),
-//RS                 root,
-//RS                 &path_indices,
-//RS             )
-//RS         })
-//RS         .collect::<Result<Vec<_>, _>>()?;
-//RS     let rounds = generated_rounds(&dependencies, &modules, span)?;
-//RS 
-//RS     let mut provenance = Vec::new();
-//RS     for round in rounds {
-//RS         for index in round {
-//RS             let module = modules[index];
-//RS             let path = normalize_project_path(root, std::path::Path::new(module.path.as_str()));
-//RS             safe_atomic_write(&path, module.source.as_bytes())
-//RS                 .map_err(|error| vec![generated_io_diag(&module.name, &error)])?;
-//RS             let mut generated_bundle = crate::Loader::load_entry_with_overlay(
-//RS                 path.to_str().unwrap_or(module.path.as_str()),
-//RS                 Some((&path, &module.source)),
-//RS                 false,
-//RS             )
-//RS             .map_err(|mut diags| {
-//RS                 for diag in &mut diags {
-//RS                     diag.what = format!("generated module `{}`: {}", module.name, diag.what);
-//RS                 }
-//RS                 diags
-//RS             })?;
-//RS             generated_bundle.build_facts = build_facts.clone();
-//RS             generated_bundle.active_os = build_facts.os;
-//RS             let generated_diags =
-//RS                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
-//RS             let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags)?;
-//RS             diags.retain(|diag| diag.severity == Severity::Error);
-//RS             if !diags.is_empty() {
-//RS                 for diag in &mut diags {
-//RS                     diag.what = format!("generated module `{}`: {}", module.name, diag.what);
-//RS                 }
-//RS                 return Err(diags);
-//RS             }
-//RS             provenance.push(GeneratedSourceProvenance {
-//RS                 name: module.name.clone(),
-//RS                 path,
-//RS                 digest: module.source_digest.clone(),
-//RS                 source: module.source.clone(),
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(provenance)
-//RS }
-//RS 
-//RS /// Build the dependency edges used by bounded generated-source staging. A
-//RS /// generated file can observe an earlier file through the ordinary quoted-file
-//RS /// import; no generation-only syntax or second semantic mechanism is needed.
-//RS fn generated_dependencies(
-//RS     module: &crate::Comptime::Build::BuildGeneratedModule,
-//RS     path: &std::path::Path,
-//RS     root: &std::path::Path,
-//RS     paths: &std::collections::BTreeMap<std::path::PathBuf, usize>,
-//RS ) -> Result<Vec<usize>, Vec<Diagnostic>> {
-//RS     let (tokens, lex_diags) = crate::Lexer::lex(&module.source);
-//RS     if !lex_diags.is_empty() {
-//RS         return Err(annotate_generated_frontend_diags(&module.name, lex_diags));
-//RS     }
-//RS     let program = crate::Parser::parse_with_source(&tokens, &module.source)
-//RS         .map_err(|diags| annotate_generated_frontend_diags(&module.name, diags))?;
-//RS     let mut dependencies = std::collections::BTreeSet::new();
-//RS     for import in program.imports {
-//RS         let crate::AST::ImportKind::File(import_path, _) = import.kind else {
-//RS             continue;
-//RS         };
-//RS         let Some(candidate) = generated_import_path(path, root, &import_path) else {
-//RS             continue;
-//RS         };
-//RS         if let Some(index) = paths.get(&candidate) {
-//RS             dependencies.insert(*index);
-//RS         }
-//RS     }
-//RS     Ok(dependencies.into_iter().collect())
-//RS }
-//RS 
-//RS fn generated_import_path(
-//RS     path: &std::path::Path,
-//RS     root: &std::path::Path,
-//RS     import_path: &str,
-//RS ) -> Option<std::path::PathBuf> {
-//RS     if import_path.trim().is_empty() || import_path.starts_with('/') {
-//RS         return None;
-//RS     }
-//RS     let mut candidate = path.parent()?.to_path_buf();
-//RS     for part in import_path.split('/') {
-//RS         if part.is_empty() || part == "." {
-//RS             continue;
-//RS         }
-//RS         if part == ".." {
-//RS             return None;
-//RS         }
-//RS         candidate.push(part);
-//RS     }
-//RS     candidate.set_extension(crate::Syntax::FILE_EXT);
-//RS     Some(normalize_project_path(root, &candidate))
-//RS }
-//RS 
-//RS fn annotate_generated_frontend_diags(
-//RS     name: &str,
-//RS     mut diagnostics: Vec<Diagnostic>,
-//RS ) -> Vec<Diagnostic> {
-//RS     for diagnostic in &mut diagnostics {
-//RS         diagnostic.what = format!("generated module `{name}`: {}", diagnostic.what);
-//RS     }
-//RS     diagnostics
-//RS }
-//RS 
-//RS /// Return dependency layers in stable path/name order. A layer is materialized
-//RS /// only after every module it imports has passed the front end, so a later
-//RS /// layer can observe an earlier layer while the total number of rounds remains
-//RS /// bounded by the number of generated modules.
-//RS fn generated_rounds(
-//RS     dependencies: &[Vec<usize>],
-//RS     modules: &[&crate::Comptime::Build::BuildGeneratedModule],
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS ) -> Result<Vec<Vec<usize>>, Vec<Diagnostic>> {
-//RS     let mut dependents = vec![Vec::<usize>::new(); modules.len()];
-//RS     let mut remaining = dependencies.iter().map(Vec::len).collect::<Vec<_>>();
-//RS     for (module, deps) in dependencies.iter().enumerate() {
-//RS         for dependency in deps {
-//RS             dependents[*dependency].push(module);
-//RS         }
-//RS     }
-//RS     for dependents in &mut dependents {
-//RS         dependents.sort_unstable();
-//RS     }
-//RS 
-//RS     let mut ready = std::collections::BTreeSet::new();
-//RS     for (index, count) in remaining.iter().enumerate() {
-//RS         if *count == 0 {
-//RS             ready.insert(index);
-//RS         }
-//RS     }
-//RS     let mut rounds = Vec::new();
-//RS     let mut emitted = 0;
-//RS     while !ready.is_empty() {
-//RS         let current = ready.iter().copied().collect::<Vec<_>>();
-//RS         ready.clear();
-//RS         for module in &current {
-//RS             emitted += 1;
-//RS             for dependent in &dependents[*module] {
-//RS                 remaining[*dependent] -= 1;
-//RS                 if remaining[*dependent] == 0 {
-//RS                     ready.insert(*dependent);
-//RS                 }
-//RS             }
-//RS         }
-//RS         rounds.push(current);
-//RS     }
-//RS     if emitted == modules.len() {
-//RS         return Ok(rounds);
-//RS     }
-//RS 
-//RS     let mut state = vec![0u8; modules.len()];
-//RS     let mut stack = Vec::new();
-//RS     let cycle = (0..modules.len())
-//RS         .find_map(|index| generated_cycle_chain(index, dependencies, &mut state, &mut stack))
-//RS         .unwrap_or_else(|| vec![0]);
-//RS     let first = cycle[0];
-//RS     let chain = cycle
-//RS         .iter()
-//RS         .map(|index| modules[*index].name.as_str())
-//RS         .collect::<Vec<_>>()
-//RS         .join(" -> ");
-//RS     Err(vec![generated_cycle_diag(
-//RS         &modules[first].name,
-//RS         modules[first].path.as_str(),
-//RS         &format!("dependency chain `{chain}` is cyclic"),
-//RS         span,
-//RS     )])
-//RS }
-//RS 
-//RS fn generated_cycle_chain(
-//RS     index: usize,
-//RS     dependencies: &[Vec<usize>],
-//RS     state: &mut [u8],
-//RS     stack: &mut Vec<usize>,
-//RS ) -> Option<Vec<usize>> {
-//RS     if state[index] == 1 {
-//RS         let start = stack.iter().position(|item| *item == index).unwrap_or(0);
-//RS         let mut cycle = stack[start..].to_vec();
-//RS         cycle.push(index);
-//RS         return Some(cycle);
-//RS     }
-//RS     if state[index] == 2 {
-//RS         return None;
-//RS     }
-//RS     state[index] = 1;
-//RS     stack.push(index);
-//RS     for dependency in &dependencies[index] {
-//RS         if let Some(cycle) = generated_cycle_chain(*dependency, dependencies, state, stack) {
-//RS             return Some(cycle);
-//RS         }
-//RS     }
-//RS     stack.pop();
-//RS     state[index] = 2;
-//RS     None
-//RS }
-//RS 
-//RS fn normalize_project_path(root: &std::path::Path, path: &std::path::Path) -> std::path::PathBuf {
-//RS     let path = if path.is_absolute() {
-//RS         path.to_path_buf()
-//RS     } else {
-//RS         root.join(path)
-//RS     };
-//RS     let mut normalized = std::path::PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             std::path::Component::Prefix(prefix) => normalized.push(prefix.as_os_str()),
-//RS             std::path::Component::RootDir => normalized.push(std::path::MAIN_SEPARATOR.to_string()),
-//RS             std::path::Component::CurDir => {}
-//RS             std::path::Component::ParentDir => {
-//RS                 normalized.pop();
-//RS             }
-//RS             std::path::Component::Normal(part) => normalized.push(part),
-//RS         }
-//RS     }
-//RS     normalized
-//RS }
-//RS 
-//RS fn has_symlinked_component(root: &std::path::Path, path: &std::path::Path) -> bool {
-//RS     let Ok(relative) = path.strip_prefix(root) else {
-//RS         return true;
-//RS     };
-//RS     let mut current = root.to_path_buf();
-//RS     for component in relative.components() {
-//RS         let std::path::Component::Normal(part) = component else {
-//RS             return true;
-//RS         };
-//RS         current.push(part);
-//RS         if let Ok(metadata) = std::fs::symlink_metadata(&current) {
-//RS             if metadata.file_type().is_symlink() {
-//RS                 return true;
-//RS             }
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn managed_generated_file(
-//RS     lock: Option<&crate::Lock::LockFile>,
-//RS     root: &std::path::Path,
-//RS     path: &std::path::Path,
-//RS     digest: &crate::Comptime::Build::ContentDigest,
-//RS ) -> bool {
-//RS     let Some(lock) = lock else {
-//RS         return false;
-//RS     };
-//RS     let Ok(relative) = path.strip_prefix(root) else {
-//RS         return false;
-//RS     };
-//RS     let relative = relative.to_string_lossy().replace('\\', "/");
-//RS     lock.comptime_inputs
-//RS         .iter()
-//RS         .any(|input| input.path == relative && input.hash == digest.as_str())
-//RS }
-//RS 
-//RS fn generated_collision_diag(
-//RS     name: &str,
-//RS     path: &str,
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3510",
-//RS         format!("`b.generate(\"{name}\")` would shadow the module at `{path}`"),
-//RS         "generation is additive: what you wrote is always what compiles".to_string(),
-//RS         "rename the generated module, or delete the hand-written one".to_string(),
-//RS         span,
-//RS     )
-//RS }
-//RS 
-//RS fn generated_cycle_diag(
-//RS     name: &str,
-//RS     path: &str,
-//RS     reason: &str,
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3511",
-//RS         format!("generation rounds form a cycle: `{name}` at `{path}`"),
-//RS         "generated source must reach a bounded deterministic order, not loop until quiescent"
-//RS             .to_string(),
-//RS         format!("{reason}; break the dependency between these generators"),
-//RS         span,
-//RS     )
-//RS }
-//RS 
-//RS fn generated_io_diag(name: &str, error: &std::io::Error) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3502",
-//RS         format!("generated module `{name}` could not be materialized"),
-//RS         format!("generated source must be a real file before it re-enters the front end: {error}"),
-//RS         "make sure `.jet/generated` is writable and the generated module name is unique"
-//RS             .to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn build_plan_diagnostic(error: &crate::Comptime::Build::BuildError) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E3502",
-//RS         format!("build plan is invalid: {error:?}"),
-//RS         "all graph handles must belong to one selected root build and every action output must have one owner".to_string(),
-//RS         "fix the named graph node and use `jet inspect explain-build` to inspect its inputs".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn build_execution_diagnostic(error: crate::Comptime::Build::BuildExecutionError) -> Diagnostic {
-//RS     use crate::Comptime::Build::BuildExecutionError;
-//RS     match error {
-//RS         BuildExecutionError::MissingGrant { action, capability } => Diagnostic::error(
-//RS             "E3504",
-//RS             format!("build action `{action}` asks for ungranted `{capability:?}` ability"),
-//RS             "declaring an ability in `fn build` does not grant it; root policy must approve each ambient effect".to_string(),
-//RS             format!("pass `--allow-{}` for this run, or grant it in package/workspace policy", capability.flag()),
-//RS             None,
-//RS         ),
-//RS         BuildExecutionError::Reported { report } => {
-//RS             let mut diagnostic = Diagnostic::error(
-//RS                 "E3505",
-//RS                 report.message.clone(),
-//RS                 "the sandboxed command reported a structured failure; its typed identity and source data remain in the report".to_string(),
-//RS                 "fix the action command, declared inputs/outputs, toolchain, or probe, then rerun `jet build`".to_string(),
-//RS                 None,
-//RS             );
-//RS             diagnostic.detail = Some(
-//RS                 report.render_with_style(jet_foundation::Outcome::JetReportStyle::PLAIN),
-//RS             );
-//RS             diagnostic.structured = Some(crate::Diagnostics::StructuredDiagnostic::BuildError {
-//RS                 report,
-//RS             });
-//RS             diagnostic
-//RS         }
-//RS         BuildExecutionError::ProbeFailed { probe, detail } => Diagnostic::error(
-//RS             "E3505",
-//RS             format!("build probe `{probe}` failed"),
-//RS             detail,
-//RS             "fix the typed probe or select a toolchain that provides it".to_string(),
-//RS             None,
-//RS         ),
-//RS         BuildExecutionError::SandboxUnavailable => Diagnostic::error(
-//RS             "E3505",
-//RS             "build sandbox is unavailable".to_string(),
-//RS             "Jet refuses to run typed build actions without the required bubblewrap isolation".to_string(),
-//RS             "install bubblewrap or run on a supported build worker; there is no ambient fallback".to_string(),
-//RS             None,
-//RS         ),
-//RS         BuildExecutionError::IO { action, detail } => Diagnostic::error(
-//RS             "E3505",
-//RS             format!("build action `{action}` could not access a declared build path"),
-//RS             detail,
-//RS             "fix the declared input/output path or make the project build directory writable".to_string(),
-//RS             None,
-//RS         ),
-//RS         BuildExecutionError::InvalidGraph(error) => build_plan_diagnostic(&error),
-//RS     }
-//RS }
-//RS 
-//RS /// The real implementation behind every `compile_bundle_path_opts*` facade —
-//RS /// see `compile_bundle_path_opts` (native) / `compile_bundle_path_opts_dbg`
-//RS /// (native debug) / `compile_bundle_path_opts_plugin` (c81 plugin guest) for
-//RS /// the public entry points.
-//RS fn compile_bundle_path_opts_full(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     library_target: bool,
-//RS     debug_linemap: bool,
-//RS     cross_target: Option<&str>,
-//RS     explicit_output: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     locked: bool,
-//RS     entry_fn: Option<&str>,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_bundle_path_opts_on_compiler_stack_with_runtime(
-//RS             file,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             plugin_target,
-//RS             library_target,
-//RS             debug_linemap,
-//RS             cross_target,
-//RS             explicit_output,
-//RS             profile,
-//RS             setting_overrides,
-//RS             locked,
-//RS             entry_fn,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         )
-//RS         .map(|(output, _)| output)
-//RS     })
-//RS }
-//RS 
-//RS /// Compile a path-shaped entry from an authority-selected source snapshot.
-//RS /// The loader consumes `source` as an entry overlay and never reopens
-//RS /// `file`; imported modules still resolve from the virtual entry's parent.
-//RS pub fn compile_bundle_path_opts_with_overlay(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     library_target: bool,
-//RS     debug_linemap: bool,
-//RS     cross_target: Option<&str>,
-//RS     explicit_output: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     locked: bool,
-//RS     entry_fn: Option<&str>,
-//RS     source_path: &std::path::Path,
-//RS     source: &str,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_bundle_path_opts_on_compiler_stack_with_runtime(
-//RS             file,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             plugin_target,
-//RS             library_target,
-//RS             debug_linemap,
-//RS             cross_target,
-//RS             explicit_output,
-//RS             profile,
-//RS             setting_overrides,
-//RS             locked,
-//RS             entry_fn,
-//RS             Some((source_path, source)),
-//RS             None,
-//RS             None,
-//RS             None,
-//RS         )
-//RS         .map(|(output, _)| output)
-//RS     })
-//RS }
-//RS /// Compile every module from one immutable authority-selected source closure.
-//RS ///
-//RS /// The loader resolves the entry and all imports from `source_closure`; no
-//RS /// checked source path is reopened during this compile.
-//RS pub fn compile_bundle_path_opts_with_source_closure(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     library_target: bool,
-//RS     debug_linemap: bool,
-//RS     cross_target: Option<&str>,
-//RS     explicit_output: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     locked: bool,
-//RS     entry_fn: Option<&str>,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_bundle_path_opts_on_compiler_stack_with_runtime(
-//RS             file,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             plugin_target,
-//RS             library_target,
-//RS             debug_linemap,
-//RS             cross_target,
-//RS             explicit_output,
-//RS             profile,
-//RS             setting_overrides,
-//RS             locked,
-//RS             entry_fn,
-//RS             None,
-//RS             None,
-//RS             Some(source_closure),
-//RS             None,
-//RS         )
-//RS         .map(|(output, _)| output)
-//RS     })
-//RS }
-//RS 
-//RS /// Compile an immutable source closure with an optional invocation-local
-//RS /// authority merged into the checked bundle before MIR lowering and codegen;
-//RS /// return that same checked runtime bundle alongside the generated output.
-//RS pub fn compile_bundle_path_opts_with_source_closure_and_runtime(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     library_target: bool,
-//RS     debug_linemap: bool,
-//RS     cross_target: Option<&str>,
-//RS     explicit_output: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     locked: bool,
-//RS     entry_fn: Option<&str>,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-//RS ) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_bundle_path_opts_on_compiler_stack_with_runtime(
-//RS             file,
-//RS             mode,
-//RS             no_os,
-//RS             gates,
-//RS             web_target,
-//RS             plugin_target,
-//RS             library_target,
-//RS             debug_linemap,
-//RS             cross_target,
-//RS             explicit_output,
-//RS             profile,
-//RS             setting_overrides,
-//RS             locked,
-//RS             entry_fn,
-//RS             None,
-//RS             None,
-//RS             Some(source_closure),
-//RS             application_authority,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS pub fn mir_artifact_build_mode_for(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     compile_mode: crate::Sema::CompileMode,
-//RS     profile: &str,
-//RS ) -> jet_foundation::MIR::MirArtifactBuildMode {
-//RS     let mode = match (compile_mode, profile) {
-//RS         (_, "fuzz") => jet_foundation::MIR::MirArtifactBuildMode::Fuzz,
-//RS         (_, "coverage") => jet_foundation::MIR::MirArtifactBuildMode::Coverage,
-//RS         (crate::Sema::CompileMode::Test | crate::Sema::CompileMode::TestOverride, _) => {
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Test
-//RS         }
-//RS         (_, "release" | "hardened") => jet_foundation::MIR::MirArtifactBuildMode::Release,
-//RS         (_, "dev" | "debug" | "ci" | "small" | "no-os" | "default" | "fast") => {
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Dev
-//RS         }
-//RS         (_, "test") => jet_foundation::MIR::MirArtifactBuildMode::Test,
-//RS         (_, name)
-//RS             if crate::Loader::package_facts_for_bundle(bundle)
-//RS                 .ok()
-//RS                 .flatten()
-//RS                 .is_some_and(|facts| {
-//RS                     facts
-//RS                         .build_profiles
-//RS                         .iter()
-//RS                         .any(|profile| profile.name == name)
-//RS                 }) =>
-//RS         {
-//RS             // Named profiles contribute settings without selecting release mode.
-//RS             jet_foundation::MIR::MirArtifactBuildMode::Dev
-//RS         }
-//RS         (_, other) => {
-//RS             jet_foundation::ice!(None, "unsupported MIR artifact build profile `{other}`")
-//RS         }
-//RS     };
-//RS     mode
-//RS }
-//RS 
-//RS fn mir_artifact_request_for(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     target: jet_foundation::MIR::MirArtifactTarget,
-//RS     kind: jet_foundation::MIR::MirArtifactKind,
-//RS     compile_mode: crate::Sema::CompileMode,
-//RS     profile: &str,
-//RS ) -> jet_foundation::MIR::MirArtifactRequest {
-//RS     let mode = mir_artifact_build_mode_for(bundle, compile_mode, profile);
-//RS     jet_foundation::MIR::MirArtifactRequest::new(target, kind, mode)
-//RS }
-//RS 
-//RS fn mir_artifact_request_for_build(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     compile_mode: crate::Sema::CompileMode,
-//RS     profile: &str,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     library_target: bool,
-//RS ) -> jet_foundation::MIR::MirArtifactRequest {
-//RS     if web_target && plugin_target {
-//RS         jet_foundation::ice!(
-//RS             None,
-//RS             "MIR artifact request cannot select both Web and sandbox targets"
-//RS         );
-//RS     }
-//RS     let target = if web_target {
-//RS         jet_foundation::MIR::MirArtifactTarget::Web
-//RS     } else {
-//RS         jet_foundation::MIR::MirArtifactTarget::RustAot
-//RS     };
-//RS     let kind = if web_target {
-//RS         jet_foundation::MIR::MirArtifactKind::WebApplication
-//RS     } else if plugin_target {
-//RS         jet_foundation::MIR::MirArtifactKind::SandboxPlugin
-//RS     } else if library_target {
-//RS         jet_foundation::MIR::MirArtifactKind::NativeLibrary
-//RS     } else if matches!(compile_mode, crate::Sema::CompileMode::TestOverride) {
-//RS         jet_foundation::MIR::MirArtifactKind::TestOverride
-//RS     } else {
-//RS         match profile {
-//RS             "fuzz" => jet_foundation::MIR::MirArtifactKind::FuzzExecutable,
-//RS             _ if matches!(compile_mode, crate::Sema::CompileMode::Test) => {
-//RS                 jet_foundation::MIR::MirArtifactKind::TestExecutable
-//RS             }
-//RS             _ => jet_foundation::MIR::MirArtifactKind::NativeExecutable,
-//RS         }
-//RS     };
-//RS     mir_artifact_request_for(bundle, target, kind, compile_mode, profile)
-//RS }
-//RS 
-//RS fn lower_checked_mir_program_for(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     request: jet_foundation::MIR::MirArtifactRequest,
-//RS ) -> (
-//RS     jet_foundation::MIR::MirProgram,
-//RS     jet_foundation::MIR::MirArtifactId,
-//RS ) {
-//RS     lower_checked_mir_program_for_with_debug(bundle, request, false)
-//RS }
-//RS 
-//RS fn lower_checked_mir_program_for_with_debug(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     request: jet_foundation::MIR::MirArtifactRequest,
-//RS     debug_linemap: bool,
-//RS ) -> (
-//RS     jet_foundation::MIR::MirProgram,
-//RS     jet_foundation::MIR::MirArtifactId,
-//RS ) {
-//RS     let mut lower_span = crate::Trace::span("lower");
-//RS     let (mir, artifact) =
-//RS         crate::Codegen::TIR::lower_checked_mir_program_for_with_debug(
-//RS             bundle,
-//RS             request,
-//RS             debug_linemap,
-//RS         )
-//RS         .unwrap_or_else(|error| jet_foundation::ice!(Some(error.span), "{error}"));
-//RS     mir.validate().unwrap_or_else(|error| {
-//RS         jet_foundation::ice!(None, "canonical MIR validation failed: {error}")
-//RS     });
-//RS     lower_span.items(mir.functions.len());
-//RS     (mir, artifact)
-//RS }
-//RS fn mir_web_target(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     mir: &jet_foundation::MIR::MirProgram,
-//RS     artifact: jet_foundation::MIR::MirArtifactId,
-//RS     release_devtools_policy: &crate::Package::ReleaseDevtoolsPolicy,
-//RS ) -> crate::Codegen::MIRWeb::MirWebTarget {
-//RS     let mut assets = crate::Codegen::MIRWeb::MirWebAssets::with_default_shell();
-//RS     assets.explicit_html_path = bundle
-//RS         .modules
-//RS         .get(bundle.entry)
-//RS         .and_then(|module| module.html_path.clone());
-//RS     assets.source_names = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| module.display.clone())
-//RS         .collect();
-//RS     assets.source_contents = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| module.source.clone())
-//RS         .collect();
-//RS     crate::Codegen::MIRWeb::MirWebTarget {
-//RS         layout: if bundle.build_facts.target_triple.is_empty() {
-//RS             jet_foundation::Layout::TargetLayout::host()
-//RS         } else {
-//RS             jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts)
-//RS         },
-//RS         assets,
-//RS         semantic_digest: jet_foundation::MIR::mir_program_digest(mir),
-//RS         artifact,
-//RS         release_devtools_policy: release_devtools_policy.clone(),
-//RS     }
-//RS }
-//RS 
-//RS fn emit_web_from_mir(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     mir: &jet_foundation::MIR::MirProgram,
-//RS     artifact: jet_foundation::MIR::MirArtifactId,
-//RS     release_devtools_policy: &crate::Package::ReleaseDevtoolsPolicy,
-//RS ) -> crate::Codegen::MIRWeb::WebArtifacts {
-//RS     crate::Codegen::MIRWeb::emit_web(
-//RS         mir,
-//RS         &mir_web_target(bundle, mir, artifact, release_devtools_policy),
-//RS     )
-//RS     .unwrap_or_else(|error| jet_foundation::ice!(None, "MIR Web emission failed: {error}"))
-//RS }
-//RS 
-//RS fn apply_application_authority(
-//RS     bundle: &mut crate::AST::ProgramBundle,
-//RS     invocation_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-//RS ) {
-//RS     let Some(invocation_authority) = invocation_authority else {
-//RS         return;
-//RS     };
-//RS     let authority = &mut bundle.package_guarantees.application_authority;
-//RS     authority
-//RS         .granted_effects
-//RS         .extend(invocation_authority.granted_effects.iter().cloned());
-//RS     authority
-//RS         .denied_effects
-//RS         .extend(invocation_authority.denied_effects.iter().cloned());
-//RS     if !authority.authority.is_empty() && !invocation_authority.authority.is_empty() {
-//RS         authority.authority.push_str(" + ");
-//RS     }
-//RS     authority
-//RS         .authority
-//RS         .push_str(&invocation_authority.authority);
-//RS }
-//RS 
-//RS /// Check an immutable source closure for native artifact lowering without
-//RS /// lowering it. The bundle carries the host target, the seeded build facts and
-//RS /// the refreshed target dossier, next to the gated lints and the prepared FFI
-//RS /// link. The caller selects the MIR artifact request, such as a
-//RS /// `NativeLibrary` for a unit without a runnable entry (D4), and emits it.
-//RS pub fn check_bundle_path_with_source_closure_for_artifact(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     profile: &str,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<
-//RS     (
-//RS         crate::AST::ProgramBundle,
-//RS         Vec<Diagnostic>,
-//RS         Option<crate::FFI::FfiLink>,
-//RS     ),
-//RS     Vec<Diagnostic>,
-//RS > {
-//RS     crate::run_compiler_work(|| {
-//RS         check_bundle_for_artifact_on_compiler_stack(
-//RS             file,
-//RS             mode,
-//RS             false,
-//RS             crate::Policy::GateSet::default(),
-//RS             false,
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             profile,
-//RS             &BTreeMap::new(),
-//RS             false,
-//RS             None,
-//RS             None,
-//RS             None,
-//RS             Some(source_closure),
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// The checked front half of artifact compilation: load, select the target,
-//RS /// seed build facts, check, refresh the target dossier, gate diagnostics and
-//RS /// prepare the FFI link. Returns the bundle, its lints and the FFI link.
-//RS fn check_bundle_for_artifact_on_compiler_stack(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     web_target: bool,
-//RS     library_target: bool,
-//RS     cross_target: Option<&str>,
-//RS     explicit_output: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     locked: bool,
-//RS     entry_fn: Option<&str>,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     target_dossier: Option<jet_foundation::Facts::TargetDossier>,
-//RS     source_closure: Option<&[(std::path::PathBuf, String)]>,
-//RS ) -> Result<
-//RS     (
-//RS         crate::AST::ProgramBundle,
-//RS         Vec<Diagnostic>,
-//RS         Option<crate::FFI::FfiLink>,
-//RS     ),
-//RS     Vec<Diagnostic>,
-//RS > {
-//RS     if locked {
-//RS         crate::Loader::verify_locked_dependency_sources(file)?;
-//RS     }
-//RS     let mut overlays = source_closure
-//RS         .unwrap_or(&[])
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     if let Some((path, source)) = overlay {
-//RS         overlays.push((path, source));
-//RS     }
-//RS     let mut load_span = crate::Trace::span("load");
-//RS     let mut bundle = crate::Loader::load_entry_with_overlays(file, &overlays, false)?;
-//RS     load_span.items(bundle.modules.len());
-//RS     drop(load_span);
-//RS     // The sema build facts and MIR adapter share this target resolution.
-//RS     set_bundle_target(&mut bundle, cross_target);
-//RS     seed_build_facts(&mut bundle, profile, locked, setting_overrides)?;
-//RS     // D-DBG1=A: an explicit output file or a library is a shipped artifact.
-//RS     bundle.build_facts.artifact_build = explicit_output.is_some() || library_target;
-//RS     let has_target_dossier = target_dossier.is_some();
-//RS     if let Some(dossier) = target_dossier {
-//RS         bundle.build_facts.target_dossier = dossier;
-//RS     }
-//RS     if let Some(entry_fn) = entry_fn {
-//RS         swap_entry_point(&mut bundle, entry_fn);
-//RS     }
-//RS     if web_target {
-//RS         bundle.web_partition_enforced = true;
-//RS     }
-//RS     let runnable_output = if library_target {
-//RS         None
-//RS     } else {
-//RS         explicit_output
-//RS     };
-//RS     let mut sema_span = crate::Trace::span("sema.check");
-//RS     let (diags, effect_facts) = if let Some(output) = runnable_output {
-//RS         crate::Sema::check_bundle_for_output_opts_with_effect_facts(
-//RS             &mut bundle,
-//RS             mode,
-//RS             output,
-//RS             no_os,
-//RS             gates,
-//RS         )
-//RS     } else if no_os {
-//RS         crate::Sema::check_bundle_no_os_with_effect_facts(&mut bundle, mode)
-//RS     } else if !gates.is_empty() {
-//RS         crate::Sema::check_bundle_gates_with_effect_facts(&mut bundle, mode, gates)
-//RS     } else {
-//RS         crate::Sema::check_bundle_with_effect_facts(&mut bundle, mode)
-//RS     };
-//RS     sema_span.items(bundle.modules.len());
-//RS     drop(sema_span);
-//RS     // Fold the selected target boundary and the complete sema-owned Prelude
-//RS     // closure into the same dossier used by codegen and artifact identity.
-//RS     if !has_target_dossier {
-//RS         refresh_target_dossier(&mut bundle, no_os, web_target);
-//RS     }
-//RS     let mut diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
-//RS     if let Some(target) = cross_target {
-//RS         diags.extend(crate::Sema::check_target_surface(&bundle, target));
-//RS     }
-//RS     let extension_diags =
-//RS         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
-//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS     let lints = gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?;
-//RS     let ffi = match cross_target {
-//RS         Some(target) => crate::FFI::prepare_for_target(&bundle, target),
-//RS         None if web_target => {
-//RS             crate::FFI::prepare_for_target(&bundle, &bundle.build_facts.target_triple)
-//RS         }
-//RS         None => crate::FFI::prepare(&bundle),
-//RS     }?;
-//RS     Ok((bundle, lints, ffi))
-//RS }
-//RS 
-//RS fn compile_bundle_path_opts_on_compiler_stack_with_runtime(
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     no_os: bool,
-//RS     gates: crate::Policy::GateSet,
-//RS     web_target: bool,
-//RS     plugin_target: bool,
-//RS     library_target: bool,
-//RS     debug_linemap: bool,
-//RS     cross_target: Option<&str>,
-//RS     explicit_output: Option<&str>,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     locked: bool,
-//RS     entry_fn: Option<&str>,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     target_dossier: Option<jet_foundation::Facts::TargetDossier>,
-//RS     source_closure: Option<&[(std::path::PathBuf, String)]>,
-//RS     application_authority: Option<&jet_foundation::Authority::ApplicationAuthority>,
-//RS ) -> Result<(crate::CompileOutput, crate::AST::ProgramBundle), Vec<Diagnostic>> {
-//RS     let (mut bundle, lints, ffi) = check_bundle_for_artifact_on_compiler_stack(
-//RS         file,
-//RS         mode,
-//RS         no_os,
-//RS         gates,
-//RS         web_target,
-//RS         library_target,
-//RS         cross_target,
-//RS         explicit_output,
-//RS         profile,
-//RS         setting_overrides,
-//RS         locked,
-//RS         entry_fn,
-//RS         overlay,
-//RS         target_dossier,
-//RS         source_closure,
-//RS     )?;
-//RS     let plugin_name = if plugin_target {
-//RS         Some(crate::PluginExport::resolve_export_name(&bundle))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let library_config = if library_target {
-//RS         if web_target || plugin_target {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E1341",
-//RS                 "a Library output cannot also select a backend target".to_string(),
-//RS                 "Library artifacts are native static/shared projections (D-LIB-EXPORT1=C), not web or sandbox guest outputs".to_string(),
-//RS                 "remove `--target=web`/`--target=sandbox` and select the Library output directly".to_string(),
-//RS                 None,
-//RS             )]);
-//RS         }
-//RS         Some(crate::LibraryExport::resolve_config(
-//RS             &bundle,
-//RS             explicit_output,
-//RS         )?)
-//RS     } else {
-//RS         None
-//RS     };
-//RS 
-//RS     apply_application_authority(&mut bundle, application_authority);
-//RS     let request = mir_artifact_request_for_build(
-//RS         &bundle,
-//RS         mode,
-//RS         profile,
-//RS         web_target,
-//RS         plugin_target,
-//RS         library_target,
-//RS     );
-//RS     let request = if let Some(name) = plugin_name.as_deref() {
-//RS         request.with_name(name)
-//RS     } else if let Some(config) = library_config.as_ref() {
-//RS         request.with_name(&config.name)
-//RS     } else {
-//RS         request
-//RS     };
-//RS     let (mir, artifact) =
-//RS         lower_checked_mir_program_for_with_debug(&bundle, request, debug_linemap);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile);
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = debug_linemap;
-//RS     execution.emit_runtime = true;
-//RS     let web_release_devtools_policy = execution.release_devtools_policy.clone();
-//RS     let mut emit_span = crate::Trace::span("emit");
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts),
-//RS             target_kind: if web_target {
-//RS                 crate::Codegen::MIRRust::MirRustTarget::WebWasm
-//RS             } else {
-//RS                 crate::Codegen::MIRRust::MirRustTarget::Native
-//RS             },
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     emit_span.items(mir.functions.len());
-//RS     drop(emit_span);
-//RS     let web = if web_target {
-//RS         Some(emit_web_from_mir(
-//RS             &bundle,
-//RS             &mir,
-//RS             artifact,
-//RS             &web_release_devtools_policy,
-//RS         ))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     // D-PLUGIN1=B / D-DEP-WASM1=A / D-PLUGIN-EXPORT1=A (c81): the guest side of
-//RS     // a `target: sandbox` build — a `.wit` world + wasm32 guest Rust, generated
-//RS     // from the checked MIR artifact plan's `Int`/`Float`/`Bool`/`Text` exports.
-//RS     let plugin = if plugin_target {
-//RS         // E1260: every `pub fn` in the entry module must be exportable —
-//RS         // never a silent skip (I3/I4).
-//RS         let surface_errors = crate::PluginExport::validate_export_surface(&bundle);
-//RS         if !surface_errors.is_empty() {
-//RS             return Err(surface_errors);
-//RS         }
-//RS         let export_name = plugin_name
-//RS             .as_deref()
-//RS             .expect("plugin artifact request has no selected export name");
-//RS         crate::PluginExport::check_and_freeze_version(&bundle, export_name)?;
-//RS         Some(crate::Codegen::emit_plugin(&mir, artifact, &rust))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     if let Some(config) = library_config.as_ref() {
-//RS         let surface_errors = crate::LibraryExport::validate_export_surface(&bundle);
-//RS         if !surface_errors.is_empty() {
-//RS             return Err(surface_errors);
-//RS         }
-//RS         crate::LibraryExport::check_and_freeze_version(&bundle, &config.name)?;
-//RS     }
-//RS     let library = library_config
-//RS         .as_ref()
-//RS         .map(|config| crate::Codegen::emit_library(&mir, artifact, &rust, &config.bindings));
-//RS     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-//RS     let resolver = match AuthorityResolver::open(&bundle.project_root) {
-//RS         Ok(resolver) => Some(resolver),
-//RS         Err(error) if error.is_missing() => None,
-//RS         Err(error) => return Err(vec![error.diagnostic()]),
-//RS     };
-//RS     if let Some(resolver) = resolver {
-//RS         let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
-//RS             Ok(checked) => Some(checked),
-//RS             Err(error) if error.is_missing() => None,
-//RS             Err(error) => return Err(vec![error.diagnostic()]),
-//RS         };
-//RS         if let Some(checked) = checked {
-//RS             let source = checked
-//RS                 .file
-//RS                 .text()
-//RS                 .map_err(|error| vec![error.diagnostic()])?;
-//RS             let manifest = crate::Manifest::parse(&checked.file.path, &source)
-//RS                 .map_err(|diagnostic| vec![diagnostic])?;
-//RS             resolver
-//RS                 .revalidate_file(&checked.file)
-//RS                 .map_err(|error| vec![error.diagnostic()])?;
-//RS             crate::Lock::record_inferred_layer(
-//RS                 &bundle.project_root,
-//RS                 &manifest.package.name,
-//RS                 bundle.inferred_layer,
-//RS             );
-//RS         }
-//RS     }
-//RS     let output = crate::CompileOutput {
-//RS         rust,
-//RS         lints,
-//RS         ffi,
-//RS         // Native C link flags are resolved separately at build time (so that
-//RS         // codegen / front-end checks never depend on system link discovery);
-//RS         // see `resolve_c_links`.
-//RS         clinks: Vec::new(),
-//RS         comptime_inputs,
-//RS         web,
-//RS         web_partition_report: bundle.web_partition_report.clone(),
-//RS         plugin,
-//RS         library,
-//RS         library_config,
-//RS         inferred_layer: bundle.inferred_layer,
-//RS         layer_ceiling: bundle.layer_ceiling,
-//RS     };
-//RS     Ok((output, bundle))
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-//RS pub struct CompileSrcOptions {
-//RS     pub web_target: bool,
-//RS }
-//RS 
-//RS /// In-memory pipeline: lex → parse → bundle → sema → ffi → codegen.
-//RS pub fn compile_src(
-//RS     src: &str,
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     compile_src_with_options(src, file, mode, CompileSrcOptions::default())
-//RS }
-//RS 
-//RS /// Compile source wholly synthesized by the compiler or one of its tools.
-//RS /// Callers embedding user text must validate that text with `Lexer::lex` first.
-//RS pub fn compile_generated_src(
-//RS     src: &str,
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     compile_src_with_options_and_policy(src, file, mode, CompileSrcOptions::default(), true)
-//RS }
-//RS 
-//RS pub fn compile_src_with_options(
-//RS     src: &str,
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     options: CompileSrcOptions,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     compile_src_with_options_and_policy(src, file, mode, options, false)
-//RS }
-//RS 
-//RS fn compile_src_with_options_and_policy(
-//RS     src: &str,
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     options: CompileSrcOptions,
-//RS     generated: bool,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| compile_src_on_compiler_stack(src, file, mode, options, generated))
-//RS }
-//RS 
-//RS fn compile_src_on_compiler_stack(
-//RS     src: &str,
-//RS     file: &str,
-//RS     mode: crate::Sema::CompileMode,
-//RS     options: CompileSrcOptions,
-//RS     generated: bool,
-//RS ) -> Result<crate::CompileOutput, Vec<Diagnostic>> {
-//RS     crate::boot_mir_eval();
-//RS     let source_for_parse = if generated {
-//RS         src.to_string()
-//RS     } else {
-//RS         crate::Package::mask_inline_package_source(src)
-//RS             .map(|(masked, _)| masked)
-//RS             .map_err(|error| vec![error.diagnostic()])?
-//RS     };
-//RS     let (toks, lex_diags) = if generated {
-//RS         crate::Lexer::lex_generated(&source_for_parse)
-//RS     } else {
-//RS         crate::Lexer::lex(&source_for_parse)
-//RS     };
-//RS     if !lex_diags.is_empty() {
-//RS         return Err(lex_diags);
-//RS     }
-//RS     let mut prog = crate::Parser::parse_with_source(&toks, &source_for_parse)?;
-//RS     let mut bundle = crate::AST::ProgramBundle {
-//RS         entry: 0,
-//RS         project_root: std::path::PathBuf::from("."),
-//RS         modules: vec![crate::AST::LoadedModule {
-//RS             path: std::path::PathBuf::from(file),
-//RS             display: file.to_string(),
-//RS             alias: crate::Loader::default_module_alias(std::path::Path::new(file)),
-//RS             imports: std::mem::take(&mut prog.imports),
-//RS             items: std::mem::take(&mut prog.items),
-//RS             script_body: std::mem::take(&mut prog.script_body),
-//RS             block_spans: std::mem::take(&mut prog.block_spans),
-//RS             source: src.to_string(),
-//RS             web_target_ceiling: prog.web_target_ceiling,
-//RS             pub_file: prog.pub_file,
-//RS             no_prelude: prog.no_prelude,
-//RS             default_target: prog.default_target,
-//RS             html_path: prog.html_path.clone(),
-//RS             policy_declarations: prog.policy_declarations.clone(),
-//RS             user_policy_declarations: prog.user_policy_declarations.clone(),
-//RS             rule_facts: std::mem::take(&mut prog.rule_facts),
-//RS         }],
-//RS         devtools_registry: crate::AST::DevtoolsRegistry::default(),
-//RS         parse_teaching: Vec::new(),
-//RS         used_core: std::collections::HashSet::new(),
-//RS         ffi_callback_fns: std::collections::HashSet::new(),
-//RS         cffi: crate::CFFI::CFfi::default(),
-//RS         comptime_inputs: Vec::new(),
-//RS         name_ledger: crate::AST::NameLedger::default(),
-//RS         layer_ceiling: None,
-//RS         inferred_layer: crate::Syntax::RuntimeLayer::Core,
-//RS         web_partitions: std::collections::HashMap::new(),
-//RS         web_partition_enforced: options.web_target,
-//RS         web_partition_report: None,
-//RS         dep_roots: std::collections::HashMap::new(),
-//RS         package_guarantees: Default::default(),
-//RS         program_allocator: Default::default(),
-//RS         active_os: crate::Syntax::OSTarget::host(),
-//RS         build_facts: jet_foundation::Facts::BuildFactSnapshot::script(
-//RS             std::path::Path::new(file),
-//RS             crate::Syntax::OSTarget::host(),
-//RS             "dev",
-//RS         ),
-//RS         edition: crate::Manifest::latest_edition().to_string(),
-//RS     };
-//RS     // Active foreign caches may contribute generated C-ABI bridge modules.
-//RS     if let Err(diags) = crate::Foreign::assemble_active_namespaces(&mut bundle) {
-//RS         return Err(diags);
-//RS     }
-//RS     bundle.cffi = match crate::CFFI::assemble(&mut bundle) {
-//RS         Ok(c) => c,
-//RS         Err(diags) => return Err(diags),
-//RS     };
-//RS     let diags = crate::Sema::check_bundle(&mut bundle, mode);
-//RS     let mut errors = Vec::new();
-//RS     let mut lints = Vec::new();
-//RS     for d in diags {
-//RS         match d.severity {
-//RS             Severity::Error => errors.push(d),
-//RS             Severity::Lint => lints.push(d),
-//RS         }
-//RS     }
-//RS     if !errors.is_empty() {
-//RS         return Err(errors);
-//RS     }
-//RS     refresh_target_dossier(&mut bundle, false, options.web_target);
-//RS     let ffi = match options.web_target {
-//RS         true => crate::FFI::prepare_for_target(&bundle, &bundle.build_facts.target_triple),
-//RS         false => crate::FFI::prepare(&bundle),
-//RS     };
-//RS     let ffi = match ffi {
-//RS         Ok(link) => link,
-//RS         Err(ffi_diags) => return Err(ffi_diags),
-//RS     };
-//RS     let request =
-//RS         mir_artifact_request_for_build(&bundle, mode, "dev", options.web_target, false, false);
-//RS     let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = false;
-//RS     execution.emit_runtime = true;
-//RS     let web_release_devtools_policy = execution.release_devtools_policy.clone();
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::host(),
-//RS             target_kind: if options.web_target {
-//RS                 crate::Codegen::MIRRust::MirRustTarget::WebWasm
-//RS             } else {
-//RS                 crate::Codegen::MIRRust::MirRustTarget::Native
-//RS             },
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     let web = if options.web_target {
-//RS         Some(emit_web_from_mir(
-//RS             &bundle,
-//RS             &mir,
-//RS             artifact,
-//RS             &web_release_devtools_policy,
-//RS         ))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let comptime_inputs = std::mem::take(&mut bundle.comptime_inputs);
-//RS     Ok(crate::CompileOutput {
-//RS         rust,
-// END-PORT-PENDING 2022 crates/jet-driver/src/Driver/mod.rs:5401-7200
+use jet_foundation.Diagnostics.[Diagnostic, Severity, Span, StructuredDiagnostic]
+use jet_foundation.Facts.[BuildFactSnapshot, TargetDossier]
+use jet_foundation.Authority.ApplicationAuthority
+use jet_foundation.Outcome.JetReportStyle
+use jet_foundation.Layout.TargetLayout
+use jet_foundation.MIR.*
+use jet_pkg_model.Authority.AuthorityResolver
+use jet_driver.[Loader, Package, Lexer, Parser, Sema, AST, Lock, Manifest, FFI, CFFI, Foreign, Policy, Trace, PluginExport, LibraryExport, CompilerExtensionHook, CompileOutput, run_compiler_work, boot_mir_eval]
+use jet_driver.Driver.[BuildRunOptions, GeneratedSourceProvenance, safe_atomic_write, apply_package_lint_policy, set_bundle_target, seed_build_facts, swap_entry_point, refresh_target_dossier, apply_package_effect_budget, gate_diagnostics, release_devtools_policy_for_bundle]
+use jet_comptime.[ProgramSemanticFacts, program_reflection_identity]
+use jet_comptime.Build.[BuildPlan, BuildCapability, BuildPath, LegacyWrapperSpec, BuildError, BuildGeneratedModule, ContentDigest, BuildExecutionError]
+use jet_codegen.Codegen.[TIR, MIRRust, MIRWeb, emit_plugin, emit_library]
+use jet_foundation.Syntax
+use std.[fs, env, io, mem]
+use std.path.[Component, MAIN_SEPARATOR]
+use std.collections.Set
 
+// Rust: crates/jet-driver/src/Driver/mod.rs:5416
+fn package_build_entry_source(project_root: &OSPath) -> (OSPath, String)? [Diagnostic]! {
+    resolver :: AuthorityResolver.open(project_root).map_err(fn(error) { [error.diagnostic()] })?
+    package :: if Loader.package_facts_for_root(project_root)? == { .Some(package) -> package .None -> return None }
+    entry :: package.resolve_build_entry_checked(&resolver).map_err(fn(error) { [build_entry_resolution_diagnostic(&error)] })?
+    entry :: if entry == { .Some(entry) -> entry .None -> return None }
+    raw_source :: entry.text().map_err(fn(error) { [error.diagnostic()] })?
+    source :: if entry.path.file_name().and_then(fn(name) { name.to_str() }) == Some(Syntax.PACKAGE_FILE) { Package.build_entry_source(&raw_source).unwrap_or(raw_source) } else { raw_source }
+    if source_has_build_entry(&source) == Some(false) { return None }
+    resolver.revalidate_file(&entry).map_err(fn(error) { [error.diagnostic()] })?
+    resolver.revalidate_root().map_err(fn(error) { [error.diagnostic()] })?
+    Some((entry.path, source))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5451
+fn build_entry_resolution_diagnostic(error: &String) -> Diagnostic {
+    code :: if error.contains("two build entries for the package:") { "E3520" } else { "E1334" }
+    (why, fix) :: if code == "E3520" { ("one package has exactly one build entry so policy and provenance have one auditable home", "keep one `fn build` and remove the other entry") } else { ("package entry discovery uses the checked package authority", "repair the package source and try the build again") }
+    Diagnostic.error(code, error.to_string(), why.to_string(), fix.to_string(), None)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5496
+// Route before tier selection using the same checked entry selection as build staging.
+pub fn selects_build_entry(source: &String, project_root: OSPath?) -> Bool {
+    if source_has_build_entry(source) == Some(true) { return true }
+    project_root.is_some_and(fn(root) { if package_build_entry_source(&root) == { .Ok(.Some(_)) -> true _ -> false } })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5506
+fn source_has_build_entry(source: &String) -> Bool? {
+    source :: Package.mask_inline_package_source(source).ok()?.0
+    (tokens, lex_diags) :: Lexer.lex(&source)
+    if !lex_diags.is_empty() { return None }
+    (program, _) :: Parser.parse_for_check_with_source(&tokens, &source).ok()?
+    Some(program.items.iter().any(fn(item) { if item == { .Func(func) -> Sema.is_build_entry(func) _ -> false } }))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5523
+fn load_build_entry_bundle(file: &String, overlay: (OSPath, String)?, direct_package_overlay: (OSPath, String)?, source_closure: &[(OSPath, String)]) -> AST.ProgramBundle [Diagnostic]! {
+    overlays := source_closure.iter().map(fn((path, source)) { (path.as_path(), source.as_str()) }).collect()
+    if overlay == Some(overlay) { overlays.push(overlay) } else if direct_package_overlay == Some((path, source)) { overlays.push((path.as_path(), source.as_str())) }
+    Loader.load_entry_with_overlays(file, &overlays, false)?
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5541
+fn package_manifest_build_overlay(file: &String) -> (OSPath, String)? [Diagnostic]! {
+    path :: OSPath.new(file)
+    if path.file_name().and_then(fn(name) { name.to_str() }) != Some(Syntax.PACKAGE_FILE) { return None }
+    // GATE #4494: current directory and native authority paths.
+    absolute :: if path.is_absolute() { path.to_path_buf() } else {
+        env.current_dir().map(fn(directory) { directory.join(path) }).map_err(fn(error) { [Diagnostic.error("E1334", "package manifest path cannot be resolved", error.to_string(), "use an existing package.jet path", None)] })?
+    }
+    root :: absolute.parent().unwrap_or(OSPath.new("."))
+    resolver :: AuthorityResolver.open(root).map_err(fn(error) { [error.diagnostic()] })?
+    checked :: resolver.checked_manifest(OSPath.new(".")).map_err(fn(error) { [error.diagnostic()] })?
+    if normalize_project_path(root, &absolute) != normalize_project_path(root, &checked.file.path) { throw [Diagnostic.error("E1334", "package manifest path changed during resolution", "the requested manifest path is not the checked package.jet object", "use the canonical package.jet path", None)] }
+    source :: checked.file.text().map_err(fn(error) { [error.diagnostic()] })?
+    resolver.revalidate_file(&checked.file).map_err(fn(error) { [error.diagnostic()] })?
+    result :: Package.build_entry_source(&source).map(fn(source) { (checked.file.path.clone(), source) })
+    resolver.revalidate_file(&checked.file).map_err(fn(error) { [error.diagnostic()] })?
+    result
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5592
+fn validate_build_authority(plan: &BuildPlan, declared: &Set[BuildCapability], has_impure_gate: Bool, options: &BuildRunOptions, dependency_name: String?, span: Span) -> Unit [Diagnostic]! {
+    selected :: plan.selected_action_ids().map_err(fn(error) { [build_plan_diagnostic(&error)] })?
+    required := plan.actions().iter().filter(fn(action) { selected.contains(&action.id) }).flat_map(fn(action) { action.caps.iter().copied() }).collect_set()
+    if !plan.selected_probe_ids().map_err(fn(error) { [build_plan_diagnostic(&error)] })?.is_empty() { required.insert(BuildCapability.Exec) }
+    effects :: required.into_iter().collect(); effects.sort()
+    for effect in effects {
+        if !declared.contains(&effect) { throw [Diagnostic.error("E3503", "this build uses `{effect.name()}` without declaring it on `fn build`", "the build signature is the static authority manifest audited before build code executes", "add `{effect.name()}` to the build function's `-[...]>` effect row", Some(span))] }
+        if !has_impure_gate { throw [Diagnostic.error("E3502", "build authority `{effect.name()}` must be used inside `#Impure(\"reason\")`", "ambient build effects need an audited source gate as well as a policy grant", "wrap the action or probe declarations in `#Impure(\"why this build needs ambient authority\")`", Some(span))] }
+        if !options.inspect_only && !effective_grants(options).contains(&effect) {
+            if dependency_name == Some(dependency_name) { throw [Diagnostic.error("E3504", "dependency `{dependency_name}` build asks for `{effect.name()}` not granted by the root", "dependency build code never gets ambient authority unless the workspace names it", "grant `{effect.name()}` explicitly in workspace policy, or remove the dependency action", Some(span))] }
+            throw [Diagnostic.error("E3503", "this build asks for `{effect.name()}`, which effective policy has not granted", "a source declaration and `#Impure` gate do not widen CLI, package, or workspace policy", "pass `--allow-{effect.flag()}` or grant it in package/workspace build policy", Some(span))]
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5665
+fn validate_legacy_project_imports(plan: &BuildPlan, project_root: &OSPath, span: Span) -> Unit [Diagnostic]! {
+    selected :: plan.selected_action_ids().map_err(fn(error) { [build_plan_diagnostic(&error)] })?
+    for action in plan.actions().iter().filter(fn(action) { selected.contains(&action.id) }) {
+        import_marker :: action.labels.get("legacy.import")
+        project_file :: if action.labels.get("legacy.project-file") == {
+            .Some(project_file) -> project_file
+            .None -> {
+                if import_marker.is_some() { throw [Diagnostic.error("E3502", "legacy project-file import is missing its canonical path", "a project-file import has one reserved marker and one canonical path", "pass the wrapper's canonical project file as the final import argument", Some(span))] }
+                continue
+            }
+        }
+        if import_marker.map(fn(text) { text.as_str() }) != Some("project-file") { throw [Diagnostic.error("E3502", "legacy project file `{project_file}` has no canonical import marker", "only the typed legacy project-file importer may attach this path to an action", "declare the project file through the legacy wrapper import", Some(span))] }
+        kind :: action.legacy_wrapper.ok_or_else(fn() { [Diagnostic.error("E3502", "legacy import `{project_file}` is not attached to a legacy wrapper", "a project-file import must be owned by the typed legacy wrapper that reads it", "declare the project file through the legacy wrapper import", Some(span))] })?
+        if project_file != kind.project_file() || BuildPath.new(project_file.clone()).is_err() || !action.inputs.iter().any(fn(input) { input.as_str() == project_file }) { throw [Diagnostic.error("E3502", "legacy import `{project_file}` is not the canonical project file for {kind.as_str()}", "an imported legacy project file must be canonical, relative, and part of the typed action identity", "use `{kind.project_file()}` through the legacy wrapper import", Some(span))] }
+        if LegacyWrapperSpec.read_legacy_project_file(project_root, kind) == .Err(error) {
+            (what, fix) :: if error == {
+                .LegacyProjectFileMissing(_) -> ("legacy project file `{project_file}` is missing", "restore the declared project file or remove the import")
+                .LegacyProjectFileInvalid(path) -> ("legacy project file `{path}` is not a bounded UTF-8 regular file", "declare a regular UTF-8 project file no larger than 1 MiB inside the project root")
+                other -> ("legacy project file `{project_file}` could not be imported: {other:?}", "restore the declared project file or remove the import")
+            }
+            throw [Diagnostic.error("E3502", what, "legacy graph import rejects links and directories before a wrapper can run", fix, Some(span))]
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5761
+fn effective_grants(options: &BuildRunOptions) -> Set[BuildCapability] { options.grants.clone() }
+// Rust: crates/jet-driver/src/Driver/mod.rs:5767
+pub fn program_semantic_facts(bundle: &AST.ProgramBundle, checked: &Sema.SemIndexEffectFacts) -> ProgramSemanticFacts {
+    effects := [String:[String]].new(); arithmetic := [:]
+    reaches_panic :: checked.reachability.nodes_with("panic", "panic")
+    for (module_idx, module) in bundle.modules.iter().enumerate() {
+        for item in &module.items {
+            func :: if item == { .Func(func) -> func _ -> continue }
+            qualified :: program_reflection_identity(&checked.name_ledger, module_idx, &module.alias, &func.name)
+            values :: checked.solved.get(&qualified).map(fn(set) { set.iter().cloned().collect() }).unwrap_or_default()
+            effects.insert(qualified.clone(), values)
+            arithmetic.insert(qualified, AST.arithmetic_policy_facts(&func.body))
+        }
+    }
+    ProgramSemanticFacts{effects: effects, arithmetic: arithmetic, reaches_panic: reaches_panic, fact_registry: checked.fact_registry.clone(), name_ledger: checked.name_ledger.clone()}
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5803
+fn bad_build_signature(span: Span) -> Diagnostic { Diagnostic.error("E3501", "`fn build` must take one `BuildContext` and return `BuildPlan`", "the build entry is a typed contract: its parameter is its authority and its result is the graph Jet executes", "write `fn build(b: BuildContext) BuildPlan`", Some(span)) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:5813
+fn build_function_location(module: &AST.LoadedModule, index: USize) -> String {
+    line :: if module.items.get(index) == { .Some(.Func(function)) -> source_line_at(&module.source, function.name_span.start) _ -> 1 }
+    "{module.path.display()}:{line}"
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5823
+fn duplicate_build_entries(bundle: &AST.ProgramBundle, indices: &[USize]) -> Diagnostic {
+    module :: &bundle.modules[bundle.entry]
+    first :: build_function_location(module, indices[0]); second :: build_function_location(module, indices[1])
+    span :: if module.items.get(indices[1]) == { .Some(.Func(function)) -> Some(function.name_span) _ -> None }
+    build_entry_conflict("the entry unit", &first, &second, span)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5834
+fn build_source_location(path: &OSPath, source: &String) -> String { "{path.display()}:{source_line_at(source, source.find("fn build").unwrap_or(0))}" }
+// Rust: crates/jet-driver/src/Driver/mod.rs:5839
+fn source_line_at(source: &String, offset: USize) -> USize { source.as_bytes()[..offset.min(source.len())].iter().filter(fn(byte) { byte == b'\n' }).count() + 1 }
+// Rust: crates/jet-driver/src/Driver/mod.rs:5847
+fn build_entry_conflict(unit: &String, first_location: &String, second_location: &String, span: Span?) -> Diagnostic {
+    Diagnostic.error("E3520", "two build entries for {unit}: {first_location} and {second_location}", "one package has exactly one build entry so policy and provenance have one auditable home", "keep the `fn build` in {first_location} and remove the entry in {second_location}", span)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5865
+fn materialize_and_check_generated(modules: &[&BuildGeneratedModule], root: &OSPath, existing_source_paths: &[OSPath], action_outputs: &[String], span: Span?, build_facts: &BuildFactSnapshot) -> [GeneratedSourceProvenance] [Diagnostic]! {
+    modules := modules.to_vec()
+    modules.sort_by(fn(left, right) { left.path.as_str().cmp(right.path.as_str()).then_with(fn() { left.name.cmp(&right.name) }) })
+    lock :: Lock.load(root)
+    existing_source_paths :: existing_source_paths.iter().map(fn(path) { normalize_project_path(root, path) }).collect()
+    action_outputs :: action_outputs.iter().map(fn(path) { normalize_project_path(root, OSPath.new(path)) }).collect()
+    // Preflight all owners before exposing any generated module to concurrent observers.
+    planned_paths := [OSPath].new().into_set()
+    for module in &modules {
+        path :: normalize_project_path(root, OSPath.new(module.path.as_str()))
+        if !planned_paths.insert(path.clone()) { throw [generated_cycle_diag(&module.name, module.path.as_str(), "two generated modules claim the same managed path", span)] }
+        if action_outputs.iter().any(fn(output) { output == &path }) { throw [generated_cycle_diag(&module.name, module.path.as_str(), "a selected build action and a generated module both own this path", span)] }
+        if has_symlinked_component(root, &path) { throw [generated_collision_diag(&module.name, module.path.as_str(), span)] }
+        managed :: managed_generated_file(lock.as_ref(), root, &path, &module.source_digest)
+        if existing_source_paths.iter().any(fn(source) { source == &path }) && !managed { throw [generated_collision_diag(&module.name, module.path.as_str(), span)] }
+        // GATE #4494: non-following native filesystem metadata.
+        if fs.symlink_metadata(&path) == .Ok(metadata) {
+            if metadata.file_type().is_symlink() || (!metadata.is_file() && !managed) { throw [generated_collision_diag(&module.name, module.path.as_str(), span)] }
+            if metadata.is_file() && !managed { throw [generated_collision_diag(&module.name, module.path.as_str(), span)] }
+        }
+    }
+    path_indices :: modules.iter().enumerate().map(fn((index, module)) { (normalize_project_path(root, OSPath.new(module.path.as_str())), index) }).collect()
+    dependencies :: modules.iter().map(fn(module) { generated_dependencies(module, &normalize_project_path(root, OSPath.new(module.path.as_str())), root, &path_indices) }).collect_result()?
+    rounds :: generated_rounds(&dependencies, &modules, span)?
+    provenance := [GeneratedSourceProvenance].new()
+    for round in rounds {
+        for index in round {
+            module :: modules[index]
+            path :: normalize_project_path(root, OSPath.new(module.path.as_str()))
+            safe_atomic_write(&path, module.source.as_bytes()).map_err(fn(error) { [generated_io_diag(&module.name, &error)] })?
+            generated_bundle := Loader.load_entry_with_overlay(path.to_str().unwrap_or(module.path.as_str()), Some((&path, &module.source)), false).map_err(fn(diags) {
+                for diag in &diags { diag.what = "generated module `{module.name}`: {diag.what}" }
+                diags
+            })?
+            generated_bundle.build_facts = build_facts.clone(); generated_bundle.active_os = build_facts.os
+            generated_diags :: Sema.check_bundle(&generated_bundle, Sema.CompileMode.Check)
+            diags := apply_package_lint_policy(&generated_bundle, generated_diags)?
+            diags.retain(fn(diag) { diag.severity == Severity.Error })
+            if !diags.is_empty() { for diag in &diags { diag.what = "generated module `{module.name}`: {diag.what}" }; throw diags }
+            provenance.push(GeneratedSourceProvenance{name: module.name.clone(), path: path, digest: module.source_digest.clone(), source: module.source.clone()})
+        }
+    }
+    provenance
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6012
+fn generated_dependencies(module: &BuildGeneratedModule, path: &OSPath, root: &OSPath, paths: &[OSPath:USize]) -> [USize] [Diagnostic]! {
+    (tokens, lex_diags) :: Lexer.lex(&module.source)
+    if !lex_diags.is_empty() { throw annotate_generated_frontend_diags(&module.name, lex_diags) }
+    program :: Parser.parse_with_source(&tokens, &module.source).map_err(fn(diags) { annotate_generated_frontend_diags(&module.name, diags) })?
+    dependencies := [USize].new().into_set()
+    for import in program.imports {
+        import_path :: if import.kind == { .File(import_path, _) -> import_path _ -> continue }
+        candidate :: if generated_import_path(path, root, &import_path) == { .Some(candidate) -> candidate .None -> continue }
+        if paths.get(&candidate) == Some(index) { dependencies.insert(index) }
+    }
+    dependencies :: dependencies.into_iter().collect(); dependencies.sort(); dependencies
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6039
+fn generated_import_path(path: &OSPath, root: &OSPath, import_path: &String) -> OSPath? {
+    if import_path.trim().is_empty() || import_path.starts_with('/') { return None }
+    candidate := path.parent()?.to_path_buf()
+    for part in import_path.split('/') { if part.is_empty() || part == "." { continue }; if part == ".." { return None }; candidate.push(part) }
+    candidate.set_extension(Syntax.FILE_EXT)
+    Some(normalize_project_path(root, &candidate))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6061
+fn annotate_generated_frontend_diags(name: &String, diagnostics: [Diagnostic]) -> [Diagnostic] {
+    for diagnostic in &diagnostics { diagnostic.what = "generated module `{name}`: {diagnostic.what}" }
+    diagnostics
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6075
+fn generated_rounds(dependencies: &[[USize]], modules: &[&BuildGeneratedModule], span: Span?) -> [[USize]] [Diagnostic]! {
+    dependents := [[USize].new(); modules.len()]
+    remaining := dependencies.iter().map(fn(deps) { deps.len() }).collect()
+    for (module, deps) in dependencies.iter().enumerate() { for dependency in deps { dependents[dependency].push(module) } }
+    for dependents in &dependents { dependents.sort_unstable() }
+    ready := [USize].new().into_set()
+    for (index, count) in remaining.iter().enumerate() { if count == 0 { ready.insert(index) } }
+    rounds := [[USize]].new(); emitted := 0
+    while !ready.is_empty() {
+        current :: ready.iter().copied().collect(); current.sort(); ready.clear()
+        for module in &current {
+            emitted += 1
+            for dependent in &dependents[module] { remaining[dependent] -= 1; if remaining[dependent] == 0 { ready.insert(dependent) } }
+        }
+        rounds.push(current)
+    }
+    if emitted == modules.len() { return rounds }
+    state := [0u8; modules.len()]; stack := [USize].new()
+    cycle :: (0..modules.len()).find_map(fn(index) { generated_cycle_chain(index, dependencies, &state, &stack) }).unwrap_or_else(fn() { [0] })
+    first :: cycle[0]
+    chain :: cycle.iter().map(fn(index) { modules[index].name.as_str() }).collect().join(" -> ")
+    throw [generated_cycle_diag(&modules[first].name, modules[first].path.as_str(), &"dependency chain `{chain}` is cyclic", span)]
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6136
+fn generated_cycle_chain(index: USize, dependencies: &[[USize]], state: &[U8], stack: &[USize]) -> [USize]? {
+    if state[index] == 1 { start :: stack.iter().position(fn(item) { item == index }).unwrap_or(0); cycle := stack[start..].to_vec(); cycle.push(index); return Some(cycle) }
+    if state[index] == 2 { return None }
+    state[index] = 1; stack.push(index)
+    for dependency in &dependencies[index] { if generated_cycle_chain(dependency, dependencies, state, stack) == Some(cycle) { return Some(cycle) } }
+    _ :: stack.pop(); state[index] = 2; None
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6163
+fn normalize_project_path(root: &OSPath, path: &OSPath) -> OSPath {
+    path :: if path.is_absolute() { path.to_path_buf() } else { root.join(path) }
+    normalized := OSPath.new()
+    for component in path.components() {
+        if component == { .Prefix(prefix) -> normalized.push(prefix.as_os_str()) .RootDir -> normalized.push(MAIN_SEPARATOR.to_string()) .CurDir -> {} .ParentDir -> { _ :: normalized.pop() } .Normal(part) -> normalized.push(part) }
+    }
+    normalized
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6184
+fn has_symlinked_component(root: &OSPath, path: &OSPath) -> Bool {
+    relative :: if path.strip_prefix(root) == { .Ok(relative) -> relative .Err(_) -> return true }
+    current := root.to_path_buf()
+    for component in relative.components() {
+        part :: if component == { .Normal(part) -> part _ -> return true }
+        current.push(part)
+        if fs.symlink_metadata(&current) == .Ok(metadata) { if metadata.file_type().is_symlink() { return true } }
+    }
+    false
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6203
+fn managed_generated_file(lock: Lock.LockFile?, root: &OSPath, path: &OSPath, digest: &ContentDigest) -> Bool {
+    lock :: if lock == { .Some(lock) -> lock .None -> return false }
+    relative :: if path.strip_prefix(root) == { .Ok(relative) -> relative .Err(_) -> return false }
+    relative :: relative.to_string_lossy().replace('\\', "/")
+    lock.comptime_inputs.iter().any(fn(input) { input.path == relative && input.hash == digest.as_str() })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6221
+fn generated_collision_diag(name: &String, path: &String, span: Span?) -> Diagnostic { Diagnostic.error("E3510", "`b.generate(\"{name}\")` would shadow the module at `{path}`", "generation is additive: what you wrote is always what compiles", "rename the generated module, or delete the hand-written one", span) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6235
+fn generated_cycle_diag(name: &String, path: &String, reason: &String, span: Span?) -> Diagnostic { Diagnostic.error("E3511", "generation rounds form a cycle: `{name}` at `{path}`", "generated source must reach a bounded deterministic order, not loop until quiescent", "{reason}; break the dependency between these generators", span) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6251
+fn generated_io_diag(name: &String, error: &io.Error) -> Diagnostic { Diagnostic.error("E3502", "generated module `{name}` could not be materialized", "generated source must be a real file before it re-enters the front end: {error}", "make sure `.jet/generated` is writable and the generated module name is unique", None) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6262
+fn build_plan_diagnostic(error: &BuildError) -> Diagnostic { Diagnostic.error("E3502", "build plan is invalid: {error:?}", "all graph handles must belong to one selected root build and every action output must have one owner", "fix the named graph node and use `jet inspect explain-build` to inspect its inputs", None) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6272
+fn build_execution_diagnostic(error: BuildExecutionError) -> Diagnostic {
+    if error == {
+        .MissingGrant(action, capability) -> Diagnostic.error("E3504", "build action `{action}` asks for ungranted `{capability:?}` ability", "declaring an ability in `fn build` does not grant it; root policy must approve each ambient effect", "pass `--allow-{capability.flag()}` for this run, or grant it in package/workspace policy", None)
+        .Reported(report) -> {
+            diagnostic := Diagnostic.error("E3505", report.message.clone(), "the sandboxed command reported a structured failure; its typed identity and source data remain in the report", "fix the action command, declared inputs/outputs, toolchain, or probe, then rerun `jet build`", None)
+            diagnostic.detail = Some(report.render_with_style(JetReportStyle.PLAIN)); diagnostic.structured = Some(StructuredDiagnostic.BuildError(report)); diagnostic
+        }
+        .ProbeFailed(probe, detail) -> Diagnostic.error("E3505", "build probe `{probe}` failed", detail, "fix the typed probe or select a toolchain that provides it", None)
+        .SandboxUnavailable -> Diagnostic.error("E3505", "build sandbox is unavailable", "Jet refuses to run typed build actions without the required bubblewrap isolation", "install bubblewrap or run on a supported build worker; there is no ambient fallback", None)
+        .IO(action, detail) -> Diagnostic.error("E3505", "build action `{action}` could not access a declared build path", detail, "fix the declared input/output path or make the project build directory writable", None)
+        .InvalidGraph(error) -> build_plan_diagnostic(&error)
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6327
+fn compile_bundle_path_opts_full(file: &String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, library_target: Bool, debug_linemap: Bool, cross_target: String?, explicit_output: String?, profile: &String, setting_overrides: &[String:String], locked: Bool, entry_fn: String?) -> CompileOutput [Diagnostic]! {
+    run_compiler_work(fn() { compile_bundle_path_opts_on_compiler_stack_with_runtime(file, mode, no_os, gates, web_target, plugin_target, library_target, debug_linemap, cross_target, explicit_output, profile, setting_overrides, locked, entry_fn, None, None, None, None).map(fn((output, _)) { output }) })?
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6371
+pub fn compile_bundle_path_opts_with_overlay(file: &String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, library_target: Bool, debug_linemap: Bool, cross_target: String?, explicit_output: String?, profile: &String, setting_overrides: &[String:String], locked: Bool, entry_fn: String?, source_path: &OSPath, source: &String) -> CompileOutput [Diagnostic]! {
+    run_compiler_work(fn() { compile_bundle_path_opts_on_compiler_stack_with_runtime(file, mode, no_os, gates, web_target, plugin_target, library_target, debug_linemap, cross_target, explicit_output, profile, setting_overrides, locked, entry_fn, Some((source_path, source)), None, None, None).map(fn((output, _)) { output }) })?
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6417
+pub fn compile_bundle_path_opts_with_source_closure(file: &String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, library_target: Bool, debug_linemap: Bool, cross_target: String?, explicit_output: String?, profile: &String, setting_overrides: &[String:String], locked: Bool, entry_fn: String?, source_closure: &[(OSPath, String)]) -> CompileOutput [Diagnostic]! {
+    run_compiler_work(fn() { compile_bundle_path_opts_on_compiler_stack_with_runtime(file, mode, no_os, gates, web_target, plugin_target, library_target, debug_linemap, cross_target, explicit_output, profile, setting_overrides, locked, entry_fn, None, None, Some(source_closure), None).map(fn((output, _)) { output }) })?
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6462
+pub fn compile_bundle_path_opts_with_source_closure_and_runtime(file: &String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, library_target: Bool, debug_linemap: Bool, cross_target: String?, explicit_output: String?, profile: &String, setting_overrides: &[String:String], locked: Bool, entry_fn: String?, source_closure: &[(OSPath, String)], application_authority: ApplicationAuthority?) -> (CompileOutput, AST.ProgramBundle) [Diagnostic]! {
+    run_compiler_work(fn() { compile_bundle_path_opts_on_compiler_stack_with_runtime(file, mode, no_os, gates, web_target, plugin_target, library_target, debug_linemap, cross_target, explicit_output, profile, setting_overrides, locked, entry_fn, None, None, Some(source_closure), application_authority) })?
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6504
+pub fn mir_artifact_build_mode_for(bundle: &AST.ProgramBundle, compile_mode: Sema.CompileMode, profile: &String) -> MirArtifactBuildMode {
+    if (compile_mode, profile) == {
+        (_, "fuzz") -> MirArtifactBuildMode.Fuzz
+        (_, "coverage") -> MirArtifactBuildMode.Coverage
+        (.Test | .TestOverride, _) -> MirArtifactBuildMode.Test
+        (_, "release" | "hardened") -> MirArtifactBuildMode.Release
+        (_, "dev" | "debug" | "ci" | "small" | "no-os" | "default" | "fast") -> MirArtifactBuildMode.Dev
+        (_, "test") -> MirArtifactBuildMode.Test
+        (_, name) -> if Loader.package_facts_for_bundle(bundle).ok().flatten().is_some_and(fn(facts) { facts.build_profiles.iter().any(fn(profile) { profile.name == name }) }) { MirArtifactBuildMode.Dev } else { panic("unsupported MIR artifact build profile `{name}`") }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6541
+fn mir_artifact_request_for(bundle: &AST.ProgramBundle, target: MirArtifactTarget, kind: MirArtifactKind, compile_mode: Sema.CompileMode, profile: &String) -> MirArtifactRequest { MirArtifactRequest.new(target, kind, mir_artifact_build_mode_for(bundle, compile_mode, profile)) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6552
+fn mir_artifact_request_for_build(bundle: &AST.ProgramBundle, compile_mode: Sema.CompileMode, profile: &String, web_target: Bool, plugin_target: Bool, library_target: Bool) -> MirArtifactRequest {
+    if web_target && plugin_target { panic("MIR artifact request cannot select both Web and sandbox targets") }
+    target :: if web_target { MirArtifactTarget.Web } else { MirArtifactTarget.RustAot }
+    kind :: if web_target { MirArtifactKind.WebApplication } else if plugin_target { MirArtifactKind.SandboxPlugin } else if library_target { MirArtifactKind.NativeLibrary } else if compile_mode == .TestOverride { MirArtifactKind.TestOverride } else if profile == "fuzz" { MirArtifactKind.FuzzExecutable } else if compile_mode == .Test { MirArtifactKind.TestExecutable } else { MirArtifactKind.NativeExecutable }
+    mir_artifact_request_for(bundle, target, kind, compile_mode, profile)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6591
+fn lower_checked_mir_program_for(bundle: &AST.ProgramBundle, request: MirArtifactRequest) -> (MirProgram, MirArtifactId) { lower_checked_mir_program_for_with_debug(bundle, request, false) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6601
+fn lower_checked_mir_program_for_with_debug(bundle: &AST.ProgramBundle, request: MirArtifactRequest, debug_linemap: Bool) -> (MirProgram, MirArtifactId) {
+    lower_span := Trace.span("lower")
+    (mir, artifact) :: TIR.lower_checked_mir_program_for_with_debug(bundle, request, debug_linemap).unwrap_or_else(fn(error) { panic("{error}") })
+    mir.validate().unwrap_or_else(fn(error) { panic("canonical MIR validation failed: {error}") })
+    lower_span.items(mir.functions.len()); (mir, artifact)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6623
+fn mir_web_target(bundle: &AST.ProgramBundle, mir: &MirProgram, artifact: MirArtifactId, release_devtools_policy: &Package.ReleaseDevtoolsPolicy) -> MIRWeb.MirWebTarget {
+    assets := MIRWeb.MirWebAssets.with_default_shell()
+    assets.explicit_html_path = bundle.modules.get(bundle.entry).and_then(fn(module) { module.html_path.clone() })
+    assets.source_names = bundle.modules.iter().map(fn(module) { module.display.clone() }).collect()
+    assets.source_contents = bundle.modules.iter().map(fn(module) { module.source.clone() }).collect()
+    MIRWeb.MirWebTarget{layout: if bundle.build_facts.target_triple.is_empty() { TargetLayout.host() } else { TargetLayout.from_build_facts(&bundle.build_facts) }, assets: assets, semantic_digest: mir_program_digest(mir), artifact: artifact, release_devtools_policy: release_devtools_policy.clone()}
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6657
+fn emit_web_from_mir(bundle: &AST.ProgramBundle, mir: &MirProgram, artifact: MirArtifactId, release_devtools_policy: &Package.ReleaseDevtoolsPolicy) -> MIRWeb.WebArtifacts { MIRWeb.emit_web(mir, &mir_web_target(bundle, mir, artifact, release_devtools_policy)).unwrap_or_else(fn(error) { panic("MIR Web emission failed: {error}") }) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:6670
+fn apply_application_authority(bundle: &AST.ProgramBundle, invocation_authority: ApplicationAuthority?) -> Unit {
+    invocation_authority :: if invocation_authority == { .Some(authority) -> authority .None -> return }
+    authority := &bundle.package_guarantees.application_authority
+    authority.granted_effects.extend(invocation_authority.granted_effects.iter().cloned()); authority.denied_effects.extend(invocation_authority.denied_effects.iter().cloned())
+    if !authority.authority.is_empty() && !invocation_authority.authority.is_empty() { authority.authority.push_str(" + ") }
+    authority.authority.push_str(&invocation_authority.authority)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6697
+pub fn check_bundle_path_with_source_closure_for_artifact(file: &String, mode: Sema.CompileMode, profile: &String, source_closure: &[(OSPath, String)]) -> (AST.ProgramBundle, [Diagnostic], FFI.FfiLink?) [Diagnostic]! {
+    run_compiler_work(fn() { check_bundle_for_artifact_on_compiler_stack(file, mode, false, Policy.GateSet.default(), false, false, None, None, profile, &[:], false, None, None, None, Some(source_closure)) })?
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6734
+fn check_bundle_for_artifact_on_compiler_stack(file: &String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, library_target: Bool, cross_target: String?, explicit_output: String?, profile: &String, setting_overrides: &[String:String], locked: Bool, entry_fn: String?, overlay: (OSPath, String)?, target_dossier: TargetDossier?, source_closure: [(OSPath, String)]?) -> (AST.ProgramBundle, [Diagnostic], FFI.FfiLink?) [Diagnostic]! {
+    if locked { Loader.verify_locked_dependency_sources(file)? }
+    overlays := source_closure.unwrap_or(&[]).iter().map(fn((path, source)) { (path.as_path(), source.as_str()) }).collect()
+    if overlay == Some((path, source)) { overlays.push((path, source)) }
+    load_span := Trace.span("load")
+    bundle := Loader.load_entry_with_overlays(file, &overlays, false)?
+    load_span.items(bundle.modules.len()); drop(load_span)
+    // GATE #4483: sema facts and MIR share one selected target dossier.
+    set_bundle_target(&bundle, cross_target); seed_build_facts(&bundle, profile, locked, setting_overrides)?
+    bundle.build_facts.artifact_build = explicit_output.is_some() || library_target
+    has_target_dossier :: target_dossier.is_some()
+    if target_dossier == Some(dossier) { bundle.build_facts.target_dossier = dossier }
+    if entry_fn == Some(entry_fn) { swap_entry_point(&bundle, &entry_fn) }
+    if web_target { bundle.web_partition_enforced = true }
+    runnable_output :: if library_target { None } else { explicit_output }
+    sema_span := Trace.span("sema.check")
+    (diags, effect_facts) :: if runnable_output == Some(output) { Sema.check_bundle_for_output_opts_with_effect_facts(&bundle, mode, &output, no_os, gates) } else if no_os { Sema.check_bundle_no_os_with_effect_facts(&bundle, mode) } else if !gates.is_empty() { Sema.check_bundle_gates_with_effect_facts(&bundle, mode, gates) } else { Sema.check_bundle_with_effect_facts(&bundle, mode) }
+    sema_span.items(bundle.modules.len()); drop(sema_span)
+    if !has_target_dossier { refresh_target_dossier(&bundle, no_os, web_target) }
+    diags := apply_package_effect_budget(&bundle, &effect_facts, diags)?
+    if cross_target == Some(target) { diags.extend(Sema.check_target_surface(&bundle, &target)) }
+    extension_diags :: CompilerExtensionHook.post_sema_diagnostics(&bundle, Some(&effect_facts), &diags)
+    parse_teaching :: mem.take(&bundle.parse_teaching)
+    lints :: gate_diagnostics(&bundle, parse_teaching, diags, extension_diags)?
+    ffi :: if cross_target == Some(target) { FFI.prepare_for_target(&bundle, &target)? } else if web_target { FFI.prepare_for_target(&bundle, &bundle.build_facts.target_triple)? } else { FFI.prepare(&bundle)? }
+    (bundle, lints, ffi)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:6834
+fn compile_bundle_path_opts_on_compiler_stack_with_runtime(file: &String, mode: Sema.CompileMode, no_os: Bool, gates: Policy.GateSet, web_target: Bool, plugin_target: Bool, library_target: Bool, debug_linemap: Bool, cross_target: String?, explicit_output: String?, profile: &String, setting_overrides: &[String:String], locked: Bool, entry_fn: String?, overlay: (OSPath, String)?, target_dossier: TargetDossier?, source_closure: [(OSPath, String)]?, application_authority: ApplicationAuthority?) -> (CompileOutput, AST.ProgramBundle) [Diagnostic]! {
+    (bundle, lints, ffi) := check_bundle_for_artifact_on_compiler_stack(file, mode, no_os, gates, web_target, library_target, cross_target, explicit_output, profile, setting_overrides, locked, entry_fn, overlay, target_dossier, source_closure)?
+    plugin_name :: if plugin_target { Some(PluginExport.resolve_export_name(&bundle)) } else { None }
+    library_config :: if library_target {
+        if web_target || plugin_target { throw [Diagnostic.error("E1341", "a Library output cannot also select a backend target", "Library artifacts are native static/shared projections (D-LIB-EXPORT1=C), not web or sandbox guest outputs", "remove `--target=web`/`--target=sandbox` and select the Library output directly", None)] }
+        Some(LibraryExport.resolve_config(&bundle, explicit_output)?)
+    } else { None }
+    apply_application_authority(&bundle, application_authority)
+    request :: mir_artifact_request_for_build(&bundle, mode, profile, web_target, plugin_target, library_target)
+    request :: if plugin_name == Some(name) { request.with_name(&name) } else if library_config.as_ref() == Some(config) { request.with_name(&config.name) } else { request }
+    (mir, artifact) :: lower_checked_mir_program_for_with_debug(&bundle, request, debug_linemap)
+    execution := MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref(); execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, profile)
+    execution.emit_types = true; execution.emit_foreign = true; execution.emit_metadata = false; execution.emit_debug_linemap = debug_linemap; execution.emit_runtime = true
+    web_release_devtools_policy :: execution.release_devtools_policy.clone()
+    emit_span := Trace.span("emit")
+    rust :: MIRRust.emit_mir_program(&mir, &MIRRust.MirRustConfig{target: TargetLayout.from_build_facts(&bundle.build_facts), target_kind: if web_target { MIRRust.MirRustTarget.WebWasm } else { MIRRust.MirRustTarget.Native }, root_prefix: "", execution: execution})
+    emit_span.items(mir.functions.len()); drop(emit_span)
+    web :: if web_target { Some(emit_web_from_mir(&bundle, &mir, artifact, &web_release_devtools_policy)) } else { None }
+    plugin :: if plugin_target {
+        surface_errors :: PluginExport.validate_export_surface(&bundle)
+        if !surface_errors.is_empty() { throw surface_errors }
+        export_name :: plugin_name.as_ref().expect("plugin artifact request has no selected export name")
+        PluginExport.check_and_freeze_version(&bundle, export_name)?
+        Some(emit_plugin(&mir, artifact, &rust))
+    } else { None }
+    if library_config.as_ref() == Some(config) {
+        surface_errors :: LibraryExport.validate_export_surface(&bundle)
+        if !surface_errors.is_empty() { throw surface_errors }
+        LibraryExport.check_and_freeze_version(&bundle, &config.name)?
+    }
+    library :: library_config.as_ref().map(fn(config) { emit_library(&mir, artifact, &rust, &config.bindings) })
+    comptime_inputs :: mem.take(&bundle.comptime_inputs)
+    resolver :: if AuthorityResolver.open(&bundle.project_root) == { .Ok(resolver) -> Some(resolver) .Err(error) -> if error.is_missing() { None } else { throw [error.diagnostic()] } }
+    if resolver == Some(resolver) {
+        checked :: if resolver.checked_manifest(OSPath.new(".")) == { .Ok(checked) -> Some(checked) .Err(error) -> if error.is_missing() { None } else { throw [error.diagnostic()] } }
+        if checked == Some(checked) {
+            source :: checked.file.text().map_err(fn(error) { [error.diagnostic()] })?
+            manifest :: Manifest.parse(&checked.file.path, &source).map_err(fn(diagnostic) { [diagnostic] })?
+            resolver.revalidate_file(&checked.file).map_err(fn(error) { [error.diagnostic()] })?
+            Lock.record_inferred_layer(&bundle.project_root, &manifest.package.name, bundle.inferred_layer)
+        }
+    }
+    output :: CompileOutput{rust: rust, lints: lints, ffi: ffi, clinks: [], comptime_inputs: comptime_inputs, web: web, web_partition_report: bundle.web_partition_report.clone(), plugin: plugin, library: library, library_config: library_config, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling}
+    (output, bundle)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:7025
+#Derive(Clone, Copy, Debug, Default, Eq)
+pub struct CompileSrcOptions { pub web_target: Bool = false }
+// Rust: crates/jet-driver/src/Driver/mod.rs:7030
+pub fn compile_src(src: &String, file: &String, mode: Sema.CompileMode) -> CompileOutput [Diagnostic]! { compile_src_with_options(src, file, mode, CompileSrcOptions.default())? }
+// Rust: crates/jet-driver/src/Driver/mod.rs:7040
+pub fn compile_generated_src(src: &String, file: &String, mode: Sema.CompileMode) -> CompileOutput [Diagnostic]! { compile_src_with_options_and_policy(src, file, mode, CompileSrcOptions.default(), true)? }
+// Rust: crates/jet-driver/src/Driver/mod.rs:7048
+pub fn compile_src_with_options(src: &String, file: &String, mode: Sema.CompileMode, options: CompileSrcOptions) -> CompileOutput [Diagnostic]! { compile_src_with_options_and_policy(src, file, mode, options, false)? }
+// Rust: crates/jet-driver/src/Driver/mod.rs:7057
+fn compile_src_with_options_and_policy(src: &String, file: &String, mode: Sema.CompileMode, options: CompileSrcOptions, generated: Bool) -> CompileOutput [Diagnostic]! { run_compiler_work(fn() { compile_src_on_compiler_stack(src, file, mode, options, generated) })? }
+// Rust: crates/jet-driver/src/Driver/mod.rs:7067
+// Complete the output record through Rust7213, so the next slice begins at check_file.
+fn compile_src_on_compiler_stack(src: &String, file: &String, mode: Sema.CompileMode, options: CompileSrcOptions, generated: Bool) -> CompileOutput [Diagnostic]! {
+    boot_mir_eval()
+    source_for_parse :: if generated { src.to_string() } else { Package.mask_inline_package_source(src).map(fn((masked, _)) { masked }).map_err(fn(error) { [error.diagnostic()] })? }
+    (toks, lex_diags) :: if generated { Lexer.lex_generated(&source_for_parse) } else { Lexer.lex(&source_for_parse) }
+    if !lex_diags.is_empty() { throw lex_diags }
+    prog := Parser.parse_with_source(&toks, &source_for_parse)?
+    bundle := AST.ProgramBundle{
+        entry: 0, project_root: OSPath.from("."),
+        modules: [AST.LoadedModule{path: OSPath.from(file), display: file.to_string(), alias: Loader.default_module_alias(OSPath.new(file)), imports: mem.take(&prog.imports), items: mem.take(&prog.items), script_body: mem.take(&prog.script_body), block_spans: mem.take(&prog.block_spans), source: src.to_string(), web_target_ceiling: prog.web_target_ceiling, pub_file: prog.pub_file, no_prelude: prog.no_prelude, default_target: prog.default_target, html_path: prog.html_path.clone(), policy_declarations: prog.policy_declarations.clone(), user_policy_declarations: prog.user_policy_declarations.clone(), rule_facts: mem.take(&prog.rule_facts)}],
+        devtools_registry: AST.DevtoolsRegistry.default(), parse_teaching: [], used_core: [].into_set(), ffi_callback_fns: [].into_set(), cffi: CFFI.CFfi.default(), comptime_inputs: [], name_ledger: AST.NameLedger.default(), layer_ceiling: None, inferred_layer: Syntax.RuntimeLayer.Core, web_partitions: [:], web_partition_enforced: options.web_target, web_partition_report: None, dep_roots: [:], package_guarantees: Default.default(), program_allocator: Default.default(), active_os: Syntax.OSTarget.host(), build_facts: BuildFactSnapshot.script(OSPath.new(file), Syntax.OSTarget.host(), "dev"), edition: Manifest.latest_edition().to_string()
+    }
+    Foreign.assemble_active_namespaces(&bundle)?
+    bundle.cffi = CFFI.assemble(&bundle)?
+    diags :: Sema.check_bundle(&bundle, mode)
+    errors := [Diagnostic].new(); lints := [Diagnostic].new()
+    for d in diags { if d.severity == { .Error -> errors.push(d) .Lint -> lints.push(d) } }
+    if !errors.is_empty() { throw errors }
+    refresh_target_dossier(&bundle, false, options.web_target)
+    ffi :: if options.web_target { FFI.prepare_for_target(&bundle, &bundle.build_facts.target_triple)? } else { FFI.prepare(&bundle)? }
+    request :: mir_artifact_request_for_build(&bundle, mode, "dev", options.web_target, false, false)
+    (mir, artifact) :: lower_checked_mir_program_for(&bundle, request)
+    execution := MIRRust.MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref(); execution.emit_types = true; execution.emit_foreign = true; execution.emit_metadata = false; execution.emit_debug_linemap = false; execution.emit_runtime = true
+    web_release_devtools_policy :: execution.release_devtools_policy.clone()
+    rust :: MIRRust.emit_mir_program(&mir, &MIRRust.MirRustConfig{target: TargetLayout.host(), target_kind: if options.web_target { MIRRust.MirRustTarget.WebWasm } else { MIRRust.MirRustTarget.Native }, root_prefix: "", execution: execution})
+    web :: if options.web_target { Some(emit_web_from_mir(&bundle, &mir, artifact, &web_release_devtools_policy)) } else { None }
+    comptime_inputs :: mem.take(&bundle.comptime_inputs)
+    CompileOutput{rust: rust, lints: lints, ffi: ffi, clinks: [], comptime_inputs: comptime_inputs, web: web, web_partition_report: bundle.web_partition_report.clone(), plugin: None, library: None, library_config: None, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling}
+}

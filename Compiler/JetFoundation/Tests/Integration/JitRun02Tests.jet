@@ -1,0 +1,471 @@
+use std.[fs, env]
+use std.path.OSPath
+use std.sync.Arc
+use std.sync.atomic.[AtomicUsize, Ordering]
+use std.collections.HashSet
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.JitRun02.*
+use jet_foundation.MIR.[MirRuntimeValue, MirFunctionId]
+use jet_foundation.SourceInterfaces.[NativeInterfaceMethod, NativeInterfaceBindings, NativeInterfaceError]
+use jet_foundation.SourceResources.SourceResourceSession
+use jet_foundation.SourceExecution.[execute_source_helper_entry, SourceHelperArgument, SourceExecutionPolicy, SourceExecutionTier, SourceHelperInvocationFailure, SourceDeoptError, SourceExecutionCompletionScope, SourceExecutionCompletionDisposition, SourceExecutionCompletionRetirement]
+use jet
+// GATE #4494: native compile/run, Web execution, resource leases, interface callbacks, atomics.
+// Rust: tests/jit_run.rs:1797
+#Test("data_tree_list_extend_runs_resident_and_snapshots_self_extension") {
+    assert_typed_fast_path_fixture_with_manifest("jit_data_tree_extend", """
+fn text_value(value: DataTree) -> String {
+    return if value == { .Text(text) -> ~text else -> "" }
+}
+fn run() -> {
+    values := [DataTree]{DataTree.Text("a"), DataTree.Text("b")}
+    other := [DataTree]{DataTree.Text("c"), DataTree.Text("d")}
+    &values.extend(other)
+    loop value in values { print(text_value(~value)) }
+    &values.extend(values)
+    loop value in values { print(text_value(~value)) }
+}
+""", "a\nb\nc\nd\na\nb\nc\nd\na\nb\nc\nd\n", Some("name: \"jit_data_tree_extend\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"))
+}
+// Rust: tests/jit_run.rs:1886
+#Test("data_tree_for_in_nested_conditions_run_resident") {
+    assert_typed_fast_path_fixture_with_manifest("jit_data_tree_for_in", """
+fn text_value(value: DataTree) -> String {
+    return if value == { .Text(text) -> ~text else -> "" }
+}
+fn run() -> {
+    rows := [DataTree]{DataTree.Text("target"), DataTree.Text("other")}
+    found := false
+    loop row in rows {
+        if text_value(~row) == "target" && !found && true -> found = true
+    }
+    print(found)
+}
+""", "true\n", Some("name: \"jit_data_tree_for_in\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"))
+}
+// Rust: tests/jit_run.rs:1970
+#Test("mapped_string_list_flatten_compiles_resident") {
+    assert_typed_fast_path_fixture_with_manifest("jit_mapped_string_flatten", """
+fn flatten_words(contents: String) -> [String] {
+    return contents.lines().map((line: String) -> line.split(" ").to_list()).flatten()
+}
+fn run() -> {
+    words :: flatten_words("one two\nthree four")
+    neighbors :: flatten_words("five six")
+    print(words.len())
+    print(words[0])
+    print(words[3])
+    print(neighbors[1])
+}
+""", "4\none\nfour\nsix\n", Some("name: \"tir_support\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Browser, DB, Env, Exec, FFI, FS, GPU, IO, Log, Mem.Alloc, Net, Rand, Secret, Time] } }\n"))
+}
+// Rust: tests/jit_run.rs:2031
+#Test("result_err_try_sort_by_runs_resident_and_matches_interpreter") {
+    assert_typed_fast_path_fixture_with_manifest("jit_result_err_try_sort_by", """
+fn epoch_order(epoch: String) -> Int Err! {
+    if epoch == "a" -> return Ok(1)
+    if epoch == "bb" -> return Ok(2)
+    return Ok(3)
+}
+fn run() -> {
+    epochs := ["ccc", "a", "bb"]
+    &epochs.sort_by((epoch: String) -> epoch_order(epoch))
+    loop epoch in epochs { print(epoch) }
+}
+""", "a\nbb\nccc\n", None)
+}
+// Rust: tests/jit_run.rs:2107
+#Test("data_tree_try_sort_by_desc_closure_runs_resident") {
+    assert_typed_fast_path_fixture_with_manifest("jit_data_tree_try_sort_by_desc", """
+fn text_value(value: DataTree) -> String Never! {
+    return if value == { .Text(text) -> ~text else -> "" }
+}
+fn run() -> {
+    rows := [DataTree]{DataTree.Text("a"), DataTree.Text("c"), DataTree.Text("b")}
+    &rows.sort_by_desc((row: DataTree) -> text_value(~row))
+    loop row in rows { print(text_value(~row)) }
+}
+""", "c\nb\na\n", None)
+}
+// Rust: tests/jit_run.rs:2172
+#Test("try_payload_return_survives_exit_block") {
+    assert_typed_fast_path_fixture_with_manifest("jit_try_payload_return", """
+use core.encoding.json as json
+fn text_at(tree: DataTree, field: String) -> String {
+    value :: &tree.field(~field) ?? panic("missing")
+    return value.text() ?? panic("not text")
+}
+fn run() -> {
+    manifest :: json.parse("{{\"schema\":\"jet.tower.parity.v1\"}}") ?? panic("parse")
+    print(text_at(~manifest, "schema"))
+}
+""", "jet.tower.parity.v1\n", None)
+}
+// Rust: tests/jit_run.rs:2227
+#Test("http_response_header_builder_runs_resident") {
+    assert_typed_fast_path_fixture_with_manifest("jit_http_response_header_builder", """
+use core.http.server as server
+fn run() -> {
+    response :: server.response(200, "ok").header("x-a", "one").header("x-b", "two")
+    print(response.status())
+    print(response.body().text(1024) ?? "invalid")
+    print(&response.header("x-a") ?? "missing")
+    print(&response.header("x-b") ?? "missing")
+}
+""", "200\nok\none\ntwo\n", Some("name: \"fixture\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Net] } }\n"))
+}
+// Rust: tests/jit_run.rs:2342
+#Test("tower_data_tree_helpers_select_resident_tier") {
+    source_root :: OSPath.from(env.manifest_dir()).join("dogfood/tower")
+    dir :: common.unique_tmp("jit_tower_data_tree_helpers")
+    fs.create_dir_all(&dir).unwrap()
+    fs.copy(source_root.join("run.jet"), dir.join("run.jet")).unwrap()
+    fs.copy(source_root.join("package.jet"), dir.join("package.jet")).unwrap()
+    path :: dir.join("run.jet")
+    bundle := jet.Loader.load_entry(path.to_str().unwrap()).expect("Tower run should load")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != jet.Diagnostics.Severity.Error }), "Tower run should type-check: {diagnostics:#?}")
+    // Every helper remains in the compiled program; no retired tier-plan representation is asserted.
+    for tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(&path, tier).expect("Tower run and DataTree/HTTP/filesystem/hash helpers must compile")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/jit_run.rs:2419
+#Test("lowering_failure_is_not_resident_covered") {
+    dir :: common.unique_tmp("jit_safety_no_program")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("lib_only.jet")
+    fs.write(&file, "fn helper() { print(1) }\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    _ :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Check)
+    for tier in ["O0", "O1", "O2", "Web"] {
+        result :: common.compile_entry_tier(&file, tier)
+        assert(result.is_err(), "a file with no run must not compile an executable {tier} program")
+        reason :: result.unwrap_err().to_string()
+        assert(!reason.is_empty(), "lowering failure must carry a diagnostic reason")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/jit_run.rs:2439
+#Test("jit_list_mutations_preserve_dense_arena_values") {
+    assert_typed_fast_path_fixture_with_manifest("jit_dense_list_mutations", """
+fn run() -> {
+    values := [10, 20, 30]
+    &values.insert(1, 99)
+    print(values.remove(0, .Slot) ?? -1)
+    print(&values.pop() ?? -1)
+    print(values[0])
+    print(values[1])
+}
+""", "10\n30\n99\n20\n", Some("name: \"jit_dense_list_mutations\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"))
+}
+// Rust: tests/jit_run.rs:2507
+#Test("nbody_entry_runs_on_resident_jit_without_deopt") {
+    file :: OSPath.from(env.manifest_dir()).join("Tools/gauntlet/entries/nbody/jet/run.jet")
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).expect("nbody entry loads")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != jet.Diagnostics.Severity.Error }), "nbody entry must type-check: {diagnostics:#?}")
+    reference := None
+    for tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier_with_args(&file, tier, &["1"])
+        assert_eq(output.status.code(), Some(0), "{tier} nbody exit")
+        assert_eq(String.from_utf8_lossy(&output.stderr), "", "{tier} nbody stderr")
+        stdout :: String.from_utf8_lossy(&output.stdout).into_owned()
+        assert_eq(stdout.lines().count(), 2)
+        if Some(expected) = reference.as_ref() { assert_eq(&stdout, expected) } else { reference = Some(^stdout) }
+    }
+}
+// Rust: tests/jit_run.rs:2584
+#Test("data_csv_query_mean_keeps_bare_list_handle_resident") {
+    scratch :: common.Scratch.new("jit_data_csv_query_mean")
+    fs.write(scratch.join("package.jet"), "name: \"jit_data_csv_query_mean\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [GPU, IO, Mem.Alloc] } }\n").unwrap()
+    file :: scratch.join("data_csv_query_mean.jet")
+    fs.write(&file, """
+use core.data as data
+#Codable
+struct Sample { station: String, amplitude: Float }
+fn run() -> {
+    rows :: data.csv<Sample>("station,amplitude\nSTA,1.0\nSTA,3.0\nSTB,2.0") ?? panic("csv")
+    groups :: data.query(rows).group_by(s -> s.station).mean(s -> s.amplitude).collect() ?? panic("group mean")
+    print("rows:{data.count(rows)}")
+    loop group in groups -> print("group:{group.key}:{group.value}")
+    options :: DataLineOptions{
+        title: "waveform", x_label: "station", y_label: "amplitude", markers: true,
+        reference: None, style: "solid", color: "#7FB2C4", legend: "amplitude"
+    }
+    print(data.line_text(groups, options))
+}
+""").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).expect("CSV group fixture should load")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "CSV group fixture must type-check: {diagnostics:#?}")
+    for tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier_with_env(&file, tier, [("JET_STORE_DIR", scratch.join("store").to_string_lossy().into_owned()), ("NO_COLOR", "1")])
+        stdout :: String.from_utf8_lossy(&output.stdout)
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert_eq(output.status.code(), Some(0), "CSV group fixture exited nonzero: stdout={stdout:?} stderr={stderr:?}")
+        assert_eq(&stdout[..stdout.find('\n').unwrap_or(stdout.len())], "rows:3")
+        assert(stdout.contains("group:STA:2.0\n"), "group output missing: {stdout:?}")
+        assert(stdout.contains("group:STB:2.0\n"), "group output missing: {stdout:?}")
+        assert(!stderr.contains("internal compiler error") && !stderr.contains("bad handle"), "CSV group fixture reported a handle failure: {stderr:?}")
+    }
+}
+// Rust: tests/jit_run.rs:2786
+#Test("jit_typed_int_arithmetic_preserves_checked_promotion") {
+    assert_typed_fast_path_fixture("jit_typed_int_arithmetic", """
+use core.math as math
+fn add_one(value: Int) -> Int { return value + 1 }
+fn subtract_one(value: Int) -> Int { return value - 1 }
+fn multiply_two(value: Int) -> Int { return value * 2 }
+fn run() -> {
+    print(add_one(41))
+    print(add_one(Int.MAX))
+    print(subtract_one(Int.MIN))
+    print(multiply_two(Int.MAX))
+    print(math.checked_add(Int.MAX, 1) ?? -1)
+    print(math.saturating_add(Int.MAX, 1))
+}
+""", "42\n9223372036854775808\n-9223372036854775809\n18446744073709551614\n9223372036854775808\n9223372036854775808\n")
+}
+// Rust: tests/jit_run.rs:2820
+#Test("jit_int_list_reducers_preserve_arbitrary_precision") {
+    assert_typed_fast_path_fixture_with_manifest("jit_int_list_reducers", """
+fn run() -> {
+    empty :: [Int]{}
+    print(empty.sum())
+    print(empty.product())
+    print([9].sum())
+    print([24].product())
+    print([Int.MAX, 1].sum())
+    print([Int.MAX, 2].product())
+}
+""", "0\n1\n9\n24\n9223372036854775808\n18446744073709551614\n", Some("name: \"jit_int_list_reducers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"))
+}
+// Rust: tests/jit_run.rs:2844
+#Test("jit_typed_float_operations_and_comparisons_stay_native") {
+    assert_typed_fast_path_fixture("jit_typed_float_operations", """
+use core.math as math
+fn transform(value: Float) -> Float { return ((value + 1.5) * 2.0 - 1.0) / 2.0 }
+fn run() -> {
+    value :: transform(3.0)
+    print(value)
+    print(value == 3.5)
+    print(value != 4.0)
+    print(value < 4.0)
+    print(value > 3.0)
+    print(value <= 3.5)
+    print(value >= 3.5)
+    print(math.sqrt(16.0))
+}
+""", "3.5\ntrue\ntrue\ntrue\ntrue\ntrue\ntrue\n4.0\n")
+}
+// Rust: tests/jit_run.rs:2873
+#Test("jit_loop_carried_scalars_preserve_exact_values") {
+    assert_typed_fast_path_fixture("jit_loop_carried_scalars", """
+fn run() -> {
+    score := 3
+    weight := 0.5
+    loop index in 0..<4 { score = score * 2 + index; weight = weight + 0.25 }
+    print(score)
+    print(weight)
+}
+""", "59\n1.50\n")
+}
+// Rust: tests/jit_run.rs:2891
+#Test("jit_typed_list_indexing_and_byte_iteration_preserve_values") {
+    assert_typed_fast_path_fixture("jit_typed_list_indexing", """
+fn run() -> {
+    bytes := [U8]{1, 2, 3, 4}
+    bytes[1] = 9
+    byte_sum := 0
+    loop byte in bytes { byte_sum = byte_sum + Int.from_u8(byte) }
+    print(bytes[0])
+    print(bytes[1])
+    print(byte_sum)
+    values := [Int]{10, 20, 30}
+    values[1] = values[0] + values[2]
+    print(values[1])
+    print(values[0] + values[1] + values[2])
+}
+""", "1\n9\n17\n40\n80\n")
+}
+// Rust: tests/jit_run.rs:2919
+#Test("jit_json_decoded_record_list_map_and_find_preserve_handles") {
+    assert_typed_fast_path_fixture_with_manifest("jit_json_decoded_record_list_handles", """
+use core.encoding.json as json
+struct Item { id: Int, qty: Int }
+struct Listing { items: [Item] }
+fn run() -> {
+    raw :: "{{\"items\":[{{\"id\":2,\"qty\":7}},{{\"id\":5,\"qty\":4}}]}}"
+    listing :: json.decode<Listing>(raw) ?? panic("decode failed")
+    print("len {listing.items.len()}")
+    print("total {listing.items.map(item -> item.qty).sum()}")
+    if listing.items.find(item -> item.id == 5) == {
+        .Val(item) -> print("found {item.qty}")
+        .None -> print("missing")
+    }
+}
+""", "len 2\ntotal 11\nfound 4\n", Some("name: \"jit_json_decoded_record_list_handles\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"))
+}
+// Rust: tests/jit_run.rs:3008
+#Test("jit_reader_fixed_width_take_pattern_preserves_fields_and_position") {
+    assert_typed_fast_path_fixture("jit_reader_fixed_width_take_pattern", """
+fn run() -> {
+    packet :: [U8]{0x45, 0x00, 0x00, 0x28, 0xDE, 0xAD, 0xBE, 0xEF}
+    reader :: Reader.over(packet)
+    parsed :: reader.take_pattern([U8]{"{version:U4}{ihl:U4}{tos:U8}{len:U16be}"}) ?? panic("bad header")
+    print(parsed.version)
+    print(parsed.ihl)
+    print(parsed.tos)
+    print(parsed.len)
+    print(reader.remaining())
+}
+""", "4\n5\n0\n40\n4\n")
+}
+// Rust: tests/jit_run.rs:3028
+#Test("native_source_helper_reenters_from_interface_and_catches_inner_error") {
+    scratch :: common.Scratch.new("jit_nested_source_helper_interface")
+    file :: scratch.join("run.jet")
+    fs.write(&file, """
+trait Bridge { fn invoke(&self, value: Int) -[]> Int }
+fn nested(value: Int) -[]> Int { return value + 10 }
+fn outer(service: Bridge, value: Int) -[]> Int {
+    before :: value * 2
+    answer :: service.invoke(value)
+    return before + answer
+}
+fn run() -> {}
+""").unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := jet.Loader.load_entry(&shown).expect("nested helper fixture loads")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != jet.Diagnostics.Severity.Error }), "nested helper fixture must type-check: {diagnostics:#?}")
+    // GATE #4494: retained checked helper/interface ABI; no retiring JIT implementation.
+    (program, artifact) :: common.lower_native_bundle(&bundle).unwrap_or_else(fn(error) { panic("nested helper fixture must lower to canonical MIR: {error}") })
+    trait_row :: program.traits.iter().find(fn(row) { row.name == "Bridge" }).expect("checked Bridge trait")
+    method_row :: trait_row.methods.iter().find(fn(row) { row.name == "invoke" }).expect("checked Bridge.invoke method")
+    outer :: program.functions.iter().find(fn(row) { row.name == "outer" }).expect("checked outer helper")
+    nested :: program.functions.iter().find(fn(row) { row.name == "nested" }).expect("checked nested helper")
+    outer_id :: outer.id
+    nested_id :: nested.id
+    receiver_type :: outer.params[0].ty.clone()
+    method :: NativeInterfaceMethod.checked(&program, artifact, trait_row.id, method_row.id, receiver_type).expect("checked native Bridge.invoke descriptor")
+    bindings :: Arc.new(NativeInterfaceBindings.new())
+    object :: bindings.create_object(()).expect("native bridge object")
+    source_resources :: Arc.new(SourceResourceSession.new())
+    callback_errors :: Arc.new(AtomicUsize.new(0))
+    nested_error_caught :: Arc.new(AtomicUsize.new(0))
+    handler_calls :: Arc.new(AtomicUsize.new(0))
+    unexpected_source_fallback :: Arc.new(AtomicUsize.new(0))
+    nested_program :: Arc.new(program)
+    nested_policy :: common.development_policy()
+    handler_resources :: source_resources.clone()
+    handler_program :: nested_program.clone()
+    handler_policy :: nested_policy.clone()
+    handler_callback_errors :: callback_errors.clone()
+    handler_error_caught :: nested_error_caught.clone()
+    handler_calls_count :: handler_calls.clone()
+    handler_unexpected_fallback :: unexpected_source_fallback.clone()
+    bindings.bind(object.clone(), method.identity.clone(), method.signature.clone(), Arc.new(fn(_object, call) {
+        handler_calls_count.fetch_add(1, Ordering.SeqCst)
+        value :: match call.argument(0).map(fn(argument) { &argument.value }) {
+            Some(MirRuntimeValue.Int(value)) -> *value,
+            _ -> return Err("Bridge.invoke received no checked Int value"),
+        }
+        lease :: handler_resources.retain_root().map_err(fn(error) { error.to_string() })?
+        if value == -1 {
+            source_callback_errors :: handler_callback_errors.clone()
+            error :: execute_source_helper_entry(handler_program.as_ref(), artifact, &[nested_id], nested_id, &lease, [SourceHelperArgument.Owned(MirRuntimeValue.Int(7))], SourceExecutionPolicy.SourceOnly, &handler_policy, fn(_request) {
+                source_callback_errors.fetch_add(1, Ordering.SeqCst)
+                Err("inner Source callback failure")
+            })
+            return match error {
+                Err(error) -> {
+                    invoked :: match error.failure() { SourceHelperInvocationFailure.Invoked { .. } -> true, _ -> false }
+                    cause :: error.to_string()
+                    error.record_completion().map_err(fn(completion) { "inner completion has no parent owner: {completion:?}" })?
+                    if invoked { handler_error_caught.fetch_add(1, Ordering.SeqCst); Ok(MirRuntimeValue.Int(90)) } else { Err("inner failure was pre-invocation: {cause}") }
+                },
+                Ok(_) -> Err("inner Source callback failure was not returned"),
+            }
+        }
+        fallback_calls :: handler_unexpected_fallback.clone()
+        execution :: execute_source_helper_entry(handler_program.as_ref(), artifact, &[nested_id], nested_id, &lease, [SourceHelperArgument.Owned(MirRuntimeValue.Int(value))], SourceExecutionPolicy.NativeWithSourceFallback, &handler_policy, fn(_request) {
+            fallback_calls.fetch_add(1, Ordering.SeqCst)
+            Err("native nested helper unexpectedly requested Source")
+        }).map_err(fn(error) { error.to_string() })?
+        if execution.tier != SourceExecutionTier.Native { return Err("nested helper did not execute in the native tier") }
+        (execution, projected) :: execution.with_completion_scope(fn(execution) { execution.take_result().expect("nested helper returns one projection") })
+        completion :: execution.retire()
+        SourceExecutionCompletionScope.record_current(completion).map_err(fn(completion) { "nested completion has no parent owner: {completion:?}" })?
+        match projected.value {
+            Some(MirRuntimeValue.Int(value)) -> Ok(MirRuntimeValue.Int(value)),
+            _ -> Err("nested helper returned no checked Int value"),
+        }
+    })).expect("bind exact native Bridge.invoke implementation")
+    outer_lease :: source_resources.retain_root().expect("retain outer helper source root")
+    pure_helper :: execute_source_helper_entry(nested_program.as_ref(), artifact, &[nested_id], nested_id, &outer_lease, [SourceHelperArgument.Owned(MirRuntimeValue.Int(30))], SourceExecutionPolicy.NativeWithSourceFallback, &nested_policy, fn(_request) { Err("pure helper unexpectedly requested Source") }).expect("a private pure helper needs no interface scope")
+    assert_eq(pure_helper.tier, SourceExecutionTier.Native)
+    pure_value :: match pure_helper.retire().disposition {
+        SourceExecutionCompletionDisposition.Invoked { retirement: Some(SourceExecutionCompletionRetirement.Completed(retirement)), .. } -> retirement.value,
+        other -> panic("private pure helper did not retain its result: {other:?}"),
+    }
+    assert_eq(pure_value, Some(MirRuntimeValue.Int(40)))
+    no_scope_values :: [object.as_runtime_value(), MirRuntimeValue.Int(10)]
+    no_scope_error :: match execute_source_helper_entry(nested_program.as_ref(), artifact, &[outer_id], outer_id, &outer_lease, [SourceHelperArgument.Owned(object.as_runtime_value()), SourceHelperArgument.Owned(MirRuntimeValue.Int(10))], SourceExecutionPolicy.NativeWithSourceFallback, &nested_policy, fn(_request) { Err("scope preflight must not enter Source") }) {
+        Err(error) -> error,
+        Ok(_) -> panic("a reachable native interface call needs its checked scope"),
+    }
+    match no_scope_error.failure() {
+        SourceHelperInvocationFailure.NotInvoked { cause: SourceDeoptError.NativeInterface(NativeInterfaceError.MissingBinding), entry_values, .. } -> assert_eq(entry_values, &no_scope_values),
+        _ -> panic("missing native interface scope must fail before invocation"),
+    }
+    assert_eq(no_scope_error.entry_values(), Some(no_scope_values.as_slice()))
+    assert_eq(handler_calls.load(Ordering.SeqCst), 0)
+    assert_eq(unexpected_source_fallback.load(Ordering.SeqCst), 0)
+    drop(no_scope_error)
+    _activation :: bindings.activate(nested_program.as_ref(), artifact).expect("activate checked native bridge")
+    // Build one identity index rather than repeated scans over every candidate function.
+    function_ids :: nested_program.functions.iter().map(fn(function) { function.id }).collect<HashSet<MirFunctionId>>()
+    missing_helper_id :: (0..).map(MirFunctionId).find(fn(candidate) { !function_ids.contains(candidate) }).expect("the checked MIR has an unused function identity")
+    preflight_values :: [object.as_runtime_value(), MirRuntimeValue.Int(77)]
+    preflight_arguments :: [SourceHelperArgument.Owned(object.as_runtime_value()), SourceHelperArgument.Owned(MirRuntimeValue.Int(77))]
+    calls :: unexpected_source_fallback.clone()
+    preflight_error :: match execute_source_helper_entry(nested_program.as_ref(), artifact, &[], missing_helper_id, &outer_lease, preflight_arguments, SourceExecutionPolicy.NativeWithSourceFallback, &common.development_policy(), fn(_request) {
+        calls.fetch_add(1, Ordering.SeqCst)
+        Err("preflight failure must not enter Source")
+    }) {
+        Err(error) -> error,
+        Ok(_) -> panic("missing helper must fail before native or Source invocation"),
+    }
+    match preflight_error.failure() {
+        SourceHelperInvocationFailure.NotInvoked { entry_values, .. } -> assert_eq(entry_values, &preflight_values),
+        _ -> panic("missing helper must fail before invocation"),
+    }
+    assert_eq(preflight_error.entry_values(), Some(preflight_values.as_slice()))
+    drop(preflight_error)
+    policy :: common.development_policy()
+    success :: execute_source_helper_entry(nested_program.as_ref(), artifact, &[outer_id], outer_id, &outer_lease, [SourceHelperArgument.Owned(object.as_runtime_value()), SourceHelperArgument.Owned(MirRuntimeValue.Int(10))], SourceExecutionPolicy.NativeWithSourceFallback, &policy, fn(_request) { Err("outer helper unexpectedly requested Source") }).expect("outer native helper returns after nested native execution")
+    assert_eq(success.tier, SourceExecutionTier.Native)
+    match &success.outcome { Some(jet.Interpreter.RunOutcome.Ran { exit_code: 0, .. }) -> {}, _ -> panic("successful helper must finish normally") }
+    success_retirement :: match success.retire().disposition {
+        SourceExecutionCompletionDisposition.Invoked { cause: None, retirement: Some(SourceExecutionCompletionRetirement.Completed(retirement)), .. } -> retirement,
+        _ -> panic("successful helper completion must retain its retirement"),
+    }
+    assert_eq(success_retirement.value, Some(MirRuntimeValue.Int(40)))
+    recovered :: execute_source_helper_entry(nested_program.as_ref(), artifact, &[outer_id], outer_id, &outer_lease, [SourceHelperArgument.Owned(object.as_runtime_value()), SourceHelperArgument.Owned(MirRuntimeValue.Int(-1))], SourceExecutionPolicy.NativeWithSourceFallback, &policy, fn(_request) { Err("outer helper unexpectedly requested Source") }).expect("outer native helper resumes after catching the nested Source error")
+    assert_eq(recovered.tier, SourceExecutionTier.Native)
+    match &recovered.outcome { Some(jet.Interpreter.RunOutcome.Ran { exit_code: 0, .. }) -> {}, _ -> panic("recovered helper must finish normally") }
+    recovered_retirement :: match recovered.retire().disposition {
+        SourceExecutionCompletionDisposition.Invoked { cause: None, retirement: Some(SourceExecutionCompletionRetirement.Completed(retirement)), .. } -> retirement,
+        _ -> panic("recovered helper completion must retain its retirement"),
+    }
+    assert_eq(recovered_retirement.value, Some(MirRuntimeValue.Int(88)))
+    assert_eq(handler_calls.load(Ordering.SeqCst), 2)
+    assert_eq(callback_errors.load(Ordering.SeqCst), 1)
+    assert_eq(nested_error_caught.load(Ordering.SeqCst), 1)
+    assert_eq(unexpected_source_fallback.load(Ordering.SeqCst), 0)
+    drop(outer_lease)
+    source_resources.retire().expect("retire shared parent Source resources")
+}

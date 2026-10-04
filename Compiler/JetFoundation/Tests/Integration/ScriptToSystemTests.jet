@@ -1,0 +1,277 @@
+use std.fs
+use std.process.Command
+use std.time.[Duration, Instant]
+use core.path.OSPath
+use core.sys.target.[selected_os, selected_arch, selected_family]
+use jet_foundation.Tests.Integration.Common.[jetpack_bin, Scratch]
+use jet_foundation.Tests.Integration.ScriptToSystem.[EXPECTED_STDOUT, RECEIPT_VERSION, receipt_path, start_receipt, bytes_digest, file_digest, record_receipt, assert_lock_preserved, assert_source_preserved, edit_file, record_artifact, recompute_project_graph, assert_graph_preserved, transition_graph, transition_journal, journal_fingerprints, compiler_text, run_jet_ok, cc]
+// GATE #4494: native subprocesses, filesystem and timers; #4483: selected target dispatch.
+
+// Rust: tests/script_to_system.rs:371
+#Test("script_to_system_continuity_preserves_one_source") {
+    fixture :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("Examples/continuity/script_to_system/run.jet")
+    scratch :: Scratch.new("script-to-system")
+    cache :: scratch.join("cache")
+    fs.copy(&fixture, scratch.join("run.jet")).expect("copy the lone starting script")
+    initial_entries :: fs.read_dir(&scratch.path).unwrap().map(fn(entry) -> entry.unwrap().file_name()).collect::<[OSPath]>()
+    assert_eq(initial_entries, [OSPath.from("run.jet")])
+    assert(!scratch.join("package.jet").exists())
+    assert(!scratch.join(".jet").exists())
+    assert(!scratch.join("target").exists())
+    fs.create_dir_all(&cache).unwrap()
+    source_before :: fs.read(scratch.join("run.jet")).unwrap()
+    source_sha256 :: bytes_digest(&source_before)
+    start_receipt(&cache)
+    record_receipt(&cache, "action", "clean-start", Duration.ZERO, "ok", "root=run.jet-only source_sha256={source_sha256}")
+    direct :: run_jet_ok(&scratch.path, &cache, "direct-run", &["run", "run.jet", "--", "--minutes", "1"])
+    assert_eq(direct.stdout, EXPECTED_STDOUT)
+    assert(compiler_text(&direct).contains("L0104"), "the direct lens should report the unselected dev helper:\n{compiler_text(&direct)}")
+    // Retired interpreter comparison becomes behavioral parity across supported tiers.
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        interpreted :: run_jet_ok(&scratch.path, &cache, "direct-run-{tier}", &["run", "--tier", tier, "run.jet", "--", "--minutes", "1"])
+        assert_eq(interpreted.status.code(), direct.status.code())
+        assert_eq(interpreted.stdout, direct.stdout)
+        assert_eq(interpreted.stdout, EXPECTED_STDOUT)
+        assert_eq(interpreted.stderr, direct.stderr)
+        record_receipt(&cache, "proof", "tier-parity", Duration.ZERO, "ok", "tier={tier} exit={interpreted.status.code():?} stdout_sha256={bytes_digest(&interpreted.stdout)} stderr_sha256={bytes_digest(&interpreted.stderr)} exact=true")
+    }
+    dev :: run_jet_ok(&scratch.path, &cache, "dev", &["dev", "run.jet"])
+    assert_eq(dev.stdout, EXPECTED_STDOUT)
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "dev-source-ownership")
+    _ :: run_jet_ok(&scratch.path, &cache, "init", &["init", "run.jet"])
+    assert(scratch.join("package.jet").is_file())
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "init-source-ownership")
+    record_receipt(&cache, "proof", "init-ownership", Duration.ZERO, "ok", "source_sha256={source_sha256} source_unchanged=true package_created=true")
+    support_started :: Instant.now()
+    fs.create_dir_all(scratch.join("support")).unwrap()
+    record_receipt(&cache, "action", "create-support-package", support_started.elapsed(), "ok", "path=support")
+    edit_file(&cache, &scratch.path, "support-package", &scratch.join("support/package.jet"), "name: \"support\"\nversion: \"0.1.0\"\n")
+    edit_file(&cache, &scratch.path, "support-source", &scratch.join("support/support.jet"), "pub fn spare() -> Int { 7 }\n")
+    _ :: run_jet_ok(&scratch.path, &cache, "add-path-dependency", &["add", "support", "--path", "./support"])
+    _ :: run_jet_ok(&scratch.path, &cache, "fetch", &["fetch"])
+    package_after_add :: fs.read_to_string(scratch.join("package.jet")).unwrap()
+    assert(package_after_add.contains("support: ./support"))
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "dependency-source-ownership")
+    package_config :: "{package_after_add}\nsettings: {{\n    default_minutes: Int = 1,\n}}\nenvironments: {{\n    development: Environment{{ tools: [\"git\"] }},\n}}\noutputs: {{\n    app: .Executable{{ name: \"pulse\", entry: run }},\n    api: .Service{{ name: \"pulse-api\", entry: serve }},\n}}\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Panic] }} }}\n"
+    edit_file(&cache, &scratch.path, "package-config", &scratch.join("package.jet"), &package_config)
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "config-source-ownership")
+    package_before_install :: fs.read(scratch.join("package.jet")).unwrap()
+    package_before_install_sha256 :: bytes_digest(&package_before_install)
+    lock_before_install :: fs.read(scratch.join(".jet/lock")).unwrap()
+    lock_before_install_sha256 :: bytes_digest(&lock_before_install)
+    graph_before_install :: recompute_project_graph(&scratch.path)
+    install_started :: Instant.now()
+    installed :: Command.new(jetpack_bin()).args(["tool", "install", "./", "--as", "pulse", "--trust", "--no-color"]).current_dir(&scratch.path).env("HOME", cache.join("home")).env("JETPACK_ROOT", cache.join("jetpack")).output().expect("jetpack tool install should start")
+    eprintln("script-to-system action=tool-install elapsed_ms={install_started.elapsed().as_millis()} status={installed.status}")
+    install_report :: compiler_text(&installed)
+    install_stderr_sha256 :: bytes_digest(&installed.stderr)
+    assert(!installed.status.success(), "jetpack tool install unexpectedly succeeded:\n{install_report}")
+    assert(install_report.contains("E1272"), "local source install must fail with the registered compatibility diagnostic:\n{install_report}")
+    loop required in ["need a pinned compatibility output", "does not invoke an installed Nix executable", "Provide a pinned fixture or verified Hangar output"] {
+        assert(install_report.contains(required), "E1272 diagnostic lost its {required} text:\n{install_report}")
+    }
+    assert_eq(fs.read(scratch.join("package.jet")).unwrap(), package_before_install)
+    assert_eq(fs.read(scratch.join(".jet/lock")).unwrap(), lock_before_install)
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "install-source-ownership")
+    graph_after_install :: recompute_project_graph(&scratch.path)
+    assert_graph_preserved(&graph_before_install, &graph_after_install, "tool install")
+    record_receipt(&cache, "failure", "tool-install", install_started.elapsed(), "expected-failure", "diagnostic=E1272 stderr_sha256={install_stderr_sha256} source_sha256={source_sha256} package_sha256={package_before_install_sha256} lock_sha256={lock_before_install_sha256} graph_fingerprint={graph_before_install.fingerprint} dependencies_sha256={graph_before_install.dependency_sha256} source_package_lock_unchanged=true dependencies_unchanged=true")
+    record_receipt(&cache, "recovery", "after-tool-install", install_started.elapsed(), "ok", "source_sha256={source_sha256} package_sha256={package_before_install_sha256} lock_sha256={lock_before_install_sha256} graph_fingerprint={graph_after_install.fingerprint} dependencies_sha256={graph_after_install.dependency_sha256} source_package_lock_unchanged=true dependencies_unchanged=true next=test")
+    test :: run_jet_ok(&scratch.path, &cache, "test", &["test", "run.jet"])
+    assert(compiler_text(&test).contains("1 passed"))
+    package_run :: run_jet_ok(&scratch.path, &cache, "package-jit-typed-cli", &["run", "run.jet", "--", "--minutes", "1"])
+    assert_eq(package_run.stdout, EXPECTED_STDOUT)
+    service :: run_jet_ok(&scratch.path, &cache, "service-output", &["run", "--quiet", "--output", "api", "run.jet"])
+    assert_eq(service.stdout, EXPECTED_STDOUT)
+    explain :: run_jet_ok(&scratch.path, &cache, "typed-config-explain", &["explain", "build.settings.default_minutes"])
+    assert(String.from_utf8_lossy(&explain.stdout).contains("Build.Settings.default_minutes = 1"))
+    // Lock baseline after package runs and before unlocked exports.
+    initial_lock :: fs.read(scratch.join(".jet/lock")).unwrap()
+    initial_lock_sha256 :: bytes_digest(&initial_lock)
+    record_receipt(&cache, "proof", "export-lock-baseline", Duration.ZERO, "ok", "lock_bytes={initial_lock.len()} lock_sha256={initial_lock_sha256} authoritative=true before_unlocked_exports=true")
+    build :: run_jet_ok(&scratch.path, &cache, "aot-build", &["build", "run.jet"])
+    assert_lock_preserved(&cache, &scratch.path, &initial_lock, &initial_lock_sha256, "aot-build-lock")
+    suffix :: if selected_os() == "windows" { ".exe" } else { "" }
+    executable :: scratch.join(".jet").join("build").join("run{suffix}")
+    assert(executable.is_file(), "missing {executable.display()}")
+    native_started :: Instant.now()
+    native :: Command.new(&executable).output().unwrap_or_else(fn(error) -> panic("built executable could not start: {error}"))
+    record_receipt(&cache, "action", "run-native-executable", native_started.elapsed(), if native.status.success() { "ok" } else { "failed" }, "path={executable.display()} exit={native.status.code():?}")
+    assert(native.status.success(), "built executable failed: {native:?}")
+    assert_eq(native.stdout, EXPECTED_STDOUT)
+    record_artifact(&cache, &scratch.path, &executable)
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "aot-source-ownership")
+    pre_library_executable :: fs.read(&executable).unwrap_or_else(fn(error) -> panic("read {executable.display()}: {error}"))
+    pre_library_executable_sha256 :: bytes_digest(&pre_library_executable)
+    record_receipt(&cache, "proof", "pre-library-aot-baseline", Duration.ZERO, "ok", "path={executable.display()} bytes={pre_library_executable.len()} sha256={pre_library_executable_sha256} baseline=true")
+    package_before_library :: fs.read_to_string(scratch.join("package.jet")).unwrap()
+    package_with_library :: package_before_library.replace("    api: .Service{ name: \"pulse-api\", entry: serve },\n}\n", "    api: .Service{ name: \"pulse-api\", entry: serve },\n    core: .Library{\n        name: \"pulse\",\n        native: true,\n        loadable: true,\n        bindings: [c],\n    },\n}\n")
+    assert_ne(package_with_library, package_before_library)
+    edit_file(&cache, &scratch.path, "package-library-output", &scratch.join("package.jet"), &package_with_library)
+    assert_lock_preserved(&cache, &scratch.path, &initial_lock, &initial_lock_sha256, "library-output-edit-lock")
+    _ :: run_jet_ok(&scratch.path, &cache, "aot-build-after-library-output", &["build", "run.jet"])
+    assert_lock_preserved(&cache, &scratch.path, &initial_lock, &initial_lock_sha256, "aot-build-after-library-lock")
+    executable_after_library_output :: fs.read(&executable).unwrap_or_else(fn(error) -> panic("read {executable.display()}: {error}"))
+    executable_after_library_output_sha256 :: bytes_digest(&executable_after_library_output)
+    assert_eq(executable_after_library_output, pre_library_executable, "adding Library output changed the first AOT executable bytes")
+    assert_eq(executable_after_library_output_sha256, pre_library_executable_sha256, "adding Library output changed the first AOT executable digest")
+    record_receipt(&cache, "proof", "library-output-aot-isolation", Duration.ZERO, "ok", "pre_library_aot_sha256={pre_library_executable_sha256} after_library_aot_sha256={executable_after_library_output_sha256} bytes_match=true hash_match=true")
+    _ :: run_jet_ok(&scratch.path, &cache, "native-library-build", &["build", "--lib", "run.jet"])
+    assert_lock_preserved(&cache, &scratch.path, &initial_lock, &initial_lock_sha256, "native-library-build-lock")
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "library-source-ownership")
+    executable_after_library_build :: fs.read(&executable).unwrap_or_else(fn(error) -> panic("read {executable.display()}: {error}"))
+    executable_after_library_build_sha256 :: bytes_digest(&executable_after_library_build)
+    assert_eq(executable_after_library_build, pre_library_executable, "Library build changed the first AOT executable bytes")
+    assert_eq(executable_after_library_build_sha256, pre_library_executable_sha256, "Library build changed the first AOT executable digest")
+    record_receipt(&cache, "proof", "library-aot-isolation", Duration.ZERO, "ok", "pre_library_aot_sha256={pre_library_executable_sha256} after_library_sha256={executable_after_library_build_sha256} bytes_match=true hash_match=true")
+    target :: scratch.join(".jet/build")
+    loop artifact in [target.join("libpulse.a"), target.join("pulse.h"), target.join("pulse.jetlib"), target.join("bindings/pulse.h")] {
+        assert(artifact.is_file(), "missing library artifact {artifact.display()}")
+        record_artifact(&cache, &scratch.path, &artifact)
+    }
+    shared :: match selected_os() { "macos" -> target.join("libpulse.dylib"); "windows" -> target.join("libpulse.dll"); _ -> target.join("libpulse.so") }
+    assert(shared.is_file(), "missing {shared.display()}")
+    record_artifact(&cache, &scratch.path, &shared)
+    header :: fs.read_to_string(target.join("pulse.h")).unwrap()
+    assert(header.contains("int64_t seconds(int64_t p0);"))
+    record_artifact(&cache, &scratch.path, &target.join("pulse.h"))
+    library_artifacts :: [target.join("libpulse.a"), target.join("pulse.h"), target.join("pulse.jetlib"), target.join("bindings/pulse.h"), shared.clone()]
+    output_digests := [(executable.clone(), pre_library_executable_sha256.clone())]
+    output_digests.extend(library_artifacts.iter().map(fn(path) -> (path.clone(), file_digest(path))))
+    output_digest_text :: output_digests.iter().map(fn(pair) -> {
+        (path, digest) :: pair
+        "{path.strip_prefix(&scratch.path).unwrap_or(path).display()}={digest}"
+    }).collect::<[String]>().join(",")
+    output_bytes :: output_digests.iter().map(fn(pair) -> {
+        (path, digest) :: pair
+        if path == &executable { return (path.clone(), pre_library_executable.clone(), digest.clone()) }
+        bytes :: fs.read(path).unwrap_or_else(fn(error) -> panic("read {path.display()}: {error}"))
+        (path.clone(), bytes, digest.clone())
+    }).collect::<[(OSPath, [U8], String)]>()
+    clean_rebuild_started :: Instant.now()
+    fs.remove_dir_all(&target).expect("remove first Library output")
+    clean_aot_started :: Instant.now()
+    _ :: run_jet_ok(&scratch.path, &cache, "clean-aot-rebuild", &["build", "--locked", "run.jet"])
+    record_receipt(&cache, "build", "clean-aot-rebuild", clean_aot_started.elapsed(), "ok", "output_tree_reset=true")
+    assert_lock_preserved(&cache, &scratch.path, &initial_lock, &initial_lock_sha256, "clean-aot-rebuild-lock")
+    clean_library_started :: Instant.now()
+    _ :: run_jet_ok(&scratch.path, &cache, "clean-native-library-rebuild", &["build", "--lib", "--locked", "run.jet"])
+    record_receipt(&cache, "build", "clean-native-library-rebuild", clean_library_started.elapsed(), "ok", "fresh_cache=true output_tree_reset=true")
+    assert_lock_preserved(&cache, &scratch.path, &initial_lock, &initial_lock_sha256, "clean-native-library-rebuild-lock")
+    loop (path, expected, expected_digest) in &output_bytes {
+        name :: path.file_name().and_then(fn(n) -> n.to_str()).unwrap_or("")
+        if name != "pulse.h" { continue }
+        actual :: fs.read(path).unwrap_or_else(fn(error) -> panic("read rebuilt {path.display()}: {error}"))
+        assert_eq(actual.as_slice(), expected.as_slice(), "clean rebuild changed {path.display()}")
+        assert_eq(bytes_digest(&actual), expected_digest.as_str(), "clean rebuild hash changed {path.display()}")
+    }
+    assert_eq(fs.read(scratch.join("run.jet")).unwrap(), source_before, "clean rebuild changed source")
+    assert_eq(fs.read(scratch.join("package.jet")).unwrap(), package_with_library.as_bytes(), "clean rebuild changed package")
+    assert_eq(fs.read(scratch.join(".jet/lock")).unwrap(), initial_lock, "clean rebuild changed lock")
+    record_receipt(&cache, "proof", "export-clean-rebuild", clean_rebuild_started.elapsed(), "ok", "fresh_output=true fresh_cache=true byte_match=true hash_match=true lock_sha256={initial_lock_sha256} lock_unchanged=true aot_baseline_sha256={pre_library_executable_sha256} install_diagnostic=E1272 install_stderr_sha256={install_stderr_sha256} artifacts={output_digest_text}")
+    record_receipt(&cache, "proof", "export-reproducibility", Duration.ZERO, "ok", "source_sha256={source_sha256} package_sha256={bytes_digest(package_with_library.as_bytes())} lock_sha256={initial_lock_sha256} lock_unchanged=true aot_baseline_sha256={pre_library_executable_sha256} install_diagnostic=E1272 install_stderr_sha256={install_stderr_sha256} artifacts={output_digest_text}")
+    if selected_family() == "unix" {
+        match cc() {
+            Some(cc) -> {
+                edit_file(&cache, &scratch.path, "foreign-host-source", &scratch.join("foreign.c"), "#include \"pulse.h\"\n#include <stdio.h>\nint main(void) { printf(\"%lld\\n\", (long long)seconds(1)); return 0; }\n")
+                foreign_binary :: scratch.join("foreign")
+                compile := Command.new(cc)
+                compile.args(["-std=c11", "-I"]).arg(&target).arg(scratch.join("foreign.c")).arg(target.join("libpulse.a")).arg("-o").arg(&foreign_binary)
+                if selected_os() == "linux" { compile.args(["-ldl", "-lpthread", "-lm"]) }
+                compile_started :: Instant.now()
+                result :: compile.output().expect("C compiler should start")
+                record_receipt(&cache, "action", "compile-foreign-host", compile_started.elapsed(), if result.status.success() { "ok" } else { "failed" }, "path={foreign_binary.display()} exit={result.status.code():?}")
+                assert(result.status.success(), "foreign host compile failed:\n{compiler_text(&result)}")
+                foreign_started :: Instant.now()
+                foreign :: Command.new(&foreign_binary).output().expect("foreign host should start")
+                record_receipt(&cache, "action", "run-foreign-host", foreign_started.elapsed(), if foreign.status.success() { "ok" } else { "failed" }, "path={foreign_binary.display()} exit={foreign.status.code():?}")
+                assert(foreign.status.success(), "foreign host failed: {foreign:?}")
+                assert_eq(foreign.stdout, EXPECTED_STDOUT)
+                record_artifact(&cache, &scratch.path, &foreign_binary)
+            }
+            None -> eprintln("note: foreign host proof skipped because no C compiler is available")
+        }
+    }
+    package_before_split :: fs.read(scratch.join("package.jet")).unwrap()
+    package_before_split_sha256 :: bytes_digest(&package_before_split)
+    lock_before_transition :: fs.read(scratch.join(".jet/lock")).unwrap()
+    lock_sha256 :: bytes_digest(&lock_before_transition)
+    assert_eq(package_before_split, package_with_library.as_bytes())
+    graph_before_split :: recompute_project_graph(&scratch.path)
+    check :: run_jet_ok(&scratch.path, &cache, "split-env-check", &["split", "env", "--check"])
+    assert(String.from_utf8_lossy(&check.stdout).contains("No files changed."))
+    assert(String.from_utf8_lossy(&check.stdout).contains("package graph unchanged"))
+    assert_eq(fs.read(scratch.join("package.jet")).unwrap(), package_before_split)
+    assert_eq(fs.read(scratch.join(".jet/lock")).unwrap(), lock_before_transition)
+    assert(!scratch.join("package/env.jet").exists())
+    split_graph :: transition_graph(&check)
+    assert_eq(split_graph, graph_before_split.fingerprint, "split --check reported a graph identity different from checked Package facts")
+    split :: run_jet_ok(&scratch.path, &cache, "split-env", &["split", "env"])
+    assert_eq(transition_graph(&split), graph_before_split.fingerprint, "split reported a graph identity different from checked Package facts")
+    split_journal :: transition_journal(&split)
+    assert(split_journal.is_file(), "missing {split_journal.display()}")
+    (journal_before, journal_after) :: journal_fingerprints(&split_journal)
+    assert_eq(journal_before, graph_before_split.fingerprint)
+    assert_eq(journal_after, graph_before_split.fingerprint)
+    assert(scratch.join("package/env.jet").is_file())
+    assert_eq(fs.read_to_string(scratch.join("package/env.jet")).unwrap(), "pub development :: Config{\n    environments: {\n    development: Environment{ tools: [\"git\"] },\n}\n}\n")
+    assert(!fs.read_to_string(scratch.join("package.jet")).unwrap().contains("environments:"))
+    package_after_split :: fs.read(scratch.join("package.jet")).unwrap()
+    generated_after_split :: fs.read(scratch.join("package/env.jet")).unwrap()
+    assert_eq(fs.read(scratch.join(".jet/lock")).unwrap(), lock_before_transition)
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "split-source-ownership")
+    graph_after_split :: recompute_project_graph(&scratch.path)
+    assert_graph_preserved(&graph_before_split, &graph_after_split, "split")
+    record_receipt(&cache, "proof", "split-preservation", Duration.ZERO, "ok", "source_sha256={source_sha256} package_before_sha256={package_before_split_sha256} package_after_sha256={bytes_digest(&package_after_split)} generated_sha256={bytes_digest(&generated_after_split)} lock_sha256={lock_sha256} graph_fingerprint={split_graph} dependencies_sha256={graph_before_split.dependency_sha256} journal_before={journal_before} journal_after={journal_after} source_unchanged=true dependencies_unchanged=true graph_unchanged=true")
+    record_artifact(&cache, &scratch.path, &scratch.join("package/env.jet"))
+    split_run :: run_jet_ok(&scratch.path, &cache, "run-after-split", &["run", "run.jet", "--", "--minutes", "1"])
+    assert_eq(split_run.stdout, EXPECTED_STDOUT)
+    fold_check :: run_jet_ok(&scratch.path, &cache, "fold-env-check", &["Fold", "package/env.jet", "--check"])
+    assert(String.from_utf8_lossy(&fold_check.stdout).contains("No files changed."))
+    assert_eq(fs.read(scratch.join("package.jet")).unwrap(), package_after_split)
+    assert_eq(fs.read(scratch.join("package/env.jet")).unwrap(), generated_after_split)
+    assert_eq(fs.read(scratch.join(".jet/lock")).unwrap(), lock_before_transition)
+    fold_graph :: transition_graph(&fold_check)
+    graph_before_fold :: recompute_project_graph(&scratch.path)
+    assert_eq(fold_graph, graph_before_fold.fingerprint, "fold --check reported a graph identity different from checked Package facts")
+    assert_graph_preserved(&graph_after_split, &graph_before_fold, "fold --check")
+    record_receipt(&cache, "proof", "fold-preservation", Duration.ZERO, "ok", "source_sha256={source_sha256} package_sha256={bytes_digest(&package_after_split)} generated_sha256={bytes_digest(&generated_after_split)} lock_sha256={lock_sha256} graph_fingerprint={fold_graph} dependencies_sha256={graph_before_fold.dependency_sha256} journal_before={journal_before} journal_after={journal_after} dependencies_unchanged=true graph_matches_split=true")
+    recovery_started :: Instant.now()
+    fold :: run_jet_ok(&scratch.path, &cache, "fold-env", &["Fold", "package/env.jet"])
+    assert_eq(transition_graph(&fold), graph_before_fold.fingerprint, "fold reported a graph identity different from checked Package facts")
+    source_after_fold :: fs.read(scratch.join("run.jet")).unwrap()
+    package_after_fold :: fs.read(scratch.join("package.jet")).unwrap()
+    lock_after_fold :: fs.read(scratch.join(".jet/lock")).unwrap()
+    graph_after_fold :: recompute_project_graph(&scratch.path)
+    assert_graph_preserved(&graph_before_split, &graph_after_fold, "fold rollback")
+    assert_eq(package_after_fold, package_before_split)
+    assert(!scratch.join("package/env.jet").exists())
+    assert_eq(lock_after_fold, lock_before_transition)
+    assert_source_preserved(&cache, &scratch.path, &source_before, &source_sha256, "fold-source-ownership")
+    loop (path, expected) in &output_digests {
+        name :: path.file_name().and_then(fn(n) -> n.to_str()).unwrap_or("")
+        if name != "pulse.h" || !path.is_file() { continue }
+        assert_eq(file_digest(path), *expected, "output changed during split/fold: {path.display()}")
+    }
+    record_receipt(&cache, "recovery", "fold-rollback", recovery_started.elapsed(), "ok", "source_sha256={bytes_digest(&source_after_fold)} package_sha256={bytes_digest(&package_after_fold)} lock_sha256={bytes_digest(&lock_after_fold)} graph_fingerprint={fold_graph} dependencies_sha256={graph_after_fold.dependency_sha256} package_source_lock_restored=true dependencies_unchanged=true outputs_unchanged=true output_digests={output_digest_text} generated=absent")
+    rollback_run :: run_jet_ok(&scratch.path, &cache, "run-after-fold", &["run", "run.jet", "--", "--minutes", "1"])
+    assert_eq(rollback_run.stdout, EXPECTED_STDOUT)
+    loop artifact in [scratch.join("run.jet"), scratch.join("package.jet"), scratch.join(".jet/lock"), executable, target.join("libpulse.a"), target.join("pulse.h"), target.join("pulse.jetlib")] {
+        if artifact.is_file() { record_artifact(&cache, &scratch.path, &artifact) }
+    }
+    receipt :: fs.read_to_string(receipt_path(&cache)).unwrap()
+    loop event in ["action", "edit", "build", "failure", "recovery", "proof", "artifact"] {
+        assert(receipt.contains("event={event}\t"), "receipt has no {event} event:\n{receipt}")
+    }
+    loop operation in ["split", "fold", "install", "export", "rollback"] {
+        assert(receipt.contains("operation={operation}\t"), "receipt has no {operation} operation:\n{receipt}")
+    }
+    loop label in ["aot-build", "aot-build-after-library-output", "tier-parity", "native-library-build", "clean-aot-rebuild", "clean-native-library-rebuild", "tool-install", "split-preservation", "fold-preservation", "export-clean-rebuild", "export-reproducibility", "fold-rollback", "dev-source-ownership", "init-source-ownership", "dependency-source-ownership", "config-source-ownership", "install-source-ownership", "aot-source-ownership", "library-source-ownership", "split-source-ownership", "fold-source-ownership"] {
+        assert(receipt.contains("label={label}\t"), "receipt has no {label} latency row:\n{receipt}")
+    }
+    loop field in ["source_sha256=", "lock_sha256=", "graph_fingerprint=", "dependencies_sha256=", "dependencies_unchanged=true", "source_unchanged=true", "diagnostic=E1272", "stderr_sha256=", "install_stderr_sha256=", "artifacts=", "output_digests=", "outputs_unchanged=true"] {
+        assert(receipt.contains(field), "receipt has no {field} evidence:\n{receipt}")
+    }
+    assert(receipt.starts_with("version={RECEIPT_VERSION}\thost={selected_os()}\tarch={selected_arch()}\n"), "receipt host identity missing:\n{receipt}")
+    eprintln("script-to-system receipt-path={receipt_path(&cache).display()}")
+}

@@ -1,1315 +1,191 @@
-// PORT-PENDING 1038 tests-diagnostic-gate-module-group: tests/diagnostic_gate.rs:1-333
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! #1463 — `jet build` and `jet run` share one diagnostic gate.
-//RS //!
-//RS //! Recoverable parse teaching must surface identically on every execution
-//RS //! entry. The single call site is `Driver::gate_diagnostics`.
-//RS 
-//RS use std::collections::BTreeSet;
-//RS use std::fs;
-//RS use std::process::{Command, Output};
-//RS 
-//RS mod common;
-//RS 
-//RS use jet::Interpreter::{dev_iteration, run_jit_once, RunOutcome};
-//RS 
-//RS fn codes(diags: &[jet::Diagnostics::Diagnostic]) -> BTreeSet<String> {
-//RS     diags.iter().map(|d| d.code.clone()).collect()
-//RS }
-//RS 
-//RS /// `#Pure` is a recoverable E0927 teaching diagnostic that lives only in
-//RS /// `parse_teaching` (sema does not re-emit it). That is the gap `jet run`
-//RS /// used to drop while `jet build` reported it.
-//RS const PURE_TEACHING: &str = r#"
-//RS #Pure
-//RS fn work() {}
-//RS fn run() {
-//RS     print("hi")
-//RS }
-//RS "#;
-//RS 
-//RS const L0103_SOURCE: &str = include_str!("ui_lint/qualified_alias_import_liveness.jet");
-//RS const L0202_SOURCE: &str = include_str!("ui_lint/shared_loop.jet");
-//RS const DIAGNOSTIC_GATE_PACKAGE: &str =
-//RS     "name: \"diagnostic_gate\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n";
-//RS const L0103_SOURCE_OUTPUT: &str =
-//RS     "key=1 door=3\nkey=3 door=1\nwins=2\nstatus=failed\nfailures=7\n";
-//RS const DENIED_LINT_PACKAGE: &str =
-//RS     "name: \"diagnostic_gate_denied\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\npolicy: { lints: { deny: [unused_import] } }\n";
-//RS const DENIED_LINT_SOURCE: &str = r#"
-//RS use core.files as files
-//RS 
-//RS fn run() {
-//RS     print("DENIED_SENTINEL")
-//RS }
-//RS "#;
-//RS 
-//RS fn diagnostic_gate_project(tag: &str, source: &str, denied: bool) -> common::Scratch {
-//RS     let project = common::Scratch::new(tag);
-//RS     fs::write(project.join("main.jet"), source).unwrap();
-//RS     fs::write(
-//RS         project.join("package.jet"),
-//RS         if denied {
-//RS             DENIED_LINT_PACKAGE
-//RS         } else {
-//RS             DIAGNOSTIC_GATE_PACKAGE
-//RS         },
-//RS     )
-//RS     .unwrap();
-//RS     project
-//RS }
-//RS 
-//RS fn run_cli(project: &common::Scratch, cache: &str, args: &[&str]) -> Output {
-//RS     Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(args)
-//RS         .current_dir(&project.path)
-//RS         .env(
-//RS             "JET_RUN_CACHE_DIR",
-//RS             project.path.join(format!("cache/{cache}/run")),
-//RS         )
-//RS         .env(
-//RS             "JET_STORE_DIR",
-//RS             project.path.join(format!("cache/{cache}/build")),
-//RS         )
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("jet {args:?}: {error}"))
-//RS }
-//RS 
-//RS fn assert_warning_status(output: &Output, label: &str, code: &str) {
-//RS     let stderr = String::from_utf8_lossy(&output.stderr);
-//RS     assert_eq!(
-//RS         output.status.code(),
-//RS         Some(0),
-//RS         "{label} exited nonzero:\nstdout={}\nstderr={stderr}",
-//RS         String::from_utf8_lossy(&output.stdout)
-//RS     );
-//RS     assert!(
-//RS         stderr.contains(&format!("Warning [{code}]")),
-//RS         "{label} did not classify {code} as a warning:\n{stderr}"
-//RS     );
-//RS     assert!(
-//RS         !stderr.contains(&format!("Error [{code}]")),
-//RS         "{label} classified {code} as an error:\n{stderr}"
-//RS     );
-//RS }
-//RS 
-//RS fn assert_warning_execution(output: &Output, label: &str, code: &str, stdout: &str) {
-//RS     assert_warning_status(output, label, code);
-//RS     assert_eq!(
-//RS         output.stdout,
-//RS         stdout.as_bytes(),
-//RS         "{label} program stdout changed"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn warnings_never_choose_execution_exit_code() {
-//RS     let cases = [
-//RS         (
-//RS             "l0103",
-//RS             L0103_SOURCE,
-//RS             "L0103",
-//RS             L0103_SOURCE_OUTPUT,
-//RS         ),
-//RS         ("l0202", L0202_SOURCE, "L0202", "0\n"),
-//RS     ];
-//RS     let modes: [(&str, &[&str]); 4] = [
-//RS         ("default", &["run", "main.jet"]),
-//RS         ("interpret", &["run", "--interpret", "main.jet"]),
-//RS         ("release", &["run", "--release", "main.jet"]),
-//RS         ("dev", &["dev", "main.jet", "--watch=off"]),
-//RS     ];
-//RS 
-//RS     for &(name, source, code, stdout) in &cases {
-//RS         for &(mode, args) in &modes {
-//RS             let project = diagnostic_gate_project(
-//RS                 &format!("diag_gate_{name}_{mode}"),
-//RS                 source,
-//RS                 false,
-//RS             );
-//RS             let output = run_cli(&project, mode, args);
-//RS             assert_warning_execution(&output, &format!("{name} {mode}"), code, stdout);
-//RS         }
-//RS 
-//RS         let project = diagnostic_gate_project(&format!("diag_gate_{name}_build"), source, false);
-//RS         let build = run_cli(&project, "build", &["build", "main.jet"]);
-//RS         assert_warning_status(&build, &format!("{name} build"), code);
-//RS         let direct = Command::new(project.join(".jet/build/main"))
-//RS             .current_dir(&project.path)
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("{name} direct binary: {error}"));
-//RS         assert_eq!(direct.status.code(), Some(0), "{name} direct binary failed");
-//RS         assert_eq!(direct.stdout, stdout.as_bytes(), "{name} direct stdout changed");
-//RS     }
-//RS 
-//RS     let project = diagnostic_gate_project("diag_gate_l0103_json", L0103_SOURCE, false);
-//RS     let json = run_cli(&project, "json", &["run", "--json", "main.jet"]);
-//RS     assert_eq!(json.status.code(), Some(0), "json run exited nonzero");
-//RS     assert_eq!(json.stdout, L0103_SOURCE_OUTPUT.as_bytes());
-//RS     let json_stderr = String::from_utf8_lossy(&json.stderr);
-//RS     assert!(json_stderr.contains("\"severity\":\"warning\""), "{json_stderr}");
-//RS     assert!(json_stderr.contains("\"code\":\"L0103\""), "{json_stderr}");
-//RS     assert!(!json_stderr.contains("\"severity\":\"error\""), "{json_stderr}");
-//RS 
-//RS     let project = diagnostic_gate_project("diag_gate_l0103_quiet", L0103_SOURCE, false);
-//RS     let quiet = run_cli(&project, "quiet", &["run", "--quiet", "main.jet"]);
-//RS     assert_eq!(quiet.status.code(), Some(0), "quiet run exited nonzero");
-//RS     assert_eq!(
-//RS         quiet.stdout,
-//RS         L0103_SOURCE_OUTPUT.as_bytes(),
-//RS         "quiet run program stdout changed"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn denied_lint_still_blocks_execution() {
-//RS     for (mode, args) in [
-//RS         ("build", &["build", "main.jet"][..]),
-//RS         ("run", &["run", "main.jet"][..]),
-//RS         ("dev", &["dev", "main.jet", "--watch=off"][..]),
-//RS     ] {
-//RS         let project = diagnostic_gate_project(
-//RS             &format!("diag_gate_denied_{mode}"),
-//RS             DENIED_LINT_SOURCE,
-//RS             true,
-//RS         );
-//RS         let output = run_cli(&project, mode, args);
-//RS         let stderr = String::from_utf8_lossy(&output.stderr);
-//RS         assert_ne!(output.status.code(), Some(0), "{mode} ran denied lint");
-//RS         assert!(stderr.contains("Error [E1293]"), "{mode} missing E1293:\n{stderr}");
-//RS         assert!(stderr.contains("L0103"), "{mode} missing denied L0103:\n{stderr}");
-//RS         assert!(!stderr.contains("Warning [L0103]"), "{mode} kept denied warning:\n{stderr}");
-//RS         assert!(
-//RS             !String::from_utf8_lossy(&output.stdout).contains("DENIED_SENTINEL"),
-//RS             "{mode} executed denied program"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// Driver-level: compile path and JIT checked path report the same error codes
-//RS /// for a recoverable parse-only diagnostic.
-//RS #[test]
-//RS fn build_and_run_share_one_diagnostic_gate() {
-//RS     let dir = common::unique_tmp("diag_gate_1463");
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("pure.jet");
-//RS     fs::write(&file, PURE_TEACHING).unwrap();
-//RS     let path = file.to_str().unwrap();
-//RS 
-//RS     let build_err = jet::compile_with_path("", path)
-//RS         .err()
-//RS         .expect("build path must reject retired #Pure");
-//RS     assert!(
-//RS         build_err.iter().any(|d| d.code == "E0927"),
-//RS         "build gate must include E0927, got: {:?}",
-//RS         codes(&build_err)
-//RS     );
-//RS 
-//RS     match run_jit_once(path) {
-//RS         RunOutcome::Problems(run_err) => {
-//RS             assert_eq!(
-//RS                 codes(&build_err),
-//RS                 codes(&run_err),
-//RS                 "build and run must share one diagnostic set\nbuild: {:?}\nrun: {:?}",
-//RS                 codes(&build_err),
-//RS                 codes(&run_err)
-//RS             );
-//RS         }
-//RS         other => panic!("jet run must surface Problems, got: {other:?}"),
-//RS     }
-//RS }
-//RS 
-//RS /// CLI: retired-marker repro reports E0927 with non-zero exit under both
-//RS /// `jet build` and default `jet run`.
-//RS #[test]
-//RS fn retired_marker_fails_build_and_default_run() {
-//RS     let dir = common::unique_tmp("diag_gate_cli");
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("retired.jet");
-//RS     let fixture = concat!(
-//RS         env!("CARGO_MANIFEST_DIR"),
-//RS         "/tests/ui/E0927_retired_marker.jet"
-//RS     );
-//RS     fs::copy(fixture, &file).unwrap();
-//RS     let path = file.to_str().unwrap();
-//RS     let jet = env!("CARGO_BIN_EXE_jet");
-//RS 
-//RS     let build = Command::new(jet)
-//RS         .args(["build", path])
-//RS         .output()
-//RS         .expect("jet build");
-//RS     let build_text = format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&build.stderr),
-//RS         String::from_utf8_lossy(&build.stdout)
-//RS     );
-//RS     assert!(
-//RS         !build.status.success(),
-//RS         "jet build must exit non-zero for E0927"
-//RS     );
-//RS     assert!(
-//RS         build_text.contains("E0927") && build_text.contains("retired"),
-//RS         "jet build must report E0927 retired wording, got:\n{build_text}"
-//RS     );
-//RS 
-//RS     let run = Command::new(jet)
-//RS         .args(["run", path])
-//RS         .output()
-//RS         .expect("jet run");
-//RS     let run_text = format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&run.stderr),
-//RS         String::from_utf8_lossy(&run.stdout)
-//RS     );
-//RS     assert!(
-//RS         !run.status.success(),
-//RS         "jet run must exit non-zero for E0927"
-//RS     );
-//RS     assert!(
-//RS         run_text.contains("E0927") && run_text.contains("retired"),
-//RS         "jet run must report E0927 retired wording, got:\n{run_text}"
-//RS     );
-//RS     assert!(
-//RS         build_text.contains("[E0927]") && run_text.contains("[E0927]"),
-//RS         "both paths must name [E0927]"
-//RS     );
-//RS }
-//RS 
-//RS /// Parse-only teaching (`#Pure`) must also fail default `jet run` — not only
-//RS /// markers that sema re-emits.
-//RS #[test]
-//RS fn pure_teaching_fails_default_run() {
-//RS     let dir = common::unique_tmp("diag_gate_pure_cli");
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("pure.jet");
-//RS     fs::write(&file, PURE_TEACHING).unwrap();
-//RS     let path = file.to_str().unwrap();
-//RS     let jet = env!("CARGO_BIN_EXE_jet");
-//RS 
-//RS     let build = Command::new(jet)
-//RS         .args(["build", path])
-//RS         .output()
-//RS         .expect("jet build");
-//RS     let run = Command::new(jet)
-//RS         .args(["run", path])
-//RS         .output()
-//RS         .expect("jet run");
-//RS     assert!(!build.status.success(), "jet build must reject #Pure");
-//RS     assert!(!run.status.success(), "jet run must reject #Pure");
-//RS     let build_text = format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&build.stderr),
-//RS         String::from_utf8_lossy(&build.stdout)
-//RS     );
-//RS     let run_text = format!(
-//RS         "{}{}",
-//RS         String::from_utf8_lossy(&run.stderr),
-//RS         String::from_utf8_lossy(&run.stdout)
-//RS     );
-//RS     assert!(build_text.contains("E0927") && run_text.contains("E0927"));
-//RS     assert!(
-//RS         !run_text.contains("hi"),
-//RS         "jet run must not execute past the gate"
-//RS     );
-//RS }
-//RS 
-//RS /// `jet dev` / interpreter deopt entry uses the same gate via `checked_bundle`.
-//RS #[test]
-//RS fn dev_path_reports_parse_teaching() {
-//RS     let dir = common::unique_tmp("diag_gate_dev");
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     let file = dir.join("pure.jet");
-//RS     fs::write(&file, PURE_TEACHING).unwrap();
-//RS     let path = file.to_str().unwrap();
-//RS     match dev_iteration(path, false, true) {
-//RS         RunOutcome::Problems(diags) => {
-//RS             assert!(
-//RS                 diags.iter().any(|d| d.code == "E0927"),
-//RS                 "dev/interpret gate must include E0927, got: {:?}",
-//RS                 codes(&diags)
-//RS             );
-//RS         }
-//RS         other => panic!("dev path must surface Problems for E0927, got: {other:?}"),
-//RS     }
-//RS }
-// END-PORT-PENDING 1038 tests/diagnostic_gate.rs:1-333
+use std.[fs, env]
+use std.process.[Command, Output]
+use std.path.OSPath
+use jet.Diagnostics.Diagnostic
+use jet_foundation.Registry.[DiagnosticRow, diagnostic_rows]
+use jet_foundation.Syntax.TEXT_NUL
+use jet_foundation.Tests.Integration.Common as common
+// GATE #4494: real filesystem, environment and subprocess providers.
+// GATE #4499: OSPath map keys retain native equality and ordering.
 
-// PORT-PENDING 1038 tests-diagnostic-gate-module-group: tests/diagnostic_pages.rs:1-263
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Generate and check one `Docs/site/dist/e/<CODE>/index.html` page for every
-//RS //! diagnostic row.
-//RS //!
-//RS //! The normal check compares committed pages with the typed registry. The
-//RS //! snapshot blessing command runs this test in the same invocation:
-//RS //!
-//RS //!     UPDATE_EXPECT=1 UPDATE_EXPECT_REASON="diagnostic page refresh" \
-//RS //!       cargo test --test diagnostic_snapshots --test diagnostic_pages
-//RS //!
-//RS //! `UPDATE_EXPECT` writes the generated pages. Without it, any missing, extra,
-//RS //! or changed page fails the build.
-//RS 
-//RS use std::collections::BTreeSet;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS const GENERATED_DIR: &str = "Docs/site/dist/e";
-//RS const SNAPSHOT_DIRS: &[&str] = &["tests/ui", "tests/ui_lint"];
-//RS 
-//RS struct Snapshot {
-//RS     path: String,
-//RS     text: String,
-//RS }
-//RS 
-//RS fn html_escape(value: &str) -> String {
-//RS     value
-//RS         .replace('&', "&amp;")
-//RS         .replace('<', "&lt;")
-//RS         .replace('>', "&gt;")
-//RS         .replace('"', "&quot;")
-//RS         .replace('\'', "&#39;")
-//RS         .replace('\0', "&#0;")
-//RS }
-//RS 
-//RS fn collect_snapshot_paths(dir: &Path, out: &mut Vec<PathBuf>) {
-//RS     let mut entries: Vec<PathBuf> = fs::read_dir(dir)
-//RS         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
-//RS         .map(|entry| entry.unwrap().path())
-//RS         .collect();
-//RS     entries.sort();
-//RS     for path in entries {
-//RS         if path.is_dir() {
-//RS             collect_snapshot_paths(&path, out);
-//RS         } else if matches!(
-//RS             path.extension().and_then(|extension| extension.to_str()),
-//RS             Some("stderr") | Some("warn")
-//RS         ) {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn snapshots(root: &Path) -> Vec<Snapshot> {
-//RS     let mut paths = Vec::new();
-//RS     for directory in SNAPSHOT_DIRS {
-//RS         collect_snapshot_paths(&root.join(directory), &mut paths);
-//RS     }
-//RS     paths.sort();
-//RS     paths
-//RS         .into_iter()
-//RS         .map(|path| Snapshot {
-//RS             path: path
-//RS                 .strip_prefix(root)
-//RS                 .unwrap()
-//RS                 .to_string_lossy()
-//RS                 .replace('\\', "/"),
-//RS             text: fs::read_to_string(&path)
-//RS                 .unwrap_or_else(|error| panic!("cannot read {}: {error}", path.display())),
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn first_snapshot<'a>(snapshots: &'a [Snapshot], code: &str) -> Option<&'a Snapshot> {
-//RS     let marker = format!("[{code}]");
-//RS     snapshots.iter().find(|snapshot| snapshot.text.contains(&marker))
-//RS }
-//RS 
-//RS fn collect_html_paths(dir: &Path, root: &Path, out: &mut BTreeSet<PathBuf>) {
-//RS     let mut entries: Vec<PathBuf> = fs::read_dir(dir)
-//RS         .unwrap_or_else(|error| panic!("cannot read {}: {error}", dir.display()))
-//RS         .map(|entry| entry.unwrap().path())
-//RS         .collect();
-//RS     entries.sort();
-//RS     for path in entries {
-//RS         if path.is_dir() {
-//RS             collect_html_paths(&path, root, out);
-//RS         } else if path.extension().and_then(|extension| extension.to_str()) == Some("html") {
-//RS             out.insert(path.strip_prefix(root).unwrap().to_path_buf());
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn sorted_rows() -> Vec<&'static jet_foundation::Registry::DiagnosticRow> {
-//RS     let mut rows: Vec<_> = jet_foundation::Registry::diagnostic_rows().iter().collect();
-//RS     rows.sort_by(|left, right| left.code.cmp(right.code));
-//RS     rows
-//RS }
-//RS 
-//RS fn render_page(
-//RS     row: &jet_foundation::Registry::DiagnosticRow,
-//RS     example: Option<&Snapshot>,
-//RS ) -> String {
-//RS     let code = html_escape(row.code);
-//RS     let what = html_escape(row.what);
-//RS     let why = html_escape(row.why);
-//RS     let fix = html_escape(row.fix);
-//RS     let description = html_escape(row.what);
-//RS     let example = match example {
-//RS         Some(snapshot) => format!(
-//RS             "<p>First UI snapshot mentioning <code>{code}</code>: <code>{}</code>.</p>\n<pre class=\"diag\">{}</pre>",
-//RS             html_escape(&snapshot.path),
-//RS             html_escape(&snapshot.text),
-//RS         ),
-//RS         None => "<p>No UI snapshot currently mentions this code.</p>".to_string(),
-//RS     };
-//RS 
-//RS     format!(
-//RS         "<!-- Generated by tests/diagnostic_pages.rs; do not edit. -->\n\
-//RS          <!doctype html>\n\
-//RS          <html lang=\"en\">\n\
-//RS          <head>\n\
-//RS          <meta charset=\"utf-8\">\n\
-//RS          <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-//RS          <title>{code} — Jet diagnostic</title>\n\
-//RS          <meta name=\"description\" content=\"{description}\">\n\
-//RS          <meta property=\"og:title\" content=\"{code} — Jet diagnostic\">\n\
-//RS          <meta property=\"og:description\" content=\"{description}\">\n\
-//RS          <link rel=\"icon\" type=\"image/svg+xml\" href=\"../../assets/favicon.svg\">\n\
-//RS          <link rel=\"stylesheet\" href=\"../../assets/site.css\">\n\
-//RS          </head>\n\
-//RS          <body>\n\
-//RS          <header class=\"wrap nav\">\n\
-//RS            <a class=\"nav-brand\" href=\"../../index.html\" aria-label=\"Jet home\"><span class=\"word\">jet</span></a>\n\
-//RS            <nav><ul class=\"nav-links\">\n\
-//RS              <li><a href=\"../../tour.html\">Tour</a></li>\n\
-//RS              <li><a href=\"../../install.html\">Install</a></li>\n\
-//RS              <li><a href=\"../index.html\" aria-current=\"page\">Error codes</a></li>\n\
-//RS            </ul></nav>\n\
-//RS          </header>\n\
-//RS          <main>\n\
-//RS          <section class=\"wrap page\">\n\
-//RS            <div class=\"page-header\">\n\
-//RS              <p class=\"eyebrow\">// diagnostic</p>\n\
-//RS              <h1>{code}</h1>\n\
-//RS              <p>{what}</p>\n\
-//RS            </div>\n\
-//RS          </section>\n\
-//RS          <article class=\"wrap article\">\n\
-//RS            <h2>What</h2>\n\
-//RS            <p class=\"diag-copy what\" data-registry-field=\"what\">{what}</p>\n\
-//RS            <h2>Why</h2>\n\
-//RS            <p class=\"diag-copy why\" data-registry-field=\"why\">{why}</p>\n\
-//RS            <h2>Fix</h2>\n\
-//RS            <p class=\"diag-copy fix\" data-registry-field=\"fix\">{fix}</p>\n\
-//RS            <h2>Worked example</h2>\n\
-//RS            {example}\n\
-//RS            <p><a href=\"../index.html\">Back to all error codes</a></p>\n\
-//RS          </article>\n\
-//RS          </main>\n\
-//RS          <footer class=\"footer\">\n\
-//RS            <div class=\"wrap footer-grid\">\n\
-//RS              <a class=\"nav-brand\" href=\"../../index.html\" aria-label=\"Jet home\"><span class=\"word\">jet</span></a>\n\
-//RS              <p class=\"made\">Generated from Jet's diagnostic registry and UI snapshots.</p>\n\
-//RS            </div>\n\
-//RS          </footer>\n\
-//RS          </body>\n\
-//RS          </html>\n",
-//RS     )
-//RS }
-//RS 
-//RS fn line_diff(expected: &str, actual: &str) -> String {
-//RS     let expected_lines: Vec<_> = expected.lines().collect();
-//RS     let actual_lines: Vec<_> = actual.lines().collect();
-//RS     let first = expected_lines
-//RS         .iter()
-//RS         .zip(&actual_lines)
-//RS         .position(|(left, right)| left != right)
-//RS         .unwrap_or(expected_lines.len().min(actual_lines.len()));
-//RS     format!(
-//RS         "first differing line {}\n- {}\n+ {}",
-//RS         first + 1,
-//RS         expected_lines.get(first).copied().unwrap_or("<missing>"),
-//RS         actual_lines.get(first).copied().unwrap_or("<missing>"),
-//RS     )
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_pages_match_registry_and_snapshots() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let output = root.join(GENERATED_DIR);
-//RS     let snapshot_files = snapshots(&root);
-//RS     let rows = sorted_rows();
-//RS     let expected_codes: BTreeSet<&str> = rows.iter().map(|row| row.code).collect();
-//RS     assert_eq!(
-//RS         expected_codes.len(),
-//RS         rows.len(),
-//RS         "diagnostic registry contains duplicate codes"
-//RS     );
-//RS 
-//RS     let update = std::env::var_os("UPDATE_EXPECT").is_some()
-//RS         || std::env::var_os("UPDATE_DIAGNOSTIC_PAGES").is_some();
-//RS     if update {
-//RS         fs::create_dir_all(&output).unwrap();
-//RS     }
-//RS 
-//RS     let mut generated = 0usize;
-//RS     for row in rows {
-//RS         let page = render_page(row, first_snapshot(&snapshot_files, row.code));
-//RS         for (field, value) in [("what", row.what), ("why", row.why), ("fix", row.fix)] {
-//RS             let marker = format!(
-//RS                 "<p class=\"diag-copy {field}\" data-registry-field=\"{field}\">{}</p>",
-//RS                 html_escape(value)
-//RS             );
-//RS             assert!(
-//RS                 page.contains(&marker),
-//RS                 "{} page lost registry {field} text",
-//RS                 row.code
-//RS             );
-//RS         }
-//RS 
-//RS         let path = output.join(row.code).join("index.html");
-//RS         if update {
-//RS             fs::create_dir_all(path.parent().unwrap()).unwrap();
-//RS             fs::write(&path, &page)
-//RS                 .unwrap_or_else(|error| panic!("cannot write {}: {error}", path.display()));
-//RS         } else {
-//RS             let actual = fs::read_to_string(&path).unwrap_or_else(|error| {
-//RS                 panic!(
-//RS                     "missing generated page {}: {error}; run with UPDATE_EXPECT=1",
-//RS                     path.display()
-//RS                 )
-//RS             });
-//RS             assert_eq!(
-//RS                 actual,
-//RS                 page,
-//RS                 "{} drifted:\n{}",
-//RS                 path.display(),
-//RS                 line_diff(&page, &actual)
-//RS             );
-//RS         }
-//RS         generated += 1;
-//RS     }
-//RS 
-//RS     let expected_pages: BTreeSet<PathBuf> = expected_codes
-//RS         .iter()
-//RS         .map(|code| PathBuf::from(code).join("index.html"))
-//RS         .collect();
-//RS     let mut actual_pages = BTreeSet::new();
-//RS     if output.is_dir() {
-//RS         collect_html_paths(&output, &output, &mut actual_pages);
-//RS     }
-//RS     actual_pages.remove(Path::new("index.html"));
-//RS     assert_eq!(
-//RS         actual_pages, expected_pages,
-//RS         "generated diagnostic page set drifted; hand-authored or stale pages exist"
-//RS     );
-//RS 
-//RS     println!(
-//RS         "diagnostic pages: generated {generated} / registry {}",
-//RS         expected_codes.len()
-//RS     );
-//RS     assert_eq!(generated, expected_codes.len());
-//RS }
-// END-PORT-PENDING 1038 tests/diagnostic_pages.rs:1-263
+// Rust: tests/diagnostic_gate.rs:14
+fn codes(diags: [Diagnostic]) -> [String: Bool] {
+    result := [:]
+    for d in diags { result.insert(d.code.clone(), true) }
+    result
+}
+// Rust: tests/diagnostic_gate.rs:21
+PURE_TEACHING :: "\n#Pure\nfn work() {}\nfn run() {\n    print(\"hi\")\n}\n"
+// Rust: tests/diagnostic_gate.rs:29
+L0103_SOURCE :: include_str("tests/ui_lint/qualified_alias_import_liveness.jet")
+// Rust: tests/diagnostic_gate.rs:30
+L0202_SOURCE :: include_str("tests/ui_lint/shared_loop.jet")
+// Rust: tests/diagnostic_gate.rs:31
+DIAGNOSTIC_GATE_PACKAGE :: "name: \"diagnostic_gate\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n"
+// Rust: tests/diagnostic_gate.rs:33
+L0103_SOURCE_OUTPUT :: "key=1 door=3\nkey=3 door=1\nwins=2\nstatus=failed\nfailures=7\n"
+// Rust: tests/diagnostic_gate.rs:35
+DENIED_LINT_PACKAGE :: "name: \"diagnostic_gate_denied\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\npolicy: { lints: { deny: [unused_import] } }\n"
+// Rust: tests/diagnostic_gate.rs:37
+DENIED_LINT_SOURCE :: "\nuse core.files as files\n\nfn run() {\n    print(\"DENIED_SENTINEL\")\n}\n"
+// Rust: tests/diagnostic_gate.rs:45
+fn diagnostic_gate_project(tag: String, source: String, denied: Bool) -> common.Scratch {
+    project :: common.Scratch.new(tag)
+    fs.write(project.join("main.jet"), source).unwrap()
+    fs.write(project.join("package.jet"), if denied -> DENIED_LINT_PACKAGE else -> DIAGNOSTIC_GATE_PACKAGE).unwrap()
+    project
+}
+// Rust: tests/diagnostic_gate.rs:60
+fn run_cli(project: common.Scratch, cache: String, args: [String]) -> Output {
+    Command.new(env.var("JET_BIN").expect("Jet executable"))
+        .args(args).current_dir(&project.path)
+        .env("JET_RUN_CACHE_DIR", project.path.join("cache/{cache}/run"))
+        .env("JET_STORE_DIR", project.path.join("cache/{cache}/build"))
+        .env("NO_COLOR", "1").output().unwrap_or_else(fn(error) { panic("jet {args}: {error}") })
+}
+// Rust: tests/diagnostic_gate.rs:77
+fn assert_warning_status(output: Output, label: String, code: String) -> {
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert_eq(output.status.code(), Some(0), "{label} exited nonzero:\nstdout={String.from_utf8_lossy(&output.stdout)}\nstderr={stderr}")
+    assert(stderr.contains("Warning [{code}]"), "{label} did not classify {code} as a warning:\n{stderr}")
+    assert(!stderr.contains("Error [{code}]"), "{label} classified {code} as an error:\n{stderr}")
+}
+// Rust: tests/diagnostic_gate.rs:95
+fn assert_warning_execution(output: Output, label: String, code: String, stdout: String) -> {
+    assert_warning_status(output, label, code)
+    assert_eq(output.stdout, stdout.as_bytes(), "{label} program stdout changed")
+}
 
-// PORT-PENDING 1038 tests-diagnostic-gate-module-group: tests/diagnostics_format.rs:1-324
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Diagnostics registry per-entry format validator.
-//RS //!
-//RS //! D-REPORT-HOME1=A requires every typed diagnostic row to carry What/Why/Fix
-//RS //! prose, not just a code and severity. The coverage test
-//RS //! (tests/diagnostics_coverage.rs) checks reachability; this test checks the
-//RS //! row payload itself.
-//RS //!
-//RS //! Run: `cargo test --test diagnostics_format`
-//RS 
-//RS #[path = "support/case_law.rs"]
-//RS mod case_law;
-//RS 
-//RS #[test]
-//RS fn every_typed_diagnostic_row_is_complete() {
-//RS     let rows = jet_foundation::Registry::diagnostic_rows();
-//RS     let violations: Vec<String> = rows
-//RS         .iter()
-//RS         .flat_map(|row| {
-//RS             [("What", row.what), ("Why", row.why), ("Fix", row.fix)]
-//RS                 .into_iter()
-//RS                 .filter_map(move |(part, value)| {
-//RS                     value
-//RS                         .trim()
-//RS                         .is_empty()
-//RS                         .then(|| format!("{}: {} is empty", row.code, part))
-//RS                 })
-//RS         })
-//RS         .collect();
-//RS     assert!(
-//RS         violations.is_empty(),
-//RS         "typed diagnostic rows have malformed or incomplete What/Why/Fix templates \
-//RS          (I4 — every diagnostic needs what/why/fix, not just a code):\n{}",
-//RS         violations.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn every_typed_diagnostic_line_uses_ratified_sentence_case() {
-//RS     let mut rows = 0;
-//RS     let mut violations = Vec::new();
-//RS     for (line_index, raw) in jet_foundation::Registry::DIAGNOSTIC_SOURCE.lines().enumerate() {
-//RS         let line = raw.trim();
-//RS         if line.is_empty() || line.starts_with("//") {
-//RS             continue;
-//RS         }
-//RS         let fields: Vec<&str> = line.split('\t').collect();
-//RS         if fields.first().copied() != Some("diagnostic") {
-//RS             continue;
-//RS         }
-//RS         rows += 1;
-//RS         // One rule, one home: this used to re-implement the check inline and
-//RS         // drifted into the inverse of D-CASE-PROSE1, so it now calls the same
-//RS         // predicate the enforcement suite uses.
-//RS         for (name, value) in [("What", fields[7]), ("Why", fields[8]), ("Fix", fields[9])] {
-//RS             if let Some(detail) = case_law::sentence_case_violation(value) {
-//RS                 violations.push(format!(
-//RS                     "Diagnostics.jet:{} {} {name}: {detail}",
-//RS                     line_index + 1,
-//RS                     fields[1],
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     assert_eq!(
-//RS         rows,
-//RS         jet_foundation::Registry::diagnostic_rows().len(),
-//RS         "table validator must inspect every typed diagnostic row"
-//RS     );
-//RS     assert!(
-//RS         violations.is_empty(),
-//RS         "ratified sentence-case violations (D-CASE-PROSE1):\n{}",
-//RS         violations.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_case_validator_preserves_code_fragments_and_flags() {
-//RS     let source = jet_foundation::Registry::DIAGNOSTIC_SOURCE;
-//RS     assert!(source.contains("`--offline` forbids network access"));
-//RS     assert!(source.contains("D-PATR: range"));
-//RS     assert!(source.contains("C-style"));
-//RS     assert!(!source.contains("`--offline` Forbids Network Access"));
-//RS     assert!(!source.contains("D-patr: Range"));
-//RS     assert_eq!(
-//RS         jet_foundation::Outcome::jet_sentence_case_line("Int cannot cross the C boundary"),
-//RS         "Int cannot cross the C boundary"
-//RS     );
-//RS     assert_eq!(
-//RS         jet_foundation::Outcome::jet_sentence_case_line("Syntax.rs owns user-typeable syntax"),
-//RS         "Syntax.rs owns user-typeable syntax"
-//RS     );
-//RS     for (input, expected) in [
-//RS         ("Bool cannot cross the boundary", "Bool cannot cross the boundary"),
-//RS         ("U8 has the wrong width", "U8 has the wrong width"),
-//RS         ("src/Main.jet is not reachable", "src/Main.jet is not reachable"),
-//RS         (
-//RS             "package@Source#Version is not available",
-//RS             "package@Source#Version is not available",
-//RS         ),
-//RS         ("UserId has no matching field", "UserId has no matching field"),
-//RS         ("fn is the only declaration form", "fn is the only declaration form"),
-//RS         (
-//RS             "`TypeName` cannot be constructed here",
-//RS             "`TypeName` cannot be constructed here",
-//RS         ),
-//RS     ] {
-//RS         assert_eq!(
-//RS             jet_foundation::Outcome::jet_sentence_case_line(input),
-//RS             expected,
-//RS             "diagnostic case law changed `{input}`"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_case_validator_excludes_non_prose_tokens() {
-//RS     for (kind, input) in [
-//RS         ("identifier", "UserId has no matching field"),
-//RS         ("flag", "--offline forbids network access"),
-//RS         ("path", "src/Main.jet is not reachable"),
-//RS         ("path", "Main.jet is not reachable"),
-//RS         ("ref", "package@Source#Version is not available"),
-//RS         ("keyword", "fn is the only declaration form"),
-//RS         ("JSON key", r#"{"SomeKey":"SomeValue"}"#),
-//RS     ] {
-//RS         let Some((start, end)) = case_law::first_diagnostic_prose_token(input) else {
-//RS             continue;
-//RS         };
-//RS         let token = &input[start..end];
-//RS         assert!(
-//RS             !token.chars().next().is_some_and(|ch| ch.is_ascii_uppercase())
-//RS                 || case_law::diagnostic_token_keeps_case(token),
-//RS             "{kind} was treated as prose: {input:?} (token {token:?})"
-//RS         );
-//RS     }
-//RS 
-//RS     for token in [
-//RS         "UserId",
-//RS         "--offline",
-//RS         "src/Main.jet",
-//RS         "package@Source#Version",
-//RS         "fn",
-//RS         "SomeKey",
-//RS     ] {
-//RS         assert!(
-//RS             case_law::diagnostic_token_keeps_case(token),
-//RS             "excluded {token:?} must keep its own case"
-//RS         );
-//RS     }
-//RS 
-//RS     for (input, expected) in [
-//RS         (
-//RS             "UserId has no matching field",
-//RS             "UserId has no matching field",
-//RS         ),
-//RS         ("--offline forbids network access", "--offline forbids network access"),
-//RS         (
-//RS             "src/Main.jet is not reachable",
-//RS             "src/Main.jet is not reachable",
-//RS         ),
-//RS         (
-//RS             "Main.jet is not reachable",
-//RS             "Main.jet is not reachable",
-//RS         ),
-//RS         (
-//RS             "package@Source#Version is not available",
-//RS             "package@Source#Version is not available",
-//RS         ),
-//RS         ("fn is the only declaration form", "fn is the only declaration form"),
-//RS         (r#"{"SomeKey":"SomeValue"}"#, r#"{"SomeKey":"SomeValue"}"#),
-//RS     ] {
-//RS         assert_eq!(
-//RS             jet_foundation::Outcome::jet_sentence_case_line(input),
-//RS             expected,
-//RS             "production diagnostic projection changed exclusion {input:?}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// D-CASE-CHROME1=C / D-CASE-PROSE1=A: collect the strings from the live
-//RS /// producers. Renderers are not alternate homes: the CLI registry feeds both
-//RS /// help surfaces, diagnostic rows feed explain and reports, and the REPL
-//RS /// render helpers feed status, prompt, and interactive chrome.
-//RS #[test]
-//RS fn every_user_facing_case_source_is_checked() {
-//RS     case_law::assert_user_facing_case_law();
-//RS }
-//RS 
-//RS #[test]
-//RS fn adding_a_new_title_case_violation_fails_case_check() {
-//RS     let mut sources = case_law::user_facing_case_sources();
-//RS     assert!(
-//RS         case_law::case_law_violations(&sources).is_empty(),
-//RS         "case-law source baseline must pass before mutation"
-//RS     );
-//RS     sources.push(case_law::CaseLawSource {
-//RS         name: "temporary violating label".to_string(),
-//RS         value: "Ready And Safe".to_string(),
-//RS         kind: case_law::CaseLawKind::Title,
-//RS     });
-//RS 
-//RS     let violations = case_law::case_law_violations(&sources);
-//RS     assert!(
-//RS         violations
-//RS             .iter()
-//RS             .any(|violation| violation.contains("temporary violating label")
-//RS                 && violation.contains("And")),
-//RS         "adding a new violating string must fail the case check: {violations:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn title_case_minor_words_follow_ratified_per_word_rule() {
-//RS     assert_eq!(case_law::TITLE_CASE_MINOR_WORDS.len(), 16);
-//RS     assert!(case_law::title_case_violation("Read a Book").is_none());
-//RS     assert!(case_law::title_case_violation("Read A Book").is_some());
-//RS     assert!(case_law::title_case_violation("A Book").is_none());
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn diagnostic_body_validator_rejects_malformed_rows() {
-//RS     let malformed = "| Code | What | Why | Fix |\n\
-//RS                      | --- | --- | --- | --- |\n\
-//RS                      | E0001 | what | why | |\n\
-//RS                      | E0002 | what | why |\n\
-//RS                      | `E0003` | what | why | |\n";
-//RS     let violations = diagnostic_body_violations(malformed);
-//RS     assert_eq!(violations.len(), 3, "{violations:#?}");
-//RS     assert!(violations[0].contains("E0001") && violations[0].contains("non-empty"));
-//RS     assert!(violations[1].contains("E0002") && violations[1].contains("malformed"));
-//RS     assert!(violations[2].contains("E0003") && violations[2].contains("non-empty"));
-//RS }
-//RS 
-//RS fn diagnostic_body_violations(text: &str) -> Vec<String> {
-//RS     let mut violations = Vec::new();
-//RS     let mut in_wwf_table = false;
-//RS 
-//RS     for (idx, raw) in text.lines().enumerate() {
-//RS         let line = raw.trim();
-//RS         if !line.starts_with('|') {
-//RS             in_wwf_table = false;
-//RS             continue;
-//RS         }
-//RS         let cells = markdown_cells(line);
-//RS         // split('|') on "| a | b | c | d |" yields ["", "a", "b", "c", "d", ""]
-//RS         if is_wwf_header(&cells) {
-//RS             in_wwf_table = true;
-//RS             continue;
-//RS         }
-//RS         if !in_wwf_table {
-//RS             continue;
-//RS         }
-//RS         if cells
-//RS             .iter()
-//RS             .all(|c| c.is_empty() || c.chars().all(|ch| ch == '-'))
-//RS         {
-//RS             continue; // header separator row
-//RS         }
-//RS         let Some(code) = cells.get(1).and_then(|code| diagnostic_code(code)) else {
-//RS             continue;
-//RS         };
-//RS         if cells.len() != 6 {
-//RS             violations.push(format!(
-//RS                 "line {}: {} — malformed What/Why/Fix row has {} pipe-delimited cells, expected 6",
-//RS                 idx + 1,
-//RS                 code,
-//RS                 cells.len()
-//RS             ));
-//RS             continue;
-//RS         }
-//RS         let what = &cells[2];
-//RS         let why = &cells[3];
-//RS         let fix = &cells[4];
-//RS         if what.is_empty() || why.is_empty() || fix.is_empty() {
-//RS             violations.push(format!(
-//RS                 "line {}: {} — What/Why/Fix must all be non-empty (what={:?} why={:?} fix={:?})",
-//RS                 idx + 1,
-//RS                 code,
-//RS                 what,
-//RS                 why,
-//RS                 fix
-//RS             ));
-//RS         }
-//RS     }
-//RS     violations
-//RS }
-//RS 
-//RS fn markdown_cells(line: &str) -> Vec<String> {
-//RS     let mut cells = vec![String::new()];
-//RS     let mut escaped = false;
-//RS     for ch in line.chars() {
-//RS         if ch == '|' && !escaped {
-//RS             cells.push(String::new());
-//RS         } else {
-//RS             cells.last_mut().unwrap().push(ch);
-//RS         }
-//RS         escaped = ch == '\\' && !escaped;
-//RS     }
-//RS     cells
-//RS         .into_iter()
-//RS         .map(|cell| cell.trim().to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS fn is_wwf_header(cells: &[String]) -> bool {
-//RS     cells.len() >= 5
-//RS         && cells[1].eq_ignore_ascii_case("code")
-//RS         && cells[2].eq_ignore_ascii_case("what")
-//RS         && cells[3].eq_ignore_ascii_case("why")
-//RS         && cells[4].eq_ignore_ascii_case("fix")
-//RS }
-//RS 
-//RS fn is_code_like(code: &str) -> bool {
-//RS     jet::Explain::is_code(code)
-//RS }
-//RS 
-//RS fn diagnostic_code(cell: &str) -> Option<&str> {
-//RS     let code = cell
-//RS         .strip_prefix('`')
-//RS         .and_then(|cell| cell.strip_suffix('`'))
-//RS         .unwrap_or(cell);
-//RS     is_code_like(code).then_some(code)
-//RS }
-// END-PORT-PENDING 1038 tests/diagnostics_format.rs:1-324
+// Rust: tests/diagnostic_pages.rs:17
+GENERATED_DIR :: "Docs/site/dist/e"
+// Rust: tests/diagnostic_pages.rs:18
+SNAPSHOT_DIRS :: ["tests/ui", "tests/ui_lint"]
+// Rust: tests/diagnostic_pages.rs:20
+struct Snapshot { path: String, text: String }
+// Rust: tests/diagnostic_pages.rs:25
+fn html_escape(value: String) -> String {
+    value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&#39;").replace(TEXT_NUL, "&#0;")
+}
+// Rust: tests/diagnostic_pages.rs:35
+fn collect_snapshot_paths(dir: OSPath, out: &[OSPath]) -> {
+    entries := fs.read_dir(dir).unwrap_or_else(fn(error) { panic("cannot read {dir.display()}: {error}") }).map(fn(entry) { entry.unwrap().path() }).collect()
+    entries.sort()
+    for path in entries {
+        if path.is_dir() { collect_snapshot_paths(&path, &out) }
+        else if path.extension().and_then(fn(ext) { ext.to_str() }) == Some("stderr") || path.extension().and_then(fn(ext) { ext.to_str() }) == Some("warn") { out.push(path) }
+    }
+}
+// Rust: tests/diagnostic_pages.rs:53
+fn snapshots(root: OSPath) -> [Snapshot] {
+    paths := []
+    for directory in SNAPSHOT_DIRS { collect_snapshot_paths(&root.join(directory), &paths) }
+    paths.sort()
+    paths.into_iter().map(fn(path) {
+        Snapshot { path: path.strip_prefix(root).unwrap().to_string_lossy().replace("\\", "/"), text: fs.read_to_string(&path).unwrap_or_else(fn(error) { panic("cannot read {path.display()}: {error}") }) }
+    }).collect()
+}
+// Rust: tests/diagnostic_pages.rs:73
+fn first_snapshot(values: [Snapshot], code: String) -> Snapshot? {
+    marker :: "[{code}]"
+    values.iter().find(fn(snapshot) { snapshot.text.contains(&marker) })
+}
+// Rust: tests/diagnostic_pages.rs:78
+fn collect_html_paths(dir: OSPath, root: OSPath, out: &[OSPath: Bool]) -> {
+    entries := fs.read_dir(dir).unwrap_or_else(fn(error) { panic("cannot read {dir.display()}: {error}") }).map(fn(entry) { entry.unwrap().path() }).collect()
+    entries.sort()
+    for path in entries {
+        if path.is_dir() { collect_html_paths(&path, root, &out) }
+        else if path.extension().and_then(fn(ext) { ext.to_str() }) == Some("html") { out.insert(path.strip_prefix(root).unwrap().to_path_buf(), true) }
+    }
+}
+// Rust: tests/diagnostic_pages.rs:93
+fn sorted_rows() -> [DiagnosticRow] {
+    rows := diagnostic_rows().iter().collect()
+    rows.sort_by(fn(left, right) { left.code.cmp(right.code) })
+    rows
+}
+// Rust: tests/diagnostic_pages.rs:99
+fn render_page(row: DiagnosticRow, example: Snapshot?) -> String {
+    code :: html_escape(row.code)
+    what :: html_escape(row.what)
+    why :: html_escape(row.why)
+    fix :: html_escape(row.fix)
+    description :: html_escape(row.what)
+    example_text :: if example == {
+        Some(snapshot) -> "<p>First UI snapshot mentioning <code>{code}</code>: <code>{html_escape(&snapshot.path)}</code>.</p>\n<pre class=\"diag\">{html_escape(&snapshot.text)}</pre>"
+        None -> "<p>No UI snapshot currently mentions this code.</p>"
+    }
+    "<!-- Generated by tests/diagnostic_pages.rs; do not edit. -->\n" +
+    "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n" +
+    "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n<title>{code} — Jet diagnostic</title>\n" +
+    "<meta name=\"description\" content=\"{description}\">\n<meta property=\"og:title\" content=\"{code} — Jet diagnostic\">\n" +
+    "<meta property=\"og:description\" content=\"{description}\">\n<link rel=\"icon\" type=\"image/svg+xml\" href=\"../../assets/favicon.svg\">\n" +
+    "<link rel=\"stylesheet\" href=\"../../assets/site.css\">\n</head>\n<body>\n<header class=\"wrap nav\">\n" +
+    "<a class=\"nav-brand\" href=\"../../index.html\" aria-label=\"Jet home\"><span class=\"word\">jet</span></a>\n<nav><ul class=\"nav-links\">\n" +
+    "<li><a href=\"../../tour.html\">Tour</a></li>\n<li><a href=\"../../install.html\">Install</a></li>\n" +
+    "<li><a href=\"../index.html\" aria-current=\"page\">Error codes</a></li>\n</ul></nav>\n</header>\n<main>\n<section class=\"wrap page\">\n" +
+    "<div class=\"page-header\">\n<p class=\"eyebrow\">// diagnostic</p>\n<h1>{code}</h1>\n<p>{what}</p>\n</div>\n</section>\n" +
+    "<article class=\"wrap article\">\n<h2>What</h2>\n<p class=\"diag-copy what\" data-registry-field=\"what\">{what}</p>\n" +
+    "<h2>Why</h2>\n<p class=\"diag-copy why\" data-registry-field=\"why\">{why}</p>\n<h2>Fix</h2>\n" +
+    "<p class=\"diag-copy fix\" data-registry-field=\"fix\">{fix}</p>\n<h2>Worked example</h2>\n{example_text}\n" +
+    "<p><a href=\"../index.html\">Back to all error codes</a></p>\n</article>\n</main>\n<footer class=\"footer\">\n<div class=\"wrap footer-grid\">\n" +
+    "<a class=\"nav-brand\" href=\"../../index.html\" aria-label=\"Jet home\"><span class=\"word\">jet</span></a>\n" +
+    "<p class=\"made\">Generated from Jet's diagnostic registry and UI snapshots.</p>\n</div>\n</footer>\n</body>\n</html>\n"
+}
+// Rust: tests/diagnostic_pages.rs:171
+fn line_diff(expected: String, actual: String) -> String {
+    expected_lines :: expected.lines().collect()
+    actual_lines :: actual.lines().collect()
+    first :: expected_lines.iter().zip(&actual_lines).position(fn(pair) { pair.0 != pair.1 }).unwrap_or(expected_lines.len().min(actual_lines.len()))
+    "first differing line {first + 1}\n- {expected_lines.get(first).copied().unwrap_or(\"<missing>\")}\n+ {actual_lines.get(first).copied().unwrap_or(\"<missing>\")}"
+}
 
-// PORT-PENDING 1038 tests-diagnostic-gate-module-group: tests/dsl_blocks.rs:1-178
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-META-DSL1=A: declared checked text blocks are syntax islands with
-//RS //! ordinary Jet checking inside them.
-//RS 
-//RS mod common;
-//RS 
-//RS #[test]
-//RS fn sql_and_html_blocks_compile_and_formatter_round_trip() {
-//RS     let source = r#"
-//RS     struct User { id: Int }
-//RS     fn run() {
-//RS     #SQL(User) {
-//RS         query :: SQL.{"select id from users"}
-//RS         print(query.template())
-//RS     }
-//RS     #HTML {
-//RS         page :: HTML.{"<p>ready</p>"}
-//RS         print(page.text())
-//RS     }
-//RS }
-//RS "#;
-//RS     let _compiled = jet::compile(source).expect("declared library blocks should compile");
-//RS     let formatted = jet::format_source(source).expect("DSL blocks should format");
-//RS     assert!(formatted.contains("#SQL(User)"));
-//RS     assert!(formatted.contains("#HTML {"));
-//RS     assert_eq!(
-//RS         jet::format_source(&formatted).unwrap(),
-//RS         formatted,
-//RS         "DSL formatter output must be stable"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn dsl_block_body_keeps_normal_sema_and_registry_rules() {
-//RS     let body_error = jet::compile("fn run() { #SQL { missing :: unknown_name() } }\n").unwrap_err();
-//RS     assert!(
-//RS         body_error
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code != "E0617"),
-//RS         "DSL body should use ordinary sema diagnostics: {body_error:?}"
-//RS     );
-//RS 
-//RS     let foreign_marker = jet::compile("fn run() { #Graph { value :: 1 } }\n").unwrap_err();
-//RS     assert!(
-//RS         !foreign_marker.is_empty(),
-//RS         "undeclared block markers must be rejected"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn undeclared_checked_text_block_reports_one_registered_error() {
-//RS     let diagnostics = jet::compile("fn run() { #Graph { value :: 1 } }\n").unwrap_err();
-//RS     let errors: Vec<_> = diagnostics
-//RS         .iter()
-//RS         .filter(|diagnostic| diagnostic.code == "E0927")
-//RS         .collect();
-//RS     assert_eq!(errors.len(), 1, "expected one E0927: {diagnostics:?}");
-//RS     let diagnostic = errors[0];
-//RS     assert!(!diagnostic.what.is_empty());
-//RS     assert!(!diagnostic.why.is_empty());
-//RS     assert!(!diagnostic.fix.is_empty());
-//RS }
-//RS 
-//RS #[test]
-//RS fn declared_block_receives_the_whole_nested_region() {
-//RS     let source = r#"
-//RS marker Check($sites: [.Block]) {
-//RS     if !target.contains("after") {
-//RS         reject(
-//RS             code: "E0927",
-//RS             what: "the complete block text is required",
-//RS             why: "the checker reads one lexical region",
-//RS             fix: "keep the trailing statement inside the block"
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS fn run() {
-//RS     #Check {
-//RS         if true {
-//RS             print("inside")
-//RS         }
-//RS         print("after")
-//RS     }
-//RS }
-//RS "#;
-//RS     jet::compile(source).expect("a declared block must include nested and trailing text");
-//RS }
-//RS 
-//RS #[test]
-//RS fn typed_text_forms_cover_sql_html_sh_and_audited_raw() {
-//RS     let source = r#"
-//RS fn run() {
-//RS     id :: 7
-//RS     query :: SQL.{"select * from users where id = {id}"}
-//RS     _template :: query.template()
-//RS     _params :: query.params()
-//RS     name :: "<unsafe>"
-//RS     page :: HTML.{"<p>{name}</p>"}
-//RS     _text :: page.text()
-//RS     _sql :: SQL.raw("select 1")
-//RS     _html :: HTML.raw("<b>audited</b>")
-//RS     command :: Sh.{"printf <%s> {name}"}
-//RS }
-//RS "#;
-//RS     jet::compile(source).expect("typed domain text should compile through one checked path");
-//RS }
-//RS 
-//RS #[test]
-//RS fn boundary_typed_heads_validate_and_compile() {
-//RS     let source = r#"
-//RS fn run() {
-//RS     service :: "ada/../etc"
-//RS     endpoint :: URL.{"https://api.example.com/v2/{service}"}
-//RS     log_path :: Path.{"/var/log/{service}.log"}
-//RS     stamp :: DateTime.{"2026-08-07T12:00:00Z"}
-//RS }
-//RS "#;
-//RS     jet::compile(source).expect("URL, Path, and DateTime heads should compile");
-//RS 
-//RS     let invalid_url = jet::compile(
-//RS         r#"fn run() {
-//RS     bad :: URL.{"https://[bad"}
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("an invalid URL head must fail in sema");
-//RS     assert!(
-//RS         invalid_url
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "E0155"),
-//RS         "invalid URL head should use E0155: {invalid_url:?}"
-//RS     );
-//RS 
-//RS     let datetime_hole = jet::compile(
-//RS         r#"fn run() {
-//RS     hour :: "12"
-//RS     bad :: DateTime.{"2026-08-07T{hour}:00:00Z"}
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("DateTime heads must reject interpolation");
-//RS     assert!(
-//RS         datetime_hole
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "E0155"),
-//RS         "DateTime interpolation should use E0155: {datetime_hole:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn regex_typed_head_owns_backslashes_but_rejects_holes() {
-//RS     let diagnostics = jet::compile(
-//RS         r#"
-//RS fn run() {
-//RS     name :: "id"
-//RS     pattern :: Regex.{"\d+{name}"}
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect_err("Regex heads must reject interpolation after receiving raw text");
-//RS     assert!(
-//RS         diagnostics
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "E0152"),
-//RS         "Regex interpolation should use E0152: {diagnostics:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn sql_row_header_is_a_real_declared_type_position() {
-//RS     let error = jet::compile("fn run() { #SQL(MissingRow) {} }\n").unwrap_err();
-//RS     assert!(
-//RS         error.iter().any(|diagnostic| {
-//RS             diagnostic.what.contains("MissingRow") || diagnostic.fix.contains("MissingRow")
-//RS         }),
-//RS         "unknown SQL row type should use ordinary declared-type diagnostics: {error:?}"
-//RS     );
-//RS }
-// END-PORT-PENDING 1038 tests/dsl_blocks.rs:1-178
-
-// PORT-PENDING 1038 tests-diagnostic-gate-module-group: tests/effect_roots.rs:1-197
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS mod tir_support;
-//RS 
-//RS use std::fs;
-//RS use std::process::Command;
-//RS 
-//RS use jet::Sema::EffectSet;
-//RS use jetpack::EffectBudget::{self, PackageEffects};
-//RS 
-//RS const FFI_LEAF_SOURCE: &str = r#"
-//RS MESSAGE :: prep { "ffi leaf" }
-//RS 
-//RS fn run() -[FFI.Py, IO]> {
-//RS     print(MESSAGE)
-//RS }
-//RS "#;
-//RS 
-//RS #[test]
-//RS fn package_deny_ffi_covers_every_language_leaf() {
-//RS     let source = r#"
-//RS name: "ffi_denied"
-//RS version: "0.1.0"
-//RS authority: { holds: { deny: [FFI] } }
-//RS "#;
-//RS     let package = jetpack::Package::PackageFacts::parse(source, "package.jet")
-//RS         .expect("one-line FFI denial should parse");
-//RS     assert_eq!(package.effects_deny, Some(vec!["FFI".to_string()]));
-//RS 
-//RS     let leaves = [
-//RS         "FFI.Go",
-//RS         "FFI.Java",
-//RS         "FFI.DotNet",
-//RS         "FFI.Fortran",
-//RS         "FFI.Cobol",
-//RS         "FFI.Tcl",
-//RS         "FFI.Lua",
-//RS         "FFI.Ada",
-//RS         "FFI.Pascal",
-//RS         "FFI.Dart",
-//RS         "FFI.PowerShell",
-//RS         "FFI.Perl",
-//RS         "FFI.Ruby",
-//RS         "FFI.Php",
-//RS         "FFI.R",
-//RS         "FFI.Com",
-//RS         "FFI.Cpp",
-//RS         "FFI.Py",
-//RS         "FFI.Octave",
-//RS     ];
-//RS     let entry = PackageEffects {
-//RS         name: "foreign-dep".to_string(),
-//RS         effects: EffectSet::from(leaves.map(str::to_string)),
-//RS         effect_sites: std::collections::BTreeMap::new(),
-//RS         panic_sites: Vec::new(),
-//RS         boundary_span: None,
-//RS     };
-//RS     let diagnostics = EffectBudget::enforce(&[entry], &package);
-//RS     assert_eq!(diagnostics.len(), leaves.len());
-//RS     assert!(diagnostics
-//RS         .iter()
-//RS         .all(|diagnostic| diagnostic.code == "E1220"));
-//RS     for leaf in leaves {
-//RS         assert_eq!(
-//RS             diagnostics
-//RS                 .iter()
-//RS                 .filter(|diagnostic| diagnostic.what.contains(leaf))
-//RS                 .count(),
-//RS             1,
-//RS             "FFI denial must report the specific leaf {leaf}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn retired_flat_ffi_spellings_are_rejected_by_the_compiler() {
-//RS     for root in [
-//RS         "Go",
-//RS         "Java",
-//RS         "DotNet",
-//RS         "Fortran",
-//RS         "Cobol",
-//RS         "Tcl",
-//RS         "Lua",
-//RS         "Ada",
-//RS         "Pascal",
-//RS         "Dart",
-//RS         "PowerShell",
-//RS         "Perl",
-//RS         "Ruby",
-//RS         "Php",
-//RS         "R",
-//RS         "Com",
-//RS         "Cpp",
-//RS         "Py",
-//RS         "Octave",
-//RS     ] {
-//RS         let source = format!("fn run() :[{root}]> {{}}\n");
-//RS         let diagnostics = jet::compile(&source).expect_err("retired flat effect must not parse");
-//RS         assert!(
-//RS             diagnostics
-//RS                 .iter()
-//RS                 .any(|diagnostic| diagnostic.code == "E0119"),
-//RS             "expected E0119 for retired effect {root}, got {diagnostics:#?}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_parser_accepts_the_ffi_leaf_row() {
-//RS     let (tokens, diagnostics) = jet::Lexer::lex(FFI_LEAF_SOURCE);
-//RS     assert!(
-//RS         diagnostics.is_empty(),
-//RS         "parser lexed the FFI leaf differently: {diagnostics:#?}"
-//RS     );
-//RS     let ast = jet::Parser::parse(&tokens).expect("parser accepts FFI.Py");
-//RS     assert!(!ast.items.is_empty(), "parser dropped the FFI leaf program");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_sema_accepts_the_ffi_leaf_row() {
-//RS     jet::compile(FFI_LEAF_SOURCE).expect("sema accepts FFI.Py under FFI");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_tir_erases_the_ffi_leaf_row() {
-//RS     let output = jet::compile(FFI_LEAF_SOURCE).expect("TIR accepts FFI.Py");
-//RS     assert!(
-//RS         !output.rust.contains("FFI.Py"),
-//RS         "effect leaf leaked into Rust"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_aot_runs_the_ffi_leaf_row() {
-//RS     let (code, stdout) = tir_support::build_and_run("ffi_leaf_aot", FFI_LEAF_SOURCE);
-//RS     assert_eq!(code, 0);
-//RS     assert_eq!(stdout, "ffi leaf\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_jit_runs_the_ffi_leaf_row() {
-//RS     let (code, stdout, stderr) = tir_support::jit_run("ffi_leaf_jit", FFI_LEAF_SOURCE);
-//RS     assert_eq!(code, 0, "JIT stderr: {stderr}");
-//RS     assert_eq!(stdout, "ffi leaf\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_interpreter_runs_the_ffi_leaf_row() {
-//RS     let (code, stdout, stderr) =
-//RS         tir_support::interpreter_run("ffi_leaf_interpreter", FFI_LEAF_SOURCE);
-//RS     assert_eq!(code, 0, "interpreter stderr: {stderr}");
-//RS     assert_eq!(stdout, "ffi leaf\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_dev_runs_the_ffi_leaf_row() {
-//RS     let root = std::env::temp_dir().join(format!("jet_ffi_leaf_dev_{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&root);
-//RS     fs::create_dir_all(&root).expect("dev scratch");
-//RS     let entry = root.join("main.jet");
-//RS     fs::write(&entry, FFI_LEAF_SOURCE).expect("dev source");
-//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["dev", entry.to_str().unwrap(), "--watch=off"])
-//RS         .current_dir(&root)
-//RS         .env("NO_COLOR", "1")
-//RS         .output()
-//RS         .expect("dev command");
-//RS     let _ = fs::remove_dir_all(&root);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "dev stderr: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     assert_eq!(String::from_utf8_lossy(&output.stdout), "ffi leaf\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_comptime_keeps_the_ffi_leaf_row() {
-//RS     let output = jet::compile(FFI_LEAF_SOURCE).expect("comptime accepts FFI.Py");
-//RS     assert!(output.rust.contains("ffi leaf"), "comptime value was lost");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_repl_runs_the_ffi_leaf_row() {
-//RS     let transcript = jet::REPL::run_transcript(&[FFI_LEAF_SOURCE, ":run"], None);
-//RS     assert!(transcript.contains("ffi leaf"), "REPL output: {transcript}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn i9_web_accepts_the_ffi_leaf_row() {
-//RS     let output = jet::compile_web_with_path(FFI_LEAF_SOURCE, "ffi_leaf_web.jet")
-//RS         .expect("web accepts FFI.Py");
-//RS     assert!(
-//RS         output.web.is_some(),
-//RS         "web tier dropped the FFI leaf program"
-//RS     );
-//RS }
-// END-PORT-PENDING 1038 tests/effect_roots.rs:1-197
-
+// Rust: tests/diagnostics_format.rs:235
+fn diagnostic_body_violations(text: String) -> [String] {
+    violations := []
+    in_wwf_table := false
+    for (idx, raw) in text.lines().enumerate() {
+        line := raw.trim() // #4303
+        if !line.starts_with("|") { in_wwf_table = false; continue }
+        cells :: markdown_cells(line)
+        if is_wwf_header(&cells) { in_wwf_table = true; continue }
+        if !in_wwf_table { continue }
+        if cells.iter().all(fn(c) { c.is_empty() || c.chars().all(fn(ch) { ch == '-' }) }) { continue }
+        code :: cells.get(1).and_then(fn(cell) { diagnostic_code(cell) })
+        if code.is_none() { continue }
+        value :: code.unwrap()
+        if cells.len() != 6 {
+            violations.push("line {idx + 1}: {value} — malformed What/Why/Fix row has {cells.len()} pipe-delimited cells, expected 6")
+            continue
+        }
+        what :: &cells[2]
+        why :: &cells[3]
+        fix :: &cells[4]
+        if what.is_empty() || why.is_empty() || fix.is_empty() { violations.push("line {idx + 1}: {value} — What/Why/Fix must all be non-empty (what={what.debug()} why={why.debug()} fix={fix.debug()})") }
+    }
+    violations
+}
+// Rust: tests/diagnostics_format.rs:289
+fn markdown_cells(line: String) -> [String] {
+    cells := [String.new()]
+    escaped := false
+    for ch in line.chars() {
+        if ch == '|' && !escaped { cells.push(String.new()) }
+        else { cells.last_mut().unwrap().push(ch) }
+        escaped = ch == '\\' && !escaped
+    }
+    cells.into_iter().map(fn(cell) { view := cell.trim(); view.to_string() }).collect() // #4303
+}
+// Rust: tests/diagnostics_format.rs:306
+fn is_wwf_header(cells: [String]) -> Bool {
+    cells.len() >= 5 && cells[1].eq_ignore_ascii_case("code") && cells[2].eq_ignore_ascii_case("what") && cells[3].eq_ignore_ascii_case("why") && cells[4].eq_ignore_ascii_case("fix")
+}
+// Rust: tests/diagnostics_format.rs:314
+fn is_code_like(code: String) -> Bool { jet.Explain.is_code(code) }
+// Rust: tests/diagnostics_format.rs:318
+fn diagnostic_code(cell: String) -> String? {
+    code :: cell.strip_prefix("`").and_then(fn(value) { value.strip_suffix("`") }).unwrap_or(cell)
+    if is_code_like(code) -> Some(code) else -> None
+}
+// Rust: tests/effect_roots.rs:10
+FFI_LEAF_SOURCE :: "\nMESSAGE :: prep { \"ffi leaf\" }\n\nfn run() -[FFI.Py, IO]> {\n    print(MESSAGE)\n}\n"

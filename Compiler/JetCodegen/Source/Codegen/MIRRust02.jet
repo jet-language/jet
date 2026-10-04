@@ -1,1804 +1,972 @@
-// PORT-PENDING 2002 crates-jet-codegen-src-codegen-mirrust-slice-1801: crates/jet-codegen/src/Codegen/MIRRust.rs:1801-3600
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     }
-//RS }
-//RS 
-//RS /// Declares block-local value slots at their definition. `out[slots_start..
-//RS /// slots_end]` holds the function's slot declarations and everything after it
-//RS /// the body. A candidate slot (no observable drop) whose first body mention
-//RS /// starts its `slot = Some(..);` statement, and whose later mentions all stay
-//RS /// in that statement's lexical scope (no line between them is indented less),
-//RS /// becomes `let mut slot: Option<T> = Some(..);` there; a candidate the body
-//RS /// never mentions loses its declaration. Returns where the declarations end.
-//RS fn localize_value_slots(
-//RS     out: &mut String,
-//RS     slots_start: usize,
-//RS     slots_end: usize,
-//RS     candidates: &BTreeMap<u64, String>,
-//RS ) -> usize {
-//RS     if candidates.is_empty() {
-//RS         return slots_end;
-//RS     }
-//RS     let mut declared: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-//RS     for_each_value_mention(&out[slots_start..slots_end], |_, _, id| {
-//RS         if candidates.contains_key(&id) {
-//RS             *declared.entry(id).or_default() += 1;
-//RS         }
-//RS     });
-//RS     struct Mentions {
-//RS         first_line: usize,
-//RS         first_column: usize,
-//RS         on_first_line: usize,
-//RS         last_line: usize,
-//RS     }
-//RS     let body = &out[slots_end..];
-//RS     let mut mentions: std::collections::HashMap<u64, Mentions> = std::collections::HashMap::new();
-//RS     for_each_value_mention(body, |line, column, id| {
-//RS         if !candidates.contains_key(&id) {
-//RS             return;
-//RS         }
-//RS         let entry = mentions.entry(id).or_insert(Mentions {
-//RS             first_line: line,
-//RS             first_column: column,
-//RS             on_first_line: 0,
-//RS             last_line: line,
-//RS         });
-//RS         if entry.first_line == line {
-//RS             entry.on_first_line += 1;
-//RS         }
-//RS         entry.last_line = line;
-//RS     });
-//RS     let lines: Vec<&str> = body.split_inclusive('\n').collect();
-//RS     let indents: Vec<usize> = lines
-//RS         .iter()
-//RS         .map(|line| {
-//RS             let content = line.trim_start_matches(' ');
-//RS             if content.trim().is_empty() {
-//RS                 usize::MAX
-//RS             } else {
-//RS                 line.len() - content.len()
-//RS             }
-//RS         })
-//RS         .collect();
-//RS     // The first later line indented less than each line closes its scope.
-//RS     let mut scope_end = vec![lines.len(); lines.len()];
-//RS     let mut open: Vec<usize> = Vec::new();
-//RS     for (index, &indent) in indents.iter().enumerate() {
-//RS         while let Some(&top) = open.last() {
-//RS             if indent >= indents[top] {
-//RS                 break;
-//RS             }
-//RS             scope_end[top] = index;
-//RS             open.pop();
-//RS         }
-//RS         open.push(index);
-//RS     }
-//RS     let mut localized: BTreeMap<usize, u64> = BTreeMap::new();
-//RS     let mut dropped: BTreeSet<u64> = BTreeSet::new();
-//RS     for id in candidates.keys() {
-//RS         if declared.get(id) != Some(&1) {
-//RS             continue;
-//RS         }
-//RS         let Some(mention) = mentions.get(id) else {
-//RS             dropped.insert(*id);
-//RS             continue;
-//RS         };
-//RS         let line = mention.first_line;
-//RS         let defines = mention.on_first_line == 1
-//RS             && mention.first_column == indents[line]
-//RS             && lines[line][indents[line]..].starts_with(&format!("__jet_v_{id} = Some("));
-//RS         if defines && mention.last_line < scope_end[line] {
-//RS             localized.insert(line, *id);
-//RS             dropped.insert(*id);
-//RS         }
-//RS     }
-//RS     if dropped.is_empty() {
-//RS         return slots_end;
-//RS     }
-//RS     let mut rebuilt = String::with_capacity(out.len() - slots_start);
-//RS     for line in out[slots_start..slots_end].split_inclusive('\n') {
-//RS         let declared_id = line
-//RS             .strip_prefix("    let mut __jet_v_")
-//RS             .and_then(|rest| rest.split_once(':'))
-//RS             .and_then(|(id, _)| id.parse::<u64>().ok());
-//RS         if declared_id.is_some_and(|id| dropped.contains(&id)) {
-//RS             continue;
-//RS         }
-//RS         rebuilt.push_str(line);
-//RS     }
-//RS     let declarations_end = slots_start + rebuilt.len();
-//RS     for (index, line) in lines.iter().enumerate() {
-//RS         match localized.get(&index) {
-//RS             Some(id) => {
-//RS                 let indent = indents[index];
-//RS                 let slot = format!("__jet_v_{id} = ");
-//RS                 rebuilt.push_str(&line[..indent]);
-//RS                 let _ = write!(rebuilt, "let mut __jet_v_{id}: Option<{}> = ", candidates[id]);
-//RS                 rebuilt.push_str(&line[indent + slot.len()..]);
-//RS             }
-//RS             None => rebuilt.push_str(line),
-//RS         }
-//RS     }
-//RS     out.truncate(slots_start);
-//RS     out.push_str(&rebuilt);
-//RS     declarations_end
-//RS }
-//RS 
-//RS fn is_identifier_byte(byte: u8) -> bool {
-//RS     byte.is_ascii_alphanumeric() || byte == b'_'
-//RS }
-//RS 
-//RS /// `text` without parentheses that enclose all of it.
-//RS fn strip_enclosing_parens(mut text: &str) -> &str {
-//RS     while text.starts_with('(') && text.ends_with(')') {
-//RS         let mut depth = 0usize;
-//RS         let encloses = text.bytes().enumerate().all(|(index, byte)| {
-//RS             match byte {
-//RS                 b'(' => depth += 1,
-//RS                 b')' => depth = depth.saturating_sub(1),
-//RS                 _ => {}
-//RS             }
-//RS             depth > 0 || index == text.len() - 1
-//RS         });
-//RS         if !encloses {
-//RS             break;
-//RS         }
-//RS         text = &text[1..text.len() - 1];
-//RS     }
-//RS     text
-//RS }
-//RS 
-//RS /// `prefix<digits>suffix`: a numbered value or local slot access.
-//RS fn numbered_slot_access(text: &str, prefix: &str, suffix: &str) -> bool {
-//RS     text.strip_prefix(prefix)
-//RS         .and_then(|rest| rest.strip_suffix(suffix))
-//RS         .is_some_and(|digits| !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit()))
-//RS }
-//RS 
-//RS /// A mangled parameter binding (`__jet_<name>`), not a slot or a symbol.
-//RS fn parameter_binding(text: &str) -> bool {
-//RS     let Some(name) = text.strip_prefix("__jet_") else {
-//RS         return false;
-//RS     };
-//RS     name.bytes().next().is_some_and(|byte| byte.is_ascii_lowercase())
-//RS         && name.bytes().all(is_identifier_byte)
-//RS         && !name.starts_with("src_")
-//RS         && !numbered_slot_access(name, "l_", "")
-//RS         && !numbered_slot_access(name, "v_", "")
-//RS         && name != "string"
-//RS }
-//RS 
-//RS /// `*binding` or `*local`, under any chain of `(..).__jet_field` reads.
-//RS fn field_read_place(text: &str) -> bool {
-//RS     let text = strip_enclosing_parens(text);
-//RS     if let Some(base) = text.strip_prefix('*') {
-//RS         return parameter_binding(base)
-//RS             || numbered_slot_access(base, "__jet_l_", ".as_ref().expect(\"MIR local\")");
-//RS     }
-//RS     match text.rsplit_once(").__jet_") {
-//RS         Some((head, field)) => {
-//RS             !field.is_empty()
-//RS                 && field.bytes().all(is_identifier_byte)
-//RS                 && head.strip_prefix('(').is_some_and(field_read_place)
-//RS         }
-//RS         None => false,
-//RS     }
-//RS }
-//RS 
-//RS /// An expression that only reads slots, bindings or fields, or builds a
-//RS /// literal whose type does not depend on its context: evaluating it later in
-//RS /// the same straight-line run, with nothing in between naming its variables,
-//RS /// observes the same state and infers the same type.
-//RS fn pure_slot_expression(expression: &str) -> bool {
-//RS     let expression = strip_enclosing_parens(expression);
-//RS     if matches!(expression, "true" | "false" | "()") {
-//RS         return true;
-//RS     }
-//RS     if let Some(digits) = expression
-//RS         .strip_prefix("jet_foundation::Numeric::JetInt::from_i64(")
-//RS         .and_then(|rest| rest.strip_suffix(')'))
-//RS     {
-//RS         let digits = digits.strip_prefix('-').unwrap_or(digits);
-//RS         return !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit());
-//RS     }
-//RS     if let Some(text) = expression
-//RS         .strip_prefix("{ let mut __jet_string = String::new(); __jet_string.push_str(\"")
-//RS         .and_then(|rest| rest.strip_suffix("\"); __jet_string }"))
-//RS     {
-//RS         let mut escaped = false;
-//RS         return text.bytes().all(|byte| {
-//RS             let open = escaped || byte != b'"';
-//RS             escaped = !escaped && byte == b'\\';
-//RS             open
-//RS         });
-//RS     }
-//RS     if expression.starts_with("__jet_src_")
-//RS         && expression.contains("::__jet_")
-//RS         && expression.bytes().all(|byte| is_identifier_byte(byte) || byte == b':')
-//RS     {
-//RS         return true;
-//RS     }
-//RS     numbered_slot_access(expression, "__jet_l_", ".as_ref().expect(\"MIR local\").clone()")
-//RS         || numbered_slot_access(expression, "__jet_l_", ".take().expect(\"MIR local\")")
-//RS         || numbered_slot_access(expression, "(__jet_v_", ".as_ref().expect(\"MIR value\")).clone()")
-//RS         || numbered_slot_access(expression, "*__jet_v_", ".as_ref().expect(\"MIR value\")")
-//RS         || numbered_slot_access(expression, "__jet_v_", ".take().expect(\"MIR value\")")
-//RS         || expression.strip_suffix(".clone()").is_some_and(field_read_place)
-//RS }
-//RS 
-//RS /// A closure carrier (`RustEmitter::closure`) whose setup borrows a captured
-//RS /// place. Kept in a function-scoped slot, the carrier's drop at function end
-//RS /// keeps that borrow alive past every later use of the place; evaluated at
-//RS /// its one consumer instead, the borrow ends with the consumer statement.
-//RS fn borrowing_closure_expression(expression: &str) -> bool {
-//RS     expression
-//RS         .strip_prefix("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let __jet_capture_")
-//RS         .and_then(|rest| rest.strip_suffix("}))))"))
-//RS         .is_some_and(|body| body.contains(" = &"))
-//RS }
-//RS 
-//RS /// Byte offsets of `name` in `text` as a whole identifier, not a field.
-//RS fn variable_mentions<'a>(text: &'a str, name: &'a str) -> impl Iterator<Item = usize> + 'a {
-//RS     text.match_indices(name).map(|(at, _)| at).filter(move |at| {
-//RS         let before = text.as_bytes()[..*at].last().copied();
-//RS         let after = text.as_bytes().get(at + name.len()).copied();
-//RS         !before.is_some_and(|byte| is_identifier_byte(byte) || byte == b'.')
-//RS             && !after.is_some_and(is_identifier_byte)
-//RS     })
-//RS }
-//RS 
-//RS /// `callee(args)`, where Rust sees no disjoint fields through separate
-//RS /// `slot.as_mut()`/`slot.as_ref()` calls: two arguments that borrow fields of
-//RS /// one local (`&mut ((*l.as_mut()..).a), &((*l.as_ref()..).b)`) conflict
-//RS /// (E0499/E0502). When every mention of such a local in `args` is one of
-//RS /// those two accesses, the local is borrowed once ahead of the call and each
-//RS /// argument projects its field from that one reference. Field borrows of a
-//RS /// split owner conflict the same way (`split_partial_field_borrows`).
-//RS fn split_local_field_borrows(callee: &str, args: &str) -> String {
-//RS     const WRITE: &str = ".as_mut().expect(\"MIR local\")";
-//RS     const READ: &str = ".as_ref().expect(\"MIR local\")";
-//RS     let (mut bindings, args) = split_partial_field_borrows(args);
-//RS     let mut split: Vec<&str> = Vec::new();
-//RS     for (at, _) in args.match_indices(WRITE) {
-//RS         let digits = args[..at].bytes().rev().take_while(u8::is_ascii_digit).count();
-//RS         if digits == 0 || !args[..at - digits].ends_with("__jet_l_") {
-//RS             continue;
-//RS         }
-//RS         let name = &args[at - digits - "__jet_l_".len()..at];
-//RS         if split.contains(&name) {
-//RS             continue;
-//RS         }
-//RS         let accesses = args.matches(&format!("{name}{WRITE}")).count()
-//RS             + args.matches(&format!("{name}{READ}")).count();
-//RS         if accesses >= 2 && variable_mentions(&args, name).count() == accesses {
-//RS             split.push(name);
-//RS         }
-//RS     }
-//RS     if split.is_empty() && bindings.is_empty() {
-//RS         return format!("{callee}({args})");
-//RS     }
-//RS     let mut rewritten = args.clone();
-//RS     for name in split {
-//RS         let binding = format!("__jet_split_{}", &name["__jet_l_".len()..]);
-//RS         let _ = write!(bindings, "let {binding} = {name}{WRITE}; ");
-//RS         rewritten = rewritten
-//RS             .replace(&format!("{name}{WRITE}"), &binding)
-//RS             .replace(&format!("{name}{READ}"), &binding);
-//RS     }
-//RS     format!("{{ {bindings}{callee}({rewritten}) }}")
-//RS }
-//RS 
-//RS /// The arms of a split owner's field borrow (`partial_field_reference`).
-//RS const PARTIAL_WHOLE_ARM: &str = " { Some(__jet_whole) => ";
-//RS const PARTIAL_SPLIT_ARM: &str = ", None => ";
-//RS 
-//RS /// One split owner's field borrow, `partial_field_reference`'s
-//RS /// `match {slot}.{as_ref|as_mut}() { Some(__jet_whole) => {whole}, None => {split} }`.
-//RS struct PartialFieldBorrow<'a> {
-//RS     span: std::ops::Range<usize>,
-//RS     slot: &'a str,
-//RS     mutable: bool,
-//RS     whole: &'a str,
-//RS     split: &'a str,
-//RS }
-//RS 
-//RS /// Field borrows of one split owner conflict as the borrows of one local do:
-//RS /// each `match slot.as_ref()`/`match slot.as_mut()` borrows all of `slot`
-//RS /// (E0499/E0502). When every mention of such an owner in `args` is one of two
-//RS /// or more such borrows, at least one mutable, the owner is borrowed once
-//RS /// ahead of the call: one destructuring `let` takes every field borrow from
-//RS /// the one `&mut` whole, or from the split field slots, and each argument
-//RS /// names its binding. A nested owner's borrows in the split arm split the
-//RS /// same way. Returns the bindings and the rewritten `args`.
-//RS fn split_partial_field_borrows(args: &str) -> (String, String) {
-//RS     let mut bindings = String::new();
-//RS     let mut args = args.to_string();
-//RS     let mut settled: Vec<String> = Vec::new();
-//RS     loop {
-//RS         let rewrite = {
-//RS             let borrows = partial_field_borrows(&args);
-//RS             let Some(slot) = borrows.iter()
-//RS                 .find(|borrow| borrow.mutable && !settled.iter().any(|slot| slot == borrow.slot))
-//RS                 .map(|borrow| borrow.slot)
-//RS             else {
-//RS                 break;
-//RS             };
-//RS             settled.push(slot.to_string());
-//RS             let owned: Vec<_> = borrows.iter().filter(|borrow| borrow.slot == slot).collect();
-//RS             if owned.len() < 2 || variable_mentions(&args, slot).count() != owned.len() {
-//RS                 continue;
-//RS             }
-//RS             let stem = slot.strip_prefix("__jet_").unwrap_or(slot);
-//RS             let names: Vec<_> = (0..owned.len()).map(|index| format!("__jet_split_whole_{stem}_{index}")).collect();
-//RS             let wholes: Vec<_> = owned.iter().map(|borrow| borrow.whole).collect();
-//RS             let splits: Vec<_> = owned.iter().map(|borrow| borrow.split).collect();
-//RS             let (nested, splits) = split_partial_field_borrows(&splits.join(", "));
-//RS             let split = if nested.is_empty() { format!("({splits})") } else { format!("{{ {nested}({splits}) }}") };
-//RS             let _ = write!(
-//RS                 bindings,
-//RS                 "let ({}) = match {slot}.as_mut() {{ Some(__jet_whole) => ({}), None => {split} }}; ",
-//RS                 names.join(", "),
-//RS                 wholes.join(", "),
-//RS             );
-//RS             let mut rewritten = String::with_capacity(args.len());
-//RS             let mut end = 0;
-//RS             for (borrow, name) in owned.iter().zip(&names) {
-//RS                 rewritten.push_str(&args[end..borrow.span.start]);
-//RS                 rewritten.push_str(name);
-//RS                 end = borrow.span.end;
-//RS             }
-//RS             rewritten.push_str(&args[end..]);
-//RS             rewritten
-//RS         };
-//RS         args = rewrite;
-//RS     }
-//RS     (bindings, args)
-//RS }
-//RS 
-//RS /// Every split owner field borrow in `text` outside any brace block or
-//RS /// closure, where it could sit under a condition or another owner's arm.
-//RS fn partial_field_borrows(text: &str) -> Vec<PartialFieldBorrow<'_>> {
-//RS     let bytes = text.as_bytes();
-//RS     let mut found = Vec::new();
-//RS     let mut depth = 0usize;
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     let mut at = 0;
-//RS     while at < bytes.len() {
-//RS         let byte = bytes[at];
-//RS         if quoted {
-//RS             quoted = escaped || byte != b'"';
-//RS             escaped = !escaped && byte == b'\\';
-//RS         } else {
-//RS             match byte {
-//RS                 b'"' => quoted = true,
-//RS                 b'{' => depth += 1,
-//RS                 b'}' => depth = depth.saturating_sub(1),
-//RS                 b'm' if depth == 0 => {
-//RS                     if let Some(borrow) = partial_field_borrow(text, at)
-//RS                         .filter(|_| !inside_closure(text, at))
-//RS                     {
-//RS                         at = borrow.span.end;
-//RS                         found.push(borrow);
-//RS                         continue;
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         at += 1;
-//RS     }
-//RS     found
-//RS }
-//RS 
-//RS /// The split owner field borrow starting at byte `at` of `text`, if any.
-//RS fn partial_field_borrow(text: &str, at: usize) -> Option<PartialFieldBorrow<'_>> {
-//RS     if text.as_bytes()[..at].last().is_some_and(|byte| is_identifier_byte(*byte)) {
-//RS         return None;
-//RS     }
-//RS     let rest = text[at..].strip_prefix("match ")?;
-//RS     let length = rest.bytes().take_while(|byte| is_identifier_byte(*byte)).count();
-//RS     let (slot, rest) = rest.split_at(length);
-//RS     if slot.is_empty() {
-//RS         return None;
-//RS     }
-//RS     let (mutable, rest) = match rest.strip_prefix(".as_mut()") {
-//RS         Some(rest) => (true, rest),
-//RS         None => (false, rest.strip_prefix(".as_ref()")?),
-//RS     };
-//RS     if !rest.starts_with(PARTIAL_WHOLE_ARM) {
-//RS         return None;
-//RS     }
-//RS     let open = text.len() - rest.len() + 1;
-//RS     let mut depth = 0usize;
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     let close = text.bytes().enumerate().skip(open).find_map(|(index, byte)| {
-//RS         if quoted {
-//RS             quoted = escaped || byte != b'"';
-//RS             escaped = !escaped && byte == b'\\';
-//RS             return None;
-//RS         }
-//RS         match byte {
-//RS             b'"' => quoted = true,
-//RS             b'{' => depth += 1,
-//RS             b'}' => {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return Some(index);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         None
-//RS     })?;
-//RS     let (whole, split) = text[open - 1 + PARTIAL_WHOLE_ARM.len()..close].split_once(PARTIAL_SPLIT_ARM)?;
-//RS     Some(PartialFieldBorrow { span: at..close + 1, slot, mutable, whole, split: split.trim_end_matches(' ') })
-//RS }
-//RS 
-//RS /// The slots and bindings a pure expression reads.
-//RS fn expression_variables(expression: &str) -> Vec<&str> {
-//RS     let mut names = Vec::new();
-//RS     for (at, _) in expression.match_indices("__jet_") {
-//RS         let length = expression.as_bytes()[at..].iter().take_while(|byte| is_identifier_byte(**byte)).count();
-//RS         let name = &expression[at..at + length];
-//RS         let slot = numbered_slot_access(name, "__jet_l_", "") || numbered_slot_access(name, "__jet_v_", "");
-//RS         if (slot || parameter_binding(name)) && variable_mentions(expression, name).any(|found| found == at) {
-//RS             names.push(name);
-//RS         }
-//RS     }
-//RS     names
-//RS }
-//RS 
-//RS /// Whether byte `at` of a statement line sits inside a closure body, where a
-//RS /// moved expression would run later or not at all. `||` counts as a closure.
-//RS fn inside_closure(line: &str, at: usize) -> bool {
-//RS     let mut depth = 0usize;
-//RS     let mut closures: Vec<usize> = Vec::new();
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     for byte in line.as_bytes()[..at].iter().copied() {
-//RS         if quoted {
-//RS             quoted = escaped || byte != b'"';
-//RS             escaped = !escaped && byte == b'\\';
-//RS             continue;
-//RS         }
-//RS         match byte {
-//RS             b'"' => quoted = true,
-//RS             b'(' | b'[' | b'{' => depth += 1,
-//RS             b')' | b']' | b'}' => {
-//RS                 depth = depth.saturating_sub(1);
-//RS                 while closures.last().is_some_and(|open| *open > depth) {
-//RS                     closures.pop();
-//RS                 }
-//RS             }
-//RS             b'|' => closures.push(depth),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     !closures.is_empty()
-//RS }
-//RS 
-//RS /// One slot definition line: indent, value id, `Some(..)` payload, and whether
-//RS /// it assigns a slot declared at the function top.
-//RS fn slot_definition(line: &str) -> Option<(usize, u64, &str, bool)> {
-//RS     let content = line.trim_end_matches('\n');
-//RS     let indent = content.len() - content.trim_start_matches(' ').len();
-//RS     let statement = &content[indent..];
-//RS     let (hoisted, rest) = match statement.strip_prefix("let mut __jet_v_") {
-//RS         Some(rest) => (false, rest),
-//RS         None => (true, statement.strip_prefix("__jet_v_")?),
-//RS     };
-//RS     let digits = rest.bytes().take_while(|byte| byte.is_ascii_digit()).count();
-//RS     let id = rest[..digits].parse::<u64>().ok()?;
-//RS     let rest = &rest[digits..];
-//RS     let payload = if hoisted {
-//RS         rest.strip_prefix(" = Some(")?
-//RS     } else {
-//RS         let rest = rest.strip_prefix(": Option<")?;
-//RS         &rest[rest.find("> = Some(")? + "> = Some(".len()..]
-//RS     };
-//RS     Some((indent, id, payload.strip_suffix(");")?, hoisted))
-//RS }
-//RS 
-//RS /// Whether the statement at `index` carries an attribute such as
-//RS /// `#[cfg(not(jet_release))]` on the line before it.
-//RS fn attributed_statement(lines: &[String], index: usize) -> bool {
-//RS     index > 0 && lines[index - 1].trim_start().starts_with("#[")
-//RS }
-//RS 
-//RS /// Folds single-use temporaries into their consumer. `out[slots_start..
-//RS /// slots_end]` holds the function's slot declarations and everything after
-//RS /// it the body. A body slot defined as `Some(E)` from a pure expression `E`
-//RS /// and read once, by the next statement of the same straight-line run (only
-//RS /// pure definitions between), as a clone or take of the slot, takes `(E)` in
-//RS /// place of that read when nothing else in the consumer or in between names a
-//RS /// variable of `E` (an assignment target local excepted, since the right side
-//RS /// runs first) and the read is not inside a closure. A hoisted slot defined
-//RS /// by a borrowing closure carrier (`borrowing_closure_expression`) folds the
-//RS /// same way, as a block typed like the slot. The definition and its top
-//RS /// declaration go away. Attributed (debug-only) statements never fold.
-//RS fn fold_value_slots(out: &mut String, slots_start: usize, slots_end: usize) {
-//RS     let mut mentions: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-//RS     for_each_value_mention(&out[slots_start..], |_, _, id| *mentions.entry(id).or_default() += 1);
-//RS     let body_start = out[slots_start..slots_end].split_inclusive('\n').count();
-//RS     let mut lines: Vec<String> = out[slots_start..].split_inclusive('\n').map(str::to_string).collect();
-//RS     let mut declarations: std::collections::HashMap<u64, usize> = std::collections::HashMap::new();
-//RS     for (index, line) in lines[..body_start].iter().enumerate() {
-//RS         let declared = line
-//RS             .strip_prefix("    let mut __jet_v_")
-//RS             .filter(|rest| rest.trim_end().ends_with("> = None;"))
-//RS             .and_then(|rest| rest.split_once(':'))
-//RS             .and_then(|(id, _)| id.parse::<u64>().ok());
-//RS         if let Some(id) = declared {
-//RS             declarations.insert(id, index);
-//RS         }
-//RS     }
-//RS     let mut removed = vec![false; lines.len()];
-//RS     let mut folded = false;
-//RS     for index in body_start..lines.len() {
-//RS         let Some((indent, id, expression, hoisted)) = slot_definition(&lines[index]) else {
-//RS             continue;
-//RS         };
-//RS         let expected = if hoisted { 3 } else { 2 };
-//RS         if mentions.get(&id) != Some(&expected)
-//RS             || (hoisted && !declarations.contains_key(&id))
-//RS             || !(pure_slot_expression(expression)
-//RS                 || (hoisted && borrowing_closure_expression(expression)))
-//RS             || attributed_statement(&lines, index)
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let expression = expression.to_string();
-//RS         let name = format!("__jet_v_{id}");
-//RS         let mut consumer = index + 1;
-//RS         while consumer < lines.len() && variable_mentions(&lines[consumer], &name).next().is_none() {
-//RS             let skippable = slot_definition(&lines[consumer]).is_some_and(|(other_indent, _, other, _)| {
-//RS                 other_indent == indent && pure_slot_expression(other)
-//RS             }) && !attributed_statement(&lines, consumer);
-//RS             if !skippable {
-//RS                 break;
-//RS             }
-//RS             consumer += 1;
-//RS         }
-//RS         let Some(line) = lines.get(consumer) else {
-//RS             continue;
-//RS         };
-//RS         if line.len() - line.trim_start_matches(' ').len() != indent || attributed_statement(&lines, consumer) {
-//RS             continue;
-//RS         }
-//RS         let read = format!("({name}.as_ref().expect(\"MIR value\")).clone()");
-//RS         let scalar = format!("(*{name}.as_ref().expect(\"MIR value\"))");
-//RS         let take = format!("{name}.take().expect(\"MIR value\")");
-//RS         let Some(form) = [read, scalar, take].into_iter().find(|form| line.matches(form.as_str()).count() == 1) else {
-//RS             continue;
-//RS         };
-//RS         let at = line.find(form.as_str()).expect("form occurs once");
-//RS         if inside_closure(line, at) {
-//RS             continue;
-//RS         }
-//RS         let (before, after) = (&line[..at], &line[at + form.len()..]);
-//RS         let rest = format!("{before}{after}");
-//RS         let target = rest
-//RS             .trim_start()
-//RS             .split_once(" = ")
-//RS             .map(|(target, _)| target)
-//RS             .filter(|target| numbered_slot_access(target, "__jet_l_", ""));
-//RS         let conflict = expression_variables(&expression).into_iter().any(|variable| {
-//RS             let allowed = usize::from(Some(variable) == target);
-//RS             variable_mentions(&rest, variable).count() > allowed
-//RS                 || lines[index + 1..consumer]
-//RS                     .iter()
-//RS                     .any(|between| variable_mentions(between, variable).next().is_some())
-//RS         });
-//RS         if conflict {
-//RS             continue;
-//RS         }
-//RS         let replaced = if pure_slot_expression(&expression) {
-//RS             format!("{before}({expression}){after}")
-//RS         } else {
-//RS             // A folded closure keeps the slot's declared callable type, so
-//RS             // the boxed closure still coerces to its `dyn` carrier.
-//RS             let Some(declared) = lines[declarations[&id]]
-//RS                 .trim_end()
-//RS                 .split_once(": Option<")
-//RS                 .and_then(|(_, ty)| ty.strip_suffix("> = None;"))
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             format!("{before}{{ let __jet_folded: {declared} = {expression}; __jet_folded }}{after}")
-//RS         };
-//RS         lines[consumer] = replaced;
-//RS         removed[index] = true;
-//RS         if hoisted {
-//RS             removed[declarations[&id]] = true;
-//RS         }
-//RS         folded = true;
-//RS     }
-//RS     if !folded {
-//RS         return;
-//RS     }
-//RS     out.truncate(slots_start);
-//RS     for (line, removed) in lines.iter().zip(removed) {
-//RS         if !removed {
-//RS             out.push_str(line);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// `JET_COPY_TAGS=1`: tag every emitted value clone with its copy fact
-//RS /// (`/*copy:<fact>*/`, `unbacked` when no MIR copy fact backs it) for
-//RS /// Tools/agent/copy-ratchet.mjs (#4318). Inert when unset.
-//RS fn copy_tags_enabled() -> bool {
-//RS     static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-//RS     *ENABLED.get_or_init(|| std::env::var_os("JET_COPY_TAGS").is_some_and(|value| value == "1"))
-//RS }
-//RS 
-//RS /// A Rust type whose values copy, so an owned read names the binding.
-//RS fn copy_scalar_type(ty: &str) -> bool {
-//RS     matches!(
-//RS         ty,
-//RS         "bool" | "char" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize"
-//RS             | "u8" | "u16" | "u32" | "u64" | "u128" | "usize"
-//RS     )
-//RS }
-//RS 
-//RS /// Turns block-local value slots into plain `let` bindings. `out[slots_start
-//RS /// ..]` holds the function's slot declarations and body. A slot declared at
-//RS /// its single definition (`let mut slot: Option<T> = Some(E);`, see
-//RS /// `localize_value_slots`) whose every other mention is a shared read
-//RS /// (`slot.as_ref().expect("MIR value")`) is never taken, written through or
-//RS /// re-initialized, so it becomes `let slot: T = E;`: an owned read names a
-//RS /// Copy scalar directly and clones any other type, and a borrow is `&slot`.
-//RS fn unwrap_value_slots(out: &mut String, slots_start: usize) {
-//RS     const BORROW: &str = ".as_ref().expect(\"MIR value\")";
-//RS     let body = &out[slots_start..];
-//RS     // Per slot: (mentions, shared-read mentions), counted in one pass.
-//RS     let mut mentions: std::collections::HashMap<u64, (usize, usize)> = std::collections::HashMap::new();
-//RS     let mut plain: std::collections::HashMap<u64, bool> = std::collections::HashMap::new();
-//RS     let mut definitions: Vec<(u64, bool)> = Vec::new();
-//RS     for line in body.split_inclusive('\n') {
-//RS         for_each_value_mention(line, |_, at, id| {
-//RS             let digits = line[at + "__jet_v_".len()..].bytes().take_while(u8::is_ascii_digit).count();
-//RS             let entry = mentions.entry(id).or_default();
-//RS             entry.0 += 1;
-//RS             if line[at + "__jet_v_".len() + digits..].starts_with(BORROW) {
-//RS                 entry.1 += 1;
-//RS             }
-//RS         });
-//RS         let Some((indent, id, _, false)) = slot_definition(line) else {
-//RS             continue;
-//RS         };
-//RS         let Some(ty) = line[indent..]
-//RS             .strip_prefix(&format!("let mut __jet_v_{id}: Option<"))
-//RS             .and_then(|rest| rest.find("> = Some(").map(|end| &rest[..end]))
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         definitions.push((id, copy_scalar_type(ty)));
-//RS     }
-//RS     for (id, copy) in definitions {
-//RS         if mentions.get(&id).is_some_and(|(all, borrows)| *all == borrows + 1) {
-//RS             plain.insert(id, copy);
-//RS         }
-//RS     }
-//RS     if plain.is_empty() {
-//RS         return;
-//RS     }
-//RS     let mut rebuilt = String::with_capacity(out.len() - slots_start);
-//RS     for original in out[slots_start..].split_inclusive('\n') {
-//RS         // A plain slot's definition becomes a plain `let`; its expression can
-//RS         // itself read other plain slots, so the rewritten line still gets the
-//RS         // read replacements below.
-//RS         let mut line = original.to_string();
-//RS         if let Some((indent, id, expression, false)) = slot_definition(original) {
-//RS             if plain.contains_key(&id) {
-//RS                 let rest = &original[indent + format!("let mut __jet_v_{id}: Option<").len()..];
-//RS                 let ty = &rest[..rest.find("> = Some(").expect("checked slot definition")];
-//RS                 line = format!("{}let __jet_v_{id}: {ty} = {expression};\n", &original[..indent]);
-//RS             }
-//RS         }
-//RS         let mut ids = Vec::new();
-//RS         for_each_value_mention(&line, |_, _, id| {
-//RS             if plain.contains_key(&id) && !ids.contains(&id) {
-//RS                 ids.push(id);
-//RS             }
-//RS         });
-//RS         if ids.is_empty() {
-//RS             rebuilt.push_str(&line);
-//RS             continue;
-//RS         }
-//RS         for id in ids {
-//RS             let borrow = format!("__jet_v_{id}.as_ref().expect(\"MIR value\")");
-//RS             let read = if plain[&id] {
-//RS                 format!("__jet_v_{id}")
-//RS             } else {
-//RS                 format!("__jet_v_{id}.clone()")
-//RS             };
-//RS             line = line
-//RS                 .replace(&format!("({borrow}).clone()"), &read)
-//RS                 .replace(&format!("(*{borrow})"), &format!("__jet_v_{id}"))
-//RS                 .replace(&borrow, &format!("(&__jet_v_{id})"));
-//RS         }
-//RS         rebuilt.push_str(&line);
-//RS     }
-//RS     out.truncate(slots_start);
-//RS     out.push_str(&rebuilt);
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod unwrap_value_slot_tests {
-//RS     use super::unwrap_value_slots;
-//RS 
-//RS     #[test]
-//RS     fn read_only_block_slots_become_plain_lets() {
-//RS         let mut out = [
-//RS             "    let mut __jet_v_1: Option<String> = None;\n",
-//RS             "  let mut __jet_v_2: Option<bool> = Some(f());\n",
-//RS             "  if (__jet_v_2.as_ref().expect(\"MIR value\")).clone() {\n",
-//RS             "  let mut __jet_v_5: Option<bool> = Some(!(__jet_v_2.as_ref().expect(\"MIR value\")).clone());\n",
-//RS             "  m((__jet_v_5.as_ref().expect(\"MIR value\")).clone());\n",
-//RS             "   let mut __jet_v_3: Option<String> = Some(g());\n",
-//RS             "   h(__jet_v_3.as_ref().expect(\"MIR value\"), (__jet_v_3.as_ref().expect(\"MIR value\")).clone());\n",
-//RS             "   let mut __jet_v_4: Option<String> = Some(g());\n",
-//RS             "   k(__jet_v_4.take().expect(\"MIR value\"));\n",
-//RS             "   __jet_v_1 = Some(g());\n",
-//RS             "  }\n",
-//RS         ]
-//RS         .concat();
-//RS         unwrap_value_slots(&mut out, 0);
-//RS         let expected = [
-//RS             "    let mut __jet_v_1: Option<String> = None;\n",
-//RS             "  let __jet_v_2: bool = f();\n",
-//RS             "  if __jet_v_2 {\n",
-//RS             "  let __jet_v_5: bool = !__jet_v_2;\n",
-//RS             "  m(__jet_v_5);\n",
-//RS             "   let __jet_v_3: String = g();\n",
-//RS             "   h((&__jet_v_3), __jet_v_3.clone());\n",
-//RS             "   let mut __jet_v_4: Option<String> = Some(g());\n",
-//RS             "   k(__jet_v_4.take().expect(\"MIR value\"));\n",
-//RS             "   __jet_v_1 = Some(g());\n",
-//RS             "  }\n",
-//RS         ]
-//RS         .concat();
-//RS         assert_eq!(out, expected);
-//RS     }
-//RS }
-//RS 
-//RS /// Final text pass over one emitted function body (`out[start..]`): every
-//RS /// slot and label named from a 64-bit MIR id is renamed in first-mention
-//RS /// order to a short sequential name (`__jet_v_N` -> `_vK`, `__jet_l_N` ->
-//RS /// `_lK`, `__jet_pm_N` -> `_pK`, `'jet_block_N` -> `'bK`, `'jet_loop_N` ->
-//RS /// `'cK`), and leading indentation becomes one space per four-space level,
-//RS /// capped at eight. String, raw-string and comment text is never touched,
-//RS /// and a line that starts inside a string keeps its indentation. The names
-//RS /// are local to the function, so the renaming is consistent by construction.
-//RS fn compact_function_text(out: &mut String, start: usize) {
-//RS     #[derive(Clone, Copy, PartialEq)]
-//RS     enum Lex {
-//RS         Code,
-//RS         Text,
-//RS         Raw(usize),
-//RS         Block,
-//RS     }
-//RS     const SLOTS: [(&str, &str); 3] = [("__jet_v_", "_v"), ("__jet_l_", "_l"), ("__jet_pm_", "_p")];
-//RS     const LABELS: [(&str, &str); 2] = [("'jet_block_", "'b"), ("'jet_loop_", "'c")];
-//RS     let text = out.split_off(start);
-//RS     let bytes = text.as_bytes();
-//RS     let mut names: [std::collections::HashMap<&str, usize>; 5] = Default::default();
-//RS     let mut state = Lex::Code;
-//RS     let mut index = 0;
-//RS     let mut line_start = true;
-//RS     let digits_at = |at: usize| bytes[at..].iter().take_while(|byte| byte.is_ascii_digit()).count();
-//RS     while index < bytes.len() {
-//RS         if line_start && state == Lex::Code {
-//RS             let spaces = bytes[index..].iter().take_while(|byte| **byte == b' ').count();
-//RS             out.extend(std::iter::repeat_n(' ', (spaces / 4).min(8)));
-//RS             index += spaces;
-//RS             line_start = false;
-//RS             continue;
-//RS         }
-//RS         line_start = false;
-//RS         let byte = bytes[index];
-//RS         let previous = index.checked_sub(1).map(|at| bytes[at]);
-//RS         match state {
-//RS             Lex::Text => {
-//RS                 if byte == b'\\' && index + 1 < bytes.len() {
-//RS                     let width = 1 + text[index + 1..].chars().next().map_or(0, char::len_utf8);
-//RS                     out.push_str(&text[index..index + width]);
-//RS                     line_start = bytes[index + 1] == b'\n';
-//RS                     index += width;
-//RS                     continue;
-//RS                 }
-//RS                 if byte == b'"' {
-//RS                     state = Lex::Code;
-//RS                 }
-//RS             }
-//RS             Lex::Raw(hashes) => {
-//RS                 if byte == b'"' && bytes[index + 1..].iter().take(hashes).filter(|byte| **byte == b'#').count() == hashes {
-//RS                     out.push_str(&text[index..index + 1 + hashes]);
-//RS                     index += 1 + hashes;
-//RS                     state = Lex::Code;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS             Lex::Block => {
-//RS                 if text[index..].starts_with("*/") {
-//RS                     out.push_str("*/");
-//RS                     index += 2;
-//RS                     state = Lex::Code;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS             Lex::Code => {
-//RS                 let joined = previous.is_some_and(is_identifier_byte);
-//RS                 if text[index..].starts_with("//") {
-//RS                     let end = text[index..].find('\n').map_or(bytes.len(), |offset| index + offset);
-//RS                     out.push_str(&text[index..end]);
-//RS                     index = end;
-//RS                     continue;
-//RS                 }
-//RS                 if text[index..].starts_with("/*") {
-//RS                     out.push_str("/*");
-//RS                     index += 2;
-//RS                     state = Lex::Block;
-//RS                     continue;
-//RS                 }
-//RS                 if byte == b'"' {
-//RS                     state = Lex::Text;
-//RS                 } else if byte == b'r' && !previous.is_some_and(|byte| is_identifier_byte(byte) && byte != b'b') {
-//RS                     let hashes = bytes[index + 1..].iter().take_while(|byte| **byte == b'#').count();
-//RS                     if bytes.get(index + 1 + hashes) == Some(&b'"') {
-//RS                         out.push_str(&text[index..index + 2 + hashes]);
-//RS                         index += 2 + hashes;
-//RS                         state = Lex::Raw(hashes);
-//RS                         continue;
-//RS                     }
-//RS                 } else if byte == b'\'' {
-//RS                     if bytes.get(index + 1) == Some(&b'\\') {
-//RS                         let close = text[index + 3..].find('\'').map_or(bytes.len(), |offset| index + 3 + offset + 1);
-//RS                         out.push_str(&text[index..close]);
-//RS                         index = close;
-//RS                         continue;
-//RS                     }
-//RS                     let width = text[index + 1..].chars().next().map_or(0, char::len_utf8);
-//RS                     if width > 0 && bytes.get(index + 1 + width) == Some(&b'\'') {
-//RS                         out.push_str(&text[index..index + 2 + width]);
-//RS                         index += 2 + width;
-//RS                         continue;
-//RS                     }
-//RS                     let label = LABELS.iter().enumerate().find_map(|(kind, (prefix, short))| {
-//RS                         let digits = text[index..].starts_with(prefix).then(|| digits_at(index + prefix.len()))?;
-//RS                         let end = index + prefix.len() + digits;
-//RS                         (digits > 0 && !bytes.get(end).is_some_and(|byte| is_identifier_byte(*byte)))
-//RS                             .then_some((kind + 3, *short, index + prefix.len(), end))
-//RS                     });
-//RS                     if let Some((kind, short, id_start, end)) = label {
-//RS                         let next = names[kind].len();
-//RS                         let number = *names[kind].entry(&text[id_start..end]).or_insert(next);
-//RS                         let _ = write!(out, "{short}{number}");
-//RS                         index = end;
-//RS                         continue;
-//RS                     }
-//RS                 } else if byte == b'_' && !joined {
-//RS                     let slot = SLOTS.iter().enumerate().find_map(|(kind, (prefix, short))| {
-//RS                         let digits = text[index..].starts_with(prefix).then(|| digits_at(index + prefix.len()))?;
-//RS                         let end = index + prefix.len() + digits;
-//RS                         (digits > 0 && !bytes.get(end).is_some_and(|byte| is_identifier_byte(*byte)))
-//RS                             .then_some((kind, *short, index + prefix.len(), end))
-//RS                     });
-//RS                     if let Some((kind, short, id_start, end)) = slot {
-//RS                         let next = names[kind].len();
-//RS                         let number = *names[kind].entry(&text[id_start..end]).or_insert(next);
-//RS                         let _ = write!(out, "{short}{number}");
-//RS                         index = end;
-//RS                         continue;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         let width = text[index..].chars().next().map_or(1, char::len_utf8);
-//RS         out.push_str(&text[index..index + width]);
-//RS         line_start = byte == b'\n';
-//RS         index += width;
-//RS     }
-//RS }
-//RS 
-//RS /// A folded list constant whose rows exceed this many bytes of Rust is built
-//RS /// by row-chunk helpers.
-//RS const CACHED_CONSTANT_BYTES: usize = 16 * 1024;
-//RS /// Upper bound on the rows one cached-constant chunk helper pushes.
-//RS const CONSTANT_CHUNK_BYTES: usize = 64 * 1024;
-//RS 
-//RS /// The initializer of a large folded list constant: row-chunk helpers of at
-//RS /// most `CONSTANT_CHUNK_BYTES` each fill the rows, so no emitted function
-//RS /// holds the whole table. The helpers are written to `out`.
-//RS fn emit_list_constant_chunks(out: &mut String, name: &str, ty: &str, rows: &[String]) -> String {
-//RS     let mut chunks: Vec<&[String]> = Vec::new();
-//RS     let mut start = 0;
-//RS     let mut bytes = 0;
-//RS     for (index, row) in rows.iter().enumerate() {
-//RS         if index > start && bytes + row.len() > CONSTANT_CHUNK_BYTES {
-//RS             chunks.push(&rows[start..index]);
-//RS             start = index;
-//RS             bytes = 0;
-//RS         }
-//RS         bytes += row.len();
-//RS     }
-//RS     chunks.push(&rows[start..]);
-//RS     for (index, chunk) in chunks.iter().enumerate() {
-//RS         let _ = writeln!(out, "fn {name}_rows_{index}(rows: &mut {ty}) {{");
-//RS         for row in *chunk {
-//RS             let _ = writeln!(out, "    rows.push({row});");
-//RS         }
-//RS         let _ = writeln!(out, "}}\n");
-//RS     }
-//RS     let mut init = format!("{{\n        let mut rows: {ty} = Vec::with_capacity({});\n", rows.len());
-//RS     for index in 0..chunks.len() {
-//RS         let _ = writeln!(init, "        {name}_rows_{index}(&mut rows);");
-//RS     }
-//RS     init.push_str("        rows\n    }");
-//RS     init
-//RS }
-//RS 
-//RS /// Emits a folded aggregate constant as one per-thread value built once, at
-//RS /// its first read. `NAME_shared()` hands a read that value itself (a
-//RS /// `JetSharedSlot`, which readers borrow in place), and only the owned
-//RS /// accessor `NAME()` copies it.
-//RS fn emit_shared_constant(
-//RS     out: &mut String,
-//RS     root: &str,
-//RS     visibility: &str,
-//RS     name: &str,
-//RS     ty: &str,
-//RS     init: &str,
-//RS ) {
-//RS     let _ = writeln!(
-//RS         out,
-//RS         "thread_local! {{\n    static {name}_SHARED: std::rc::Rc<{ty}> = std::rc::Rc::new({init});\n}}\n"
-//RS     );
-//RS     let _ = writeln!(
-//RS         out,
-//RS         "#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_SHARED.with(|value| (**value).clone()) }}\n"
-//RS     );
-//RS     let _ = writeln!(
-//RS         out,
-//RS         "#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}\n"
-//RS     );
-//RS }
-//RS 
-//RS /// Plans structured emission (Ramsey, "Beyond Relooper"), or `None` when the
-//RS /// CFG is irreducible or names a missing block.
-//RS fn mir_cfg_plan(function: &MirFunction) -> Option<MirCfgPlan> {
-//RS     let positions: BTreeMap<MirBlockId, usize> = function
-//RS         .blocks
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(position, block)| (block.id, position))
-//RS         .collect();
-//RS     let entry = *positions.get(&function.entry)?;
-//RS     let count = function.blocks.len();
-//RS     let mut successors = Vec::with_capacity(count);
-//RS     for block in &function.blocks {
-//RS         let mut row = Vec::new();
-//RS         for target in block.terminator.targets() {
-//RS             row.push(*positions.get(&target)?);
-//RS         }
-//RS         successors.push(row);
-//RS     }
-//RS     let mut visited = vec![false; count];
-//RS     let mut postorder = Vec::with_capacity(count);
-//RS     let mut stack = vec![(entry, 0usize)];
-//RS     visited[entry] = true;
-//RS     while let Some(top) = stack.last_mut() {
-//RS         let (node, edge) = *top;
-//RS         if let Some(&child) = successors[node].get(edge) {
-//RS             top.1 += 1;
-//RS             if !visited[child] {
-//RS                 visited[child] = true;
-//RS                 stack.push((child, 0));
-//RS             }
-//RS         } else {
-//RS             postorder.push(node);
-//RS             stack.pop();
-//RS         }
-//RS     }
-//RS     let rpo: Vec<usize> = postorder.into_iter().rev().collect();
-//RS     let mut order = vec![usize::MAX; count];
-//RS     for (number, &position) in rpo.iter().enumerate() {
-//RS         order[position] = number;
-//RS     }
-//RS     let mut predecessors = vec![Vec::new(); count];
-//RS     for &position in &rpo {
-//RS         for &target in &successors[position] {
-//RS             predecessors[target].push(position);
-//RS         }
-//RS     }
-//RS     // Cooper, Harvey and Kennedy, "A Simple, Fast Dominance Algorithm".
-//RS     let mut idom = vec![usize::MAX; count];
-//RS     idom[entry] = entry;
-//RS     let intersect = |idom: &[usize], mut left: usize, mut right: usize| {
-//RS         while left != right {
-//RS             while order[left] > order[right] {
-//RS                 left = idom[left];
-//RS             }
-//RS             while order[right] > order[left] {
-//RS                 right = idom[right];
-//RS             }
-//RS         }
-//RS         left
-//RS     };
-//RS     let mut changed = true;
-//RS     while changed {
-//RS         changed = false;
-//RS         for &position in &rpo {
-//RS             if position == entry {
-//RS                 continue;
-//RS             }
-//RS             let mut candidate = usize::MAX;
-//RS             for &predecessor in &predecessors[position] {
-//RS                 if idom[predecessor] == usize::MAX {
-//RS                     continue;
-//RS                 }
-//RS                 candidate = if candidate == usize::MAX {
-//RS                     predecessor
-//RS                 } else {
-//RS                     intersect(&idom, predecessor, candidate)
-//RS                 };
-//RS             }
-//RS             if idom[position] != candidate {
-//RS                 idom[position] = candidate;
-//RS                 changed = true;
-//RS             }
-//RS         }
-//RS     }
-//RS     let dominates = |dominator: usize, mut block: usize| loop {
-//RS         if block == dominator {
-//RS             return true;
-//RS         }
-//RS         if block == entry {
-//RS             return false;
-//RS         }
-//RS         block = idom[block];
-//RS     };
-//RS     let mut headers = vec![false; count];
-//RS     let mut forward = vec![0usize; count];
-//RS     for &position in &rpo {
-//RS         for &target in &successors[position] {
-//RS             if order[target] <= order[position] {
-//RS                 if !dominates(target, position) {
-//RS                     return None;
-//RS                 }
-//RS                 headers[target] = true;
-//RS             } else {
-//RS                 forward[target] += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     // Latest first: the outermost labeled block closes before the merge block
-//RS     // that comes last in reverse postorder.
-//RS     let mut merges = vec![false; count];
-//RS     let mut follows = vec![Vec::new(); count];
-//RS     for &position in rpo.iter().skip(1).rev() {
-//RS         if forward[position] >= 2 {
-//RS             merges[position] = true;
-//RS             follows[idom[position]].push(position);
-//RS         }
-//RS     }
-//RS     Some(MirCfgPlan {
-//RS         positions,
-//RS         entry,
-//RS         order,
-//RS         headers,
-//RS         merges,
-//RS         follows,
-//RS     })
-//RS }
-//RS 
-//RS fn wrap_cfg_not_release(out: &mut String, start: usize, indent: usize) {
-//RS     if start >= out.len() {
-//RS         return;
-//RS     }
-//RS     let body = out[start..].to_string();
-//RS     out.truncate(start);
-//RS     let pad = " ".repeat(indent);
-//RS     let _ = writeln!(out, "{pad}#[cfg(not(jet_release))]");
-//RS     let _ = writeln!(out, "{pad}{{");
-//RS     for line in body.lines() {
-//RS         let _ = writeln!(out, "{pad}    {line}");
-//RS     }
-//RS     let _ = writeln!(out, "{pad}}}");
-//RS }
-//RS 
-//RS 
-//RS fn is_source_owned_core_compute_shape(name: &str) -> bool {
-//RS     name.starts_with("<corelib>/Core/compute::")
-//RS }
-//RS fn is_source_owned_core_net_shape(name: &str) -> bool {
-//RS     if !name.starts_with("<corelib>/") {
-//RS         return false;
-//RS     }
-//RS     let leaf = crate::Codegen::core_source_type_leaf(name);
-//RS     (name.starts_with("<corelib>/Core/net::")
-//RS         && matches!(
-//RS             leaf,
-//RS             "SocketAddr"
-//RS                 | "UDPSocket"
-//RS                 | "UDPPacket"
-//RS                 | "UnixStream"
-//RS                 | "UnixListener"
-//RS                 | "SRVRecord"
-//RS         ))
-//RS         || (name.starts_with("<corelib>/Core/net/tls::")
-//RS             && matches!(leaf, "TLSCertificate" | "TLSPeerIdentity"))
-//RS }
-//RS 
-//RS fn is_source_owned_core_web_query_shape(name: &str) -> bool {
-//RS     name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
-//RS         && matches!(
-//RS             crate::Codegen::core_source_type_leaf(name),
-//RS             "WebQuery" | "WebQueryState" | "WebMutationState"
-//RS         )
-//RS }
-//RS fn is_source_owned_core_web_query_enum(name: &str) -> bool {
-//RS     name.starts_with("<corelib>/Core/web::Core/web/query.jet::")
-//RS         && matches!(
-//RS             crate::Codegen::core_source_type_leaf(name),
-//RS             "WebQueryNetworkMode" | "WebMutationStatus" | "WebQueryStatus"
-//RS         )
-//RS }
-//RS 
-//RS fn native_core_query_enum_variant_name(name: &str) -> &str {
-//RS     name.strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS         .unwrap_or(name)
-//RS }
-//RS 
-//RS /// The Rust identifier of one Jet enum variant. A grouped leaf keeps its complete
-//RS /// dotted identity (`Net.Ping`), which is not a Rust identifier, so it takes the
-//RS /// path encoding (`__jet_Net_dPing`); a flat variant keeps the plain name mangle.
-//RS /// Every variant declaration, construction and pattern reads this one spelling.
-//RS fn mangle_variant(name: &str) -> String {
-//RS     if name.contains('.') {
-//RS         mangle_path(name)
-//RS     } else {
-//RS         mangle(name)
-//RS     }
-//RS }
-//RS 
-//RS fn native_core_query_enum_trait_impl<'a>(
-//RS     type_name: &str,
-//RS     rust_trait: &str,
-//RS     value_method: &str,
-//RS     variants: impl Iterator<Item = &'a str>,
-//RS ) -> String {
-//RS     let mut out = String::new();
-//RS     let _ = writeln!(out, "impl {rust_trait} for {type_name} {{");
-//RS     let _ = writeln!(out, "    fn {value_method}(&self) -> String {{");
-//RS     let _ = writeln!(out, "        match self {{");
-//RS     for source_variant in variants {
-//RS         let variant = native_core_query_enum_variant_name(source_variant);
-//RS         let variant_name = quote_rust_string(variant);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "            Self::{variant} => jet_debug_variant({variant_name}, None),"
-//RS         );
-//RS     }
-//RS     let _ = writeln!(out, "        }}");
-//RS     let _ = writeln!(out, "    }}\n}}\n");
-//RS     out
-//RS }
-//RS 
-//RS 
-//RS /// Core native maps are leaf-indexed, but only canonical Core identities may
-//RS /// be reduced to a leaf. Keep arbitrary qualified user types intact.
-//RS fn core_native_probe_name(name: &str) -> &str {
-//RS     // Keep canonical Core source types when their shape differs from a
-//RS     // same-leaf native carrier.
-//RS     if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy"))
-//RS         || is_source_owned_core_compute_shape(name)
-//RS         || is_source_owned_core_net_shape(name)
-//RS         || is_source_owned_core_web_query_shape(name)
-//RS     {
-//RS         name
-//RS     } else if name.starts_with("<corelib>/") {
-//RS         crate::Codegen::core_source_type_leaf(name)
-//RS     } else {
-//RS         name
-//RS     }
-//RS }
-//RS 
-//RS fn has_native_type_projection(name: &str) -> bool {
-//RS     if is_source_owned_core_compute_shape(name)
-//RS         || is_source_owned_core_net_shape(name)
-//RS         || is_source_owned_core_web_query_shape(name)
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let probe = core_native_probe_name(name);
-//RS     crate::Codegen::core_rust_type_name(name).is_some()
-//RS         || crate::Codegen::root_prelude_rust_type_name(probe).is_some()
-//RS         || crate::Codegen::core_ui_rust_type_name(probe).is_some()
-//RS         || crate::Codegen::compute_handle_rust_type(probe).is_some()
-//RS         || crate::Codegen::service_handle_rust_type(probe).is_some()
-//RS         || crate::Codegen::alloc_handle_rust_type(probe).is_some()
-//RS         || crate::Codegen::file_handle_rust_type(name).is_some()
-//RS         || crate::Codegen::reflect_handle_rust_type(probe).is_some()
-//RS         || crate::Codegen::binary_text_handle_rust_type(probe).is_some()
-//RS         || crate::Codegen::core_email_rust_type_name(name).is_some()
-//RS         || crate::Codegen::core_crypto_rust_type_name(name).is_some()
-//RS }
-//RS 
-//RS fn is_canonical_core_native_type(name: &str) -> bool {
-//RS     name.starts_with("<corelib>/") && has_native_type_projection(name)
-//RS }
-//RS 
-//RS /// Compiler-owned trait methods keep their source leaf because the cached
-//RS /// runtime traits declare those names unmangled, except the Debug protocol:
-//RS /// the runtime `JetDebug` trait spells its method `jet_debug`.
-//RS fn compiler_trait_method_symbol(trait_name: &str, leaf: &str) -> String {
-//RS     if trait_name == crate::Generics::DEBUG && leaf == "debug" {
-//RS         "jet_debug".to_string()
-//RS     } else {
-//RS         leaf.to_string()
-//RS     }
-//RS }
-//RS 
-//RS /// The declarations of an extension-trait impl's emitted methods: each
-//RS /// column-zero method header becomes a body-less signature. A declaration
-//RS /// takes no binding patterns, so `mut` parameter bindings are dropped.
-//RS fn carrier_trait_signatures(methods: &str) -> String {
-//RS     let mut out = String::new();
-//RS     for line in methods.lines() {
-//RS         let Some(header) = line.strip_suffix(" {") else {
-//RS             continue;
-//RS         };
-//RS         if !(header.starts_with("fn ") || header.starts_with("unsafe fn ")) {
-//RS             continue;
-//RS         }
-//RS         let header = header.replace("(mut ", "(").replace(", mut ", ", ");
-//RS         let _ = writeln!(out, "    {header};");
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn is_net_tls_client_bridge_call(symbol: &MirSymbol) -> bool {
-//RS     matches!(
-//RS         symbol,
-//RS         MirSymbol::Prelude(symbol) | MirSymbol::Runtime(symbol)
-//RS             if symbol == "jet_net_tls_client"
-//RS     )
-//RS }
-//RS 
-//RS fn native_net_error_detail_field(
-//RS     rust_type_name: &str,
-//RS     field_name: &str,
-//RS     value: &str,
-//RS     native_int_argument: impl FnOnce(String) -> String,
-//RS ) -> Option<String> {
-//RS     if rust_type_name != "JetNetErrorDetail" {
-//RS         return None;
-//RS     }
-//RS     match field_name {
-//RS         "address" | "name" => Some(format!("({value}).ok()")),
-//RS         "os_code" => Some(format!(
-//RS             "({value}).ok().map(|value| {})",
-//RS             native_int_argument("value".to_string())
-//RS         )),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod core_native_projection_tests {
-//RS     use super::{
-//RS         core_native_probe_name, is_canonical_core_native_type, is_net_tls_client_bridge_call,
-//RS         is_source_owned_core_web_query_enum, native_core_query_enum_trait_impl,
-//RS         native_core_query_enum_variant_name, native_net_error_detail_field, MirSymbol,
-//RS     };
-//RS 
-//RS     #[test]
-//RS     fn imported_core_native_names_project_without_matching_user_qualified_names() {
-//RS         let compute_error = "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError";
-//RS         let vjp_run = "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun";
-//RS         let query_mode = "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode";
-//RS         let mutation_status = "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus";
-//RS         let query_status = "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus";
-//RS 
-//RS         for source_type in [
-//RS             compute_error,
-//RS             vjp_run,
-//RS             "<corelib>/Core/compute::Core/compute/compute.jet::ComputeDevice",
-//RS             "<corelib>/Core/compute::Core/compute/compute.jet::Tensor",
-//RS             "<corelib>/Core/compute::Core/compute/compute.jet::ComputeStream",
-//RS             "<corelib>/Core/compute::Core/compute/compute.jet::SparseTensor",
-//RS         ] {
-//RS             assert_eq!(core_native_probe_name(source_type), source_type);
-//RS             assert!(!is_canonical_core_native_type(source_type));
-//RS         }
-//RS         for source_record in [
-//RS             "<corelib>/Core/web::Core/web/query.jet::WebQuery",
-//RS             "<corelib>/Core/web::Core/web/query.jet::WebQueryState",
-//RS             "<corelib>/Core/web::Core/web/query.jet::WebMutationState",
-//RS         ] {
-//RS             assert_eq!(core_native_probe_name(source_record), source_record);
-//RS             assert!(!is_canonical_core_native_type(source_record));
-//RS         }
-//RS         assert_eq!(
-//RS             crate::Codegen::root_prelude_rust_type_name("WebQuery"),
-//RS             Some("JetWebQuery")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::root_prelude_rust_type_name("WebQueryState"),
-//RS             Some("JetWebQueryState")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::root_prelude_rust_type_name("WebMutationState"),
-//RS             Some("JetWebMutationState")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::compute_handle_rust_type("ComputeError"),
-//RS             Some("JetComputeError")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::compute_handle_rust_type("VJPRun"),
-//RS             Some("JetComputeVjpRun")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::compute_handle_rust_type("Tensor"),
-//RS             Some("JetTensor")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(query_mode)),
-//RS             Some("JetWebQueryNetworkMode")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(mutation_status)),
-//RS             Some("JetWebMutationStatus")
-//RS         );
-//RS         assert_eq!(
-//RS             crate::Codegen::root_prelude_rust_type_name(core_native_probe_name(query_status)),
-//RS             Some("JetWebQueryStatus")
-//RS         );
-//RS         assert!(is_canonical_core_native_type(query_mode));
-//RS         assert!(is_canonical_core_native_type(mutation_status));
-//RS         assert!(is_canonical_core_native_type(query_status));
-//RS         assert!(!is_canonical_core_native_type(
-//RS             "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
-//RS         ));
-//RS         let source_owned_policy = "<corelib>/Core/sync::Core/sync/policy.jet::RowPolicy";
-//RS         assert_eq!(core_native_probe_name(source_owned_policy), source_owned_policy);
-//RS         assert!(!is_canonical_core_native_type(source_owned_policy));
-//RS         for source_record in [
-//RS             "<corelib>/Core/net::Core/net/net.jet::SocketAddr",
-//RS             "<corelib>/Core/net::Core/net/net.jet::UDPPacket",
-//RS             "<corelib>/Core/net::Core/net/net.jet::UnixListener",
-//RS             "<corelib>/Core/net::Core/net/net.jet::UnixStream",
-//RS             "<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate",
-//RS             "<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity",
-//RS         ] {
-//RS             assert_eq!(core_native_probe_name(source_record), source_record);
-//RS             assert!(!is_canonical_core_native_type(source_record));
-//RS         }
-//RS 
-//RS         let user_name = "app::ComputeError";
-//RS         assert_eq!(core_native_probe_name(user_name), user_name);
-//RS         assert!(!is_canonical_core_native_type(user_name));
-//RS         assert_eq!(
-//RS             crate::Codegen::compute_handle_rust_type(core_native_probe_name(user_name)),
-//RS             None
-//RS         );
-//RS     }
-//RS     #[test]
-//RS     fn native_query_enum_traits_keep_native_carriers_and_source_variant_names() {
-//RS         let cases = [
-//RS             (
-//RS                 "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode",
-//RS                 "JetWebQueryNetworkMode",
-//RS                 &["Online", "Always", "OfflineFirst"][..],
-//RS             ),
-//RS             (
-//RS                 "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus",
-//RS                 "JetWebMutationStatus",
-//RS                 &["Idle", "Pending", "Success", "Error", "Settled"][..],
-//RS             ),
-//RS             (
-//RS                 "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus",
-//RS                 "JetWebQueryStatus",
-//RS                 &["Pending", "Fresh", "Stale", "Fetching", "Error", "Offline"][..],
-//RS             ),
-//RS         ];
-//RS 
-//RS         for (source_type, native_type, variants) in cases {
-//RS             assert!(is_source_owned_core_web_query_enum(source_type));
-//RS             for (rust_trait, value_method) in
-//RS                 [("JetShow", "jet_show"), ("JetDebug", "jet_debug")]
-//RS             {
-//RS                 let actual = native_core_query_enum_trait_impl(
-//RS                     native_type,
-//RS                     rust_trait,
-//RS                     value_method,
-//RS                     variants.iter().copied(),
-//RS                 );
-//RS                 let mut expected = format!(
-//RS                     "impl {rust_trait} for {native_type} {{\n    fn {value_method}(&self) -> String {{\n        match self {{\n"
-//RS                 );
-//RS                 for variant in variants {
-//RS                     expected.push_str(&format!(
-//RS                         "            Self::{variant} => jet_debug_variant(\"{variant}\", None),\n"
-//RS                     ));
-//RS                 }
-//RS                 expected.push_str("        }\n    }\n}\n\n");
-//RS                 assert_eq!(actual, expected);
-//RS             }
-//RS         }
-//RS         assert_eq!(
-//RS             native_core_query_enum_variant_name(&format!(
-//RS                 "{}OfflineFirst",
-//RS                 jet_foundation::Syntax::GENERATED_NAME_PREFIX
-//RS             )),
-//RS             "OfflineFirst"
-//RS         );
-//RS 
-//RS 
-//RS         assert!(!is_source_owned_core_web_query_enum(
-//RS             "<corelib>/Core/web::Core/web/query.jet::WebQueryError"
-//RS         ));
-//RS         assert!(!is_source_owned_core_web_query_enum(
-//RS             "app::Core/web/query.jet::WebQueryStatus"
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn net_error_detail_fields_adapt_only_the_native_carrier() {
-//RS         let native_type = "JetNetErrorDetail";
-//RS         let option =
-//RS             native_net_error_detail_field(native_type, "address", "checked", |_| String::new());
-//RS         assert_eq!(option.as_deref(), Some("(checked).ok()"));
-//RS         let name =
-//RS             native_net_error_detail_field(native_type, "name", "checked", |_| String::new());
-//RS         assert_eq!(name.as_deref(), Some("(checked).ok()"));
-//RS 
-//RS         let optional_int =
-//RS             native_net_error_detail_field(native_type, "os_code", "checked", |value| {
-//RS                 format!("native_i64({value})")
-//RS             });
-//RS         assert_eq!(
-//RS             optional_int.as_deref(),
-//RS             Some("(checked).ok().map(|value| native_i64(value))")
-//RS         );
-//RS         assert_eq!(
-//RS             native_net_error_detail_field(native_type, "message", "checked", |_| String::new()),
-//RS             None
-//RS         );
-//RS         assert_eq!(
-//RS             native_net_error_detail_field(
-//RS                 "app::NetErrorDetail",
-//RS                 "address",
-//RS                 "checked",
-//RS                 |_| String::new()
-//RS             ),
-//RS             None
-//RS         );
-//RS     }
-//RS     #[test]
-//RS     fn net_tls_client_bridge_matches_prelude_and_runtime_symbols() {
-//RS         assert!(is_net_tls_client_bridge_call(&MirSymbol::Prelude(
-//RS             "jet_net_tls_client".to_string()
-//RS         )));
-//RS         assert!(is_net_tls_client_bridge_call(&MirSymbol::Runtime(
-//RS             "jet_net_tls_client".to_string()
-//RS         )));
-//RS         assert!(!is_net_tls_client_bridge_call(&MirSymbol::Runtime(
-//RS             "jet_net_tls_server".to_string()
-//RS         )));
-//RS     }
-//RS 
-//RS }
-//RS 
-//RS pub(crate) fn append_web_time_zones(out: &mut String) -> std::io::Result<()> {
-//RS     RustEmitter::emit_web_time_zones(out)
-//RS }
-//RS fn canonical_core_email_rust_type_name(name: &str) -> Option<&'static str> {
-//RS     let name = name.strip_prefix("<corelib>/Core/email::Core/email/email.jet::")?;
-//RS     crate::Codegen::core_email_rust_type_name(name)
-//RS }
-//RS 
-//RS 
-//RS struct PartialMoveField {
-//RS     id: MirFieldId,
-//RS     slot: String,
-//RS     ty: MirType,
-//RS     boxed: bool,
-//RS     nested: Option<Box<PartialMoveNode>>,
-//RS }
-//RS 
-//RS // Per-function ownership storage only: the source record and its ABI stay
-//RS // unchanged. Either `slot` owns the whole value or its field slots own the
-//RS // initialized remainder, never both. Nested nodes obey the same invariant.
-//RS struct PartialMoveNode {
-//RS     slot: String,
-//RS     owner: MirTypeId,
-//RS     boxed: bool,
-//RS     fields: Vec<PartialMoveField>,
-//RS }
-//RS 
-//RS struct PartialMoveRoot {
-//RS     base: MirPlaceBase,
-//RS     node: PartialMoveNode,
-//RS }
-//RS 
-//RS /// Per-function move facts from the canonical MIR (D-MEM-COPYSEM1).
-//RS #[derive(Default)]
-//RS struct MoveFacts {
-//RS     /// SSA values read exactly once, in their defining block: that one
-//RS     /// by-value read may take the value instead of cloning it.
-//RS     single_use: BTreeSet<MirValueId>,
-//RS     /// Enum subjects that a `Move` hands to the payload bindings of one
-//RS     /// block: subject -> (payload index, payload result) in block order.
-//RS     payload_groups: BTreeMap<MirValueId, Vec<(usize, MirValueId)>>,
-//RS     /// Payload result -> its group's subject.
-//RS     payload_subjects: BTreeMap<MirValueId, MirValueId>,
-//RS }
-//RS 
-//RS /// #4318: pattern binding locals stored as a shared reference to the payload
-//RS /// they bind (`Option<&T>`) instead of a copy of it (`plan_ref_bindings`).
-//RS #[derive(Default)]
-//RS struct RefBindings {
-//RS     locals: BTreeSet<MirLocalId>,
-//RS     /// Payload reads whose only use binds one of `locals`: that write
-//RS     /// borrows the payload in place and the read has no slot of its own.
-//RS     payloads: BTreeSet<MirValueId>,
-//RS     /// Read loops that walk their list in place (`borrowed_loop_candidates`):
-//RS     /// cursor -> the stable list place it walks. Every element the cursor
-//RS     /// yields binds one of `locals`.
-//RS     cursors: BTreeMap<MirValueId, MirPlaceId>,
-//RS     /// The collection values those cursors walk; they have no slot.
-//RS     collections: BTreeSet<MirValueId>,
-//RS }
-//RS 
-//RS struct RustEmitter<'a> {
-//RS     program: &'a MirProgram,
-//RS     config: &'a MirRustConfig<'a>,
-//RS     artifact: &'a MirArtifactPlan,
-//RS     artifact_identity: MirArtifactIdentity,
-//RS     functions: BTreeMap<MirFunctionId, String>,
-//RS     test_functions: BTreeSet<MirFunctionId>,
-//RS     foreigns: BTreeMap<MirForeignId, String>,
-//RS     types: BTreeMap<MirTypeId, String>,
-//RS     type_instances: BTreeMap<MirTypeId, &'a MirType>,
-//RS     types_by_name: BTreeMap<String, String>,
-//RS     /// First `program.types` row (program order) for each type ID, key and
-//RS     /// name, so type-definition lookups keep first-match order without a
-//RS     /// linear scan per query.
-//RS     type_def_by_id: BTreeMap<MirTypeId, usize>,
-//RS     type_def_by_key: BTreeMap<&'a str, usize>,
-//RS     type_def_by_name: BTreeMap<&'a str, usize>,
-//RS     /// Source-written (not compiler-generated) trait impls by trait name, in
-//RS     /// program order.
-//RS     user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>>,
-//RS     traits: BTreeMap<MirTraitId, String>,
-//RS     traits_by_name: BTreeMap<String, String>,
-//RS     /// Symbols of the declared traits used as single-bound trait objects
-//RS     /// (`Box<dyn T>`). Each gets a clone-box supertrait so the boxed value is
-//RS     /// `Clone` and does not block the derives of the rows that carry it.
-//RS     dyn_clone_traits: BTreeSet<String>,
-//RS     fields: BTreeMap<MirFieldId, String>,
-//RS     history_capture_encoders: std::cell::RefCell<BTreeMap<String, String>>,
-//RS     history_callable_arities: std::cell::RefCell<BTreeSet<usize>>,
-//RS     history_callable_modes: std::cell::RefCell<BTreeSet<(usize, String)>>,
-//RS     generic_scopes: std::cell::RefCell<Vec<&'a [MirGenericParam]>>,
-//RS     history_current_function: std::cell::Cell<Option<MirFunctionId>>,
-//RS     /// Control-flow state of the function body being printed.
-//RS     cfg_state: std::cell::RefCell<Option<MirCfgState>>,
-//RS     /// Whether the program calls `core.testing.histories` (computed once).
-//RS     history_runtime_metadata: std::cell::OnceCell<bool>,
-//RS     /// Memoized `type_derive_capability` answers for closed (non-generic,
-//RS     /// unbound) type rows, per trait name.
-//RS     derive_capability_cache: std::cell::RefCell<BTreeMap<String, BTreeMap<MirTypeId, bool>>>,
-//RS     /// Lowest `visiting` index a cycle assumption reached in the current
-//RS     /// `type_derive_capability` frame (`usize::MAX` when none).
-//RS     derive_capability_cycle_floor: std::cell::Cell<usize>,
-//RS     history_callback_lifetime: std::cell::Cell<&'static str>,
-//RS     partial_moves: BTreeMap<MirFunctionId, Vec<PartialMoveRoot>>,
-//RS     shared_capture_locals: BTreeMap<MirFunctionId, BTreeSet<MirLocalId>>,
-//RS     move_facts: BTreeMap<MirFunctionId, MoveFacts>,
-//RS     /// Per-function reference bindings, planned on a function's first query.
-//RS     ref_bindings: std::cell::RefCell<HashMap<MirFunctionId, std::rc::Rc<RefBindings>>>,
-//RS     /// D-SHAPE-PLACE1=A: `(function, parameter index)` rows emitted as
-//RS     /// `&mut [T]` because a caller fills them with a range write window.
-//RS     window_params: BTreeSet<(MirFunctionId, usize)>,
-//RS     /// Every source row with its line index, built once so per-function and
-//RS     /// per-instruction locations never rescan the text from byte 0.
-//RS     source_lines: BTreeMap<
-//RS         jet_foundation::MIR::MirSourceFileId,
-//RS         (&'a jet_foundation::MIR::MirSourceFile, jet_foundation::Diagnostics::LineIndex),
-//RS     >,
-//RS     /// Position of each `program.functions` row by function ID.
-//RS     function_positions: HashMap<MirFunctionId, usize>,
-//RS     /// Position of each `program.fields` row by field ID (first row wins).
-//RS     field_positions: HashMap<MirFieldId, usize>,
-//RS     /// Per-function lookup tables, built on a function's first query.
-//RS     function_indexes: std::cell::RefCell<HashMap<MirFunctionId, std::rc::Rc<FunctionIndex>>>,
-//RS     /// Positions of the functions that build a closure of each function
-//RS     /// (program order, no repeats), built on first use.
-//RS     closure_parents: std::cell::OnceCell<HashMap<MirFunctionId, Vec<usize>>>,
-//RS }
-//RS 
-//RS impl<'a> RustEmitter<'a> {
-//RS     fn new(
-//RS         program: &'a MirProgram,
-//RS         config: &'a MirRustConfig<'a>,
-//RS         artifact_identity: MirArtifactIdentity,
-//RS     ) -> Self {
-//RS         let artifact = select_artifact(program, config.execution.artifact, config.target_kind);
-//RS         if artifact.id != artifact_identity.artifact {
-//RS             panic!("MIR artifact identity does not match the selected artifact row");
-//RS         }
-//RS         let functions = program
-//RS             .functions
-//RS             .iter()
-//RS             .map(|function| (function.id, mangle_path(&function.key)))
-//RS             .collect();
-//RS         let mut foreigns = BTreeMap::new();
-//RS         for foreign in &program.foreign {
-//RS             let name = if foreign.name.is_empty() {
-//RS                 mangle_path(&foreign.key)
-//RS             } else {
-//RS                 mangle(&foreign.name)
-//RS             };
-//RS             if foreigns.insert(foreign.id, name).is_some() {
-//RS                 panic!("MIR foreign ID {:?} is duplicated", foreign.id);
-//RS             }
-//RS         }
-//RS         let mut types = BTreeMap::new();
-//RS         let type_instances = program
-//RS             .type_instances
-//RS             .iter()
-//RS             .filter_map(|instance| instance.identity.map(|id| (id, instance)))
-//RS             .collect();
-//RS         let mut types_by_name = BTreeMap::new();
-//RS         let mut fields = BTreeMap::new();
-//RS         let mut method_owners = BTreeMap::new();
-//RS         let mut type_def_by_id = BTreeMap::new();
-//RS         let mut type_def_by_key = BTreeMap::new();
-//RS         let mut type_def_by_name = BTreeMap::new();
-//RS         for (index, def) in program.types.iter().enumerate() {
-//RS             type_def_by_id.entry(def.id).or_insert(index);
-//RS             type_def_by_key.entry(def.key.as_str()).or_insert(index);
-//RS             type_def_by_name.entry(def.name.as_str()).or_insert(index);
-//RS             let symbol = mangle_path(&def.key);
-//RS             types.insert(def.id, symbol.clone());
-//RS             types_by_name.insert(def.key.clone(), symbol.clone());
-//RS             types_by_name.insert(def.name.clone(), symbol);
-//RS             Self::collect_type_fields(def, &mut fields);
-//RS             if let MirTypeDefKind::Struct { methods, .. } | MirTypeDefKind::Enum { methods, .. } =
-//RS                 &def.kind
-//RS             {
-//RS                 for function in methods {
-//RS                     if let Some(previous) = method_owners.insert(*function, def.id) {
-//RS                         if previous != def.id {
-//RS                             panic!(
-//RS                                 "MIR method {:?} is listed by type IDs {:?} and {:?}",
-//RS                                 function, previous, def.id
-//RS                             );
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         for ty in &program.type_instances {
-//RS             if let MirTypeKind::Tuple(declared) = ty.kind() {
-//RS                 let identity = ty.identity_key();
-//RS                 for (index, (name, _)) in declared.iter().enumerate() {
-//RS                     let id = MirFieldId(stable_id("mir-field", &format!("{identity}::{name}")));
-//RS                     fields.insert(id, index.to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS         for handle in &program.handles {
-//RS             if let MirTypeKind::Apply { name, .. } = handle.ty.kind() {
-//RS                 let symbol = mangle_path(&name.name);
-//RS                 types_by_name
-//RS                     .entry(name.name.clone())
-//RS                     .or_insert_with(|| symbol.clone());
-//RS             }
-//RS         }
-//RS         let mut user_impls_by_trait: BTreeMap<&'a str, Vec<&'a MirImplDef>> = BTreeMap::new();
-//RS         for implementation in &program.impls {
-//RS             if let Some(trait_ref) = implementation
-//RS                 .trait_ref
-//RS                 .as_ref()
-//RS                 .filter(|_| !implementation.compiler_generated)
-//RS             {
-//RS                 user_impls_by_trait
-//RS                     .entry(trait_ref.name.as_str())
-//RS                     .or_default()
-//RS                     .push(implementation);
-//RS             }
-//RS             let owner =
-//RS                 Self::type_identity_from_instances(&type_instances, &implementation.self_type);
-//RS             for function in &implementation.methods {
-//RS                 if let Some(previous) = method_owners.insert(*function, owner) {
-//RS                     if previous != owner {
-//RS                         panic!(
-//RS                             "MIR method {:?} is listed by type IDs {:?} and {:?}",
-//RS                             function, previous, owner
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         let mut traits = BTreeMap::new();
-//RS         let mut traits_by_name = BTreeMap::new();
-//RS         let mut user_traits_by_name = BTreeMap::new();
-//RS         for definition in &program.traits {
-//RS             let compiler_owned =
-//RS                 crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name);
-//RS             let symbol = if compiler_owned {
-//RS                 crate::Codegen::rust_trait_name(&definition.name)
-//RS             } else {
-//RS                 mangle_path(&definition.key)
-//RS             };
-//RS             if !compiler_owned
-//RS                 && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.key)
-//RS             {
-//RS                 user_traits_by_name.insert(definition.key.as_str(), symbol.clone());
-//RS                 user_traits_by_name.insert(definition.name.as_str(), symbol.clone());
-//RS             }
-//RS             traits.insert(definition.id, symbol.clone());
-//RS             traits_by_name.insert(definition.key.clone(), symbol.clone());
-//RS             traits_by_name.insert(definition.name.clone(), symbol);
-//RS         }
-//RS         let mut dyn_clone_traits = BTreeSet::new();
-//RS         for ty in &program.type_instances {
-//RS             mir_type_single_trait_objects(ty, &mut |name: &str| {
-//RS                 if let Some(symbol) = user_traits_by_name.get(name) {
-//RS                     dyn_clone_traits.insert(symbol.clone());
-//RS                 }
-//RS             });
-//RS         }
-//RS         let mut emitter = Self {
-//RS             program,
-//RS             config,
-//RS             artifact,
-//RS             artifact_identity,
-//RS             functions,
-//RS             test_functions: if artifact.mode == MirArtifactBuildMode::Coverage {
-//RS                 program.tests.iter().map(|test| test.function).collect()
-//RS             } else {
-//RS                 BTreeSet::new()
-//RS             },
-//RS             foreigns,
-//RS             types,
-//RS             type_instances,
-//RS             types_by_name,
-//RS             type_def_by_id,
-//RS             type_def_by_key,
-//RS             type_def_by_name,
-//RS             user_impls_by_trait,
-//RS             traits,
-//RS             traits_by_name,
-//RS             dyn_clone_traits,
-//RS             fields,
-//RS             history_capture_encoders: std::cell::RefCell::new(BTreeMap::new()),
-//RS             history_callable_arities: std::cell::RefCell::new(BTreeSet::new()),
-//RS             history_callable_modes: std::cell::RefCell::new(BTreeSet::new()),
-//RS             generic_scopes: std::cell::RefCell::new(Vec::new()),
-//RS             history_current_function: std::cell::Cell::new(None),
-//RS             cfg_state: std::cell::RefCell::new(None),
-//RS             history_runtime_metadata: std::cell::OnceCell::new(),
-//RS             derive_capability_cache: std::cell::RefCell::new(BTreeMap::new()),
-//RS             derive_capability_cycle_floor: std::cell::Cell::new(usize::MAX),
-//RS             history_callback_lifetime: std::cell::Cell::new("'static"),
-//RS             partial_moves: BTreeMap::new(),
-//RS             shared_capture_locals: BTreeMap::new(),
-//RS             move_facts: BTreeMap::new(),
-//RS             ref_bindings: std::cell::RefCell::new(HashMap::new()),
-//RS             window_params: Self::collect_window_params(program),
-//RS             source_lines: program
-//RS                 .source_files
-//RS                 .iter()
-//RS                 .map(|source| {
-//RS                     let lines = jet_foundation::Diagnostics::LineIndex::new(&source.source);
-// END-PORT-PENDING 2002 crates/jet-codegen/src/Codegen/MIRRust.rs:1801-3600
+use std.[env, io]
+use std.sync.OnceLock
+use std.cell.[RefCell, Cell, OnceCell]
+use std.rc.Rc
+use jet_foundation.MIR.*
+use jet_foundation.Diagnostics.LineIndex
+use jet_foundation.Syntax.GENERATED_NAME_PREFIX
+use jet_codegen.Codegen as codegen
+use jet_codegen.Generics.DEBUG
+use jet_codegen.Codegen.MIRRust.[for_each_value_mention, MirCfgPlan, MirCfgState, FunctionIndex, MirRustConfig, select_artifact, mangle, mangle_path, quote_rust_string, stable_id, mir_type_single_trait_objects]
+// GATE #4499: canonical MIR ids and tuple keys retain typed equality/hash/order.
+// GATE #4494: OnceLock memoizes native environment access.
 
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1811
+// Localize only no-drop slots with one declaration and scope-contained uses.
+fn localize_value_slots(out: &String, slots_start: USize, slots_end: USize, candidates: &[U64:String]) -> USize {
+    if candidates.is_empty() { return slots_end }
+    declared := [U64:USize].new()
+    for_each_value_mention(&out[slots_start..slots_end], fn(_, _, id) {
+        if candidates.contains_key(&id) { declared[id] = declared.get(&id).copied().unwrap_or(0) + 1 }
+    })
+    struct Mentions { first_line: USize, first_column: USize, on_first_line: USize, last_line: USize }
+    body := &out[slots_end..] // #4303
+    mentions := [U64:Mentions].new()
+    for_each_value_mention(body, fn(line, column, id) {
+        if !candidates.contains_key(&id) { return }
+        entry :: mentions.entry(id).or_insert(Mentions { first_line: line, first_column: column, on_first_line: 0, last_line: line })
+        if entry.first_line == line { entry.on_first_line += 1 }
+        entry.last_line = line
+    })
+    lines :: body.split_inclusive('\n').collect()
+    indents :: lines.iter().map(fn(line) {
+        content := line.trim_start_matches(' ') // #4303
+        if content.trim().is_empty() { USize.MAX } else { line.len() - content.len() }
+    }).collect()
+    scope_end := [lines.len(); lines.len()]
+    open := [USize].new()
+    for (index, indent) in indents.iter().enumerate() {
+        while !open.is_empty() {
+            top :: open.last().unwrap()
+            if indent >= indents[top] { break }
+            scope_end[top] = index
+            _ :: open.pop()
+        }
+        open.push(index)
+    }
+    localized := [USize:U64].new()
+    dropped := [U64].new().into_set()
+    ids := candidates.keys().copied().collect()
+    ids.sort()
+    for id in ids {
+        if declared.get(&id) != Some(&1) { continue }
+        mention_opt :: mentions.get(&id)
+        if mention_opt.is_none() { _ :: dropped.insert(id); continue }
+        mention :: mention_opt.unwrap()
+        line :: mention.first_line
+        defines :: mention.on_first_line == 1 && mention.first_column == indents[line] && lines[line][indents[line]..].starts_with(&"__jet_v_{id} = Some(")
+        if defines && mention.last_line < scope_end[line] { localized.insert(line, id); _ :: dropped.insert(id) }
+    }
+    if dropped.is_empty() { return slots_end }
+    rebuilt := String.with_capacity(out.len() - slots_start)
+    for line in out[slots_start..slots_end].split_inclusive('\n') {
+        declared_id :: line.strip_prefix("    let mut __jet_v_").and_then(fn(rest) { rest.split_once(':') }).and_then(fn((id, _)) { id.parse[U64]().ok() })
+        if declared_id.is_some_and(fn(id) { dropped.contains(&id) }) { continue }
+        rebuilt.push_str(line)
+    }
+    declarations_end :: slots_start + rebuilt.len()
+    for (index, line) in lines.iter().enumerate() {
+        if localized.get(&index) == {
+            .Some(id) -> {
+                indent :: indents[index]
+                slot :: "__jet_v_{id} = "
+                rebuilt.push_str(&line[..indent])
+                rebuilt.push_str(&"let mut __jet_v_{id}: Option<{candidates[id]}> = ")
+                rebuilt.push_str(&line[indent + slot.len()..])
+            }
+            .None -> rebuilt.push_str(line)
+        }
+    }
+    out.truncate(slots_start)
+    out.push_str(&rebuilt)
+    declarations_end
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1925
+fn is_identifier_byte(byte: U8) -> Bool { byte.is_ascii_alphanumeric() || byte == b'_' }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1930
+fn strip_enclosing_parens(text: &String) -> &String {
+    text := text
+    while text.starts_with('(') && text.ends_with(')') {
+        depth := 0
+        encloses :: text.bytes().enumerate().all(fn((index, byte)) {
+            if byte == b'(' { depth += 1 } else if byte == b')' { depth = depth.saturating_sub(1) }
+            depth > 0 || index == text.len() - 1
+        })
+        if !encloses { break }
+        text = &text[1..text.len() - 1]
+    }
+    text
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1950
+fn numbered_slot_access(text: &String, prefix: &String, suffix: &String) -> Bool {
+    text.strip_prefix(prefix).and_then(fn(rest) { rest.strip_suffix(suffix) }).is_some_and(fn(digits) { !digits.is_empty() && digits.bytes().all(fn(byte) { byte.is_ascii_digit() }) })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1957
+fn parameter_binding(text: &String) -> Bool {
+    name_opt :: text.strip_prefix("__jet_")
+    if name_opt.is_none() { return false }
+    name :: name_opt.unwrap()
+    name.bytes().next().is_some_and(fn(byte) { byte.is_ascii_lowercase() }) && name.bytes().all(is_identifier_byte) && !name.starts_with("src_") && !numbered_slot_access(name, "l_", "") && !numbered_slot_access(name, "v_", "") && name != "string"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1970
+fn field_read_place(text: &String) -> Bool {
+    text :: strip_enclosing_parens(text)
+    base_opt :: text.strip_prefix('*')
+    if base_opt.is_some() {
+        base :: base_opt.unwrap()
+        return parameter_binding(base) || numbered_slot_access(base, "__jet_l_", ".as_ref().expect(\"MIR local\")")
+    }
+    text.rsplit_once(").__jet_").is_some_and(fn((head, field)) {
+        !field.is_empty() && field.bytes().all(is_identifier_byte) && head.strip_prefix('(').is_some_and(field_read_place)
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:1990
+fn pure_slot_expression(expression: &String) -> Bool {
+    expression :: strip_enclosing_parens(expression)
+    if expression == "true" || expression == "false" || expression == "()" { return true }
+    digits_opt :: expression.strip_prefix("jet_foundation::Numeric::JetInt::from_i64(").and_then(fn(rest) { rest.strip_suffix(')') })
+    if digits_opt.is_some() {
+        digits :: digits_opt.unwrap()
+        digits :: digits.strip_prefix('-').unwrap_or(digits)
+        return !digits.is_empty() && digits.bytes().all(fn(byte) { byte.is_ascii_digit() })
+    }
+    text_opt :: expression.strip_prefix("{ let mut __jet_string = String::new(); __jet_string.push_str(\"").and_then(fn(rest) { rest.strip_suffix("\"); __jet_string }") })
+    if text_opt.is_some() {
+        escaped := false
+        return text_opt.unwrap().bytes().all(fn(byte) {
+            open :: escaped || byte != b'"'
+            escaped = !escaped && byte == b'\\'
+            open
+        })
+    }
+    if expression.starts_with("__jet_src_") && expression.contains("::__jet_") && expression.bytes().all(fn(byte) { is_identifier_byte(byte) || byte == b':' }) { return true }
+    numbered_slot_access(expression, "__jet_l_", ".as_ref().expect(\"MIR local\").clone()") || numbered_slot_access(expression, "__jet_l_", ".take().expect(\"MIR local\")") || numbered_slot_access(expression, "(__jet_v_", ".as_ref().expect(\"MIR value\")).clone()") || numbered_slot_access(expression, "*__jet_v_", ".as_ref().expect(\"MIR value\")") || numbered_slot_access(expression, "__jet_v_", ".take().expect(\"MIR value\")") || expression.strip_suffix(".clone()").is_some_and(field_read_place)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2031
+fn borrowing_closure_expression(expression: &String) -> Bool {
+    expression.strip_prefix("std::rc::Rc::new(std::cell::RefCell::new(Some(Box::new({ let __jet_capture_").and_then(fn(rest) { rest.strip_suffix("}))))") }).is_some_and(fn(body) { body.contains(" = &") })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2039
+fn variable_mentions(text: &String, name: &String) -> Iterator[USize] {
+    text.match_indices(name).map(fn((at, _)) { at }).filter(fn(at) {
+        before :: text.as_bytes()[..at].last().copied()
+        after :: text.as_bytes().get(at + name.len()).copied()
+        !before.is_some_and(fn(byte) { is_identifier_byte(byte) || byte == b'.' }) && !after.is_some_and(is_identifier_byte)
+    })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2055
+fn split_local_field_borrows(callee: &String, args: &String) -> String {
+    const WRITE: String = ".as_mut().expect(\"MIR local\")"
+    const READ: String = ".as_ref().expect(\"MIR local\")"
+    (bindings, args) := split_partial_field_borrows(args)
+    split := [&String].new()
+    for (at, _) in args.match_indices(WRITE) {
+        digits :: args[..at].bytes().rev().take_while(fn(byte) { byte.is_ascii_digit() }).count()
+        if digits == 0 || !args[..at - digits].ends_with("__jet_l_") { continue }
+        name := &args[at - digits - "__jet_l_".len()..at] // #4303
+        if split.contains(&name) { continue }
+        accesses :: args.matches(&"{name}{WRITE}").count() + args.matches(&"{name}{READ}").count()
+        if accesses >= 2 && variable_mentions(&args, name).count() == accesses { split.push(name) }
+    }
+    if split.is_empty() && bindings.is_empty() { return "{callee}({args})" }
+    rewritten := args.clone()
+    for name in split {
+        binding :: "__jet_split_{&name[\"__jet_l_\".len()..]}"
+        bindings.push_str(&"let {binding} = {name}{WRITE}; ")
+        rewritten = rewritten.replace(&"{name}{WRITE}", &binding).replace(&"{name}{READ}", &binding)
+    }
+    "{{ {bindings}{callee}({rewritten}) }}"
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2090
+const PARTIAL_WHOLE_ARM: String = " { Some(__jet_whole) => "
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2091
+const PARTIAL_SPLIT_ARM: String = ", None => "
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2095
+struct PartialFieldBorrow {
+    span: Range[USize]
+    slot: &String
+    mutable: Bool
+    whole: &String
+    split: &String
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2111
+fn split_partial_field_borrows(args: &String) -> (String, String) {
+    bindings := String.new()
+    args := args.to_string()
+    settled := [String].new()
+    loop {
+        borrows :: partial_field_borrows(&args)
+        slot_opt :: borrows.iter().find(fn(borrow) { borrow.mutable && !settled.iter().any(fn(slot) { slot == borrow.slot }) }).map(fn(borrow) { borrow.slot })
+        if slot_opt.is_none() { break }
+        slot :: slot_opt.unwrap()
+        settled.push(slot.to_string())
+        owned :: borrows.iter().filter(fn(borrow) { borrow.slot == slot }).collect()
+        if owned.len() < 2 || variable_mentions(&args, slot).count() != owned.len() { continue }
+        stem :: slot.strip_prefix("__jet_").unwrap_or(slot)
+        names :: (0..owned.len()).map(fn(index) { "__jet_split_whole_{stem}_{index}" }).collect()
+        wholes :: owned.iter().map(fn(borrow) { borrow.whole }).collect()
+        splits :: owned.iter().map(fn(borrow) { borrow.split }).collect()
+        (nested, splits) :: split_partial_field_borrows(&splits.join(", "))
+        split :: if nested.is_empty() { "({splits})" } else { "{{ {nested}({splits}) }}" }
+        bindings.push_str(&"let ({names.join(\", \")}) = match {slot}.as_mut() {{ Some(__jet_whole) => ({wholes.join(\", \")}), None => {split} }}; ")
+        rewritten := String.with_capacity(args.len())
+        end := 0
+        for (borrow, name) in owned.iter().zip(&names) {
+            rewritten.push_str(&args[end..borrow.span.start])
+            rewritten.push_str(name)
+            end = borrow.span.end
+        }
+        rewritten.push_str(&args[end..])
+        args = rewritten
+    }
+    (bindings, args)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2158
+fn partial_field_borrows(text: &String) -> [PartialFieldBorrow] {
+    bytes :: text.as_bytes()
+    found := [PartialFieldBorrow].new()
+    depth := 0
+    quoted := false
+    escaped := false
+    at := 0
+    while at < bytes.len() {
+        byte :: bytes[at]
+        if quoted {
+            quoted = escaped || byte != b'"'
+            escaped = !escaped && byte == b'\\'
+        } else {
+            if byte == b'"' { quoted = true }
+            else if byte == b'{' { depth += 1 }
+            else if byte == b'}' { depth = depth.saturating_sub(1) }
+            else if byte == b'm' && depth == 0 {
+                borrow_opt :: partial_field_borrow(text, at).filter(fn(_) { !inside_closure(text, at) })
+                if borrow_opt.is_some() {
+                    borrow :: borrow_opt.unwrap()
+                    at = borrow.span.end
+                    found.push(borrow)
+                    continue
+                }
+            }
+        }
+        at += 1
+    }
+    found
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2193
+fn partial_field_borrow(text: &String, at: USize) -> PartialFieldBorrow? {
+    if text.as_bytes()[..at].last().is_some_and(fn(byte) { is_identifier_byte(byte) }) { return None }
+    rest :: text[at..].strip_prefix("match ")?
+    length :: rest.bytes().take_while(is_identifier_byte).count()
+    (slot, rest) :: rest.split_at(length)
+    if slot.is_empty() { return None }
+    mut_rest :: rest.strip_prefix(".as_mut()")
+    (mutable, rest) :: if mut_rest.is_some() { (true, mut_rest.unwrap()) } else { (false, rest.strip_prefix(".as_ref()")?) }
+    if !rest.starts_with(PARTIAL_WHOLE_ARM) { return None }
+    open :: text.len() - rest.len() + 1
+    depth := 0
+    quoted := false
+    escaped := false
+    close :: text.bytes().enumerate().skip(open).find_map(fn((index, byte)) {
+        if quoted { quoted = escaped || byte != b'"'; escaped = !escaped && byte == b'\\'; return None }
+        if byte == b'"' { quoted = true }
+        else if byte == b'{' { depth += 1 }
+        else if byte == b'}' { depth -= 1; if depth == 0 { return Some(index) } }
+        None
+    })?
+    (whole, split) :: text[open - 1 + PARTIAL_WHOLE_ARM.len()..close].split_once(PARTIAL_SPLIT_ARM)?
+    Some(PartialFieldBorrow { span: at..close + 1, slot, mutable, whole, split: split.trim_end_matches(' ') })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2238
+fn expression_variables(expression: &String) -> [&String] {
+    names := [&String].new()
+    for (at, _) in expression.match_indices("__jet_") {
+        length :: expression.as_bytes()[at..].iter().take_while(is_identifier_byte).count()
+        name := &expression[at..at + length] // #4303
+        slot :: numbered_slot_access(name, "__jet_l_", "") || numbered_slot_access(name, "__jet_v_", "")
+        if (slot || parameter_binding(name)) && variable_mentions(expression, name).any(fn(found) { found == at }) { names.push(name) }
+    }
+    names
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2253
+fn inside_closure(line: &String, at: USize) -> Bool {
+    depth := 0
+    closures := [USize].new()
+    quoted := false
+    escaped := false
+    for byte in line.as_bytes()[..at].iter().copied() {
+        if quoted { quoted = escaped || byte != b'"'; escaped = !escaped && byte == b'\\'; continue }
+        if byte == b'"' { quoted = true }
+        else if byte == b'(' || byte == b'[' || byte == b'{' { depth += 1 }
+        else if byte == b')' || byte == b']' || byte == b'}' {
+            depth = depth.saturating_sub(1)
+            while closures.last().is_some_and(fn(open) { open > depth }) { _ :: closures.pop() }
+        } else if byte == b'|' { closures.push(depth) }
+    }
+    !closures.is_empty()
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2282
+fn slot_definition(line: &String) -> (USize, U64, &String, Bool)? {
+    content := line.trim_end_matches('\n') // #4303
+    indent :: content.len() - content.trim_start_matches(' ').len()
+    statement := &content[indent..] // #4303
+    local :: statement.strip_prefix("let mut __jet_v_")
+    (hoisted, rest) :: if local.is_some() { (false, local.unwrap()) } else { (true, statement.strip_prefix("__jet_v_")?) }
+    digits :: rest.bytes().take_while(fn(byte) { byte.is_ascii_digit() }).count()
+    id :: rest[..digits].parse[U64]().ok()?
+    rest := &rest[digits..] // #4303
+    payload :: if hoisted { rest.strip_prefix(" = Some(")? } else {
+        rest :: rest.strip_prefix(": Option<")?
+        &rest[rest.find("> = Some(")? + "> = Some(".len()..]
+    }
+    Some((indent, id, payload.strip_suffix(");")?, hoisted))
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2304
+fn attributed_statement(lines: &[String], index: USize) -> Bool { index > 0 && lines[index - 1].trim_start().starts_with("#[") }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2319
+fn fold_value_slots(out: &String, slots_start: USize, slots_end: USize) -> {
+    mentions := [U64:USize].new()
+    for_each_value_mention(&out[slots_start..], fn(_, _, id) { mentions[id] = mentions.get(&id).copied().unwrap_or(0) + 1 })
+    body_start :: out[slots_start..slots_end].split_inclusive('\n').count()
+    lines := out[slots_start..].split_inclusive('\n').map(fn(line) { line.to_string() }).collect()
+    declarations := [U64:USize].new()
+    for (index, line) in lines[..body_start].iter().enumerate() {
+        declared :: line.strip_prefix("    let mut __jet_v_").filter(fn(rest) { rest.trim_end().ends_with("> = None;") }).and_then(fn(rest) { rest.split_once(':') }).and_then(fn((id, _)) { id.parse[U64]().ok() })
+        if declared.is_some() { declarations.insert(declared.unwrap(), index) }
+    }
+    removed := [false; lines.len()]
+    folded := false
+    for index in body_start..lines.len() {
+        definition :: slot_definition(&lines[index])
+        if definition.is_none() { continue }
+        (indent, id, expression, hoisted) :: definition.unwrap()
+        expected :: if hoisted { 3 } else { 2 }
+        if mentions.get(&id) != Some(&expected) || (hoisted && !declarations.contains_key(&id)) || !(pure_slot_expression(expression) || (hoisted && borrowing_closure_expression(expression))) || attributed_statement(&lines, index) { continue }
+        expression :: expression.to_string()
+        name :: "__jet_v_{id}"
+        consumer := index + 1
+        while consumer < lines.len() && variable_mentions(&lines[consumer], &name).next().is_none() {
+            skippable :: slot_definition(&lines[consumer]).is_some_and(fn((other_indent, _, other, _)) { other_indent == indent && pure_slot_expression(other) }) && !attributed_statement(&lines, consumer)
+            if !skippable { break }
+            consumer += 1
+        }
+        line_opt :: lines.get(consumer)
+        if line_opt.is_none() { continue }
+        line :: line_opt.unwrap()
+        if line.len() - line.trim_start_matches(' ').len() != indent || attributed_statement(&lines, consumer) { continue }
+        read :: "({name}.as_ref().expect(\"MIR value\")).clone()"
+        scalar :: "(*{name}.as_ref().expect(\"MIR value\"))"
+        take :: "{name}.take().expect(\"MIR value\")"
+        form_opt :: [read, scalar, take].into_iter().find(fn(form) { line.matches(form.as_str()).count() == 1 })
+        if form_opt.is_none() { continue }
+        form :: form_opt.unwrap()
+        at :: line.find(form.as_str()).expect("form occurs once")
+        if inside_closure(line, at) { continue }
+        (before, after) :: (&line[..at], &line[at + form.len()..])
+        rest :: "{before}{after}"
+        target :: rest.trim_start().split_once(" = ").map(fn((target, _)) { target }).filter(fn(target) { numbered_slot_access(target, "__jet_l_", "") })
+        conflict :: expression_variables(&expression).into_iter().any(fn(variable) {
+            allowed :: if Some(variable) == target { 1 } else { 0 }
+            variable_mentions(&rest, variable).count() > allowed || lines[index + 1..consumer].iter().any(fn(between) { variable_mentions(between, variable).next().is_some() })
+        })
+        if conflict { continue }
+        replaced := String.new()
+        if pure_slot_expression(&expression) { replaced = "{before}({expression}){after}" } else {
+            declared_opt :: lines[declarations[&id]].trim_end().split_once(": Option<").and_then(fn((_, ty)) { ty.strip_suffix("> = None;") })
+            if declared_opt.is_none() { continue }
+            declared :: declared_opt.unwrap()
+            replaced = "{before}{{ let __jet_folded: {declared} = {expression}; __jet_folded }}{after}"
+        }
+        lines[consumer] = replaced
+        removed[index] = true
+        if hoisted { removed[declarations[&id]] = true }
+        folded = true
+    }
+    if !folded { return }
+    out.truncate(slots_start)
+    for (line, removed) in lines.iter().zip(removed) { if !removed { out.push_str(line) } }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2430
+fn copy_tags_enabled() -> Bool {
+    static ENABLED: OnceLock[Bool] = OnceLock.new()
+    ENABLED.get_or_init(fn() { env.var_os("JET_COPY_TAGS").ok().is_some_and(fn(value) { value == "1" }) })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2436
+fn copy_scalar_type(ty: &String) -> Bool {
+    if ty == { "bool" | "char" | "f32" | "f64" | "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128" | "usize" -> true; _ -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2451
+fn unwrap_value_slots(out: &String, slots_start: USize) -> {
+    const BORROW: String = ".as_ref().expect(\"MIR value\")"
+    body := &out[slots_start..] // #4303
+    mentions := [U64:(USize, USize)].new()
+    plain := [U64:Bool].new()
+    definitions := [(U64, Bool)].new()
+    for line in body.split_inclusive('\n') {
+        for_each_value_mention(line, fn(_, at, id) {
+            digits :: line[at + "__jet_v_".len()..].bytes().take_while(fn(byte) { byte.is_ascii_digit() }).count()
+            entry :: mentions.entry(id).or_insert((0, 0))
+            entry.0 += 1
+            if line[at + "__jet_v_".len() + digits..].starts_with(BORROW) { entry.1 += 1 }
+        })
+        definition :: slot_definition(line)
+        if definition.is_none() { continue }
+        (indent, id, _, hoisted) :: definition.unwrap()
+        if hoisted { continue }
+        ty_opt :: line[indent..].strip_prefix(&"let mut __jet_v_{id}: Option<").and_then(fn(rest) { rest.find("> = Some(").map(fn(end) { &rest[..end] }) })
+        if ty_opt.is_none() { continue }
+        definitions.push((id, copy_scalar_type(ty_opt.unwrap())))
+    }
+    for (id, copy) in definitions {
+        if mentions.get(&id).is_some_and(fn((all, borrows)) { all == borrows + 1 }) { plain.insert(id, copy) }
+    }
+    if plain.is_empty() { return }
+    rebuilt := String.with_capacity(out.len() - slots_start)
+    for original in out[slots_start..].split_inclusive('\n') {
+        line := original.to_string()
+        if slot_definition(original) == {
+            .Some((indent, id, expression, false)) -> {
+                if plain.contains_key(&id) {
+                    rest := &original[indent + "let mut __jet_v_{id}: Option<".len()..] // #4303
+                    ty := &rest[..rest.find("> = Some(").expect("checked slot definition")] // #4303
+                    line = "{&original[..indent]}let __jet_v_{id}: {ty} = {expression};\n"
+                }
+            }
+            _ -> {}
+        }
+        ids := [U64].new()
+        for_each_value_mention(&line, fn(_, _, id) { if plain.contains_key(&id) && !ids.contains(&id) { ids.push(id) } })
+        if ids.is_empty() { rebuilt.push_str(&line); continue }
+        for id in ids {
+            borrow :: "__jet_v_{id}.as_ref().expect(\"MIR value\")"
+            read :: if plain[&id] { "__jet_v_{id}" } else { "__jet_v_{id}.clone()" }
+            line = line.replace(&"({borrow}).clone()", &read).replace(&"(*{borrow})", &"__jet_v_{id}").replace(&borrow, &"(&__jet_v_{id})")
+        }
+        rebuilt.push_str(&line)
+    }
+    out.truncate(slots_start)
+    out.push_str(&rebuilt)
+}
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2574
+// Compact names in code only; preserve literal/comment bytes and UTF-8 widths.
+fn compact_function_text(out: &String, start: USize) -> {
+    enum Lex { Code, Text, Raw(USize), Block }
+    const SLOTS: [(String, String)] = [("__jet_v_", "_v"), ("__jet_l_", "_l"), ("__jet_pm_", "_p")]
+    const LABELS: [(String, String)] = [("'jet_block_", "'b"), ("'jet_loop_", "'c")]
+    text :: out.split_off(start)
+    bytes :: text.as_bytes()
+    names := [[&String:USize].new(); 5]
+    state := Lex.Code
+    index := 0
+    line_start := true
+    digits_at :: fn(at: USize) { bytes[at..].iter().take_while(fn(byte) { byte.is_ascii_digit() }).count() }
+    while index < bytes.len() {
+        if line_start && state == Lex.Code {
+            spaces :: bytes[index..].iter().take_while(fn(byte) { byte == b' ' }).count()
+            out.extend(std.iter.repeat_n(' ', (spaces / 4).min(8)))
+            index += spaces
+            line_start = false
+            continue
+        }
+        line_start = false
+        byte :: bytes[index]
+        previous :: index.checked_sub(1).map(fn(at) { bytes[at] })
+        if state == {
+            .Text -> {
+                if byte == b'\\' && index + 1 < bytes.len() {
+                    width :: 1 + text[index + 1..].chars().next().map_or(0, fn(ch) { ch.len_utf8() })
+                    out.push_str(&text[index..index + width])
+                    line_start = bytes[index + 1] == b'\n'
+                    index += width
+                    continue
+                }
+                if byte == b'"' { state = Lex.Code }
+            }
+            .Raw(hashes) -> {
+                if byte == b'"' && bytes[index + 1..].iter().take(hashes).filter(fn(byte) { byte == b'#' }).count() == hashes {
+                    out.push_str(&text[index..index + 1 + hashes])
+                    index += 1 + hashes
+                    state = Lex.Code
+                    continue
+                }
+            }
+            .Block -> {
+                if text[index..].starts_with("*/") {
+                    out.push_str("*/")
+                    index += 2
+                    state = Lex.Code
+                    continue
+                }
+            }
+            .Code -> {
+                joined :: previous.is_some_and(is_identifier_byte)
+                if text[index..].starts_with("//") {
+                    end :: text[index..].find('\n').map_or(bytes.len(), fn(offset) { index + offset })
+                    out.push_str(&text[index..end])
+                    index = end
+                    continue
+                }
+                if text[index..].starts_with("/*") {
+                    out.push_str("/*")
+                    index += 2
+                    state = Lex.Block
+                    continue
+                }
+                if byte == b'"' { state = Lex.Text }
+                else if byte == b'r' && !previous.is_some_and(fn(byte) { is_identifier_byte(byte) && byte != b'b' }) {
+                    hashes :: bytes[index + 1..].iter().take_while(fn(byte) { byte == b'#' }).count()
+                    if bytes.get(index + 1 + hashes) == Some(&b'"') {
+                        out.push_str(&text[index..index + 2 + hashes])
+                        index += 2 + hashes
+                        state = Lex.Raw(hashes)
+                        continue
+                    }
+                } else if byte == b'\'' {
+                    if bytes.get(index + 1) == Some(&b'\\') {
+                        close :: text[index + 3..].find('\'').map_or(bytes.len(), fn(offset) { index + 3 + offset + 1 })
+                        out.push_str(&text[index..close])
+                        index = close
+                        continue
+                    }
+                    width :: text[index + 1..].chars().next().map_or(0, fn(ch) { ch.len_utf8() })
+                    if width > 0 && bytes.get(index + 1 + width) == Some(&b'\'') {
+                        out.push_str(&text[index..index + 2 + width])
+                        index += 2 + width
+                        continue
+                    }
+                    label :: LABELS.iter().enumerate().find_map(fn((kind, (prefix, short))) {
+                        if !text[index..].starts_with(prefix) { return None }
+                        digits :: digits_at(index + prefix.len())
+                        end :: index + prefix.len() + digits
+                        if digits > 0 && !bytes.get(end).is_some_and(is_identifier_byte) { Some((kind + 3, short, index + prefix.len(), end)) } else { None }
+                    })
+                    if label.is_some() {
+                        (kind, short, id_start, end) :: label.unwrap()
+                        next :: names[kind].len()
+                        number :: names[kind].entry(&text[id_start..end]).or_insert(next)
+                        out.push_str(&"{short}{number}")
+                        index = end
+                        continue
+                    }
+                } else if byte == b'_' && !joined {
+                    slot :: SLOTS.iter().enumerate().find_map(fn((kind, (prefix, short))) {
+                        if !text[index..].starts_with(prefix) { return None }
+                        digits :: digits_at(index + prefix.len())
+                        end :: index + prefix.len() + digits
+                        if digits > 0 && !bytes.get(end).is_some_and(is_identifier_byte) { Some((kind, short, index + prefix.len(), end)) } else { None }
+                    })
+                    if slot.is_some() {
+                        (kind, short, id_start, end) :: slot.unwrap()
+                        next :: names[kind].len()
+                        number :: names[kind].entry(&text[id_start..end]).or_insert(next)
+                        out.push_str(&"{short}{number}")
+                        index = end
+                        continue
+                    }
+                }
+            }
+        }
+        width :: text[index..].chars().next().map_or(1, fn(ch) { ch.len_utf8() })
+        out.push_str(&text[index..index + width])
+        line_start = byte == b'\n'
+        index += width
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2707
+const CACHED_CONSTANT_BYTES: USize = 16 * 1024
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2709
+const CONSTANT_CHUNK_BYTES: USize = 64 * 1024
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2714
+fn emit_list_constant_chunks(out: &String, name: &String, ty: &String, rows: &[String]) -> String {
+    chunks := [&[String]].new()
+    start := 0
+    bytes := 0
+    for (index, row) in rows.iter().enumerate() {
+        if index > start && bytes + row.len() > CONSTANT_CHUNK_BYTES {
+            chunks.push(&rows[start..index])
+            start = index
+            bytes = 0
+        }
+        bytes += row.len()
+    }
+    chunks.push(&rows[start..])
+    for (index, chunk) in chunks.iter().enumerate() {
+        out.push_str(&"fn {name}_rows_{index}(rows: &mut {ty}) {{\n")
+        for row in chunk { out.push_str(&"    rows.push({row});\n") }
+        out.push_str("}\n\n")
+    }
+    init := "{{\n        let mut rows: {ty} = Vec::with_capacity({rows.len()});\n"
+    for index in 0..chunks.len() { init.push_str(&"        {name}_rows_{index}(&mut rows);\n") }
+    init.push_str("        rows\n    }")
+    init
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2746
+fn emit_shared_constant(out: &String, root: &String, visibility: &String, name: &String, ty: &String, init: &String) -> {
+    out.push_str(&"thread_local! {{\n    static {name}_SHARED: std::rc::Rc<{ty}> = std::rc::Rc::new({init});\n}}\n\n")
+    out.push_str(&"#[inline]\n{visibility}fn {name}() -> {ty} {{ {name}_SHARED.with(|value| (**value).clone()) }}\n\n")
+    out.push_str(&"#[inline]\n{visibility}fn {name}_shared() -> {root}JetSharedSlot<{ty}> {{ {name}_SHARED.with(|value| {root}JetSharedSlot::new(std::rc::Rc::clone(value))) }}\n\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2770
+// Iterative DFS and Cooper/Harvey/Kennedy immediate dominators.
+fn mir_cfg_plan(function: &MirFunction) -> MirCfgPlan? {
+    positions: [MirBlockId:USize] = function.blocks.iter().enumerate().map(fn((position, block)) { (block.id, position) }).collect()
+    entry :: positions.get(&function.entry).copied()?
+    count :: function.blocks.len()
+    successors := [[USize]].with_capacity(count)
+    for block in &function.blocks {
+        row := [USize].new()
+        for target in block.terminator.targets() { row.push(positions.get(&target).copied()?) }
+        successors.push(row)
+    }
+    visited := [false; count]
+    postorder := [USize].with_capacity(count)
+    stack := [(entry, 0)]
+    visited[entry] = true
+    while !stack.is_empty() {
+        top :: stack.last_mut().unwrap()
+        (node, edge) :: top
+        child_opt :: successors[node].get(edge).copied()
+        if child_opt.is_some() {
+            child :: child_opt.unwrap()
+            top.1 += 1
+            if !visited[child] { visited[child] = true; stack.push((child, 0)) }
+        } else { postorder.push(node); _ :: stack.pop() }
+    }
+    rpo: [USize] = postorder.into_iter().rev().collect()
+    order := [USize.MAX; count]
+    for (number, position) in rpo.iter().enumerate() { order[position] = number }
+    predecessors := [[USize].new(); count]
+    for position in &rpo { for target in &successors[position] { predecessors[target].push(position) } }
+    idom := [USize.MAX; count]
+    idom[entry] = entry
+    intersect :: fn(idom: &[USize], left: USize, right: USize) {
+        left := left
+        right := right
+        while left != right {
+            while order[left] > order[right] { left = idom[left] }
+            while order[right] > order[left] { right = idom[right] }
+        }
+        left
+    }
+    changed := true
+    while changed {
+        changed = false
+        for position in &rpo {
+            if position == entry { continue }
+            candidate := USize.MAX
+            for predecessor in &predecessors[position] {
+                if idom[predecessor] == USize.MAX { continue }
+                candidate = if candidate == USize.MAX { predecessor } else { intersect(&idom, predecessor, candidate) }
+            }
+            if idom[position] != candidate { idom[position] = candidate; changed = true }
+        }
+    }
+    dominates :: fn(dominator: USize, block: USize) {
+        block := block
+        loop {
+            if block == dominator { return true }
+            if block == entry { return false }
+            block = idom[block]
+        }
+    }
+    headers := [false; count]
+    forward := [0; count]
+    for position in &rpo {
+        for target in &successors[position] {
+            if order[target] <= order[position] {
+                if !dominates(target, position) { return None }
+                headers[target] = true
+            } else { forward[target] += 1 }
+        }
+    }
+    merges := [false; count]
+    follows := [[USize].new(); count]
+    for position in rpo.iter().skip(1).rev() {
+        if forward[position] >= 2 { merges[position] = true; follows[idom[position]].push(position) }
+    }
+    Some(MirCfgPlan { positions, entry, order, headers, merges, follows })
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2896
+fn wrap_cfg_not_release(out: &String, start: USize, indent: USize) -> {
+    if start >= out.len() { return }
+    body :: out[start..].to_string()
+    out.truncate(start)
+    pad :: " ".repeat(indent)
+    out.push_str(&"{pad}#[cfg(not(jet_release))]\n{pad}{{\n")
+    for line in body.lines() { out.push_str(&"{pad}    {line}\n") }
+    out.push_str(&"{pad}}}\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2912
+fn is_source_owned_core_compute_shape(name: &String) -> Bool { name.starts_with("<corelib>/Core/compute::") }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2915
+fn is_source_owned_core_net_shape(name: &String) -> Bool {
+    if !name.starts_with("<corelib>/") { return false }
+    leaf :: codegen.core_source_type_leaf(name)
+    (name.starts_with("<corelib>/Core/net::") && (leaf == "SocketAddr" || leaf == "UDPSocket" || leaf == "UDPPacket" || leaf == "UnixStream" || leaf == "UnixListener" || leaf == "SRVRecord")) || (name.starts_with("<corelib>/Core/net/tls::") && (leaf == "TLSCertificate" || leaf == "TLSPeerIdentity"))
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2934
+fn is_source_owned_core_web_query_shape(name: &String) -> Bool {
+    leaf :: codegen.core_source_type_leaf(name)
+    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQuery" || leaf == "WebQueryState" || leaf == "WebMutationState")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2941
+fn is_source_owned_core_web_query_enum(name: &String) -> Bool {
+    leaf :: codegen.core_source_type_leaf(name)
+    name.starts_with("<corelib>/Core/web::Core/web/query.jet::") && (leaf == "WebQueryNetworkMode" || leaf == "WebMutationStatus" || leaf == "WebQueryStatus")
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2949
+fn native_core_query_enum_variant_name(name: &String) -> &String { name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(name) }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2958
+fn mangle_variant(name: &String) -> String { if name.contains('.') { mangle_path(name) } else { mangle(name) } }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2966
+fn native_core_query_enum_trait_impl(type_name: &String, rust_trait: &String, value_method: &String, variants: Iterator[&String]) -> String {
+    out := String.new()
+    out.push_str(&"impl {rust_trait} for {type_name} {{\n    fn {value_method}(&self) -> String {{\n        match self {{\n")
+    for source_variant in variants {
+        variant :: native_core_query_enum_variant_name(source_variant)
+        variant_name :: quote_rust_string(variant)
+        out.push_str(&"            Self::{variant} => jet_debug_variant({variant_name}, None),\n")
+    }
+    out.push_str("        }\n    }\n}\n\n")
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2992
+fn core_native_probe_name(name: &String) -> &String {
+    if (name.starts_with("<corelib>/Core/sync::") && name.ends_with("::RowPolicy")) || is_source_owned_core_compute_shape(name) || is_source_owned_core_net_shape(name) || is_source_owned_core_web_query_shape(name) { name }
+    else if name.starts_with("<corelib>/") { codegen.core_source_type_leaf(name) }
+    else { name }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3008
+fn has_native_type_projection(name: &String) -> Bool {
+    if is_source_owned_core_compute_shape(name) || is_source_owned_core_net_shape(name) || is_source_owned_core_web_query_shape(name) { return false }
+    probe :: core_native_probe_name(name)
+    codegen.core_rust_type_name(name).is_some() || codegen.root_prelude_rust_type_name(probe).is_some() || codegen.core_ui_rust_type_name(probe).is_some() || codegen.compute_handle_rust_type(probe).is_some() || codegen.service_handle_rust_type(probe).is_some() || codegen.alloc_handle_rust_type(probe).is_some() || codegen.file_handle_rust_type(name).is_some() || codegen.reflect_handle_rust_type(probe).is_some() || codegen.binary_text_handle_rust_type(probe).is_some() || codegen.core_email_rust_type_name(name).is_some() || codegen.core_crypto_rust_type_name(name).is_some()
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3029
+fn is_canonical_core_native_type(name: &String) -> Bool { name.starts_with("<corelib>/") && has_native_type_projection(name) }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3036
+fn compiler_trait_method_symbol(trait_name: &String, leaf: &String) -> String { if trait_name == DEBUG && leaf == "debug" { "jet_debug" } else { leaf.to_string() } }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3047
+fn carrier_trait_signatures(methods: &String) -> String {
+    out := String.new()
+    for line in methods.lines() {
+        header_opt :: line.strip_suffix(" {")
+        if header_opt.is_none() { continue }
+        header :: header_opt.unwrap()
+        if !(header.starts_with("fn ") || header.starts_with("unsafe fn ")) { continue }
+        header :: header.replace("(mut ", "(").replace(", mut ", ", ")
+        out.push_str(&"    {header};\n")
+    }
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3062
+fn is_net_tls_client_bridge_call(symbol: &MirSymbol) -> Bool {
+    if symbol == { .Prelude(symbol) | .Runtime(symbol) -> symbol == "jet_net_tls_client"; _ -> false }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3070
+fn native_net_error_detail_field(rust_type_name: &String, field_name: &String, value: &String, native_int_argument: fn(String) -> String) -> String? {
+    if rust_type_name != "JetNetErrorDetail" { return None }
+    if field_name == {
+        "address" | "name" -> Some("({value}).ok()")
+        "os_code" -> Some("({value}).ok().map(|value| {native_int_argument(\"value\")})")
+        _ -> None
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3296
+fn append_web_time_zones(out: &String) -> () io.Error! { RustEmitter.emit_web_time_zones(out) }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3299
+fn canonical_core_email_rust_type_name(name: &String) -> &String? {
+    name :: name.strip_prefix("<corelib>/Core/email::Core/email/email.jet::")?
+    codegen.core_email_rust_type_name(name)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3305
+struct PartialMoveField {
+    id: MirFieldId
+    slot: String
+    ty: MirType
+    boxed: Bool
+    nested: Box[PartialMoveNode]?
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3316
+// Whole slot or field slots own the initialized remainder, never both.
+struct PartialMoveNode { slot: String, owner: MirTypeId, boxed: Bool, fields: [PartialMoveField] }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3323
+struct PartialMoveRoot { base: MirPlaceBase, node: PartialMoveNode }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3330
+#Derive(Default)
+struct MoveFacts {
+    single_use: Set[MirValueId]
+    payload_groups: [MirValueId:[(USize, MirValueId)]]
+    payload_subjects: [MirValueId:MirValueId]
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3344
+#Derive(Default)
+struct RefBindings {
+    locals: Set[MirLocalId]
+    payloads: Set[MirValueId]
+    cursors: [MirValueId:MirPlaceId]
+    collections: Set[MirValueId]
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3357
+struct RustEmitter {
+    program: &MirProgram
+    config: &MirRustConfig
+    artifact: &MirArtifactPlan
+    artifact_identity: MirArtifactIdentity
+    functions: [MirFunctionId:String]
+    test_functions: Set[MirFunctionId]
+    foreigns: [MirForeignId:String]
+    types: [MirTypeId:String]
+    type_instances: [MirTypeId:&MirType]
+    types_by_name: [String:String]
+    // First program row wins; indexes avoid per-query linear scans.
+    type_def_by_id: [MirTypeId:USize]
+    type_def_by_key: [&String:USize]
+    type_def_by_name: [&String:USize]
+    user_impls_by_trait: [&String:[&MirImplDef]]
+    traits: [MirTraitId:String]
+    traits_by_name: [String:String]
+    dyn_clone_traits: Set[String]
+    fields: [MirFieldId:String]
+    history_capture_encoders: RefCell[[String:String]]
+    history_callable_arities: RefCell[Set[USize]]
+    history_callable_modes: RefCell[Set[(USize, String)]]
+    generic_scopes: RefCell[[&[MirGenericParam]]]
+    history_current_function: Cell[MirFunctionId?]
+    cfg_state: RefCell[MirCfgState?]
+    history_runtime_metadata: OnceCell[Bool]
+    derive_capability_cache: RefCell[[String:[MirTypeId:Bool]]]
+    derive_capability_cycle_floor: Cell[USize]
+    history_callback_lifetime: Cell[&String]
+    partial_moves: [MirFunctionId:[PartialMoveRoot]]
+    shared_capture_locals: [MirFunctionId:Set[MirLocalId]]
+    move_facts: [MirFunctionId:MoveFacts]
+    ref_bindings: RefCell[[MirFunctionId:Rc[RefBindings]]]
+    window_params: Set[(MirFunctionId, USize)]
+    source_lines: [MirSourceFileId:(&MirSourceFile, LineIndex)]
+    function_positions: [MirFunctionId:USize]
+    field_positions: [MirFieldId:USize]
+    function_indexes: RefCell[[MirFunctionId:Rc[FunctionIndex]]]
+    closure_parents: OnceCell[[MirFunctionId:[USize]]]
+}
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3426
+    fn new(program: &MirProgram, config: &MirRustConfig, artifact_identity: MirArtifactIdentity) -> Self {
+        artifact :: select_artifact(program, config.execution.artifact, config.target_kind)
+        if artifact.id != artifact_identity.artifact { panic("MIR artifact identity does not match the selected artifact row") }
+        functions :: program.functions.iter().map(fn(function) { (function.id, mangle_path(&function.key)) }).collect()
+        foreigns := [MirForeignId:String].new()
+        for foreign in &program.foreign {
+            name :: if foreign.name.is_empty() { mangle_path(&foreign.key) } else { mangle(&foreign.name) }
+            if foreigns.insert(foreign.id, name).is_some() { panic("MIR foreign ID {foreign.id:?} is duplicated") }
+        }
+        types := [MirTypeId:String].new()
+        type_instances :: program.type_instances.iter().filter_map(fn(instance) { instance.identity.map(fn(id) { (id, instance) }) }).collect()
+        types_by_name := [String:String].new()
+        fields := [MirFieldId:String].new()
+        method_owners := [MirFunctionId:MirTypeId].new()
+        type_def_by_id := [MirTypeId:USize].new()
+        type_def_by_key := [&String:USize].new()
+        type_def_by_name := [&String:USize].new()
+        for (index, def) in program.types.iter().enumerate() {
+            _ :: type_def_by_id.entry(def.id).or_insert(index)
+            _ :: type_def_by_key.entry(def.key.as_str()).or_insert(index)
+            _ :: type_def_by_name.entry(def.name.as_str()).or_insert(index)
+            symbol :: mangle_path(&def.key)
+            types.insert(def.id, symbol.clone())
+            types_by_name.insert(def.key.clone(), symbol.clone())
+            types_by_name.insert(def.name.clone(), symbol)
+            Self.collect_type_fields(def, &fields)
+            if &def.kind == {
+                .Struct { methods, .. } | .Enum { methods, .. } -> {
+                    for function in methods {
+                        previous :: method_owners.insert(function, def.id)
+                        if previous.is_some() && previous.unwrap() != def.id { panic("MIR method {function:?} is listed by type IDs {previous.unwrap():?} and {def.id:?}") }
+                    }
+                }
+                _ -> {}
+            }
+        }
+        for ty in &program.type_instances {
+            if ty.kind() == {
+                .Tuple(declared) -> {
+                    identity :: ty.identity_key()
+                    for (index, (name, _)) in declared.iter().enumerate() {
+                        id :: MirFieldId(stable_id("mir-field", &"{identity}::{name}"))
+                        fields.insert(id, index.to_string())
+                    }
+                }
+                _ -> {}
+            }
+        }
+        for handle in &program.handles {
+            if handle.ty.kind() == {
+                .Apply { name, .. } -> {
+                    symbol :: mangle_path(&name.name)
+                    _ :: types_by_name.entry(name.name.clone()).or_insert_with(fn() { symbol.clone() })
+                }
+                _ -> {}
+            }
+        }
+        user_impls_by_trait := [&String:[&MirImplDef]].new()
+        for implementation in &program.impls {
+            trait_ref :: implementation.trait_ref.as_ref().filter(fn(_) { !implementation.compiler_generated })
+            if trait_ref.is_some() { user_impls_by_trait.entry(trait_ref.unwrap().name.as_str()).or_default().push(implementation) }
+            owner :: Self.type_identity_from_instances(&type_instances, &implementation.self_type)
+            for function in &implementation.methods {
+                previous :: method_owners.insert(function, owner)
+                if previous.is_some() && previous.unwrap() != owner { panic("MIR method {function:?} is listed by type IDs {previous.unwrap():?} and {owner:?}") }
+            }
+        }
+        traits := [MirTraitId:String].new()
+        traits_by_name := [String:String].new()
+        user_traits_by_name := [&String:String].new()
+        for definition in &program.traits {
+            compiler_owned :: codegen.TIR.tir_to_mir_types.is_compiler_owned_trait(&definition.name)
+            symbol :: if compiler_owned { codegen.rust_trait_name(&definition.name) } else { mangle_path(&definition.key) }
+            if !compiler_owned && !codegen.TIR.tir_to_mir_types.is_compiler_owned_trait(&definition.key) {
+                user_traits_by_name.insert(definition.key.as_str(), symbol.clone())
+                user_traits_by_name.insert(definition.name.as_str(), symbol.clone())
+            }
+            traits.insert(definition.id, symbol.clone())
+            traits_by_name.insert(definition.key.clone(), symbol.clone())
+            traits_by_name.insert(definition.name.clone(), symbol)
+        }
+        dyn_clone_traits := Set[String].new()
+        for ty in &program.type_instances {
+            mir_type_single_trait_objects(ty, fn(name) {
+                symbol :: user_traits_by_name.get(name)
+                if symbol.is_some() { _ :: dyn_clone_traits.insert(symbol.unwrap().clone()) }
+            })
+        }
+        emitter := Self {
+            program, config, artifact, artifact_identity, functions,
+            test_functions: if artifact.mode == MirArtifactBuildMode.Coverage { program.tests.iter().map(fn(test) { test.function }).collect() } else { Set[MirFunctionId].new() },
+            foreigns, types, type_instances, types_by_name, type_def_by_id, type_def_by_key, type_def_by_name,
+            user_impls_by_trait, traits, traits_by_name, dyn_clone_traits, fields,
+            history_capture_encoders: RefCell.new([String:String].new()),
+            history_callable_arities: RefCell.new(Set[USize].new()),
+            history_callable_modes: RefCell.new(Set[(USize, String)].new()),
+            generic_scopes: RefCell.new([]), history_current_function: Cell.new(None),
+            cfg_state: RefCell.new(None), history_runtime_metadata: OnceCell.new(),
+            derive_capability_cache: RefCell.new([String:[MirTypeId:Bool]].new()),
+            derive_capability_cycle_floor: Cell.new(USize.MAX), history_callback_lifetime: Cell.new("'static"),
+            partial_moves: [MirFunctionId:[PartialMoveRoot]].new(),
+            shared_capture_locals: [MirFunctionId:Set[MirLocalId]].new(),
+            move_facts: [MirFunctionId:MoveFacts].new(), ref_bindings: RefCell.new([MirFunctionId:Rc[RefBindings]].new()),
+            window_params: Self.collect_window_params(program),
+            source_lines: program.source_files.iter().map(fn(source) {
+                lines :: LineIndex.new(&source.source)
+                (source.id, (source, lines))
+            }).collect(),
+            function_positions: [MirFunctionId:USize].new(),
+            field_positions: [MirFieldId:USize].new(),
+            function_indexes: RefCell.new([MirFunctionId:Rc[FunctionIndex]].new()),
+            closure_parents: OnceCell.new()
+        }
+        // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3601-3638
+        // Continuation at the next source-slice owner completes the indexes/plans.
+        RustEmitter.finish_new(&emitter)
+        emitter
+    }
+}

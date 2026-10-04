@@ -1,0 +1,236 @@
+use jet.compile
+use jet_foundation.Tests.Integration.PoolIdEquality.STALE_SOURCE
+use jet_foundation.Tests.Integration.PrintBranchTiers as print_branch
+use jet_foundation.Tests.Integration.ProcessSessions.[compile_native_fixture, native_pid_alive, stop_native_pid]
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.CorelibParts.PlatformEmail.[build_and_run, jet_string_path, write_executable]
+use std.fs
+use std.env.temp_dir
+use std.process as process
+use std.time.[Instant, Duration]
+use std.thread
+use core.sys.target.[selected_os, selected_family]
+// Rust: tests/pool_id_equality.rs:19
+#Test("pool_ids_are_equatable_without_requiring_the_payload_to_be_equatable") {
+    source :: "\nstruct Payload {{\n    callback: fn(Int) -> Int\n}}\n\nfn identity(value: Int) -> Int {{\n    return value\n}}\n\nfn equal<T: Equatable>(left: T, right: T) -> Bool {{\n    return left == right\n}}\n\nfn run() {{\n    pool := Pool<Payload>.new()\n    left :: pool.add(Payload.{{callback: identity}})\n    right :: pool.add(Payload.{{callback: identity}})\n    same :: equal(left, right)\n    print(same)\n}}\n"
+    result :: compile(source)
+    assert(result.is_ok(), "ID<T> equality must depend on ID identity, not T: {result:#?}")
+}
+// Rust: tests/pool_id_equality.rs:50
+#Test("reused_pool_slot_does_not_equal_its_stale_generation") {
+    if tir_support.have_rustc() {
+        (code, stdout) :: tir_support.build_and_run("pool_id_stale_generation", STALE_SOURCE)
+        assert_eq(code, 0)
+        assert_eq(stdout, "false\n")
+    }
+    (code, stdout, stderr) :: tir_support.run_default_multi("pool_id_stale_generation", "main.jet", &[("main.jet", STALE_SOURCE)])
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "false\n")
+}
+// Rust: tests/print_branch_tiers.rs:207
+#Test("print_primitives_render_the_same_bytes_on_every_tier") {
+    print_branch.assert_cli_tiers_agree("print_primitives", print_branch.PRINT_PRIMITIVES, print_branch.PRINT_PRIMITIVES_STDOUT)
+}
+// Rust: tests/print_branch_tiers.rs:212
+#Test("printable_display_and_variadic_evaluation_agree_on_every_tier") {
+    print_branch.assert_cli_tiers_agree("printable_display_variadic", print_branch.PRINTABLE_DISPLAY_VARIADIC, print_branch.PRINTABLE_DISPLAY_VARIADIC_STDOUT)
+}
+// Rust: tests/print_branch_tiers.rs:221
+#Test("ordinary_branch_shapes_execute_on_every_tier") {
+    print_branch.assert_cli_tiers_agree("branch_shapes", print_branch.BRANCH_SHAPES, print_branch.BRANCH_SHAPES_STDOUT)
+}
+// Rust: tests/print_branch_tiers.rs:226
+#Test("local_bindings_execute_on_every_tier") {
+    print_branch.assert_cli_tiers_agree("local_bindings", print_branch.LOCAL_BINDINGS, print_branch.LOCAL_BINDINGS_STDOUT)
+}
+// Rust: tests/print_branch_tiers.rs:231
+#Test("value_if_joins_execute_on_every_tier") {
+    print_branch.assert_cli_tiers_agree("value_if", print_branch.VALUE_IF, print_branch.VALUE_IF_STDOUT)
+}
+// Rust: tests/process_sessions.rs:34
+#Test("native_fixture_terminal_bytes_resize_and_closed_stream") {
+    if selected_family() != "unix" && selected_os() != "windows" { return }
+    dir :: temp_dir().join("jet_process_session_fixture_terminal_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    src :: "\nuse core.process as process\n\nfn run() {{\n    policy :: TerminalPolicy{{\n        size: TerminalSize{{ cols: 80, rows: 24 }},\n        mode: .Cooked\n    }}\n    child :: process.cmd([\"{fixture}\", \"terminal\"]).terminal(policy).spawn() ?? panic(\"spawn failed\")\n    session :: child.terminal ?? panic(\"missing terminal session\")\n    session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic(\"resize failed\")\n    child.stdin.write(\"typed\n\") ?? panic(\"write failed\")\n    result :: child.wait() ?? panic(\"wait failed\")\n    print(result.success)\n    print(result.output.contains(\"input:typed\"))\n    print(result.output.contains(\"size:30x100\"))\n    print(result.output)\n    if child.stdin.write(\"late\") == {{\n        .Ok(_) -> {{ print(\"closed:accepted\") }}\n        .Err(_) -> {{ print(\"closed:error\") }}\n}}\n}}\n"
+    (code, stdout, stderr) :: build_and_run(&dir, "native_terminal", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.starts_with("true\ntrue\ntrue\n"), "{stdout:?}")
+    assert(stdout.contains("\u{1b}[31mcontrol\u{1b}[0m"), "ANSI bytes lost: {stdout:?}")
+    assert(stdout.contains("size:30x100"), "resize lost: {stdout:?}")
+    assert(stdout.ends_with("closed:error\n"), "closed input was not typed: {stdout:?}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:89
+#Test("terminal_session_behavior_matches_all_execution_tiers") {
+    if selected_family() != "unix" && selected_os() != "windows" { return }
+    dir :: temp_dir().join("jet_process_session_fixture_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    src :: "\nuse core.process as process\n\nfn run() {{\n    child :: process.cmd([\"{fixture}\", \"terminal\"]).terminal().spawn() ?? panic(\"spawn failed\")\n    session :: child.terminal ?? panic(\"missing terminal session\")\n    session.resize(TerminalSize{{ cols: 100, rows: 30 }}) ?? panic(\"resize failed\")\n    exited :: child.exited() ?? panic(\"poll failed\")\n    print(!exited)\n    child.stdin.write(\"typed\n\") ?? panic(\"write failed\")\n    result :: child.wait() ?? panic(\"wait failed\")\n    print(result.success)\n    print(result.output.contains(\"input:typed\"))\n    print(result.output.contains(\"size:30x100\"))\n    if child.stdin.write(\"late\") == {{\n        .Ok(_) -> {{ print(false) }}\n        .Err(_) -> {{ print(true) }}\n}}\n}}\n"
+    tir_support.assert_tiers_agree("process_session_terminal_behavior", &src, "true\ntrue\ntrue\ntrue\ntrue\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:134
+#Test("process_spawn_collects_stdout_and_stderr") {
+    if selected_family() != "unix" { return }
+    source :: "\nuse core.process as process\n\nfn run() {{\n    spec :: process.cmd([\"sh\", \"-c\", \"printf out; printf err >&2\"])\n        .stdout(.Capture)\n        .stderr(.Capture)\n    child :: spec.spawn() ?? panic(\"spawn failed\")\n    receipt :: child.wait() ?? panic(\"wait failed\")\n    print(receipt.output)\n    print(receipt.errors)\n    print(receipt.success)\n}}\n"
+    tir_support.assert_tiers_agree("process_spawn_collect", source, "out\nerr\ntrue\n")
+}
+// Rust: tests/process_sessions.rs:154
+#Test("process_stdin_text_propagates_child_status_across_execution_tiers") {
+    if selected_family() != "unix" { return }
+    shell :: jet_string_path(&fs.canonicalize("/bin/sh").expect("canonicalize Unix shell"))
+    source :: "\nuse core.process as process\n\nfn run() {{\n    process.stdin_text(\n        process.cmd([\"{shell}\", \"-c\", \"read input; [ \\\"$input\\\" = expected ]\"]),\n        \"expected\n\",\n    ) ?? panic(\"stdin_text positive failed\")\n    print(\"stdin:accepted\")\n\n    if process.stdin_text(\n        process.cmd([\"{shell}\", \"-c\", \"cat >/dev/null; exit 7\"]),\n        \"payload\",\n    ) == {{\n        .Err(error) -> {{\n            if error == {{\n                .Other(context) -> {{\n                    if context.operation == .Resolve &&\n                        (context.resource ?? \"\") == \"{shell}\" &&\n                        context.os_code == None &&\n                        (context.cause ?? \"\") == \"process exited unsuccessfully: code=7\" {{\n                        print(\"nonzero:typed\")\n                    }} else {{\n                        print(\"nonzero:wrong-context\")\n                }}\n                }}\n                else -> print(\"nonzero:wrong-category\")\n            }}\n        }}\n        .Ok(_) -> print(\"nonzero:accepted\")\n    }}\n}}\n"
+    tir_support.assert_tiers_agree("process_stdin_text_child_status", &source, "stdin:accepted\nnonzero:typed\n")
+}
+// Rust: tests/process_sessions.rs:202
+#Test("process_stdin_text_preserves_input_and_io_error_all_tiers") {
+    if selected_family() != "unix" { return }
+    dir :: temp_dir().join("jet_process_stdin_text_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    output_prefix :: jet_string_path(&dir.join("stdin"))
+    payload :: "x".repeat(131072)
+    source :: "\nuse core.process as process\n\nfn run() {{\n    session :: process.current_pid()\n    path := \"{output_prefix}-{{session}}.txt\"\n    process.stdin_text(\n        process.cmd([\"sh\", \"-c\", \"cat > \\\"$1\\\"\", \"sh\", path]),\n        \"exact stdin\nbytes\n\"\n    ) ?? panic(\"stdin text failed\")\n    print(\"stdin:sent\")\n\n    if process.stdin_text(process.cmd([\"sh\", \"-c\", \"exit 0\"]), \"{payload}\") == {{\n        .Ok(_) -> print(\"write:missed\")\n        .Err(error) -> {{\n            if error == {{\n                .Closed(_) -> print(\"write:closed\")\n                else -> print(\"write:wrong\")\n            }}\n        }}\n    }}\n}}\n"
+    tir_support.assert_tiers_agree("process_stdin_text_carriers", &source, "stdin:sent\nwrite:closed\n")
+    output_files :: fs.read_dir(&dir).unwrap().map(|entry| -> entry.unwrap().path()).filter(|path| -> path.extension().and_then(|extension| -> extension.to_str()) == Some("txt")).collect()
+    assert_eq(output_files.len(), if tir_support.have_rustc() -> 3 else -> 2, "each available execution tier must write its own input file")
+    for path in output_files {
+        assert_eq(fs.read(path).unwrap(), "exact stdin\nbytes\n".as_bytes(), "stdin_text must close the stream after writing the exact payload")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:266
+#Test("process_pipeline_streaming_lifecycle_matches_all_execution_tiers") {
+    if selected_family() != "unix" { return }
+    source :: "\nuse core.process as process\n\nfn run() {{\n    streamed :: process.pipeline([\n        process.cmd([\"python3\", \"-c\", \"import sys;sys.stdout.write('x'*131072)\"]),\n        process.cmd([\"wc\", \"-c\"])\n    ]) ?? panic(\"stream pipeline failed\")\n    print(\"stream:{{streamed.output.trim()}}\")\n\n    if process.pipeline([\n        process.cmd([\"python3\", \"-c\", \"import sys;sys.stdout.write('x'*131072)\"]).output_limit(4096),\n        process.cmd([\"cat\"])\n    ]) == {{\n        .Err(error) -> {{\n            if error == {{\n                .ResourceLimit(limit) -> print(if limit == .Output -> \"bounded:output\" else -> \"bounded:wrong\")\n                else -> print(\"bounded:wrong\")\n            }}\n        }}\n        .Ok(_) -> print(\"bounded:accepted\")\n    }}\n\n    if process.pipeline([\n        process.cmd([\"yes\", \"x\"]),\n        process.cmd([\"head\", \"-c\", \"4\"])\n    ]) == {{\n        .Ok(receipt) -> print(\"early:{{receipt.output.len()}}:{{receipt.success}}\")\n        .Err(_) -> print(\"early:error\")\n    }}\n\n    nonzero :: process.pipeline([\n        process.cmd([\"sh\", \"-c\", \"printf out; printf err >&2; exit 7\"]),\n        process.cmd([\"cat\"])\n    ]) ?? panic(\"nonzero pipeline failed\")\n    print(\"nonzero:{{nonzero.output.trim()}}:{{nonzero.errors.trim()}}:{{nonzero.code}}:{{nonzero.success}}\")\n}}\n"
+    tir_support.assert_tiers_agree("process_pipeline_streaming_lifecycle", source, "stream:131072\nbounded:output\nearly:4:false\nnonzero:out:err:7:false\n")
+}
+// Rust: tests/process_sessions.rs:314
+#Test("process_pipeline_timeout_reaps_descendants_across_execution_tiers") {
+    if selected_family() != "unix" { return }
+    dir :: temp_dir().join("jet_process_pipeline_timeout_tree_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    pid_files :: ["aot", "jit", "interp"].map(|name| -> dir.join("{name}.pid"))
+    for path in &pid_files { _ :: fs.remove_file(path) }
+    aot :: jet_string_path(&pid_files[0])
+    jit :: jet_string_path(&pid_files[1])
+    interp :: jet_string_path(&pid_files[2])
+    src :: "\nuse core.process as process\n\nfn run() {{\n    timeout :: Duration.milliseconds(100) ?? panic(\"duration failed\")\n    first :: process.pipeline([\n        process.cmd([\"{fixture}\", \"tree\", \"{aot}\"]).timeout(timeout),\n        process.cmd([\"cat\"])\n    ]) ?? panic(\"aot-shaped pipeline failed\")\n    print(first.timed_out)\n    second :: process.pipeline([\n        process.cmd([\"{fixture}\", \"tree\", \"{jit}\"]).timeout(timeout),\n        process.cmd([\"cat\"])\n    ]) ?? panic(\"jit-shaped pipeline failed\")\n    print(second.timed_out)\n    third :: process.pipeline([\n        process.cmd([\"{fixture}\", \"tree\", \"{interp}\"]).timeout(timeout),\n        process.cmd([\"cat\"])\n    ]) ?? panic(\"interpreter-shaped pipeline failed\")\n    print(third.timed_out)\n}}\n"
+    tir_support.assert_tiers_agree("process_pipeline_timeout_tree", &src, "true\ntrue\ntrue\n")
+    for path in &pid_files {
+        pid_text :: fs.read_to_string(path).expect("pipeline descendant wrote pid")
+        pid := pid_text.trim() // #4303
+        deadline :: Instant.now() + Duration.from_secs(2)
+        while native_pid_alive(pid) {
+            if Instant.now() >= deadline {
+                stop_native_pid(pid)
+                panic("pipeline descendant {pid} survived timeout")
+            }
+            // GATE #4494: native thread sleep.
+            thread.sleep(Duration.from_millis(10))
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:376
+#Test("pipeline_stage_timeout_matches_all_execution_tiers") {
+    if selected_family() != "unix" { return }
+    dir :: temp_dir().join("jet_process_session_pipeline_timeout_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    slow_path :: dir.join("slow.sh")
+    write_executable(&slow_path, "#!/bin/sh\nsleep 1\n")
+    slow :: jet_string_path(&slow_path)
+    src :: "\nuse core.process as process\n\nfn run() {{\n    timeout :: Duration.milliseconds(100) ?? panic(\"duration failed\")\n    result :: process.pipeline([\n        process.cmd([\"{slow}\"]).timeout(timeout),\n        process.cmd([\"cat\"])\n    ]) ?? panic(\"pipeline failed\")\n    print(result.timed_out)\n}}\n"
+    tir_support.assert_tiers_agree("process_pipeline_stage_timeout", &src, "true\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:406
+#Test("process_session_pipeline_cpu_limit_is_typed_all_tiers") {
+    if selected_os() != "linux" { return }
+    dir :: temp_dir().join("jet_process_session_pipeline_cpu_limit_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    src :: "\nuse core.process as process\n\nfn run() {{\n    cpu_budget :: Duration.milliseconds(1000) ?? panic(\"duration failed\")\n    if process.pipeline([\n        process.cmd([\"{fixture}\", \"cpu\"]).cpu_time_limit(cpu_budget),\n        process.cmd([\"cat\"])\n    ]) == {{\n        .Ok(_) -> print(\"cpu:missed\")\n        .Err(error) -> {{\n            if error == {{\n                .ResourceLimit(limit) -> print(if limit == .CpuTime -> \"cpu:typed\" else -> \"cpu:wrong\")\n                else -> print(\"cpu:wrong\")\n            }}\n        }}\n    }}\n}}\n"
+    tir_support.assert_tiers_agree("process_session_pipeline_cpu_limit", &src, "cpu:typed\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:442
+#Test("process_session_resource_limits_match_all_execution_tiers") {
+    if selected_family() != "unix" && selected_os() != "windows" { return }
+    dir :: temp_dir().join("jet_process_session_resource_limits_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    resource_builders :: if selected_os() == "linux" -> ".cpu_time_limit(cpu_budget).memory_limit(67108864).open_file_limit(64)" else if selected_os() == "windows" -> ".cpu_time_limit(cpu_budget).memory_limit(67108864)" else -> ".cpu_time_limit(cpu_budget)"
+    src :: "\nuse core.process as process\n\nfn run() {{\n    cpu_budget :: Duration.milliseconds(100) ?? panic(\"duration failed\")\n    accepted :: process.cmd([\"{fixture}\", \"output\", \"small\"]){resource_builders}.output_limit(16).run() ?? panic(\"under-limit run failed\")\n    print(accepted.success)\n    print(accepted.output == \"ok\n\")\n    if process.cmd([\"{fixture}\", \"output\", \"large\"]).output_limit(16).run() == {{\n        .Ok(_) -> {{ print(\"limit:accepted\") }}\n        .Err(error) -> {{\n            if error == {{\n                .ResourceLimit(limit) -> {{\n                    if limit == {{\n                        .Output -> {{ print(\"limit:output\") }}\n                        else -> {{ print(\"limit:wrong\") }}\n                    }}\n                }}\n                else -> {{ print(\"limit:wrong\") }}\n            }}\n        }}\n    }}\n}}\n"
+    tir_support.assert_tiers_agree("process_session_resource_limits", &src, "true\ntrue\nlimit:output\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:495
+#Test("process_session_resource_limit_exhaustion_names_each_limit_all_tiers") {
+    if selected_os() != "linux" { return }
+    dir :: temp_dir().join("jet_process_session_resource_exhaustion_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    src :: "\nuse core.process as process\n\nfn run() {{\n    cpu_budget :: Duration.milliseconds(1000) ?? panic(\"duration failed\")\n    if process.cmd([\"{fixture}\", \"cpu\"]).cpu_time_limit(cpu_budget).run() == {{\n        .Ok(_) -> print(\"cpu:missed\")\n        .Err(error) -> {{\n            if error == {{\n                .ResourceLimit(limit) -> print(if limit == .CpuTime -> \"cpu:typed\" else -> \"cpu:wrong\")\n                else -> print(\"cpu:wrong\")\n            }}\n        }}\n    }}\n    if process.cmd([\"{fixture}\", \"memory\"]).memory_limit(33554432).run() == {{\n        .Ok(_) -> print(\"memory:missed\")\n        .Err(error) -> {{\n            if error == {{\n                .ResourceLimit(limit) -> print(if limit == .Memory -> \"memory:typed\" else -> \"memory:wrong\")\n                else -> print(\"memory:wrong\")\n            }}\n        }}\n    }}\n    if process.cmd([\"{fixture}\", \"files\"]).open_file_limit(64).run() == {{\n        .Ok(_) -> print(\"files:missed\")\n        .Err(error) -> {{\n            if error == {{\n                .ResourceLimit(limit) -> print(if limit == .OpenFiles -> \"files:typed\" else -> \"files:wrong\")\n                else -> print(\"files:wrong\")\n            }}\n        }}\n    }}\n}}\n"
+    tir_support.assert_tiers_agree("process_session_resource_limit_exhaustion", &src, "cpu:typed\nmemory:typed\nfiles:typed\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:550
+#Test("native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop") {
+    if selected_family() != "unix" && selected_os() != "windows" { return }
+    dir :: temp_dir().join("jet_process_session_fixture_tree_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    _ :: fs.create_dir_all(&dir).unwrap()
+    fixture :: jet_string_path(&compile_native_fixture(&dir))
+    pid_prefix :: jet_string_path(&dir.join("session"))
+    src :: "\nuse core.process as process\nuse core.time as time\n\nfn dropped(fixture: String, pid: String) {{\n    child :: process.cmd([fixture, \"tree\", pid]).terminal().spawn() ?? panic(\"drop spawn failed\")\n    time.sleep(100ms)\n}}\n\nfn run() {{\n    session :: process.current_pid()\n\n    interrupt_pid := \"{pid_prefix}-{{session}}-interrupt.pid\"\n    interrupt :: process.cmd([\"{fixture}\", \"tree\", interrupt_pid]).terminal().spawn() ?? panic(\"interrupt spawn failed\")\n    time.sleep(100ms)\n    interrupt.interrupt() ?? panic(\"interrupt failed\")\n    interrupt_result :: interrupt.wait() ?? panic(\"interrupt wait failed\")\n    print(interrupt_result.success)\n    if interrupt.stdin.write(\"late\") == {{\n        .Ok(_) -> panic(\"interrupt cleanup left stdin open\")\n        .Err(error) -> {{\n            if error == {{ .Closed(_) -> {{}} else -> panic(\"interrupt cleanup was not typed\") }}\n        }}\n    }}\n\n    terminate_pid := \"{pid_prefix}-{{session}}-terminate.pid\"\n    terminate :: process.cmd([\"{fixture}\", \"tree\", terminate_pid]).terminal().spawn() ?? panic(\"terminate spawn failed\")\n    time.sleep(100ms)\n    terminate.terminate() ?? panic(\"terminate failed\")\n    terminate_result :: terminate.wait() ?? panic(\"terminate wait failed\")\n    print(terminate_result.success)\n    if terminate.stdin.write(\"late\") == {{\n        .Ok(_) -> panic(\"terminate cleanup left stdin open\")\n        .Err(error) -> {{\n            if error == {{ .Closed(_) -> {{}} else -> panic(\"terminate cleanup was not typed\") }}\n        }}\n    }}\n\n    kill_pid := \"{pid_prefix}-{{session}}-kill.pid\"\n    kill :: process.cmd([\"{fixture}\", \"tree\", kill_pid]).terminal().spawn() ?? panic(\"kill spawn failed\")\n    time.sleep(100ms)\n    kill.kill() ?? panic(\"kill failed\")\n    kill_result :: kill.wait() ?? panic(\"kill wait failed\")\n    print(kill_result.success)\n    if kill.stdin.write(\"late\") == {{\n        .Ok(_) -> panic(\"kill cleanup left stdin open\")\n        .Err(error) -> {{\n            if error == {{ .Closed(_) -> {{}} else -> panic(\"kill cleanup was not typed\") }}\n        }}\n    }}\n\n    timeout :: Duration.milliseconds(100) ?? panic(\"duration failed\")\n    timeout_pid := \"{pid_prefix}-{{session}}-timeout.pid\"\n    timed :: process.cmd([\"{fixture}\", \"tree\", timeout_pid]).terminal().timeout(timeout).run() ?? panic(\"timeout failed\")\n    print(timed.timed_out)\n\n    drop_pid := \"{pid_prefix}-{{session}}-drop.pid\"\n    dropped(\"{fixture}\", drop_pid)\n    print(\"drop returned\")\n}}\n"
+    tir_support.assert_tiers_agree("native_process_session_full_tree_cleanup", &src, "false\nfalse\nfalse\ntrue\ndrop returned\n")
+    pid_files :: fs.read_dir(&dir).expect("read native process-session PID files").map(|entry| -> entry.expect("read native process-session directory entry").path()).filter(|path| -> path.extension().and_then(|extension| -> extension.to_str()) == Some("pid")).collect()
+    assert_eq(pid_files.len(), 15, "all five cleanup paths must be exercised by AOT, JIT, and interpreter")
+    for path in pid_files {
+        pid_text :: fs.read_to_string(&path).expect("native fixture wrote descendant pid")
+        pid := pid_text.trim() // #4303
+        deadline :: Instant.now() + Duration.from_secs(2)
+        while native_pid_alive(pid) {
+            if Instant.now() >= deadline {
+                stop_native_pid(pid)
+                panic("native process-session descendant {pid} survived {path:?}")
+            }
+            // GATE #4494: native thread sleep.
+            thread.sleep(Duration.from_millis(10))
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/process_sessions.rs:711
+#Test("compatibility_matrix_names_every_session_capability") {
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    matrix :: fs.read_to_string(root.join("tests/fixtures/process_sessions/compatibility.tsv")).expect("read process-session compatibility matrix")
+    rows := matrix.lines()
+    assert_eq(rows.next(), Some("capability\tfixture\tlinux\tmacos\twindows\tother"))
+    expected :: ["terminal-byte-stream", "terminal-resize", "terminal-input-and-close", "process-tree-interrupt", "process-tree-terminate", "process-tree-kill", "process-tree-timeout", "process-tree-drop"]
+    collected :: rows.collect()
+    assert_eq(collected.len(), expected.len())
+    host_column :: if selected_os() == "linux" -> 2 else if selected_os() == "macos" -> 3 else if selected_os() == "windows" -> 4 else -> 5
+    for (row, capability) in collected.into_iter().zip(expected) {
+        fields :: row.split('\t').collect()
+        assert_eq(fields.len(), 6, "malformed matrix row: {row}")
+        assert_eq(fields[0], capability)
+        assert_eq(fields[1], "session_fixture.rs")
+        expected_test :: if capability.starts_with("terminal-") -> "native_fixture_terminal_bytes_resize_and_closed_stream" else -> "native_fixture_controls_the_full_tree_on_interrupt_timeout_and_drop"
+        assert(fields[2..5].iter().all(|state| -> state == expected_test))
+        assert_eq(fields[host_column], if host_column == 5 -> "unsupported" else -> expected_test, "matrix does not describe this target's fixture evidence: {row}")
+        assert_eq(fields[5], "unsupported")
+    }
+}

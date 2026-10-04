@@ -1,0 +1,169 @@
+use jet_foundation.[AccessConvention, CodeModule, EffectRowEntry, Func, Item, Param, ParamZone, Span, Type, UnitDimensionDecl, UnitFamilyDef, UnitFamilyMember, UnitRatio, UnitScaleProvenance, ViewProvenance, ViewProvenanceEntry, ViewProvenanceMap, ViewSource, ViewSourcePath, ViewSourceProjection, ast_func, dimension_base, dimension_divide]
+use jet_sema.[API_SNAPSHOT_VERSION, APISnapshot, APIUnitDimensions, api_snapshot_capability_digest, api_snapshot_parse, api_snapshot_write, canonical_api_type_name, fn_signature, fn_signature_with_effects, legacy_api_name, legacy_api_signature, signature_without_effect_row, snapshot_from_items, snapshot_from_items_with_effects]
+
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:915
+fn freeze02_zero() -> Span { Span{start: 0, end: 0} }
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:919
+fn freeze02_param(name: String, convention: AccessConvention, ty: Type) -> Param {
+    Param{convention: convention, root: false, name: name, name_span: freeze02_zero(), public_label: None, zone: ParamZone.Either, ty: ty, ty_span: freeze02_zero(), default: None, variadic: false, variadic_bound_list: None, declared_view_from_names: None}
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:936
+fn freeze02_func(name: String, is_pub: Bool, params: [Param], ret: Type?) -> Func {
+    function := ast_func(name, freeze02_zero(), freeze02_zero())
+    function.is_pub = is_pub
+    function.params = params
+    function.return_type = ret
+    function
+}
+fn freeze02_parse(raw: String) -> APISnapshot {
+    if api_snapshot_parse(raw) == {
+        .Ok(snapshot) -> snapshot
+        .Err(error) -> panic(error.message)
+    }
+}
+fn freeze02_path(index: Int) -> ViewSourcePath {
+    ViewSourcePath{source: ViewSource.Parameter{index: index}, projections: [ViewSourceProjection]{ViewSourceProjection.Range}}
+}
+fn freeze02_entry(slot: [String], indices: [Int]) -> ViewProvenanceEntry {
+    ViewProvenanceEntry{slot: slot, value: ViewProvenance{sources: loop index in indices -> freeze02_path(index), mutable: false}}
+}
+fn freeze02_view_func(name: String, ret: Type, entries: [ViewProvenanceEntry]) -> Func {
+    function := freeze02_func(name, true, [Param]{freeze02_param("left", AccessConvention.Read, Type.List{element: Type.Int}), freeze02_param("right", AccessConvention.Read, Type.List{element: Type.Int})}, Val(ret))
+    function.return_view_provenance = Val(ViewProvenanceMap{entries: entries})
+    function
+}
+fn freeze02_view_snapshot(index: Int) -> APISnapshot {
+    function :: freeze02_view_func("pick", Type.Apply{name: "View", args: [Type]{Type.Int}}, [ViewProvenanceEntry]{freeze02_entry([String]{}, [Int]{index})})
+    snapshot_from_items([Item]{Item.Func{value: function}}, "views", "1.0.0")
+}
+
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:993
+#Test("sig_carries_resolved_sigil") {
+    f :: freeze02_func("scale", true, [Param]{freeze02_param("v", AccessConvention.Write, Type.Named{name: "Vec3"}), freeze02_param("factor", AccessConvention.Read, Type.Float)}, None)
+    assert(fn_signature(f) == "fn scale(v: &Vec3, factor: Float)")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1007
+#Test("sig_carries_normalized_inferred_effects") {
+    f :: freeze02_func("load", true, [Param]{}, Val(Type.String))
+    assert(fn_signature_with_effects(f, Val([String]{"FS.Read", "IO"})) == "fn load() String -[FS.Read, IO]>")
+    assert(fn_signature_with_effects(f, Val([String]{})) == "fn load() String -[]>")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1021
+#Test("canonical_api_types_use_prefix_roles_in_alias_and_function_type_shapes") {
+    fallible :: Type.Result{ok: Type.Option{inner: Type.Int}, err: Type.Union{members: [Type]{Type.Named{name: "DbError"}, Type.Named{name: "TimeoutError"}}}}
+    dimensions :: APIUnitDimensions{identities: [String:String]{}}
+    // Preserve the original witness, even though the source uses suffix roles.
+    assert(canonical_api_type_name(fallible, dimensions) == "?Int !(DbError | TimeoutError)")
+    callback :: Type.Fn{params: [Type]{fallible}, ret: Val(Type.Result{ok: Type.Named{name: "Unit"}, err: Type.Named{name: "IOError"}}), effect_bound: Val([EffectRowEntry]{}), param_contract: None, call_metadata: None, return_view_provenance: None}
+    assert(canonical_api_type_name(callback, dimensions) == "fn(?Int !(DbError | TimeoutError)) !IOError -[]>")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1052
+#Test("inline_module_snapshot_uses_mangled_effect_identity") {
+    module :: Item.CodeModule{value: CodeModule{name: "files", name_span: freeze02_zero(), is_pub: false, is_package_pub: false, body: Val([Item]{Item.Func{value: freeze02_func("load", true, [Param]{}, Val(Type.String))}}), imports: [], web_target: None, instance_identity: None, span: freeze02_zero()}}
+    solved :: [String:[String]]{"main::files__load": [String]{"FS.Read"}}
+    snapshot :: snapshot_from_items_with_effects([Item]{module}, "files", "1.0.0", Val(solved), Val("main"))
+    assert(snapshot.funcs[0].name == "files.load")
+    assert(snapshot.api_version == API_SNAPSHOT_VERSION)
+    assert(snapshot.funcs[0].signature == "fn files.load() String -[FS.Read]>")
+    assert(freeze02_parse(api_snapshot_write(snapshot)).funcs[0].name == "files.load")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1091
+#Test("pre_v3_comparison_normalizes_added_metadata_and_type_glosses") {
+    assert(signature_without_effect_row("fn load() String -[FS.Read, IO]>") == "fn load() String")
+    assert(signature_without_effect_row("fn load(path: String) =[FS.Read, IO]=> String") == "fn load(path: String) -> String")
+    assert(signature_without_effect_row("fn flush() =[]=>") == "fn flush()")
+    assert(signature_without_effect_row("fn legacy() -> Int") == "fn legacy() -> Int")
+    assert(legacy_api_name("files.load") == "load")
+    assert(legacy_api_signature("fn files.load() =[FS.Read]=> String") == "fn load() -> String")
+    assert(legacy_api_signature("fn report(x: Int (a whole number))") == "fn report(x: Int)")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1120
+#Test("sig_carries_normalized_physical_dimension_identity") {
+    speed :: dimension_divide(dimension_base("api::Length"), dimension_base("api::Time")) ?? panic("speed dimension")
+    quantity :: Type.Quantity{base: Type.Float, dimension: speed}
+    f :: freeze02_func("pace", true, [Param]{freeze02_param("value", AccessConvention.Read, quantity)}, Val(quantity))
+    assert(fn_signature(f) == "fn pace(value: Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>) Quantity<Length * Time^-1, Float; api%3A%3ALength:1;api%3A%3ATime:-1>")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1141
+#Test("checked_source_unit_signature_carries_dimension_identity") {
+    family :: UnitFamilyDef{is_pub: true, is_package_pub: false, family: "Length", family_span: freeze02_zero(), dimension: Val(UnitDimensionDecl.Base{span: freeze02_zero()}), resolved_dimension: Val(dimension_base("api::Length")), resolved_owner: Val("api"), base: None, members: [UnitFamilyMember]{UnitFamilyMember{name: "meter", name_span: freeze02_zero(), scale: UnitRatio{numerator: 1, denominator: 1}, scale_provenance: UnitScaleProvenance.Rational, offset: UnitRatio{numerator: 0, denominator: 1}}}, span: freeze02_zero()}
+    api :: snapshot_from_items([Item]{Item.UnitFamily{value: family}, Item.Func{value: freeze02_func("distance", true, [Param]{}, Val(Type.Named{name: "Meter"}))}}, "physics", "1.0.0")
+    assert(api.funcs[0].signature == "fn distance() Meter{{family=Length; base=Float; dimension=api%3A%3ALength:1}}")
+    assert(api.api_version == API_SNAPSHOT_VERSION - U32{1})
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1181
+#Test("sig_carries_parameter_view_provenance") {
+    f := freeze02_func("first", true, [Param]{freeze02_param("xs", AccessConvention.Read, Type.List{element: Type.Int})}, Val(Type.Apply{name: "View", args: [Type]{Type.Int}}))
+    f.return_view_provenance = Val(ViewProvenanceMap{entries: [ViewProvenanceEntry]{freeze02_entry([String]{}, [Int]{0})}})
+    assert(fn_signature(f).contains("view_source = parameter:0;access:read;path:range"))
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1209
+#Test("returned_view_source_round_trips_and_changes_contract") {
+    left :: freeze02_view_snapshot(0)
+    right :: freeze02_view_snapshot(1)
+    assert(freeze02_parse(api_snapshot_write(left)) == left)
+    assert(freeze02_parse(api_snapshot_write(right)) == right)
+    assert(api_snapshot_capability_digest(left) != api_snapshot_capability_digest(right))
+    assert(left.funcs[0].signature.contains("view_source = parameter:0"))
+    assert(right.funcs[0].signature.contains("view_source = parameter:1"))
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1258
+#Test("aggregate_view_sources_round_trip_and_change_contract") {
+    snapshot :: (right_source: Int) -> {
+        f :: freeze02_view_func("pair", Type.Named{name: "Pair"}, [ViewProvenanceEntry]{freeze02_entry([String]{"left"}, [Int]{0}), freeze02_entry([String]{"right"}, [Int]{right_source})})
+        snapshot_from_items([Item]{Item.Func{value: f}}, "views", "1.0.0")
+    }
+    distinct :: snapshot(1)
+    changed :: snapshot(0)
+    assert(freeze02_parse(api_snapshot_write(distinct)) == distinct)
+    assert(api_snapshot_capability_digest(distinct) != api_snapshot_capability_digest(changed))
+    assert(distinct.funcs[0].signature.contains("view_sources = left=parameter:0;access:read;path:range|right=parameter:1;access:read;path:range"))
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1312
+#Test("source_union_is_public_and_identity_bearing") {
+    snapshot :: (sources: [Int]) -> {
+        f :: freeze02_view_func("choose", Type.Apply{name: "View", args: [Type]{Type.Int}}, [ViewProvenanceEntry]{freeze02_entry([String]{}, sources)})
+        snapshot_from_items([Item]{Item.Func{value: f}}, "views", "1.0.0")
+    }
+    one :: snapshot([Int]{0})
+    union :: snapshot([Int]{0, 1})
+    assert(api_snapshot_capability_digest(one) != api_snapshot_capability_digest(union))
+    assert(union.funcs[0].signature.contains("view_source = one_of(parameter:0;path:range,parameter:1;path:range);access:read"))
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1359
+#Test("round_trip") {
+    items :: [Item]{
+        Item.Func{value: freeze02_func("length", true, [Param]{freeze02_param("v", AccessConvention.Read, Type.Named{name: "Vec3"})}, Val(Type.Float))},
+        Item.Func{value: freeze02_func("scale", true, [Param]{freeze02_param("v", AccessConvention.Write, Type.Named{name: "Vec3"})}, None)},
+        Item.Func{value: freeze02_func("helper", false, [Param]{}, None)},
+        Item.Func{value: freeze02_func("_unstable", true, [Param]{}, None)}
+    }
+    snap :: snapshot_from_items(items, "mathkit", "1.0.0")
+    assert(snap.funcs.len() == 2)
+    parsed :: freeze02_parse(api_snapshot_write(snap))
+    assert(parsed == snap)
+    assert(parsed.funcs[0].name == "length")
+    assert(parsed.funcs[1].name == "scale")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1397
+#Test("digest_ignores_version") {
+    mk :: (ver: String) -> {
+        items :: [Item]{Item.Func{value: freeze02_func("scale", true, [Param]{freeze02_param("v", AccessConvention.Write, Type.Named{name: "Vec3"})}, None)}}
+        api_snapshot_capability_digest(snapshot_from_items(items, "mathkit", ver))
+    }
+    assert(mk("1.0.0") == mk("2.5.9"), "digest tracks shape, not version")
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1415
+#Test("digest_shifts_on_capability_change") {
+    read :: snapshot_from_items([Item]{Item.Func{value: freeze02_func("scale", true, [Param]{freeze02_param("v", AccessConvention.Read, Type.Named{name: "Vec3"})}, None)}}, "mathkit", "1.0.0")
+    write :: snapshot_from_items([Item]{Item.Func{value: freeze02_func("scale", true, [Param]{freeze02_param("v", AccessConvention.Write, Type.Named{name: "Vec3"})}, None)}}, "mathkit", "1.0.0")
+    assert(api_snapshot_capability_digest(read) != api_snapshot_capability_digest(write))
+}
+// Rust: crates/jet-sema/src/Sema/ApiFreeze.rs:1448
+#Test("parse_known_text") {
+    snap :: freeze02_parse("api_version = 1\npackage = mk\npublished_version = 0.1.0\nfn f(x: &Int)\n")
+    assert(snap.package == "mk")
+    assert(snap.funcs.len() == 1)
+    assert(snap.funcs[0].name == "f")
+    assert(snap.funcs[0].signature == "fn f(x: &Int)")
+}

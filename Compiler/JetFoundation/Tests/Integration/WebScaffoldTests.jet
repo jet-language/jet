@@ -1,0 +1,381 @@
+use jet_foundation.Tests.Integration.WebScaffold.[have_tool, jet_bin, unused_local_port, http_get, wait_for_server, assert_web_dom_output, assert_no_scaffold_diagnostic, KillOnDrop]
+use jet_foundation.Tests.Integration.Common.Scratch
+use jet_foundation.Tests.Integration.CliParts.Support.[compile_latency_budget_project, canonical_field]
+use jet_foundation.Tests.Integration.CorelibParts.PlatformEmail.build_and_run
+use jet_foundation.PerformanceBudget.[CanonicalJson, verify_budget_report]
+use jet_foundation.Outcome.JetAbsent
+use core.email as jet_email
+use std.fs
+use std.process.[Command, Stdio, id]
+use std.time.Duration
+use std.env.temp_dir
+use std.collections.BTreeSet
+use std.io.Cursor
+use jet
+// GATE #4494: actual filesystem, child CLI/Node, TCP and clock providers.
+
+// Rust: tests/web_scaffold.rs:170
+#Test("jet_new_web_scaffold_runs_from_new_to_browser") {
+    if !have_tool("rustc") { eprintln("note: skipping jet_new_web_scaffold_runs_from_new_to_browser (need rustc)"); return }
+    scratch :: Scratch.new("web-scaffold")
+    project_root :: &scratch.path
+    created :: Command.new(jet_bin()).current_dir(project_root).args(["new", "web_app", "--template", "web"]).output().expect("spawn jet new web scaffold")
+    assert(created.status.success(), "jet new --template web failed:\nstdout: {String.from_utf8_lossy(&created.stdout)}\nstderr: {String.from_utf8_lossy(&created.stderr)}")
+    project :: project_root.join("web_app")
+    source :: fs.read_to_string(project.join("run.jet")).expect("web scaffold source")
+    assert(source.contains("#Target(Web)"), "web target missing:\n{source}")
+    assert(source.contains("reactive.signal"), "reactive example missing:\n{source}")
+    assert(source.contains("ui.button"), "editable button example missing:\n{source}")
+    loop command in ["jet dev", "jet test", "jet build --target web"] { assert(source.contains(command), "scaffold comment missing `{command}`") }
+    assert(!project.join("run.html").exists(), "web scaffold must use the generated default page")
+    manifest :: fs.read_to_string(project.join("package.jet")).expect("web scaffold manifest")
+    manifest_facts :: jet.Package.PackageFacts.parse(&manifest, "package.jet").expect("web scaffold manifest must remain valid")
+    allowed_effects :: manifest_facts.authority.holds.allow.as_ref().expect("web scaffold authority must declare allowed effects")
+    assert(allowed_effects.iter().any((effect) -> effect == "Browser"), "web scaffold authority must grant Browser:\n{manifest}")
+    build :: Command.new(jet_bin()).current_dir(&project).args(["build", "--target", "web"]).output().expect("spawn jet build for web scaffold")
+    assert(build.status.success(), "web scaffold build failed:\nstdout: {String.from_utf8_lossy(&build.stdout)}\nstderr: {String.from_utf8_lossy(&build.stderr)}")
+    assert_no_scaffold_diagnostic("web scaffold build", &build.stdout, &build.stderr)
+    assert(project.join(".jet/build/index.html").is_file())
+    test :: Command.new(jet_bin()).current_dir(&project).arg("test").output().expect("spawn jet test for web scaffold")
+    assert(test.status.success(), "web scaffold test failed:\nstdout: {String.from_utf8_lossy(&test.stdout)}\nstderr: {String.from_utf8_lossy(&test.stderr)}")
+    assert_no_scaffold_diagnostic("web scaffold test", &test.stdout, &test.stderr)
+    port :: unused_local_port()
+    _server :: KillOnDrop{child: Command.new(jet_bin()).current_dir(&project).args(["dev", "--port={port}"]).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("spawn jet dev for web scaffold")}
+    wait_for_server(port, Duration.from_secs(30))
+    (status, body) :: http_get(port, "/").expect("GET scaffold page")
+    assert_eq(status, 200, "web scaffold page was not served")
+    page := String.from_utf8_lossy(&body) // #4303
+    assert(page.contains("type=\"module\"") && page.contains("src=\"./app.js\""), "generated scaffold page must load its Web module: {page}")
+    assert(!page.contains("jet_main"), "generated scaffold page must not know an export name: {page}")
+}
+// Rust: tests/web_scaffold.rs:277
+#Test("jet_new_native_scaffold_builds_for_explicit_web_target") {
+    if !have_tool("rustc") || !have_tool("node") { eprintln("note: skipping native scaffold Web DOM proof (need rustc + node)"); return }
+    scratch :: Scratch.new("web-target-native-scaffold")
+    project_root :: &scratch.path
+    created :: Command.new(jet_bin()).current_dir(project_root).args(["new", "demo", "--template", "ui"]).output().expect("spawn jet new native scaffold")
+    assert(created.status.success(), "jet new failed:\nstdout: {String.from_utf8_lossy(&created.stdout)}\nstderr: {String.from_utf8_lossy(&created.stderr)}")
+    project :: project_root.join("demo")
+    manifest :: fs.read_to_string(project.join("package.jet")).expect("native scaffold manifest")
+    manifest_facts :: jet.Package.PackageFacts.parse(&manifest, "package.jet").expect("native scaffold manifest must remain valid")
+    allowed_effects :: manifest_facts.authority.holds.allow.as_ref().expect("native scaffold authority must declare allowed effects")
+    loop effect in [jet.Syntax.EFFECT_LEAF_EXEC_ARGS, "Browser"] { assert(allowed_effects.iter().any((declared) -> declared == effect), "native scaffold authority must grant {effect}:\n{manifest}") }
+    native :: Command.new(jet_bin()).current_dir(&project).arg("run").output().expect("spawn native run for scaffold")
+    assert(native.status.success(), "native scaffold run failed:\nstdout: {String.from_utf8_lossy(&native.stdout)}\nstderr: {String.from_utf8_lossy(&native.stderr)}")
+    assert_eq(String.from_utf8_lossy(&native.stdout), "hello, world\n", "native scaffold output changed")
+    assert_no_scaffold_diagnostic("native scaffold run", &native.stdout, &native.stderr)
+    build :: Command.new(jet_bin()).current_dir(&project).args(["build", "--target", "web"]).output().expect("spawn explicit Web build for native scaffold")
+    assert(build.status.success(), "native scaffold Web build failed:\nstdout: {String.from_utf8_lossy(&build.stdout)}\nstderr: {String.from_utf8_lossy(&build.stderr)}")
+    assert_no_scaffold_diagnostic("native scaffold Web build", &build.stdout, &build.stderr)
+    loop artifact in [".jet/build/index.html", ".jet/build/app.js", ".jet/build/app.wasm"] { assert(project.join(artifact).is_file(), "missing Web scaffold artifact {artifact}") }
+    port :: unused_local_port()
+    _server :: KillOnDrop{child: Command.new(jet_bin()).current_dir(&project).args(["dev", "--port={port}"]).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("spawn jet dev for native scaffold")}
+    wait_for_server(port, Duration.from_secs(30))
+    (status, _) :: http_get(port, "/").expect("GET native scaffold page")
+    assert_eq(status, 200, "native scaffold page was not served")
+    assert_web_dom_output(&project)
+}
+// Rust: tests/cli_parts/compile_latency.rs:14
+#Test("budget_check_measures_typed_compile_workloads_and_records_provenance") {
+    dir :: compile_latency_budget_project("budget_compile_latency")
+    bootstrap :: Command.new(jet_bin()).args(["budget", "update", "--baseline", "ci/linux-x64", "--bootstrap", "--reason", "initial compile latency", "--yes", "--json"]).current_dir(&dir).output().unwrap()
+    assert_eq(bootstrap.status.code(), Val(0), "stdout: {String.from_utf8_lossy(&bootstrap.stdout)}\nstderr: {String.from_utf8_lossy(&bootstrap.stderr)}")
+    bootstrap_command :: if CanonicalJson.parse_canonical(&bootstrap.stdout).unwrap() == .Object(fields) -> fields else -> panic("bootstrap command")
+    assert_eq(canonical_field(&bootstrap_command["budget"], "applied"), CanonicalJson.Bool(true))
+    bootstrap_report :: if canonical_field(&bootstrap_command["budget"], "report") == .Object(fields) -> fields else -> panic("bootstrap report")
+    bootstrap_content :: if bootstrap_report["content"] == .Object(fields) -> fields else -> panic("bootstrap content")
+    bootstrap_measurements :: if bootstrap_content["measurements"] == .Array(items) -> items else -> panic("bootstrap measurements")
+    assert_eq(bootstrap_measurements.len(), 3)
+    loop value in bootstrap_measurements {
+        measurement :: if value == .Object(fields) -> fields else -> panic("bootstrap measurement")
+        assert_eq(measurement["unit"], CanonicalJson.String("Duration"))
+        statistics :: if measurement["statistics"] == .Object(fields) -> fields else -> panic("bootstrap statistics")
+        assert_eq(statistics["count"], CanonicalJson.Integer("20"))
+    }
+    check :: Command.new(jet_bin()).args(["budget", "check", "--json"]).current_dir(&dir).output().unwrap()
+    assert_eq(check.status.code(), Val(0), "stdout: {String.from_utf8_lossy(&check.stdout)}\nstderr: {String.from_utf8_lossy(&check.stderr)}")
+    command :: if CanonicalJson.parse_canonical(&check.stdout).unwrap() == .Object(fields) -> fields else -> panic("command")
+    report :: if canonical_field(&command["budget"], "report") == .Object(fields) -> fields else -> panic("report")
+    content :: if report["content"] == .Object(fields) -> fields else -> panic("content")
+    measurements :: if content["measurements"] == .Array(items) -> items else -> panic("measurements")
+    assert_eq(measurements.len(), 3)
+    cache_states := BTreeSet<String>.new()
+    loop value in measurements {
+        measurement :: if value == .Object(fields) -> fields else -> panic("measurement")
+        provider :: if measurement["provider"] == .Object(fields) -> fields else -> panic("provider")
+        assert_eq(provider["kind"], CanonicalJson.String("CompilerProbe"))
+        assert_eq(measurement["unit"], CanonicalJson.String("Duration"))
+        samples :: if measurement["samples"] == .Array(items) -> items else -> panic("samples")
+        assert_eq(samples.len(), 20)
+        statistics :: if measurement["statistics"] == .Object(fields) -> fields else -> panic("statistics")
+        assert_eq(statistics["count"], CanonicalJson.Integer("20"))
+        compile :: if measurement["compile"] == .Object(fields) -> fields else -> panic("compile metadata")
+        cache_state :: if compile["cache_state"] == .String(text) -> text else -> panic("cache state")
+        _ :: cache_states.insert(cache_state.clone())
+        edit_bytes :: if compile["edit_bytes"] == .Integer(text) -> text else -> panic("edit byte count")
+        assert_eq(cache_state == "Edit", edit_bytes != "0")
+        assert_eq(compile["warmups"], CanonicalJson.Integer("1"))
+        assert_eq(compile["samples"], CanonicalJson.Integer("20"))
+        if cache_state == "Clean" || cache_state == "NoChange" || cache_state == "Edit" {
+            // Original compiler-probe provenance; canonical provider owns backend cutover.
+            assert_eq(compile["backend"], CanonicalJson.String("cranelift-jit"))
+            assert_eq(compile["profile"], CanonicalJson.String("dev"))
+        }
+        loop key in ["source_tree_sha256", "compiler_digest", "core_digest", "clock", "target", "profile", "backend", "linker", "host", "cache_state", "warmups", "samples", "variance", "phase_totals", "sample_records", "edit_bytes", "edit_sha256", "workload_bytes"] { assert(compile.contains_key(key), "missing compile metadata field {key}") }
+        assert_eq(compile["clock"], CanonicalJson.String("process_cpu"))
+        assert(compile.contains_key("peak_rss_bytes"), "missing compile metadata field peak_rss_bytes")
+    }
+    assert_eq(cache_states, ["Clean", "NoChange", "Edit"].into_iter().collect::<BTreeSet<String>>())
+    report_path :: fs.read_dir(dir.join(".jet/perf/reports")).unwrap().next().unwrap().unwrap().path()
+    verify_budget_report(&fs.read(report_path).unwrap()).unwrap()
+}
+
+// Rust: tests/corelib_parts/email.rs:15
+#Test("core_email_mime_bytes_use_crlf_and_keep_bcc_envelope_only") {
+    from :: jet_email.address("Mara ☕ <mara@example.com>").unwrap()
+    to :: jet_email.address("Ada <ada@example.net>").unwrap()
+    bcc :: jet_email.address("secret@example.org").unwrap()
+    attachment :: jet_email.attachment("notes.txt", "text/plain", b"hi").unwrap()
+    message :: jet_email.message(&from, &[to], &[bcc], "Welcome ☕", "plain", "<b>html</b>", &[attachment]).unwrap()
+    first :: jet_email.serialize(&message).unwrap()
+    second :: jet_email.serialize(&message).unwrap()
+    assert_eq(first, second)
+    wire :: String.from_utf8(first).unwrap()
+    assert(wire.contains("Content-Type: multipart/mixed"))
+    assert(wire.contains("Content-Type: multipart/alternative"))
+    assert(wire.contains("aGk="))
+    assert(!wire.contains("Bcc:"))
+    assert(!wire.contains("secret@example.org"))
+    assert(!wire.replace("\r\n", "").contains('\n'))
+    assert(wire.split_inclusive("\r\n").all((line) -> line.len() <= jet_email.MAX_HEADER_BYTES || !line.contains(':')))
+}
+// Rust: tests/corelib_parts/email.rs:43
+#Test("core_email_headers_and_wire_bounds_are_prospective") {
+    quoted :: jet_email.address("\"Doe, \\\"Ada\\\"\" <ada@example.net>").unwrap()
+    assert(jet_email.address("\"a@b\"@example.net").is_ok())
+    unicode_name :: "{"界".repeat(120)} <mara@example.com>"
+    from :: jet_email.address(&unicode_name).unwrap()
+    message :: jet_email.message(&from, &[quoted], &[], &"界".repeat(120), "plain", "", &[]).unwrap()
+    wire :: String.from_utf8(jet_email.serialize(&message).unwrap()).unwrap()
+    assert(wire.contains("\"Doe, \\\"Ada\\\"\" <ada@example.net>"))
+    loop word in wire.split_whitespace().filter((word) -> word.starts_with("=?UTF-8?B?")) { assert(word.len() <= 75, "encoded word too long: {word.len()}") }
+    loop line in wire.split_inclusive("\r\n") { if line.contains(':') || line.starts_with(' ') { assert(line.len() <= jet_email.MAX_HEADER_BYTES, "header line too long: {line.len()}") } }
+    sender :: jet_email.address("sender@example.com").unwrap()
+    recipient :: jet_email.address("recipient@example.com").unwrap()
+    at_body_limit :: "x".repeat(jet_email.MAX_BODY_BYTES)
+    assert(jet_email.message(&sender, &[recipient.clone()], &[], "subject", &at_body_limit, "", &[]).is_ok())
+    over_body_limit :: "x".repeat(jet_email.MAX_BODY_BYTES + 1)
+    assert(jet_email.message(&sender, &[recipient.clone()], &[], "subject", &over_body_limit, "", &[]).is_err())
+    max_subject :: "s".repeat(jet_email.MAX_HEADER_BYTES - "Subject: ".len() - 2)
+    assert(jet_email.message(&sender, &[recipient.clone()], &[], &max_subject, "body", "", &[]).is_ok())
+    assert(jet_email.message(&sender, &[recipient], &[], "{max_subject}s", "body", "", &[]).is_err())
+    assert(jet_email.attachment("{"a".repeat(900)}.txt", "application/octet-stream", &[]).is_ok())
+    assert(jet_email.attachment("{"a".repeat(960)}.txt", "application/octet-stream", &[]).is_err())
+    tiny :: jet_email.attachment("tiny.bin", "application/octet-stream", &[U8]{0}).unwrap()
+    assert(jet_email.message(&sender, &[jet_email.address("to@example.com").unwrap()], &[], "subject", "body", "", &[tiny; jet_email.MAX_ATTACHMENTS + 1]).is_err())
+}
+// Rust: tests/corelib_parts/email.rs:105
+#Test("core_email_envelope_reports_and_errors_follow_smtp_law") {
+    from :: jet_email.address("sender@example.com").unwrap()
+    visible :: jet_email.address("visible@example.net").unwrap()
+    hidden :: jet_email.address("hidden@example.org").unwrap()
+    message :: jet_email.message(&from, &[visible.clone()], &[hidden.clone()], "subject", "body", "", &[]).unwrap()
+    assert_eq(message.envelope().recipients, [visible.clone(), hidden.clone()])
+    replacement :: jet_email.envelope(&from, &[hidden.clone()]).unwrap()
+    replaced :: message.with_envelope(&replacement).unwrap()
+    assert_eq(replaced.envelope().recipients, [hidden])
+    assert(!String.from_utf8(jet_email.serialize(&replaced).unwrap()).unwrap().contains("Bcc:"))
+    error :: jet_email.envelope(&from, &[]).unwrap_err()
+    if error == {
+        .Configuration(operation, server, code, reason) -> { assert_eq(operation, "envelope"); assert_eq((server, code), (.None, .None)); assert(reason.contains("recipient")) }
+        else -> panic("unexpected envelope error: {error:?}")
+    }
+}
+// Rust: tests/corelib_parts/email.rs:131
+#Test("core_email_smtp_config_limits_and_trust_follow_ratified_law") {
+    safe :: jet_email.Limits.safe()
+    assert_eq((safe.max_reply_line_bytes, safe.max_reply_lines, safe.max_capabilities, safe.max_recipients, safe.max_message_bytes, safe.max_auth_challenge_bytes), (512, 100, 100, 100, 33_554_432, 4096))
+    invalid := safe.clone()
+    invalid.max_reply_line_bytes = 63
+    invalid.max_reply_lines = 0
+    first :: invalid.validate().unwrap_err()
+    assert(if first == .Configuration(_, _, _, reason) -> reason.starts_with("max_reply_line_bytes") else -> false)
+    pem :: b"-----BEGIN CERTIFICATE-----\nMAMCAQE=\n-----END CERTIFICATE-----\n".to_vec()
+    config := jet_email.SMTPConfig<Unit>{host: "smtp.example.com", port: 587, security: jet_email.SMTPSecurity.StartTLS, auth: jet_email.SMTPAuth.None, recipient_policy: jet_email.RecipientPolicy.RequireAll, trust: jet_email.TLSTrust.SystemPlusCa(pem: pem), limits: safe.clone(), dkim: Err(JetAbsent)}
+    jet_email.validate_smtp_config(&config).unwrap()
+    config.dkim = Ok(jet_email.DkimConfig{domain: "example.com", selector: "login-2026", private_key: (), signed_headers: ["subject"]})
+    assert(if jet_email.validate_smtp_config(&config) == .Err(.Configuration(_, _, _, reason)) -> reason.contains("include `from`") else -> false)
+    config.dkim.as_mut().unwrap().signed_headers = ["from", "FROM"]
+    assert(if jet_email.validate_smtp_config(&config) == .Err(.Configuration(_, _, _, reason)) -> reason.contains("duplicate") else -> false)
+    config.dkim.as_mut().unwrap().signed_headers = ["from", "received"]
+    assert(if jet_email.validate_smtp_config(&config) == .Err(.Configuration(_, _, _, reason)) -> reason.contains("hop header") else -> false)
+    malformed :: jet_email.SMTPConfig<Unit>{host: "smtp.example.com", port: 465, security: jet_email.SMTPSecurity.TLS, auth: jet_email.SMTPAuth.None, recipient_policy: jet_email.RecipientPolicy.DeliverAccepted, trust: jet_email.TLSTrust.SystemPlusCa(pem: b"-----BEGIN PRIVATE KEY-----\nAA==\n-----END PRIVATE KEY-----".to_vec()), limits: safe, dkim: Err(JetAbsent)}
+    assert(if jet_email.validate_smtp_config(&malformed) == .Err(.Configuration(_, _, _, reason)) -> reason.contains("certificate") else -> false)
+}
+// Rust: tests/corelib_parts/email.rs:194
+#Test("core_email_smtp_reply_parser_bounds_and_tls_auth_order_are_real") {
+    limits :: jet_email.Limits.safe()
+    wire := b"250-smtp.example\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n".as_slice()
+    reply :: jet_email.read_smtp_reply(&wire, &limits).unwrap()
+    caps :: jet_email.smtp_capabilities(&reply, &limits).unwrap()
+    assert_eq(caps.names, ["STARTTLS", "AUTH"])
+    state := jet_email.SMTPState.new()
+    state.greeting(&jet_email.SMTPReply{code: 220, lines: ["ready"]}).unwrap()
+    ehlo_caps :: state.ehlo(&reply, &limits).unwrap()
+    assert(state.authenticate("PLAIN", 10, &limits).is_err())
+    state.start_tls(&ehlo_caps).unwrap()
+    state.verified_tls()
+    assert(state.authenticate("PLAIN", 10, &limits).is_err())
+    state.ehlo(&reply, &limits).unwrap()
+    state.authenticate("PLAIN", 10, &limits).unwrap()
+    assert(state.authenticate("PLAIN", 4097, &limits).is_err())
+    tight := limits
+    tight.max_reply_line_bytes = 64
+    oversized :: "250 {"x".repeat(61)}\r\n"
+    oversized_bytes := oversized.as_bytes()
+    assert(jet_email.read_smtp_reply(&oversized_bytes, &tight).is_err())
+    changed := b"250-first\r\n251 final\r\n".as_slice()
+    assert(jet_email.read_smtp_reply(&changed, &tight).is_err())
+}
+// Rust: tests/corelib_parts/email.rs:222
+#Test("core_email_smtp_transaction_starttls_auth_rcpt_and_data_are_real") {
+    // Original deterministic in-memory protocol fixture, not a production transport.
+    // Rust: tests/corelib_parts/email.rs:226
+    struct Script { replies: Cursor<[U8]>, writes: [U8], verified_tls: Bool, upgrades: Int, closed: Bool }
+    impl Script.Read {
+        // Rust: tests/corelib_parts/email.rs:234
+        fn read(&self, out: &[U8]) -> Int Err! { self.replies.read(out) }
+    }
+    impl Script.Write {
+        // Rust: tests/corelib_parts/email.rs:237
+        fn write(&self, bytes: [U8]) -> Int Err! { self.writes.extend_from_slice(bytes); bytes.len() }
+        // Rust: tests/corelib_parts/email.rs:241
+        fn flush(&self) -> Unit Err! { () }
+    }
+    impl Script.SMTPTransport {
+        // Rust: tests/corelib_parts/email.rs:244
+        fn verified_tls(self) -> Bool { self.verified_tls }
+        // Rust: tests/corelib_parts/email.rs:245
+        fn start_tls(&self, _server: String, _trust: jet_email.TLSTrust) -> Unit Err! { self.verified_tls = true; self.upgrades += 1; () }
+        // Rust: tests/corelib_parts/email.rs:250
+        fn close(&self) -> { self.closed = true }
+    }
+    sender :: jet_email.address("sender@example.com").unwrap()
+    accepted :: jet_email.address("ok@example.net").unwrap()
+    rejected :: jet_email.address("no@example.org").unwrap()
+    message :: jet_email.message(&sender, &[accepted.clone(), rejected.clone()], &[], "subject", "first\r\n.second", "", &[]).unwrap()
+    config :: jet_email.SMTPConfig{host: "smtp.example.com", port: 587, security: jet_email.SMTPSecurity.StartTLS, auth: jet_email.SMTPAuth.Password(username: "mailer", password: b"secret".to_vec()), recipient_policy: jet_email.RecipientPolicy.DeliverAccepted, trust: jet_email.TLSTrust.System, limits: jet_email.Limits.safe(), dkim: Err(JetAbsent)}
+    replies :: "220 relay ready\r\n250-relay\r\n250-STARTTLS\r\n250 AUTH PLAIN LOGIN\r\n220 begin TLS\r\n250-relay\r\n250 AUTH PLAIN LOGIN\r\n235 authenticated\r\n250 sender accepted\r\n250 recipient accepted\r\n550 recipient rejected\r\n354 send data\r\n250 queued as q-1\r\n221 bye\r\n"
+    transport := Script{replies: Cursor.new(replies.as_bytes().to_vec()), writes: [], verified_tls: false, upgrades: 0, closed: false}
+    report :: jet_email.smtp_transaction(&transport, &config, &message, &jet_email.NoopSmtpControl).unwrap()
+    assert_eq((report.accepted.len(), report.rejected.len()), (1, 1))
+    assert_eq((report.response_code, report.response.as_str()), (250, "queued as q-1"))
+    assert(!report.accepted_at.is_empty())
+    assert_eq(transport.upgrades, 1)
+    assert(transport.closed)
+    wire :: String.from_utf8(transport.writes).unwrap()
+    assert(wire.starts_with("EHLO localhost\r\nSTARTTLS\r\nEHLO localhost\r\nAUTH PLAIN "))
+    assert(!wire.contains("secret"))
+    assert(wire.contains("MAIL FROM:<sender@example.com>\r\n"))
+    assert(wire.contains("RCPT TO:<ok@example.net>\r\nRCPT TO:<no@example.org>\r\nDATA\r\n"))
+    assert(wire.contains("\r\n.\r\nQUIT\r\n"))
+    assert_eq(jet_email.smtp_dot_stuff(b"first\r\n.second\r\n").unwrap(), b"first\r\n..second\r\n.\r\n")
+}
+// Rust: tests/corelib_parts/email.rs:311
+#Test("core_email_smtp_transaction_require_all_and_delivery_unknown_are_honest") {
+    // Rust: tests/corelib_parts/email.rs:315
+    struct Script { replies: Cursor<[U8]>, writes: [U8], closed: Bool }
+    impl Script.Read {
+        // Rust: tests/corelib_parts/email.rs:317
+        fn read(&self, out: &[U8]) -> Int Err! { self.replies.read(out) }
+    }
+    impl Script.Write {
+        // Rust: tests/corelib_parts/email.rs:320
+        fn write(&self, bytes: [U8]) -> Int Err! { self.writes.extend_from_slice(bytes); bytes.len() }
+        // Rust: tests/corelib_parts/email.rs:323
+        fn flush(&self) -> Unit Err! { () }
+    }
+    impl Script.SMTPTransport {
+        // Rust: tests/corelib_parts/email.rs:326
+        fn verified_tls(self) -> Bool { true }
+        // Rust: tests/corelib_parts/email.rs:327
+        fn start_tls(&self, _server: String, _trust: jet_email.TLSTrust) -> Unit Err! { panic("implicit TLS must not upgrade") }
+        // Rust: tests/corelib_parts/email.rs:330
+        fn close(&self) -> { self.closed = true }
+    }
+    // Rust: tests/corelib_parts/email.rs:332
+    struct Stop { value: jet_email.SMTPStop }
+    impl Stop.SMTPControl {
+        // Rust: tests/corelib_parts/email.rs:334
+        fn checkpoint(self, _operation: String) -> Unit jet_email.SMTPStop! { Err(self.value) }
+        // Rust: tests/corelib_parts/email.rs:335
+        fn accepted_at(self) -> String { panic("stopped transaction cannot be accepted") }
+    }
+    sender :: jet_email.address("sender@example.com").unwrap()
+    recipient :: jet_email.address("recipient@example.net").unwrap()
+    message :: jet_email.message(&sender, &[recipient], &[], "subject", "body", "", &[]).unwrap()
+    config :: (policy) -> jet_email.SMTPConfig{host: "smtp.example.com", port: 465, security: jet_email.SMTPSecurity.TLS, auth: jet_email.SMTPAuth.None, recipient_policy: policy, trust: jet_email.TLSTrust.System, limits: jet_email.Limits.safe(), dkim: Err(JetAbsent)}
+    loop (stop, timed_out) in [(jet_email.SMTPStop.Cancelled, false), (jet_email.SMTPStop.TimedOut, true)] {
+        stopped := Script{replies: Cursor.new([U8]{}), writes: [], closed: false}
+        error :: jet_email.smtp_transaction(&stopped, &config(jet_email.RecipientPolicy.RequireAll), &message, &Stop{value: stop}).unwrap_err()
+        assert_eq(if error == .TimedOut(_) -> true else -> false, timed_out)
+        assert_eq(if error == .Cancelled(_) -> true else -> false, !timed_out)
+        assert(stopped.writes.is_empty())
+        assert(stopped.closed)
+    }
+    reject_replies :: "220 ready\r\n250 relay\r\n250 sender\r\n550 no\r\n"
+    reject := Script{replies: Cursor.new(reject_replies.as_bytes().to_vec()), writes: [], closed: false}
+    result :: jet_email.smtp_transaction(&reject, &config(jet_email.RecipientPolicy.RequireAll), &message, &jet_email.NoopSmtpControl)
+    assert(if result == .Err(.Rejected(_, _, code, _)) -> code == Val(550) else -> false)
+    assert(!String.from_utf8(reject.writes).unwrap().contains("DATA\r\n"))
+    assert(reject.closed)
+    unknown_replies :: "220 ready\r\n250 relay\r\n250 sender\r\n250 recipient\r\n354 continue\r\n"
+    unknown := Script{replies: Cursor.new(unknown_replies.as_bytes().to_vec()), writes: [], closed: false}
+    unknown_result :: jet_email.smtp_transaction(&unknown, &config(jet_email.RecipientPolicy.DeliverAccepted), &message, &jet_email.NoopSmtpControl)
+    assert(if unknown_result == .Err(.DeliveryUnknown(operation, _, _, _)) -> operation == "data_response" else -> false)
+    assert_eq(String.from_utf8(unknown.writes).unwrap().matches("DATA\r\n").count(), 1)
+    assert(unknown.closed)
+}
+// Rust: tests/corelib_parts/email.rs:399
+#Test("core_email_limits_are_constructible_real_jet_values") {
+    dir :: temp_dir().join("jet_email_limits_{id()}")
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "email_limits", """
+use core.email as email
+fn run() {{
+    safe := email.Limits.safe()
+    print("{{safe.max_reply_line_bytes}},{{safe.max_reply_lines}},{{safe.max_capabilities}},{{safe.max_recipients}},{{safe.max_message_bytes}},{{safe.max_auth_challenge_bytes}}")
+    strict := email.Limits{{ max_reply_line_bytes: 64, max_reply_lines: 1, max_capabilities: 2, max_recipients: 3, max_message_bytes: 4, max_auth_challenge_bytes: 5 }}
+    print("{{strict.max_reply_line_bytes}},{{strict.max_auth_challenge_bytes}}")
+}}
+""", &[], .None)
+    assert_eq(code, 0, "stderr: {stderr}")
+    assert_eq(stdout, "512,100,100,100,33554432,4096\n64,5\n")
+}
+// Rust: tests/corelib_parts/email.rs:424
+#Test("core_email_mailer_surface_constructs_with_real_secret") {
+    dir :: temp_dir().join("jet_email_mailer_surface_{id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "email_mailer_surface", """
+use core.email as email
+use core.crypto as crypto
+fn run() {{
+    password :: crypto.Secret.from_text("not-logged")
+    dkim_key :: crypto.Secret.from_text("0123456789abcdef0123456789abcdef")
+    dkim :: email.DKIMConfig{{ domain: "example.com", selector: "login-2026", private_key: dkim_key, signed_headers: ["from", "subject", "mime-version", "content-type"] }}
+    auth :: SMTPAuth{{ .Password{{ username: "mailer", password: password }} }}
+    config :: email.SMTPConfig{{ host: "localhost", port: 465, security: .TLS, auth: auth, recipient_policy: .RequireAll, trust: .System, limits: email.Limits.safe(), dkim: Val(dkim) }}
+    mailer :: email.smtp(config) ?? panic("mailer config")
+    env_mailer :: email.smtp_from_env() ?? panic("environment mailer config")
+    sender :: email.address("sender@example.com") ?? panic("sender")
+    recipient :: email.address("recipient@example.net") ?? panic("recipient")
+    message :: email.message(sender, [recipient], [Address]{{}}, "subject", "body", HTML{{""}}, [Attachment]{{}}) ?? panic("message")
+    if false {{ report :: mailer.send(message) ?? panic("send"); print(report.response_code) }}
+    print("mailer-ready")
+}}
+""", &[("SMTP_HOST", "localhost"), ("SMTP_SECURITY", "tls"), ("SMTP_PORT", "465")], .None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "mailer-ready\n")
+    _ :: fs.remove_dir_all(&dir)
+}

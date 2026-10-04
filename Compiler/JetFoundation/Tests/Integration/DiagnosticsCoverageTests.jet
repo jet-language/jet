@@ -1,0 +1,393 @@
+use jet_foundation.Tests.Integration.DiagnosticsCoverage.[root, read, PRELUDE_JET_SHOW_ROWS, PRELUDE_JET_SHOW_EXCLUSIONS, prelude_file, prelude_declared_type, prelude_declared_jet_show, named_string_const, runtime_stop_calls, registered_codes, registered_code_rows, is_snake_case, assert_ui_snapshot_matches_row, is_retired, coverage_baseline_failure, code_set, report_snapshot_paths, report_fixture_snapshot_paths, extract_report_opening_codes, rendered_report_codes, rendered_snapshot_texts, RUSTC_CODES_IN_SOURCE, DIAGNOSTIC_COVERAGE_ALLOWLIST, DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING, STAGED_BEHIND_GATE, UNTESTABLE_VIA_SNAPSHOT, RETIRED_WITH_LEGACY_EMISSION, coverage_set_diff, format_code_set, walk_rs, allowed_backend_voice_snapshot, collect_rs_paths, emitted_codes, all_exclusions, coverage_allowlist_codes, coverage_allowlist_errors, coverage_left, coverage_right, check_json_snapshots_for_edits, allowlist_reason_errors]
+use jet_foundation.[Registry, Traits, Diagnostics, LintPolicy, Outcome, Coverage, Report]
+use jet.Explain
+// GATE #4494: tests read actual checked-in source and harness snapshots.
+// Rust: tests/diagnostics_coverage.rs:213
+#Test("prelude_jet_show_rows_match_canonical_printable_types") {
+    prelude_types := Set<String>.new()
+    for row in PRELUDE_JET_SHOW_ROWS {
+        impl_source :: read(&prelude_file(row.impl_file))
+        assert(prelude_declared_jet_show(impl_source, row.rust_type), "missing Prelude JetShow implementation `{row.rust_type}` for `{row.canonical_type}` in {row.impl_file}")
+        type_source :: read(&prelude_file(row.type_file))
+        assert(prelude_declared_type(type_source, row.rust_type), "missing Prelude type declaration `{row.rust_type}` for `{row.canonical_type}` in {row.type_file}")
+        assert(prelude_types.insert(row.canonical_type.to_string()), "duplicate canonical Prelude JetShow row `{row.canonical_type}`")
+    }
+    foundation :: read(&root().join("crates/jet-foundation/src/Traits.rs"))
+    declared :: named_string_const(foundation, "PRELUDE_JET_SHOW_PRINTABLE_TYPES")
+    missing := prelude_types.difference(&declared).cloned().collect::<[String]>()
+    extra := declared.difference(&prelude_types).cloned().collect::<[String]>()
+    missing.sort()
+    extra.sort()
+    registry := Traits.TraitRegistry.default()
+    registry.register_synthetic_display_debug()
+    missing_auto := prelude_types.iter().filter((name) -> !registry.auto_printable.contains(name)).cloned().collect::<[String]>()
+    missing_auto.sort()
+    assert(missing.is_empty() && extra.is_empty() && missing_auto.is_empty(), "Prelude JetShow printable relationship drifted.\nMissing canonical rows: {missing:Debug}\nExtra canonical rows: {extra:Debug}\nMissing auto_printable entries: {missing_auto:Debug}")
+}
+// Rust: tests/diagnostics_coverage.rs:265
+#Test("prelude_jet_show_exclusions_remain_explicit_only") {
+    registry := Traits.TraitRegistry.default()
+    registry.register_synthetic_display_debug()
+    canonical_names := Set<String>.new()
+    for exclusion in PRELUDE_JET_SHOW_EXCLUSIONS {
+        impl_source :: read(&prelude_file(exclusion.impl_file))
+        assert(prelude_declared_jet_show(impl_source, exclusion.rust_type), "missing explicitly excluded Prelude JetShow implementation `{exclusion.rust_type}` in {exclusion.impl_file}")
+        type_source :: read(&prelude_file(exclusion.type_file))
+        assert(prelude_declared_type(type_source, exclusion.rust_type), "missing explicitly excluded Prelude type declaration `{exclusion.rust_type}` in {exclusion.type_file}")
+        assert(canonical_names.insert(exclusion.canonical_type.to_string()), "duplicate explicit Prelude JetShow exclusion `{exclusion.canonical_type}`")
+        assert(!exclusion.reason.trim().is_empty(), "explicit Prelude JetShow exclusion `{exclusion.canonical_type}` needs a narrow reason")
+        assert(!registry.auto_printable.contains(exclusion.canonical_type), "excluded Prelude JetShow type `{exclusion.canonical_type}` has an automatic printable row: {exclusion.reason}")
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:428
+#Test("jit_collections_use_ice_for_internals_and_canonical_runtime_messages") {
+    source :: read(&root().join("crates/jet-jit/src/Collections.rs"))
+    assert(!source.contains("set_trap("), "Collections.rs must not convert adapter invariants into runtime traps")
+    direct_messages :: runtime_stop_calls(source).into_iter().filter_map((args) -> args.get(2).cloned()).filter((wording) -> wording.trim_start_matches('&').trim_start().starts_with('"')).collect::<[String]>()
+    assert(direct_messages.is_empty(), "Collections.rs must pass canonical or returned messages to set_runtime_stop, not direct wording literals: {direct_messages:Debug}")
+}
+// Rust: tests/diagnostics_coverage.rs:460
+#Test("runtime_stop_renderer_accepts_only_active_runtime_rows") {
+    rows :: Registry.diagnostic_rows()
+    active_runtime :: rows.iter().filter((row) -> row.stage == "runtime" && row.status == Registry.DiagnosticStatus.Active).collect::<[_]>()
+    assert(!active_runtime.is_empty(), "registry must publish runtime rows")
+    for row in active_runtime {
+        report :: Outcome.jet_render_runtime_stop(row.code, "probe.jet", 7, "probe", "stop()", 1, 1, "runtime probe", "")
+        assert_eq(report.code, row.code)
+        assert_eq(report.source, "runtime")
+        assert_eq(report.exit_code, 70)
+        assert(!report.what.is_empty())
+        assert(!report.why.is_empty())
+        assert(!report.fix.is_empty())
+    }
+    for row in rows.iter().filter((row) -> row.stage != "runtime" || row.status != Registry.DiagnosticStatus.Active) {
+        report :: Outcome.jet_render_runtime_stop(row.code, "probe.jet", 7, "probe", "stop()", 1, 1, "runtime probe", "")
+        assert_eq(report.exit_code, 101, "{row.code} must be a host fault")
+    }
+    unknown :: Outcome.jet_render_runtime_stop("__unknown_runtime_stop__", "probe.jet", 7, "probe", "stop()", 1, 1, "runtime probe", "")
+    assert_eq(unknown.exit_code, 101)
+    assert_eq(unknown.source, "host")
+}
+// Rust: tests/diagnostics_coverage.rs:527
+#Test("ffi_runtime_stop_keeps_one_jet_source_frame") {
+    report :: Outcome.jet_render_runtime_stop("E3014", "ffi.jet", 7, "run", "foreign_call()", 1, 1, "panic: a foreign function panicked", "")
+    assert_eq(report.source, "runtime")
+    assert_eq(report.exit_code, 70)
+    assert(report.rendered.contains("Stop [E3014]"))
+    assert(report.rendered.contains("--> ffi.jet:7 in run"))
+    assert(report.rendered.contains("foreign_call()"))
+    assert(!report.rendered.contains("rustc"))
+}
+// Rust: tests/diagnostics_coverage.rs:556
+#Test("registered_codes_keep_explicit_severity_and_lint_names") {
+    for (code, severity) in [("E2930", Diagnostics.Severity.Lint), ("W0410", Diagnostics.Severity.Lint), ("R0801", Diagnostics.Severity.Error), ("E0043", Diagnostics.Severity.Error)] {
+        row :: Registry.diagnostic(code).unwrap_or_else(() -> panic("{code} must stay registered"))
+        assert_eq(row.severity, severity, "{code} must keep the registry row's explicit severity")
+    }
+    for lint in Registry.lint_rows() {
+        name :: lint.lint_name.unwrap_or_else(() -> panic("lint {lint.code} needs a stable name"))
+        assert(is_snake_case(name), "lint {lint.code} has an unstable selector name `{name}`")
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:586
+#Test("semantic_guidance_lints_round_trip_through_the_registry") {
+    for (code, name) in [("L0515", "process_args_view"), ("L0516", "message_text"), ("L0517", "path_containment_string_prefix"), ("L0518", "redundant_fixed_cleanup"), ("L0519", "unit_scalar_rewrap"), ("L0520", "display_migration"), ("L0521", "complete_ascii_case_ladder"), ("L0522", "walk_files_filter"), ("L0523", "repeated_list_head"), ("L0524", "raw_multiline_html")] {
+        row :: Registry.diagnostic(code).unwrap_or_else(() -> panic("{code} must stay registered"))
+        assert_eq(row.severity, Diagnostics.Severity.Lint)
+        assert_eq(row.lint_name, Some(name))
+        assert(!row.what.is_empty(), "{code} needs What copy")
+        assert(!row.why.is_empty(), "{code} needs Why copy")
+        assert(!row.fix.is_empty(), "{code} needs Fix copy")
+        assert_eq(LintPolicy.code_for_name(name), Some(code))
+        assert_eq(LintPolicy.name_for_code(code), Some(name))
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:634
+#Test("every_registered_lint_has_a_unique_snake_case_name") {
+    registered :: Registry.diagnostic_rows().iter().filter((row) -> row.severity == Diagnostics.Severity.Lint).map((row) -> row.code).collect::<Set<String>>()
+    lints :: Registry.lint_rows().collect::<[_]>()
+    names := Set<String>.new()
+    codes := Set<String>.new()
+    for lint in lints {
+        name :: lint.lint_name.expect("every registered lint must carry a stable name")
+        assert(is_snake_case(name), "lint `{name}` is not a stable snake_case name")
+        assert(names.insert(name), "lint name `{name}` is duplicated")
+        assert(codes.insert(lint.code), "lint code `{lint.code}` is duplicated")
+        assert_eq(Registry.diagnostic(lint.code).map((row) -> row.severity), Some(Diagnostics.Severity.Lint), "lint `{lint.code}` is not a registered lint diagnostic row")
+        assert_eq(LintPolicy.name_for_code(lint.code), Some(name), "lint `{lint.code}` does not round-trip through the name registry")
+        assert_eq(LintPolicy.code_for_name(name), Some(lint.code), "lint name `{name}` does not resolve to its registered code")
+    }
+    assert_eq(codes, registered, "every registered lint row must carry exactly one stable name")
+}
+// Rust: tests/diagnostics_coverage.rs:685
+#Test("rendered_lint_keeps_code_beside_name") {
+    diagnostic :: Diagnostics.Diagnostic.from_row("L0302", &[], None)
+    rendered :: diagnostic.render("example.jet", "")
+    assert(rendered.starts_with("Warning [L0302] (same_enum_guard_table):"), "rendered lint lost its code/name pair: {rendered}")
+}
+// Rust: tests/diagnostics_coverage.rs:710
+#Test("registered_config_and_cli_snapshots_keep_row_identity") {
+    assert_ui_snapshot_matches_row("E1206", &[("code", "L0302"), ("name", "same_enum_guard_table")], "lint_policy_code_name.stderr")
+    assert_ui_snapshot_matches_row("E0043", &[], "cli_e0043_install.stderr")
+    assert_ui_snapshot_matches_row("E1219", &[("name", "turbo")], "cli_e1219_unknown_profile.stderr")
+}
+// Rust: tests/diagnostics_coverage.rs:725
+#Test("retired_bench_command_snapshot_keeps_registered_teaching_code") {
+    row :: Registry.diagnostic("E2101").expect("retired command route must stay registered")
+    assert_eq(row.status, Registry.DiagnosticStatus.Retired, "E2101 must remain a retired teaching diagnostic")
+    snapshot :: read(&root().join("tests/ui/bench_command_retired_e2101.stderr"))
+    assert(snapshot.contains("Error [E2101]"), "snapshot lost E2101: {snapshot}")
+    assert(snapshot.contains("`bench`"), "snapshot lost retired spelling: {snapshot}")
+    assert(snapshot.contains("jet test --measure"), "snapshot lost canonical fix: {snapshot}")
+}
+// Rust: tests/diagnostics_coverage.rs:833
+#Test("coverage_baseline_rejects_removal_addition_and_substitution") {
+    baseline :: ["E2101", "E3001"]
+    emitted :: Set<String>.new()
+    assert_eq(coverage_baseline_failure(baseline, &code_set(&["E2101"]), &emitted), Some("EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001"))
+    assert_eq(coverage_baseline_failure(["E2101"], &code_set(&["E2101", "E3001"]), &emitted), Some("Unexpected codes registered in typed rows but not emitted in Source/.\nIf this is intentional (staged feature), add the code to EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\nUnexpected:\n  E3001"))
+    assert_eq(coverage_baseline_failure(baseline, &code_set(&["E2101", "E4000"]), &emitted), Some("EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001\nUnexpected codes registered in typed rows but not emitted in Source/.\nIf this is intentional (staged feature), add the code to EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\nUnexpected:\n  E4000"))
+    assert_eq(coverage_baseline_failure(baseline, &code_set(&baseline), &emitted), None)
+}
+// Rust: tests/diagnostics_coverage.rs:1009
+#Test("diagnostic_snapshots_keep_the_complete_registered_product") {
+    source_rows := 0
+    for (line_index, raw) in Registry.DIAGNOSTIC_SOURCE.lines().enumerate() {
+        line := raw.trim() // #4303
+        if line.is_empty() || line.starts_with("//") { continue }
+        fields :: line.split('\t').collect::<[String]>()
+        assert(fields.len() == 12 || fields.len() == 13, "Diagnostics.jet:{line_index + 1} lost a registered field: expected 12 or 13, got {fields.len()}")
+        for (index, name) in [(1, "code"), (7, "What"), (8, "Why"), (9, "Fix")] { assert(!fields[index].trim().is_empty(), "Diagnostics.jet:{line_index + 1} lost its registered {name}") }
+        assert(Registry.diagnostic(fields[1]).is_some(), "Diagnostics.jet:{line_index + 1} lost registry identity for {fields[1]}")
+        source_rows += 1
+    }
+    assert_eq(source_rows, Registry.diagnostic_rows().len(), "snapshot contract must inspect every registered source row")
+    for row in Registry.diagnostic_rows() {
+        assert(!row.code.is_empty(), "diagnostic row lost its code")
+        assert(!row.what.is_empty(), "{row.code} lost its What")
+        assert(!row.why.is_empty(), "{row.code} lost its Why")
+        assert(!row.fix.is_empty(), "{row.code} lost its Fix")
+    }
+    for path in report_snapshot_paths() {
+        snapshot :: read(&path)
+        lines :: snapshot.lines().collect::<[String]>()
+        // Index all openers once; each report's span is visited once.
+        openers :: lines.iter().enumerate().filter_map(((index, line)) -> extract_report_opening_codes(line).first().map((code) -> (index, code.clone()))).collect::<[(Int, String)]>()
+        for (position, (start, code)) in openers.iter().enumerate() {
+            row :: Registry.diagnostic(code).unwrap_or_else(() -> panic("{path.display()} snapshot uses unregistered diagnostic code {code}"))
+            end :: openers.get(position + 1).map((entry) -> entry.0).unwrap_or(lines.len())
+            report :: &lines[start..end]
+            what := lines[start].split_once("]: ").or_else(() -> lines[start].split_once("): ")).map((parts) -> parts.1.trim()).unwrap_or("") // #4303
+            assert(!what.is_empty(), "{path.display()} lost What for {code}")
+            assert(report.iter().any((line) -> line.strip_prefix(" Why: ").is_some_and((why) -> !why.is_empty())), "{path.display()} lost Why for {code}")
+            assert(report.iter().any((line) -> line.strip_prefix(" Fix: ").is_some_and((fix) -> !fix.is_empty())), "{path.display()} lost Fix for {code}")
+            more :: "More: jet-lang.dev/e/{code}"
+            assert(report.iter().any((line) -> line == more), "{path.display()} lost snapshot link for {code}")
+            assert(!row.what.trim().is_empty() && !row.why.trim().is_empty() && !row.fix.trim().is_empty(), "{code} has an incomplete registered product")
+        }
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:1112
+#Test("every_report_fixture_has_a_snapshot_file") {
+    missing :: report_fixture_snapshot_paths().into_iter().filter((path) -> !path.is_file()).map((path) -> path.display().to_string()).collect::<[String]>()
+    assert(missing.is_empty(), "diagnostic fixture lost its UI snapshot:\n{missing.join("\n")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1133
+#Test("report_openers_ignore_prose_comments_and_rust_assertion_text") {
+    text :: "Error [E0001]: what; Why: [E9998]; Fix: [E9997]\n// Error [E9996]\nassert!(stderr.contains(\"[E9995]\"));\n  Error [E9994]: indented\nWarning [L0001]: lint\nStop [E0002]: stop\nLint [L0002]: lint\n"
+    assert_eq(extract_report_opening_codes(text), ["E0001", "L0001", "E0002", "L0002"])
+}
+// Rust: tests/diagnostics_coverage.rs:1156
+#Test("reverse_coverage_diff_names_retired_and_unregistered_fixture_codes") {
+    left :: Set<String>.new()
+    right :: extract_report_opening_codes("Error [E0004]: retired\nError [E9999]: no longer registered\n").into_iter().collect::<Set<String>>()
+    (left_only, right_only) :: coverage_set_diff(&left, &right)
+    assert(left_only.is_empty())
+    assert_eq(right_only, code_set(&["E0004", "E9999"]))
+    assert_eq(format_code_set(&right_only), "E0004\n  E9999")
+}
+// Rust: tests/diagnostics_coverage.rs:1213
+#Test("diagnostic_voice_scope_includes_owned_runtime_artifacts") {
+    paths :: rendered_snapshot_texts().into_iter().filter_map(((path, _)) -> path.strip_prefix(root()).ok().map((p) -> p.display().to_string())).collect::<Set<String>>()
+    for expected in ["tests/fixtures/module-eval-diagnostics/E0970.stderr", "tests/fixtures/module-eval-diagnostics/E0971.stderr", "tests/cli/doctor_l2101.txt", "tests/cli/fetch_no_git_e1203.txt", "tests/cli/repl_e1801.txt"] { assert(paths.contains(expected), "voice ratchet omitted {expected}") }
+}
+// Rust: tests/diagnostics_coverage.rs:1234
+#Test("word_shaped_codes_are_registered_and_explainable") {
+    expected :: ["E-WEB-ABI-TYPE", "E-WEB-CROSS-PARTITION", "E-WEB-TARGET-BROWSER", "E-WEB-TIR-UNSUPPORTED", "E-WEB-RUN", "E-APP-TARGET-FEATURE", "E-OSTARGET-MIXED-AXIS", "E-OSTARGET-UNMATCHED-CALL", "E-OSTARGET-BUILD-CONTEXT", "E-OSTARGET-DISPATCH-ARM", "E-OSTARGET-DISPATCH-EXHAUSTIVE"]
+    registered :: registered_codes()
+    live :: Explain.live_codes()
+    for code in expected {
+        assert(registered.contains(code), "scanner missed {code}")
+        assert(live.iter().any((live_code) -> live_code == code), "explain missed {code}")
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:1567
+#Test("i2_rustc_codes_do_not_leak_as_jet_diagnostics") {
+    allowed_fn_context :: "looks_like_signature_mismatch"
+    source_text := String.new()
+    for dir in [root().join("Source"), root().join("crates")] { walk_rs(&dir, (content) -> { source_text.push_str(content); source_text.push('\n') }) }
+    for code in RUSTC_CODES_IN_SOURCE {
+        other_count := 0
+        for dir in [root().join("Source"), root().join("crates")] {
+            walk_rs(&dir, (content) -> { other_count += content.lines().filter((line) -> line.contains(code)).filter((line) -> line.contains("Diagnostic::error") || line.contains("Diagnostic::warn")).count() })
+        }
+        assert_eq(other_count, 0, "I2 violation: rustc error code {code} appears in a Jet Diagnostic::error/warn call outside of {allowed_fn_context}: {other_count} occurrence(s). Rustc codes must NEVER be emitted as Jet diagnostics — only used to classify rustc stderr.")
+        classifier_diag_lines :: source_text.lines().filter((line) -> line.contains(code) && line.contains("Diagnostic::error")).count()
+        assert_eq(classifier_diag_lines, 0, "I2 violation: rustc code {code} appears inside a Diagnostic::error call")
+        snaps :: rendered_report_codes()
+        assert(!snaps.contains(code), "I2 violation: rustc code {code} appears in a user-facing snapshot as [{code}]. Rustc error codes must never reach end users.")
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:1628
+#Test("diagnostic_snapshots_do_not_leak_runtime_or_backend_voice") {
+    banned :: ["thread 'main' panicked", "panicked at", "stack backtrace:", "target/debug", ".rs:", "rustc rejected generated code"]
+    failures := [String]{}
+    for (path, text) in rendered_snapshot_texts() {
+        for needle in banned { if text.contains(needle) && !allowed_backend_voice_snapshot(&path, text, needle) { failures.push("{path.display()} contains `{needle}`") } }
+    }
+    assert(failures.is_empty(), "user-facing diagnostics leaked runtime/backend voice:\n{failures.join("\n")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1656
+#Test("diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators") {
+    banned :: ["the earlier consuming operation", "source bytes", "found `;`"]
+    failures := [String]{}
+    for (path, text) in rendered_snapshot_texts() { for needle in banned { if text.contains(needle) { failures.push("{path.display()} contains `{needle}`") } } }
+    assert(failures.is_empty(), "user-facing diagnostics render placeholder or internal text:\n{failures.join("\n")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1678
+#Test("runtime_user_error_codes_use_jet_panic_voice") {
+    failures := [String]{}
+    paths := [root().join("crates/jet-codegen/src/Prelude/Core.rs")]
+    collect_rs_paths(&root().join("crates/jet-codegen/src/Prelude/Core"), &paths)
+    collect_rs_paths(&root().join("crates/jet-codegen/src/Prelude/CoreLib"), &paths)
+    for path in paths {
+        text :: read(&path)
+        rel :: path.strip_prefix(root()).unwrap_or(&path).display().to_string()
+        for (idx, line) in text.lines().enumerate() { if line.contains("panic!(\"E") { failures.push("{rel}:{idx + 1} uses raw panic for a Jet error code") } }
+    }
+    assert(failures.is_empty(), "runtime user errors must use Jet-owned panic/report helpers:\n{failures.join("\n")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1744
+#Test("every_emitted_code_has_typed_row") {
+    emitted :: emitted_codes()
+    registered :: registered_codes()
+    exclusions :: all_exclusions()
+    missing := emitted.iter().filter((code) -> !exclusions.contains(code)).filter((code) -> !registered.contains(code)).cloned().collect::<[String]>()
+    missing.sort()
+    assert(missing.is_empty(), "The following codes are emitted in Source/ but have NO typed diagnostic row (invariant I4a). For each: add one row with code, stage, severity, moment, What/Why/Fix templates, then add a tests/ui snapshot.\nMissing:\n  {missing.join("\n  ")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1768
+#Test("diagnostics_registry_has_no_duplicate_code_rows") {
+    seen := Set<String>.new()
+    duplicates := [String]{}
+    for (code, line) in registered_code_rows() { if !seen.insert(code.clone()) { duplicates.push("{code} at Diagnostics.jet:{line}") } }
+    assert(duplicates.is_empty(), "duplicate code rows in the typed diagnostic source:\n{duplicates.join("\n")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1788
+#Test("every_emitted_code_has_snapshot") {
+    allowlist_errors :: coverage_allowlist_errors()
+    assert(allowlist_errors.is_empty(), "invalid diagnostic coverage allowlist rows:\n{allowlist_errors.join("\n")}")
+    left :: coverage_left()
+    right :: coverage_right()
+    (left_only, right_only) := coverage_set_diff(&left, &right)
+    allowed_left :: coverage_allowlist_codes("left-only")
+    allowed_right :: coverage_allowlist_codes("right-only")
+    left_only.retain((code) -> !allowed_left.contains(code))
+    right_only.retain((code) -> !allowed_right.contains(code))
+    assert(left_only.is_empty() && right_only.is_empty(), "I4(b) diagnostic coverage set mismatch after named exclusions and owned allowlist rows:\nLEFT-only (registered-active emitted, no report opener):\n  {format_code_set(&left_only)}\nRIGHT-only (report opener, not registered-active emitted):\n  {format_code_set(&right_only)}")
+}
+// Rust: tests/diagnostics_coverage.rs:1816
+#Test("e0102_and_e0111_exact_replacement_reports_carry_machine_edits") {
+    failures := [String]{}
+    check_json_snapshots_for_edits(&root().join("tests/cli"), &failures)
+    assert(failures.is_empty(), "machine-readable diagnostics with one exact replacement token must carry fix_edits:\n{failures.join("\n")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1921
+#Test("diagnostic_coverage_allowlist_rows_are_still_needed") {
+    allowlist_errors :: coverage_allowlist_errors()
+    assert(allowlist_errors.is_empty(), "invalid diagnostic coverage allowlist rows:\n{allowlist_errors.join("\n")}")
+    left :: coverage_left()
+    right :: coverage_right()
+    stale := [String]{}
+    for (code, side, owner) in DIAGNOSTIC_COVERAGE_ALLOWLIST {
+        still_needed :: match side { "left-only" -> left.contains(code) && !right.contains(code), "right-only" -> right.contains(code) && !left.contains(code), _ -> false }
+        if !still_needed { stale.push("{code} ({side}; owner {owner})") }
+    }
+    stale.sort()
+    assert(stale.is_empty(), "remove stale I4(b) diagnostic coverage allowlist rows:\n  {stale.join("\n  ")}")
+}
+// Rust: tests/diagnostics_coverage.rs:1959
+#Test("exclusion_list_counts_do_not_grow") {
+    CEILINGS :: [("DIAGNOSTIC_COVERAGE_ALLOWLIST", DIAGNOSTIC_COVERAGE_ALLOWLIST.len(), DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING), ("STAGED_BEHIND_GATE", STAGED_BEHIND_GATE.len(), 5), ("UNTESTABLE_VIA_SNAPSHOT", UNTESTABLE_VIA_SNAPSHOT.len(), 1), ("RETIRED_WITH_LEGACY_EMISSION", RETIRED_WITH_LEGACY_EMISSION.len(), 1), ("RUSTC_CODES_IN_SOURCE", RUSTC_CODES_IN_SOURCE.len(), 3)]
+    violations := [String]{}
+    for (name, actual, ceiling) in CEILINGS { if actual > ceiling { violations.push("{name} grew from {ceiling} to {actual} entries — shrinking is welcome, growing needs a reviewed bump of the ceiling in this test, not a silent add") } }
+    assert(violations.is_empty(), violations.join("\n"))
+}
+// Rust: tests/diagnostics_coverage.rs:1992
+#Test("every_registered_code_has_explain_page") {
+    registered :: registered_codes()
+    diag_md :: ""
+    missing := registered.iter().filter((code) -> !is_retired(code, diag_md)).filter((code) -> Explain.lookup(code).is_none()).cloned().collect::<[String]>()
+    missing.sort()
+    assert(missing.is_empty(), "The following codes are registered in the typed row source but `jet explain <code>` returns None (invariant I4c).\nSince Explain.rs is built directly from the row registry, this means the typed row is malformed or missing.\nMissing explain:\n  {missing.join("\n  ")}")
+}
+// Rust: tests/diagnostics_coverage.rs:2020
+#Test("reworded_law_rows_explain_with_detail") {
+    for code in ["E0041", "E0109", "E0301", "E0907", "E2511"] {
+        explanation :: Explain.lookup(code).unwrap_or_else(() -> panic("{code} explain page"))
+        for (field, value) in [("what", &explanation.what), ("why", &explanation.why), ("fix", &explanation.fix)] {
+            text :: value.as_deref().unwrap_or_else(() -> panic("{code} explain page has no detailed {field}"))
+            assert(!text.starts_with("The registered ") && !text.starts_with("Follow the guidance"), "{code} explain {field} is the generic registry fallback: {text}")
+        }
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:2048
+#Test("registered_unimplemented_codes_are_expected") {
+    // Rust: tests/diagnostics_coverage.rs:2050
+    EXPECTED_SPEC_AHEAD_OF_IMPL :: [
+        ("E0004", "retired"), ("E0005", "retired"), ("E0006", "retired"), ("E0007", "retired"), ("E0062", "retired"), ("E0071", "retired"), ("E0010", "retired"), ("E0011", "retired"),
+        ("E0020", "retired"), ("E0058", "retired"), ("E0206", "retired"), ("E0207", "retired"), ("E0745", "retired"), ("E0427", "retired"), ("E0912", "retired"), ("E0990", "retired"),
+        ("E2301", "retired"), ("E2302", "retired"), ("E2303", "retired"), ("E2304", "retired"), ("E2306", "retired"), ("E2403", "staged #1542"), ("E2410", "staged #1830"), ("E2412", "staged #1830"),
+        ("E2413", "retired"), ("E2701", "staged #1495"), ("E2801", "staged #17"), ("E2802", "staged #17"), ("E2803", "staged #17"), ("E2804", "staged #17"), ("E2902", "staged #1530"), ("E2940", "staged #240"),
+        ("E3104", "retired"), ("E0958", "retired"), ("E0951", "retired"), ("E0993", "retired"), ("E0328", "retired"), ("E0342", "staged #1606"), ("E0954", "retired"), ("E0920", "retired"),
+        ("E1109", "staged #1220"), ("E1111", "retired"), ("E1229", "retired"), ("E0410", "retired"), ("E0859", "staged #521"), ("E0416", "retired"), ("E0428", "retired"), ("E2407", "staged #1330"), ("E3626", "staged #521"),
+    ]
+    emitted :: emitted_codes()
+    registered :: registered_codes()
+    exclusions :: all_exclusions()
+    reason_errors :: allowlist_reason_errors(&EXPECTED_SPEC_AHEAD_OF_IMPL)
+    assert(reason_errors.is_empty(), "Invalid EXPECTED_SPEC_AHEAD_OF_IMPL reasons:\n  {reason_errors.join("\n  ")}")
+    // Rust: tests/diagnostics_coverage.rs:2113
+    STALE_ALLOWLIST_FIXTURE :: ["E2101", "E3001"]
+    stale_fixture_failure :: coverage_baseline_failure(STALE_ALLOWLIST_FIXTURE, &Set<String>.new(), &emitted).expect("embedded stale allowlist fixture must fail")
+    assert_eq(stale_fixture_failure, "EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  E2101\n  E3001")
+    assert(registered.contains("E0033"), "E0033 is a retired reservation and must remain in the typed rows")
+    assert(registered.contains("E0745") && is_retired("E0745", ""), "E0745 is a retired reservation and must remain in the typed rows")
+    parser :: read(&root().join("crates/jet-parser/src/Parser/mod.rs"))
+    assert(parser.contains("\"E0032\", \"E0033\", \"E0036\""), "E0033 must remain in the parser retired-code non-emission guard")
+    spec_ahead_of_impl :: registered.iter().filter((code) -> !exclusions.contains(code)).filter((code) -> Registry.diagnostic(code).is_some_and((row) -> row.status != Registry.DiagnosticStatus.Reserved)).filter((code) -> !emitted.contains(code)).cloned().collect::<Set<String>>()
+    baseline_failure :: coverage_baseline_failure(EXPECTED_SPEC_AHEAD_OF_IMPL.iter().map((row) -> row.0).collect(), &spec_ahead_of_impl, &emitted)
+    if baseline_failure == Some(failure) { panic("{failure}") }
+}
+// Rust: tests/diagnostics_coverage.rs:2162
+#Test("diagnostic_coverage_baseline_is_a_non_decreasing_floor") {
+    baseline :: Registry.diagnostic_coverage_baseline()
+    assert(baseline.rows.len() > 1, "coverage baseline must classify the current registry by plane")
+    entries :: Registry.diagnostic_coverage_entries()
+    facts :: Coverage.try_facts(entries.clone()).expect("registered diagnostic coverage rows must be valid")
+    validated :: Registry.validate_diagnostic_coverage(entries).expect("current diagnostic coverage must meet its checked-in floor")
+    assert_eq(facts, validated)
+    assert_eq(facts.iter().map((fact) -> fact.rows).sum::<Int>(), baseline.rows.values().map((row) -> row.total).sum::<Int>())
+    assert_eq(facts.iter().map((fact) -> fact.edit_covered).sum::<Int>(), baseline.rows.values().map((row) -> row.edit_covered).sum::<Int>())
+    assert_eq(facts.iter().map((fact) -> fact.reason_covered).sum::<Int>(), baseline.rows.values().map((row) -> row.reason_covered).sum::<Int>())
+    with_new_uncovered := [Coverage.CoverageEntry]{}
+    for fact in facts {
+        for _ in 0..fact.edit_covered { with_new_uncovered.push(Coverage.CoverageEntry.new(fact.plane.clone(), true, None)) }
+        for _ in 0..fact.reason_covered { with_new_uncovered.push(Coverage.CoverageEntry.new(fact.plane.clone(), false, Some(Report.NoFixReasonKind.Behavior))) }
+        for _ in 0..fact.uncovered { with_new_uncovered.push(Coverage.CoverageEntry.new(fact.plane.clone(), false, None)) }
+    }
+    open_plane :: facts.iter().find((fact) -> fact.uncovered > 0).expect("the current source must expose an open coverage plane")
+    with_new_uncovered.push(Coverage.CoverageEntry.new(open_plane.plane.clone(), false, None))
+    failure :: Coverage.validate_registry_coverage(with_new_uncovered, &baseline).expect_err("a new uncovered row in an open plane must fail the ratchet")
+    assert(failure.contains("neither fix_edits nor no_fix_reason"))
+}

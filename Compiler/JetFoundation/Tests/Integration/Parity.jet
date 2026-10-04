@@ -1,2323 +1,699 @@
-// PORT-PENDING 1126 tests-parity: tests/parity.rs:1-2319
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #392: AOT-vs-comptime builtin parity matrix.
-//RS //!
-//RS //! Builds one deterministic inventory from AOT's fixed Core signatures,
-//RS //! bespoke `infer_core_call` arms, direct/static builtins, and value-method
-//RS //! registry. Comptime coverage comes from the real split interpreter source
-//RS //! tree. Every discovered entry receives exactly one classification.
-//RS //!
-//RS //! A pair present in AOT but absent from comptime means `use core.x as a;
-//RS //! a.f(...)` type-checks and compiles for `jet build`, but hits E0956 in
-//RS //! `jet dev`/the REPL/a `comptime` binding — an R12 parity bug (silent
-//RS //! AOT-only builtin). New effect-free builtins must add themselves to
-//RS //! comptime's dispatch (or to `KNOWN_OPEN_GAPS` as PurePending). Genuine
-//RS //! ambient/native effects are named in `core_boundary` — never listed as
-//RS //! PurePending gaps.
-//RS //!
-//RS //! Effectful modules (`core.files`/`core.sys`/`core.term`/`core.net`/
-//RS //! `core.net.tls`/`core.process`) are explicit effect boundaries:
-//RS //! comptime handles them as a whole via the `is_tier2` wildcard (E3410
-//RS //! `#Impure` gate), not per-method.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fs;
-//RS 
-//RS /// Modules comptime gates wholesale behind `#Impure` (Methods.rs `is_tier2`)
-//RS /// rather than dispatching per-method — a per-name diff against these would
-//RS /// only prove the gate exists, which other tests (e.g. `repl.rs`'s E3410
-//RS /// cases) already cover.
-//RS const EFFECT_GATED_MODULES: &[&str] = &[
-//RS     "core.files",
-//RS     "core.sys",
-//RS     "core.term",
-//RS     "core.net",
-//RS     "core.net.tls",
-//RS     "core.process",
-//RS     // Not gated by the generic `is_tier2` list — denied unconditionally,
-//RS     // earlier in `eval_method`, with its own diagnostic (E1265): a build
-//RS     // artifact must never bake in a decrypted secret (I1), so there is no
-//RS     // `#Impure` escape hatch at all here, unlike the effects above. Correctly
-//RS     // handled, just not through the per-method `apply_core_call` table this
-//RS     // audit reads — excluded so it isn't flagged as a silent gap.
-//RS     "core.crypto.vault",
-//RS ];
-//RS 
-//RS // The tuple extractor intentionally over-approximates alternation arms. JSON's
-//RS // `to_string_pretty` must not cross-product onto adapters whose sema surface
-//RS // exposes only `to_string`.
-//RS const EXTRACTOR_ARTIFACTS: &[(&str, &str)] = &[
-//RS     ("core.encoding.csv", "to_string_pretty"),
-//RS     ("core.encoding.toml", "to_string_pretty"),
-//RS     ("core.encoding.yaml", "to_string_pretty"),
-//RS ];
-//RS 
-//RS /// Known, currently-open *pure* comptime gaps: real AOT `(module, method)`
-//RS /// pairs with no comptime dispatch yet that are effect-free and therefore
-//RS /// eligible for a future pure port. Every entry here is a to-do — remove a
-//RS /// line the same PR that closes the gap.
-//RS ///
-//RS /// Ambient / native / security *boundaries* do **not** live here. They are
-//RS /// classified by `core_boundary` (exact per-call for mixed modules). Listing a
-//RS /// boundary row here used to false-green: `classify_inventory` preferred the
-//RS /// broad module boundary and the asserted pure-pending count stayed zero
-//RS /// while these rows were still open (card #721 / #392 criterion 3).
-//RS /// Closed by #722: crypto.expert AEAD/sign/argon2id and encoding.xml projection
-//RS /// ports. View/ViewMut.join closed here (string JoinSep; same List join semantics).
-//RS /// D-ITERTOOLS1 Iter.* rows are Covered via sequence/Iter dispatch (list-shaped
-//RS /// TirBridge + AOT JetIter fusion).
-//RS /// until inventory closeout — not #722 crypto/xml gaps.
-//RS const KNOWN_OPEN_GAPS: &[(&str, &str)] = &[];
-//RS 
-//RS /// Calls with a production-compiled foundation that must remain private until
-//RS /// the complete AOT contract is resident. A public comptime arm is a false
-//RS /// parity claim while an entry remains here. Remove the entry in the same
-//RS /// commit that completes and dispatches the call.
-//RS const KNOWN_PARTIAL_GAPS: &[(&str, &str)] = &[];
-//RS 
-//RS fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
-//RS     let mut i = match (bytes.get(start), bytes.get(start + 1)) {
-//RS         (Some(b'r'), _) => start + 1,
-//RS         (Some(b'b'), Some(b'r')) => start + 2,
-//RS         _ => return None,
-//RS     };
-//RS     let hashes_start = i;
-//RS     while bytes.get(i) == Some(&b'#') {
-//RS         i += 1;
-//RS     }
-//RS     if bytes.get(i) != Some(&b'"') {
-//RS         return None;
-//RS     }
-//RS     let hashes = i - hashes_start;
-//RS     i += 1;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'"'
-//RS             && bytes
-//RS                 .get(i + 1..i + 1 + hashes)
-//RS                 .is_some_and(|closing| closing.iter().all(|byte| *byte == b'#'))
-//RS         {
-//RS             return Some(i + 1 + hashes);
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     Some(bytes.len())
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Eq, PartialEq)]
-//RS enum RustSegment {
-//RS     Code,
-//RS     String,
-//RS }
-//RS 
-//RS fn rust_source_segments(text: &str) -> Vec<(RustSegment, usize, usize)> {
-//RS     let bytes = text.as_bytes();
-//RS     let mut segments = Vec::new();
-//RS     let mut i = 0usize;
-//RS     let mut start = 0usize;
-//RS     while i < bytes.len() {
-//RS         let skipped_from = i;
-//RS         let mut string = false;
-//RS         let skipped;
-//RS         if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
-//RS             i += 2;
-//RS             while i < bytes.len() && bytes[i] != b'\n' {
-//RS                 i += 1;
-//RS             }
-//RS             skipped = true;
-//RS         } else if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-//RS             i += 2;
-//RS             let mut comments = 1usize;
-//RS             while i < bytes.len() && comments > 0 {
-//RS                 if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
-//RS                     comments += 1;
-//RS                     i += 2;
-//RS                 } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
-//RS                     comments -= 1;
-//RS                     i += 2;
-//RS                 } else {
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             skipped = true;
-//RS         } else if let Some(end) = raw_string_end(bytes, i) {
-//RS             i = end;
-//RS             skipped = true;
-//RS         } else if bytes[i] == b'"' {
-//RS             i += 1;
-//RS             while i < bytes.len() {
-//RS                 if bytes[i] == b'\\' {
-//RS                     i = (i + 2).min(bytes.len());
-//RS                 } else if bytes[i] == b'"' {
-//RS                     i += 1;
-//RS                     break;
-//RS                 } else {
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             string = true;
-//RS             skipped = true;
-//RS         } else if bytes[i] == b'\'' {
-//RS             let end = if bytes.get(i + 1) == Some(&b'\\') {
-//RS                 i + 3
-//RS             } else {
-//RS                 i + 2
-//RS             };
-//RS             if bytes.get(end) == Some(&b'\'') {
-//RS                 i = end + 1;
-//RS                 skipped = true;
-//RS             } else {
-//RS                 i += 1;
-//RS                 skipped = false;
-//RS             }
-//RS         } else {
-//RS             i += 1;
-//RS             skipped = false;
-//RS         }
-//RS         if skipped {
-//RS             if start < skipped_from {
-//RS                 segments.push((RustSegment::Code, start, skipped_from));
-//RS             }
-//RS             if string {
-//RS                 segments.push((RustSegment::String, skipped_from, i));
-//RS             }
-//RS             start = i;
-//RS         }
-//RS     }
-//RS     if start < bytes.len() {
-//RS         segments.push((RustSegment::Code, start, bytes.len()));
-//RS     }
-//RS     segments
-//RS }
-//RS 
-//RS fn rust_code_ranges(text: &str) -> impl Iterator<Item = (usize, usize)> + '_ {
-//RS     rust_source_segments(text)
-//RS         .into_iter()
-//RS         .filter_map(|(kind, start, end)| (kind == RustSegment::Code).then_some((start, end)))
-//RS }
-//RS 
-//RS fn rust_code_occurrences(text: &str, needle: &str) -> Vec<usize> {
-//RS     rust_code_ranges(text)
-//RS         .into_iter()
-//RS         .flat_map(|(start, end)| {
-//RS             text[start..end]
-//RS                 .match_indices(needle)
-//RS                 .map(move |(at, _)| start + at)
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn rust_header_before_block(text: &str) -> Option<String> {
-//RS     let segments = rust_source_segments(text);
-//RS     let brace = segments.iter().find_map(|(kind, start, end)| {
-//RS         (*kind == RustSegment::Code)
-//RS             .then(|| {
-//RS                 text.as_bytes()[*start..*end]
-//RS                     .iter()
-//RS                     .position(|byte| *byte == b'{')
-//RS             })
-//RS             .flatten()
-//RS             .map(|at| *start + at)
-//RS     })?;
-//RS     let mut header = vec![b' '; brace];
-//RS     for (_, start, end) in segments {
-//RS         if start >= brace {
-//RS             break;
-//RS         }
-//RS         let end = end.min(brace);
-//RS         header[start..end].copy_from_slice(&text.as_bytes()[start..end]);
-//RS     }
-//RS     String::from_utf8(header).ok()
-//RS }
-//RS 
-//RS fn tuple_ranges(text: &str) -> Vec<(usize, usize)> {
-//RS     let bytes = text.as_bytes();
-//RS     let mut ranges = Vec::new();
-//RS     let mut starts = Vec::new();
-//RS     for (start, end) in rust_code_ranges(text) {
-//RS         for (i, byte) in bytes.iter().enumerate().take(end).skip(start) {
-//RS             match byte {
-//RS                 b'(' => starts.push(i),
-//RS                 b')' => {
-//RS                     if let Some(start) = starts.pop() {
-//RS                         ranges.push((start, i + 1));
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS     }
-//RS     ranges.sort_unstable();
-//RS     ranges
-//RS }
-//RS 
-//RS /// Pull Core module/method tuples from Rust code, ignoring tuples that occur
-//RS /// only in comments or string contents.
-//RS fn extract_pairs(text: &str) -> BTreeSet<(String, String)> {
-//RS     let mut out = BTreeSet::new();
-//RS     for (start, end) in tuple_ranges(text) {
-//RS         let fields = split_top_level(&text[start + 1..end - 1], ',');
-//RS         if fields.len() >= 2 {
-//RS             let modules = extract_quoted(fields[0]);
-//RS             let names = extract_quoted(fields[1]);
-//RS             for module in modules.iter().filter(|module| module.starts_with("core.")) {
-//RS                 for name in names.iter().filter(|name| *name != "_") {
-//RS                     out.insert((module.clone(), name.clone()));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn split_top_level(text: &str, separator: char) -> Vec<&str> {
-//RS     let mut fields = Vec::new();
-//RS     let mut depth = 0i32;
-//RS     let mut quoted = false;
-//RS     let mut escaped = false;
-//RS     let mut start = 0usize;
-//RS     for (i, ch) in text.char_indices() {
-//RS         if quoted {
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if ch == '\\' {
-//RS                 escaped = true;
-//RS             } else if ch == '"' {
-//RS                 quoted = false;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         match ch {
-//RS             '"' => quoted = true,
-//RS             '(' | '[' | '{' => depth += 1,
-//RS             ')' | ']' | '}' => depth -= 1,
-//RS             _ if ch == separator && depth == 0 => {
-//RS                 fields.push(&text[start..i]);
-//RS                 start = i + ch.len_utf8();
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     fields.push(&text[start..]);
-//RS     fields
-//RS }
-//RS 
-//RS fn extract_quoted(s: &str) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let bytes = s.as_bytes();
-//RS     let mut i = 0usize;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'"' {
-//RS             if let Some(j) = s[i + 1..].find('"') {
-//RS                 out.push(s[i + 1..i + 1 + j].to_string());
-//RS                 i = i + 1 + j + 1;
-//RS                 continue;
-//RS             } else {
-//RS                 break;
-//RS             }
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn read(rel: &str) -> String {
-//RS     let path = format!("{}/{}", env!("CARGO_MANIFEST_DIR"), rel);
-//RS     fs::read_to_string(&path).unwrap_or_else(|e| panic!("reading {}: {}", path, e))
-//RS }
-//RS 
-//RS fn read_rust_tree(rel: &str) -> String {
-//RS     fn visit(path: &std::path::Path, files: &mut Vec<std::path::PathBuf>) {
-//RS         if path.is_dir() {
-//RS             for entry in fs::read_dir(path).unwrap() {
-//RS                 visit(&entry.unwrap().path(), files);
-//RS             }
-//RS         } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-//RS             files.push(path.to_path_buf());
-//RS         }
-//RS     }
-//RS 
-//RS     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(rel);
-//RS     let mut files = Vec::new();
-//RS     visit(&root, &mut files);
-//RS     files.sort();
-//RS     files
-//RS         .into_iter()
-//RS         .map(|path| fs::read_to_string(path).unwrap())
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS }
-//RS 
-//RS fn source_between<'a>(text: &'a str, start: &str, end: Option<&str>) -> &'a str {
-//RS     let start = text
-//RS         .find(start)
-//RS         .unwrap_or_else(|| panic!("missing source marker {start}"));
-//RS     let rest = &text[start..];
-//RS     match end {
-//RS         Some(end) => {
-//RS             &rest[..rest
-//RS                 .find(end)
-//RS                 .unwrap_or_else(|| panic!("missing source marker {end}"))]
-//RS         }
-//RS         None => rest,
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS enum Surface {
-//RS     Fixed,
-//RS     DirectStatic,
-//RS     Value,
-//RS     Bespoke,
-//RS }
-//RS 
-//RS impl Surface {
-//RS     fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Fixed => "fixed",
-//RS             Self::DirectStatic => "direct_static",
-//RS             Self::Value => "value",
-//RS             Self::Bespoke => "bespoke",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS enum Class {
-//RS     Covered,
-//RS     PurePending,
-//RS     Boundary,
-//RS }
-//RS 
-//RS impl Class {
-//RS     fn name(self) -> &'static str {
-//RS         match self {
-//RS             Self::Covered => "covered",
-//RS             Self::PurePending => "pure_pending",
-//RS             Self::Boundary => "boundary",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS struct Entry {
-//RS     surface: Surface,
-//RS     owner: String,
-//RS     method: String,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS struct Classified {
-//RS     entry: Entry,
-//RS     class: Class,
-//RS     reason: &'static str,
-//RS }
-//RS 
-//RS fn string_constant_values(text: &str, prefix: &str) -> BTreeMap<String, String> {
-//RS     let mut values = BTreeMap::new();
-//RS     for line in text.lines() {
-//RS         let line = line.trim();
-//RS         let Some(rest) = line.strip_prefix("pub const ") else {
-//RS             continue;
-//RS         };
-//RS         let Some((name, value)) = rest.split_once(": &str = ") else {
-//RS             continue;
-//RS         };
-//RS         if !name.starts_with(prefix) {
-//RS             continue;
-//RS         }
-//RS         let Some(start) = value.find('"') else {
-//RS             continue;
-//RS         };
-//RS         let Some(end) = value[start + 1..].find('"') else {
-//RS             continue;
-//RS         };
-//RS         let value = &value[start + 1..start + 1 + end];
-//RS         values.insert(name.to_string(), value.to_string());
-//RS     }
-//RS     values
-//RS }
-//RS 
-//RS fn constant_refs(text: &str, prefix: &str) -> BTreeSet<String> {
-//RS     let mut refs = BTreeSet::new();
-//RS     let needle = format!("Syntax::{prefix}");
-//RS     let mut rest = text;
-//RS     while let Some(at) = rest.find(&needle) {
-//RS         let after = &rest[at + "Syntax::".len()..];
-//RS         let len = after
-//RS             .bytes()
-//RS             .take_while(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_')
-//RS             .count();
-//RS         refs.insert(after[..len].to_string());
-//RS         rest = &after[len..];
-//RS     }
-//RS     refs
-//RS }
-//RS 
-//RS fn builtin_constant_refs(text: &str) -> BTreeSet<String> {
-//RS     constant_refs(text, "BUILTIN_")
-//RS }
-//RS 
-//RS fn equality_constant_refs(text: &str, subject: &str) -> BTreeSet<String> {
-//RS     let mut refs = BTreeSet::new();
-//RS     let needle = format!("{subject} == ");
-//RS     let mut rest = text;
-//RS     while let Some(at) = rest.find(&needle) {
-//RS         let after = rest[at + needle.len()..].trim_start();
-//RS         let after = after.strip_prefix("crate::").unwrap_or(after);
-//RS         if let Some(after) = after.strip_prefix("Syntax::") {
-//RS             let len = after
-//RS                 .bytes()
-//RS                 .take_while(|byte| {
-//RS                     byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == b'_'
-//RS                 })
-//RS                 .count();
-//RS             refs.insert(after[..len].to_string());
-//RS         }
-//RS         rest = &rest[at + needle.len()..];
-//RS     }
-//RS     refs
-//RS }
-//RS 
-//RS fn method_candidates(text: &str) -> BTreeSet<String> {
-//RS     extract_quoted(text)
-//RS         .into_iter()
-//RS         .filter(|name| {
-//RS             !name.is_empty()
-//RS                 && name
-//RS                     .chars()
-//RS                     .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn named(name: &str) -> jet::AST::Type {
-//RS     jet::AST::Type::Named(name.to_string())
-//RS }
-//RS 
-//RS fn apply(name: &str, args: Vec<jet::AST::Type>) -> jet::AST::Type {
-//RS     jet::AST::Type::Apply {
-//RS         name: name.to_string(),
-//RS         args,
-//RS     }
-//RS }
-//RS 
-//RS fn builtin_receivers(collections: &str, syntax: &str) -> Vec<(String, jet::AST::Type)> {
-//RS     use jet::AST::Type;
-//RS     let mut out = vec![
-//RS         ("List".into(), Type::List(Box::new(Type::Int))),
-//RS         (
-//RS             "FixedList".into(),
-//RS             Type::FixedList {
-//RS                 elem: Box::new(Type::Int),
-//RS                 len: jet::AST::Measure::literal("length", 4),
-//RS             },
-//RS         ),
-//RS         (
-//RS             "Map".into(),
-//RS             Type::Map {
-//RS                 key: Box::new(Type::String),
-//RS                 key_span: None,
-//RS                 value: Box::new(Type::Int),
-//RS             },
-//RS         ),
-//RS         ("String".into(), Type::String),
-//RS         ("Int".into(), Type::Int),
-//RS         ("Float".into(), Type::Float),
-//RS         ("F32".into(), Type::Float32),
-//RS         ("Bool".into(), Type::Bool),
-//RS         ("Char".into(), Type::Char),
-//RS         ("Option".into(), Type::Option(Box::new(Type::Int))),
-//RS         ("Shared".into(), Type::Shared(Box::new(Type::Int))),
-//RS     ];
-//RS     let values = string_constant_values(syntax, "");
-//RS     let mut named_receivers = extract_quoted(collections)
-//RS         .into_iter()
-//RS         .collect::<BTreeSet<_>>();
-//RS     named_receivers.extend(
-//RS         constant_refs(collections, "")
-//RS             .into_iter()
-//RS             .filter_map(|constant| values.get(&constant).cloned()),
-//RS     );
-//RS     for owner in named_receivers {
-//RS         out.push((owner.clone(), named(&owner)));
-//RS         out.push((owner.clone(), apply(&owner, vec![Type::Int])));
-//RS         out.push((owner.clone(), apply(&owner, vec![Type::String, Type::Int])));
-//RS     }
-//RS     for (method, source) in jet::Syntax::NUMERIC_CONVERSION_SOURCES {
-//RS         let _ = method;
-//RS         if let Some(ty) = jet::AST::numeric_type_from_name(source) {
-//RS             let owner = ty.name();
-//RS             if !out.iter().any(|(existing, _)| existing == &owner) {
-//RS                 out.push((owner, ty));
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn aot_collection_methods() -> BTreeSet<Entry> {
-//RS     let source = read("crates/jet-foundation/src/Collections.rs");
-//RS     let syntax = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-foundation/src/Syntax.rs"),
-//RS         read_rust_tree("crates/jet-foundation/src/Syntax")
-//RS     );
-//RS     let mut candidates = method_candidates(&source);
-//RS     let values = string_constant_values(&syntax, "");
-//RS     candidates.extend(
-//RS         constant_refs(&source, "")
-//RS             .into_iter()
-//RS             .filter_map(|constant| values.get(&constant).cloned()),
-//RS     );
-//RS     candidates.extend(
-//RS         jet::Syntax::NUMERIC_CONVERSION_SOURCES
-//RS             .iter()
-//RS             .map(|(method, _)| (*method).to_string()),
-//RS     );
-//RS     let mut entries = BTreeSet::new();
-//RS     for (owner, ty) in builtin_receivers(&source, &syntax) {
-//RS         for method in &candidates {
-//RS             for arity in 0..=8 {
-//RS                 if jet::Collections::builtin_method_return(&ty, method, arity, false).is_some() {
-//RS                     entries.insert(Entry {
-//RS                         surface: Surface::Value,
-//RS                         owner: owner.clone(),
-//RS                         method: method.clone(),
-//RS                     });
-//RS                 }
-//RS                 if jet::Collections::builtin_method_return(&ty, method, arity, true).is_some() {
-//RS                     entries.insert(Entry {
-//RS                         surface: Surface::DirectStatic,
-//RS                         owner: owner.clone(),
-//RS                         method: method.clone(),
-//RS                     });
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     entries
-//RS }
-//RS 
-//RS fn aot_special_collection_constructors() -> BTreeSet<Entry> {
-//RS     let source = read("crates/jet-codegen/src/Codegen/TIR/subset/methods.rs");
-//RS     extract_any_string_pairs(source_between(
-//RS         &source,
-//RS         "// Shape (d-coll-ctor)",
-//RS         Some("// D-MEM1 S6"),
-//RS     ))
-//RS     .into_iter()
-//RS     .map(|(owner, method)| Entry {
-//RS         surface: Surface::DirectStatic,
-//RS         owner,
-//RS         method,
-//RS     })
-//RS     .collect()
-//RS }
-//RS 
-//RS fn aot_specialized_value_methods() -> BTreeSet<Entry> {
-//RS     fn add_arm(entries: &mut BTreeSet<Entry>, source: &str, owner: &str, marker: &str) {
-//RS         for method in method_candidates(source_between(source, marker, Some("_ => None,"))) {
-//RS             entries.insert(Entry {
-//RS                 surface: Surface::Value,
-//RS                 owner: owner.to_string(),
-//RS                 method,
-//RS             });
-//RS         }
-//RS     }
-//RS 
-//RS     let time = read("crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs");
-//RS     let mut entries = BTreeSet::new();
-//RS     add_arm(
-//RS         &mut entries,
-//RS         &time,
-//RS         "MIME",
-//RS         "Type::Named(n) if n == \"MIME\" => match method {",
-//RS     );
-//RS     let date_marker = "Type::Named(n) if n == \"Date\" || n == \"LocalDate\" => match method {";
-//RS     add_arm(&mut entries, &time, "Date", date_marker);
-//RS     add_arm(&mut entries, &time, "LocalDate", date_marker);
-//RS     for owner in [
-//RS         "LocalTime",
-//RS         "DateTime",
-//RS         "Instant",
-//RS         "Period",
-//RS         "Zone",
-//RS         "ZonedDateTime",
-//RS     ] {
-//RS         add_arm(
-//RS             &mut entries,
-//RS             &time,
-//RS             owner,
-//RS             &format!("Type::Named(n) if n == \"{owner}\" => match method {{"),
-//RS         );
-//RS     }
-//RS 
-//RS     let inference = read("crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs");
-//RS     for method in method_candidates(source_between(
-//RS         &inference,
-//RS         "// D-HONESTNUM1=A: methods on `Measurement<Float>`",
-//RS         Some("// D-MEM1 S6"),
-//RS     )) {
-//RS         entries.insert(Entry {
-//RS             surface: Surface::Value,
-//RS             owner: "Measurement".to_string(),
-//RS             method,
-//RS         });
-//RS     }
-//RS     entries
-//RS }
-//RS 
-//RS fn ct_value_methods(text: &str) -> BTreeSet<(String, String)> {
-//RS     let variants = [
-//RS         ("List", "List"),
-//RS         ("Bytes", "List"),
-//RS         ("Map", "Map"),
-//RS         ("Str", "String"),
-//RS         ("Int", "Int"),
-//RS         ("Float", "Float"),
-//RS         ("Bool", "Bool"),
-//RS         ("Char", "Char"),
-//RS         ("BigInt", "Int"),
-//RS         // D-FAIL-CARRIER1=A: one carrier, so one pair of variants.
-//RS         ("Present", "Option"),
-//RS         ("Failed", "Option"),
-//RS     ];
-//RS     let syntax = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-foundation/src/Syntax.rs"),
-//RS         read_rust_tree("crates/jet-foundation/src/Syntax")
-//RS     );
-//RS     let values = string_constant_values(&syntax, "");
-//RS     let mut out = BTreeSet::new();
-//RS     for (start, end) in tuple_ranges(text) {
-//RS         let fields = split_top_level(&text[start + 1..end - 1], ',');
-//RS         if fields.len() >= 2 {
-//RS             let methods = extract_quoted(fields[1]);
-//RS             for (variant, owner) in variants {
-//RS                 if fields[0].contains(&format!("CtValue::{variant}")) {
-//RS                     for method in &methods {
-//RS                         out.insert((owner.to_string(), method.clone()));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if fields[0].trim() == "v" {
-//RS                 for (_, owner) in variants {
-//RS                     for method in &methods {
-//RS                         out.insert((owner.to_string(), method.clone()));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if fields[0].contains("CtValue::Struct") {
-//RS                 let rest = &text[end..];
-//RS                 let guard = &rest[..rest.find("=>").unwrap_or(0)];
-//RS                 let mut owners = string_equalities(guard, "type_name");
-//RS                 owners.extend(
-//RS                     equality_constant_refs(guard, "type_name")
-//RS                         .into_iter()
-//RS                         .filter_map(|constant| values.get(&constant).cloned()),
-//RS                 );
-//RS                 if guard.contains("type_name.as_str()") {
-//RS                     owners.extend(extract_quoted(guard).into_iter().filter(|owner| {
-//RS                         owner
-//RS                             .chars()
-//RS                             .next()
-//RS                             .is_some_and(|ch| ch.is_ascii_uppercase())
-//RS                     }));
-//RS                 }
-//RS                 let mut methods = extract_quoted(fields[1]);
-//RS                 if fields[1].trim() == "method" {
-//RS                     methods.extend(extract_quoted(guard).into_iter().filter(|method| {
-//RS                         method
-//RS                             .chars()
-//RS                             .all(|ch| ch.is_ascii_lowercase() || ch == '_')
-//RS                     }));
-//RS                 }
-//RS                 for owner in owners {
-//RS                     for method in &methods {
-//RS                         out.insert((owner.clone(), method.clone()));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn guarded_static_methods(text: &str) -> BTreeSet<(String, String)> {
-//RS     let syntax = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-foundation/src/Syntax.rs"),
-//RS         read_rust_tree("crates/jet-foundation/src/Syntax")
-//RS     );
-//RS     let values = string_constant_values(&syntax, "");
-//RS     let mut out = BTreeSet::new();
-//RS     let needle = "if type_name == ";
-//RS     for at in rust_code_occurrences(text, needle) {
-//RS         let after = &text[at + needle.len()..];
-//RS         let Some(header) = rust_header_before_block(after) else {
-//RS             continue;
-//RS         };
-//RS         let owner = if let Some(quoted) = header.trim_start().strip_prefix('"') {
-//RS             quoted.find('"').map(|end| quoted[..end].to_string())
-//RS         } else {
-//RS             let token = header
-//RS                 .trim_start()
-//RS                 .split_whitespace()
-//RS                 .next()
-//RS                 .unwrap_or_default();
-//RS             token
-//RS                 .rsplit("::")
-//RS                 .next()
-//RS                 .and_then(|constant| values.get(constant).cloned())
-//RS         };
-//RS         if let Some(owner) = owner {
-//RS             let mut methods = string_equalities(&header, "method");
-//RS             if let Some(matches) = header.find("matches!(method,") {
-//RS                 methods.extend(extract_quoted(&header[matches..]));
-//RS             }
-//RS             for method in methods {
-//RS                 out.insert((owner.clone(), method));
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn ct_static_methods(text: &str) -> BTreeSet<(String, String)> {
-//RS     let mut out = BTreeSet::new();
-//RS     for (owner, method) in extract_any_string_pairs(text) {
-//RS         if owner
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(|ch| ch.is_ascii_uppercase())
-//RS         {
-//RS             out.insert((owner, method));
-//RS         }
-//RS     }
-//RS     let collections = read("crates/jet-foundation/src/Collections.rs");
-//RS     let syntax = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-foundation/src/Syntax.rs"),
-//RS         read_rust_tree("crates/jet-foundation/src/Syntax")
-//RS     );
-//RS     let receivers = builtin_receivers(&collections, &syntax);
-//RS     for (method, _) in jet::Syntax::NUMERIC_CONVERSION_SOURCES {
-//RS         for (owner, ty) in &receivers {
-//RS             if ty.is_numeric() {
-//RS                 out.insert((owner.clone(), (*method).to_string()));
-//RS             }
-//RS         }
-//RS     }
-//RS     out.extend(guarded_static_methods(text));
-//RS     out
-//RS }
-//RS 
-//RS fn ct_build_context_methods() -> BTreeSet<String> {
-//RS     let bridge = read("crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs");
-//RS     let mut methods = method_candidates(source_between(
-//RS         &bridge,
-//RS         "let result = match method {",
-//RS         Some("_ => return None.ok_or_else"),
-//RS     ));
-//RS     let dispatch = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs"),
-//RS         read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch"),
-//RS     );
-//RS     for method in ["find", "fetch", "embed"] {
-//RS         if dispatch.contains(&format!("method == \"{method}\""))
-//RS             || dispatch.contains(&format!("\"{method}\" =>"))
-//RS         {
-//RS             methods.insert(method.to_string());
-//RS         }
-//RS     }
-//RS     methods
-//RS }
-//RS 
-//RS fn string_equalities(text: &str, subject: &str) -> BTreeSet<String> {
-//RS     let mut names = BTreeSet::new();
-//RS     let needle = format!("{subject} == \"");
-//RS     let mut rest = text;
-//RS     while let Some(at) = rest.find(&needle) {
-//RS         let value = &rest[at + needle.len()..];
-//RS         if let Some(end) = value.find('"') {
-//RS             names.insert(value[..end].to_string());
-//RS             rest = &value[end + 1..];
-//RS         } else {
-//RS             break;
-//RS         }
-//RS     }
-//RS     names
-//RS }
-//RS 
-//RS fn direct_dispatch_names(text: &str) -> BTreeSet<String> {
-//RS     string_equalities(text, "name")
-//RS }
-//RS 
-//RS fn extract_any_string_pairs(text: &str) -> BTreeSet<(String, String)> {
-//RS     let mut out = BTreeSet::new();
-//RS     for (start, end) in tuple_ranges(text) {
-//RS         let fields = split_top_level(&text[start + 1..end - 1], ',');
-//RS         if fields.len() >= 2 {
-//RS             for owner in extract_quoted(fields[0]) {
-//RS                 for method in extract_quoted(fields[1]) {
-//RS                     out.insert((owner.clone(), method));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn core_boundary(module: &str, method: &str) -> Option<&'static str> {
-//RS     if EFFECT_GATED_MODULES.contains(&module) {
-//RS         return Some("named comptime effect gate");
-//RS     }
-//RS     // Wholly ambient modules — every discovered call is a named boundary.
-//RS     if matches!(
-//RS         module,
-//RS         "core.sys"
-//RS             | "core.term"
-//RS             | "core.web"
-//RS             | "core.web.storage.local"
-//RS             | "core.web.storage.session"
-//RS             | "core.tasks"
-//RS             | "core.watcher"
-//RS             | "core.web.devserver"
-//RS             | "core.crypto.uuid"
-//RS     ) {
-//RS         return Some("named ambient/native boundary");
-//RS     }
-//RS     // Mixed modules: exact per-call boundaries only. Pure constructors /
-//RS     // verify helpers that comptime already ports must not be swallowed here
-//RS     // (and PurePending gaps must win over any residual broad match).
-//RS     if module == "core.ui"
-//RS         && matches!(
-//RS             method,
-//RS             "null_backend" | "tui_backend" | "gtk_backend" | "reactive_render"
-//RS         )
-//RS     {
-//RS         return Some("named ambient/native boundary");
-//RS     }
-//RS     if module == "core.game.raylib"
-//RS         && matches!(
-//RS             method,
-//RS             "begin_drawing"
-//RS                 | "clear_background"
-//RS                 | "close_window"
-//RS                 | "draw_rectangle"
-//RS                 | "draw_text"
-//RS                 | "end_drawing"
-//RS                 | "key_down"
-//RS                 | "set_target_fps"
-//RS                 | "window_open"
-//RS                 | "window_ready"
-//RS                 | "window_should_close"
-//RS         )
-//RS     {
-//RS         return Some("named ambient/native boundary");
-//RS     }
-//RS     if module == "core.testing"
-//RS         && matches!(
-//RS             method,
-//RS             "corpus" | "fixture" | "golden" | "snap" | "temp_dir"
-//RS         )
-//RS     {
-//RS         return Some("named testing filesystem boundary");
-//RS     }
-//RS     if matches!(
-//RS         (module, method),
-//RS         ("core.args", "spec") | ("core.game", "run")
-//RS     ) {
-//RS         return Some("named ambient runtime boundary");
-//RS     }
-//RS     if matches!(
-//RS         module,
-//RS         "core.event"
-//RS             | "core.http.client"
-//RS             | "core.http.server"
-//RS             | "core.http.middleware"
-//RS             | "core.net.ws"
-//RS             | "core.mem"
-//RS             | "core.mem.scope"
-//RS     ) {
-//RS         return Some("named runtime/native boundary");
-//RS     }
-//RS     if (module.starts_with("core.encoding.") && matches!(method, "reader" | "writer"))
-//RS         || (module == "core.email" && matches!(method, "smtp" | "smtp_from_env"))
-//RS         || (module == "core.data" && matches!(method, "csv_reader" | "json_reader"))
-//RS     {
-//RS         return Some("named I/O handle boundary");
-//RS     }
-//RS     if module == "core.time"
-//RS         && matches!(
-//RS             method,
-//RS             "now" | "now_utc" | "today" | "time" | "instant" | "sleep" | "start"
-//RS         )
-//RS     {
-//RS         return Some("named clock boundary");
-//RS     }
-//RS     if module == "core.auth" && matches!(method, "verify_jwt" | "verify_paseto") {
-//RS         return Some("named native/security boundary");
-//RS     }
-//RS     if module == "core.crypto.random" && method == "bytes" {
-//RS         return Some("named native/security boundary");
-//RS     }
-//RS     if module == "core.crypto.expert" && matches!(method, "open_v1" | "migrate_v1") {
-//RS         return Some("named native/security boundary");
-//RS     }
-//RS     if module == "core.crypto.vault" {
-//RS         return Some("named native/security boundary");
-//RS     }
-//RS     if (module == "core.time" && method == "today") || (module == "core.time" && method == "now") {
-//RS         return Some("named clock boundary");
-//RS     }
-//RS     if module == "core.time.expiring" && method == "new" {
-//RS         return Some("named E1004 retired spelling boundary");
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn value_boundary(owner: &str) -> Option<&'static str> {
-//RS     if owner == "Instant" {
-//RS         return Some("named clock boundary");
-//RS     }
-//RS     if owner == "Clock" {
-//RS         return Some("named clock boundary");
-//RS     }
-//RS     if owner == "ExpiringValue" {
-//RS         return Some("named expiry runtime boundary");
-//RS     }
-//RS     if matches!(owner, "Secret" | "WrappedVaultKey") {
-//RS         return Some("named native/security boundary");
-//RS     }
-//RS     // True reactive / decision handles need a live runtime graph. Pool is
-//RS     // D-MEM1/D-POOLID-API1 (generational arena) and stays PurePending until
-//RS     // ported. Solver (D-SOLVER-LIB1) is ported in CorePureParity + dispatch.
-//RS     if matches!(
-//RS         owner,
-//RS         "Signal" | "Shared" | "Effect" | "Computed" | "Derived" | "DecisionHook"
-//RS     ) {
-//RS         return Some("named reactive runtime boundary");
-//RS     }
-//RS     matches!(
-//RS         owner,
-//RS         "Task"
-//RS             | "Receiver"
-//RS             | "Sender"
-//RS             | "Event"
-//RS             | "AsyncEvent"
-//RS             | "DispatchReport"
-//RS             | "Hook"
-//RS             | "Subscription"
-//RS             | "EventScope"
-//RS             | "EventTrace"
-//RS             | "WatchHandle"
-//RS             | "WatchSet"
-//RS             | "SigningKey"
-//RS             | "X25519SecretKey"
-//RS             | "VerifyKey"
-//RS             | "X25519PublicKey"
-//RS             | "Signature"
-//RS             | "Sealed"
-//RS             | "WrappedKey"
-//RS             | "Digest256"
-//RS             | "Digest512"
-//RS             | "PasswordHash"
-//RS     )
-//RS     .then_some("named runtime/native handle boundary")
-//RS }
-//RS 
-//RS fn value_method_boundary(owner: &str, method: &str) -> Option<&'static str> {
-//RS     match (owner, method) {
-//RS         ("List" | "FixedList", "view") => Some("named E0214 retired spelling boundary"),
-//RS         ("FixedList", "insert") => Some("named E0964 fixed-length boundary"),
-//RS         ("Float", "origin") => Some("named float-debug tracking boundary"),
-//RS         ("Stopwatch", "elapsed_millis") => Some("named clock boundary"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn comptime_sequence_methods() -> BTreeSet<String> {
-//RS     let source = read("crates/jet-comptime/src/Comptime/SequenceParity.rs");
-//RS     method_candidates(source_between(
-//RS         &source,
-//RS         "if !matches!(",
-//RS         Some("return None;"),
-//RS     ))
-//RS }
-//RS 
-//RS fn discover_inventory() -> BTreeSet<Entry> {
-//RS     let fixed_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs");
-//RS     let bespoke_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs");
-//RS     let fixed = extract_pairs(&fixed_src);
-//RS     let core_all = extract_pairs(&bespoke_src);
-//RS     let mut entries = BTreeSet::new();
-//RS     for (module, method) in &fixed {
-//RS         if EXTRACTOR_ARTIFACTS.contains(&(module.as_str(), method.as_str())) {
-//RS             continue;
-//RS         }
-//RS         entries.insert(Entry {
-//RS             surface: Surface::Fixed,
-//RS             owner: module.clone(),
-//RS             method: method.clone(),
-//RS         });
-//RS     }
-//RS     for (module, method) in core_all.difference(&fixed) {
-//RS         entries.insert(Entry {
-//RS             surface: Surface::Bespoke,
-//RS             owner: module.clone(),
-//RS             method: method.clone(),
-//RS         });
-//RS     }
-//RS 
-//RS     let syntax_src = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-foundation/src/Syntax.rs"),
-//RS         read_rust_tree("crates/jet-foundation/src/Syntax")
-//RS     );
-//RS     let values = string_constant_values(&syntax_src, "");
-//RS     let direct_src = read("crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs");
-//RS     let mut direct_aot = builtin_constant_refs(&direct_src);
-//RS     direct_aot.extend(
-//RS         equality_constant_refs(&direct_src, "call.name")
-//RS             .into_iter()
-//RS             .filter(|constant| constant.starts_with("TYPE_") || constant == "RESOURCE_CLOSE"),
-//RS     );
-//RS     for constant in direct_aot {
-//RS         let spelling = values
-//RS             .get(&constant)
-//RS             .cloned()
-//RS             .unwrap_or_else(|| constant.clone());
-//RS         entries.insert(Entry {
-//RS             surface: Surface::DirectStatic,
-//RS             owner: "direct".into(),
-//RS             method: spelling,
-//RS         });
-//RS     }
-//RS     let math_src = read("crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs");
-//RS     let math_types = math_src
-//RS         .split("pub fn math_scalar_ty")
-//RS         .next()
-//RS         .map(extract_quoted)
-//RS         .unwrap_or_default();
-//RS     for name in math_types.into_iter().filter(|name| {
-//RS         name.chars()
-//RS             .next()
-//RS             .is_some_and(|ch| ch.is_ascii_uppercase())
-//RS     }) {
-//RS         entries.insert(Entry {
-//RS             surface: Surface::DirectStatic,
-//RS             owner: "direct".into(),
-//RS             method: name,
-//RS         });
-//RS     }
-//RS     entries.extend(aot_collection_methods());
-//RS     entries.extend(aot_special_collection_constructors());
-//RS     entries.extend(aot_specialized_value_methods());
-//RS     entries
-//RS }
-//RS 
-//RS fn classify_inventory(discovered: &BTreeSet<Entry>) -> Result<Vec<Classified>, Vec<String>> {
-//RS     let core_dispatch_src = read_rust_tree("crates/jet-comptime/src/Comptime");
-//RS     let builtin_dispatch_src = read("crates/jet-comptime/src/Comptime/Builtins.rs");
-//RS     let dispatch_tree = read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch");
-//RS     let dispatch_src = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs"),
-//RS         dispatch_tree,
-//RS     );
-//RS     let ct_core = extract_pairs(&core_dispatch_src);
-//RS     let gaps = KNOWN_OPEN_GAPS.iter().copied().collect::<BTreeSet<_>>();
-//RS     let partials = KNOWN_PARTIAL_GAPS.iter().copied().collect::<BTreeSet<_>>();
-//RS     let syntax_src = format!(
-//RS         "{}\n{}",
-//RS         read("crates/jet-foundation/src/Syntax.rs"),
-//RS         read_rust_tree("crates/jet-foundation/src/Syntax")
-//RS     );
-//RS     let values = string_constant_values(&syntax_src, "");
-//RS     let mut direct_ct = builtin_constant_refs(&dispatch_src);
-//RS     direct_ct.extend(equality_constant_refs(&dispatch_src, "name"));
-//RS     let mut direct_names = direct_dispatch_names(&dispatch_src);
-//RS     direct_names.extend(
-//RS         direct_ct
-//RS             .iter()
-//RS             .filter_map(|constant| values.get(constant).cloned()),
-//RS     );
-//RS     // Value methods live in both the leaf builtin table and the interpreter
-//RS     // spine: higher-order calls need `&mut self` for closure dispatch, while
-//RS     // mutators need write-back. Audit the complete canonical comptime tree so
-//RS     // those real paths are not mislabeled as open gaps.
-//RS     let mut ct_values = ct_value_methods(&core_dispatch_src);
-//RS     let core_pure_source = read("crates/jet-comptime/src/Comptime/CorePureParity.rs");
-//RS     let core_pure_methods = source_between(
-//RS         &core_pure_source,
-//RS         "pub(super) fn evaluate_method(",
-//RS         Some("fn one<'a>("),
-//RS     );
-//RS     ct_values.extend(
-//RS         extract_any_string_pairs(core_pure_methods)
-//RS             .into_iter()
-//RS             .filter(|(owner, _)| {
-//RS                 owner
-//RS                     .chars()
-//RS                     .next()
-//RS                     .is_some_and(|ch| ch.is_ascii_uppercase())
-//RS             }),
-//RS     );
-//RS     let mut ct_statics = ct_static_methods(source_between(
-//RS         &builtin_dispatch_src,
-//RS         "pub fn apply_static_type_method(",
-//RS         Some("pub fn apply_mutating("),
-//RS     ));
-//RS     ct_statics.extend(guarded_static_methods(&dispatch_tree));
-//RS     let ct_build_context = ct_build_context_methods();
-//RS     let sequence_methods = comptime_sequence_methods();
-//RS     let view_methods = [
-//RS         "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len", "map",
-//RS     ]
-//RS     .into_iter()
-//RS     .collect::<BTreeSet<_>>();
-//RS     let mut errors = Vec::new();
-//RS     for &(module, method) in KNOWN_OPEN_GAPS {
-//RS         let pair_is_discovered = discovered.iter().any(|entry| {
-//RS             matches!(entry.surface, Surface::Fixed | Surface::Bespoke)
-//RS                 && entry.owner == module
-//RS                 && entry.method == method
-//RS         });
-//RS         if !pair_is_discovered {
-//RS             errors.push(format!(
-//RS                 "stale pure_pending gap: {module}.{method} is no longer discovered"
-//RS             ));
-//RS         } else if ct_core.contains(&(module.to_string(), method.to_string())) {
-//RS             errors.push(format!(
-//RS                 "stale pure_pending gap: {module}.{method} is now comptime-covered"
-//RS             ));
-//RS         }
-//RS     }
-//RS     for &(module, method) in KNOWN_PARTIAL_GAPS {
-//RS         let pair = (module.to_string(), method.to_string());
-//RS         if !discovered.iter().any(|entry| {
-//RS             matches!(entry.surface, Surface::Fixed | Surface::Bespoke)
-//RS                 && entry.owner == module
-//RS                 && entry.method == method
-//RS         }) {
-//RS             errors.push(format!(
-//RS                 "stale partial gap: {module}.{method} is no longer discovered"
-//RS             ));
-//RS         } else if ct_core.contains(&pair) {
-//RS             errors.push(format!(
-//RS                 "partial gap leaked into comptime dispatch: {module}.{method}"
-//RS             ));
-//RS         }
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     for entry in discovered.iter().cloned() {
-//RS         let classified = match entry.surface {
-//RS             Surface::Fixed | Surface::Bespoke => {
-//RS                 let pair = (entry.owner.clone(), entry.method.clone());
-//RS                 if partials.contains(&(entry.owner.as_str(), entry.method.as_str())) {
-//RS                     Some((Class::PurePending, "explicit partial pure port"))
-//RS                 } else if ct_core.contains(&pair) {
-//RS                     Some((Class::Covered, "comptime core dispatch"))
-//RS                 } else if gaps.contains(&(entry.owner.as_str(), entry.method.as_str())) {
-//RS                     // PurePending before boundary so broad/exact ambient matches
-//RS                     // cannot hide deterministic effect-free backlog rows.
-//RS                     Some((Class::PurePending, "explicit pure port backlog"))
-//RS                 } else if let Some(reason) = core_boundary(&entry.owner, &entry.method) {
-//RS                     Some((Class::Boundary, reason))
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             }
-//RS             Surface::DirectStatic if entry.owner == "direct" => {
-//RS                 if matches!(entry.method.as_str(), "print" | "input") {
-//RS                     Some((Class::Boundary, "named interactive I/O boundary"))
-//RS                 } else if entry.method == "close" {
-//RS                     Some((Class::Boundary, "named runtime resource boundary"))
-//RS                 } else if direct_names.contains(&entry.method) {
-//RS                     Some((Class::Covered, "comptime direct dispatch"))
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             }
-//RS             Surface::DirectStatic => {
-//RS                 if ct_statics.contains(&(entry.owner.clone(), entry.method.clone())) {
-//RS                     Some((Class::Covered, "comptime static dispatch"))
-//RS                 } else if let Some(reason) = value_boundary(&entry.owner) {
-//RS                     Some((Class::Boundary, reason))
-//RS                 } else {
-//RS                     Some((Class::PurePending, "static method port pending"))
-//RS                 }
-//RS             }
-//RS             Surface::Value => {
-//RS                 let owner = if entry.owner == "FixedList" {
-//RS                     "List"
-//RS                 } else {
-//RS                     &entry.owner
-//RS                 };
-//RS                 let erased_scalar_dispatch = match entry.owner.as_str() {
-//RS                     "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" => {
-//RS                         matches!(
-//RS                             entry.method.as_str(),
-//RS                             "to_string"
-//RS                                 | "count_ones"
-//RS                                 | "count_zeros"
-//RS                                 | "leading_zeros"
-//RS                                 | "trailing_zeros"
-//RS                         ) && ct_values.contains(&("Int".to_string(), entry.method.clone()))
-//RS                     }
-//RS                     // D-FLOATW1: CtFloat preserves F32 width, so Float method
-//RS                     // dispatch is honest coverage for the F32 surface.
-//RS                     "F32" => {
-//RS                         matches!(
-//RS                             entry.method.as_str(),
-//RS                             "is_nan" | "is_infinite" | "is_finite" | "to_string"
-//RS                         ) && ct_values.contains(&("Float".to_string(), entry.method.clone()))
-//RS                     }
-//RS                     _ => false,
-//RS                 };
-//RS                 if let Some(reason) = value_method_boundary(&entry.owner, &entry.method) {
-//RS                     Some((Class::Boundary, reason))
-//RS                 } else if owner == "BuildContext" && ct_build_context.contains(&entry.method) {
-//RS                     Some((Class::Covered, "interpreter-owned build context dispatch"))
-//RS                 } else if matches!(entry.owner.as_str(), "List" | "FixedList" | "Iter")
-//RS                     && sequence_methods.contains(&entry.method)
-//RS                 {
-//RS                     Some((Class::Covered, "comptime sequence dispatch"))
-//RS                 } else if entry.owner == "Iter"
-//RS                     && matches!(
-//RS                         entry.method.as_str(),
-//RS                         "to_list"
-//RS                             | "collect"
-//RS                             | "len"
-//RS                             | "is_empty"
-//RS                             | "join"
-//RS                             | "map"
-//RS                             | "filter"
-//RS                             | "each"
-//RS                             | "find"
-//RS                     )
-//RS                 {
-//RS                     Some((Class::Covered, "comptime Iter dispatch"))
-//RS                 } else if matches!(entry.owner.as_str(), "View" | "ViewMut")
-//RS                     && view_methods.contains(entry.method.as_str())
-//RS                 {
-//RS                     Some((Class::Covered, "comptime slice-view dispatch"))
-//RS                 } else if erased_scalar_dispatch {
-//RS                     Some((Class::Covered, "comptime scalar representation dispatch"))
-//RS                 } else if ct_values.contains(&(owner.to_string(), entry.method.clone())) {
-//RS                     Some((Class::Covered, "comptime value dispatch"))
-//RS                 } else if let Some(reason) = value_boundary(&entry.owner) {
-//RS                     Some((Class::Boundary, reason))
-//RS                 } else {
-//RS                     Some((Class::PurePending, "value method port pending"))
-//RS                 }
-//RS             }
-//RS         };
-//RS         match classified {
-//RS             Some((class, reason)) => out.push(Classified {
-//RS                 entry,
-//RS                 class,
-//RS                 reason,
-//RS             }),
-//RS             None => errors.push(format!(
-//RS                 "unclassified {} {}.{}",
-//RS                 entry.surface.name(),
-//RS                 entry.owner,
-//RS                 entry.method
-//RS             )),
-//RS         }
-//RS     }
-//RS     if errors.is_empty() {
-//RS         Ok(out)
-//RS     } else {
-//RS         Err(errors)
-//RS     }
-//RS }
-//RS 
-//RS fn render_inventory(records: &[Classified]) -> String {
-//RS     let mut lines = records
-//RS         .iter()
-//RS         .map(|record| {
-//RS             format!(
-//RS                 "{} | {} | {}.{} | {}",
-//RS                 record.class.name(),
-//RS                 record.entry.surface.name(),
-//RS                 record.entry.owner,
-//RS                 record.entry.method,
-//RS                 record.reason
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     lines.sort();
-//RS     lines.join("\n") + "\n"
-//RS }
-//RS 
-//RS fn stable_hash(text: &str) -> u64 {
-//RS     text.bytes().fold(0xcbf29ce484222325u64, |hash, byte| {
-//RS         (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
-//RS     })
-//RS }
-//RS 
-//RS fn validate_records(
-//RS     discovered: &BTreeSet<Entry>,
-//RS     records: &[Classified],
-//RS ) -> Result<(), Vec<String>> {
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut errors = Vec::new();
-//RS     for record in records {
-//RS         if !seen.insert(record.entry.clone()) {
-//RS             errors.push(format!(
-//RS                 "duplicate classification: {} {}.{}",
-//RS                 record.entry.surface.name(),
-//RS                 record.entry.owner,
-//RS                 record.entry.method
-//RS             ));
-//RS         }
-//RS         if !discovered.contains(&record.entry) {
-//RS             errors.push(format!(
-//RS                 "stale {} classification: {} {}.{}",
-//RS                 record.class.name(),
-//RS                 record.entry.surface.name(),
-//RS                 record.entry.owner,
-//RS                 record.entry.method
-//RS             ));
-//RS         }
-//RS     }
-//RS     for entry in discovered.difference(&seen) {
-//RS         errors.push(format!(
-//RS             "unclassified: {} {}.{}",
-//RS             entry.surface.name(),
-//RS             entry.owner,
-//RS             entry.method
-//RS         ));
-//RS     }
-//RS     if errors.is_empty() {
-//RS         Ok(())
-//RS     } else {
-//RS         Err(errors)
-//RS     }
-//RS }
-//RS 
-//RS fn record<'a>(
-//RS     records: &'a [Classified],
-//RS     surface: Surface,
-//RS     owner: &str,
-//RS     method: &str,
-//RS ) -> &'a Classified {
-//RS     records
-//RS         .iter()
-//RS         .find(|record| {
-//RS             record.entry.surface == surface
-//RS                 && record.entry.owner == owner
-//RS                 && record.entry.method == method
-//RS         })
-//RS         .unwrap_or_else(|| panic!("missing {} {owner}.{method}", surface.name()))
-//RS }
-//RS 
-//RS #[test]
-//RS fn canonical_builtin_inventory_is_complete_and_stable() {
-//RS     let discovered = discover_inventory();
-//RS     let records =
-//RS         classify_inventory(&discovered).unwrap_or_else(|errors| panic!("{}", errors.join("\n")));
-//RS     validate_records(&discovered, &records).unwrap();
-//RS 
-//RS     let fixed = records
-//RS         .iter()
-//RS         .filter(|record| record.entry.surface == Surface::Fixed)
-//RS         .count();
-//RS     let direct_static = records
-//RS         .iter()
-//RS         .filter(|record| record.entry.surface == Surface::DirectStatic)
-//RS         .count();
-//RS     let value = records
-//RS         .iter()
-//RS         .filter(|record| record.entry.surface == Surface::Value)
-//RS         .count();
-//RS     let bespoke = records
-//RS         .iter()
-//RS         .filter(|record| record.entry.surface == Surface::Bespoke)
-//RS         .count();
-//RS     // #747 / D-RANGE-EXCL1=C replaced enumerate with indexed + indexes on
-//RS     // List, FixedList, and Iter: six additions, three removals, net +3 values.
-//RS     assert_eq!((fixed, direct_static, value, bespoke), (512, 151, 531, 57));
-//RS 
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.math", "round").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::Fixed,
-//RS             "core.encoding.json",
-//RS             "to_string_pretty"
-//RS         )
-//RS         .class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Bespoke, "core.reactive.loadable", "idle").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::Bespoke,
-//RS             "core.reactive.loadable",
-//RS             "loading"
-//RS         )
-//RS         .class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::Bespoke,
-//RS             "core.reactive.loadable",
-//RS             "loaded"
-//RS         )
-//RS         .class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::Bespoke,
-//RS             "core.reactive.loadable",
-//RS             "failed"
-//RS         )
-//RS         .class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Int", "parse").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Clock", "new").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Set", "from").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "ExpiringValue", "new").class,
-//RS         Class::Boundary
-//RS     );
-//RS     for (owner, method) in [
-//RS         ("Rank", "from"),
-//RS         ("Rank", "new"),
-//RS         ("PriorityQueue", "from"),
-//RS         ("PriorityQueue", "new"),
-//RS         ("Cache", "new"),
-//RS         ("Queue", "new"),
-//RS         ("Bits", "new"),
-//RS         ("Bytes", "from"),
-//RS         ("Bytes", "new"),
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::DirectStatic, owner, method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Tally", "new").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Secret", "from_text").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Secret", "from_bytes").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::DirectStatic,
-//RS             "WrappedVaultKey",
-//RS             "from_bytes"
-//RS         )
-//RS         .class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "WrappedVaultKey", "bytes").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "String", "from_bytes").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "direct", "Decimal").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "direct", "Vec3").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "direct", "wrapping").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "direct", "consume").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "String", "trim").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in ["after", "before", "bytes", "slice"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "String", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in ["is_nan", "is_infinite", "is_finite"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Float", method).class,
-//RS             Class::Covered
-//RS         );
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "F32", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     // D-FLOATW1: F32 width is preserved in CtFloat, so F32.to_string shares Float display.
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "F32", "to_string").class,
-//RS         Class::Covered
-//RS     );
-//RS     for owner in ["I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, owner, "to_string").class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Float", "origin").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Stopwatch", "elapsed_millis").class,
-//RS         Class::Boundary
-//RS     );
-//RS     for owner in ["Int", "I8", "I16", "I32", "U8", "U16", "U32", "U64"] {
-//RS         for method in [
-//RS             "count_ones",
-//RS             "count_zeros",
-//RS             "leading_zeros",
-//RS             "trailing_zeros",
-//RS         ] {
-//RS             assert_eq!(
-//RS                 record(&records, Surface::Value, owner, method).class,
-//RS                 Class::Covered
-//RS             );
-//RS         }
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Decimal", "to_string").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Decimal", "add").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.math", "decimal").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in ["add", "add_new", "clear", "each", "has_key"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Map", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "List", "filter").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "List", "clear").class,
-//RS         Class::Covered
-//RS     );
-//RS     let sequence_methods = comptime_sequence_methods();
-//RS     assert_eq!(
-//RS         sequence_methods.len(),
-//RS         40,
-//RS         "SequenceParity method-set drift"
-//RS     );
-//RS     for owner in ["List", "FixedList"] {
-//RS         for method in &sequence_methods {
-//RS             let expected = if owner == "FixedList" && method == "insert" {
-//RS                 Class::Boundary
-//RS             } else {
-//RS                 Class::Covered
-//RS             };
-//RS             assert_eq!(
-//RS                 record(&records, Surface::Value, owner, method).class,
-//RS                 expected
-//RS             );
-//RS         }
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, owner, "view").class,
-//RS             Class::Boundary
-//RS         );
-//RS     }
-//RS     for owner in ["View", "ViewMut"] {
-//RS         for method in [
-//RS             "contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len",
-//RS             "map",
-//RS         ] {
-//RS             assert_eq!(
-//RS                 record(&records, Surface::Value, owner, method).class,
-//RS                 Class::Covered
-//RS             );
-//RS         }
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "BuildContext", "generate").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Duration", "in").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in [
-//RS         "int",
-//RS         "float",
-//RS         "float_range",
-//RS         "bool",
-//RS         "normal",
-//RS         "exponential",
-//RS         "bytes",
-//RS         "split",
-//RS         "pick",
-//RS         "weighted_pick",
-//RS         "sample",
-//RS         "shuffle",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "RNG", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "len",
-//RS         "is_empty",
-//RS         "clear",
-//RS         "to_bytes",
-//RS         "write_u8",
-//RS         "write_u16_le",
-//RS         "write_u16_be",
-//RS         "write_u32_le",
-//RS         "write_u32_be",
-//RS         "write_u64_le",
-//RS         "write_u64_be",
-//RS         "write_bytes",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Bytes", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "add", "add_new", "get", "remove", "has_key", "keys", "capacity", "len", "is_empty",
-//RS         "clear",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Cache", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "push_front",
-//RS         "push_back",
-//RS         "pop_front",
-//RS         "pop_back",
-//RS         "peek_front",
-//RS         "peek_back",
-//RS         "len",
-//RS         "is_empty",
-//RS         "clear",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Queue", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "add", "remove", "has", "first", "last", "union", "to_list", "len", "is_empty", "clear",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Rank", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "add", "remove", "has", "count", "len", "is_empty", "clear", "to_list",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Bits", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "push",
-//RS         "pop",
-//RS         "peek",
-//RS         "to_sorted_list",
-//RS         "len",
-//RS         "is_empty",
-//RS         "clear",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "PriorityQueue", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "add", "remove", "has", "union", "to_list", "len", "is_empty", "clear",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Set", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in ["add", "remove", "has", "count", "len", "is_empty", "any"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Tally", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "media_type",
-//RS         "subtype",
-//RS         "essence",
-//RS         "to_string",
-//RS         "param",
-//RS         "params",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "MIME", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for owner in ["Date", "LocalDate"] {
-//RS         for method in [
-//RS             "year",
-//RS             "month",
-//RS             "day",
-//RS             "to_string",
-//RS             "add_days",
-//RS             "add_months",
-//RS             "add_period",
-//RS             "day_of_year",
-//RS             "diff_days",
-//RS             "format",
-//RS             "iso_week",
-//RS             "iso_weekday",
-//RS             "truncate",
-//RS             "weekday",
-//RS         ] {
-//RS             assert_eq!(
-//RS                 record(&records, Surface::Value, owner, method).class,
-//RS                 Class::Covered
-//RS             );
-//RS         }
-//RS     }
-//RS     for method in ["hour", "minute", "second", "to_string"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "LocalTime", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in ["to_timestamp", "to_unix_ms", "to_string"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "DateTime", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "DateTime", "in_zone").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Zone", "name").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in [
-//RS         "add_duration",
-//RS         "add_period",
-//RS         "date",
-//RS         "format",
-//RS         "offset_seconds",
-//RS         "time",
-//RS         "to_datetime",
-//RS         "to_string",
-//RS         "zone",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "ZonedDateTime", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in ["utc", "zone", "zoned", "zoned_local"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.time", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "date",
-//RS         "format",
-//RS         "format_rfc3339",
-//RS         "hour",
-//RS         "minute",
-//RS         "plus_duration",
-//RS         "round",
-//RS         "second",
-//RS         "time",
-//RS         "truncate",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "DateTime", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Period", "to_string").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in ["value", "uncertainty"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Measurement", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in ["add", "sub", "mul", "div"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Measurement", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Instant", "elapsed_millis").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Task", "detach").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.data", "inner_join").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.data", "left_join").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.data", "pivot_sum").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.data", "schema").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.data", "json").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.testing", "fake_rng").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.testing", "fake_clock").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in ["corpus", "fixture", "golden", "snap", "temp_dir"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.testing", method).class,
-//RS             Class::Boundary
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "create",
-//RS         "tar_add",
-//RS         "tar_get",
-//RS         "tar_names_json",
-//RS         "zip_decompress",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.archive", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for method in ["compress", "decompress"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.archive.gzip", method).class,
-//RS             Class::Covered
-//RS         );
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.archive.zstd", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.args", "spec").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.game", "run").class,
-//RS         Class::Boundary
-//RS     );
-//RS     for (module, method) in [
-//RS         ("core.data.sketch.hll", "new"),
-//RS         ("core.data.sketch.tdigest", "new"),
-//RS         ("core.data.sketch.cms", "new"),
-//RS         ("core.data.sketch.reservoir", "new"),
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Bespoke, module, method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     for owner in [
-//RS         "Signal",
-//RS         "Shared",
-//RS         "Effect",
-//RS         "Computed",
-//RS         "Derived",
-//RS         "DecisionHook",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(
-//RS                 &records,
-//RS                 Surface::Value,
-//RS                 owner,
-//RS                 match owner {
-//RS                     "Signal" => "get",
-//RS                     "Shared" => "read",
-//RS                     "Effect" => "unsubscribe",
-//RS                     "Computed" | "Derived" => "get",
-//RS                     "DecisionHook" => "run",
-//RS                     _ => unreachable!(),
-//RS                 }
-//RS             )
-//RS             .class,
-//RS             Class::Boundary
-//RS         );
-//RS     }
-//RS     for method in ["add", "remove", "ids"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Value, "Pool", method).class,
-//RS             Class::Covered
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Solver", "status").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::DirectStatic, "Solver", "new").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Solver", "require").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "Solver", "failure_count").class,
-//RS         Class::Covered
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.time", "now").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.crypto.expert", "open_v1").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.crypto.expert", "migrate_v1").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::Fixed,
-//RS             "core.crypto.vault",
-//RS             "prepare_import_signing"
-//RS         )
-//RS         .class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(
-//RS             &records,
-//RS             Surface::Fixed,
-//RS             "core.crypto.vault",
-//RS             "commit_import_x25519"
-//RS         )
-//RS         .class,
-//RS         Class::Boundary
-//RS     );
-//RS 
-//RS     // Exact per-call inventory: ported pure rows stay Covered; open pure gaps
-//RS     // stay PurePending; ambient backends stay Boundary (#721 / #392 C3).
-//RS     for method in [
-//RS         "point",
-//RS         "size",
-//RS         "rect",
-//RS         "constraint",
-//RS         "node",
-//RS         "text",
-//RS         "button",
-//RS         "box",
-//RS         "key_event",
-//RS         "resize_event",
-//RS         "node_role",
-//RS         "node_color",
-//RS         "aria_role_button",
-//RS         "aria_role_text_input",
-//RS         "aria_role_label",
-//RS         "aria_role_container",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.ui", method).class,
-//RS             Class::Covered,
-//RS             "core.ui.{method}"
-//RS         );
-//RS     }
-//RS     for method in ["null_backend", "tui_backend", "gtk_backend"] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.ui", method).class,
-//RS             Class::Boundary,
-//RS             "core.ui.{method}"
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Bespoke, "core.ui", "reactive_render").class,
-//RS         Class::Boundary
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.game.raylib", "color").class,
-//RS         Class::Covered
-//RS     );
-//RS     for method in [
-//RS         "ed25519_verify_strict",
-//RS         "ed25519_sign",
-//RS         "hkdf_sha256_raw",
-//RS         "x25519_raw",
-//RS         "xchacha20poly1305_seal",
-//RS         "xchacha20poly1305_open",
-//RS         "aes256gcm_seal",
-//RS         "aes256gcm_open",
-//RS         "argon2id",
-//RS         "secret_bytes",
-//RS         "signing_key_bytes",
-//RS         "x25519_secret_bytes",
-//RS         "shared_secret_bytes",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.crypto.expert", method).class,
-//RS             Class::Covered,
-//RS             "core.crypto.expert.{method}"
-//RS         );
-//RS     }
-//RS     for method in [
-//RS         "attribute",
-//RS         "content",
-//RS         "decode",
-//RS         "decode_bytes",
-//RS         "expanded_name",
-//RS         "root",
-//RS     ] {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, "core.encoding.xml", method).class,
-//RS             Class::Covered,
-//RS             "core.encoding.xml.{method}"
-//RS         );
-//RS     }
-//RS     for &(module, method) in KNOWN_OPEN_GAPS {
-//RS         assert_eq!(
-//RS             record(&records, Surface::Fixed, module, method).class,
-//RS             Class::PurePending,
-//RS             "{module}.{method} must remain PurePending (not swallowed by a module boundary)"
-//RS         );
-//RS     }
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "View", "join").class,
-//RS         Class::Covered,
-//RS         "View.join Covered (JoinSep)"
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Value, "ViewMut", "join").class,
-//RS         Class::Covered,
-//RS         "ViewMut.join Covered (JoinSep)"
-//RS     );
-//RS     assert_eq!(
-//RS         record(&records, Surface::Fixed, "core.crypto.random", "bytes").class,
-//RS         Class::Boundary
-//RS     );
-//RS 
-//RS     let rendered = render_inventory(&records);
-//RS     let mut reversed = records.clone();
-//RS     reversed.reverse();
-//RS     assert_eq!(
-//RS         render_inventory(&reversed),
-//RS         rendered,
-//RS         "inventory rendering must be order-stable"
-//RS     );
-//RS     let covered = records
-//RS         .iter()
-//RS         .filter(|record| record.class == Class::Covered)
-//RS         .count();
-//RS     let pending = records
-//RS         .iter()
-//RS         .filter(|record| record.class == Class::PurePending)
-//RS         .count();
-//RS     let boundaries = records
-//RS         .iter()
-//RS         .filter(|record| record.class == Class::Boundary)
-//RS         .count();
-//RS     // #722 closed View/ViewMut.join. Iter.* covered via sequence dispatch (list-shaped TirBridge + AOT JetIter).
-//RS     // #722/#743: View.join + Iter.* covered. Zero PurePending effect-free backlog.
-//RS     assert_eq!(
-//RS         (records.len(), covered, pending, boundaries),
-//RS         (1_251, 904, 0, 347)
-//RS     );
-//RS     eprintln!(
-//RS         "builtin parity inventory: {} total, {covered} covered, {pending} pure pending, {boundaries} boundaries",
-//RS         records.len()
-//RS     );
-//RS     let hash = stable_hash(&rendered);
-//RS     assert_eq!(
-//RS         hash,
-//RS         14619055002375487292,
-//RS         "intentional inventory movement must update the reviewed stable hash; counts fixed={fixed} direct_static={direct_static} value={value} bespoke={bespoke}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn inventory_validator_rejects_duplicate_stale_and_unclassified_entries() {
-//RS     let live = Entry {
-//RS         surface: Surface::Value,
-//RS         owner: "String".into(),
-//RS         method: "trim".into(),
-//RS     };
-//RS     let stale_covered = Entry {
-//RS         surface: Surface::Fixed,
-//RS         owner: "core.fake".into(),
-//RS         method: "covered".into(),
-//RS     };
-//RS     let stale_pending = Entry {
-//RS         surface: Surface::Fixed,
-//RS         owner: "core.fake".into(),
-//RS         method: "pending".into(),
-//RS     };
-//RS     let stale_boundary = Entry {
-//RS         surface: Surface::Fixed,
-//RS         owner: "core.fake".into(),
-//RS         method: "boundary".into(),
-//RS     };
-//RS     let discovered = [live.clone()].into_iter().collect::<BTreeSet<_>>();
-//RS     let duplicate = Classified {
-//RS         entry: live.clone(),
-//RS         class: Class::Covered,
-//RS         reason: "proof",
-//RS     };
-//RS     let records = vec![
-//RS         duplicate.clone(),
-//RS         duplicate,
-//RS         Classified {
-//RS             entry: stale_covered,
-//RS             class: Class::Covered,
-//RS             reason: "old",
-//RS         },
-//RS         Classified {
-//RS             entry: stale_pending,
-//RS             class: Class::PurePending,
-//RS             reason: "old",
-//RS         },
-//RS         Classified {
-//RS             entry: stale_boundary,
-//RS             class: Class::Boundary,
-//RS             reason: "old",
-//RS         },
-//RS     ];
-//RS     let errors = validate_records(&discovered, &records)
-//RS         .unwrap_err()
-//RS         .join("\n");
-//RS     assert!(
-//RS         errors.contains("duplicate classification: value String.trim"),
-//RS         "{errors}"
-//RS     );
-//RS     assert!(
-//RS         errors.contains("stale covered classification: fixed core.fake.covered"),
-//RS         "{errors}"
-//RS     );
-//RS     assert!(
-//RS         errors.contains("stale pure_pending classification: fixed core.fake.pending"),
-//RS         "{errors}"
-//RS     );
-//RS     assert!(
-//RS         errors.contains("stale boundary classification: fixed core.fake.boundary"),
-//RS         "{errors}"
-//RS     );
-//RS 
-//RS     let errors = validate_records(&discovered, &[]).unwrap_err().join("\n");
-//RS     assert!(
-//RS         errors.contains("unclassified: value String.trim"),
-//RS         "{errors}"
-//RS     );
-//RS 
-//RS     let direct = direct_dispatch_names(
-//RS         "if name == \"require\" { dispatch(); } fn helper() { let name = \"require_eq\"; }",
-//RS     );
-//RS     assert!(direct.contains("require"));
-//RS     assert!(
-//RS         !direct.contains("require_eq"),
-//RS         "helper-only string must not prove dispatch coverage"
-//RS     );
-//RS 
-//RS     let fake_core =
-//RS         "// (\"core.fake\", \"comment\")\nlet text = \"(\\\"core.fake\\\", \\\"string\\\")\";";
-//RS     assert!(
-//RS         extract_pairs(fake_core).is_empty(),
-//RS         "comment/string tuples must not prove dispatch coverage"
-//RS     );
-//RS 
-//RS     let fake_statics = r###"
-//RS // if type_name == crate::Syntax::TYPE_SET && method == "from" {
-//RS /* if type_name == crate::Syntax::TYPE_BITS && method == "new" { */
-//RS let example = r#"if type_name == crate::Syntax::TYPE_QUEUE && method == "new" {"#;
-//RS "###;
-//RS     assert!(
-//RS         guarded_static_methods(fake_statics).is_empty(),
-//RS         "comment/raw-string guards must not prove static dispatch coverage"
-//RS     );
-//RS 
-//RS     let commented_method = r#"
-//RS if type_name == crate::Syntax::TYPE_SET // method == "from"
-//RS {
-//RS     disabled_example()
-//RS }
-//RS "#;
-//RS     assert!(
-//RS         guarded_static_methods(commented_method).is_empty(),
-//RS         "a commented method must not complete an active type guard"
-//RS     );
-//RS }
-// END-PORT-PENDING 1126 tests/parity.rs:1-2319
+// Card #392: deterministic AOT-vs-comptime builtin parity inventory.
+use std.fs
+use std.collections.BTreeSet
+use core.path.OSPath
+use jet
+use jet.AST.[Type, Measure]
+// GATE #4494: real filesystem reads and directory traversal.
+// GATE #4499: exact tuple/Entry equality and ordering in canonical sets.
+// Rust: tests/parity.rs:30
+pub EFFECT_GATED_MODULES :: ["core.files", "core.sys", "core.term", "core.net", "core.net.tls", "core.process", "core.crypto.vault"]
+// Rust: tests/parity.rs:49
+pub EXTRACTOR_ARTIFACTS :: [("core.encoding.csv", "to_string_pretty"), ("core.encoding.toml", "to_string_pretty"), ("core.encoding.yaml", "to_string_pretty")]
+// Rust: tests/parity.rs:70
+pub KNOWN_OPEN_GAPS: [(String, String)] :: []
+// Rust: tests/parity.rs:76
+pub KNOWN_PARTIAL_GAPS: [(String, String)] :: []
+
+// Rust: tests/parity.rs:78
+pub fn raw_string_end(bytes: &[U8], start: Int) -> Int? {
+    i := match (bytes.get(start), bytes.get(start + 1)) {
+        (Some(114), _) -> start + 1
+        (Some(98), Some(114)) -> start + 2
+        _ -> { return None }
+    }
+    hashes_start :: i
+    loop bytes.get(i) == Some(35) { i += 1 }
+    if bytes.get(i) != Some(34) { return None }
+    hashes :: i - hashes_start
+    i += 1
+    loop i < bytes.len() {
+        if bytes[i] == 34 && i + 1 + hashes <= bytes.len() && bytes[i + 1..i + 1 + hashes].iter().all(fn(byte) -> *byte == 35) {
+            return Some(i + 1 + hashes)
+        }
+        i += 1
+    }
+    Some(bytes.len())
+}
+
+// Rust: tests/parity.rs:106
+#Derive(Clone, Copy, Eq, PartialEq)
+pub enum RustSegment { Code, String }
+
+// Rust: tests/parity.rs:112
+pub fn rust_source_segments(text: &String) -> [(RustSegment, Int, Int)] {
+    bytes :: text.as_bytes()
+    segments: [(RustSegment, Int, Int)] := []
+    i := 0
+    start := 0
+    loop i < bytes.len() {
+        skipped_from :: i
+        string := false
+        skipped := false
+        if bytes[i] == 47 && bytes.get(i + 1) == Some(47) {
+            i += 2
+            loop i < bytes.len() && bytes[i] != 10 { i += 1 }
+            skipped = true
+        } else if bytes[i] == 47 && bytes.get(i + 1) == Some(42) {
+            i += 2
+            comments := 1
+            loop i < bytes.len() && comments > 0 {
+                if bytes[i] == 47 && bytes.get(i + 1) == Some(42) { comments += 1; i += 2 }
+                else if bytes[i] == 42 && bytes.get(i + 1) == Some(47) { comments -= 1; i += 2 }
+                else { i += 1 }
+            }
+            skipped = true
+        } else if match raw_string_end(bytes, i) { Some(end) -> { i = end; skipped = true; true }; None -> false } {
+        } else if bytes[i] == 34 {
+            i += 1
+            loop i < bytes.len() {
+                if bytes[i] == 92 { i = (i + 2).min(bytes.len()) }
+                else if bytes[i] == 34 { i += 1; break }
+                else { i += 1 }
+            }
+            string = true
+            skipped = true
+        } else if bytes[i] == 39 {
+            end :: if bytes.get(i + 1) == Some(92) { i + 3 } else { i + 2 }
+            if bytes.get(end) == Some(39) { i = end + 1; skipped = true }
+            else { i += 1 }
+        } else { i += 1 }
+        if skipped {
+            if start < skipped_from { segments.push((RustSegment.Code, start, skipped_from)) }
+            if string { segments.push((RustSegment.String, skipped_from, i)) }
+            start = i
+        }
+    }
+    if start < bytes.len() { segments.push((RustSegment.Code, start, bytes.len())) }
+    segments
+}
+
+// Rust: tests/parity.rs:192
+pub fn rust_code_ranges(text: &String) -> Iter<(Int, Int)> {
+    rust_source_segments(text).into_iter().filter_map(fn(segment) -> {
+        (kind, start, end) :: segment
+        if kind == RustSegment.Code { Some((start, end)) } else { None }
+    })
+}
+// Rust: tests/parity.rs:198
+pub fn rust_code_occurrences(text: &String, needle: &String) -> [Int] {
+    out: [Int] := []
+    loop (start, end) in rust_code_ranges(text) {
+        loop (at, _) in text[start..end].match_indices(needle) { out.push(start + at) }
+    }
+    out
+}
+// Rust: tests/parity.rs:209
+pub fn rust_header_before_block(text: &String) -> String? {
+    segments :: rust_source_segments(text)
+    brace: Int? := None
+    loop (kind, start, end) in &segments {
+        if kind == RustSegment.Code {
+            match text.as_bytes()[start..end].iter().position(fn(byte) -> *byte == 123) {
+                Some(at) -> { brace = Some(start + at); break }
+                None -> {}
+            }
+        }
+    }
+    limit :: match brace { Some(at) -> at; None -> { return None } }
+    header := [U8].repeat(32, limit)
+    loop (_, start, end) in segments {
+        if start >= limit { break }
+        bounded_end :: end.min(limit)
+        header[start..bounded_end].copy_from_slice(&text.as_bytes()[start..bounded_end])
+    }
+    String.from_utf8(header).ok()
+}
+// Rust: tests/parity.rs:232
+pub fn tuple_ranges(text: &String) -> [(Int, Int)] {
+    bytes :: text.as_bytes()
+    ranges: [(Int, Int)] := []
+    starts: [Int] := []
+    loop (start, end) in rust_code_ranges(text) {
+        loop i in start..end {
+            match bytes[i] {
+                40 -> starts.push(i)
+                41 -> { match starts.pop() { Some(start) -> ranges.push((start, i + 1)); None -> {} } }
+                _ -> {}
+            }
+        }
+    }
+    ranges.sort_unstable()
+    ranges
+}
+// Rust: tests/parity.rs:255
+pub fn extract_pairs(text: &String) -> BTreeSet<(String, String)> {
+    out := BTreeSet<(String, String)>.new()
+    loop (start, end) in tuple_ranges(text) {
+        fields :: split_top_level(&text[start + 1..end - 1], ',')
+        if fields.len() >= 2 {
+            modules :: extract_quoted(fields[0])
+            names :: extract_quoted(fields[1])
+            loop module in modules.iter().filter(fn(module) -> module.starts_with("core.")) {
+                loop name in names.iter().filter(fn(name) -> *name != "_") { _ :: out.insert((module.clone(), name.clone())) }
+            }
+        }
+    }
+    out
+}
+// Rust: tests/parity.rs:272
+pub fn split_top_level(text: &String, separator: Char) -> [&String] {
+    fields: [&String] := []
+    depth := 0
+    quoted := false
+    escaped := false
+    start := 0
+    loop (i, ch) in text.char_indices() {
+        if quoted {
+            if escaped { escaped = false }
+            else if ch == '\\' { escaped = true }
+            else if ch == '"' { quoted = false }
+            continue
+        }
+        match ch {
+            '"' -> { quoted = true }
+            '(' | '[' | '{' -> { depth += 1 }
+            ')' | ']' | '}' -> { depth -= 1 }
+            _ -> { if ch == separator && depth == 0 { fields.push(&text[start..i]); start = i + ch.len_utf8() } }
+        }
+    }
+    fields.push(&text[start..])
+    fields
+}
+// Rust: tests/parity.rs:304
+pub fn extract_quoted(s: &String) -> [String] {
+    out: [String] := []
+    bytes :: s.as_bytes()
+    i := 0
+    loop i < bytes.len() {
+        if bytes[i] == 34 {
+            match s[i + 1..].find('"') {
+                Some(j) -> { out.push(s[i + 1..i + 1 + j].to_string()); i = i + 1 + j + 1; continue }
+                None -> { break }
+            }
+        }
+        i += 1
+    }
+    out
+}
+// Rust: tests/parity.rs:323
+pub fn read(rel: &String) -> String {
+    path :: OSPath.from("{env("CARGO_MANIFEST_DIR")}/{rel}")
+    fs.read_to_string(&path).unwrap_or_else(fn(e) -> panic("reading {path}: {e}"))
+}
+// Rust: tests/parity.rs:328
+pub fn read_rust_tree(rel: &String) -> String {
+    // Rust: tests/parity.rs:329
+    fn visit(path: &OSPath, files: &[OSPath]) -> {
+        if path.is_dir() {
+            loop entry in fs.read_dir(path).unwrap() { visit(&entry.unwrap().path(), files) }
+        } else if path.extension().and_then(fn(ext) -> ext.to_str()) == Some("rs") { files.push(path.clone()) }
+    }
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR")).join(rel)
+    files: [OSPath] := []
+    visit(&root, &files)
+    files.sort()
+    files.into_iter().map(fn(path) -> fs.read_to_string(path).unwrap()).collect::<[String]>().join("\n")
+}
+// Rust: tests/parity.rs:350
+pub fn source_between(text: &String, start: &String, end: String?) -> &String {
+    at :: text.find(start).unwrap_or_else(fn() -> panic("missing source marker {start}"))
+    rest := &text[at..] // #4303
+    match end {
+        Some(end) -> &rest[..rest.find(end).unwrap_or_else(fn() -> panic("missing source marker {end}"))]
+        None -> rest
+    }
+}
+// Rust: tests/parity.rs:365
+#Derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)
+pub enum Surface {
+    Fixed, DirectStatic, Value, Bespoke
+    // Rust: tests/parity.rs:374
+    pub fn name(self) -> String {
+        match self { .Fixed -> "fixed"; .DirectStatic -> "direct_static"; .Value -> "value"; .Bespoke -> "bespoke" }
+    }
+}
+// Rust: tests/parity.rs:384
+#Derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)
+pub enum Class {
+    Covered, PurePending, Boundary
+    // Rust: tests/parity.rs:392
+    pub fn name(self) -> String {
+        match self { .Covered -> "covered"; .PurePending -> "pure_pending"; .Boundary -> "boundary" }
+    }
+}
+// Rust: tests/parity.rs:401
+#Derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)
+pub struct Entry { surface: Surface, owner: String, method: String }
+// Rust: tests/parity.rs:408
+#Derive(Clone, Debug, Eq, PartialEq)
+pub struct Classified { entry: Entry, class: Class, reason: String }
+
+// Rust: tests/parity.rs:415
+pub fn string_constant_values(text: &String, prefix: &String) -> [String:String] {
+    values: [String:String] := [:]
+    loop line in text.lines() {
+        line := line.trim() // #4303
+        rest :: match line.strip_prefix("pub const ") { Some(rest) -> rest; None -> { continue } }
+        (name, value) :: match rest.split_once(": &str = ") { Some(pair) -> pair; None -> { continue } }
+        if !name.starts_with(prefix) { continue }
+        start :: match value.find('"') { Some(at) -> at; None -> { continue } }
+        end :: match value[start + 1..].find('"') { Some(at) -> at; None -> { continue } }
+        value := &value[start + 1..start + 1 + end] // #4303
+        _ :: values.insert(name.to_string(), value.to_string())
+    }
+    values
+}
+// Rust: tests/parity.rs:440
+pub fn constant_refs(text: &String, prefix: &String) -> BTreeSet<String> {
+    refs := BTreeSet<String>.new()
+    needle :: "Syntax::{prefix}"
+    rest := text
+    loop {
+        at :: match rest.find(&needle) { Some(at) -> at; None -> { break } }
+        after := &rest[at + "Syntax::".len()..] // #4303
+        len :: after.bytes().take_while(fn(byte) -> byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == 95).count()
+        _ :: refs.insert(after[..len].to_string())
+        rest = &after[len..]
+    }
+    refs
+}
+// Rust: tests/parity.rs:456
+pub fn builtin_constant_refs(text: &String) -> BTreeSet<String> { constant_refs(text, "BUILTIN_") }
+// Rust: tests/parity.rs:460
+pub fn equality_constant_refs(text: &String, subject: &String) -> BTreeSet<String> {
+    refs := BTreeSet<String>.new()
+    needle :: "{subject} == "
+    rest := text
+    loop {
+        at :: match rest.find(&needle) { Some(at) -> at; None -> { break } }
+        after := rest[at + needle.len()..].trim_start() // #4303
+        after = after.strip_prefix("crate::").unwrap_or(after)
+        match after.strip_prefix("Syntax::") {
+            Some(after) -> {
+                len :: after.bytes().take_while(fn(byte) -> byte.is_ascii_uppercase() || byte.is_ascii_digit() || *byte == 95).count()
+                _ :: refs.insert(after[..len].to_string())
+            }
+            None -> {}
+        }
+        rest = &rest[at + needle.len()..]
+    }
+    refs
+}
+// Rust: tests/parity.rs:481
+pub fn method_candidates(text: &String) -> BTreeSet<String> {
+    extract_quoted(text).into_iter().filter(fn(name) -> !name.is_empty() && name.chars().all(fn(ch) -> ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_')).collect()
+}
+// Rust: tests/parity.rs:493
+pub fn named(name: &String) -> Type { Type.Named(name.to_string()) }
+// Rust: tests/parity.rs:497
+pub fn apply(name: &String, args: [Type]) -> Type { Type.Apply { name: name.to_string(), args } }
+// Rust: tests/parity.rs:504
+pub fn builtin_receivers(collections: &String, syntax: &String) -> [(String, Type)] {
+    out := [
+        ("List", Type.List(Box.new(Type.Int))),
+        ("FixedList", Type.FixedList { elem: Box.new(Type.Int), len: Measure.literal("length", 4) }),
+        ("Map", Type.Map { key: Box.new(Type.String), key_span: None, value: Box.new(Type.Int) }),
+        ("String", Type.String), ("Int", Type.Int), ("Float", Type.Float), ("F32", Type.Float32),
+        ("Bool", Type.Bool), ("Char", Type.Char), ("Option", Type.Option(Box.new(Type.Int))), ("Shared", Type.Shared(Box.new(Type.Int)))
+    ]
+    values :: string_constant_values(syntax, "")
+    named_receivers: BTreeSet<String> := extract_quoted(collections).into_iter().collect()
+    named_receivers.extend(constant_refs(collections, "").into_iter().filter_map(fn(constant) -> values.get(&constant).cloned()))
+    loop owner in named_receivers {
+        out.push((owner.clone(), named(&owner)))
+        out.push((owner.clone(), apply(&owner, [Type.Int])))
+        out.push((owner.clone(), apply(&owner, [Type.String, Type.Int])))
+    }
+    loop (_, source) in jet.Syntax.NUMERIC_CONVERSION_SOURCES {
+        match jet.AST.numeric_type_from_name(source) {
+            Some(ty) -> {
+                owner :: ty.name()
+                if !out.iter().any(fn(pair) -> pair.0 == owner) { out.push((owner, ty)) }
+            }
+            None -> {}
+        }
+    }
+    out
+}
+// Rust: tests/parity.rs:558
+pub fn aot_collection_methods() -> BTreeSet<Entry> {
+    source :: read("crates/jet-foundation/src/Collections.rs")
+    syntax :: "{read("crates/jet-foundation/src/Syntax.rs")}\n{read_rust_tree("crates/jet-foundation/src/Syntax")}"
+    candidates := method_candidates(&source)
+    values :: string_constant_values(&syntax, "")
+    candidates.extend(constant_refs(&source, "").into_iter().filter_map(fn(constant) -> values.get(&constant).cloned()))
+    candidates.extend(jet.Syntax.NUMERIC_CONVERSION_SOURCES.iter().map(fn(pair) -> pair.0.to_string()))
+    entries := BTreeSet<Entry>.new()
+    loop (owner, ty) in builtin_receivers(&source, &syntax) {
+        loop method in &candidates {
+            loop arity in 0..9 {
+                if jet.Collections.builtin_method_return(&ty, method, arity, false).is_some() {
+                    _ :: entries.insert(Entry { surface: Surface.Value, owner: owner.clone(), method: method.clone() })
+                }
+                if jet.Collections.builtin_method_return(&ty, method, arity, true).is_some() {
+                    _ :: entries.insert(Entry { surface: Surface.DirectStatic, owner: owner.clone(), method: method.clone() })
+                }
+            }
+        }
+    }
+    entries
+}
+// Rust: tests/parity.rs:601
+pub fn aot_special_collection_constructors() -> BTreeSet<Entry> {
+    source :: read("crates/jet-codegen/src/Codegen/TIR/subset/methods.rs")
+    extract_any_string_pairs(source_between(&source, "// Shape (d-coll-ctor)", Some("// D-MEM1 S6"))).into_iter().map(fn(pair) -> {
+        (owner, method) :: pair
+        Entry { surface: Surface.DirectStatic, owner, method }
+    }).collect()
+}
+// Rust: tests/parity.rs:617
+pub fn aot_specialized_value_methods() -> BTreeSet<Entry> {
+    // Rust: tests/parity.rs:618
+    fn add_arm(entries: &BTreeSet<Entry>, source: &String, owner: &String, marker: &String) -> {
+        loop method in method_candidates(source_between(source, marker, Some("_ => None,"))) {
+            _ :: entries.insert(Entry { surface: Surface.Value, owner: owner.to_string(), method })
+        }
+    }
+    time :: read("crates/jet-sema/src/Sema/CheckerCoreLib/net_text_time.rs")
+    entries := BTreeSet<Entry>.new()
+    add_arm(&entries, &time, "MIME", "Type::Named(n) if n == \"MIME\" => match method {")
+    date_marker :: "Type::Named(n) if n == \"Date\" || n == \"LocalDate\" => match method {"
+    add_arm(&entries, &time, "Date", date_marker)
+    add_arm(&entries, &time, "LocalDate", date_marker)
+    loop owner in ["LocalTime", "DateTime", "Instant", "Period", "Zone", "ZonedDateTime"] {
+        add_arm(&entries, &time, owner, "Type::Named(n) if n == \"{owner}\" => match method {{")
+    }
+    inference :: read("crates/jet-sema/src/Sema/CheckerInfer/calls/method_calls.rs")
+    loop method in method_candidates(source_between(&inference, "// D-HONESTNUM1=A: methods on `Measurement<Float>`", Some("// D-MEM1 S6"))) {
+        _ :: entries.insert(Entry { surface: Surface.Value, owner: "Measurement", method })
+    }
+    entries
+}
+// Rust: tests/parity.rs:670
+pub fn ct_value_methods(text: &String) -> BTreeSet<(String, String)> {
+    variants :: [("List", "List"), ("Bytes", "List"), ("Map", "Map"), ("Str", "String"), ("Int", "Int"), ("Float", "Float"), ("Bool", "Bool"), ("Char", "Char"), ("BigInt", "Int"), ("Present", "Option"), ("Failed", "Option")]
+    syntax :: "{read("crates/jet-foundation/src/Syntax.rs")}\n{read_rust_tree("crates/jet-foundation/src/Syntax")}"
+    values :: string_constant_values(&syntax, "")
+    out := BTreeSet<(String, String)>.new()
+    loop (start, end) in tuple_ranges(text) {
+        fields :: split_top_level(&text[start + 1..end - 1], ',')
+        if fields.len() >= 2 {
+            methods :: extract_quoted(fields[1])
+            loop (variant, owner) in variants {
+                if fields[0].contains("CtValue::{variant}") {
+                    loop method in &methods { _ :: out.insert((owner.to_string(), method.clone())) }
+                }
+            }
+            field := fields[0].trim() // #4303
+            if field == "v" {
+                loop (_, owner) in variants { loop method in &methods { _ :: out.insert((owner.to_string(), method.clone())) } }
+            }
+            if fields[0].contains("CtValue::Struct") {
+                rest := &text[end..] // #4303
+                guard := &rest[..rest.find("=>").unwrap_or(0)] // #4303
+                owners := string_equalities(guard, "type_name")
+                owners.extend(equality_constant_refs(guard, "type_name").into_iter().filter_map(fn(constant) -> values.get(&constant).cloned()))
+                if guard.contains("type_name.as_str()") {
+                    owners.extend(extract_quoted(guard).into_iter().filter(fn(owner) -> owner.chars().next().is_some_and(fn(ch) -> ch.is_ascii_uppercase())))
+                }
+                methods := extract_quoted(fields[1])
+                field := fields[1].trim() // #4303
+                if field == "method" {
+                    methods.extend(extract_quoted(guard).into_iter().filter(fn(method) -> method.chars().all(fn(ch) -> ch.is_ascii_lowercase() || ch == '_')))
+                }
+                loop owner in owners { loop method in &methods { _ :: out.insert((owner.clone(), method.clone())) } }
+            }
+        }
+    }
+    out
+}
+// Rust: tests/parity.rs:746
+pub fn guarded_static_methods(text: &String) -> BTreeSet<(String, String)> {
+    syntax :: "{read("crates/jet-foundation/src/Syntax.rs")}\n{read_rust_tree("crates/jet-foundation/src/Syntax")}"
+    values :: string_constant_values(&syntax, "")
+    out := BTreeSet<(String, String)>.new()
+    needle :: "if type_name == "
+    loop at in rust_code_occurrences(text, needle) {
+        after := &text[at + needle.len()..] // #4303
+        header :: match rust_header_before_block(after) { Some(header) -> header; None -> { continue } }
+        trimmed := header.trim_start() // #4303
+        owner :: match trimmed.strip_prefix('"') {
+            Some(quoted) -> quoted.find('"').map(fn(end) -> quoted[..end].to_string())
+            None -> {
+                token := trimmed.split_whitespace().next().unwrap_or_default() // #4303
+                token.rsplit("::").next().and_then(fn(constant) -> values.get(constant).cloned())
+            }
+        }
+        match owner {
+            Some(owner) -> {
+                methods := string_equalities(&header, "method")
+                match header.find("matches!(method,") { Some(at) -> methods.extend(extract_quoted(&header[at..])); None -> {} }
+                loop method in methods { _ :: out.insert((owner.clone(), method)) }
+            }
+            None -> {}
+        }
+    }
+    out
+}
+// Rust: tests/parity.rs:786
+pub fn ct_static_methods(text: &String) -> BTreeSet<(String, String)> {
+    out := BTreeSet<(String, String)>.new()
+    loop (owner, method) in extract_any_string_pairs(text) {
+        if owner.chars().next().is_some_and(fn(ch) -> ch.is_ascii_uppercase()) { _ :: out.insert((owner, method)) }
+    }
+    collections :: read("crates/jet-foundation/src/Collections.rs")
+    syntax :: "{read("crates/jet-foundation/src/Syntax.rs")}\n{read_rust_tree("crates/jet-foundation/src/Syntax")}"
+    receivers :: builtin_receivers(&collections, &syntax)
+    loop (method, _) in jet.Syntax.NUMERIC_CONVERSION_SOURCES {
+        loop (owner, ty) in &receivers { if ty.is_numeric() { _ :: out.insert((owner.clone(), method.to_string())) } }
+    }
+    out.extend(guarded_static_methods(text))
+    out
+}
+// Rust: tests/parity.rs:815
+pub fn ct_build_context_methods() -> BTreeSet<String> {
+    bridge :: read("crates/jet-comptime/src/Comptime/Build/runtime_bridge.rs")
+    methods := method_candidates(source_between(&bridge, "let result = match method {", Some("_ => return None.ok_or_else")))
+    dispatch :: "{read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs")}\n{read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch")}"
+    loop method in ["find", "fetch", "embed"] {
+        if dispatch.contains("method == \"{method}\"") || dispatch.contains("\"{method}\" =>") { _ :: methods.insert(method.to_string()) }
+    }
+    methods
+}
+// Rust: tests/parity.rs:837
+pub fn string_equalities(text: &String, subject: &String) -> BTreeSet<String> {
+    names := BTreeSet<String>.new()
+    needle :: "{subject} == \""
+    rest := text
+    loop {
+        at :: match rest.find(&needle) { Some(at) -> at; None -> { break } }
+        value := &rest[at + needle.len()..] // #4303
+        match value.find('"') {
+            Some(end) -> { _ :: names.insert(value[..end].to_string()); rest = &value[end + 1..] }
+            None -> { break }
+        }
+    }
+    names
+}
+// Rust: tests/parity.rs:853
+pub fn direct_dispatch_names(text: &String) -> BTreeSet<String> { string_equalities(text, "name") }
+// Rust: tests/parity.rs:857
+pub fn extract_any_string_pairs(text: &String) -> BTreeSet<(String, String)> {
+    out := BTreeSet<(String, String)>.new()
+    loop (start, end) in tuple_ranges(text) {
+        fields :: split_top_level(&text[start + 1..end - 1], ',')
+        if fields.len() >= 2 {
+            loop owner in extract_quoted(fields[0]) {
+                loop method in extract_quoted(fields[1]) { _ :: out.insert((owner.clone(), method)) }
+            }
+        }
+    }
+    out
+}
+// Rust: tests/parity.rs:872
+pub fn core_boundary(module: &String, method: &String) -> String? {
+    if EFFECT_GATED_MODULES.contains(module) { return Some("named comptime effect gate") }
+    if ["core.sys", "core.term", "core.web", "core.web.storage.local", "core.web.storage.session", "core.tasks", "core.watcher", "core.web.devserver", "core.crypto.uuid"].contains(module) { return Some("named ambient/native boundary") }
+    if module == "core.ui" && ["null_backend", "tui_backend", "gtk_backend", "reactive_render"].contains(method) { return Some("named ambient/native boundary") }
+    if module == "core.game.raylib" && ["begin_drawing", "clear_background", "close_window", "draw_rectangle", "draw_text", "end_drawing", "key_down", "set_target_fps", "window_open", "window_ready", "window_should_close"].contains(method) { return Some("named ambient/native boundary") }
+    if module == "core.testing" && ["corpus", "fixture", "golden", "snap", "temp_dir"].contains(method) { return Some("named testing filesystem boundary") }
+    if (module == "core.args" && method == "spec") || (module == "core.game" && method == "run") { return Some("named ambient runtime boundary") }
+    if ["core.event", "core.http.client", "core.http.server", "core.http.middleware", "core.net.ws", "core.mem", "core.mem.scope"].contains(module) { return Some("named runtime/native boundary") }
+    if (module.starts_with("core.encoding.") && ["reader", "writer"].contains(method)) || (module == "core.email" && ["smtp", "smtp_from_env"].contains(method)) || (module == "core.data" && ["csv_reader", "json_reader"].contains(method)) { return Some("named I/O handle boundary") }
+    if module == "core.time" && ["now", "now_utc", "today", "time", "instant", "sleep", "start"].contains(method) { return Some("named clock boundary") }
+    if module == "core.auth" && ["verify_jwt", "verify_paseto"].contains(method) { return Some("named native/security boundary") }
+    if module == "core.crypto.random" && method == "bytes" { return Some("named native/security boundary") }
+    if module == "core.crypto.expert" && ["open_v1", "migrate_v1"].contains(method) { return Some("named native/security boundary") }
+    if module == "core.crypto.vault" { return Some("named native/security boundary") }
+    if module == "core.time" && (method == "today" || method == "now") { return Some("named clock boundary") }
+    if module == "core.time.expiring" && method == "new" { return Some("named E1004 retired spelling boundary") }
+    None
+}
+// Rust: tests/parity.rs:981
+pub fn value_boundary(owner: &String) -> String? {
+    if owner == "Instant" { return Some("named clock boundary") }
+    if owner == "Clock" { return Some("named clock boundary") }
+    if owner == "ExpiringValue" { return Some("named expiry runtime boundary") }
+    if ["Secret", "WrappedVaultKey"].contains(owner) { return Some("named native/security boundary") }
+    if ["Signal", "Shared", "Effect", "Computed", "Derived", "DecisionHook"].contains(owner) { return Some("named reactive runtime boundary") }
+    if ["Task", "Receiver", "Sender", "Event", "AsyncEvent", "DispatchReport", "Hook", "Subscription", "EventScope", "EventTrace", "WatchHandle", "WatchSet", "SigningKey", "X25519SecretKey", "VerifyKey", "X25519PublicKey", "Signature", "Sealed", "WrappedKey", "Digest256", "Digest512", "PasswordHash"].contains(owner) { Some("named runtime/native handle boundary") } else { None }
+}
+// Rust: tests/parity.rs:1031
+pub fn value_method_boundary(owner: &String, method: &String) -> String? {
+    match (owner, method) {
+        ("List" | "FixedList", "view") -> Some("named E0214 retired spelling boundary")
+        ("FixedList", "insert") -> Some("named E0964 fixed-length boundary")
+        ("Float", "origin") -> Some("named float-debug tracking boundary")
+        ("Stopwatch", "elapsed_millis") -> Some("named clock boundary")
+        _ -> None
+    }
+}
+// Rust: tests/parity.rs:1041
+pub fn comptime_sequence_methods() -> BTreeSet<String> {
+    source :: read("crates/jet-comptime/src/Comptime/SequenceParity.rs")
+    method_candidates(source_between(&source, "if !matches!(", Some("return None;")))
+}
+// Rust: tests/parity.rs:1050
+pub fn discover_inventory() -> BTreeSet<Entry> {
+    fixed_src :: read("crates/jet-sema/src/Sema/CheckerCoreLib/fixed_sigs.rs")
+    bespoke_src :: read("crates/jet-sema/src/Sema/CheckerCoreLib/core_call.rs")
+    fixed :: extract_pairs(&fixed_src)
+    core_all :: extract_pairs(&bespoke_src)
+    entries := BTreeSet<Entry>.new()
+    loop (module, method) in &fixed {
+        if EXTRACTOR_ARTIFACTS.contains(&(module.as_str(), method.as_str())) { continue }
+        _ :: entries.insert(Entry { surface: Surface.Fixed, owner: module.clone(), method: method.clone() })
+    }
+    loop (module, method) in core_all.difference(&fixed) {
+        _ :: entries.insert(Entry { surface: Surface.Bespoke, owner: module.clone(), method: method.clone() })
+    }
+    syntax_src :: "{read("crates/jet-foundation/src/Syntax.rs")}\n{read_rust_tree("crates/jet-foundation/src/Syntax")}"
+    values :: string_constant_values(&syntax_src, "")
+    direct_src :: read("crates/jet-sema/src/Sema/CheckerInfer/calls/direct_calls.rs")
+    direct_aot := builtin_constant_refs(&direct_src)
+    direct_aot.extend(equality_constant_refs(&direct_src, "call.name").into_iter().filter(fn(constant) -> constant.starts_with("TYPE_") || constant == "RESOURCE_CLOSE"))
+    loop constant in direct_aot {
+        spelling :: values.get(&constant).cloned().unwrap_or_else(fn() -> constant.clone())
+        _ :: entries.insert(Entry { surface: Surface.DirectStatic, owner: "direct", method: spelling })
+    }
+    math_src :: read("crates/jet-sema/src/Sema/CheckerCoreLib/math_layout.rs")
+    math_types :: math_src.split("pub fn math_scalar_ty").next().map(extract_quoted).unwrap_or_default()
+    loop name in math_types.into_iter().filter(fn(name) -> name.chars().next().is_some_and(fn(ch) -> ch.is_ascii_uppercase())) {
+        _ :: entries.insert(Entry { surface: Surface.DirectStatic, owner: "direct", method: name })
+    }
+    entries.extend(aot_collection_methods())
+    entries.extend(aot_special_collection_constructors())
+    entries.extend(aot_specialized_value_methods())
+    entries
+}
+// Rust: tests/parity.rs:1121
+pub fn classify_inventory(discovered: &BTreeSet<Entry>) -> [Classified] [String]! {
+    core_dispatch_src :: read_rust_tree("crates/jet-comptime/src/Comptime")
+    builtin_dispatch_src :: read("crates/jet-comptime/src/Comptime/Builtins.rs")
+    dispatch_tree :: read_rust_tree("crates/jet-comptime/src/Comptime/Methods/dispatch")
+    dispatch_src :: "{read("crates/jet-comptime/src/Comptime/Methods/dispatch.rs")}\n{dispatch_tree}"
+    ct_core :: extract_pairs(&core_dispatch_src)
+    gaps: BTreeSet<(String, String)> :: KNOWN_OPEN_GAPS.iter().cloned().collect()
+    partials: BTreeSet<(String, String)> :: KNOWN_PARTIAL_GAPS.iter().cloned().collect()
+    syntax_src :: "{read("crates/jet-foundation/src/Syntax.rs")}\n{read_rust_tree("crates/jet-foundation/src/Syntax")}"
+    values :: string_constant_values(&syntax_src, "")
+    direct_ct := builtin_constant_refs(&dispatch_src)
+    direct_ct.extend(equality_constant_refs(&dispatch_src, "name"))
+    direct_names := direct_dispatch_names(&dispatch_src)
+    direct_names.extend(direct_ct.iter().filter_map(fn(constant) -> values.get(constant).cloned()))
+    ct_values := ct_value_methods(&core_dispatch_src)
+    core_pure_source :: read("crates/jet-comptime/src/Comptime/CorePureParity.rs")
+    core_pure_methods :: source_between(&core_pure_source, "pub(super) fn evaluate_method(", Some("fn one<'a>("))
+    ct_values.extend(extract_any_string_pairs(core_pure_methods).into_iter().filter(fn(pair) -> pair.0.chars().next().is_some_and(fn(ch) -> ch.is_ascii_uppercase())))
+    ct_statics := ct_static_methods(source_between(&builtin_dispatch_src, "pub fn apply_static_type_method(", Some("pub fn apply_mutating(")))
+    ct_statics.extend(guarded_static_methods(&dispatch_tree))
+    ct_build_context :: ct_build_context_methods()
+    sequence_methods :: comptime_sequence_methods()
+    view_methods: BTreeSet<String> :: ["contains", "first", "fold", "get", "index_of", "is_empty", "join", "last", "len", "map"].into_iter().collect()
+    errors: [String] := []
+    loop (module, method) in KNOWN_OPEN_GAPS {
+        pair_is_discovered :: discovered.iter().any(fn(entry) -> (entry.surface == Surface.Fixed || entry.surface == Surface.Bespoke) && entry.owner == module && entry.method == method)
+        if !pair_is_discovered { errors.push("stale pure_pending gap: {module}.{method} is no longer discovered") }
+        else if ct_core.contains(&(module.to_string(), method.to_string())) { errors.push("stale pure_pending gap: {module}.{method} is now comptime-covered") }
+    }
+    loop (module, method) in KNOWN_PARTIAL_GAPS {
+        pair :: (module.to_string(), method.to_string())
+        if !discovered.iter().any(fn(entry) -> (entry.surface == Surface.Fixed || entry.surface == Surface.Bespoke) && entry.owner == module && entry.method == method) {
+            errors.push("stale partial gap: {module}.{method} is no longer discovered")
+        } else if ct_core.contains(&pair) { errors.push("partial gap leaked into comptime dispatch: {module}.{method}") }
+    }
+    out: [Classified] := []
+    loop entry in discovered.iter().cloned() {
+        classified: (Class, String)? :: match entry.surface {
+            .Fixed | .Bespoke -> {
+                pair :: (entry.owner.clone(), entry.method.clone())
+                if partials.contains(&(entry.owner.as_str(), entry.method.as_str())) { Some((Class.PurePending, "explicit partial pure port")) }
+                else if ct_core.contains(&pair) { Some((Class.Covered, "comptime core dispatch")) }
+                else if gaps.contains(&(entry.owner.as_str(), entry.method.as_str())) { Some((Class.PurePending, "explicit pure port backlog")) }
+                else { core_boundary(&entry.owner, &entry.method).map(fn(reason) -> (Class.Boundary, reason)) }
+            }
+            .DirectStatic -> {
+                if entry.owner == "direct" {
+                    if ["print", "input"].contains(&entry.method) { Some((Class.Boundary, "named interactive I/O boundary")) }
+                    else if entry.method == "close" { Some((Class.Boundary, "named runtime resource boundary")) }
+                    else if direct_names.contains(&entry.method) { Some((Class.Covered, "comptime direct dispatch")) }
+                    else { None }
+                } else if ct_statics.contains(&(entry.owner.clone(), entry.method.clone())) { Some((Class.Covered, "comptime static dispatch")) }
+                else { match value_boundary(&entry.owner) { Some(reason) -> Some((Class.Boundary, reason)); None -> Some((Class.PurePending, "static method port pending")) } }
+            }
+            .Value -> {
+                owner :: if entry.owner == "FixedList" { "List" } else { &entry.owner }
+                erased_scalar_dispatch :: match entry.owner.as_str() {
+                    "I8" | "I16" | "I32" | "U8" | "U16" | "U32" | "U64" -> ["to_string", "count_ones", "count_zeros", "leading_zeros", "trailing_zeros"].contains(&entry.method) && ct_values.contains(&("Int", entry.method.clone()))
+                    "F32" -> ["is_nan", "is_infinite", "is_finite", "to_string"].contains(&entry.method) && ct_values.contains(&("Float", entry.method.clone()))
+                    _ -> false
+                }
+                match value_method_boundary(&entry.owner, &entry.method) {
+                    Some(reason) -> Some((Class.Boundary, reason))
+                    None -> {
+                        if owner == "BuildContext" && ct_build_context.contains(&entry.method) { Some((Class.Covered, "interpreter-owned build context dispatch")) }
+                        else if ["List", "FixedList", "Iter"].contains(&entry.owner) && sequence_methods.contains(&entry.method) { Some((Class.Covered, "comptime sequence dispatch")) }
+                        else if entry.owner == "Iter" && ["to_list", "collect", "len", "is_empty", "join", "map", "filter", "each", "find"].contains(&entry.method) { Some((Class.Covered, "comptime Iter dispatch")) }
+                        else if ["View", "ViewMut"].contains(&entry.owner) && view_methods.contains(entry.method.as_str()) { Some((Class.Covered, "comptime slice-view dispatch")) }
+                        else if erased_scalar_dispatch { Some((Class.Covered, "comptime scalar representation dispatch")) }
+                        else if ct_values.contains(&(owner.to_string(), entry.method.clone())) { Some((Class.Covered, "comptime value dispatch")) }
+                        else { match value_boundary(&entry.owner) { Some(reason) -> Some((Class.Boundary, reason)); None -> Some((Class.PurePending, "value method port pending")) } }
+                    }
+                }
+            }
+        }
+        match classified {
+            Some((class, reason)) -> out.push(Classified { entry, class, reason })
+            None -> errors.push("unclassified {entry.surface.name()} {entry.owner}.{entry.method}")
+        }
+    }
+    if errors.is_empty() { Ok(out) } else { Err(errors) }
+}
+// Rust: tests/parity.rs:1339
+pub fn render_inventory(records: &[Classified]) -> String {
+    lines: [String] := records.iter().map(fn(record) -> "{record.class.name()} | {record.entry.surface.name()} | {record.entry.owner}.{record.entry.method} | {record.reason}").collect()
+    lines.sort()
+    lines.join("\n") + "\n"
+}
+// Rust: tests/parity.rs:1357
+pub fn stable_hash(text: &String) -> U64 {
+    text.bytes().fold(0xcbf29ce484222325 as U64, fn(hash, byte) -> (hash ^ U64.from(byte)).wrapping_mul(0x100000001b3))
+}
+// Rust: tests/parity.rs:1363
+pub fn validate_records(discovered: &BTreeSet<Entry>, records: &[Classified]) -> Unit [String]! {
+    seen := BTreeSet<Entry>.new()
+    errors: [String] := []
+    loop record in records {
+        if !seen.insert(record.entry.clone()) { errors.push("duplicate classification: {record.entry.surface.name()} {record.entry.owner}.{record.entry.method}") }
+        if !discovered.contains(&record.entry) { errors.push("stale {record.class.name()} classification: {record.entry.surface.name()} {record.entry.owner}.{record.entry.method}") }
+    }
+    loop entry in discovered.difference(&seen) { errors.push("unclassified: {entry.surface.name()} {entry.owner}.{entry.method}") }
+    if errors.is_empty() { Ok(()) } else { Err(errors) }
+}
+// Rust: tests/parity.rs:1403
+pub fn record(records: &[Classified], surface: Surface, owner: &String, method: &String) -> &Classified {
+    records.iter().find(fn(record) -> record.entry.surface == surface && record.entry.owner == owner && record.entry.method == method).unwrap_or_else(fn() -> panic("missing {surface.name()} {owner}.{method}"))
+}
+
 

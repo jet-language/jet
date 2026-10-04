@@ -1,0 +1,48 @@
+use jet_foundation.Tests.Integration.Common as common
+use std.fs
+use std.process.Command
+// Rust: tests/print_branch_tiers.rs:1
+// I9: exact stdout bytes, not just successful exit, must agree across tiers.
+// Rust: tests/print_branch_tiers.rs:13
+PACKAGE_SOURCE :: "\nname: \"print_branch_tiers\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\n"
+// Rust: tests/print_branch_tiers.rs:24
+pub PRINT_PRIMITIVES :: "\nfn run() {{\n    print(1)\n    print(-7)\n    print(1 + 2)\n    print(true)\n    print(false)\n    print(1.5)\n    print(2.0)\n    print(\"s\")\n    print('c')\n    print(1, \"two\", 3)\n    x :: 3\n    print(x)\n    s :: \"text\"\n    print(s)\n    print(\"v={{x + 1}} b={{x > 2}} s={{s}}\")\n}}\n"
+// Rust: tests/print_branch_tiers.rs:44
+pub PRINT_PRIMITIVES_STDOUT :: "1\n-7\n3\ntrue\nfalse\n1.5\n2.0\ns\nc\n1\ntwo\n3\n3\ntext\nv=4 b=true s=text\n"
+// Rust: tests/print_branch_tiers.rs:52
+pub PRINTABLE_DISPLAY_VARIADIC :: "\nstruct D {{\n    value: Int\n}}\n\nstruct Pair {{\n    a: Int\n    b: Int\n}}\n\nfn align(left: D, right: D) -> Pair {{ Pair{{a: left.value, b: right.value}} }}\n\nimpl D.Add {{\n    fn add(self, rhs: D) -> D {{\n        pair :: align(self, rhs)\n        return D{{value: pair.a + pair.b}}\n    }}\n}}\n\nenum Envelope {{\n    Pair(left: D, right: D)\n}}\n\nstruct Shown {{\n    value: Int\n}}\n\nimpl Shown.Display {{\n    fn display(self) -> String {{ \"shown={{self.value}}\" }}\n}}\n\nfn mark(label: String, value: Int) -[IO]> D {{\n    print(label)\n    return D{{value: value}}\n}}\n\nfn run() {{\n    print(D{{value: 3}})\n    print(D{{value: 1}} + D{{value: 2}})\n    print(Envelope.Pair{{left: D{{value: 4}}, right: D{{value: 5}}}})\n    print(Shown{{value: 9}})\n    print(mark(\"left\", 1), mark(\"right\", 2))\n}}\n"
+// Rust: tests/print_branch_tiers.rs:97
+pub PRINTABLE_DISPLAY_VARIADIC_STDOUT :: "D {{ value: 3 }}\nD {{ value: 3 }}\nPair {{ left: D {{ value: 4 }}, right: D {{ value: 5 }} }}\nshown=9\nleft\nright\nD {{ value: 1 }}\nD {{ value: 2 }}\n"
+// Rust: tests/print_branch_tiers.rs:102
+pub BRANCH_SHAPES :: "\nfn plain(flag: Bool) {{\n    if flag {{ print(\"plain\") }}\n    print(\"after plain\")\n}}\n\nfn either(flag: Bool) {{\n    if flag {{ print(\"then\") }} else {{ print(\"else\") }}\n}}\n\nfn nested(outer: Bool, inner: Bool) {{\n    if outer {{\n        if inner {{ print(\"outer inner\") }} else {{ print(\"outer only\") }}\n    }} else {{\n        print(\"neither\")\n    }}\n}}\n\nfn pick(flag: Bool) -> Int {{\n    if flag -> 10 else -> 20\n}}\n\nfn count_odd(limit: Int) -> Int {{\n    odd := 0\n    loop i in 0..<limit {{\n        if i % 2 == 1 {{ odd += 1 }}\n    }}\n    odd\n}}\n\nfn early(n: Int) -> String {{\n    if n == 0 {{ return \"zero\" }}\n    \"nonzero\"\n}}\n\nfn run() {{\n    plain(true)\n    plain(false)\n    either(true)\n    either(false)\n    nested(true, true)\n    nested(true, false)\n    nested(false, true)\n    print(pick(true))\n    print(pick(false))\n    print(count_odd(7))\n    print(early(0))\n    print(early(3))\n}}\n"
+// Rust: tests/print_branch_tiers.rs:153
+pub BRANCH_SHAPES_STDOUT :: "plain\nafter plain\nafter plain\nthen\nelse\nouter inner\nouter only\nneither\n10\n20\n3\nzero\nnonzero\n"
+// Rust: tests/print_branch_tiers.rs:161
+pub LOCAL_BINDINGS :: "\nfn run() {{\n    n :: 3\n    print(n)\n    f :: Float{{1.5}}\n    print(f)\n    s :: \"text\"\n    print(s)\n    flag :: true\n    print(flag)\n    m := 10\n    m += 5\n    m = m + n\n    print(m)\n    print(n + m)\n}}\n"
+// Rust: tests/print_branch_tiers.rs:179
+pub LOCAL_BINDINGS_STDOUT :: "3\n1.5\ntext\ntrue\n18\n21\n"
+// Rust: tests/print_branch_tiers.rs:186
+pub VALUE_IF :: "\nfn show(label: String) {{ print(label) }}\n\nfn band(n: Int) -> Int {{\n    if n < 0 -> 1 else if n == 0 -> 2 else -> 3\n}}\n\nfn run() {{\n    x :: if true -> 1 else -> 2\n    print(x)\n    print(if false -> \"a\" else -> \"b\")\n    print(band(-4))\n    print(band(0))\n    print(band(9))\n    show(\"param ok\")\n}}\n"
+// Rust: tests/print_branch_tiers.rs:204
+pub VALUE_IF_STDOUT :: "1\nb\n1\n2\n3\nparam ok\n"
+// Rust: tests/print_branch_tiers.rs:235
+pub fn assert_cli_tiers_agree(name: String, src: String, expected_stdout: String) -> {
+    root :: common.unique_tmp("jet_print_branch_tiers_{name}")
+    _ :: fs.create_dir_all(&root).unwrap()
+    _ :: fs.write(root.join("package.jet"), PACKAGE_SOURCE).unwrap()
+    _ :: fs.write(root.join("run.jet"), src).unwrap()
+    release :: common.have_rustc()
+    if !release { eprintln("note: skipping the AOT tier of {name} (need rustc)") }
+    modes :: [("default", []), ("interpret", ["--interpret"]), ("release", ["--release"])]
+    for (mode, flags) in modes {
+        if mode == "release" && !release { continue }
+        cache :: root.join("cache-{mode}")
+        // GATE #4494: native process invocation.
+        output :: Command.new(env("CARGO_BIN_EXE_jet")).arg("run").args(flags).arg("run.jet").current_dir(&root).env("JET_STORE_DIR", &cache).env("JETPACK_ENV", "1").env("NO_COLOR", "1").output().unwrap()
+        stdout :: String.from_utf8_lossy(&output.stdout)
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert_eq(output.status.code(), Some(0), "{name}: {mode} run failed:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+        assert_eq(stdout, expected_stdout, "{name}: {mode} stdout")
+    }
+    _ :: fs.remove_dir_all(root)
+}

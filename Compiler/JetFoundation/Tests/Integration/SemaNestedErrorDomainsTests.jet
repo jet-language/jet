@@ -1,0 +1,323 @@
+use Compiler.JetFoundation.Tests.Integration.SemaNestedErrorDomains.[NESTED_ERROR_DOMAINS]
+use Compiler.JetFoundation.Tests.Integration.SendFnMirLowering as send_fn
+use Compiler.JetFoundation.Tests.Integration.SimdWitness as simd
+use Compiler.JetFoundation.Tests.Integration.SingleUse.[LOCK, err_codes, codes_of]
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.MIR.[MirOptimizationDecision]
+use core.fs as fs
+use std.env
+use jet
+
+// Rust: tests/sema_nested_error_domains.rs:131
+#Test("nested_error_domains_agree_across_execution_tiers") {
+    tir_support.assert_release_tiers_agree("nested_error_domains", NESTED_ERROR_DOMAINS, "matching value\nmatching nested\nnever\nimplicit value\nhandled default\nconversion value\nconverted\n")
+}
+// Rust: tests/sema_soundness.rs:9
+#Test("knowledge_loss_requires_a_spelled_gate") {
+    rejects :: (source: String, code: String) -> {
+        diagnostics :: jet.compile(source).expect_err("source must be rejected by sema")
+        assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == code), "expected {code}, got {diagnostics:?}")
+    }
+    rejects("""
+fn accept_f32(value: F32) {}
+fn run() {
+    value :: Float.{1.0}
+    accept_f32(value)
+}
+""", "E0112")
+    rejects("""
+#Numeric Severity :: distinct Int(0..10)
+fn run() {
+    left :: Severity.from_int(4)
+    right :: Severity.from_int(5)
+    total :: left + right
+    print(total)
+}
+""", "E0156")
+    rejects("""
+fn accept_int(value: Int) {}
+fn run() {
+    bounded :: Int(0..10).from_int(4)
+    accept_int(bounded)
+}
+""", "E0156")
+    rejects("""
+fn run() {
+    bounded :: Int(0..10).from_int(4)
+    negated :: -bounded
+    print(negated)
+}
+""", "E0156")
+    rejects(fs.read_to_string(env.manifest_dir().join("tests/ui/quantity_implicit_rounding.jet")).unwrap(), "E0127")
+    rejects(fs.read_to_string(env.manifest_dir().join("tests/ui/typestate_wrong_state.jet")).unwrap(), "E0150")
+    rejects(fs.read_to_string(env.manifest_dir().join("tests/ui/taint_sink_unsanitized.jet")).unwrap(), "E0721")
+}
+// Rust: tests/sema_soundness.rs:80
+#Test("inline_range_runtime_conversion_requires_try") {
+    diagnostics :: jet.compile(fs.read_to_string(env.manifest_dir().join("tests/ui/inline_range_runtime_needs_try.jet")).unwrap()).expect_err("runtime inline range conversion must be rejected")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0136"), "expected E0136, got {diagnostics:?}")
+}
+// Rust: tests/send_fn_mir_lowering.rs:98
+#Test("app_handlers_lower_to_verified_mir") {
+    send_fn.assert_lowers_on_every_tier("app_handlers", send_fn.APP_HANDLERS)
+}
+// Rust: tests/send_fn_mir_lowering.rs:103
+#Test("named_interrupt_callback_lowers_to_verified_mir") {
+    send_fn.assert_lowers_on_every_tier("named_interrupt", send_fn.NAMED_INTERRUPT_CALLBACK)
+}
+// Rust: tests/simd_witness.rs:216
+#Test("default_float_loop_is_packed_and_scalar_marker_is_a_hard_opt_out") {
+    optimized :: simd.lower_checked(simd.SOURCE)
+    auto :: simd.mir_function(&optimized, "auto")
+    scalar :: simd.mir_function(&optimized, "scalar")
+    fact :: auto.optimization.vector_facts.iter().find((fact) -> fact.decision.is_eligible()).unwrap_or_else(() -> panic("default Float loop must retain an eligible vector fact: {auto.optimization.vector_facts:?}"))
+    assert(fact.lane_width == .Val(2) || fact.lane_width == .Val(4))
+    assert(scalar.optimization.vector_facts.iter().all((fact) -> !fact.decision.is_eligible()))
+    assert(scalar.optimization.vector_facts.iter().any((fact) -> fact.decision is MirOptimizationDecision.Rejected(_)))
+}
+// Rust: tests/simd_witness.rs:245
+#Test("default_and_scalar_float_witnesses_print_identical_values_on_every_tier") {
+    expected :: "3.0\n5.0\n7.0\n9.0\n3.0\n5.0\n7.0\n9.0\n"
+    (jit_code, jit_stdout, jit_stderr) :: tir_support.jit_run("simd_default_scalar", simd.SOURCE)
+    assert_eq(jit_code, 0, "default run failed: {jit_stderr}")
+    assert_eq(jit_stdout, expected)
+    (interpreter_code, interpreter_stdout, interpreter_stderr) :: tir_support.interpreter_run("simd_default_scalar", simd.SOURCE)
+    assert_eq(interpreter_code, jit_code, "interpreter failed: {interpreter_stderr}")
+    assert_eq(interpreter_stdout, expected)
+    if tir_support.have_rustc() {
+        (aot_code, aot_stdout, aot_stderr) :: tir_support.build_and_run_full("jet_simd_witness", "simd_default_scalar", simd.SOURCE)
+        assert_eq(aot_code, jit_code, "AOT failed: {aot_stderr}")
+        assert_eq(aot_stdout, expected)
+    }
+    if tir_support.have_rustc() { simd.assert_native_simd_artifact(expected) }
+    simd.assert_web_simd_artifacts_run(expected)
+}
+// Rust: tests/single_use.rs:37
+#Test("consumed_once_compiles") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    release(^db)
+}
+""")
+    assert(codes.is_empty(), "expected clean compile, got {codes:?}")
+}
+// Rust: tests/single_use.rs:51
+#Test("returned_value_is_consumed") {
+    codes :: err_codes("""
+fn make() -> Lock {
+    db :: acquire("db")
+    return db
+}
+fn run() {
+    held :: make()
+    release(^held)
+}
+""")
+    assert(codes.is_empty(), "return should consume, got {codes:?}")
+}
+// Rust: tests/single_use.rs:69
+#Test("passthrough_moves_the_duty") {
+    codes :: err_codes("""
+fn hold(lock: ^Lock) -> Lock { return lock }
+fn run() {
+    db :: acquire("db")
+    held :: hold(^db)
+    release(^held)
+}
+""")
+    assert(codes.is_empty(), "passthrough should be clean, got {codes:?}")
+}
+// Rust: tests/single_use.rs:91
+#Test("dropped_is_e0140") {
+    codes :: err_codes("""
+fn run() { db :: acquire("db") }
+""")
+    assert(codes.contains("E0140"), "expected E0140, got {codes:?}")
+}
+// Rust: tests/single_use.rs:108
+#Test("one_branch_is_e0141") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    early :: true
+    if early { release(^db) }
+}
+""")
+    assert(codes.contains("E0141"), "expected E0141, got {codes:?}")
+    assert(!codes.contains("E0140"), "E0141 should not double-report as E0140: {codes:?}")
+}
+// Rust: tests/single_use.rs:135
+#Test("both_branches_consume_is_clean") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    early :: true
+    if early { release(^db) } else { release(^db) }
+}
+""")
+    assert(codes.is_empty(), "both-branch consume should be clean, got {codes:?}")
+}
+// Rust: tests/single_use.rs:158
+#Test("used_twice_is_e0121") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    release(^db)
+    release(^db)
+}
+""")
+    assert(codes.contains("E0121"), "expected E0121, got {codes:?}")
+}
+// Rust: tests/single_use.rs:177
+#Test("aliased_is_e0142") {
+    codes :: err_codes("""
+fn peek(lock: Lock) { print(lock.resource) }
+fn run() {
+    db :: acquire("db")
+    peek(db)
+    release(^db)
+}
+""")
+    assert(codes.contains("E0142"), "expected E0142, got {codes:?}")
+}
+// Rust: tests/single_use.rs:202
+#Test("drop_inside_unsafe_block_satisfies_single_use") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    #Unsafe("the resource is already gone; nothing to release") { consume(db) }
+}
+""")
+    assert(codes.is_empty(), "audited drop should compile, got {codes:?}")
+}
+// Rust: tests/single_use.rs:223
+#Test("drop_inside_unsafe_fn_satisfies_single_use") {
+    codes :: err_codes("""
+#Unsafe("voids a freshly-acquired lock whose resource is already gone")
+fn void_one() {
+    db :: acquire("db")
+    consume(db)
+}
+fn run() {
+    #Unsafe("calling the audited voider") { void_one() }
+}
+""")
+    assert(codes.is_empty(), "drop in #Unsafe fn should compile, got {codes:?}")
+}
+// Rust: tests/single_use.rs:248
+#Test("drop_outside_unsafe_is_e0143") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    consume(db)
+}
+""")
+    assert(codes.contains("E0143"), "expected E0143, got {codes:?}")
+    assert(!codes.contains("E0140"), "E0143 should not also report E0140: {codes:?}")
+}
+// Rust: tests/single_use.rs:272
+#Test("reuse_after_drop_is_e0121") {
+    codes :: err_codes("""
+fn run() {
+    db :: acquire("db")
+    #Unsafe("done with it") { consume(db) }
+    release(^db)
+}
+""")
+    assert(codes.contains("E0121"), "expected E0121 after drop, got {codes:?}")
+}
+// Rust: tests/single_use.rs:293
+#Test("user_drop_fn_shadows_builtin") {
+    codes :: err_codes("""
+fn drop(n: Int) -> Int { return n + 1 }
+fn run() {
+    db :: acquire("db")
+    release(^db)
+    x :: drop(41)
+    print("{x}")
+}
+""")
+    assert(codes.is_empty(), "user `drop` fn should shadow the builtin, got {codes:?}")
+}
+// Rust: tests/single_use.rs:316
+#Test("drop_erases_no_unsafe_in_codegen") {
+    body :: """
+fn run() {
+    db :: acquire("db")
+    #Unsafe("gone") { consume(db) }
+}
+"""
+    src :: "{LOCK}\n{body}"
+    out :: jet.compile(&src).expect("should compile")
+    assert(out.rust.contains("drop("), "consume should lower to a Rust drop(...) call")
+}
+// Rust: tests/single_use.rs:330
+#Test("single_use_enum_dropped_is_e0140") {
+    src :: """
+#SingleUse enum Ticket {
+    Open
+    Closed
+}
+fn make() -> Ticket { return Ticket.Open }
+fn close(t: ^Ticket) { print("closed") }
+fn run() { t :: make() }
+"""
+    codes :: codes_of(src)
+    assert(codes.contains("E0140"), "expected E0140 for enum, got {codes:?}")
+}
+// Rust: tests/single_use.rs:357
+#Test("tag_erases_in_codegen") {
+    body :: """
+fn run() {
+    db :: acquire("db")
+    release(^db)
+}
+"""
+    src :: "{LOCK}\n{body}"
+    out :: jet.compile(&src).expect("should compile")
+    assert(!common.strip_vetted_prelude_modules(&out.rust).contains("unsafe"), "I1: no unsafe in generated code")
+    assert(!out.rust.contains("SingleUse"), "tag must erase, found SingleUse in output")
+    assert(out.rust.contains("struct __jet_Lock"), "Lock should lower to a plain struct")
+}
+// Rust: tests/single_use.rs:385
+#Test("task_handles_owe_join_or_detach") {
+    dropped :: codes_of("""
+fn run() {
+    handle :: task 42
+    print("done")
+}
+""")
+    assert(dropped.contains("L1101"), "a bound handle that is never discharged must report L1101, got {dropped:?}")
+    discarded :: codes_of("""
+fn run() {
+    _ :: task 42
+    print("done")
+}
+""")
+    assert(discarded.contains("L1101"), "discarding a handle into `_` is still dropping it, got {discarded:?}")
+    join_source :: """
+fn run() {
+    handle :: task 42
+    print(handle.join() ?? 0)
+}
+"""
+    detach_source :: """
+fn run() {
+    handle :: task 42
+    handle.detach()
+}
+"""
+    unbound_source :: """
+fn work() -> Int { 7 }
+fn run() {
+    task work()
+    print("spawned")
+}
+"""
+    for (label, src) in [("join", join_source), ("detach", detach_source), ("unbound spawn", unbound_source)] {
+        codes :: codes_of(src)
+        assert(!codes.contains("L1101"), "{label} discharges the duty, so no L1101 belongs here; got {codes:?}")
+    }
+}

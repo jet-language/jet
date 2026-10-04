@@ -1,0 +1,290 @@
+use AgentWorkloads.*
+use std.fs
+use jet.SHA256
+
+// Rust: tests/agent_workloads.rs:1246
+#Test("recorded_baselines_cover_frozen_tasks") {
+    root :: corpus_root().join("baselines")
+    receipt :: fs.read_to_string(root.join("receipt.tsv")).unwrap()
+    lines := receipt.lines()
+    assert_eq(lines.next(), Val(BASELINE_HEADER), "baseline schema drifted")
+    tasks :: read_tasks()
+    // GATE #4499: tuple keys preserve equality without string encoding.
+    seen := Set<(String, String)>.new()
+    run_id := None
+    machine := None
+    for line in lines.filter((line) -> !line.is_empty()) {
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 23, "bad baseline receipt row: {line}")
+        assert_eq(fields[0], "1", "unsupported baseline receipt version: {line}")
+        assert(BASELINE_ADAPTERS.contains(fields[3]), "unknown baseline adapter: {line}")
+        task :: tasks.iter().find((task) -> task.id == fields[4]).unwrap_or_else(() -> panic("baseline names unknown task: {line}"))
+        assert(seen.insert((fields[3].to_string(), fields[4].to_string())), "duplicate baseline row: {line}")
+        if run_id == Val(previous) { assert_eq(previous, fields[1], "baseline mixes run IDs") }
+        else { run_id = Val(fields[1]) }
+        if machine == Val(previous) { assert_eq(previous, fields[2], "baseline mixes machines") }
+        else { machine = Val(fields[2]) }
+        assert(!fields[1].is_empty() && !fields[2].is_empty())
+        assert(fields[21] != "" && fields[21] != "unknown")
+        assert_eq(fields[22], policy_digest(), "baseline policy digest drifted: {line}")
+        assert_eq(fields[7], input_digest(&corpus_root().join(&task.input)))
+        expected :: fs.read(corpus_root().join(&task.expected)).unwrap()
+        assert_eq(fields[8], SHA256.sha256_hex(&expected))
+        assert_eq(fields[10].parse::<USize>().unwrap().to_string(), fields[10])
+        assert(fields[15].parse::<U128>().is_ok())
+        assert(fields[16].parse::<U128>().is_ok())
+        assert_eq(fields[20], DOMAIN_SCORING)
+        if fields[5] == {
+            "supported" -> {
+                assert_eq(fields[6], "none")
+                assert_eq(fields[9], "0")
+                assert_eq(fields[19], "true")
+                stdout :: fs.read(baseline_artifact_path(&root, fields[11]).unwrap_or_else((error) -> panic("{error}"))).unwrap()
+                stderr :: fs.read(baseline_artifact_path(&root, fields[13]).unwrap_or_else((error) -> panic("{error}"))).unwrap()
+                assert_eq(stdout, expected, "baseline stdout drifted: {line}")
+                assert_eq(fields[12], SHA256.sha256_hex(&stdout))
+                assert_eq(fields[14], SHA256.sha256_hex(&stderr))
+                assert_eq(fields[17], fields[12])
+            }
+            "unsupported" -> {
+                assert_ne(fields[6], "none", "unsupported baseline lacks finding: {line}")
+                assert_eq(fields[11], "-")
+                assert_eq(fields[13], "-")
+            }
+            other -> panic("unknown baseline expressibility {other}: {line}")
+        }
+    }
+    assert_eq(seen.len(), tasks.len() * BASELINE_ADAPTERS.len(), "baseline omitted a frozen task or adapter")
+}
+// Rust: tests/agent_workloads.rs:1343
+#Test("policy_digest_covers_authority_and_receipt_contract") {
+    digest :: policy_digest()
+    receipt :: policy_receipt(&digest)
+    contract_fields :: POLICY_CONTRACT.lines().collect()
+    assert_eq(contract_fields.len(), POLICY_FIELDS.len())
+    for (line, name) in contract_fields.iter().zip(POLICY_FIELDS) {
+        assert(line.starts_with("{name}="), "policy field drifted: {line}")
+    }
+    for field in ["digest={digest}", "plan={policy_field("plan")}", "launch_transaction={policy_field("launch_transaction")}", "descendants={policy_field("descendants")}", "limits={policy_field("limits")}", "outputs={policy_field("outputs")}", "receipt={policy_field("receipt")}", "authority={policy_field("authority")}"] {
+        assert(receipt.contains(&field), "policy receipt lost {field}")
+    }
+    assert(validate_authority(policy_field("authority")).is_ok())
+    assert(validate_authority("argv=input-root;cwd=scratch;host=ambient;network=denied;external-write=unmeasured").is_err())
+    assert(validate_authority("argv=input-root;cwd=scratch;host=ambient;network=unmeasured;external-write=denied").is_err())
+}
+// Rust: tests/agent_workloads.rs:1378
+#Test("receipt_artifact_paths_reject_escape_attempts") {
+    root :: OSPath("/corpus/baselines")
+    assert(baseline_artifact_path(root, "outputs/bash/task.stdout").is_ok())
+    for path in ["/etc/passwd", "../outside", "outputs//task", "outputs/../task", "outputs/./task", "..\\outside", "C:\\outside"] {
+        assert(baseline_artifact_path(root, path).is_err(), "accepted {path}")
+    }
+}
+// Rust: tests/agent_workloads.rs:1398
+#Test("corpus_fixture_paths_reject_escape_attempts") {
+    assert(validate_corpus_relative_path("inputs/repository").is_ok())
+    for path in ["", "/etc/passwd", "../outside", "inputs/../outside", "..\\outside", "C:\\outside", "inputs//repository", "inputs/./repository"] {
+        assert(validate_corpus_relative_path(path).is_err(), "accepted {path}")
+    }
+}
+// Rust: tests/agent_workloads.rs:1418
+#Test("manifest_is_complete_frozen_and_non_vacuous") {
+    hostile_cases :: SANDBOX_HOSTILE_CORPUS.lines().filter((line) -> !line.is_empty() && !line.starts_with('#')).map((line) -> line.split('\t').collect()).collect()
+    assert_eq(hostile_cases.len(), 7)
+    for row in hostile_cases {
+        assert_eq(row.len(), 4, "malformed shared sandbox hostile corpus row")
+        assert_eq(row[3], "blocked-or-unsupported")
+    }
+    tasks :: read_tasks()
+    actual :: tasks.iter().map((task) -> (task.id, task.domain, task.case, task.outcome)).collect()
+    assert_eq(actual, EXPECTED_TASKS, "task removed, added, or reclassified")
+    ids := Set<String>.new()
+    task_ids :: tasks.iter().map((task) -> task.id).collect::<Set<String>>()
+    for task in tasks {
+        assert(ids.insert(task.id), "duplicate task ID {task.id}")
+        assert_eq(task.authority, policy_field("authority"))
+        validate_authority(&task.authority).unwrap_or_else((error) -> panic("{error}"))
+        assert_eq(task.adapters, "jet,bash,python,node")
+        assert_eq(task.platforms, "linux=native;macos=native;windows=unavailable:bash-not-native")
+        assert_eq(task.evidence, "tests/agent_workloads.rs::equivalent_adapters_complete_declared_tasks")
+        assert_eq(task.tower_card, "#769")
+        assert_eq(task.loss_cards, "default-run=#688;wall-time=#666")
+        assert(corpus_root().join(&task.input).exists())
+        assert(corpus_root().join(&task.expected).is_file())
+        if ["build-test-failure-recovery", "process-batch-large-stderr", "process-batch-timeout-recovery", "browser-automation-preflight", "desktop-interaction-focus", "document-markdown-inspection", "media-asset-inventory", "mcp-environment-denied", "interactive-terminal-closed", "service-lifecycle-readiness-timeout"].contains(task.id) {
+            input :: corpus_root().join(&task.input)
+            if task.id == {
+                "build-test-failure-recovery" -> {
+                    for invalid in ["invalid.jet", "invalid.sh", "invalid.py", "invalid.mjs"] {
+                        source :: fs.read_to_string(input.join(invalid)).unwrap()
+                        assert(source.contains("fn run( {") || source.contains("if then") || source.contains("def run(:") || source.contains("function run( {"), "build recovery lost hostile source {invalid}")
+                    }
+                }
+                "process-batch-large-stderr" -> {
+                    source :: fs.read_to_string(input).unwrap()
+                    assert(source.contains("100000") && source.contains(">&2"), "large-stderr task lost hostile output pressure")
+                }
+                "process-batch-timeout-recovery" -> {
+                    source :: fs.read_to_string(input).unwrap()
+                    assert(source.contains("trap '' TERM") && source.contains("50"), "timeout task lost TERM-resistant cancellation case")
+                }
+                else -> {
+                    expected :: fs.read_to_string(corpus_root().join(&task.expected)).unwrap()
+                    hostile :: if task.id == {
+                        "desktop-interaction-focus" -> expected.lines().any((line) -> line == "event|Empty|observed")
+                        "browser-automation-preflight" -> expected.lines().any((line) -> line.ends_with("|rejected"))
+                        "mcp-environment-denied" -> expected.lines().any((line) -> line == "error=-32002")
+                        "interactive-terminal-closed" -> expected.lines().any((line) -> line == "closed=ok")
+                        "service-lifecycle-readiness-timeout" -> expected.lines().any((line) -> line == "error=E1261")
+                        else -> expected.lines().any((line) -> line.starts_with("reject|"))
+                    }
+                    assert(hostile, "target task {task.id} lost its hostile variant")
+                }
+            }
+        }
+        stem :: adapter_stem(&task.id)
+        for (_, extension) in ADAPTERS {
+            source :: "{stem}.{extension}"
+            assert(corpus_root().join("adapters").join(&source).is_file(), "missing adapter {source}")
+        }
+    }
+    contracts :: read_domain_contract()
+    actual_contract :: contracts.iter().map((contract) -> (contract.task_id, contract.allowed_dependencies, contract.machine_spec, contract.variant)).collect()
+    assert_eq(actual_contract, EXPECTED_DOMAIN_CONTRACT, "domain contract changed without a frozen task review")
+    for contract in contracts {
+        assert(task_ids.contains(contract.task_id), "domain contract names unknown task {contract.task_id}")
+        assert_eq(contract.scoring, DOMAIN_SCORING)
+    }
+    sums :: fs.read_to_string(corpus_root().join("SHA256SUMS")).unwrap()
+    verified :: verify_checksum_closure(&corpus_root(), &sums).unwrap()
+    assert_eq(verified, 82, "all inputs and declared outputs must be frozen")
+}
+// Rust: tests/agent_workloads.rs:1577
+#Test("compiled_workload_contract_reuses_agent_schema_and_keeps_hosted_rows") {
+    manifest :: read_compiled_workload_tsv("manifest.tsv", HEADER, 13)
+    task_ids :: manifest.iter().map((row) -> row[1]).collect::<Set<String>>()
+    assert_eq(manifest.len(), task_ids.len())
+    assert_eq(task_ids, Set.from(["systems-file-index", "service-json-http", "cli-archive-filter", "library-json-roundtrip", "compute-mandelbrot", "embedded-sensor-ring", "cross-platform-notes"]))
+    for row in manifest {
+        assert_eq(row[0], "1")
+        assert_eq(row[11], "#1414")
+        assert_eq(row[12], "#2414")
+        validate_corpus_relative_path(&row[5]).unwrap()
+        validate_corpus_relative_path(&row[6]).unwrap()
+        input :: compiled_workload_root().join(&row[5])
+        expected :: compiled_workload_root().join(&row[6])
+        if row[1] == "systems-file-index" { assert(input.is_dir(), "systems input must be a directory") }
+        else { assert(input.is_file(), "{row[1]} input must be a file") }
+        assert(expected.is_file(), "{row[1]} expected output must be a file")
+    }
+    systems :: manifest.iter().find((row) -> row[1] == "systems-file-index").expect("systems task must stay declared")
+    assert_eq(systems[5], "fixtures/systems-file-index/input")
+    assert_eq(systems[7], "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled")
+    for (task_id, authority) in [("service-json-http", "argv=input-root;cwd=scratch;host=ambient;network=loopback-only;external-write=disabled"), ("cli-archive-filter", "argv=input-root;cwd=scratch;host=ambient;network=disabled;external-write=disabled")] {
+        row :: manifest.iter().find((row) -> row[1] == task_id).unwrap_or_else(() -> panic("{task_id} manifest row missing"))
+        assert_eq(row[7], authority)
+    }
+    adapters :: read_compiled_workload_tsv("adapter_ledger.tsv", "version\ttask_id\tjet_source\tjet_hostile\tpeer_source\tpeer_hostile\tpeer_commit", 7)
+    assert_eq(adapters.len(), manifest.len())
+    assert_eq(adapters.iter().map((row) -> row[1]).collect::<Set<String>>(), task_ids)
+    for row in adapters {
+        assert_eq(row[0], "1")
+        validate_corpus_relative_path(&row[2]).unwrap()
+        validate_corpus_relative_path(&row[3]).unwrap()
+        validate_corpus_relative_path(&row[4]).unwrap()
+        validate_corpus_relative_path(&row[5]).unwrap()
+        for path in row[2..6] {
+            path :: compiled_workload_root().join(path)
+            assert(path.is_file() || path.is_dir(), "adapter path is missing: {path.display()}")
+        }
+        assert_eq(row[3], row[5], "hostile path drifted between adapters")
+        assert_eq(row[6].len(), 40)
+    }
+    systems_adapter :: adapters.iter().find((row) -> row[1] == "systems-file-index").expect("systems adapter must stay declared")
+    assert_eq(systems_adapter[3], "fixtures/systems-file-index/hostile")
+    assert_eq(systems_adapter[5], "fixtures/systems-file-index/hostile")
+    peers :: read_compiled_workload_tsv("peer_ledger.tsv", "version\ttask_id\tselection\tlanguage\tprogram\tsource_url\tsource_revision\tbuild_command\trun_command\tdependency_rule\tsource_boundary\tapplicable_targets\towner", 13)
+    selected :: peers.iter().filter((row) -> row[2] == "best-applicable").collect()
+    assert_eq(selected.len(), manifest.len())
+    assert_eq(selected.iter().map((row) -> row[3]).collect::<Set<String>>(), Set.from(["cxx", "domain", "go", "rust", "zig"]))
+    assert(peers.iter().any((row) -> row[2] == "candidate" && row[3] == "cxx"), "C++ must remain represented in the declared peer ledger")
+    assert_eq(selected.iter().map((row) -> row[1]).collect::<Set<String>>(), task_ids)
+    for adapter in adapters {
+        peer :: selected.iter().find((row) -> row[1] == adapter[1]).unwrap_or_else(() -> panic("{adapter[1]} selected peer missing"))
+        assert_eq(adapter[6], peer[6], "peer revision drifted from adapter ledger")
+    }
+    for (task_id, language, program, source, source_url, revision, dependency_rule) in [
+        ("systems-file-index", "rust", "local systems file-index equivalent", "adapters/peer/systems-file-index.rs", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;no network"),
+        ("service-json-http", "go", "local JSON HTTP service equivalent", "adapters/peer/service-json-http.go", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;loopback only"),
+        ("cli-archive-filter", "cxx", "local archive filter equivalent", "adapters/peer/cli-archive-filter.cpp", "https://github.com/jet-language/jet", "8b9933668f7f7d3c1a62182ff865f68989b41209", "repository source only;no network"),
+    ] {
+        peer :: selected.iter().find((row) -> row[1] == task_id).unwrap_or_else(() -> panic("{task_id} selected peer missing"))
+        assert_eq(peer[3], language)
+        assert_eq(peer[4], program)
+        assert_eq(peer[5], source_url)
+        assert_eq(peer[6], revision)
+        assert_eq(peer[9], dependency_rule)
+        adapter :: adapters.iter().find((row) -> row[1] == task_id).unwrap_or_else(() -> panic("{task_id} adapter missing"))
+        assert_eq(adapter[4], source)
+        assert_eq(adapter[6], peer[6])
+    }
+    selected_cross_platform :: selected.iter().find((row) -> row[1] == "cross-platform-notes").expect("cross-platform task needs a selected peer")
+    assert_eq(selected_cross_platform[3], "domain")
+    assert_eq(selected_cross_platform[4], "ECMAScript browser notes task adapter")
+    assert_eq(selected_cross_platform[11], "linux,macos,windows,web")
+    assert(selected_cross_platform[11].split(',').any((target) -> target == "web"), "browser peer must claim web applicability")
+    for row in selected {
+        assert(task_ids.contains(row[1]))
+        assert(row[5].starts_with("https://"))
+        assert(row[6].starts_with("tag:") || row[6].len() == 40)
+        assert(row[7..12].iter().all((field) -> !field.is_empty()))
+        assert(row[12].starts_with('#'))
+    }
+    assert(peers.iter().all((row) -> row[12] == "#1414"))
+    metrics :: read_compiled_workload_tsv("metric_contract.tsv", "version\tmetric\tunit\tcomparison\tmissing_policy", 5)
+    assert_eq(metrics.len(), 10)
+    assert_eq(metrics.iter().map((row) -> row[1]).collect::<Set<String>>(), Set.from(["source_effort", "build_time", "edit_time", "runtime", "memory", "artifact_size", "diagnostics", "debugging", "deployment", "unsafe_burden"]))
+    assert(metrics.iter().all((row) -> row[0] == "1" && !row[2].is_empty() && row[3] == "lower" && row[4] == "fail"))
+    domains :: read_compiled_workload_tsv("domain_contract.tsv", DOMAIN_CONTRACT_HEADER, 6)
+    assert(domains.iter().all((row) -> row[0] == "1" && task_ids.contains(row[1]) && !row[2].is_empty() && !row[3].is_empty() && !row[4].is_empty() && row[5].starts_with("#1414:")))
+    assert_eq(domains.len(), manifest.len())
+    systems_domain :: domains.iter().find((row) -> row[1] == "systems-file-index").expect("systems domain contract missing")
+    assert_eq(systems_domain[2], "jet=Core:files,crypto;rust=rust-stdlib;cxx=libstdc++;go=stdlib-os-path-filepath;swift=Foundation;zig=std;domain=POSIX filesystem indexing")
+    service_domain :: domains.iter().find((row) -> row[1] == "service-json-http").expect("service domain contract missing")
+    assert_eq(service_domain[2], "jet=Core:files,http.client,http.server,net,time;rust=tokio+hyper;cxx=boost-beast;go=stdlib-net-http;swift=swift-nio;zig=std-http;domain=bounded JSON HTTP service")
+    archive_domain :: domains.iter().find((row) -> row[1] == "cli-archive-filter").expect("archive domain contract missing")
+    assert_eq(archive_domain[2], "jet=Core:archive,files;rust=std+tar;cxx=c++20-stdlib;go=archive-tar;swift=Foundation;zig=std-tar;domain=POSIX ustar extraction")
+    assert(!archive_domain[2].contains("libarchive"))
+    toolchains :: read_compiled_workload_tsv("toolchain_contract.tsv", "version\tlanguage\tcommand\tversion_prefix", 4)
+    assert_eq(toolchains.len(), 6)
+    assert_eq(toolchains.iter().map((row) -> "{row[1]}|{row[2]}|{row[3]}").collect::<Set<String>>(), Set.from(["jet|jet|Jet 0.1.0", "rust|rustc|rustc 1.97.1", "go|go|go version go1.26.5", "cxx|clang++|clang version 21.1.8", "zig|zig|zig 0.16.0", "domain|node|node v22.23.2"]))
+    receipt_fields :: COMPILED_RECEIPT_HEADER.split('\t').collect()
+    assert_eq(receipt_fields.len(), 20, "compiled receipts must remain 20 columns")
+    assert_eq(receipt_fields[16..], ["peer_launcher_path", "peer_launcher_version", "peer_launcher_sha256", "authority"])
+    assert_eq(PEER_LAUNCH_CONTRACT, "compiled-workload-peer-isolation-v1")
+    tiers :: read_compiled_workload_tsv("tier_matrix.tsv", "version\ttask_id\tplatform\ttarget\ttier\trequirement\tavailability\tavailability_reason\trationale", 9)
+    assert_eq(tiers.len(), 39)
+    assert_eq(tiers.iter().map((row) -> "{row[6]}|{row[7]}").collect::<Set<String>>(), Set.from(["local|host-toolchain", "local|host-runtime", "local|browser-runtime", "external|host-platform", "external|cross-toolchain", "excluded|freestanding-profile"]))
+    aarch64_rows :: tiers.iter().filter((row) -> row[2] == "cross-target" && row[3] == "aarch64-unknown-linux-gnu").collect()
+    assert_eq(aarch64_rows.len(), 5)
+    assert(aarch64_rows.iter().all((row) -> row[5] == "required" && row[6] == "external" && row[7] == "cross-toolchain"))
+    web_row :: tiers.iter().find((row) -> row[2] == "cross-target" && row[3] == "web").expect("cross-target web tier must stay declared")
+    assert_eq(web_row[5..8], ["required", "local", "browser-runtime"])
+    hosted_targets :: [("systems-file-index", "aarch64-unknown-linux-gnu"), ("service-json-http", "aarch64-unknown-linux-gnu"), ("cli-archive-filter", "aarch64-unknown-linux-gnu"), ("library-json-roundtrip", "aarch64-unknown-linux-gnu"), ("compute-mandelbrot", "aarch64-unknown-linux-gnu"), ("cross-platform-notes", "web")]
+    for (task_id, cross_target) in hosted_targets {
+        required :: tiers.iter().filter((row) -> row[1] == task_id && row[5] == "required").map((row) -> "{row[1]}|{row[2]}|{row[3]}|{row[4]}").collect::<Set<String>>()
+        assert_eq(required, Set.from(["{task_id}|linux|x86_64-unknown-linux-gnu|aot", "{task_id}|macos|x86_64-apple-darwin|aot", "{task_id}|windows|x86_64-pc-windows-msvc|aot", "{task_id}|cross-target|{cross_target}|aot", "{task_id}|linux|x86_64-unknown-linux-gnu|jit"]))
+    }
+    cross_platform_web :: tiers.iter().find((row) -> row[1] == "cross-platform-notes" && row[2] == "cross-target" && row[3] == "web" && row[4] == "aot").expect("cross-platform web tier must stay declared")
+    assert_eq(cross_platform_web[5], "required")
+    embedded :: tiers.iter().filter((row) -> row[1] == "embedded-sensor-ring").collect()
+    assert_eq(embedded.len(), 9, "embedded rows must stay visible")
+    embedded_excluded :: embedded.iter().filter((row) -> row[5] == "excluded").collect()
+    assert_eq(embedded_excluded.len(), 5)
+    assert(embedded_excluded.iter().all((row) -> row[6] == "excluded" && row[7] == "freestanding-profile" && row[8].contains("#2046") && row[8].contains("#2300")))
+    assert_eq(embedded.iter().filter((row) -> row[5] == "required").map((row) -> "{row[2]}|{row[3]}|{row[4]}").collect::<Set<String>>(), Set.from(["linux|x86_64-unknown-linux-gnu|aot", "macos|x86_64-apple-darwin|aot", "windows|x86_64-pc-windows-msvc|aot", "linux|x86_64-unknown-linux-gnu|jit"]))
+    canaries :: read_compiled_workload_tsv("canaries.tsv", "version\tcanary\tmutation\trequired_failure", 4)
+    assert_eq(canaries.len(), 20, "all declared removal canaries must stay present")
+    assert_eq(canaries.iter().map((row) -> row[1]).collect::<Set<String>>(), Set.from(["comparison-dependency-drift", "comparison-toolchain-drift", "statistics-drift", "receipt-input-drift", "missing-samples", "missing-statistics", "missing-receipt", "missing-tier-receipt", "missing-outcome", "unrelated-live-owner", "missing-metric", "missing-tier", "changed-input", "embedded-review-claim", "stale-candidate", "unowned-metric-loss", "required-tier-loss", "toolchain-drift", "missing-peer-coverage", "candidate-peer-loss"]))
+    assert(canaries.iter().all((row) -> row[0] == "1" && !row[1].is_empty() && !row[2].is_empty() && !row[3].is_empty()))
+}

@@ -1,0 +1,375 @@
+use std.[fs, env, process, time]
+use std.sync.atomic.Ordering
+use jet
+use jet_foundation.Tests.Integration.InlineDeps.*
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+// GATE #4494: native filesystem, processes and symlinks.
+// Rust: tests/inline_deps.rs:79
+#Test("script_inline_dep_resolves") {
+    if !jet_bin().is_file() || !have_cargo() { eprintln("note: skipping script_inline_dep_resolves (need the jet binary + cargo)"); return }
+    dir :: tmp_dir("resolves")
+    write_textkit_fixture(&dir)
+    write(&dir, "stats.jet", "use textkit#1.4.2\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n")
+    out :: jet_cmd(["run", "stats.jet"], &dir)
+    assert(out.status.success(), "jet run should resolve the inline dep and run\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert(String.from_utf8_lossy(&out.stdout).contains("hi"), "expected the script's output, got: {String.from_utf8_lossy(&out.stdout)}")
+}
+// Rust: tests/inline_deps.rs:107
+#Test("script_inline_dep_unresolved_is_e1253") {
+    if !jet_bin().is_file() { return }
+    dir :: tmp_dir("unresolved")
+    write(&dir, "stats.jet", "use ghostpkg#1.0.0\n\nfn run() {\n    print(\"never\")\n}\n")
+    out :: jet_cmd(["run", "stats.jet"], &dir)
+    assert(!out.status.success())
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E1253"), "expected E1253 in stderr, got: {stderr}")
+}
+// Rust: tests/inline_deps.rs:128
+#Test("script_inline_dep_unpinned_is_l0203") {
+    if !jet_bin().is_file() || !have_cargo() { return }
+    dir :: tmp_dir("unpinned")
+    write_textkit_fixture(&dir)
+    write(&dir, "stats.jet", "use textkit#1.4\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n")
+    out :: jet_cmd(["run", "stats.jet"], &dir)
+    assert(out.status.success(), "a loose selector still resolves and runs\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("L0203"), "expected L0203 warning in stderr, got: {stderr}")
+}
+// Rust: tests/inline_deps.rs:158
+#Test("jet_lock_writes_sidecar") {
+    if !jet_bin().is_file() { return }
+    dir :: tmp_dir("lock")
+    write_textkit_fixture(&dir)
+    write(&dir, "stats.jet", "use textkit#1.4\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n")
+    out :: jet_cmd(["fetch", "--lock", "stats.jet"], &dir)
+    assert(out.status.success(), "jet fetch --lock should succeed\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    sidecar :: dir.join("stats.jet.lock")
+    assert(sidecar.is_file(), "expected {sidecar.display()} to exist")
+    contents :: fs.read_to_string(&sidecar).unwrap()
+    assert(contents.contains("version = 1"))
+    assert(contents.contains("script_hash = \"sha256-"))
+    assert(contents.contains("[[dep]]"))
+    assert(contents.contains("name = \"textkit\""))
+    assert(contents.contains("selector = \"1.4\""))
+    assert(contents.contains("resolved = \"1.4.2\""))
+    assert(contents.contains("content_hash = \"sha256-"))
+    out2 :: jet_cmd(["fetch", "--lock", "stats.jet"], &dir)
+    assert(out2.status.success())
+    assert_eq(contents, fs.read_to_string(&sidecar).unwrap())
+}
+// Rust: tests/inline_deps.rs:197
+#Test("jet_lock_unresolved_dep_is_e1253") {
+    if !jet_bin().is_file() { return }
+    dir :: tmp_dir("lock_unresolved")
+    write(&dir, "stats.jet", "use ghostpkg#1.0.0\n\nfn run() {\n    print(\"never\")\n}\n")
+    out :: jet_cmd(["fetch", "--lock", "stats.jet"], &dir)
+    assert(!out.status.success())
+    assert(String.from_utf8_lossy(&out.stderr).contains("E1253"))
+    assert(!dir.join("stats.jet.lock").exists())
+}
+// Rust: tests/inline_deps.rs:218
+#Test("jet_init_lifts_uses_into_package_jet") {
+    if !jet_bin().is_file() { return }
+    dir :: tmp_dir("init_lift")
+    write_textkit_fixture(&dir)
+    write(&dir, "stats.jet", "use textkit#1.4\n\nfn run() {\n    print(textkit.shout(\"hi\"))\n}\n")
+    out :: jet_cmd(["init", "stats.jet"], &dir)
+    assert(out.status.success(), "jet init should succeed\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    manifest_path :: dir.join("package.jet")
+    assert(manifest_path.is_file(), "jet init should write package.jet")
+    manifest :: fs.read_to_string(&manifest_path).unwrap()
+    assert(manifest.contains("textkit"), "expected the inline dep lifted into package.jet, got:\n{manifest}")
+    assert(manifest.contains("\"1.4\""), "expected the selector preserved in the lifted dep, got:\n{manifest}")
+}
+// Rust: tests/inline_deps.rs:254
+#Test("jet_init_without_script_is_unchanged") {
+    if !jet_bin().is_file() { return }
+    dir :: tmp_dir("init_bare")
+    out :: jet_cmd(["init"], &dir)
+    assert(out.status.success())
+    manifest :: fs.read_to_string(dir.join("package.jet")).unwrap()
+    assert(manifest.contains("name:"))
+    assert(!manifest.contains("textkit"))
+}
+// Rust: tests/inline_package.rs:14
+#Test("inline_package_example_matches_release_default_and_interpreter") {
+    tir_support.assert_example_cli_tiers_agree("packages/inline_package", include_str("Examples/features/expected/packages/inline_package.out"))
+}
+// Rust: tests/inline_package.rs:22
+#Test("inline_package_keeps_pub_package_visibility") {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet-inline-package-{process.id()}-{stamp}")
+    fs.create_dir_all(&root).unwrap()
+    source :: "package {\n    name: \"inline-visibility\"\n}\n\npub(package) fn secret() -> String {\n    return \"ok\"\n}\n\nfn run() {\n    print(secret())\n}\n"
+    path :: root.join("run.jet")
+    fs.write(&path, source).unwrap()
+    diagnostics :: jet.check_with_path(&path.to_string_lossy())
+    assert(diagnostics.iter().all(fn(diagnostic) -> diagnostic.severity != jet.Diagnostics.Severity.Error), "inline Package must preserve pub(package): {diagnostics:?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/inline_package.rs:53
+#Test("inline_package_conflicts_with_manifest_for_every_entry") {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet-inline-package-conflict-{process.id()}-{stamp}")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("run.jet"), "package { name: \"inline\" }\nfn run() {}\n").unwrap()
+    fs.write(root.join("other.jet"), "fn run() {}\n").unwrap()
+    fs.write(root.join("package.jet"), "name: \"manifest\"\n").unwrap()
+    assert_eq(jet.Loader.find_package_root_checked(&root).unwrap(), Some(root.clone()))
+    load_diagnostics :: jet.Loader.load_entry(root.join("other.jet").to_str().unwrap()).expect_err("an inline Package and package.jet must not coexist")
+    assert(load_diagnostics.iter().any(fn(diagnostic) -> diagnostic.code == "E1363"), "{load_diagnostics:#?}")
+    facts_diagnostics :: jet.Loader.package_facts_for_entry(&root.join("other.jet")).expect_err("facts lookup must reject the same conflicting carriers")
+    assert(facts_diagnostics.iter().any(fn(diagnostic) -> diagnostic.code == "E1363"), "{facts_diagnostics:#?}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/inline_package.rs:93
+#Test("nested_manifest_stops_outer_inline_package_discovery") {
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    outer :: env.temp_dir().join("jet-inline-package-boundary-{process.id()}-{stamp}")
+    inner :: outer.join("inner")
+    fs.create_dir_all(&inner).unwrap()
+    fs.write(outer.join("run.jet"), "package { name: \"outer\" }\nfn run() {}\n").unwrap()
+    fs.write(inner.join("package.jet"), "name: \"inner\"\n").unwrap()
+    assert_eq(jet.Loader.find_inline_package_root_checked(&inner).unwrap(), None)
+    _ :: fs.remove_dir_all(outer)
+}
+// Rust: tests/inline_package.rs:118
+#Test("inline_and_extracted_package_keep_facts_graph_and_authority_identity") {
+    body :: "\nname: \"inline-parity\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2026\"\ndescription: \"one source of package facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/inline-parity\"\ndeps: { dep: ./deps/dep }\noutputs: { app: .Executable{ name: \"app\", entry: run } }\ndefaults: { run: app }\nauthority: { holds: { allow: [IO] } }\npolicy: { unsafe: .Deny }\n"
+    program :: "use dep\n\nfn run() {\n    print(dep.value())\n}\n"
+    stamp :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    base :: env.temp_dir().join("jet-inline-package-parity-{process.id()}-{stamp}")
+    inline_root :: base.join("inline")
+    extracted_root :: base.join("extracted")
+    for root in [&inline_root, &extracted_root] {
+        fs.create_dir_all(root.join("deps/dep")).unwrap()
+        fs.write(root.join("deps/dep/package.jet"), "name: \"dep\"\nversion: \"0.1.0\"\n").unwrap()
+        fs.write(root.join("deps/dep/dep.jet"), "pub fn value() -> String { \"dependency\" }\n").unwrap()
+    }
+    inline_entry :: inline_root.join("run.jet")
+    inline_source :: "package {{{body}}}\n{program}"
+    inline_block :: jet.Package.extract_inline_package(&inline_source).unwrap().expect("inline source must carry one Package block")
+    assert_eq(inline_block.body(&inline_source), body, "extraction must copy the Package body byte-for-byte")
+    fs.write(&inline_entry, inline_source).unwrap()
+    fs.write(extracted_root.join("package.jet"), body).unwrap()
+    extracted_entry :: extracted_root.join("run.jet")
+    fs.write(&extracted_entry, program).unwrap()
+    inline_facts :: jet.Loader.package_facts_for_entry(&inline_entry).unwrap().expect("inline source must provide Package facts")
+    extracted_facts :: jet.Loader.package_facts_for_entry(&extracted_entry).unwrap().expect("package.jet must provide Package facts")
+    assert_eq(inline_facts.semantic_digest(), extracted_facts.semantic_digest(), "inline and extracted forms must share one typed Package identity")
+    assert_eq(jet.Package.to_manifest(&inline_facts, body).unwrap(), jet.Package.to_manifest(&extracted_facts, body).unwrap(), "inline and extracted forms must project to one resolver manifest")
+    inline_bundle :: jet.Loader.load_entry(&inline_entry.to_string_lossy()).expect("inline graph loads")
+    extracted_bundle :: jet.Loader.load_entry(&extracted_entry.to_string_lossy()).expect("extracted graph loads")
+    assert_eq(inline_bundle.build_facts, extracted_bundle.build_facts)
+    assert_eq(inline_bundle.comptime_inputs, extracted_bundle.comptime_inputs)
+    inline_guarantees := inline_bundle.package_guarantees.clone()
+    extracted_guarantees := extracted_bundle.package_guarantees.clone()
+    inline_authority_suffix :: "{inline_entry.display()} authority.holds"
+    extracted_authority_suffix :: "{extracted_root.join("package.jet").display()} authority.holds"
+    assert(inline_guarantees.application_authority.authority.ends_with(&inline_authority_suffix), "inline authority provenance changed: {inline_guarantees.application_authority.authority}")
+    assert(extracted_guarantees.application_authority.authority.ends_with(&extracted_authority_suffix), "extracted authority provenance changed: {extracted_guarantees.application_authority.authority}")
+    inline_guarantees.application_authority.authority = "<entry> authority.holds"
+    extracted_guarantees.application_authority.authority = "<entry> authority.holds"
+    assert_eq(inline_guarantees, extracted_guarantees)
+    assert_eq(inline_bundle.program_allocator, extracted_bundle.program_allocator)
+    assert_eq(inline_bundle.edition, extracted_bundle.edition)
+    assert_eq(inline_bundle.dep_roots.keys().collect(), extracted_bundle.dep_roots.keys().collect(), "dependency aliases must resolve identically")
+    assert_eq(inline_bundle.dep_roots.get("dep").and_then(fn(path) -> path.file_name()), extracted_bundle.dep_roots.get("dep").and_then(fn(path) -> path.file_name()), "dependency source roots must resolve from each source root")
+    _ :: fs.remove_dir_all(base)
+}
+// Rust: tests/inline_package.rs:290
+#Test("inline_package_canonical_surface_has_one_generated_shape") {
+    assert_eq(jet.Syntax.INLINE_PACKAGE_DECL, "package")
+    assert_eq(jet.Syntax.PACKAGE_FILE, "package.jet")
+    syntax :: include_str("crates/jet-foundation/src/Syntax.rs")
+    assert(syntax.contains("D-ECO-INLINEPACKAGE1=A"))
+    package_files :: include_str("crates/jet-foundation/src/Syntax/package_files.rs")
+    assert(package_files.contains("pub const INLINE_PACKAGE_DECL: &str = \"package\";"))
+    decision :: include_str("Docs/spec/syntax-decisions.md")
+    assert(decision.contains("D-ECO-INLINEPACKAGE1=A — one optional leading inline"))
+    tree_sitter :: include_str("Tools/editors/tree-sitter/grammar.js")
+    assert(tree_sitter.contains("source_file: ($) => seq(optional($.inline_package), repeat($._item))"))
+    assert(tree_sitter.contains("inline_package: ($) => seq(\"package\", $.record_literal)"))
+    vscode :: include_str("Tools/editors/vscode/syntaxes/jet.tmLanguage.json")
+    assert(vscode.contains("D-ECO-INLINEPACKAGE1=A"))
+    textmate :: include_str("Tools/editors/jet.tmGrammar")
+    assert(textmate.contains("D-ECO-INLINEPACKAGE1=A"))
+    zed :: include_str("Tools/editors/zed/languages/jet/highlights.scm")
+    assert(zed.contains("(inline_package \"package\" @keyword)"))
+}
+// Rust: tests/inline_package.rs:317
+#Test("inline_package_mask_preserves_parser_offsets_and_code") {
+    source :: "#!/usr/bin/env jet\n// leading trivia remains outside the carrier\npackage {\n    name: \"mask\"\n}\n\nfn run() {\n    print(\"ok\")\n}\n"
+    block :: jet.Package.extract_inline_package(source).unwrap().expect("leading inline Package must be found")
+    assert_eq(block.source(source), "package {\n    name: \"mask\"\n}")
+    (masked, found) :: jet.Package.mask_inline_package_source(source).unwrap()
+    assert_eq(found.unwrap().span, block.span)
+    assert_eq(masked.len(), source.len())
+    assert_eq(&masked[block.span.end..], &source[block.span.end..])
+    assert(masked[block.span.start..block.span.end].bytes().all(fn(byte) -> byte == b' ' || byte == b'\n' || byte == b'\r'), "the parser-facing carrier mask must retain only whitespace and line endings")
+}
+// Rust: tests/inline_package.rs:346
+#Test("inline_package_path_escape_fails_before_state_mutation_with_provenance") {
+    root :: inline_scratch("path-escape")
+    path :: root.join("run.jet")
+    source :: "package {\n    name: \"escape\"\n    configs: [\"../outside-config.jet\"]\n}\nfn run() {}\n"
+    outside :: root.parent().unwrap().join("outside-config-{process.id()}-{INLINE_SCRATCH_SEQ.load(Ordering.Relaxed)}.jet")
+    outside_before :: b"host-state\n"
+    fs.write(&path, source).unwrap()
+    fs.write(&outside, outside_before).unwrap()
+    source_before :: fs.read(&path).unwrap()
+    diagnostics :: jet.Loader.package_facts_for_entry(&path).expect_err("a config path escaping the source root must be rejected")
+    assert(diagnostics.iter().any(fn(diagnostic) -> diagnostic.code == "E1362"), "expected registered inline-package diagnostic: {diagnostics:#?}")
+    assert_eq(fs.read(&path).unwrap(), source_before)
+    assert_eq(fs.read(&outside).unwrap(), outside_before)
+    detailed :: jet.Loader.load_entry_with_diagnostics(&path.display().to_string()).expect_err("the full loader must reject the same path escape")
+    failure :: detailed.iter().find(fn(entry) -> entry.diagnostic.code == "E1362").expect("path escape must retain its registered diagnostic")
+    assert_eq(failure.file, path.display().to_string())
+    assert_eq(failure.source, source)
+    assert(failure.diagnostic.span.is_some())
+    _ :: fs.remove_file(outside)
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:389
+#Test("inline_package_symlinked_metadata_is_rejected_without_hidden_host_state") {
+    // GATE #4483: retain the Unix-only source arm using selected target facts.
+    if core.sys.target.selected_family() != "unix" { return }
+    root :: inline_scratch("symlink-metadata")
+    path :: root.join("run.jet")
+    config :: root.join("config.jet")
+    target :: root.join("outside-config.jet")
+    source :: "package {\n    name: \"symlink\"\n    configs: [\"config.jet\"]\n}\nfn run() {}\n"
+    fs.write(&path, source).unwrap()
+    fs.write(&target, "description: \"host-state\"\n").unwrap()
+    std.os.unix.fs.symlink(&target, &config).unwrap()
+    detailed :: jet.Loader.load_entry_with_diagnostics(&path.display().to_string()).expect_err("symlinked package metadata must fail closed")
+    failure :: detailed.iter().find(fn(entry) -> entry.diagnostic.code == "E1334" || entry.diagnostic.code == "E1362").expect("authority symlink rejection must use a registered diagnostic")
+    match failure.diagnostic.code.as_str() {
+        "E1334" -> { assert(failure.file.ends_with("config.jet"), "wrong provenance: {failure.file}"); assert(failure.source.is_empty()) }
+        "E1362" -> { assert_eq(failure.file, path.display().to_string()); assert_eq(failure.source, source); assert(failure.diagnostic.span.is_some()) }
+        code -> panic("unexpected symlink diagnostic {code}")
+    }
+    assert_eq(fs.read_to_string(&target).unwrap(), "description: \"host-state\"\n")
+    assert(fs.symlink_metadata(&config).unwrap().file_type().is_symlink(), "rejection must not replace the metadata link")
+    _ :: fs.remove_file(config)
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:438
+#Test("inline_package_import_cycle_fails_with_cycle_diagnostic_and_file_provenance") {
+    root :: inline_scratch("cycle")
+    entry :: root.join("run.jet")
+    module :: root.join("a.jet")
+    fs.write(&entry, "package { name: \"cycle\" version: \"0.1.0\" }\nuse \"a\"\nfn run() {}\n").unwrap()
+    fs.write(&module, "use \"run\"\nfn a() {}\n").unwrap()
+    detailed :: jet.Loader.load_entry_with_diagnostics(&entry.display().to_string()).expect_err("an import cycle must fail before compilation")
+    failure :: detailed.iter().find(fn(entry) -> entry.diagnostic.code == "E0604").expect("cycle must use the registered E0604 diagnostic")
+    assert(failure.file.ends_with("a.jet"), "cycle provenance lost: {failure.file}")
+    assert_eq(failure.diagnostic.what, "these files import each other in a circle")
+    assert(failure.source.is_empty())
+    assert_eq(fs.read_to_string(&entry).unwrap(), "package { name: \"cycle\" version: \"0.1.0\" }\nuse \"a\"\nfn run() {}\n")
+    assert_eq(fs.read_to_string(&module).unwrap(), "use \"run\"\nfn a() {}\n")
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:465
+#Test("inline_package_rejects_retired_manifest_metadata_without_mutation") {
+    root :: inline_scratch("stale-manifest")
+    entry :: root.join("run.jet")
+    stale :: root.join("pkg.jet")
+    source :: "package { name: \"inline\" version: \"0.1.0\" }\nfn run() {}\n"
+    stale_source :: "name: \"stale\"\nversion: \"0.1.0\"\n"
+    fs.write(&entry, source).unwrap()
+    fs.write(&stale, stale_source).unwrap()
+    detailed :: jet.Loader.load_entry_with_diagnostics(&entry.display().to_string()).expect_err("retired package metadata must not shadow inline Package facts")
+    failure :: detailed.iter().find(fn(entry) -> entry.diagnostic.code == "E1226").expect("retired manifest must use registered E1226")
+    assert_eq(failure.file, entry.display().to_string())
+    assert(failure.diagnostic.what.contains("pkg.jet"))
+    assert_eq(fs.read_to_string(&entry).unwrap(), source)
+    assert_eq(fs.read_to_string(&stale).unwrap(), stale_source)
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:489
+#Test("inline_package_rejects_ambiguous_manifest_metadata_before_loading") {
+    root :: inline_scratch("ambiguous-manifest")
+    entry :: root.join("run.jet")
+    package :: root.join("package.jet")
+    stale :: root.join("pkg.jet")
+    entry_source :: "package { name: \"inline\" version: \"0.1.0\" }\nfn run() {}\n"
+    package_source :: "name: \"manifest\"\nversion: \"0.1.0\"\n"
+    stale_source :: "name: \"stale\"\nversion: \"0.1.0\"\n"
+    fs.write(&entry, entry_source).unwrap()
+    fs.write(&package, package_source).unwrap()
+    fs.write(&stale, stale_source).unwrap()
+    detailed :: jet.Loader.load_entry_with_diagnostics(&entry.display().to_string()).expect_err("two manifest names must fail before inline loading")
+    failure :: detailed.iter().find(fn(entry) -> entry.diagnostic.code == "E1239").expect("ambiguous manifest names must use registered E1239")
+    assert_eq(failure.file, entry.display().to_string())
+    assert_eq(fs.read_to_string(&entry).unwrap(), entry_source)
+    assert_eq(fs.read_to_string(&package).unwrap(), package_source)
+    assert_eq(fs.read_to_string(&stale).unwrap(), stale_source)
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:516
+#Test("inline_package_rejects_stale_lock_metadata_with_lock_provenance") {
+    root :: inline_scratch("stale-lock")
+    entry :: root.join("run.jet")
+    lock_dir :: root.join(".jet")
+    lock :: lock_dir.join("lock")
+    source :: "package {\n    name: \"locked-inline\"\n    version: \"0.1.0\"\n    deps: { dep: ./dep }\n}\nfn run() {}\n"
+    lock_source :: "stale lock bytes\n"
+    fs.create_dir_all(&lock_dir).unwrap()
+    fs.write(&entry, source).unwrap()
+    fs.write(&lock, lock_source).unwrap()
+    detailed :: jet.Loader.load_entry_with_diagnostics(&entry.display().to_string()).expect_err("an invalid lock must stop inline package loading")
+    failure :: detailed.iter().find(fn(entry) -> entry.diagnostic.code == "E1202").expect("stale lock must use registered E1202")
+    assert(failure.file.ends_with(".jet/lock"), "lock provenance lost: {failure.file}")
+    assert_eq(failure.source, lock_source)
+    assert_eq(fs.read_to_string(&entry).unwrap(), source)
+    assert_eq(fs.read_to_string(&lock).unwrap(), lock_source)
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:548
+#Test("inline_package_rejects_duplicate_carriers_before_state_change") {
+    root :: inline_scratch("duplicate")
+    entry :: root.join("run.jet")
+    source :: "package { name: \"first\" }\nfn run() {}\npackage { name: \"second\" }\n"
+    fs.write(&entry, source).unwrap()
+    diagnostics :: jet.Loader.package_facts_for_entry(&entry).expect_err("duplicate inline Package carriers must fail")
+    assert(diagnostics.iter().any(fn(diagnostic) -> diagnostic.code == "E1361"), "expected registered duplicate diagnostic: {diagnostics:#?}")
+    assert_eq(fs.read_to_string(&entry).unwrap(), source)
+    remove_inline_scratch(&root)
+}
+// Rust: tests/inline_package.rs:566
+#Test("inline_package_extraction_matches_extracted_entry_across_build_and_run_tiers") {
+    source :: include_str("Examples/features/packages/inline_package.jet")
+    expected :: include_str("Examples/features/expected/packages/inline_package.out")
+    block :: jet.Package.extract_inline_package(source).unwrap().expect("the shipped example must carry an inline Package")
+    body :: block.body(source).to_owned()
+    extracted_program :: source[block.span.end..].to_owned()
+    assert(extracted_program.contains("fn run"))
+    base :: inline_scratch("tier-extraction")
+    inline_root :: base.join("inline")
+    extracted_root :: base.join("extracted")
+    fs.create_dir_all(&inline_root).unwrap()
+    fs.create_dir_all(&extracted_root).unwrap()
+    fs.write(inline_root.join("run.jet"), source).unwrap()
+    fs.write(extracted_root.join("package.jet"), &body).unwrap()
+    fs.write(extracted_root.join("run.jet"), &extracted_program).unwrap()
+    for root in [&inline_root, &extracted_root] {
+        (code, _stdout, stderr) :: run_inline_cli(root, ["build", "run.jet"])
+        assert_eq(code, 0, "AOT build failed in {root.display()}:\n{stderr}")
+    }
+    modes :: [["run", "--release", "run.jet"], ["run", "run.jet"], ["run", "--interpret", "run.jet"]]
+    inline_results: [(Int32, String)] = []
+    extracted_results: [(Int32, String)] = []
+    for args in modes {
+        inline :: run_inline_cli(&inline_root, args)
+        assert_eq(inline.0, 0, "inline tier failed {args:?}:\n{inline.2}")
+        assert_eq(inline.1, expected, "inline tier output drifted for {args:?}")
+        extracted :: run_inline_cli(&extracted_root, args)
+        assert_eq(extracted.0, 0, "extracted tier failed {args:?}:\n{extracted.2}")
+        assert_eq(extracted.1, expected, "extracted tier output drifted for {args:?}")
+        inline_results.push((inline.0, inline.1))
+        extracted_results.push((extracted.0, extracted.1))
+    }
+    assert_eq(inline_results, extracted_results, "inline and extracted source must have identical tier receipts")
+    remove_inline_scratch(&base)
+}

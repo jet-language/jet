@@ -1,0 +1,321 @@
+use jet_driver.Loader.*
+use jet_driver.Loader03.*
+use jet_driver.Loader04.*
+use jet_driver.[Sema, Driver]
+use jet_foundation.Syntax
+use core.path.OSPath
+use core.sys.target
+use std.[env, time, thread, fs]
+
+// Rust: crates/jet-driver/src/Loader.rs:5864
+fn tempdir(tag: String) -> OSPath {
+    base := env.temp_dir()
+    loop {
+        has_repository :: find_repository_root(base).is_some()
+        has_workspace :: find_workspace_root_checked(base).map(fn(root) { root.is_some() }).unwrap_or(true)
+        has_package :: find_package_root_checked(base).map(fn(root) { root.is_some() }).unwrap_or(true)
+        if !has_repository && !has_workspace && !has_package -> break
+        base = base.parent().expect("could not find an authority-free temp directory for loader tests").to_path_buf()
+    }
+    // GATE #4494: native clock and thread identity primitives.
+    nanos :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    path :: base.join("loader-stale-manifest-{tag}-{nanos}-{thread.current().id():?}")
+    fs.create_dir_all(path).unwrap()
+    path
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5896
+#Test("selected_project_root_prefers_repository_over_nested_package") {
+    repository :: tempdir("selected-repository")
+    source :: repository.join("packages/app/src")
+    fs.create_dir_all(source).unwrap()
+    fs.create_dir(repository.join(".git")).unwrap()
+    fs.write(repository.join("packages/app").join(Syntax.PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    assert_eq(selected_project_root(source).unwrap(), fs.canonicalize(repository).unwrap())
+    _ :: fs.remove_dir_all(repository)
+}
+// Rust: crates/jet-driver/src/Loader.rs:5915
+#Test("selected_project_root_preserves_nested_workspace_precedence") {
+    repository :: tempdir("selected-workspace")
+    workspace :: repository.join("nested")
+    source :: workspace.join("packages/app/src")
+    fs.create_dir_all(source).unwrap()
+    fs.create_dir(repository.join(".git")).unwrap()
+    fs.write(repository.join(Syntax.PACKAGE_FILE), "name: \"repository\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(workspace.join("workspace.jet"), "module workspace { members: [\"./packages/app\"] }\n").unwrap()
+    fs.write(workspace.join("packages/app").join(Syntax.PACKAGE_FILE), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    assert_eq(selected_project_root(source).unwrap(), fs.canonicalize(workspace).unwrap())
+    _ :: fs.remove_dir_all(repository)
+}
+// Rust: crates/jet-driver/src/Loader.rs:5945
+#Test("selected_project_root_uses_checked_package_without_repository") {
+    root :: tempdir("selected-package")
+    package :: root.join("package")
+    source :: package.join("src")
+    fs.create_dir_all(source).unwrap()
+    fs.write(package.join(Syntax.PACKAGE_FILE), "name: \"package\"\nversion: \"0.1.0\"\n").unwrap()
+    assert_eq(selected_project_root(source).unwrap(), fs.canonicalize(package).unwrap())
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/Loader.rs:5964
+#Test("selected_project_root_uses_canonical_standalone_parent") {
+    root :: tempdir("selected-standalone")
+    standalone :: root.join("standalone")
+    fs.create_dir_all(standalone).unwrap()
+    fs.write(standalone.join(Syntax.DEFAULT_ENTRY_FILE), "fn run() {}\n").unwrap()
+    assert_eq(selected_project_root(standalone).unwrap(), fs.canonicalize(standalone).unwrap())
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/Loader.rs:5978
+#Test("staged_frontend_is_bounded_and_deterministic") {
+    first :: OSPath.from("/virtual/z.jet")
+    second :: OSPath.from("/virtual/a.jet")
+    overlays :: [(first, "fn z() -> Int { return 1 }\n"), (second, "fn a() -> Int { return 2 }\n")]
+    prepared :: prepare_overlay_frontend(overlays)
+    assert(frontend_worker_count(MAX_FRONTEND_WORKERS.saturating_mul(2)) <= MAX_FRONTEND_WORKERS,
+        "frontend fan-out must stay bounded for a source batch larger than the cap")
+    assert_eq(prepared.len(), overlays.len())
+    assert(if prepared.get(normalize_path(first)).map(fn(entry) { entry.module }) == { Val(.Parsed(_, _)) -> true else -> false })
+    assert(if prepared.get(normalize_path(second)).map(fn(entry) { entry.module }) == { Val(.Parsed(_, _)) -> true else -> false })
+}
+// Rust: crates/jet-driver/src/Loader.rs:6008
+#Test("staged_frontend_production_path_preserves_success_and_failure") {
+    dir :: tempdir("staged-frontend-production")
+    entry :: dir.join("main.jet")
+    dependency :: dir.join("dep.jet")
+    entry_source :: "module dep\nfn run() -> Int { return dep.value() }\n"
+    valid_dependency :: "pub fn value() -> Int { return 7 }\n"
+    fs.write(entry, entry_source).unwrap()
+    fs.write(dependency, valid_dependency).unwrap()
+    overlays :: [(entry, entry_source), (dependency, valid_dependency)]
+    (loaded, _, diagnostics) :: load_entry_with_overlays_and_dependencies_with_diagnostics(entry.to_str().unwrap(), overlays, true)
+    assert(loaded.is_ok(), "valid staged batch failed: {diagnostics:?}")
+    assert(diagnostics.is_empty(), "valid staged batch diagnosed: {diagnostics:?}")
+    invalid_dependency :: "pub fn value() -> Int { return 7 }\n::\n"
+    invalid_overlays :: [(entry, entry_source), (dependency, invalid_dependency)]
+    (invalid_loaded, _, invalid_diagnostics) :: load_entry_with_overlays_and_dependencies_with_diagnostics(entry.to_str().unwrap(), invalid_overlays, true)
+    assert(invalid_loaded.is_err(), "malformed staged batch unexpectedly loaded")
+    assert(invalid_diagnostics.iter().any(fn(diagnostic) { diagnostic.diagnostic.code == "E0003" }),
+        "malformed staged batch lost parser diagnostic: {invalid_diagnostics:?}")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: crates/jet-driver/src/Loader.rs:6057
+#Test("finds_pack_jet") {
+    dir :: tempdir("pack")
+    fs.write(dir.join("pack.jet"), "").unwrap()
+    (found_dir, name) :: find_stale_manifest_name(dir).expect("should find pack.jet")
+    assert_eq(found_dir, dir)
+    assert_eq(name, "pack.jet")
+}
+// Rust: crates/jet-driver/src/Loader.rs:6067
+#Test("finds_payload_jet") {
+    dir :: tempdir("payload")
+    fs.write(dir.join("payload.jet"), "").unwrap()
+    (_, name) :: find_stale_manifest_name(dir).expect("should find payload.jet")
+    assert_eq(name, "payload.jet")
+}
+// Rust: crates/jet-driver/src/Loader.rs:6075
+#Test("finds_jet_toml") {
+    dir :: tempdir("jettoml")
+    fs.write(dir.join("jet.toml"), "").unwrap()
+    (_, name) :: find_stale_manifest_name(dir).expect("should find jet.toml")
+    assert_eq(name, "jet.toml")
+}
+// Rust: crates/jet-driver/src/Loader.rs:6083
+#Test("jetpack_toml_is_not_stale") {
+    // Retired config, not a package-manifest name: never misreport E1226.
+    dir :: tempdir("jetpacktoml")
+    fs.write(dir.join("jetpack.toml"), "").unwrap()
+    assert_eq(find_stale_manifest_name(dir), None)
+}
+// Rust: crates/jet-driver/src/Loader.rs:6092
+#Test("pkg_jet_present_means_nothing_stale") {
+    dir :: tempdir("both")
+    fs.write(dir.join(Syntax.PACKAGE_FILE), "name: \"fixture\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("pack.jet"), "").unwrap()
+    assert_eq(find_stale_manifest_name(dir), None)
+}
+// Rust: crates/jet-driver/src/Loader.rs:6106
+#Test("no_manifest_at_all_is_none") {
+    dir :: tempdir("empty")
+    assert_eq(find_stale_manifest_name(dir), None)
+}
+// Rust: crates/jet-driver/src/Loader.rs:6112
+#Test("workspace_boundary_blocks_outer_stale_manifest_lookup") {
+    outer :: tempdir("workspace-boundary")
+    inner :: outer.join("child")
+    source :: inner.join("src")
+    fs.create_dir_all(source).unwrap()
+    fs.write(outer.join("pack.jet"), "").unwrap()
+    fs.write(inner.join("authority.jet"), "module workspace { policy: { deny: #(FS) } }\n").unwrap()
+    assert_eq(find_stale_manifest_name(source), None)
+    assert_eq(find_manifest_root(source), None)
+}
+// Rust: crates/jet-driver/src/Loader.rs:6129
+#Test("ambiguous_workspace_boundary_blocks_outer_package_authority") {
+    outer :: tempdir("ambiguous-workspace-authority")
+    inner :: outer.join("child")
+    source :: inner.join("src")
+    fs.create_dir_all(source).unwrap()
+    fs.write(outer.join(Syntax.PACKAGE_FILE), "name: \"outer\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(inner.join("a.jet"), "module workspace { policy: { deny: #(FS) } }\n").unwrap()
+    fs.write(inner.join("b.jet"), "module workspace { policy: { deny: #(FS) } }\n").unwrap()
+    diagnostic :: find_manifest_root_checked(source).expect_err("ambiguous inner workspace must not expose an outer Package")
+    assert_eq(diagnostic.code, "E1239")
+    assert_eq(find_manifest_root(source), None)
+}
+// Rust: crates/jet-driver/src/Loader.rs:6157
+#Test("explicit_shared_package_manifest_needs_reach_bundle_and_core_usage") {
+    // GATE #4483 / #4494: cfg(unix) and native Unix permissions.
+    if target.selected_family() == "unix" {
+        dir :: tempdir("shared-package-authority")
+        entry :: dir.join(Syntax.DEFAULT_ENTRY_FILE)
+        source :: "use core.font as font\nfn run() {\n    face :: font.system(.Body)\n    _shaped :: font.shape(\"x\", face)\n}\n"
+        manifest :: "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [IO] },\n    needs: [UI.FontShaping]\n}\n"
+        fs.write(dir.join(Syntax.PACKAGE_FILE), manifest).unwrap()
+        fs.write(entry, source).unwrap()
+        fs.set_permissions(dir, fs.Permissions.from_mode(0o777)).unwrap()
+        expected_root :: fs.canonicalize(dir).unwrap()
+        assert_eq(find_manifest_root_checked(dir).unwrap(), Val(expected_root))
+        facts :: package_facts_for_entry(entry).unwrap().expect("explicit package manifest should load")
+        assert_eq(facts.authority.needs, ["UI.FontShaping"])
+        bundle := load_entry(entry.to_str().unwrap()).expect("bundle should load")
+        bundle_facts :: package_facts_for_bundle(bundle).unwrap().expect("bundle package manifest should load")
+        assert_eq(bundle_facts.authority.needs, ["UI.FontShaping"])
+        assert_eq(bundle.package_guarantees.authority_needs, ["UI.FontShaping"])
+        assert(bundle.package_guarantees.application_authority.granted_effects.contains("IO"), "authority.holds.allow must remain the execution grant")
+        diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+        assert(!diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E2937" }), "declared UI.FontShaping must satisfy CoreUsage: {diagnostics:?}")
+        fs.write(dir.join(Syntax.PACKAGE_FILE), "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [IO] }\n}\n").unwrap()
+        omitted_bundle := load_entry(entry.to_str().unwrap()).expect("bundle without needs should load")
+        assert(omitted_bundle.package_guarantees.authority_needs.is_empty())
+        omitted_diagnostics :: Sema.check_bundle(&omitted_bundle, Sema.CompileMode.Run)
+        assert(omitted_diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E2937" }), "omitting UI.FontShaping must retain E2937: {omitted_diagnostics:?}")
+        fs.set_permissions(dir, fs.Permissions.from_mode(0o700)).unwrap()
+        _ :: fs.remove_dir_all(dir)
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:6234
+#Test("file_import_rejects_physical_symlink_escape_as_e0603") {
+    // GATE #4483 / #4494: cfg(unix), native symlink primitive.
+    if target.selected_family() == "unix" {
+        root :: tempdir("file-import-symlink")
+        outside :: tempdir("file-import-symlink-outside")
+        entry :: root.join("run.jet")
+        fs.write(entry, "use \"./escape\" as escape\nfn run() {}\n").unwrap()
+        fs.write(outside.join("secret.jet"), "pub fn fixture() {}\n").unwrap()
+        fs.symlink(outside.join("secret.jet"), root.join("escape.jet")).unwrap()
+        diagnostics :: load_entry(entry.to_str().unwrap()).unwrap_err()
+        assert(diagnostics.iter().any(fn(diagnostic) {
+            diagnostic.code == "E1334" && diagnostic.what.to_ascii_lowercase().contains("symlink") && diagnostic.what.contains("escape.jet")
+        }), "{diagnostics:#?}")
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:6256
+#Test("explicit_project_import_keeps_internal_module_available") {
+    dir :: tempdir("internal-module")
+    entry :: dir.join("main.jet")
+    fs.write(entry, "use project._bench as bench\nfn run() { bench.fixture() }\n").unwrap()
+    fs.write(dir.join("arbitrary.jet"), "module _bench { }\npub fn fixture() {}\n").unwrap()
+    (diagnostics, maybe_bundle) :: Driver.check_file(entry.to_str().unwrap(), None, false)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    bundle :: maybe_bundle.unwrap()
+    assert(bundle.modules.iter().any(fn(module) { module.path == dir.join("arbitrary.jet") }))
+}
+// Rust: crates/jet-driver/src/Loader.rs:6280
+#Test("explicit_project_import_propagates_invalid_target_diagnostics") {
+    loop (tag, broken) in [("lex", "module _bench { }\n§\n"), ("parse", "module _bench { }\nfn broken(\n")] {
+        dir :: tempdir("internal-module-{tag}")
+        entry :: dir.join("main.jet")
+        fs.write(entry, "use project._bench\nfn run() {}\n").unwrap()
+        fs.write(dir.join("broken.jet"), broken).unwrap()
+        diagnostics :: load_entry(entry.to_str().unwrap()).unwrap_err()
+        assert(diagnostics.iter().any(fn(diagnostic) {
+            diagnostic.code == "E0603" && diagnostic.what.contains("project module `project._bench`") &&
+                diagnostic.what.contains("broken.jet") && diagnostic.span.is_some()
+        }), "{diagnostics:#?}")
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:6304
+#Test("unrelated_invalid_file_does_not_mask_missing_project_module") {
+    dir :: tempdir("internal-module-unrelated-invalid")
+    entry :: dir.join("main.jet")
+    fs.write(entry, "use project._bench\nfn run() {}\n").unwrap()
+    fs.write(dir.join("broken.jet"), "module _other { }\n§\n").unwrap()
+    diagnostics :: load_entry(entry.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) {
+        diagnostic.code == "E0603" && diagnostic.what == "Can't find a project module named `project._bench`"
+    }), "{diagnostics:#?}")
+}
+// Rust: crates/jet-driver/src/Loader.rs:6321
+#Test("explicit_project_import_rejects_duplicate_internal_declarations") {
+    dir :: tempdir("internal-module-conflict")
+    entry :: dir.join("main.jet")
+    fs.write(entry, "use project._bench as bench\nfn run() {}\n").unwrap()
+    fs.write(dir.join("a.jet"), "module _bench { }\n").unwrap()
+    fs.write(dir.join("b.jet"), "module _bench { }\n").unwrap()
+    diagnostics :: load_entry(entry.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0606" && diagnostic.span.is_some() }))
+}
+// Rust: crates/jet-driver/src/Loader.rs:6336
+#Test("duplicate_internal_declarations_fail_without_an_explicit_import") {
+    dir :: tempdir("internal-module-unimported-conflict")
+    entry :: dir.join("main.jet")
+    fs.write(entry, "fn run() {}\n").unwrap()
+    fs.write(dir.join(Syntax.PACKAGE_FILE), "name: \"fixture\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dir.join("a.jet"), "module _bench { }\n").unwrap()
+    fs.write(dir.join("b.jet"), "module _bench { }\n").unwrap()
+    diagnostics :: load_entry(entry.to_str().unwrap()).unwrap_err()
+    assert(diagnostics.iter().any(fn(diagnostic) {
+        diagnostic.code == "E0606" && diagnostic.span.is_none() && diagnostic.fix.contains("a.jet, b.jet")
+    }))
+}
+// Rust: crates/jet-driver/src/Loader.rs:6357
+#Test("single_file_mode_ignores_unrelated_sibling_module_conflicts") {
+    dir :: tempdir("single-file-unrelated-conflict")
+    entry :: dir.join("fixture.jet")
+    fs.write(entry, "fn run() {}\n").unwrap()
+    fs.write(dir.join("a.jet"), "module _bench { }\n").unwrap()
+    fs.write(dir.join("b.jet"), "module _bench { }\n").unwrap()
+    load_entry(entry.to_str().unwrap()).expect("single-file mode ignores siblings")
+}
+// Rust: crates/jet-driver/src/Loader.rs:6368
+#Test("explicit_project_import_uses_overlay_declarations") {
+    dir :: tempdir("internal-module-overlay")
+    entry :: dir.join("main.jet")
+    part :: dir.join("part.jet")
+    fs.write(entry, "use project._bench\nfn run() {}\n").unwrap()
+    fs.write(part, "module _other { }\n").unwrap()
+    bundle :: load_entry_with_overlay(entry.to_str().unwrap(), Val((part, "module _bench { }\n")), false).unwrap()
+    assert(bundle.modules.iter().any(fn(module) { module.path == part }))
+}
+// Rust: crates/jet-driver/src/Loader.rs:6385
+#Test("module_directory_uses_canonical_run_entry_not_main") {
+    dir :: tempdir("module-directory-entry")
+    module_dir :: dir.join("tool")
+    fs.create_dir_all(module_dir).unwrap()
+    fs.write(module_dir.join("main.jet"), "pub fn run() {}").unwrap()
+    assert(find_module_files("tool", dir).unwrap().is_empty())
+    run :: module_dir.join(Syntax.DEFAULT_ENTRY_FILE)
+    fs.write(run, "pub fn run() {}\n").unwrap()
+    assert_eq(find_module_files("tool", dir).unwrap(), [normalize_path(run)])
+}
+// Rust: crates/jet-driver/src/Loader.rs:6401
+#Test("authority_name_uses_run_and_rejects_main_fallback") {
+    dir :: tempdir("authority-entry-name")
+    main :: dir.join(Syntax.LEGACY_ENTRY_FILE)
+    fs.write(main, "fn run() {}\n").unwrap()
+    assert_eq(authority_name_for_entry(main).unwrap(), "app")
+    run :: dir.join(Syntax.DEFAULT_ENTRY_FILE)
+    fs.write(run, "fn run() {}\n").unwrap()
+    assert_eq(authority_name_for_entry(main).unwrap(), "run")
+}
+// Rust: crates/jet-driver/src/Loader.rs:6413
+#Test("message_names_e1226_and_both_filenames") {
+    dir :: tempdir("message")
+    fs.write(dir.join("pack.jet"), "").unwrap()
+    msg :: stale_manifest_name_message(dir).expect("message")
+    assert(msg.contains("E1226"))
+    assert(msg.contains("pack.jet"))
+    assert(msg.contains(Syntax.PACKAGE_FILE))
+}

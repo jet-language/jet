@@ -1,0 +1,831 @@
+use std.[fs, env, process, thread, io]
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant]
+use jet.Interpreter.RunOutcome
+use jet.Diagnostics.Severity
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.DevParts.Support.[ProgramOutput, example_path, golden_program_output, corpus_gate_run_gaps, parse_corpus_gate_manifest, CorpusGateClass, bundle_of, STRUCT_OLD, dev_iteration, dev_iteration_with_timeout, require_multi_head_parity_prereqs, multi_head_diagnostic_entries, diagnostic_shapes, assert_cli_diagnostic_snapshot, with_jit_test_scope, lock_recovered, dev_diff_lock, cranelift_hot_swap_preserves_live_state_inner, cranelift_trap_then_hot_swap_continues_inner, persist_binding_survives_hot_swap_and_resets_on_shape_change_inner]
+use jet_foundation.Tests.Integration.DevParts.Routine04.[emitted_body, emitted_rust]
+// GATE #4494: native child processes, streams, threads, files and watch providers.
+// Legacy names identify original tests; execution parity uses native O0/O1/O2/Web.
+// Rust: tests/dev_parts/routine.rs:5441
+#Test("resident_jit_safety_detail_smoke") {
+    for stem in ["basics/compound", "basics/value_dispatch", "types/structs", "types/enums", "basics/branches", "concurrency/task_group"] {
+        file :: example_path(stem)
+        bundle := jet.Loader.load_entry(&file).expect("load")
+        diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+        assert(diagnostics.iter().all(fn(d) { d.severity != Severity.Error }), "{stem}: {diagnostics:?}")
+        expected :: golden_program_output(stem)
+        tir_support.assert_example_cli_tiers_agree(stem, &expected.stdout)
+    }
+}
+// Rust: tests/dev_parts/routine.rs:5491
+#Test("resident_jit_safe_labeled_loop_control") {
+    src :: """
+fn run() {
+    outer :: loop i in 0..<2 {
+        loop {
+            if i == 0 {
+                next(outer)
+            }
+            break(outer)
+        }
+    }
+    print("done")
+}
+"""
+    tir_support.assert_tiers_agree("labeled_loop_control", src, "done\n")
+}
+// Rust: tests/dev_parts/routine.rs:5515
+#Test("resident_jit_named_or_fallback_loop_control") {
+    src :: """
+fn run() {
+    values := [7]
+    outer :: loop i in 0..<2 {
+        loop {
+            value :: values.get(1 - i) ?? next(outer)
+            print(value)
+            values.get(99) ?? break(outer)
+        }
+    }
+    print("done")
+}
+"""
+    tir_support.assert_tiers_agree("named_or_fallback_loop_control", src, "7\ndone\n")
+}
+// Rust: tests/dev_parts/routine.rs:5539
+#Test("resident_jit_safe_increment_decrement") {
+    jet.run_compiler_work(fn() {
+        file :: "Examples/features/basics/increment.jet"
+        bundle := jet.Loader.load_entry(file).expect("load")
+        diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+        errors :: diags.into_iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+        assert(errors.is_empty(), "increment example must type-check")
+        tir_support.assert_example_cli_tiers_agree("basics/increment", &golden_program_output("basics/increment").stdout)
+    })
+}
+// Rust: tests/dev_parts/routine.rs:5567
+#Test("resident_jit_safe_named_tuples") {
+    jet.run_compiler_work(fn() {
+        bundle := jet.Loader.load_entry("Examples/features/basics/tuples.jet").expect("load")
+        diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+        errors :: diags.into_iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+        assert(errors.is_empty(), "tuple example must type-check")
+        tir_support.assert_example_cli_tiers_agree("basics/tuples", &golden_program_output("basics/tuples").stdout)
+    })
+}
+// Rust: tests/dev_parts/routine.rs:5587
+#Test("resident_jit_safe_zip_family") {
+    jet.run_compiler_work(fn() {
+        bundle := jet.Loader.load_entry("Examples/features/collections/zip_family.jet").expect("zip family example")
+        diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+        errors :: diags.into_iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+        assert(errors.is_empty(), "zip family example must type-check: {errors:?}")
+        tir_support.assert_example_cli_tiers_agree("collections/zip_family", &golden_program_output("collections/zip_family").stdout)
+    })
+}
+// Rust: tests/dev_parts/routine.rs:5612
+#Test("resident_jit_safe_chained_comparison") {
+    jet.run_compiler_work(fn() {
+        bundle := jet.Loader.load_entry("Examples/features/operators/chained_comparison.jet").expect("load")
+        diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+        errors :: diags.into_iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+        assert(errors.is_empty(), "chained comparison example must type-check")
+        tir_support.assert_example_cli_tiers_agree("operators/chained_comparison", &golden_program_output("operators/chained_comparison").stdout)
+    })
+}
+// Rust: tests/dev_parts/routine.rs:5635
+#Test("resident_jit_safe_user_operator_traits") {
+    file :: "Examples/features/operators/user_defined.jet"
+    bundle := jet.Loader.load_entry(file).expect("load")
+    diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    errors :: diags.into_iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+    assert(errors.is_empty(), "user operator example must type-check: {errors:?}")
+    src :: fs.read_to_string(file).expect("operator example")
+    tir_support.assert_tiers_agree("user_operator_traits", &src, "4,6 4,6 true true false\n")
+}
+// Rust: tests/dev_parts/routine.rs:5661
+#Test("resident_jit_safe_string_method_chain") {
+    bundle := jet.Loader.load_entry("Examples/features/basics/method_chain.jet").expect("load")
+    diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    errors :: diags.into_iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+    assert(errors.is_empty(), "method-chain example must type-check")
+    tir_support.assert_example_cli_tiers_agree("basics/method_chain", &golden_program_output("basics/method_chain").stdout)
+}
+// Rust: tests/dev_parts/routine.rs:5679
+#Test("run_tier_parity_guard") {
+    run_gaps :: corpus_gate_run_gaps(&parse_corpus_gate_manifest())
+    assert(run_gaps.is_empty(), "run-tier parity has {run_gaps.len()} gap(s):\n{run_gaps.join("\n")}")
+}
+// Rust: tests/dev_parts/routine.rs:5720
+#Test("serde_jit_parity_manifest_pins") {
+    gate :: parse_corpus_gate_manifest()
+    for stem in ["serde/encoding_breadth", "serde/serde_generic"] {
+        rows :: gate.iter().filter(fn(record) { record.stem == stem }).collect()
+        assert_eq(rows.len(), 1, "{stem} must carry exactly one corpus-gate row, found {rows.len()}")
+        record :: rows[0]
+        assert(record.class != CorpusGateClass.RunTierBroken && record.class != CorpusGateClass.TierDivergent, "{stem} became a run-tier refusal or a tier divergence: {record.class:?} {record.detail}")
+        if record.class == CorpusGateClass.DeoptInterp { assert(record.detail.is_empty(), "{stem} deopts CARRYING a diagnostic: {record.detail}") }
+        assert(record.class != CorpusGateClass.FrontendRejected, "{stem} is frontend-rejected: {record.detail}. The E2402 error-conversion gap that once excused this row is fixed (D-FAIL-CONV2=A), so a rejection here is a live defect, not the known one")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:5772
+#Test("cranelift_covers_string_interpolation") {
+    tir_support.assert_tiers_agree("str_interp", "fn run() {{\n    n := 7\n    print(\"value {{n}}\")\n}}\n", "value 7\n")
+}
+// Rust: tests/dev_parts/routine.rs:5780
+#Test("cranelift_covers_shield_region") {
+    tir_support.assert_tiers_agree("shield_region", "fn run() {{\n    #Shield {{\n        print(7)\n    }}\n}}\n", "7\n")
+}
+// Rust: tests/dev_parts/routine.rs:5789
+#Test("cranelift_shield_defers_task_cancel_without_unwinding_native_frame") {
+    with_jit_test_scope(fn() {
+        tir_support.assert_tiers_agree("shield_cancel", """
+use core.tasks as tasks
+fn run() {
+    (sender, ch) :: channel<Int>()
+    (ack_sender, ack) :: channel<Int>()
+    slow :: task {
+        #Shield {
+            value :: ch.receive() ?? panic("closed")
+            print(value)
+            ack_sender.send(1)
+        }
+        print(99)
+    }
+    slow.cancel()
+    slow.detach()
+    sender.send(42)
+    ack.receive() ?? panic("closed")
+}
+""", "42\n")
+    })
+}
+// Rust: tests/dev_parts/routine.rs:5825
+#Test("cranelift_unshielded_receive_cancel_does_not_unwind_native_frame") {
+    tir_support.assert_tiers_agree("unshielded_receive_cancel", """
+use core.tasks as tasks
+fn run() {
+    (ready_sender, ready) :: channel<Int>()
+    (sender, ch) :: channel<Int>()
+    slow :: task {
+        ready_sender.send(1)
+        ch.receive() ?? panic("closed")
+        print(99)
+    }
+    ready.receive() ?? panic("closed")
+    slow.cancel()
+    slow.detach()
+    sender.send(42)
+}
+""", "")
+}
+// Rust: tests/dev_parts/routine.rs:5848
+#Test("cranelift_unshielded_sleep_cancel_does_not_unwind_native_frame") {
+    tir_support.assert_tiers_agree("unshielded_sleep_cancel", """
+use core.tasks as tasks
+use core.time as time
+fn run() {
+    (ready_sender, ready) :: channel<Int>()
+    slow :: task {
+        ready_sender.send(1)
+        time.sleep(200ms)
+        print(99)
+    }
+    ready.receive() ?? panic("closed")
+    slow.cancel()
+    slow.detach()
+}
+""", "")
+}
+// Rust: tests/dev_parts/routine.rs:5870
+#Test("cranelift_unshielded_select_cancel_does_not_unwind_native_frame") {
+    tir_support.assert_tiers_agree("unshielded_select_cancel", """
+use core.tasks as tasks
+fn select_cancel_worker(ready_sender: Sender<Int>) {
+    task.group worker {
+        (_sender, ch) :: channel<Int>()
+        ready_sender.send(1)
+        if {
+            value, ch -> print(value)
+        }
+        print(99)
+    }
+}
+fn run() {
+    task.group g {
+        (ready_sender, ready) :: channel<Int>()
+        slow :: task select_cancel_worker(ready_sender)
+        ready.receive() ?? panic("closed")
+        slow.cancel()
+    }
+}
+""", "")
+}
+// Rust: tests/dev_parts/routine.rs:5899
+#Test("cranelift_wait_failures_recover_as_typed_task_failures") {
+    join_cancelled :: """
+use core.time as time
+fn failure_label(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+fn run() {
+    child :: task {
+        time.sleep(200ms)
+    }
+    child.cancel()
+    result :: child.join()
+    if result == {
+        .Err(error) -> { print(failure_label(error)) }
+        .Ok(_) -> { print("wrong cancellation") }
+    }
+}
+"""
+    tir_support.assert_tiers_agree("join_cancelled", join_cancelled, "cancelled\n")
+}
+// Rust: tests/dev_parts/routine.rs:5937
+#Test("all_failfast_jit_stderr_matches_aot_golden") {
+    file :: "Examples/features/concurrency/all_failfast.jet"
+    expected :: fs.read_to_string("Examples/features/expected/concurrency/all_failfast.err.out").expect("all_failfast.err.out")
+    for _ in 0..2 {
+        if dev_iteration(file, false, false) == {
+            .Ran(stdout, stderr, exit_code) -> { assert_eq(exit_code, 70, "exit"); assert_eq(stderr, expected, "stderr"); assert(stdout.is_empty(), "stdout") }
+            .Problems(ds) -> panic("all_failfast must run, got: {ds:?}")
+        }
+    }
+}
+// Rust: tests/dev_parts/routine.rs:5964
+#Test("cranelift_covers_checked_arithmetic") {
+    tir_support.assert_tiers_agree("arith", "fn run() {{\n    a := 10\n    b := 3\n    print(a + b)\n    print(a * b)\n    print(a - b)\n}}\n", "13\n30\n7\n")
+}
+// Rust: tests/dev_parts/routine.rs:5973
+#Test("cranelift_covers_let_and_if") {
+    tir_support.assert_tiers_agree("let_if", "fn run() {{\n    n := 5\n    if n > 3 {{\n        print(1)\n    }} else {{\n        print(0)\n    }}\n    m := n + 1\n    print(m)\n}}\n", "1\n6\n")
+}
+// Rust: tests/dev_parts/routine.rs:5982
+#Test("cranelift_covers_function_calls") {
+    tir_support.assert_tiers_agree("calls", "fn double(n: Int) -> Int {{\n    return n * 2\n}}\nfn run() {{\n    print(double(3))\n    print(double(0))\n}}\n", "6\n0\n")
+}
+// Rust: tests/dev_parts/routine.rs:5990
+#Test("multi_head_functions_match_interpreter_resident_jit_and_aot") {
+    require_multi_head_parity_prereqs()
+    src :: """
+enum Shape {
+    Circle(Float)
+    Rect(left_1: Float, right_1: Float)
+}
+fn area(Circle(r: Float)) -> Float { return r * r }
+fn area(Rect(left_1: Float, right_1: Float)) -> Float { return left_1 * right_1 }
+fn run() {
+    print(area(Shape.Circle(3.0)))
+    print(area(.Rect{ left_1: 2.0, right_1: 4.0 }))
+}
+"""
+    dir :: env.temp_dir().join("jet_multi_head_parity_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("multi_head.jet")
+    fs.write(&file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    tir_support.assert_tiers_agree("multi_head_functions", src, "9\n8\n")
+    for verb in ["run", "dev"] {
+        args := [verb, shown]
+        if verb == "dev" { args.push("--watch=off") }
+        out :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(args).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "{String.from_utf8_lossy(&out.stderr)}")
+        assert_eq(String.from_utf8_lossy(&out.stdout), "9\n8\n")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:6048
+#Test("value_position_enum_patterns_match_all_execution_tiers") {
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    for stem in ["tooling/branch_dispatch_bench", "types/enum_dot", "types/enum_dot_patterns", "types/enums"] {
+        expected :: golden_program_output(stem)
+        tir_support.assert_example_cli_tiers_agree(stem, &expected.stdout)
+        file :: example_path(stem)
+        if dev_iteration(&file, false, false) == {
+            .Ran(stdout, stderr, exit_code) -> assert_eq(ProgramOutput.ran(stdout, stderr, exit_code), expected, "default dev drifted for {stem}")
+            .Problems(diags) -> panic("{stem} must run: {diags:?}")
+        }
+    }
+}
+// Rust: tests/dev_parts/routine.rs:6088
+#Test("multi_head_payload_range_checks_each_slot_across_runtime_tiers") {
+    require_multi_head_parity_prereqs()
+    src :: """
+enum Pair {
+    Values(left: Int, right: Int)
+    Empty
+}
+fn classify(pair: Pair) -> String {
+    if pair == {
+        .Values(_, 10..19) -> { return "range" }
+        .Values(_, _) -> { return "other" }
+        .Empty -> { return "empty" }
+    }
+    return "unknown"
+}
+fn run() {
+    print(classify(.Values{ left: 1, right: 15 }))
+    print(classify(.Values{ left: 1, right: 25 }))
+}
+"""
+    dir :: common.unique_tmp("jet_multi_head_payload_range")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("multi_head_payload_range.jet")
+    fs.write(&file, src).unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    tir_support.assert_tiers_agree("multi_head_payload_range", src, "range\nother\n")
+    if dev_iteration(&shown, false, false) == {
+        .Ran(stdout, stderr, exit_code) -> assert_eq(ProgramOutput.ran(stdout, stderr, exit_code), ProgramOutput.ran("range\nother\n", "", 0), "default dev payload-range slot drifted")
+        .Problems(diags) -> panic("default dev failed payload-range fixture: {diags:?}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:6147
+#Test("multi_head_missing_head_e0307_reaches_all_diagnostic_entries") {
+    file :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/ui/multi_head_not_exhaustive.jet")
+    shown :: file.to_string_lossy().into_owned()
+    src :: fs.read_to_string(&file).unwrap()
+    snapshot :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/ui/multi_head_not_exhaustive.stderr")).unwrap()
+    snapshot_file :: "tests/ui/multi_head_not_exhaustive.jet"
+    require_multi_head_parity_prereqs()
+    entries :: multi_head_diagnostic_entries(&shown, &src)
+    expected :: diagnostic_shapes(&entries.sema)
+    assert_eq(expected.len(), 1, "missing-head fixture must produce exactly one diagnostic: {expected:?}")
+    assert_eq(expected[0].code, "E0307")
+    assert_eq(jet.render_diagnostics(snapshot_file, &src, &entries.sema), snapshot, "the sema diagnostic must match the checked-in UI snapshot")
+    for command in ["run", "dev"] { assert_cli_diagnostic_snapshot(command, snapshot_file, &snapshot) }
+    for (tier, result) in [("sema", RunOutcome.Problems(entries.sema)), ("AOT", RunOutcome.Problems(entries.aot)), ("native", entries.jit), ("default dev", entries.default_dev), ("diagnostic gate", entries.interpreter_gate)] {
+        if result == {
+            .Problems(diags) -> {
+                assert_eq(diagnostic_shapes(&diags), expected, "{tier} diagnostic code/text/span drifted from sema")
+                assert_eq(jet.render_diagnostics(snapshot_file, &src, &diags), snapshot, "{tier} rendered diagnostic drifted from the UI snapshot")
+            }
+            _ -> panic("{tier} entry must reject missing multi-head coverage")
+        }
+    }
+    assert_eq(entries.forced_interpreter, ProgramOutput.ran("first\n", "", 0), "successful forced entry must keep first-head order")
+}
+// Rust: tests/dev_parts/routine.rs:6208
+#Test("multi_head_duplicate_head_l0301_keeps_first_match_across_runtime_tiers") {
+    require_multi_head_parity_prereqs()
+    file :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/ui_lint/multi_head_unreachable.jet")
+    shown :: file.to_string_lossy().into_owned()
+    src :: fs.read_to_string(&file).unwrap()
+    dir :: common.unique_tmp("jet_multi_head_duplicate_head")
+    fs.create_dir_all(&dir).unwrap()
+    bundle := jet.Loader.load_entry(&shown).expect("duplicate-head fixture should load")
+    sema :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(sema.iter().any(fn(diagnostic) { diagnostic.code == "L0301" }), "sema must retain duplicate-head lint: {sema:?}")
+    compiled :: jet.compile_with_path(&src, &shown).expect("duplicate-head lint must not block AOT compilation")
+    assert(compiled.lints.iter().any(fn(diagnostic) { diagnostic.code == "L0301" }), "AOT entry lost duplicate-head lint: {compiled.lints:?}")
+    tir_support.assert_tiers_agree("multi_head_duplicate_head", &src, "first\n")
+    for verb in ["run", "dev"] {
+        args := [verb, shown]
+        if verb == "dev" { args.push("--watch=off") }
+        out :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(args).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "{String.from_utf8_lossy(&out.stderr)}")
+        assert_eq(String.from_utf8_lossy(&out.stdout), "first\n")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:6288
+#Test("cranelift_matches_plain_parameter_read_write_and_take_modes") {
+    tir_support.assert_tiers_agree("plain_parameter_modes", "fn read(text: String) {{ print(text) }}\nfn edit(values: &[Int]) {{ values[0] = 9 }}\nfn consume(text: ^String) {{ print(text) }}\nfn run() {{\n    text :: \"hello\"\n    values := [1, 2]\n    read(text)\n    edit(&values)\n    print(values[0])\n    consume(^text)\n}}\n", "hello\n9\nhello\n")
+}
+// Rust: tests/dev_parts/routine.rs:6322
+#Test("cranelift_matches_variadic_fixed_writeback") {
+    tir_support.assert_tiers_agree("variadic_fixed_writeback", "fn edit(values: &[Int], extras: ...Int) {{ values[0] = extras.len() }}\nfn run() {{\n    values := [0]\n    edit(&values, 7, 8)\n    print(values[0])\n}}\n", "2\n")
+}
+// Rust: tests/dev_parts/routine.rs:6344
+#Test("cranelift_covers_counted_loop") {
+    tir_support.assert_tiers_agree("counted_loop", "fn run() {{\n    sum := 0\n    loop i in 0..<5 {{\n        sum += i\n    }}\n    print(sum)\n}}\n", "10\n")
+}
+// Rust: tests/dev_parts/routine.rs:6353
+#Test("cranelift_covers_while_loop") {
+    tir_support.assert_tiers_agree("while_loop", "fn run() {{\n    fuel := 3\n    loop fuel > 0 {{\n        print(fuel)\n        fuel -= 1\n    }}\n}}\n", "3\n2\n1\n")
+}
+// Rust: tests/dev_parts/routine.rs:6362
+#Test("cranelift_covers_range_loop") {
+    tir_support.assert_tiers_agree("range_loop", "fn run() {{\n    loop n in 1..3 {{\n        print(n)\n    }}\n}}\n", "1\n2\n3\n")
+}
+// Rust: tests/dev_parts/routine.rs:6371
+#Test("cranelift_covers_logic_ops") {
+    tir_support.assert_tiers_agree("logic_ops", "fn run() {{\n    a := true\n    b := false\n    if a && !b {{\n        print(1)\n    }}\n    if b || a {{\n        print(2)\n    }}\n}}\n", "1\n2\n")
+}
+// Rust: tests/dev_parts/routine.rs:6380
+#Test("cranelift_covers_string_print") {
+    tir_support.assert_tiers_agree("strings", "fn run() {{\n    msg := \"hello, jit\"\n    print(msg)\n    print(\"done\")\n}}\n", "hello, jit\ndone\n")
+}
+// Rust: tests/dev_parts/routine.rs:6403
+#Test("cranelift_covers_float_lists") {
+    tir_support.assert_tiers_agree("float_lists", "fn run() {{\n    xs := [Float]{{ 1.5, 2.5 }}\n    xs.push(3.5)\n    print(xs.len())\n    print(xs[0])\n    xs[1] = 4.5\n    print(xs[1])\n    mid :: xs[1..2]\n    print(mid[0])\n}}\n", "3\n1.5\n4.5\n4.5\n")
+}
+// Rust: tests/dev_parts/routine.rs:6426
+#Test("cranelift_covers_mixed_record_fields") {
+    tir_support.assert_tiers_agree("mixed_record_fields", "struct Card {{\n    name: String\n    score: Float\n    ready: Bool\n    mark: Char\n}}\nfn run() {{\n    c :: Card{{name: \"jet\", score: 2.5, ready: true, mark: 'J'}}\n    print(c.name)\n    print(c.score)\n    print(c.ready)\n    print(c.mark)\n}}\n", "jet\n2.5\ntrue\nJ\n")
+}
+// Rust: tests/dev_parts/routine.rs:6436
+#Test("cranelift_hot_swap_preserves_live_state") { with_jit_test_scope(cranelift_hot_swap_preserves_live_state_inner) }
+// Rust: tests/dev_parts/routine.rs:6461
+#Test("cranelift_trap_then_hot_swap_continues") { with_jit_test_scope(cranelift_trap_then_hot_swap_continues_inner) }
+// Rust: tests/dev_parts/routine.rs:6469
+#Test("front_end_errors_surface_in_dev_iteration") {
+    dir :: env.temp_dir()
+    file :: dir.join("jet_dev_broken.jet")
+    fs.write(&file, "fn run() {{\n    print(nope)\n}}\n").unwrap()
+    shown :: file.to_string_lossy().to_string()
+    if dev_iteration(&shown, false, true) == {
+        .Problems(diags) -> { assert(!diags.is_empty(), "broken program must report problems"); assert(diags.iter().all(fn(d) { d.severity == Severity.Error }), "dev should surface errors") }
+        .Ran(_, _, _) -> panic("a broken program must not run")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:6491
+#Test("body_only_edit_is_type_stable") {
+    old :: bundle_of(STRUCT_OLD, "stable_old")
+    new :: bundle_of("struct P {{\n    x: Int\n}}\nfn f(p: P) -> Int {{\n    return p.x + 1\n}}\nfn run() {{\n    print(f(P{{x: 2}}))\n}}\n", "stable_new")
+    decision :: jet.Sema.HotSwap.type_stable_decision(&old, &new, "run").expect("body-only edit must produce a hot-swap decision")
+    assert(decision.is_compatible(), "a body-only edit must be type-stable (swap path): {decision:?}")
+}
+// Rust: tests/dev_parts/routine.rs:6507
+#Test("struct_field_change_emits_e2210") {
+    old :: bundle_of(STRUCT_OLD, "field_old")
+    new :: bundle_of("struct P {{\n    x: Int\n    y: Int\n}}\nfn f(p: P) -> Int {{\n    return p.x\n}}\nfn run() {{\n    print(f(P{{x: 1, y: 2}}))\n}}\n", "field_new")
+    decision :: jet.Sema.HotSwap.type_stable_decision(&old, &new, "run").expect("struct field change must produce a hot-swap decision")
+    assert(decision.requires_restart(), "adding a struct field must force a restart: {decision:?}")
+    reason :: decision.compatibility.reason().expect("an incompatible decision must carry a restart reason")
+    diagnostic :: jet.Sema.HotSwap.e2210(reason)
+    assert_eq(diagnostic.code, "E2210")
+    assert(diagnostic.what.contains("struct `P`"), "E2210 should name the changed struct, got: {diagnostic.what}")
+}
+// Rust: tests/dev_parts/routine.rs:6534
+#Test("fn_signature_change_emits_e2210") {
+    old :: bundle_of("fn g(a: Int) -> Int {{\n    return a\n}}\nfn run() {{\n    print(g(1))\n}}\n", "sig_old")
+    new :: bundle_of("fn g(a: Int) -> Bool {{\n    return a == 0\n}}\nfn run() {{\n    print(g(1))\n}}\n", "sig_new")
+    decision :: jet.Sema.HotSwap.type_stable_decision(&old, &new, "run").expect("function signature change must produce a hot-swap decision")
+    assert(decision.requires_restart(), "a return-type change must force a restart: {decision:?}")
+    reason :: decision.compatibility.reason().expect("an incompatible decision must carry a restart reason")
+    diagnostic :: jet.Sema.HotSwap.e2210(reason)
+    assert_eq(diagnostic.code, "E2210")
+    assert(diagnostic.what.contains("return type"))
+}
+// Rust: tests/dev_parts/routine.rs:6560
+#Test("enum_variant_change_emits_e2210") {
+    old :: bundle_of("enum E {{\n    A\n    B\n}}\nfn run() {{\n    print(1)\n}}\n", "enum_old")
+    new :: bundle_of("enum E {{\n    A\n    B\n    C\n}}\nfn run() {{\n    print(1)\n}}\n", "enum_new")
+    decision :: jet.Sema.HotSwap.type_stable_decision(&old, &new, "run").expect("enum variant change must produce a hot-swap decision")
+    assert(decision.requires_restart(), "adding an enum variant must force a restart: {decision:?}")
+    reason :: decision.compatibility.reason().expect("an incompatible decision must carry a restart reason")
+    diagnostic :: jet.Sema.HotSwap.e2210(reason)
+    assert_eq(diagnostic.code, "E2210")
+    assert(diagnostic.what.contains("enum `E`"))
+}
+// Rust: tests/dev_parts/routine.rs:6589
+#Test("persist_binding_codegen_uses_safe_prelude_cell") {
+    dir :: env.temp_dir().join("jet_persist_parity_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("counter.jet")
+    src :: "#Persist counter := 0\nfn run() {{\n    counter += 1\n    print(counter)\n}}\n"
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy().to_string()
+    rust :: jet.compile_with_path(src, &shown).unwrap_or_else(fn(diags) { panic("front end rejected fixture:\n{jet.render_diagnostics(&shown, src, &diags)}") }).rust
+    assert(rust.contains("static __JET_COUNTER: JetPersistCell<i64> = JetPersistCell::new(0i64);"), "`#Persist counter := 0` must lower to a Prelude `JetPersistCell`:\n{rust}")
+    assert(rust.contains("(__JET_COUNTER).set(jet_std::jet_int_add_hot(((__JET_COUNTER).get()), (1i64))!);"), "writes to `#Persist counter` must use the Prelude cell:\n{rust}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:6625
+#Test("list_constant_reads_borrow_the_shared_table") {
+    dir :: env.temp_dir().join("jet_shared_constant_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("table.jet")
+    rows :: (0..400).map(fn(index) { "    Row{{code: \"E{index:04}\", meaning: \"meaning number {index} padded so the table is large\"}}," }).collect().join("\n")
+    src :: "struct Row {{\n    code: String\n    meaning: String\n}}\n\nROWS :: prep {{ [Row]{{\n{rows}\n}} }}\n\nfn find_in(rows: [Row], code: String) -> Bool {{\n    loop row in rows {{\n        if row.code == code -> return true\n    }}\n    false\n}}\n\nfn run() {{\n    if find_in(ROWS, \"E0399\") -> print(ROWS[3].meaning)\n    print(\"{{ROWS.len()}}\")\n}}\n"
+    fs.write(&path, &src).unwrap()
+    shown :: path.to_string_lossy().to_string()
+    rust :: jet.compile_with_path(&src, &shown).unwrap_or_else(fn(diags) { panic("front end rejected fixture:\n{jet.render_diagnostics(&shown, &src, &diags)}") }).rust
+    assert(rust.contains("JetSharedSlot::new(std::rc::Rc::clone(value))"), "a list constant must hand reads its shared value:\n{rust}")
+    assert(rust.contains("JetSharedSlot::empty()"), "a read of a list constant must hold the shared table, not a copy:\n{rust}")
+    assert(rust.contains("ROWS_shared();"), "each read of a list constant must take the shared value, not a copy:\n{rust}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:6699
+#Test("indexed_field_read_never_copies_the_element") {
+    src :: "struct M {{\n    id: String\n    big: [String]\n}}\n\nstruct G {{\n    mods: [M]\n}}\n\nfn find_mod(g: G, id: String) -> Int? {{\n    loop i in 0..<g.mods.len() {{\n        if g.mods[i].id == id -> return Val(i)\n    }}\n    None\n}}\n\nfn make(id: String) -> M {{\n    M{{id: id, big: [String]{{\"x\"}}}}\n}}\n\nfn made_id(id: String) -> String {{\n    make(id).id\n}}\n\nfn run() {{\n    g :: G{{mods: [M]{{M{{id: \"a\", big: [String]{{\"x\"}}}}, M{{id: \"b\", big: [String]{{\"y\"}}}}}}}}\n    print(find_mod(g, \"b\") ?? -1)\n    print(made_id(\"c\"))\n}}\n"
+    rust :: emitted_rust("index_field", src)
+    find := emitted_body(&rust, "find_umod") // #4303
+    assert(find.contains("u32)).__jet_id"), "`g.mods[i].id` must read `id` through the element place:\n{find}")
+    assert(!find.lines().any(fn(line) { line.contains("jet_index_vec_ref(") && line.contains("u32)).clone()") }), "`g.mods[i].id` must not copy the whole element:\n{find}")
+    assert(!find.contains(".clone()).__jet_"), "a field read must not copy its whole receiver:\n{find}")
+    made := emitted_body(&rust, "made_uid") // #4303
+    assert(!made.contains(".clone()).__jet_id"), "`make(id).id` must borrow the result slot and copy only `id`:\n{made}")
+}
+// Rust: tests/dev_parts/routine.rs:6725
+#Test("bool_branch_conditions_never_clone_their_slot") {
+    src :: "fn count_hits(flags: [Bool], limit: Int) -> Int {{\n    hits := 0\n    loop i in 0..<flags.len() {{\n        if flags[i] && i < limit -> hits += 1\n    }}\n    hits\n}}\n\nfn run() {{\n    print(count_hits([Bool]{{true, false, true}}, 2))\n}}\n"
+    rust :: emitted_rust("bool_branch", src)
+    body := emitted_body(&rust, "count_uhits") // #4303
+    assert(body.contains("if "), "`count_hits` must branch:\n{body}")
+    assert(!body.contains(".clone() {{"), "a Bool branch condition must be read bitwise, not cloned:\n{body}")
+}
+// Rust: tests/dev_parts/routine.rs:6739
+#Test("interpolation_holes_borrow_their_values") {
+    src :: "fn greet(name: String, n: Int) -> String {{\n    \"hi {{name}}, you are {{n}}\"\n}}\n\nfn run() {{\n    print(greet(\"ann\", 3))\n}}\n"
+    rust :: emitted_rust("interpolation_borrow", src)
+    body := emitted_body(&rust, "greet") // #4303
+    assert_eq(body.matches(".jet_show()").count(), 2, "both holes of `greet` must be shown:\n{body}")
+    assert(!body.contains(".clone()).jet_show()") && !body.contains(".clone().jet_show()"), "an interpolation hole must borrow its value, not clone it:\n{body}")
+}
+// Rust: tests/dev_parts/routine.rs:6758
+#Test("read_only_bindings_borrow_their_payload") {
+    src :: "enum Shape {{\n    Circle(label: String)\n    Rect(label: String, parts: [String])\n    Dot\n}}\n\nstruct Bag {{\n    name: String\n    tags: [String]\n}}\n\nfn label_len(shape: Shape) -> Int {{\n    if shape == {{\n        .Circle(label) | .Rect(label, _) -> return label.len()\n        .Dot -> return 0\n    }}\n    0\n}}\n\nfn tag_count(bag: Bag) -> Int {{\n    tags :: bag.tags\n    tags.len()\n}}\n\nfn run() {{\n    print(label_len(Shape.Rect{{label: \"ab\", parts: [String]{{\"x\"}}}}))\n    print(tag_count(Bag{{name: \"b\", tags: [String]{{\"x\", \"y\"}}}}))\n}}\n"
+    rust :: emitted_rust("ref_bindings", src)
+    label := emitted_body(&rust, "label_ulen") // #4303
+    assert(label.contains("Option<&String>"), "an or-pattern binding of a read parameter's payload must hold a reference:\n{label}")
+    assert(!label.contains("payload.clone()") && !label.contains("payload.as_ref().clone()"), "an or-pattern binding must not copy its payload:\n{label}")
+    tags := emitted_body(&rust, "tag_ucount") // #4303
+    assert(!tags.contains("__jet_tags).clone()"), "a `::` let of a read parameter's field must not copy it:\n{tags}")
+}
+// Rust: tests/dev_parts/routine.rs:6782
+#Test("persist_binding_survives_hot_swap_and_resets_on_shape_change") { with_jit_test_scope(persist_binding_survives_hot_swap_and_resets_on_shape_change_inner) }
+// Rust: tests/dev_parts/routine.rs:6794
+#Test("hand_written_codec_dev_tier_matches_native_shape") {
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    src :: """
+use core.encoding.json as json
+struct Email { addr: String }
+impl Email.Encode {
+    fn encode(self) -> DataTree {
+        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
+        return DataTree.Object(m)
+    }
+}
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email [FieldError]! {
+        f := &tree.field("email") ?? DataTree.Text("")
+        s := f.text() ?? ""
+        return Ok(Email{addr: s})
+    }
+}
+fn run() {
+    e := Email{addr: "a@b.com"}
+    s := json.to_string(e)
+    print(s)
+    back := json.decode<Email>(s) ?? panic("decode failed")
+    print(back.addr)
+}
+"""
+    dir :: env.temp_dir().join("jet_hand_codec_dev_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("hand_codec.jet")
+    fs.write(&file, src).unwrap()
+    outcome :: dev_iteration_with_timeout("hand_codec", file.to_str().unwrap(), true)
+    if outcome == {
+        .Ran(stdout, stderr, exit_code) -> { assert_eq(stdout, "{{\"email\":\"a@b.com\"}}\na@b.com\n"); assert(stderr.is_empty(), "hand codec wrote stderr: {stderr}"); assert_eq(exit_code, 0) }
+        .Problems(diags) -> panic("hand codec dev tier failed: {diags:?}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:6853
+#Test("schedule_every_dev_loop_consumer") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    file :: root.join("Examples/features/devloop/schedule_every.jet")
+    src :: fs.read_to_string(&file).unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap_or_else(fn(diags) { panic("schedule_every.jet failed to load: {diags:?}") })
+    diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    errors :: diags.iter().filter(fn(d) { d.severity == Severity.Error }).collect()
+    assert(errors.is_empty(), "schedule_every.jet must compile clean:\n{jet.render_diagnostics("schedule_every.jet", &src, &diags)}")
+    jobs := jet.Interpreter.scheduled_jobs(&bundle)
+    jobs.sort_by(fn(a, b) { a.0.cmp(&b.0) })
+    names :: jobs.iter().map(fn((n, _)) { n.as_str() }).collect()
+    assert_eq(names, ["compact_archive", "nightly_backup", "prune_sessions", "refresh_indexes"], "scheduled_jobs must list every #Job fn carrying #Every(…), and skip the #Every(…)-less `manual_only` job")
+    schedules :: jobs.iter().map(fn((n, s)) { (n.as_str(), s) }).collect()
+    assert_eq(schedules["prune_sessions"], jet.AST.EverySchedule.Duration(nanos: 5 * 60 * 1_000_000_000), "`#Every(5min)` must resolve to a 5-minute interval")
+    assert_eq(schedules["nightly_backup"], jet.AST.EverySchedule.WallClockTime(hour: 3, minute: 0), "`#Every(\"03:00\")` must resolve to 03:00 daily")
+    assert_eq(schedules["refresh_indexes"], jet.AST.EverySchedule.Duration(nanos: 2 * 60 * 60 * 1_000_000_000), "`#Every(2h)` must resolve through the canonical Time family")
+    assert_eq(schedules["compact_archive"], jet.AST.EverySchedule.Duration(nanos: 24 * 60 * 60 * 1_000_000_000), "`#Every(1d)` must resolve through the canonical Time family")
+    dispatch_file :: root.join(".jet-schedule-dispatch-{process.id()}.jet")
+    _ :: fs.remove_file(&dispatch_file)
+    dispatch_src :: src.replace("fn run() {{\n    prune_sessions()\n    refresh_indexes()\n    compact_archive()\n    nightly_backup()\n    manual_only()\n}}", "fn run() {{}}")
+    assert_ne(dispatch_src, src, "dispatch fixture must isolate fn run")
+    fs.write(&dispatch_file, &dispatch_src).unwrap()
+    dispatch_bundle := jet.Loader.load_entry(dispatch_file.to_str().unwrap()).unwrap_or_else(fn(diags) { panic("dispatch fixture failed to load: {diags:?}") })
+    dispatch_diags :: jet.Sema.check_bundle(&dispatch_bundle, jet.Sema.CompileMode.Run)
+    assert(dispatch_diags.iter().all(fn(diagnostic) { diagnostic.severity != Severity.Error }), "dispatch fixture must compile clean:\n{jet.render_diagnostics("schedule_every-dispatch.jet", &dispatch_src, &dispatch_diags)}")
+    policy :: common.development_policy()
+    if common.run_interpreter_named_job(&dispatch_bundle, dispatch_file.to_str().unwrap(), "prune_sessions", false, &policy) == {
+        .Ran(stdout, _, exit_code) -> { assert_eq(exit_code, 0); assert_eq(stdout, "pruning sessions\n") }
+        .Problems(diags) -> panic("named job failed: {diags:?}")
+    }
+    _ :: fs.remove_file(dispatch_file)
+}
+// Rust: tests/dev_parts/routine.rs:6962
+#Test("schedule_clock_records_window_and_missed_tick_behavior") {
+    clock := jet_jit.Job.JetJobClock.new()
+    interval :: [("interval", jet_jit.Job.JetJobSchedule.Duration(nanos: 5 * 60 * 1_000_000_000))]
+    assert_eq(clock.due_at(&interval, 0), ["interval"])
+    assert(clock.due_at(&interval, 0).is_empty(), "a local interval must not overlap itself before its duration elapses")
+    wall_clock :: [("cron", jet_jit.Job.JetJobSchedule.WallClockTime(hour: 3, minute: 0))]
+    missed_window :: 3 * 3_600 + 61
+    assert(clock.due_at(&wall_clock, missed_window).is_empty(), "a 03:00 UTC wall-clock schedule must not fire after its one-minute window")
+    next_day :: missed_window + 86_400 - 61
+    assert_eq(clock.due_at(&wall_clock, next_day), ["cron"], "the next UTC day gets one fresh local tick, not a replay of the missed one")
+    assert(clock.due_at(&wall_clock, next_day + 30).is_empty(), "a wall-clock schedule fires at most once in a UTC day")
+}
+// Rust: tests/dev_parts/routine.rs:6999
+#Test("watching_dev_reruns_on_jit_gap_and_recovers") {
+    dir :: env.temp_dir().join("jet_dev_watch_c6_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("app.jet")
+    fs.write(&file, "fn run() {{\n    print(\"good-v1\")\n}}\n").unwrap()
+    shown :: file.to_string_lossy().to_string()
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).arg("dev").arg(&shown).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn watching jet dev")
+    thread.sleep(Duration.from_millis(800))
+    fs.write(&file, "use core.sys as env\nfn run() {{\n    print(env.current_dir())\n}}\n").unwrap()
+    thread.sleep(Duration.from_millis(800))
+    fs.write(&file, "fn run() {{\n    print(\"good-v2\")\n}}\n").unwrap()
+    thread.sleep(Duration.from_millis(800))
+    _ :: child.kill()
+    out :: child.wait_with_output().expect("watching jet dev output")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("good-v1"), "stdout:\n{stdout}")
+    assert(!stderr.contains("E2211") && !stdout.contains("E2211"), "retired E2211 must not appear\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    assert(stdout.contains("good-v2"), "stdout:\n{stdout}")
+    fs.write(&file, "use core.sys as env\nfn run() {{\n    print(env.current_dir())\n}}\n").unwrap()
+    once :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["dev", &shown, "--watch=off"]).env("NO_COLOR", "1").output().unwrap()
+    once_stdout :: String.from_utf8_lossy(&once.stdout)
+    once_stderr :: String.from_utf8_lossy(&once.stderr)
+    assert_eq(once.status.code(), Val(0), "stderr={once_stderr}")
+    assert(!once_stderr.contains("E2211") && !once_stdout.contains("E2211"), "retired E2211 must not appear: stdout={once_stdout} stderr={once_stderr}")
+    assert(!once_stdout.trim().is_empty(), "one-shot dev should print output: stdout={once_stdout} stderr={once_stderr}")
+}
+// Rust: tests/dev_parts/routine.rs:7064
+#Test("ul6_native_watch_matrix_budget_and_reconnect") {
+    dir :: env.temp_dir().join("jet_ul6_native_{process.id()}_{Instant.now().elapsed().as_nanos()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    entry :: dir.join("app.jet")
+    lib :: dir.join("lib.jet")
+    asset :: dir.join("app.css")
+    fs.write(&lib, "// helper module\n").unwrap()
+    fs.write(&asset, "body{{}}\n").unwrap()
+    fs.write(&entry, "fn run() {{\n    print(\"v1\")\n}}\n").unwrap()
+    graph := jet_devserver.WatchGraph.from_entry(&entry, [lib.clone()]).unwrap()
+    graph.upsert(asset.clone(), jet_devserver.RootKind.Style)
+    graph.link(fs.canonicalize(&entry).unwrap_or(entry.clone()), asset.clone())
+    session := jet_devserver.WatchSession.from_graph(graph)
+    assert(session.graph().node_count() >= 3)
+    kinds :: session.graph().nodes().map(fn(n) { n.kind }).collect()
+    assert(kinds.contains(jet_devserver.RootKind.Import))
+    assert(kinds.contains(jet_devserver.RootKind.Style))
+    thread.sleep(Duration.from_millis(30))
+    fs.write(&lib, "// helper module v2\n").unwrap()
+    started :: Instant.now()
+    receipt :: session.poll().expect("lib invalidation")
+    visible_ms :: started.elapsed().as_millis()
+    assert(receipt.closure.iter().any(fn(p) { p.ends_with("lib.jet") || p.ends_with("app.jet") }), "closure={receipt.closure:?}")
+    assert(visible_ms <= jet_devserver.EDIT_TO_VISIBLE_BUDGET_MS || jet_devserver.within_budget(&receipt), "edit-to-visible {visible_ms}ms receipt={receipt.edit_to_visible_ms:?}")
+    assert(receipt.render().contains("\"generation\":"))
+    session.acknowledge(&receipt).unwrap()
+    thread.sleep(Duration.from_millis(30))
+    fs.write(&lib, "// helper module v3\n").unwrap()
+    session.recover()
+    assert(session.poll().is_none(), "recover must clear pending drift")
+    thread.sleep(Duration.from_millis(30))
+    fs.write(&entry, "fn run() {{\n    print(\"v4\")\n}}\n").unwrap()
+    again :: session.poll().expect("post-reconnect edit")
+    session.acknowledge(&again).unwrap()
+    out :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", &entry.to_string_lossy()]).env("NO_COLOR", "1").output().expect("jet run")
+    assert(out.status.success(), "stderr={String.from_utf8_lossy(&out.stderr)}")
+    assert_eq(String.from_utf8_lossy(&out.stdout).trim(), "v4")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:7141
+#Test("ul6_run_watch_and_dev_share_engine") {
+    dir :: env.temp_dir().join("jet_ul6_share_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("app.jet")
+    fs.write(&file, "fn run() {{\n    print(\"v1\")\n}}\n").unwrap()
+    shown :: file.to_string_lossy().to_string()
+    child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", &shown, "--watch"]).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn jet run --watch")
+    thread.sleep(Duration.from_millis(900))
+    fs.write(&file, "fn run() {{\n    print(\"v2\")\n}}\n").unwrap()
+    thread.sleep(Duration.from_millis(900))
+    _ :: child.kill()
+    out :: child.wait_with_output().expect("run --watch output")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(stdout.contains("watching") || stdout.contains("v1") || stdout.contains("v2"), "stdout:\n{stdout}")
+    assert(stdout.contains("v1") || stdout.contains("changed") || stdout.contains("v2"), "expected watch activity\nstdout:\n{stdout}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:7176
+#Test("package_callable_survives_dev_and_run_watch_reload") {
+    for command in ["dev", "run"] {
+        scratch :: common.Scratch.new("package-callable-reload")
+        fs.write(scratch.join("package.jet"), "name: \"callable_reload\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [IO] }} }}\noutputs: {{ app: .Executable{{ entry: launch }} }}\n").unwrap()
+        file :: scratch.join("entry.jet")
+        fs.write(&file, "fn run() {{ print(\"wrong callable\") }}\npub fn launch() {{ print(\"selected-1\") }}\n").unwrap()
+        args := [command, scratch.path.to_str().unwrap()]
+        if command == "run" { args.push("--watch") }
+        child := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(&args).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap_or_else(fn(error) { panic("spawn package {command}: {error}") })
+        stdout :: child.stdout.take().unwrap()
+        (lines_tx, lines_rx) :: std.sync.mpsc.channel()
+        thread.spawn(fn() {
+            for line in io.BufReader.new(^stdout).lines() { if lines_tx.send(line).is_err() { break } }
+        })
+        // Rust: tests/dev_parts/routine.rs:7213 (local wait_for closure)
+        wait_for :: fn(expected: String) {
+            loop {
+                line :: lines_rx.recv_timeout(Duration.from_secs(30)).unwrap_or_else(fn(error) { panic("package {command} output {expected}: {error}") }).expect("package callable stdout line")
+                if line == expected { break }
+                assert_ne(line, "wrong callable", "package execution fell back to run")
+            }
+        }
+        wait_for("selected-1")
+        fs.write(&file, "fn run() {{ print(\"wrong callable\") }}\npub fn launch() {{ print(\"selected-2\") }}\n").unwrap()
+        wait_for("selected-2")
+        _ :: child.kill()
+        output :: child.wait_with_output().unwrap_or_else(fn(error) { panic("stop package {command}: {error}") })
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert(!stderr.contains("Error [") && !stderr.contains("E2211"), "package {command} reload failed:\n{stderr}")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:7264
+#Test("tiered_run_selects_per_function_tiers_and_cross_calls") {
+    dir :: common.unique_tmp("jet_778_tiers")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("mixed.jet")
+    src :: """
+#Memo fn cached(n: Int) -[]> Int { n * 2 }
+fn add1(n: Int) -> Int {
+    return n + 1
+}
+fn native_sum() -> Int {
+    doubled :: [add1(40), add1(1)]
+    [a, b] :: doubled
+    return a + b
+}
+fn run() {
+    print(native_sum())
+    print(cached(21) + add1(0))
+}
+"""
+    fs.write(&file, src).unwrap()
+    // Retired planner/trace assertions become genuine native cross-call/memo
+    // behavior across each retained optimization tier, with no deopt engine.
+    tir_support.assert_tiers_agree("mixed_tiers_cross_calls", src, "43\n43\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:7389
+#Test("tracked_origin_fact_matches_aot_in_default_dev") {
+    dir :: common.unique_tmp("jet_origin_fact_dev")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("origin_fact.jet")
+    src :: "fn run() {{\n    #Track speed :: Float{{3.5}}\n    plain :: Float{{3.5}}\n    copied :: speed\n    speed_origin :: prep {{ speed.$origin }}\n    plain_origin :: prep {{ plain.$origin }}\n    copied_origin :: prep {{ copied.$origin }}\n    print(speed_origin?.tracked ?? false)\n    print(speed_origin?.source ?? \"missing\")\n    print(speed_origin?.line ?? 0)\n    print(speed_origin?.column ?? 0)\n    print(plain_origin == None)\n    print(copied_origin == None)\n}}\n"
+    fs.write(&file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    expected_stdout :: "true\nspeed\n2\n12\ntrue\ntrue\n"
+    tir_support.assert_tiers_agree("origin_fact", src, expected_stdout)
+    for forced in [false, true] {
+        if dev_iteration_with_timeout("origin_fact", &shown, forced) == {
+            .Ran(stdout, stderr, exit_code) -> assert_eq(ProgramOutput.ran(stdout, stderr, exit_code), ProgramOutput.ran(expected_stdout, "", 0))
+            .Problems(diags) -> panic("dev failed origin fact: {diags:?}")
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:7434
+#Test("tower_1754_collection_parity_focus") {
+    with_jit_test_scope(fn() {
+        guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+        for stem in ["collections/iter_adapters", "collections/iter_tools_audit", "collections/list_remove_selector", "collections/list_surface", "effects/taint"] {
+            tir_support.assert_example_cli_tiers_agree(stem, &golden_program_output(stem).stdout)
+        }
+    })
+}
+// Rust: tests/dev_parts/routine.rs:7467
+#Test("every_dev_slice_is_wired_into_a_test_target") {
+    tests_dir :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Compiler/JetFoundation/Tests/Integration")
+    wired := ""
+    for entry in fs.read_dir(&tests_dir).expect("tests dir").flatten() {
+        name :: entry.file_name().to_string_lossy().into_owned()
+        if name.starts_with("Dev") && name.ends_with(".jet") { wired.push_str(&fs.read_to_string(entry.path()).expect("dev target source")) }
+    }
+    orphans := []
+    for entry in fs.read_dir(tests_dir.join("DevParts")).expect("DevParts dir").flatten() {
+        name :: entry.file_name().to_string_lossy().into_owned()
+        if name.ends_with(".jet") && !wired.contains("DevParts.{name.trim_end_matches(".jet")}") && !wired.contains("DevParts/{name}") { orphans.push(name) }
+    }
+    orphans.sort()
+    assert(orphans.is_empty(), "no integration Dev target includes these slices, so every test in them runs nowhere: {orphans:?}")
+}

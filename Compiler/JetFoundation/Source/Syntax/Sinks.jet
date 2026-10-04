@@ -1,141 +1,53 @@
-// PORT-PENDING 2168 crates-jet-foundation-src-syntax-sinks: crates/jet-foundation/src/Syntax/sinks.rs:1-137
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-TAG-SURFACE1 / card #1710: one registration table for untrusted-text sinks.
-//RS //!
-//RS //! Call rows use `(module, method)` lookup. Checked text heads are nominal
-//RS //! library declarations, not entries in this credential-sink registry.
-//RS 
-//RS /// The policy a sink applies to untrusted text.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum SinkClass {
-//RS     /// A credential may not reach this call.
-//RS     Credential,
-//RS }
-//RS 
-//RS /// One registered call sink.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub struct SinkRow {
-//RS     pub module: &'static str,
-//RS     pub method: &'static str,
-//RS     pub class: SinkClass,
-//RS }
-//RS 
-//RS impl SinkRow {
-//RS     pub const fn call(module: &'static str, method: &'static str, class: SinkClass) -> Self {
-//RS         Self {
-//RS             module,
-//RS             method,
-//RS             class,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// One home for credential sinks.
-//RS pub const SINK_ROWS: &[SinkRow] = &[
-//RS     SinkRow::call("core.term", "print", SinkClass::Credential),
-//RS     SinkRow::call("core.term", "eprint", SinkClass::Credential),
-//RS     SinkRow::call("core.log", "*", SinkClass::Credential),
-//RS     SinkRow::call("core.encoding.json", "to_string", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.json",
-//RS         "to_string_pretty",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.json", "to_bytes", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.json",
-//RS         "to_bytes_canonical",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.csv", "to_string", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.csv",
-//RS         "to_string_pretty",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.csv", "to_bytes", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.csv",
-//RS         "to_bytes_canonical",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.toml", "to_string", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.toml",
-//RS         "to_string_pretty",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.toml", "to_bytes", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.toml",
-//RS         "to_bytes_canonical",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.yaml", "to_string", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.yaml",
-//RS         "to_string_pretty",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.yaml", "to_bytes", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.yaml",
-//RS         "to_bytes_canonical",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.cbor", "to_string", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.cbor",
-//RS         "to_string_pretty",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.cbor", "to_bytes", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.cbor",
-//RS         "to_bytes_canonical",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.xml", "to_string", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.xml",
-//RS         "to_string_pretty",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     SinkRow::call("core.encoding.xml", "to_bytes", SinkClass::Credential),
-//RS     SinkRow::call(
-//RS         "core.encoding.xml",
-//RS         "to_bytes_canonical",
-//RS         SinkClass::Credential,
-//RS     ),
-//RS     // Card #1710 regression row: JSONL was absent from the old match.
-//RS     SinkRow::call("core.encoding.jsonl", "to_string", SinkClass::Credential),
-//RS ];
-//RS 
-//RS /// Find the row for a Core call. `*` declares every member in a module.
-//RS pub fn sink_row(module: &str, method: &str) -> Option<&'static SinkRow> {
-//RS     SINK_ROWS
-//RS         .iter()
-//RS         .find(|row| row.module == module && (row.method == method || row.method == "*"))
-//RS }
-//RS 
-//RS /// Return whether a Core call is a credential sink.
-//RS pub fn credential_sink(module: &str, method: &str) -> bool {
-//RS     matches!(
-//RS         sink_row(module, method).map(|row| row.class),
-//RS         Some(SinkClass::Credential)
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn rows_share_call_lookup() {
-//RS         assert!(credential_sink("core.encoding.jsonl", "to_string"));
-//RS         assert!(!credential_sink("core.encoding.jsonl", "parse"));
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2168 crates/jet-foundation/src/Syntax/sinks.rs:1-137
-
+// D-TAG-SURFACE1: call rows use (module, method); checked-text heads are nominal declarations.
+// Rust: crates/jet-foundation/src/Syntax/sinks.rs:8
+pub enum SinkClass { Credential }
+// Rust: crates/jet-foundation/src/Syntax/sinks.rs:15
+pub struct SinkRow {
+    pub module: String
+    pub method: String
+    pub class: SinkClass
+    // Rust: crates/jet-foundation/src/Syntax/sinks.rs:22
+    pub fn call(module: String, method: String, class: SinkClass) -> SinkRow {
+        SinkRow{module: ~module, method: ~method, class: class}
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/sinks.rs:32
+pub SINK_ROWS :: prep {
+    [SinkRow.call("core.term", "print", SinkClass.Credential),
+     SinkRow.call("core.term", "eprint", SinkClass.Credential),
+     SinkRow.call("core.log", "*", SinkClass.Credential),
+     SinkRow.call("core.encoding.json", "to_string", SinkClass.Credential),
+     SinkRow.call("core.encoding.json", "to_string_pretty", SinkClass.Credential),
+     SinkRow.call("core.encoding.json", "to_bytes", SinkClass.Credential),
+     SinkRow.call("core.encoding.json", "to_bytes_canonical", SinkClass.Credential),
+     SinkRow.call("core.encoding.csv", "to_string", SinkClass.Credential),
+     SinkRow.call("core.encoding.csv", "to_string_pretty", SinkClass.Credential),
+     SinkRow.call("core.encoding.csv", "to_bytes", SinkClass.Credential),
+     SinkRow.call("core.encoding.csv", "to_bytes_canonical", SinkClass.Credential),
+     SinkRow.call("core.encoding.toml", "to_string", SinkClass.Credential),
+     SinkRow.call("core.encoding.toml", "to_string_pretty", SinkClass.Credential),
+     SinkRow.call("core.encoding.toml", "to_bytes", SinkClass.Credential),
+     SinkRow.call("core.encoding.toml", "to_bytes_canonical", SinkClass.Credential),
+     SinkRow.call("core.encoding.yaml", "to_string", SinkClass.Credential),
+     SinkRow.call("core.encoding.yaml", "to_string_pretty", SinkClass.Credential),
+     SinkRow.call("core.encoding.yaml", "to_bytes", SinkClass.Credential),
+     SinkRow.call("core.encoding.yaml", "to_bytes_canonical", SinkClass.Credential),
+     SinkRow.call("core.encoding.cbor", "to_string", SinkClass.Credential),
+     SinkRow.call("core.encoding.cbor", "to_string_pretty", SinkClass.Credential),
+     SinkRow.call("core.encoding.cbor", "to_bytes", SinkClass.Credential),
+     SinkRow.call("core.encoding.cbor", "to_bytes_canonical", SinkClass.Credential),
+     SinkRow.call("core.encoding.xml", "to_string", SinkClass.Credential),
+     SinkRow.call("core.encoding.xml", "to_string_pretty", SinkClass.Credential),
+     SinkRow.call("core.encoding.xml", "to_bytes", SinkClass.Credential),
+     SinkRow.call("core.encoding.xml", "to_bytes_canonical", SinkClass.Credential),
+     // Card #1710 regression row: JSONL was absent from the old match.
+     SinkRow.call("core.encoding.jsonl", "to_string", SinkClass.Credential)]
+}
+// Rust: crates/jet-foundation/src/Syntax/sinks.rs:113
+pub fn sink_row(module: String, method: String) -> SinkRow? {
+    SINK_ROWS.iter().find(|row| -> row.module == module && (row.method == method || row.method == "*"))
+}
+// Rust: crates/jet-foundation/src/Syntax/sinks.rs:120
+pub fn credential_sink(module: String, method: String) -> Bool {
+    sink_row(module, method).map(|row| -> row.class) == Val(SinkClass.Credential)
+}

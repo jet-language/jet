@@ -1,2234 +1,430 @@
-// PORT-PENDING 1040 tests-diagnostics-coverage: tests/diagnostics_coverage.rs:1-2230
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Diagnostics coverage accounting (board card c116, P0).
-//RS //!
-//RS //! Enforces invariant I4: every emitted code must have
-//RS //!   (a) an entry in the typed diagnostic-row registry,
-//RS //!   (b) at least one harness-enumerated fixture with a column-0 report opener,
-//RS //!       and
-//RS //!   (c) a `jet explain` page (resolves through Explain::lookup).
-//RS //!
-//RS //! Also checks I2 regression: the FFI bridge must not surface raw rustc error
-//RS //! codes as Jet diagnostic codes (E0061, E0277, E0308, E0425 are rustc codes
-//RS //! used internally for pattern-matching rustc stderr — they must never appear
-//RS //! as Jet diagnostic IDs in any snapshot or Source/ emission path that calls
-//RS //! Diagnostic::error / Diagnostic::warn).
-//RS //!
-//RS //! Run: `cargo test diagnostics_coverage`
-//RS //! Bless new snapshots: `UPDATE_EXPECT=1 cargo test`
-//RS 
-//RS mod common;
-//RS 
-//RS use jet_foundation::DataTree::DataTree;
-//RS use std::collections::BTreeSet;
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Helpers
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS fn root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//RS }
-//RS 
-//RS fn read(p: &PathBuf) -> String {
-//RS     fs::read_to_string(p).unwrap_or_else(|_| panic!("cannot read {}", p.display()))
-//RS }
-//RS struct PreludeShowRow {
-//RS     impl_file: &'static str,
-//RS     type_file: &'static str,
-//RS     rust_type: &'static str,
-//RS     canonical_type: &'static str,
-//RS }
-//RS 
-//RS /// These are the nine Prelude `JetShow` implementations whose Core values are
-//RS /// admitted by the foundation's synthetic printable table. Keep the file and
-//RS /// Rust type explicit: unrelated Prelude renderers are not this invariant.
-//RS const PRELUDE_JET_SHOW_ROWS: &[PreludeShowRow] = &[
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Compute.rs",
-//RS         type_file: "CoreLib/Top/Compute.rs",
-//RS         rust_type: "JetComputeDevice",
-//RS         canonical_type: "ComputeDevice",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Sync.rs",
-//RS         type_file: "CoreLib/Top/Sync.rs",
-//RS         rust_type: "JetSyncText",
-//RS         canonical_type: "SyncText",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Sync.rs",
-//RS         type_file: "CoreLib/Top/Sync.rs",
-//RS         rust_type: "JetSyncCounter",
-//RS         canonical_type: "SyncCounter",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Sync.rs",
-//RS         type_file: "CoreLib/Top/Sync.rs",
-//RS         rust_type: "JetSyncMap",
-//RS         canonical_type: "SyncMap",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Sync.rs",
-//RS         type_file: "CoreLib/Top/Sync.rs",
-//RS         rust_type: "JetSyncList",
-//RS         canonical_type: "SyncList",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Services.rs",
-//RS         type_file: "CoreLib/Top/Services.rs",
-//RS         rust_type: "JetServiceRestart",
-//RS         canonical_type: "ServiceRestart",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Services.rs",
-//RS         type_file: "CoreLib/Top/Services.rs",
-//RS         rust_type: "JetServiceDelivery",
-//RS         canonical_type: "ServiceDelivery",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Services.rs",
-//RS         type_file: "CoreLib/Top/ServiceAuthority.rs",
-//RS         rust_type: "JetServiceRuntime",
-//RS         canonical_type: "ServiceRuntime",
-//RS     },
-//RS     PreludeShowRow {
-//RS         impl_file: "CoreLib/Top/Services.rs",
-//RS         type_file: "CoreLib/Top/Services.rs",
-//RS         rust_type: "JetServiceStateStore",
-//RS         canonical_type: "ServiceStateStore",
-//RS     },
-//RS ];
-//RS 
-//RS struct PreludeShowExclusion {
-//RS     impl_file: &'static str,
-//RS     type_file: &'static str,
-//RS     rust_type: &'static str,
-//RS     canonical_type: &'static str,
-//RS     reason: &'static str,
-//RS }
-//RS 
-//RS /// Explicit-only renderers. `ServiceEndpoint` is the card's "Endpoint"
-//RS /// shorthand; keep the canonical Core name here rather than inventing an alias.
-//RS const PRELUDE_JET_SHOW_EXCLUSIONS: &[PreludeShowExclusion] = &[
-//RS     PreludeShowExclusion {
-//RS         impl_file: "CoreLib/Top/Compute.rs",
-//RS         type_file: "CoreLib/Top/Compute.rs",
-//RS         rust_type: "JetTensor",
-//RS         canonical_type: "Tensor",
-//RS         reason: "Tensor has an explicit state-aware renderer; it is not an automatic printable row",
-//RS     },
-//RS     PreludeShowExclusion {
-//RS         impl_file: "CoreLib/Top/Compute.rs",
-//RS         type_file: "CoreLib/Top/Compute.rs",
-//RS         rust_type: "JetComputeStream",
-//RS         canonical_type: "ComputeStream",
-//RS         reason: "ComputeStream identity is runtime-local, so its explicit renderer omits the identity",
-//RS     },
-//RS     PreludeShowExclusion {
-//RS         impl_file: "CoreLib/Top/Compute.rs",
-//RS         type_file: "CoreLib/Top/Compute.rs",
-//RS         rust_type: "JetSparseCsr",
-//RS         canonical_type: "SparseTensor",
-//RS         reason: "SparseTensor uses the explicit `jet_compute_sparse_show` projection",
-//RS     },
-//RS     PreludeShowExclusion {
-//RS         impl_file: "CoreLib/Top/Services.rs",
-//RS         type_file: "CoreLib/Top/Services.rs",
-//RS         rust_type: "JetServiceTree",
-//RS         canonical_type: "ServiceTree",
-//RS         reason: "ServiceTree owns runtime workers and uses the explicit `jet_services_tree_show` projection",
-//RS     },
-//RS     PreludeShowExclusion {
-//RS         impl_file: "CoreLib/Top/Services.rs",
-//RS         type_file: "CoreLib/Top/ServiceAuthority.rs",
-//RS         rust_type: "JetServiceEndpoint",
-//RS         canonical_type: "ServiceEndpoint",
-//RS         reason: "ServiceEndpoint uses the explicit `jet_services_endpoint_show` projection",
-//RS     },
-//RS ];
-//RS 
-//RS fn prelude_declared_type(source: &str, rust_type: &str) -> bool {
-//RS     source.lines().any(|line| {
-//RS         let line = line.trim_start();
-//RS         [
-//RS             "pub struct ",
-//RS             "pub enum ",
-//RS             "pub type ",
-//RS             "struct ",
-//RS             "enum ",
-//RS             "type ",
-//RS         ]
-//RS         .iter()
-//RS         .any(|prefix| {
-//RS             line.strip_prefix(prefix).and_then(|rest| {
-//RS                 rest.split(|ch: char| ch.is_whitespace() || ch == '<')
-//RS                     .next()
-//RS             }) == Some(rust_type)
-//RS         })
-//RS     })
-//RS }
-//RS 
-//RS fn prelude_declared_jet_show(source: &str, rust_type: &str) -> bool {
-//RS     source.lines().any(|line| {
-//RS         let line = line.trim_start();
-//RS         let Some(rest) = line.strip_prefix("impl ") else {
-//RS             return false;
-//RS         };
-//RS         let Some((trait_name, target)) = rest.split_once(" for ") else {
-//RS             return false;
-//RS         };
-//RS         let target = target
-//RS             .split(|ch: char| ch.is_whitespace() || ch == '<' || ch == '{')
-//RS             .next()
-//RS             .unwrap_or_default();
-//RS         trait_name.ends_with("JetShow") && target == rust_type
-//RS     })
-//RS }
-//RS 
-//RS fn prelude_file(relative: &str) -> PathBuf {
-//RS     root().join("crates/jet-codegen/src/Prelude").join(relative)
-//RS }
-//RS 
-//RS fn named_string_const(source: &str, name: &str) -> BTreeSet<String> {
-//RS     let marker = format!("const {name}: &[&str] = &[");
-//RS     let start = source
-//RS         .find(&marker)
-//RS         .unwrap_or_else(|| panic!("missing canonical printable const `{name}`"));
-//RS     let body = &source[start + marker.len()..];
-//RS     let end = body
-//RS         .find("];")
-//RS         .unwrap_or_else(|| panic!("unterminated canonical printable const `{name}`"));
-//RS     body[..end]
-//RS         .lines()
-//RS         .filter_map(|line| {
-//RS             let (_, rest) = line.split_once('"')?;
-//RS             let (value, _) = rest.split_once('"')?;
-//RS             Some(value.to_string())
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn prelude_jet_show_rows_match_canonical_printable_types() {
-//RS     let mut prelude_types = BTreeSet::new();
-//RS     for row in PRELUDE_JET_SHOW_ROWS {
-//RS         let impl_source = read(&prelude_file(row.impl_file));
-//RS         assert!(
-//RS             prelude_declared_jet_show(&impl_source, row.rust_type),
-//RS             "missing Prelude JetShow implementation `{}` for `{}` in {}",
-//RS             row.rust_type,
-//RS             row.canonical_type,
-//RS             row.impl_file
-//RS         );
-//RS         let type_source = read(&prelude_file(row.type_file));
-//RS         assert!(
-//RS             prelude_declared_type(&type_source, row.rust_type),
-//RS             "missing Prelude type declaration `{}` for `{}` in {}",
-//RS             row.rust_type,
-//RS             row.canonical_type,
-//RS             row.type_file
-//RS         );
-//RS         assert!(
-//RS             prelude_types.insert(row.canonical_type.to_string()),
-//RS             "duplicate canonical Prelude JetShow row `{}`",
-//RS             row.canonical_type
-//RS         );
-//RS     }
-//RS 
-//RS     let foundation = read(&root().join("crates/jet-foundation/src/Traits.rs"));
-//RS     let declared = named_string_const(&foundation, "PRELUDE_JET_SHOW_PRINTABLE_TYPES");
-//RS     let missing: Vec<_> = prelude_types.difference(&declared).cloned().collect();
-//RS     let extra: Vec<_> = declared.difference(&prelude_types).cloned().collect();
-//RS 
-//RS     let mut registry = jet_foundation::Traits::TraitRegistry::default();
-//RS     registry.register_synthetic_display_debug();
-//RS     let missing_auto: Vec<_> = prelude_types
-//RS         .iter()
-//RS         .filter(|name| !registry.auto_printable.contains(*name))
-//RS         .cloned()
-//RS         .collect();
-//RS 
-//RS     assert!(
-//RS         missing.is_empty() && extra.is_empty() && missing_auto.is_empty(),
-//RS         "Prelude JetShow printable relationship drifted.\n\
-//RS          Missing canonical rows: {:?}\n\
-//RS          Extra canonical rows: {:?}\n\
-//RS          Missing auto_printable entries: {:?}",
-//RS         missing,
-//RS         extra,
-//RS         missing_auto
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn prelude_jet_show_exclusions_remain_explicit_only() {
-//RS     let mut registry = jet_foundation::Traits::TraitRegistry::default();
-//RS     registry.register_synthetic_display_debug();
-//RS     let mut canonical_names = BTreeSet::new();
-//RS 
-//RS     for exclusion in PRELUDE_JET_SHOW_EXCLUSIONS {
-//RS         let impl_source = read(&prelude_file(exclusion.impl_file));
-//RS         assert!(
-//RS             prelude_declared_jet_show(&impl_source, exclusion.rust_type),
-//RS             "missing explicitly excluded Prelude JetShow implementation `{}` in {}",
-//RS             exclusion.rust_type,
-//RS             exclusion.impl_file
-//RS         );
-//RS         let type_source = read(&prelude_file(exclusion.type_file));
-//RS         assert!(
-//RS             prelude_declared_type(&type_source, exclusion.rust_type),
-//RS             "missing explicitly excluded Prelude type declaration `{}` in {}",
-//RS             exclusion.rust_type,
-//RS             exclusion.type_file
-//RS         );
-//RS         assert!(
-//RS             canonical_names.insert(exclusion.canonical_type.to_string()),
-//RS             "duplicate explicit Prelude JetShow exclusion `{}`",
-//RS             exclusion.canonical_type
-//RS         );
-//RS         assert!(
-//RS             !exclusion.reason.trim().is_empty(),
-//RS             "explicit Prelude JetShow exclusion `{}` needs a narrow reason",
-//RS             exclusion.canonical_type
-//RS         );
-//RS         assert!(
-//RS             !registry.auto_printable.contains(exclusion.canonical_type),
-//RS             "excluded Prelude JetShow type `{}` has an automatic printable row: {}",
-//RS             exclusion.canonical_type,
-//RS             exclusion.reason
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// Collect all registered-shape codes emitted in Source/ via Diagnostic::error
-//RS /// / Diagnostic::warn.
-//RS fn emitted_codes() -> BTreeSet<String> {
-//RS     let mut codes: BTreeSet<String> = BTreeSet::new();
-//RS     let mut scan_dir = |dir: PathBuf| {
-//RS         walk_rs(&dir, &mut |content| {
-//RS             for code in extract_quoted_codes(content) {
-//RS                 codes.insert(code);
-//RS             }
-//RS         });
-//RS     };
-//RS     // Scan both the root Source/ (Cmd*, LSP, etc.) and the seam crates.
-//RS     scan_dir(root().join("Source"));
-//RS     scan_dir(root().join("crates"));
-//RS     codes
-//RS }
-//RS 
-//RS /// Extract registered-shape Jet diagnostic codes from Rust source, in two forms:
-//RS /// 1. a standalone quoted code (used in Diagnostic::error calls)
-//RS /// 2. a bracketed code inside a string literal (used in eprintln! / format! paths)
-//RS fn extract_quoted_codes(text: &str) -> Vec<String> {
-//RS     let mut out = extract_delimited_codes(text, b'"', b'"');
-//RS     out.extend(extract_delimited_codes(text, b'[', b']'));
-//RS     out
-//RS }
-//RS 
-//RS fn extract_delimited_codes(text: &str, open: u8, close: u8) -> Vec<String> {
-//RS     let mut out = Vec::new();
-//RS     let bytes = text.as_bytes();
-//RS     let mut i = 0;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == open {
-//RS             let start = i + 1;
-//RS             let mut end = start;
-//RS             while end < bytes.len()
-//RS                 && (bytes[end].is_ascii_uppercase()
-//RS                     || bytes[end].is_ascii_digit()
-//RS                     || bytes[end] == b'-')
-//RS             {
-//RS                 end += 1;
-//RS             }
-//RS             if end > start && end < bytes.len() && bytes[end] == close {
-//RS                 let code = &text[start..end];
-//RS                 if jet::Explain::is_code(code) {
-//RS                     out.push(code.to_string());
-//RS                 }
-//RS             }
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn walk_rs(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for e in entries.flatten() {
-//RS         let p = e.path();
-//RS         if p.is_dir() {
-//RS             walk_rs(&p, cb);
-//RS         } else if p.extension().and_then(|x| x.to_str()) == Some("rs") {
-//RS             if let Ok(content) = fs::read_to_string(&p) {
-//RS                 cb(&content);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn runtime_stop_calls(source: &str) -> Vec<Vec<&str>> {
-//RS     let needle = "set_runtime_stop(";
-//RS     let mut calls = Vec::new();
-//RS     let mut search_from = 0;
-//RS     while let Some(offset) = source[search_from..].find(needle) {
-//RS         let start = search_from + offset + needle.len();
-//RS         let bytes = source.as_bytes();
-//RS         let mut args = Vec::new();
-//RS         let mut arg_start = start;
-//RS         let mut parens = 0usize;
-//RS         let mut brackets = 0usize;
-//RS         let mut braces = 0usize;
-//RS         let mut string = false;
-//RS         let mut escaped = false;
-//RS         let mut end = None;
-//RS         for index in start..bytes.len() {
-//RS             let byte = bytes[index];
-//RS             if string {
-//RS                 if escaped {
-//RS                     escaped = false;
-//RS                 } else if byte == b'\\' {
-//RS                     escaped = true;
-//RS                 } else if byte == b'"' {
-//RS                     string = false;
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             match byte {
-//RS                 b'"' => string = true,
-//RS                 b'(' => parens += 1,
-//RS                 b')' if parens > 0 => parens -= 1,
-//RS                 b')' => {
-//RS                     args.push(source[arg_start..index].trim());
-//RS                     end = Some(index);
-//RS                     break;
-//RS                 }
-//RS                 b'[' => brackets += 1,
-//RS                 b']' => brackets = brackets.saturating_sub(1),
-//RS                 b'{' => braces += 1,
-//RS                 b'}' => braces = braces.saturating_sub(1),
-//RS                 b',' if parens == 0 && brackets == 0 && braces == 0 => {
-//RS                     args.push(source[arg_start..index].trim());
-//RS                     arg_start = index + 1;
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         let Some(end) = end else { break };
-//RS         calls.push(args);
-//RS         search_from = end + 1;
-//RS     }
-//RS     calls
-//RS }
-//RS 
-//RS #[test]
-//RS fn jit_collections_use_ice_for_internals_and_canonical_runtime_messages() {
-//RS     let source = read(&root().join("crates/jet-jit/src/Collections.rs"));
-//RS     assert!(
-//RS         !source.contains("set_trap("),
-//RS         "Collections.rs must not convert adapter invariants into runtime traps"
-//RS     );
-//RS 
-//RS     let direct_messages: Vec<_> = runtime_stop_calls(&source)
-//RS         .into_iter()
-//RS         .filter_map(|args| args.get(2).copied())
-//RS         .filter(|wording| {
-//RS             wording
-//RS                 .trim_start_matches('&')
-//RS                 .trim_start()
-//RS                 .starts_with('"')
-//RS         })
-//RS         .collect();
-//RS     assert!(
-//RS         direct_messages.is_empty(),
-//RS         "Collections.rs must pass canonical or returned messages to set_runtime_stop, not direct wording literals: {direct_messages:?}"
-//RS     );
-//RS }
-//RS 
-//RS /// All codes registered in the typed compile-time diagnostic rows.
-//RS fn registered_codes() -> BTreeSet<String> {
-//RS     jet_foundation::Registry::diagnostic_rows()
-//RS         .iter()
-//RS         .map(|row| row.code.to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn runtime_stop_renderer_accepts_only_active_runtime_rows() {
-//RS     let rows = jet_foundation::Registry::diagnostic_rows();
-//RS     let active_runtime = rows
-//RS         .iter()
-//RS         .filter(|row| {
-//RS             row.stage == "runtime"
-//RS                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     assert!(
-//RS         !active_runtime.is_empty(),
-//RS         "registry must publish runtime rows"
-//RS     );
-//RS 
-//RS     for row in active_runtime {
-//RS         let report = jet_foundation::Outcome::jet_render_runtime_stop(
-//RS             row.code,
-//RS             "probe.jet",
-//RS             7,
-//RS             "probe",
-//RS             "stop()",
-//RS             1,
-//RS             1,
-//RS             "runtime probe",
-//RS             "",
-//RS         );
-//RS         assert_eq!(report.code, row.code);
-//RS         assert_eq!(report.source, "runtime");
-//RS         assert_eq!(report.exit_code, 70);
-//RS         assert!(!report.what.is_empty());
-//RS         assert!(!report.why.is_empty());
-//RS         assert!(!report.fix.is_empty());
-//RS     }
-//RS 
-//RS     for row in rows.iter().filter(|row| {
-//RS         row.stage != "runtime" || row.status != jet_foundation::Registry::DiagnosticStatus::Active
-//RS     }) {
-//RS         let report = jet_foundation::Outcome::jet_render_runtime_stop(
-//RS             row.code,
-//RS             "probe.jet",
-//RS             7,
-//RS             "probe",
-//RS             "stop()",
-//RS             1,
-//RS             1,
-//RS             "runtime probe",
-//RS             "",
-//RS         );
-//RS         assert_eq!(report.exit_code, 101, "{} must be a host fault", row.code);
-//RS     }
-//RS 
-//RS     let unknown = jet_foundation::Outcome::jet_render_runtime_stop(
-//RS         "__unknown_runtime_stop__",
-//RS         "probe.jet",
-//RS         7,
-//RS         "probe",
-//RS         "stop()",
-//RS         1,
-//RS         1,
-//RS         "runtime probe",
-//RS         "",
-//RS     );
-//RS     assert_eq!(unknown.exit_code, 101);
-//RS     assert_eq!(unknown.source, "host");
-//RS }
-//RS 
-//RS #[test]
-//RS fn ffi_runtime_stop_keeps_one_jet_source_frame() {
-//RS     let report = jet_foundation::Outcome::jet_render_runtime_stop(
-//RS         "E3014",
-//RS         "ffi.jet",
-//RS         7,
-//RS         "run",
-//RS         "foreign_call()",
-//RS         1,
-//RS         1,
-//RS         "panic: a foreign function panicked",
-//RS         "",
-//RS     );
-//RS     assert_eq!(report.source, "runtime");
-//RS     assert_eq!(report.exit_code, 70);
-//RS     assert!(report.rendered.contains("Stop [E3014]"));
-//RS     assert!(report.rendered.contains("--> ffi.jet:7 in run"));
-//RS     assert!(report.rendered.contains("foreign_call()"));
-//RS     assert!(!report.rendered.contains("rustc"));
-//RS }
-//RS 
-//RS fn registered_code_rows() -> Vec<(String, usize)> {
-//RS     jet_foundation::Registry::diagnostic_rows()
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(idx, row)| (row.code.to_string(), idx + 5))
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn registered_codes_keep_explicit_severity_and_lint_names() {
-//RS     use jet_foundation::Diagnostics::Severity;
-//RS 
-//RS     for (code, severity) in [
-//RS         ("E2930", Severity::Lint),
-//RS         ("W0410", Severity::Lint),
-//RS         ("R0801", Severity::Error),
-//RS         ("E0043", Severity::Error),
-//RS     ] {
-//RS         let row = jet_foundation::Registry::diagnostic(code)
-//RS             .unwrap_or_else(|| panic!("{code} must stay registered"));
-//RS         assert_eq!(
-//RS             row.severity, severity,
-//RS             "{code} must keep the registry row's explicit severity"
-//RS         );
-//RS     }
-//RS 
-//RS     for lint in jet_foundation::Registry::lint_rows() {
-//RS         let name = lint
-//RS             .lint_name
-//RS             .unwrap_or_else(|| panic!("lint {} needs a stable name", lint.code));
-//RS         assert!(
-//RS             is_snake_case(name),
-//RS             "lint {} has an unstable selector name `{name}`",
-//RS             lint.code
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn semantic_guidance_lints_round_trip_through_the_registry() {
-//RS     use jet_foundation::Diagnostics::Severity;
-//RS 
-//RS     for (code, name) in [
-//RS         ("L0515", "process_args_view"),
-//RS         ("L0516", "message_text"),
-//RS         ("L0517", "path_containment_string_prefix"),
-//RS         ("L0518", "redundant_fixed_cleanup"),
-//RS         ("L0519", "unit_scalar_rewrap"),
-//RS         ("L0520", "display_migration"),
-//RS         ("L0521", "complete_ascii_case_ladder"),
-//RS         ("L0522", "walk_files_filter"),
-//RS         ("L0523", "repeated_list_head"),
-//RS         ("L0524", "raw_multiline_html"),
-//RS     ] {
-//RS         let row = jet_foundation::Registry::diagnostic(code)
-//RS             .unwrap_or_else(|| panic!("{code} must stay registered"));
-//RS         assert_eq!(row.severity, Severity::Lint);
-//RS         assert_eq!(row.lint_name, Some(name));
-//RS         assert!(!row.what.is_empty(), "{code} needs What copy");
-//RS         assert!(!row.why.is_empty(), "{code} needs Why copy");
-//RS         assert!(!row.fix.is_empty(), "{code} needs Fix copy");
-//RS         assert_eq!(jet_foundation::LintPolicy::code_for_name(name), Some(code));
-//RS         assert_eq!(jet_foundation::LintPolicy::name_for_code(code), Some(name));
-//RS     }
-//RS }
-//RS 
-//RS fn is_snake_case(name: &str) -> bool {
-//RS     if name.is_empty() {
-//RS         return false;
-//RS     }
-//RS     let mut previous_underscore = false;
-//RS     for (index, character) in name.chars().enumerate() {
-//RS         if character == '_' {
-//RS             if index == 0 || previous_underscore {
-//RS                 return false;
-//RS             }
-//RS             previous_underscore = true;
-//RS         } else if character.is_ascii_lowercase() || character.is_ascii_digit() {
-//RS             previous_underscore = false;
-//RS         } else {
-//RS             return false;
-//RS         }
-//RS     }
-//RS     !previous_underscore
-//RS }
-//RS 
-//RS #[test]
-//RS fn every_registered_lint_has_a_unique_snake_case_name() {
-//RS     let registered_codes: BTreeSet<&str> = jet_foundation::Registry::diagnostic_rows()
-//RS         .iter()
-//RS         .filter(|row| row.severity == jet_foundation::Diagnostics::Severity::Lint)
-//RS         .map(|row| row.code)
-//RS         .collect();
-//RS     let lints: Vec<_> = jet_foundation::Registry::lint_rows().collect();
-//RS     let mut names = BTreeSet::new();
-//RS     let mut codes = BTreeSet::new();
-//RS 
-//RS     for lint in lints {
-//RS         let name = lint
-//RS             .lint_name
-//RS             .expect("every registered lint must carry a stable name");
-//RS         assert!(
-//RS             is_snake_case(name),
-//RS             "lint `{}` is not a stable snake_case name",
-//RS             name
-//RS         );
-//RS         assert!(names.insert(name), "lint name `{name}` is duplicated");
-//RS         assert!(
-//RS             codes.insert(lint.code),
-//RS             "lint code `{}` is duplicated",
-//RS             lint.code
-//RS         );
-//RS         assert_eq!(
-//RS             jet_foundation::Registry::diagnostic(lint.code).map(|row| row.severity),
-//RS             Some(jet_foundation::Diagnostics::Severity::Lint),
-//RS             "lint `{}` is not a registered lint diagnostic row",
-//RS             lint.code
-//RS         );
-//RS         assert_eq!(
-//RS             jet_foundation::LintPolicy::name_for_code(lint.code),
-//RS             Some(name),
-//RS             "lint `{}` does not round-trip through the name registry",
-//RS             lint.code
-//RS         );
-//RS         assert_eq!(
-//RS             jet_foundation::LintPolicy::code_for_name(name),
-//RS             Some(lint.code),
-//RS             "lint name `{name}` does not resolve to its registered code"
-//RS         );
-//RS     }
-//RS 
-//RS     assert_eq!(
-//RS         codes, registered_codes,
-//RS         "every registered lint row must carry exactly one stable name"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn rendered_lint_keeps_code_beside_name() {
-//RS     let diagnostic = jet_foundation::Diagnostics::Diagnostic::from_row("L0302", &[], None);
-//RS     let rendered = diagnostic.render("example.jet", "");
-//RS     assert!(
-//RS         rendered.starts_with("Warning [L0302] (same_enum_guard_table):"),
-//RS         "rendered lint lost its code/name pair: {rendered}"
-//RS     );
-//RS }
-//RS 
-//RS fn assert_ui_snapshot_matches_row(code: &str, holes: &[(&str, &str)], fixture: &str) {
-//RS     let row = jet_foundation::Registry::diagnostic(code)
-//RS         .unwrap_or_else(|| panic!("{code} must stay registered"));
-//RS     let rendered = row.render(holes);
-//RS     let expected = format!(
-//RS         "Error [{code}]: {}\n Why: {}\n Fix: {}\nMore: jet-lang.dev/e/{code}\n",
-//RS         rendered.what, rendered.why, rendered.fix
-//RS     );
-//RS     assert_eq!(
-//RS         read(&root().join("tests/ui").join(fixture)),
-//RS         expected,
-//RS         "{fixture} must preserve {code}'s registered What/Why/Fix identity"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn registered_config_and_cli_snapshots_keep_row_identity() {
-//RS     assert_ui_snapshot_matches_row(
-//RS         "E1206",
-//RS         &[("code", "L0302"), ("name", "same_enum_guard_table")],
-//RS         "lint_policy_code_name.stderr",
-//RS     );
-//RS     assert_ui_snapshot_matches_row("E0043", &[], "cli_e0043_install.stderr");
-//RS     assert_ui_snapshot_matches_row(
-//RS         "E1219",
-//RS         &[("name", "turbo")],
-//RS         "cli_e1219_unknown_profile.stderr",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn retired_bench_command_snapshot_keeps_registered_teaching_code() {
-//RS     let row = jet_foundation::Registry::diagnostic("E2101")
-//RS         .expect("retired command route must stay registered");
-//RS     assert_eq!(
-//RS         row.status,
-//RS         jet_foundation::Registry::DiagnosticStatus::Retired,
-//RS         "E2101 must remain a retired teaching diagnostic"
-//RS     );
-//RS     let snapshot = read(&root().join("tests/ui/bench_command_retired_e2101.stderr"));
-//RS     assert!(
-//RS         snapshot.contains("Error [E2101]"),
-//RS         "snapshot lost E2101: {snapshot}"
-//RS     );
-//RS     assert!(
-//RS         snapshot.contains("`bench`"),
-//RS         "snapshot lost retired spelling: {snapshot}"
-//RS     );
-//RS     assert!(
-//RS         snapshot.contains("jet test --measure"),
-//RS         "snapshot lost canonical fix: {snapshot}"
-//RS     );
-//RS }
-//RS 
-//RS /// Whether a code is marked retired in the typed row source.
-//RS fn is_retired(code: &str, _diag_md: &str) -> bool {
-//RS     jet_foundation::Registry::diagnostic(code)
-//RS         .is_some_and(|row| row.status == jet_foundation::Registry::DiagnosticStatus::Retired)
-//RS }
-//RS 
-//RS fn staged_card_number(reason: &str) -> Option<u32> {
-//RS     let card = reason.strip_prefix("staged #")?;
-//RS     if card.is_empty() || !card.bytes().all(|byte| byte.is_ascii_digit()) {
-//RS         return None;
-//RS     }
-//RS     card.parse().ok().filter(|card| *card > 0)
-//RS }
-//RS 
-//RS fn allowlist_reason_errors(entries: &[(&str, &str)]) -> Vec<String> {
-//RS     entries
-//RS         .iter()
-//RS         .filter_map(|(code, reason)| {
-//RS             if *reason == "retired" && is_retired(code, "") {
-//RS                 None
-//RS             } else if staged_card_number(reason).is_some() {
-//RS                 None
-//RS             } else {
-//RS                 Some(format!(
-//RS                     "{code}: reason must be `retired` or `staged #<card>`"
-//RS                 ))
-//RS             }
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Compare the one expected-unimplemented baseline with the current registry
-//RS /// projection. A stale row must be deleted; missing or unexpected rows must
-//RS /// update the registry and baseline together.
-//RS fn coverage_baseline_failure<'a>(
-//RS     entries: impl IntoIterator<Item = &'a str>,
-//RS     unimplemented: &BTreeSet<String>,
-//RS     emitted: &BTreeSet<String>,
-//RS ) -> Option<String> {
-//RS     let expected: BTreeSet<String> = entries.into_iter().map(str::to_string).collect();
-//RS 
-//RS     let mut now_emitted: Vec<String> = expected.intersection(emitted).cloned().collect();
-//RS     now_emitted.sort();
-//RS 
-//RS     let mut missing: Vec<String> = expected
-//RS         .difference(unimplemented)
-//RS         .filter(|code| !emitted.contains(*code))
-//RS         .cloned()
-//RS         .collect();
-//RS     missing.sort();
-//RS 
-//RS     let mut unexpected: Vec<String> = unimplemented.difference(&expected).cloned().collect();
-//RS     unexpected.sort();
-//RS 
-//RS     let mut failures = Vec::new();
-//RS     if !now_emitted.is_empty() {
-//RS         failures.push(format!(
-//RS             "EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  {}",
-//RS             now_emitted.join("\n  ")
-//RS         ));
-//RS     }
-//RS     if !missing.is_empty() {
-//RS         failures.push(format!(
-//RS             "EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  {}",
-//RS             missing.join("\n  ")
-//RS         ));
-//RS     }
-//RS     if !unexpected.is_empty() {
-//RS         failures.push(format!(
-//RS             "Unexpected codes registered in typed rows but not emitted in Source/.\n\
-//RS          If this is intentional (staged feature), add the code to \
-//RS          EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
-//RS          Unexpected:\n  {}",
-//RS             unexpected.join("\n  ")
-//RS         ));
-//RS     }
-//RS 
-//RS     (!failures.is_empty()).then(|| failures.join("\n"))
-//RS }
-//RS 
-//RS fn code_set(codes: &[&str]) -> BTreeSet<String> {
-//RS     codes.iter().map(|code| (*code).to_string()).collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn coverage_baseline_rejects_removal_addition_and_substitution() {
-//RS     let baseline = ["E2101", "E3001"];
-//RS     let emitted = BTreeSet::new();
-//RS 
-//RS     assert_eq!(
-//RS         coverage_baseline_failure(
-//RS             baseline.iter().copied(),
-//RS             &code_set(&["E2101"]),
-//RS             &emitted,
-//RS         ),
-//RS         Some(
-//RS             "EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001"
-//RS                 .to_string()
-//RS         )
-//RS     );
-//RS     assert_eq!(
-//RS         coverage_baseline_failure(
-//RS             ["E2101"].iter().copied(),
-//RS             &code_set(&["E2101", "E3001"]),
-//RS             &emitted,
-//RS         ),
-//RS         Some(
-//RS             "Unexpected codes registered in typed rows but not emitted in Source/.\n\
-//RS          If this is intentional (staged feature), add the code to \
-//RS          EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
-//RS          Unexpected:\n  E3001"
-//RS                 .to_string()
-//RS         )
-//RS     );
-//RS     assert_eq!(
-//RS         coverage_baseline_failure(
-//RS             baseline.iter().copied(),
-//RS             &code_set(&["E2101", "E4000"]),
-//RS             &emitted,
-//RS         ),
-//RS         Some(
-//RS             "EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  E3001\nUnexpected codes registered in typed rows but not emitted in Source/.\n\
-//RS          If this is intentional (staged feature), add the code to \
-//RS          EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\n\
-//RS          Unexpected:\n  E4000"
-//RS                 .to_string()
-//RS         )
-//RS     );
-//RS     assert_eq!(
-//RS         coverage_baseline_failure(baseline.iter().copied(), &code_set(&baseline), &emitted,),
-//RS         None
-//RS     );
-//RS }
-//RS 
-//RS /// Direct fixture directories that carry rendered CLI/tool reports. UI and
-//RS /// lint paths are collected separately because their harnesses derive the
-//RS /// expected snapshot path from each source fixture.
-//RS const REPORT_FIXTURE_DIRS: &[(&str, &str)] = &[
-//RS     ("tests/cli", "txt"),
-//RS     ("tests/release", "txt"),
-//RS     ("tests/fixtures/cli-diagnostics", "stderr"),
-//RS     ("tests/fixtures/jetpack-diagnostics", "stderr"),
-//RS     ("tests/fixtures/module-eval-diagnostics", "stderr"),
-//RS ];
-//RS 
-//RS /// Exact snapshot paths consumed by the UI/lint harnesses plus direct report
-//RS /// fixture directories. Keeping this path table independent from code
-//RS /// extraction prevents prose, comments, and Rust assertions from becoming
-//RS /// coverage.
-//RS fn report_snapshot_paths() -> Vec<PathBuf> {
-//RS     report_fixture_snapshot_paths()
-//RS         .into_iter()
-//RS         .filter(|path| path.is_file())
-//RS         .collect()
-//RS }
-//RS 
-//RS /// Expected snapshot paths for every fixture consumed by the UI/lint harnesses
-//RS /// plus direct report fixture directories. Keep this list independent from
-//RS /// code extraction so deleting a snapshot cannot silently remove it from the
-//RS /// coverage scan.
-//RS fn report_fixture_snapshot_paths() -> Vec<PathBuf> {
-//RS     let root = root();
-//RS     let mut out = Vec::new();
-//RS 
-//RS     let ui = root.join("tests/ui");
-//RS     if let Ok(entries) = fs::read_dir(&ui) {
-//RS         for entry in entries.flatten() {
-//RS             let path = entry.path();
-//RS             if path.is_file()
-//RS                 && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
-//RS                 && !path
-//RS                     .file_name()
-//RS                     .and_then(|name| name.to_str())
-//RS                     .is_some_and(|name| name.contains(".fixed."))
-//RS             {
-//RS                 let snapshot = path.with_extension("stderr");
-//RS                 out.push(snapshot);
-//RS                 continue;
-//RS             }
-//RS             if !path.is_dir() {
-//RS                 continue;
-//RS             }
-//RS             let entry = ["run", "main"]
-//RS                 .into_iter()
-//RS                 .map(|name| path.join(format!("{name}.{}", jet::Syntax::FILE_EXT)))
-//RS                 .find(|candidate| candidate.is_file());
-//RS             if entry.is_some() {
-//RS                 let snapshot = path.join("stderr");
-//RS                 out.push(snapshot);
-//RS             } else {
-//RS                 let workspace = path.join(jet::Syntax::WORKSPACE_FILE);
-//RS                 if workspace.is_file() {
-//RS                     let name = path
-//RS                         .file_name()
-//RS                         .expect("workspace fixture directory name")
-//RS                         .to_string_lossy();
-//RS                     let snapshot = path
-//RS                         .parent()
-//RS                         .expect("workspace fixture parent")
-//RS                         .join(format!("{name}.stderr"));
-//RS                     out.push(snapshot);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let lint = root.join("tests/ui_lint");
-//RS     if let Ok(entries) = fs::read_dir(&lint) {
-//RS         for entry in entries.flatten() {
-//RS             let path = entry.path();
-//RS             if path.is_file()
-//RS                 && path.extension().and_then(|ext| ext.to_str()) == Some(jet::Syntax::FILE_EXT)
-//RS             {
-//RS                 let snapshot = path.with_extension("warn");
-//RS                 out.push(snapshot);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     for &(dir, extension) in REPORT_FIXTURE_DIRS {
-//RS         let dir = root.join(dir);
-//RS         if let Ok(entries) = fs::read_dir(dir) {
-//RS             for entry in entries.flatten() {
-//RS                 let path = entry.path();
-//RS                 if path.is_file()
-//RS                     && path.extension().and_then(|ext| ext.to_str()) == Some(extension)
-//RS                 {
-//RS                     out.push(path);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     out.sort();
-//RS     out.dedup();
-//RS     out
-//RS }
-//RS 
-//RS fn is_report_code(code: &str) -> bool {
-//RS     let mut bytes = code.bytes();
-//RS     matches!(bytes.next(), Some(byte) if byte.is_ascii_uppercase())
-//RS         && bytes.all(|byte| byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == b'-')
-//RS }
-//RS 
-//RS /// Extract only report-opening lines. Column 0 is intentional: indented
-//RS /// backend text, Why/Fix cross-references, comments, and quoted assertions do
-//RS /// not assert a rendered report.
-//RS fn extract_report_opening_codes(text: &str) -> Vec<String> {
-//RS     text.lines()
-//RS         .filter_map(|line| {
-//RS             let rest = ["Error [", "Warning [", "Stop [", "Lint ["]
-//RS                 .into_iter()
-//RS                 .find_map(|prefix| line.strip_prefix(prefix))?;
-//RS             let end = rest.find(']')?;
-//RS             let code = &rest[..end];
-//RS             is_report_code(code).then(|| code.to_string())
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_snapshots_keep_the_complete_registered_product() {
-//RS     let mut source_rows = 0;
-//RS     for (line_index, raw) in jet_foundation::Registry::DIAGNOSTIC_SOURCE
-//RS         .lines()
-//RS         .enumerate()
-//RS     {
-//RS         let line = raw.trim();
-//RS         if line.is_empty() || line.starts_with("//") {
-//RS             continue;
-//RS         }
-//RS         let fields: Vec<&str> = line.split('\t').collect();
-//RS         assert!(
-//RS             matches!(fields.len(), 12 | 13),
-//RS             "Diagnostics.jet:{} lost a registered field: expected 12 or 13, got {}",
-//RS             line_index + 1,
-//RS             fields.len()
-//RS         );
-//RS         for (index, name) in [(1, "code"), (7, "What"), (8, "Why"), (9, "Fix")] {
-//RS             assert!(
-//RS                 !fields[index].trim().is_empty(),
-//RS                 "Diagnostics.jet:{} lost its registered {name}",
-//RS                 line_index + 1
-//RS             );
-//RS         }
-//RS         assert!(
-//RS             jet_foundation::Registry::diagnostic(fields[1]).is_some(),
-//RS             "Diagnostics.jet:{} lost registry identity for {}",
-//RS             line_index + 1,
-//RS             fields[1]
-//RS         );
-//RS         source_rows += 1;
-//RS     }
-//RS     assert_eq!(
-//RS         source_rows,
-//RS         jet_foundation::Registry::diagnostic_rows().len(),
-//RS         "snapshot contract must inspect every registered source row"
-//RS     );
-//RS 
-//RS     for row in jet_foundation::Registry::diagnostic_rows() {
-//RS         assert!(!row.code.is_empty(), "diagnostic row lost its code");
-//RS         assert!(!row.what.is_empty(), "{} lost its What", row.code);
-//RS         assert!(!row.why.is_empty(), "{} lost its Why", row.code);
-//RS         assert!(!row.fix.is_empty(), "{} lost its Fix", row.code);
-//RS     }
-//RS 
-//RS     for path in report_snapshot_paths() {
-//RS         let snapshot = read(&path);
-//RS         let lines: Vec<&str> = snapshot.lines().collect();
-//RS         for (start, line) in lines.iter().enumerate() {
-//RS             let Some(code) = extract_report_opening_codes(line).into_iter().next() else {
-//RS                 continue;
-//RS             };
-//RS             let row = jet_foundation::Registry::diagnostic(&code).unwrap_or_else(|| {
-//RS                 panic!(
-//RS                     "{} snapshot uses unregistered diagnostic code {code}",
-//RS                     path.display()
-//RS                 )
-//RS             });
-//RS             let end = lines
-//RS                 .iter()
-//RS                 .enumerate()
-//RS                 .skip(start + 1)
-//RS                 .find_map(|(index, line)| extract_report_opening_codes(line).first().map(|_| index))
-//RS                 .unwrap_or(lines.len());
-//RS             let report = &lines[start..end];
-//RS             let what = line
-//RS                 .split_once("]: ")
-//RS                 .or_else(|| line.split_once("): "))
-//RS                 .map(|(_, what)| what.trim())
-//RS                 .unwrap_or("");
-//RS             assert!(!what.is_empty(), "{} lost What for {code}", path.display());
-//RS             assert!(
-//RS                 report.iter().any(|line| line
-//RS                     .strip_prefix(" Why: ")
-//RS                     .is_some_and(|why| !why.is_empty())),
-//RS                 "{} lost Why for {code}",
-//RS                 path.display()
-//RS             );
-//RS             assert!(
-//RS                 report.iter().any(|line| line
-//RS                     .strip_prefix(" Fix: ")
-//RS                     .is_some_and(|fix| !fix.is_empty())),
-//RS                 "{} lost Fix for {code}",
-//RS                 path.display()
-//RS             );
-//RS             let more = format!("More: jet-lang.dev/e/{code}");
-//RS             assert!(
-//RS                 report.iter().any(|line| *line == more),
-//RS                 "{} lost snapshot link for {code}",
-//RS                 path.display()
-//RS             );
-//RS             assert!(
-//RS                 !row.what.trim().is_empty()
-//RS                     && !row.why.trim().is_empty()
-//RS                     && !row.fix.trim().is_empty(),
-//RS                 "{} has an incomplete registered product",
-//RS                 code
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn every_report_fixture_has_a_snapshot_file() {
-//RS     let missing: Vec<String> = report_fixture_snapshot_paths()
-//RS         .into_iter()
-//RS         .filter(|path| !path.is_file())
-//RS         .map(|path| path.display().to_string())
-//RS         .collect();
-//RS     assert!(
-//RS         missing.is_empty(),
-//RS         "diagnostic fixture lost its UI snapshot:\n{}",
-//RS         missing.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS fn rendered_report_codes() -> BTreeSet<String> {
-//RS     report_snapshot_paths()
-//RS         .into_iter()
-//RS         .flat_map(|path| extract_report_opening_codes(&read(&path)))
-//RS         .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn report_openers_ignore_prose_comments_and_rust_assertion_text() {
-//RS     let text = concat!(
-//RS         "Error [E0001]: what; Why: [E9998]; Fix: [E9997]\n",
-//RS         "// Error [E9996]\n",
-//RS         "assert!(stderr.contains(\"[E9995]\"));\n",
-//RS         "  Error [E9994]: indented\n",
-//RS         "Warning [L0001]: lint\n",
-//RS         "Stop [E0002]: stop\n",
-//RS         "Lint [L0002]: lint\n",
-//RS     );
-//RS 
-//RS     assert_eq!(
-//RS         extract_report_opening_codes(text),
-//RS         vec![
-//RS             "E0001".to_string(),
-//RS             "L0001".to_string(),
-//RS             "E0002".to_string(),
-//RS             "L0002".to_string(),
-//RS         ]
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn reverse_coverage_diff_names_retired_and_unregistered_fixture_codes() {
-//RS     let left = BTreeSet::new();
-//RS     let right: BTreeSet<String> = extract_report_opening_codes(
-//RS         "Error [E0004]: retired\nError [E9999]: no longer registered\n",
-//RS     )
-//RS     .into_iter()
-//RS     .collect();
-//RS 
-//RS     let (left_only, right_only) = coverage_set_diff(&left, &right);
-//RS     assert!(left_only.is_empty());
-//RS     assert_eq!(right_only, code_set(&["E0004", "E9999"]));
-//RS     assert_eq!(format_code_set(&right_only), "E0004\n  E9999");
-//RS }
-//RS 
-//RS fn rendered_snapshot_texts() -> Vec<(PathBuf, String)> {
-//RS     let mut out = Vec::new();
-//RS     for dir in [
-//RS         root().join("tests/ui"),
-//RS         root().join("tests/ui_lint"),
-//RS         root().join("tests/fixtures/jetpack-diagnostics"),
-//RS         root().join("tests/fixtures/module-eval-diagnostics"),
-//RS     ] {
-//RS         let Ok(entries) = fs::read_dir(&dir) else {
-//RS             continue;
-//RS         };
-//RS         for e in entries.flatten() {
-//RS             let p = e.path();
-//RS             if p.is_dir() {
-//RS                 let sub = p.join("stderr");
-//RS                 if sub.is_file() {
-//RS                     out.push((sub.clone(), read(&sub)));
-//RS                 }
-//RS             } else if matches!(
-//RS                 p.extension().and_then(|x| x.to_str()),
-//RS                 Some("stderr" | "warn")
-//RS             ) {
-//RS                 out.push((p.clone(), read(&p)));
-//RS             }
-//RS         }
-//RS     }
-//RS     for name in [
-//RS         "bind_missing_e3208.txt",
-//RS         "bind_data_invalid_e3208.txt",
-//RS         "doctor_l2101.txt",
-//RS         "fetch_no_git_e1203.txt",
-//RS         "repl_e1801.txt",
-//RS         "unknown_target_e3302.txt",
-//RS     ] {
-//RS         let path = root().join("tests/cli").join(name);
-//RS         if path.is_file() {
-//RS             out.push((path.clone(), read(&path)));
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_voice_scope_includes_owned_runtime_artifacts() {
-//RS     let paths: BTreeSet<String> = rendered_snapshot_texts()
-//RS         .into_iter()
-//RS         .filter_map(|(path, _)| {
-//RS             path.strip_prefix(root())
-//RS                 .ok()
-//RS                 .map(|p| p.display().to_string())
-//RS         })
-//RS         .collect();
-//RS     for expected in [
-//RS         "tests/fixtures/module-eval-diagnostics/E0970.stderr",
-//RS         "tests/fixtures/module-eval-diagnostics/E0971.stderr",
-//RS         "tests/cli/doctor_l2101.txt",
-//RS         "tests/cli/fetch_no_git_e1203.txt",
-//RS         "tests/cli/repl_e1801.txt",
-//RS     ] {
-//RS         assert!(paths.contains(expected), "voice ratchet omitted {expected}");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn word_shaped_codes_are_registered_and_explainable() {
-//RS     let expected = [
-//RS         "E-WEB-ABI-TYPE",
-//RS         "E-WEB-CROSS-PARTITION",
-//RS         "E-WEB-TARGET-BROWSER",
-//RS         "E-WEB-TIR-UNSUPPORTED",
-//RS         "E-WEB-RUN",
-//RS         "E-APP-TARGET-FEATURE",
-//RS         "E-OSTARGET-MIXED-AXIS",
-//RS         "E-OSTARGET-UNMATCHED-CALL",
-//RS         "E-OSTARGET-BUILD-CONTEXT",
-//RS         "E-OSTARGET-DISPATCH-ARM",
-//RS         "E-OSTARGET-DISPATCH-EXHAUSTIVE",
-//RS     ];
-//RS     let registered = registered_codes();
-//RS     let live = jet::Explain::live_codes();
-//RS     for code in expected {
-//RS         assert!(registered.contains(code), "scanner missed {code}");
-//RS         assert!(
-//RS             live.iter().any(|live_code| live_code == code),
-//RS             "explain missed {code}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // The known exclusions
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS /// Codes present in Source/ that are NOT Jet diagnostic codes — they are rustc
-//RS /// error codes used in FFI.rs to classify rustc stderr output (I2 / looks_like_signature_mismatch).
-//RS /// They must never appear in a Jet Diagnostic::error call or a user-facing snapshot
-//RS /// (in [Exxxx] bracket format) EXCEPT when embedded in a "cargo said:" block inside an FFI diagnostic.
-//RS ///
-//RS /// NOTE: E0308 is intentionally excluded here even though it also appears as a rustc code —
-//RS /// Jet uses E0308 independently for the null-typing diagnostic (CheckerInfer.rs).
-//RS /// The I2 guard for E0308 is that it must never appear ORIGINATING from rustc code paths,
-//RS /// which is confirmed by the FFI.rs Diagnostic::error check above.
-//RS const RUSTC_CODES_IN_SOURCE: &[&str] = &[
-//RS     "E0061", // rustc: wrong arg count — NOT a Jet code
-//RS     "E0277", // rustc: trait bound not satisfied — NOT a Jet code
-//RS     "E0425", // rustc: unresolved name — NOT a Jet code
-//RS ];
-//RS 
-//RS /// Internal placeholder used in Jetpack/ModuleEval — never reaches the user.
-//RS const INTERNAL_PLACEHOLDER: &[&str] = &["E0000"];
-//RS 
-//RS /// Codes registered in the typed rows as *retired*; still emitted for backward-compat
-//RS /// log readability but not expected to have new snapshots.
-//RS /// (E0019 is retired but still fires for legacy `import` spelling. The
-//RS ///  retirement status in the row is the coverage proof.)
-//RS const RETIRED_WITH_LEGACY_EMISSION: &[&str] = &["E0019"];
-//RS 
-//RS /// Codes that are fully implemented (parser + sema) but gated behind an
-//RS /// unreleased syntax feature; the gate is named here. They satisfy I4 via
-//RS /// the typed row + the gate comment; snapshots will land with the gate.
-//RS ///
-//RS /// Gate: D-UNINIT1 (#Uninit binding) — parser gate in Parser/Statements.rs:660
-//RS const STAGED_BEHIND_GATE: &[&str] = &[
-//RS     "E0420", // #Uninit: read before write
-//RS     "E0421", // #Uninit: needs type annotation
-//RS     "E0422", // #Uninit: cannot have initializer
-//RS     "E0423", // #Uninit: needs plain-data type
-//RS     "E0424", // #Uninit: needs use core.mem
-//RS ];
-//RS 
-//RS /// Codes that ARE fully implemented but cannot be snapshot-tested via a .jet file
-//RS /// because the triggering condition causes a physical problem (stack overflow, system
-//RS /// dependency) before the diagnostic fires. Coverage is via Source/ unit tests or
-//RS /// the typed diagnostic row.
-//RS ///
-//RS /// E0909: Parser depth-guards at 64 levels of generic nesting, but the parser's
-//RS ///        own recursive descent overflows the stack before reaching depth 64.
-//RS ///        The actual depth guard is tested in Source/Generics.rs unit tests.
-//RS ///        (Tracked as a known issue: the guard depth should be lowered to avoid the
-//RS ///        stack overflow, but that's a separate bug fix.)
-//RS const UNTESTABLE_VIA_SNAPSHOT: &[&str] = &[
-//RS     "E0909", // generic instantiation: parser stack overflow before depth guard fires
-//RS ];
-//RS 
-//RS /// Current fixture/registry mismatches that are intentional and owned. The
-//RS /// side names which independently maintained table is missing the code:
-//RS /// `left-only` is a registered-active emitted code without a report opener;
-//RS /// `right-only` is a report opener without a registered-active emitted code.
-//RS /// Every row has an owner, and the count ratchet below makes this list shrink-only.
-//RS const DIAGNOSTIC_COVERAGE_ALLOWLIST: &[(&str, &str, &str)] = &[
-//RS     // LEFT-only: registered-active and emitted, but no column-0 report opener.
-//RS     ("E0037", "left-only", "Tower #2093"),
-//RS     ("E0153", "left-only", "Tower #2093"),
-//RS     ("E0343", "left-only", "Tower #2093"),
-//RS     ("E0345", "left-only", "Tower #2093"),
-//RS     ("E0347", "left-only", "Tower #2093"),
-//RS     ("E0349", "left-only", "Tower #2093"),
-//RS     ("E0403", "left-only", "Tower #2093"),
-//RS     ("E0502", "left-only", "Tower #2093"),
-//RS     ("E0601", "left-only", "Tower #2093"),
-//RS     ("E0613", "left-only", "Tower #2093"),
-//RS     ("E0916", "left-only", "Tower #2093"),
-//RS     ("E0953", "left-only", "Tower #2093"),
-//RS     ("E0959", "left-only", "Tower #2093"),
-//RS     ("E0979", "left-only", "Tower #2093"),
-//RS     ("E0980", "left-only", "Tower #2093"),
-//RS     ("E0981", "left-only", "Tower #2093"),
-//RS     ("E0982", "left-only", "Tower #2093"),
-//RS     ("E1204", "left-only", "Tower #2093"),
-//RS     ("E1217", "left-only", "Tower #2093"),
-//RS     ("E1218", "left-only", "Tower #2093"),
-//RS     ("E1221", "left-only", "Tower #2093"),
-//RS     ("E1227", "left-only", "Tower #2093"),
-//RS     ("E1228", "left-only", "Tower #2093"),
-//RS     ("E1230", "left-only", "Tower #2093"),
-//RS     ("E1232", "left-only", "Tower #2093"),
-//RS     ("E1233", "left-only", "Tower #2093"),
-//RS     ("E1234", "left-only", "Tower #2093"),
-//RS     ("E1235", "left-only", "Tower #2093"),
-//RS     ("E1236", "left-only", "Tower #2093"),
-//RS     ("E1237", "left-only", "Tower #2093"),
-//RS     ("E1238", "left-only", "Tower #2093"),
-//RS     ("E1240", "left-only", "Tower #2093"),
-//RS     ("E1241", "left-only", "Tower #2093"),
-//RS     ("E1242", "left-only", "Tower #2093"),
-//RS     ("E1243", "left-only", "Tower #2093"),
-//RS     ("E1244", "left-only", "Tower #2093"),
-//RS     ("E1245", "left-only", "Tower #2093"),
-//RS     ("E1246", "left-only", "Tower #2093"),
-//RS     ("E1247", "left-only", "Tower #2093"),
-//RS     ("E1248", "left-only", "Tower #2093"),
-//RS     ("E1249", "left-only", "Tower #2093"),
-//RS     ("E1250", "left-only", "Tower #2093"),
-//RS     ("E1251", "left-only", "Tower #2093"),
-//RS     ("E1252", "left-only", "Tower #2093"),
-//RS     ("E1254", "left-only", "Tower #2093"),
-//RS     ("E1255", "left-only", "Tower #2093"),
-//RS     ("E1256", "left-only", "Tower #2093"),
-//RS     ("E1261", "left-only", "Tower #2093"),
-//RS     ("E1262", "left-only", "Tower #2093"),
-//RS     ("E1263", "left-only", "Tower #2093"),
-//RS     ("E1266", "left-only", "Tower #2093"),
-//RS     ("E1267", "left-only", "Tower #2093"),
-//RS     ("E1268", "left-only", "Tower #2093"),
-//RS     ("E1269", "left-only", "Tower #2093"),
-//RS     ("E1271", "left-only", "Tower #2093"),
-//RS     ("E1275", "left-only", "Tower #2093"),
-//RS     ("E1276", "left-only", "Tower #2093"),
-//RS     ("E1278", "left-only", "Tower #2093"),
-//RS     ("E1279", "left-only", "Tower #2093"),
-//RS     ("E1280", "left-only", "Tower #2093"),
-//RS     ("E1281", "left-only", "Tower #2093"),
-//RS     ("E1282", "left-only", "Tower #2093"),
-//RS     ("E1283", "left-only", "Tower #2093"),
-//RS     ("E1284", "left-only", "Tower #2093"),
-//RS     ("E1285", "left-only", "Tower #2093"),
-//RS     ("E1286", "left-only", "Tower #2093"),
-//RS     ("E1287", "left-only", "Tower #2093"),
-//RS     ("E1288", "left-only", "Tower #2093"),
-//RS     ("E1289", "left-only", "Tower #2093"),
-//RS     ("E1290", "left-only", "Tower #2093"),
-//RS     ("E1291", "left-only", "Tower #2093"),
-//RS     ("E1294", "left-only", "Tower #2093"),
-//RS     ("E1316", "left-only", "Tower #2093"),
-//RS     ("E1320", "left-only", "Tower #2093"),
-//RS     ("E1329", "left-only", "Tower #2093"),
-//RS     ("E1330", "left-only", "Tower #2093"),
-//RS     ("E1332", "left-only", "Tower #2093"),
-//RS     ("E1336", "left-only", "Tower #2093"),
-//RS     ("E1802", "left-only", "Tower #2093"),
-//RS     ("E1803", "left-only", "Tower #2093"),
-//RS     ("E2106", "left-only", "Tower #2093"),
-//RS     ("E2202", "left-only", "Tower #2093"),
-//RS     ("E2203", "left-only", "Tower #2093"),
-//RS     ("E2204", "left-only", "Tower #2093"),
-//RS     ("E2210", "left-only", "Tower #2093"),
-//RS     ("E2601", "left-only", "Tower #2093"),
-//RS     ("E2602", "left-only", "Tower #2093"),
-//RS     ("E2603", "left-only", "Tower #2093"),
-//RS     ("E2604", "left-only", "Tower #2093"),
-//RS     ("E2605", "left-only", "Tower #2093"),
-//RS     ("E2606", "left-only", "Tower #2093"),
-//RS     ("E2712", "left-only", "Tower #2093"),
-//RS     ("E2901", "left-only", "Tower #2093"),
-//RS     ("E2906", "left-only", "Tower #2093"),
-//RS     ("E2907", "left-only", "Tower #2093"),
-//RS     ("E2908", "left-only", "Tower #2093"),
-//RS     ("E3002", "left-only", "Tower #2093"),
-//RS     ("E3201", "left-only", "Tower #2093"),
-//RS     ("E3209", "left-only", "Tower #2093"),
-//RS     ("E3210", "left-only", "Tower #2093"),
-//RS     ("E3504", "left-only", "Tower #2093"),
-//RS     ("L0204", "left-only", "Tower #2093"),
-//RS     ("L0205", "left-only", "Tower #2093"),
-//RS     ("L3102", "left-only", "Tower #2093"),
-//RS     // RIGHT-only: existing report openers for retired/reserved rows.
-//RS     ("E0060", "right-only", "Tower #2093"),
-//RS     ("E0065", "right-only", "Tower #2093"),
-//RS     ("E0066", "right-only", "Tower #2093"),
-//RS     ("E0067", "right-only", "Tower #2093"),
-//RS     ("E0146", "right-only", "Tower #2093"),
-//RS     ("E0214", "right-only", "Tower #2093"),
-//RS     ("E0341", "right-only", "Tower #2093"),
-//RS     ("E0351", "right-only", "Tower #2093"),
-//RS     ("E0358", "right-only", "Tower #2093"),
-//RS     ("E0374", "right-only", "Tower #2093"),
-//RS     ("E0375", "right-only", "Tower #2093"),
-//RS     ("E0376", "right-only", "Tower #2093"),
-//RS     ("E0377", "right-only", "Tower #2093"),
-//RS     ("E0426", "right-only", "Tower #2093"),
-//RS     ("E0431", "right-only", "Tower #2093"),
-//RS     ("E0432", "right-only", "Tower #2093"),
-//RS     ("E0922", "right-only", "Tower #2093"),
-//RS     ("E0929", "right-only", "Tower #2093"),
-//RS     ("E0960", "right-only", "Tower #2093"),
-//RS     ("E0988", "right-only", "Tower #2093"),
-//RS     ("E1002", "right-only", "Tower #2093"),
-//RS     ("E1105", "right-only", "Tower #2093"),
-//RS     ("E1107", "right-only", "Tower #2093"),
-//RS     ("E1115", "right-only", "Tower #2093"),
-//RS     ("E1116", "right-only", "Tower #2093"),
-//RS     ("E1209", "right-only", "Tower #2093"),
-//RS     ("E1210", "right-only", "Tower #2093"),
-//RS     ("E1306", "right-only", "Tower #2093"),
-//RS     ("E1342", "right-only", "Tower #2093"),
-//RS     ("E1343", "right-only", "Tower #2093"),
-//RS     ("E2101", "right-only", "Tower #2093"),
-//RS     ("E2510", "right-only", "Tower #2093"),
-//RS     ("E2714", "right-only", "Tower #2093"),
-//RS     ("E2805", "right-only", "Tower #2093"),
-//RS     ("E2935", "right-only", "Tower #2093"),
-//RS     ("E2936", "right-only", "Tower #2093"),
-//RS     ("E3206", "right-only", "Tower #2093"),
-//RS     ("E3530", "right-only", "Tower #2093"),
-//RS ];
-//RS 
-//RS const DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING: usize = 152;
-//RS 
-//RS /// All exclusions combined.
-//RS fn all_exclusions() -> BTreeSet<String> {
-//RS     let mut out = BTreeSet::new();
-//RS     for &c in RUSTC_CODES_IN_SOURCE
-//RS         .iter()
-//RS         .chain(INTERNAL_PLACEHOLDER.iter())
-//RS         .chain(RETIRED_WITH_LEGACY_EMISSION.iter())
-//RS         .chain(STAGED_BEHIND_GATE.iter())
-//RS         .chain(UNTESTABLE_VIA_SNAPSHOT.iter())
-//RS     {
-//RS         out.insert(c.to_string());
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn coverage_allowlist_codes(side: &str) -> BTreeSet<String> {
-//RS     DIAGNOSTIC_COVERAGE_ALLOWLIST
-//RS         .iter()
-//RS         .filter(|(_, entry_side, _)| *entry_side == side)
-//RS         .map(|(code, _, _)| (*code).to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS fn coverage_allowlist_errors() -> Vec<String> {
-//RS     let registered = registered_codes();
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut errors = Vec::new();
-//RS 
-//RS     for &(code, side, owner) in DIAGNOSTIC_COVERAGE_ALLOWLIST {
-//RS         if !is_report_code(code) {
-//RS             errors.push(format!("{code}: invalid diagnostic code"));
-//RS         }
-//RS         if side != "left-only" && side != "right-only" {
-//RS             errors.push(format!("{code}: side must be `left-only` or `right-only`"));
-//RS         }
-//RS         if owner.trim().is_empty() {
-//RS             errors.push(format!("{code}: coverage owner is empty"));
-//RS         }
-//RS         if !registered.contains(code) {
-//RS             errors.push(format!("{code}: coverage allowlist row is not registered"));
-//RS         }
-//RS         if !seen.insert(code) {
-//RS             errors.push(format!("{code}: duplicate coverage allowlist row"));
-//RS         }
-//RS     }
-//RS 
-//RS     errors
-//RS }
-//RS 
-//RS /// LEFT: registered-active codes emitted in Source/crates, minus named
-//RS /// exclusions. RIGHT: codes opened by an actual harness/direct fixture report,
-//RS /// minus the same named exclusions. The two sets remain independently derived.
-//RS fn coverage_left() -> BTreeSet<String> {
-//RS     let emitted = emitted_codes();
-//RS     let exclusions = all_exclusions();
-//RS     registered_codes()
-//RS         .into_iter()
-//RS         .filter(|code| emitted.contains(code))
-//RS         .filter(|code| {
-//RS             jet_foundation::Registry::diagnostic(code)
-//RS                 .is_some_and(|row| row.status == jet_foundation::Registry::DiagnosticStatus::Active)
-//RS         })
-//RS         .filter(|code| !exclusions.contains(code))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn coverage_right() -> BTreeSet<String> {
-//RS     let exclusions = all_exclusions();
-//RS     rendered_report_codes()
-//RS         .into_iter()
-//RS         .filter(|code| !exclusions.contains(code))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn coverage_set_diff(
-//RS     left: &BTreeSet<String>,
-//RS     right: &BTreeSet<String>,
-//RS ) -> (BTreeSet<String>, BTreeSet<String>) {
-//RS     (
-//RS         left.difference(right).cloned().collect(),
-//RS         right.difference(left).cloned().collect(),
-//RS     )
-//RS }
-//RS 
-//RS fn format_code_set(codes: &BTreeSet<String>) -> String {
-//RS     if codes.is_empty() {
-//RS         "(none)".to_string()
-//RS     } else {
-//RS         codes.iter().cloned().collect::<Vec<_>>().join("\n  ")
-//RS     }
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // I2 regression guard
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS /// Confirm that rustc codes are only used in the `looks_like_signature_mismatch`
-//RS /// pattern matcher, not as Jet Diagnostic codes.
-//RS #[test]
-//RS fn i2_rustc_codes_do_not_leak_as_jet_diagnostics() {
-//RS     // The FFI.rs pattern-matcher is the only allowlisted use.
-//RS     // Verify the strings appear only inside a function whose name contains "mismatch" or "looks_like".
-//RS     let allowed_fn_context = "looks_like_signature_mismatch";
-//RS     let mut source_text = String::new();
-//RS     for dir in [root().join("Source"), root().join("crates")] {
-//RS         walk_rs(&dir, &mut |content| {
-//RS             source_text.push_str(content);
-//RS             source_text.push('\n');
-//RS         });
-//RS     }
-//RS 
-//RS     for &code in RUSTC_CODES_IN_SOURCE {
-//RS         // Count occurrences in Source/ and seam crates.
-//RS         let mut other_count = 0usize;
-//RS         for dir in [root().join("Source"), root().join("crates")] {
-//RS             walk_rs(&dir, &mut |content| {
-//RS                 other_count += content
-//RS                     .lines()
-//RS                     .filter(|l| l.contains(code))
-//RS                     .filter(|l| {
-//RS                         // Any line that uses Diagnostic::error with this code is a leak
-//RS                         l.contains("Diagnostic::error") || l.contains("Diagnostic::warn")
-//RS                     })
-//RS                     .count();
-//RS             });
-//RS         }
-//RS 
-//RS         assert_eq!(
-//RS             other_count, 0,
-//RS             "I2 violation: rustc error code {} appears in a Jet Diagnostic::error/warn call \
-//RS              outside of {}: {} occurrence(s). \
-//RS              Rustc codes must NEVER be emitted as Jet diagnostics — only used to classify rustc stderr.",
-//RS             code, allowed_fn_context, other_count
-//RS         );
-//RS 
-//RS         // Also confirm classifier usage is benign (not inside a Diagnostic::error call).
-//RS         let classifier_diag_lines = source_text
-//RS             .lines()
-//RS             .filter(|l| l.contains(code) && l.contains("Diagnostic::error"))
-//RS             .count();
-//RS         assert_eq!(
-//RS             classifier_diag_lines, 0,
-//RS             "I2 violation: rustc code {} appears inside a Diagnostic::error call",
-//RS             code
-//RS         );
-//RS 
-//RS         // Verify no rendered report opens with the rustc code.
-//RS         let snaps = rendered_report_codes();
-//RS         assert!(
-//RS             !snaps.contains(code),
-//RS             "I2 violation: rustc code {} appears in a user-facing snapshot as [{}]. \
-//RS              Rustc error codes must never reach end users.",
-//RS             code,
-//RS             code
-//RS         );
-//RS         let _ = &allowed_fn_context;
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_snapshots_do_not_leak_runtime_or_backend_voice() {
-//RS     let banned = [
-//RS         "thread 'main' panicked",
-//RS         "panicked at",
-//RS         "stack backtrace:",
-//RS         "target/debug",
-//RS         ".rs:",
-//RS         "rustc rejected generated code",
-//RS     ];
-//RS     let mut failures = Vec::new();
-//RS     for (path, text) in rendered_snapshot_texts() {
-//RS         for needle in banned {
-//RS             if text.contains(needle) && !allowed_backend_voice_snapshot(&path, &text, needle) {
-//RS                 failures.push(format!("{} contains `{}`", path.display(), needle));
-//RS             }
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "user-facing diagnostics leaked runtime/backend voice:\n{}",
-//RS         failures.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS /// A rendered report must describe what the reader wrote. Placeholder
-//RS /// consumer text and raw byte offsets hide the move site (#3715), and the
-//RS /// lexer's synthetic line terminator is not source text (#3719).
-//RS #[test]
-//RS fn diagnostic_snapshots_never_render_placeholders_offsets_or_synthetic_terminators() {
-//RS     let banned = [
-//RS         "the earlier consuming operation",
-//RS         "source bytes",
-//RS         "found `;`",
-//RS     ];
-//RS     let mut failures = Vec::new();
-//RS     for (path, text) in rendered_snapshot_texts() {
-//RS         for needle in banned {
-//RS             if text.contains(needle) {
-//RS                 failures.push(format!("{} contains `{}`", path.display(), needle));
-//RS             }
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "user-facing diagnostics render placeholder or internal text:\n{}",
-//RS         failures.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn runtime_user_error_codes_use_jet_panic_voice() {
-//RS     let mut failures = Vec::new();
-//RS     let mut paths = vec![root().join("crates/jet-codegen/src/Prelude/Core.rs")];
-//RS     collect_rs_paths(
-//RS         &root().join("crates/jet-codegen/src/Prelude/Core"),
-//RS         &mut paths,
-//RS     );
-//RS     collect_rs_paths(
-//RS         &root().join("crates/jet-codegen/src/Prelude/CoreLib"),
-//RS         &mut paths,
-//RS     );
-//RS     for path in paths {
-//RS         let text = read(&path);
-//RS         let rel = path
-//RS             .strip_prefix(root())
-//RS             .unwrap_or(&path)
-//RS             .display()
-//RS             .to_string();
-//RS         for (idx, line) in text.lines().enumerate() {
-//RS             if line.contains("panic!(\"E") {
-//RS                 failures.push(format!(
-//RS                     "{}:{} uses raw panic for a Jet error code",
-//RS                     rel,
-//RS                     idx + 1
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "runtime user errors must use Jet-owned panic/report helpers:\n{}",
-//RS         failures.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS fn collect_rs_paths(dir: &PathBuf, out: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             collect_rs_paths(&path, out);
-//RS         } else if path.extension().and_then(|ext| ext.to_str()) == Some("rs") {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS     out.sort();
-//RS }
-//RS 
-//RS fn allowed_backend_voice_snapshot(path: &std::path::Path, text: &str, needle: &str) -> bool {
-//RS     let p = path.to_string_lossy();
-//RS     if p.ends_with("ffi_bad_path.stderr") {
-//RS         return needle == ".rs:" || needle == "rustc rejected generated code";
-//RS     }
-//RS     if p.ends_with("os_target_unmatched_call.stderr") && text.contains("raw rustc") {
-//RS         return true;
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // I4(a): every emitted Jet code has a typed row
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[test]
-//RS fn every_emitted_code_has_typed_row() {
-//RS     let emitted = emitted_codes();
-//RS     let registered = registered_codes();
-//RS     let exclusions = all_exclusions();
-//RS 
-//RS     let mut missing: Vec<String> = emitted
-//RS         .iter()
-//RS         .filter(|c| !exclusions.contains(*c))
-//RS         .filter(|c| !registered.contains(*c))
-//RS         .cloned()
-//RS         .collect();
-//RS     missing.sort();
-//RS 
-//RS     assert!(
-//RS         missing.is_empty(),
-//RS         "The following codes are emitted in Source/ but have NO typed diagnostic row \
-//RS          (invariant I4a). For each: add one row with code, stage, severity, moment, \
-//RS          What/Why/Fix templates, then add a tests/ui snapshot.\n\
-//RS          Missing:\n  {}",
-//RS         missing.join("\n  ")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostics_registry_has_no_duplicate_code_rows() {
-//RS     let mut seen = BTreeSet::new();
-//RS     let mut duplicates = Vec::new();
-//RS     for (code, line) in registered_code_rows() {
-//RS         if !seen.insert(code.clone()) {
-//RS             duplicates.push(format!("{code} at Diagnostics.jet:{line}"));
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         duplicates.is_empty(),
-//RS         "duplicate code rows in the typed diagnostic source:\n{}",
-//RS         duplicates.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // I4(b): every emitted Jet code has at least one report-opening fixture
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[test]
-//RS fn every_emitted_code_has_snapshot() {
-//RS     let allowlist_errors = coverage_allowlist_errors();
-//RS     assert!(
-//RS         allowlist_errors.is_empty(),
-//RS         "invalid diagnostic coverage allowlist rows:\n{}",
-//RS         allowlist_errors.join("\n")
-//RS     );
-//RS 
-//RS     let left = coverage_left();
-//RS     let right = coverage_right();
-//RS     let (mut left_only, mut right_only) = coverage_set_diff(&left, &right);
-//RS     let allowed_left = coverage_allowlist_codes("left-only");
-//RS     let allowed_right = coverage_allowlist_codes("right-only");
-//RS     left_only.retain(|code| !allowed_left.contains(code));
-//RS     right_only.retain(|code| !allowed_right.contains(code));
-//RS 
-//RS     assert!(
-//RS         left_only.is_empty() && right_only.is_empty(),
-//RS         "I4(b) diagnostic coverage set mismatch after named exclusions and \
-//RS          owned allowlist rows:\n\
-//RS          LEFT-only (registered-active emitted, no report opener):\n  {}\n\
-//RS          RIGHT-only (report opener, not registered-active emitted):\n  {}",
-//RS         format_code_set(&left_only),
-//RS         format_code_set(&right_only),
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn e0102_and_e0111_exact_replacement_reports_carry_machine_edits() {
-//RS     let mut failures = Vec::new();
-//RS     check_json_snapshots_for_edits(&root().join("tests/cli"), &mut failures);
-//RS     assert!(
-//RS         failures.is_empty(),
-//RS         "machine-readable diagnostics with one exact replacement token must carry fix_edits:\n{}",
-//RS         failures.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS fn check_json_snapshots_for_edits(path: &PathBuf, failures: &mut Vec<String>) {
-//RS     let Ok(entries) = fs::read_dir(path) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             check_json_snapshots_for_edits(&path, failures);
-//RS             continue;
-//RS         }
-//RS         if path.extension().and_then(|ext| ext.to_str()) != Some("txt") {
-//RS             continue;
-//RS         }
-//RS         let Ok(text) = fs::read_to_string(&path) else {
-//RS             continue;
-//RS         };
-//RS         for (line, raw) in text.lines().enumerate() {
-//RS             let Ok(report) = jet_foundation::JSON::parse_json(raw) else {
-//RS                 continue;
-//RS             };
-//RS             let Some(schema) = jet_foundation::JSON::json_get(&report, "schema")
-//RS                 .and_then(jet_foundation::JSON::json_str)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             if schema != "jet.report/v1" {
-//RS                 continue;
-//RS             }
-//RS             let Some(fix) = jet_foundation::JSON::json_get(&report, "fix")
-//RS                 .and_then(jet_foundation::JSON::json_str)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             if !names_one_exact_replacement(fix) {
-//RS                 continue;
-//RS             }
-//RS             let has_edit = matches!(
-//RS                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-//RS                 Some(DataTree::Array(edits)) if !edits.is_empty()
-//RS             );
-//RS             if !has_edit {
-//RS                 failures.push(format!("{}:{} — {fix}", path.display(), line + 1));
-//RS                 continue;
-//RS             }
-//RS             let has_applicability = matches!(
-//RS                 jet_foundation::JSON::json_get(&report, "applicability"),
-//RS                 Some(DataTree::Text(value) | DataTree::TypedText(value))
-//RS                     if value == "safe" || value == "suggested"
-//RS             );
-//RS             if !has_applicability {
-//RS                 failures.push(format!(
-//RS                     "{}:{} — machine edit has no closed applicability grade",
-//RS                     path.display(),
-//RS                     line + 1
-//RS                 ));
-//RS             }
-//RS             let has_safety = matches!(
-//RS                 jet_foundation::JSON::json_get(&report, "fix_edits"),
-//RS                 Some(DataTree::Array(edits))
-//RS                     if edits.iter().all(|edit| matches!(
-//RS                         jet_foundation::JSON::json_get(edit, "safety"),
-//RS                         Some(DataTree::Text(value) | DataTree::TypedText(value))
-//RS                             if [
-//RS                                 jet_foundation::Report::FixSafety::Formatting,
-//RS                                 jet_foundation::Report::FixSafety::BehaviorPreserving,
-//RS                                 jet_foundation::Report::FixSafety::ApiChanging,
-//RS                                 jet_foundation::Report::FixSafety::TargetChanging,
-//RS                                 jet_foundation::Report::FixSafety::NeedsReview,
-//RS                             ]
-//RS                             .iter()
-//RS                             .any(|grade| grade.as_str() == value.as_str())
-//RS                     ))
-//RS             );
-//RS             if !has_safety {
-//RS                 failures.push(format!(
-//RS                     "{}:{} — machine edit has no closed safety grade",
-//RS                     path.display(),
-//RS                     line + 1
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn names_one_exact_replacement(fix: &str) -> bool {
-//RS     (fix.starts_with("did you mean `") && fix.ends_with("`?"))
-//RS         || (fix.starts_with("replace `") && fix.contains("` with `"))
-//RS         || (fix.starts_with("declare it with `") && fix.contains(" := "))
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // I4(b) coverage allowlist sentinel: rows must shrink, never rot
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[test]
-//RS fn diagnostic_coverage_allowlist_rows_are_still_needed() {
-//RS     let allowlist_errors = coverage_allowlist_errors();
-//RS     assert!(
-//RS         allowlist_errors.is_empty(),
-//RS         "invalid diagnostic coverage allowlist rows:\n{}",
-//RS         allowlist_errors.join("\n")
-//RS     );
-//RS 
-//RS     let left = coverage_left();
-//RS     let right = coverage_right();
-//RS     let mut stale = Vec::new();
-//RS     for &(code, side, owner) in DIAGNOSTIC_COVERAGE_ALLOWLIST {
-//RS         let still_needed = match side {
-//RS             "left-only" => left.contains(code) && !right.contains(code),
-//RS             "right-only" => right.contains(code) && !left.contains(code),
-//RS             _ => false,
-//RS         };
-//RS         if !still_needed {
-//RS             stale.push(format!("{code} ({side}; owner {owner})"));
-//RS         }
-//RS     }
-//RS     stale.sort();
-//RS 
-//RS     assert!(
-//RS         stale.is_empty(),
-//RS         "remove stale I4(b) diagnostic coverage allowlist rows:\n  {}",
-//RS         stale.join("\n  ")
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Count-ratchets (card #447 / durability W2): exclusion lists must shrink
-//RS // over time, never grow silently. A PR that adds a new exclusion to route
-//RS // around this file's checks trips the corresponding ceiling below and must
-//RS // bump it explicitly (a visible, reviewable diff) rather than sneaking a
-//RS // larger list past a green run.
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn exclusion_list_counts_do_not_grow() {
-//RS     const CEILINGS: &[(&str, usize, usize)] = &[
-//RS         (
-//RS             "DIAGNOSTIC_COVERAGE_ALLOWLIST",
-//RS             DIAGNOSTIC_COVERAGE_ALLOWLIST.len(),
-//RS             DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING,
-//RS         ),
-//RS         ("STAGED_BEHIND_GATE", STAGED_BEHIND_GATE.len(), 5),
-//RS         ("UNTESTABLE_VIA_SNAPSHOT", UNTESTABLE_VIA_SNAPSHOT.len(), 1),
-//RS         (
-//RS             "RETIRED_WITH_LEGACY_EMISSION",
-//RS             RETIRED_WITH_LEGACY_EMISSION.len(),
-//RS             1,
-//RS         ),
-//RS         ("RUSTC_CODES_IN_SOURCE", RUSTC_CODES_IN_SOURCE.len(), 3),
-//RS     ];
-//RS     let mut violations = Vec::new();
-//RS     for (name, actual, ceiling) in CEILINGS {
-//RS         if actual > ceiling {
-//RS             violations.push(format!(
-//RS                 "{name} grew from {ceiling} to {actual} entries — shrinking is welcome, \
-//RS                  growing needs a reviewed bump of the ceiling in this test, not a silent add"
-//RS             ));
-//RS         }
-//RS     }
-//RS     assert!(violations.is_empty(), "{}", violations.join("\n"));
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // I4(c): jet explain resolves for every live typed row
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[test]
-//RS fn every_registered_code_has_explain_page() {
-//RS     let registered = registered_codes();
-//RS     let diag_md = "";
-//RS 
-//RS     let mut missing: Vec<String> = registered
-//RS         .iter()
-//RS         .filter(|c| !is_retired(c, &diag_md))
-//RS         .filter(|c| jet::Explain::lookup(c).is_none())
-//RS         .cloned()
-//RS         .collect();
-//RS     missing.sort();
-//RS 
-//RS     assert!(
-//RS         missing.is_empty(),
-//RS         "The following codes are registered in the typed row source but \
-//RS          `jet explain <code>` returns None (invariant I4c).\n\
-//RS          Since Explain.rs is built directly from the row registry, this means the \
-//RS          typed row is malformed or missing.\n\
-//RS          Missing explain:\n  {}",
-//RS         missing.join("\n  ")
-//RS     );
-//RS }
-//RS 
-//RS /// Tower #2434: the five reworded rows must reach `jet explain` as detailed
-//RS /// what/why/fix, not the generic stage fallback. Explain.rs projects a row's
-//RS /// prose only when its typed `detail` flag is set, so a rewritten row that
-//RS /// keeps `false` silently regresses to "A longer explanation will land".
-//RS #[test]
-//RS fn reworded_law_rows_explain_with_detail() {
-//RS     for code in ["E0041", "E0109", "E0301", "E0907", "E2511"] {
-//RS         let explanation =
-//RS             jet::Explain::lookup(code).unwrap_or_else(|| panic!("{code} explain page"));
-//RS         for (field, value) in [
-//RS             ("what", &explanation.what),
-//RS             ("why", &explanation.why),
-//RS             ("fix", &explanation.fix),
-//RS         ] {
-//RS             let text = value
-//RS                 .as_deref()
-//RS                 .unwrap_or_else(|| panic!("{code} explain page has no detailed {field}"));
-//RS             assert!(
-//RS                 !text.starts_with("The registered ") && !text.starts_with("Follow the guidance"),
-//RS                 "{code} explain {field} is the generic registry fallback: {text}"
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Audit: typed rows but NOT emitted (spec ahead of impl)
-//RS //
-//RS // This allowlist is shrink-only. Retired rows stay listed for explain-page
-//RS // coverage. Staged rows name the owning Tower card.
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[test]
-//RS fn registered_unimplemented_codes_are_expected() {
-//RS     // Reason is exactly `retired` or `staged #<owning-card>`.
-//RS     const EXPECTED_SPEC_AHEAD_OF_IMPL: &[(&str, &str)] = &[
-//RS         ("E0004", "retired"),
-//RS         ("E0005", "retired"),
-//RS         ("E0006", "retired"),
-//RS         ("E0007", "retired"),
-//RS         ("E0062", "retired"),
-//RS         ("E0071", "retired"),
-//RS         ("E0010", "retired"),
-//RS         ("E0011", "retired"),
-//RS         ("E0020", "retired"),
-//RS         ("E0058", "retired"),
-//RS         ("E0206", "retired"),
-//RS         ("E0207", "retired"),
-//RS         ("E0745", "retired"),
-//RS         ("E0427", "retired"),
-//RS         ("E0912", "retired"),
-//RS         ("E0990", "retired"),
-//RS         ("E2301", "retired"),
-//RS         ("E2302", "retired"),
-//RS         ("E2303", "retired"),
-//RS         ("E2304", "retired"),
-//RS         ("E2306", "retired"),
-//RS         ("E2403", "staged #1542"),
-//RS         ("E2410", "staged #1830"),
-//RS         ("E2412", "staged #1830"),
-//RS         ("E2413", "retired"),
-//RS         ("E2701", "staged #1495"),
-//RS         ("E2801", "staged #17"),
-//RS         ("E2802", "staged #17"),
-//RS         ("E2803", "staged #17"),
-//RS         ("E2804", "staged #17"),
-//RS         ("E2902", "staged #1530"),
-//RS         ("E2940", "staged #240"),
-//RS         ("E3104", "retired"),
-//RS         ("E0958", "retired"),
-//RS         ("E0951", "retired"),
-//RS         ("E0993", "retired"),
-//RS         ("E0328", "retired"),
-//RS         ("E0342", "staged #1606"),
-//RS         ("E0954", "retired"),
-//RS         ("E0920", "retired"),
-//RS         ("E1109", "staged #1220"),
-//RS         ("E1111", "retired"),
-//RS         ("E1229", "retired"),
-//RS         ("E0410", "retired"),
-//RS         ("E0859", "staged #521"),
-//RS         ("E0416", "retired"),
-//RS         ("E0428", "retired"),
-//RS         ("E2407", "staged #1330"),
-//RS         ("E3626", "staged #521"),
-//RS     ];
-//RS 
-//RS     let emitted = emitted_codes();
-//RS     let registered = registered_codes();
-//RS     let exclusions = all_exclusions();
-//RS 
-//RS     let reason_errors = allowlist_reason_errors(EXPECTED_SPEC_AHEAD_OF_IMPL);
-//RS     assert!(
-//RS         reason_errors.is_empty(),
-//RS         "Invalid EXPECTED_SPEC_AHEAD_OF_IMPL reasons:\n  {}",
-//RS         reason_errors.join("\n  ")
-//RS     );
-//RS 
-//RS     const STALE_ALLOWLIST_FIXTURE: &[&str] = &["E2101", "E3001"];
-//RS     let stale_fixture_failure = coverage_baseline_failure(
-//RS         STALE_ALLOWLIST_FIXTURE.iter().copied(),
-//RS         &BTreeSet::new(),
-//RS         &emitted,
-//RS     )
-//RS     .expect("embedded stale allowlist fixture must fail");
-//RS     assert_eq!(
-//RS         stale_fixture_failure,
-//RS         "EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  E2101\n  E3001"
-//RS     );
-//RS 
-//RS     assert!(
-//RS         registered.contains("E0033"),
-//RS         "E0033 is a retired reservation and must remain in the typed rows"
-//RS     );
-//RS     assert!(
-//RS         registered.contains("E0745") && is_retired("E0745", ""),
-//RS         "E0745 is a retired reservation and must remain in the typed rows"
-//RS     );
-//RS     let parser = read(&root().join("crates/jet-parser/src/Parser/mod.rs"));
-//RS     assert!(
-//RS         parser.contains("\"E0032\", \"E0033\", \"E0036\""),
-//RS         "E0033 must remain in the parser retired-code non-emission guard"
-//RS     );
-//RS 
-//RS     let spec_ahead_of_impl: BTreeSet<String> = registered
-//RS         .iter()
-//RS         .filter(|c| !exclusions.contains(*c))
-//RS         .filter(|c| {
-//RS             jet_foundation::Registry::diagnostic(c).is_some_and(|row| {
-//RS                 row.status != jet_foundation::Registry::DiagnosticStatus::Reserved
-//RS             })
-//RS         })
-//RS         .filter(|c| !emitted.contains(*c))
-//RS         .cloned()
-//RS         .collect();
-//RS 
-//RS     let baseline_failure = coverage_baseline_failure(
-//RS         EXPECTED_SPEC_AHEAD_OF_IMPL.iter().map(|(code, _)| *code),
-//RS         &spec_ahead_of_impl,
-//RS         &emitted,
-//RS     );
-//RS     if let Some(failure) = baseline_failure {
-//RS         panic!("{failure}");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn diagnostic_coverage_baseline_is_a_non_decreasing_floor() {
-//RS     use jet_foundation::Coverage::CoverageEntry;
-//RS     use jet_foundation::Report::NoFixReasonKind;
-//RS 
-//RS     let baseline = jet_foundation::Registry::diagnostic_coverage_baseline();
-//RS     assert!(
-//RS         baseline.rows.len() > 1,
-//RS         "coverage baseline must classify the current registry by plane"
-//RS     );
-//RS 
-//RS     let entries = jet_foundation::Registry::diagnostic_coverage_entries();
-//RS     let facts = jet_foundation::Coverage::try_facts(entries.clone())
-//RS         .expect("registered diagnostic coverage rows must be valid");
-//RS     let validated = jet_foundation::Registry::validate_diagnostic_coverage(entries)
-//RS         .expect("current diagnostic coverage must meet its checked-in floor");
-//RS     assert_eq!(facts, validated);
-//RS     assert_eq!(
-//RS         facts.iter().map(|fact| fact.rows).sum::<usize>(),
-//RS         baseline.rows.values().map(|row| row.total).sum::<usize>()
-//RS     );
-//RS     assert_eq!(
-//RS         facts.iter().map(|fact| fact.edit_covered).sum::<usize>(),
-//RS         baseline
-//RS             .rows
-//RS             .values()
-//RS             .map(|row| row.edit_covered)
-//RS             .sum::<usize>()
-//RS     );
-//RS     assert_eq!(
-//RS         facts.iter().map(|fact| fact.reason_covered).sum::<usize>(),
-//RS         baseline
-//RS             .rows
-//RS             .values()
-//RS             .map(|row| row.reason_covered)
-//RS             .sum::<usize>()
-//RS     );
-//RS 
-//RS     let mut with_new_uncovered = facts
-//RS         .iter()
-//RS         .flat_map(|fact| {
-//RS             let mut rows = Vec::with_capacity(fact.rows);
-//RS             rows.extend((0..fact.edit_covered).map(|_| {
-//RS                 CoverageEntry::new(fact.plane.clone(), true, None)
-//RS             }));
-//RS             rows.extend((0..fact.reason_covered).map(|_| {
-//RS                 CoverageEntry::new(
-//RS                     fact.plane.clone(),
-//RS                     false,
-//RS                     Some(NoFixReasonKind::Behavior),
-//RS                 )
-//RS             }));
-//RS             rows.extend((0..fact.uncovered).map(|_| {
-//RS                 CoverageEntry::new(fact.plane.clone(), false, None)
-//RS             }));
-//RS             rows
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let open_plane = facts
-//RS         .iter()
-//RS         .find(|fact| fact.uncovered > 0)
-//RS         .expect("the current source must expose an open coverage plane");
-//RS     with_new_uncovered.push(CoverageEntry::new(open_plane.plane.clone(), false, None));
-//RS     let failure = jet_foundation::Coverage::validate_registry_coverage(
-//RS         with_new_uncovered,
-//RS         &baseline,
-//RS     )
-//RS     .expect_err("a new uncovered row in an open plane must fail the ratchet");
-//RS     assert!(failure.contains("neither fix_edits nor no_fix_reason"));
-//RS }
-// END-PORT-PENDING 1040 tests/diagnostics_coverage.rs:1-2230
-
+// Diagnostics coverage accounting: I4 registry, report opener, and explain coverage.
+use std.fs
+use core.path.OSPath
+use jet_foundation.DataTree.DataTree
+use jet_foundation.[Registry, JSON, Report]
+use jet.Explain
+// GATE #4494: real filesystem access and repository-root environment fact.
+// Rust: tests/diagnostics_coverage.rs:29
+pub fn root() -> OSPath { OSPath.from(env!("CARGO_MANIFEST_DIR")) }
+// Rust: tests/diagnostics_coverage.rs:33
+pub fn read(p: &OSPath) -> String { fs.read_to_string(p).unwrap_or_else((_) -> panic("cannot read {p.display()}")) }
+// Rust: tests/diagnostics_coverage.rs:36
+pub struct PreludeShowRow { impl_file: String, type_file: String, rust_type: String, canonical_type: String }
+// Rust: tests/diagnostics_coverage.rs:46
+pub const PRELUDE_JET_SHOW_ROWS: [PreludeShowRow] = [
+    PreludeShowRow{impl_file: "CoreLib/Top/Compute.rs", type_file: "CoreLib/Top/Compute.rs", rust_type: "JetComputeDevice", canonical_type: "ComputeDevice"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Sync.rs", type_file: "CoreLib/Top/Sync.rs", rust_type: "JetSyncText", canonical_type: "SyncText"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Sync.rs", type_file: "CoreLib/Top/Sync.rs", rust_type: "JetSyncCounter", canonical_type: "SyncCounter"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Sync.rs", type_file: "CoreLib/Top/Sync.rs", rust_type: "JetSyncMap", canonical_type: "SyncMap"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Sync.rs", type_file: "CoreLib/Top/Sync.rs", rust_type: "JetSyncList", canonical_type: "SyncList"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Services.rs", type_file: "CoreLib/Top/Services.rs", rust_type: "JetServiceRestart", canonical_type: "ServiceRestart"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Services.rs", type_file: "CoreLib/Top/Services.rs", rust_type: "JetServiceDelivery", canonical_type: "ServiceDelivery"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Services.rs", type_file: "CoreLib/Top/ServiceAuthority.rs", rust_type: "JetServiceRuntime", canonical_type: "ServiceRuntime"},
+    PreludeShowRow{impl_file: "CoreLib/Top/Services.rs", type_file: "CoreLib/Top/Services.rs", rust_type: "JetServiceStateStore", canonical_type: "ServiceStateStore"},
+]
+// Rust: tests/diagnostics_coverage.rs:103
+pub struct PreludeShowExclusion { impl_file: String, type_file: String, rust_type: String, canonical_type: String, reason: String }
+// Explicit-only renderers; ServiceEndpoint is the canonical Core name.
+// Rust: tests/diagnostics_coverage.rs:113
+pub const PRELUDE_JET_SHOW_EXCLUSIONS: [PreludeShowExclusion] = [
+    PreludeShowExclusion{impl_file: "CoreLib/Top/Compute.rs", type_file: "CoreLib/Top/Compute.rs", rust_type: "JetTensor", canonical_type: "Tensor", reason: "Tensor has an explicit state-aware renderer; it is not an automatic printable row"},
+    PreludeShowExclusion{impl_file: "CoreLib/Top/Compute.rs", type_file: "CoreLib/Top/Compute.rs", rust_type: "JetComputeStream", canonical_type: "ComputeStream", reason: "ComputeStream identity is runtime-local, so its explicit renderer omits the identity"},
+    PreludeShowExclusion{impl_file: "CoreLib/Top/Compute.rs", type_file: "CoreLib/Top/Compute.rs", rust_type: "JetSparseCsr", canonical_type: "SparseTensor", reason: "SparseTensor uses the explicit `jet_compute_sparse_show` projection"},
+    PreludeShowExclusion{impl_file: "CoreLib/Top/Services.rs", type_file: "CoreLib/Top/Services.rs", rust_type: "JetServiceTree", canonical_type: "ServiceTree", reason: "ServiceTree owns runtime workers and uses the explicit `jet_services_tree_show` projection"},
+    PreludeShowExclusion{impl_file: "CoreLib/Top/Services.rs", type_file: "CoreLib/Top/ServiceAuthority.rs", rust_type: "JetServiceEndpoint", canonical_type: "ServiceEndpoint", reason: "ServiceEndpoint uses the explicit `jet_services_endpoint_show` projection"},
+]
+// Rust: tests/diagnostics_coverage.rs:151
+pub fn prelude_declared_type(source: String, rust_type: String) -> Bool {
+    source.lines().any((raw) -> {
+        line := raw.trim_start() // #4303
+        ["pub struct ", "pub enum ", "pub type ", "struct ", "enum ", "type "].iter().any((prefix) -> line.strip_prefix(prefix).and_then((rest) -> rest.split((ch) -> ch.is_whitespace() || ch == '<').next()) == Some(rust_type))
+    })
+}
+// Rust: tests/diagnostics_coverage.rs:172
+pub fn prelude_declared_jet_show(source: String, rust_type: String) -> Bool {
+    source.lines().any((raw) -> {
+        line := raw.trim_start() // #4303
+        rest :: match line.strip_prefix("impl ") { Some(rest) -> rest, None -> return false }
+        (trait_name, target) :: match rest.split_once(" for ") { Some(parts) -> parts, None -> return false }
+        name :: target.split((ch) -> ch.is_whitespace() || ch == '<' || ch == '{').next().unwrap_or_default()
+        trait_name.ends_with("JetShow") && name == rust_type
+    })
+}
+// Rust: tests/diagnostics_coverage.rs:189
+pub fn prelude_file(relative: String) -> OSPath { root().join("crates/jet-codegen/src/Prelude").join(relative) }
+// Rust: tests/diagnostics_coverage.rs:193
+pub fn named_string_const(source: String, name: String) -> Set<String> {
+    marker :: "const {name}: &[&str] = &["
+    start :: source.find(&marker).unwrap_or_else(() -> panic("missing canonical printable const `{name}`"))
+    body :: source[start + marker.len()..]
+    end :: body.find("];").unwrap_or_else(() -> panic("unterminated canonical printable const `{name}`"))
+    body[..end].lines().filter_map((line) -> {
+        (_, rest) :: line.split_once('"')?
+        (value, _) :: rest.split_once('"')?
+        Some(value.to_string())
+    }).collect()
+}
+// Rust: tests/diagnostics_coverage.rs:306
+pub fn emitted_codes() -> Set<String> {
+    codes := Set<String>.new()
+    for dir in [root().join("Source"), root().join("crates")] {
+        walk_rs(&dir, (content) -> { for code in extract_quoted_codes(content) { _ :: codes.insert(code) } })
+    }
+    codes
+}
+// Rust: tests/diagnostics_coverage.rs:324
+pub fn extract_quoted_codes(text: String) -> [String] {
+    out := extract_delimited_codes(text, '"', '"')
+    out.extend(extract_delimited_codes(text, '[', ']'))
+    out
+}
+// Rust: tests/diagnostics_coverage.rs:330
+pub fn extract_delimited_codes(text: String, open: UInt8, close: UInt8) -> [String] {
+    out := [String]{}
+    bytes :: text.as_bytes()
+    i := 0
+    while i < bytes.len() {
+        if bytes[i] == open {
+            start :: i + 1
+            end := start
+            while end < bytes.len() && (bytes[end].is_ascii_uppercase() || bytes[end].is_ascii_digit() || bytes[end] == '-') { end += 1 }
+            if end > start && end < bytes.len() && bytes[end] == close {
+                code := text[start..end] // #4303
+                if Explain.is_code(code) { out.push(code.to_string()) }
+            }
+        }
+        i += 1
+    }
+    out
+}
+// Rust: tests/diagnostics_coverage.rs:357
+pub fn walk_rs(dir: &OSPath, cb: (String) -> Void) -> {
+    entries :: match fs.read_dir(dir) { Ok(entries) -> entries, Err(_) -> return }
+    for e in entries.flatten() {
+        p :: e.path()
+        if p.is_dir() { walk_rs(&p, cb) }
+        else if p.extension().and_then((x) -> x.to_str()) == Some("rs") {
+            if fs.read_to_string(&p) == { Ok(content) -> cb(content), Err(_) -> {} }
+        }
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:373
+pub fn runtime_stop_calls(source: String) -> [[String]] {
+    needle :: "set_runtime_stop("
+    calls := [[String]]{}
+    search_from := 0
+    while source[search_from..].find(needle) == Some(offset) {
+        start :: search_from + offset + needle.len()
+        bytes :: source.as_bytes()
+        args := [String]{}
+        arg_start := start
+        parens := 0
+        brackets := 0
+        braces := 0
+        string := false
+        escaped := false
+        end: Int? := None
+        for index in start..bytes.len() {
+            byte :: bytes[index]
+            if string {
+                if escaped { escaped = false }
+                else if byte == '\\' { escaped = true }
+                else if byte == '"' { string = false }
+                continue
+            }
+            match byte {
+                '"' -> string = true
+                '(' -> parens += 1
+                ')' if parens > 0 -> parens -= 1
+                ')' -> { args.push(source[arg_start..index].trim().to_string()); end = Some(index); break }
+                '[' -> brackets += 1
+                ']' -> brackets = brackets.saturating_sub(1)
+                '{' -> braces += 1
+                '}' -> braces = braces.saturating_sub(1)
+                ',' if parens == 0 && brackets == 0 && braces == 0 -> { args.push(source[arg_start..index].trim().to_string()); arg_start = index + 1 }
+                _ -> {}
+            }
+        }
+        finish :: match end { Some(value) -> value, None -> break }
+        calls.push(args)
+        search_from = finish + 1
+    }
+    calls
+}
+// Rust: tests/diagnostics_coverage.rs:452
+pub fn registered_codes() -> Set<String> { Registry.diagnostic_rows().iter().map((row) -> row.code.to_string()).collect() }
+// Rust: tests/diagnostics_coverage.rs:547
+pub fn registered_code_rows() -> [(String, Int)] { Registry.diagnostic_rows().iter().enumerate().map(((idx, row)) -> (row.code.to_string(), idx + 5)).collect() }
+// Rust: tests/diagnostics_coverage.rs:613
+pub fn is_snake_case(name: String) -> Bool {
+    if name.is_empty() { return false }
+    previous_underscore := false
+    for (index, character) in name.chars().enumerate() {
+        if character == '_' {
+            if index == 0 || previous_underscore { return false }
+            previous_underscore = true
+        } else if character.is_ascii_lowercase() || character.is_ascii_digit() { previous_underscore = false }
+        else { return false }
+    }
+    !previous_underscore
+}
+// Rust: tests/diagnostics_coverage.rs:694
+pub fn assert_ui_snapshot_matches_row(code: String, holes: &[(String, String)], fixture: String) -> {
+    row :: Registry.diagnostic(code).unwrap_or_else(() -> panic("{code} must stay registered"))
+    rendered :: row.render(holes)
+    expected :: "Error [{code}]: {rendered.what}\n Why: {rendered.why}\n Fix: {rendered.fix}\nMore: jet-lang.dev/e/{code}\n"
+    assert_eq(read(&root().join("tests/ui").join(fixture)), expected, "{fixture} must preserve {code}'s registered What/Why/Fix identity")
+}
+// Rust: tests/diagnostics_coverage.rs:749
+pub fn is_retired(code: String, _diag_md: String) -> Bool { Registry.diagnostic(code).is_some_and((row) -> row.status == Registry.DiagnosticStatus.Retired) }
+// Rust: tests/diagnostics_coverage.rs:754
+pub fn staged_card_number(reason: String) -> UInt32? {
+    card :: reason.strip_prefix("staged #")?
+    if card.is_empty() || !card.bytes().all((byte) -> byte.is_ascii_digit()) { return None }
+    card.parse::<UInt32>().ok().filter((card) -> card > 0)
+}
+// Rust: tests/diagnostics_coverage.rs:762
+pub fn allowlist_reason_errors(entries: &[(String, String)]) -> [String] {
+    entries.iter().filter_map(((code, reason)) -> {
+        if reason == "retired" && is_retired(code, "") { None }
+        else if staged_card_number(reason).is_some() { None }
+        else { Some("{code}: reason must be `retired` or `staged #<card>`") }
+    }).collect()
+}
+// Rust: tests/diagnostics_coverage.rs:782
+pub fn coverage_baseline_failure(entries: [String], unimplemented: &Set<String>, emitted: &Set<String>) -> String? {
+    expected :: entries.iter().cloned().collect::<Set<String>>()
+    now_emitted := expected.intersection(emitted).cloned().collect::<[String]>()
+    now_emitted.sort()
+    missing := expected.difference(unimplemented).filter((code) -> !emitted.contains(code)).cloned().collect::<[String]>()
+    missing.sort()
+    unexpected := unimplemented.difference(&expected).cloned().collect::<[String]>()
+    unexpected.sort()
+    failures := [String]{}
+    if !now_emitted.is_empty() { failures.push("EXPECTED_SPEC_AHEAD_OF_IMPL contains now-emitted codes; remove the line for each:\n  {now_emitted.join("\n  ")}") }
+    if !missing.is_empty() { failures.push("EXPECTED_SPEC_AHEAD_OF_IMPL is missing baseline entries; restore the line for each:\n  {missing.join("\n  ")}") }
+    if !unexpected.is_empty() { failures.push("Unexpected codes registered in typed rows but not emitted in Source/.\nIf this is intentional (staged feature), add the code to EXPECTED_SPEC_AHEAD_OF_IMPL in tests/diagnostics_coverage.rs.\nUnexpected:\n  {unexpected.join("\n  ")}") }
+    if failures.is_empty() { None } else { Some(failures.join("\n")) }
+}
+// Rust: tests/diagnostics_coverage.rs:828
+pub fn code_set(codes: &[String]) -> Set<String> { codes.iter().cloned().collect() }
+// Rust: tests/diagnostics_coverage.rs:885
+pub const REPORT_FIXTURE_DIRS: [(String, String)] = [("tests/cli", "txt"), ("tests/release", "txt"), ("tests/fixtures/cli-diagnostics", "stderr"), ("tests/fixtures/jetpack-diagnostics", "stderr"), ("tests/fixtures/module-eval-diagnostics", "stderr")]
+// Rust: tests/diagnostics_coverage.rs:897
+pub fn report_snapshot_paths() -> [OSPath] { report_fixture_snapshot_paths().into_iter().filter((path) -> path.is_file()).collect() }
+// Rust: tests/diagnostics_coverage.rs:908
+pub fn report_fixture_snapshot_paths() -> [OSPath] {
+    base :: root()
+    out := [OSPath]{}
+    if fs.read_dir(&base.join("tests/ui")) == Ok(entries) {
+        for entry in entries.flatten() {
+            path :: entry.path()
+            if path.is_file() && path.extension().and_then((ext) -> ext.to_str()) == Some(jet.Syntax.FILE_EXT) && !path.file_name().and_then((name) -> name.to_str()).is_some_and((name) -> name.contains(".fixed.")) {
+                out.push(path.with_extension("stderr"))
+                continue
+            }
+            if !path.is_dir() { continue }
+            entry :: ["run", "main"].into_iter().map((name) -> path.join("{name}.{jet.Syntax.FILE_EXT}")).find((candidate) -> candidate.is_file())
+            if entry.is_some() { out.push(path.join("stderr")) }
+            else if path.join(jet.Syntax.WORKSPACE_FILE).is_file() {
+                name :: path.file_name().expect("workspace fixture directory name").to_string_lossy()
+                out.push(path.parent().expect("workspace fixture parent").join("{name}.stderr"))
+            }
+        }
+    }
+    if fs.read_dir(&base.join("tests/ui_lint")) == Ok(entries) {
+        for entry in entries.flatten() {
+            path :: entry.path()
+            if path.is_file() && path.extension().and_then((ext) -> ext.to_str()) == Some(jet.Syntax.FILE_EXT) { out.push(path.with_extension("warn")) }
+        }
+    }
+    for (dir, extension) in REPORT_FIXTURE_DIRS {
+        if fs.read_dir(base.join(dir)) == Ok(entries) {
+            for entry in entries.flatten() {
+                path :: entry.path()
+                if path.is_file() && path.extension().and_then((ext) -> ext.to_str()) == Some(extension) { out.push(path) }
+            }
+        }
+    }
+    out.sort()
+    out.dedup()
+    out
+}
+// Rust: tests/diagnostics_coverage.rs:986
+pub fn is_report_code(code: String) -> Bool {
+    bytes := code.bytes()
+    bytes.next().is_some_and((byte) -> byte.is_ascii_uppercase()) && bytes.all((byte) -> byte.is_ascii_uppercase() || byte.is_ascii_digit() || byte == '-')
+}
+// Column zero only: prose, quoted assertions, and indented backend text are not reports.
+// Rust: tests/diagnostics_coverage.rs:995
+pub fn extract_report_opening_codes(text: String) -> [String] {
+    text.lines().filter_map((line) -> {
+        rest :: ["Error [", "Warning [", "Stop [", "Lint ["].into_iter().find_map((prefix) -> line.strip_prefix(prefix))?
+        end :: rest.find(']')?
+        code := rest[..end] // #4303
+        if is_report_code(code) { Some(code.to_string()) } else { None }
+    }).collect()
+}
+// Rust: tests/diagnostics_coverage.rs:1125
+pub fn rendered_report_codes() -> Set<String> { report_snapshot_paths().into_iter().flat_map((path) -> extract_report_opening_codes(read(&path))).collect() }
+// Rust: tests/diagnostics_coverage.rs:1170
+pub fn rendered_snapshot_texts() -> [(OSPath, String)] {
+    out := [(OSPath, String)]{}
+    for dir in [root().join("tests/ui"), root().join("tests/ui_lint"), root().join("tests/fixtures/jetpack-diagnostics"), root().join("tests/fixtures/module-eval-diagnostics")] {
+        entries :: match fs.read_dir(&dir) { Ok(entries) -> entries, Err(_) -> continue }
+        for e in entries.flatten() {
+            p :: e.path()
+            if p.is_dir() {
+                sub :: p.join("stderr")
+                if sub.is_file() { out.push((sub.clone(), read(&sub))) }
+            } else if p.extension().and_then((x) -> x.to_str()).is_some_and((ext) -> ext == "stderr" || ext == "warn") { out.push((p.clone(), read(&p))) }
+        }
+    }
+    for name in ["bind_missing_e3208.txt", "bind_data_invalid_e3208.txt", "doctor_l2101.txt", "fetch_no_git_e1203.txt", "repl_e1801.txt", "unknown_target_e3302.txt"] {
+        path :: root().join("tests/cli").join(name)
+        if path.is_file() { out.push((path.clone(), read(&path))) }
+    }
+    out
+}
+// E0308 is independently Jet's null-typing diagnostic, so it is not excluded.
+// Rust: tests/diagnostics_coverage.rs:1272
+pub const RUSTC_CODES_IN_SOURCE: [String] = ["E0061", "E0277", "E0425"]
+// Rust: tests/diagnostics_coverage.rs:1279
+pub const INTERNAL_PLACEHOLDER: [String] = ["E0000"]
+// Rust: tests/diagnostics_coverage.rs:1285
+pub const RETIRED_WITH_LEGACY_EMISSION: [String] = ["E0019"]
+// D-UNINIT1 parser gate: read-before-write, annotation, initializer, plain data, core.mem.
+// Rust: tests/diagnostics_coverage.rs:1292
+pub const STAGED_BEHIND_GATE: [String] = ["E0420", "E0421", "E0422", "E0423", "E0424"]
+// Parser stack overflows before its generic-depth guard; covered by Generics unit tests.
+// Rust: tests/diagnostics_coverage.rs:1310
+pub const UNTESTABLE_VIA_SNAPSHOT: [String] = ["E0909"]
+// Each independently derived mismatch has an owner; the list is shrink-only.
+// Rust: tests/diagnostics_coverage.rs:1319
+pub const DIAGNOSTIC_COVERAGE_ALLOWLIST: [(String, String, String)] = [
+    ("E0037", "left-only", "Tower #2093"), ("E0153", "left-only", "Tower #2093"), ("E0343", "left-only", "Tower #2093"), ("E0345", "left-only", "Tower #2093"),
+    ("E0347", "left-only", "Tower #2093"), ("E0349", "left-only", "Tower #2093"), ("E0403", "left-only", "Tower #2093"), ("E0502", "left-only", "Tower #2093"),
+    ("E0601", "left-only", "Tower #2093"), ("E0613", "left-only", "Tower #2093"), ("E0916", "left-only", "Tower #2093"), ("E0953", "left-only", "Tower #2093"),
+    ("E0959", "left-only", "Tower #2093"), ("E0979", "left-only", "Tower #2093"), ("E0980", "left-only", "Tower #2093"), ("E0981", "left-only", "Tower #2093"),
+    ("E0982", "left-only", "Tower #2093"), ("E1204", "left-only", "Tower #2093"), ("E1217", "left-only", "Tower #2093"), ("E1218", "left-only", "Tower #2093"),
+    ("E1221", "left-only", "Tower #2093"), ("E1227", "left-only", "Tower #2093"), ("E1228", "left-only", "Tower #2093"), ("E1230", "left-only", "Tower #2093"),
+    ("E1232", "left-only", "Tower #2093"), ("E1233", "left-only", "Tower #2093"), ("E1234", "left-only", "Tower #2093"), ("E1235", "left-only", "Tower #2093"),
+    ("E1236", "left-only", "Tower #2093"), ("E1237", "left-only", "Tower #2093"), ("E1238", "left-only", "Tower #2093"), ("E1240", "left-only", "Tower #2093"),
+    ("E1241", "left-only", "Tower #2093"), ("E1242", "left-only", "Tower #2093"), ("E1243", "left-only", "Tower #2093"), ("E1244", "left-only", "Tower #2093"),
+    ("E1245", "left-only", "Tower #2093"), ("E1246", "left-only", "Tower #2093"), ("E1247", "left-only", "Tower #2093"), ("E1248", "left-only", "Tower #2093"),
+    ("E1249", "left-only", "Tower #2093"), ("E1250", "left-only", "Tower #2093"), ("E1251", "left-only", "Tower #2093"), ("E1252", "left-only", "Tower #2093"),
+    ("E1254", "left-only", "Tower #2093"), ("E1255", "left-only", "Tower #2093"), ("E1256", "left-only", "Tower #2093"), ("E1261", "left-only", "Tower #2093"),
+    ("E1262", "left-only", "Tower #2093"), ("E1263", "left-only", "Tower #2093"), ("E1266", "left-only", "Tower #2093"), ("E1267", "left-only", "Tower #2093"),
+    ("E1268", "left-only", "Tower #2093"), ("E1269", "left-only", "Tower #2093"), ("E1271", "left-only", "Tower #2093"), ("E1275", "left-only", "Tower #2093"),
+    ("E1276", "left-only", "Tower #2093"), ("E1278", "left-only", "Tower #2093"), ("E1279", "left-only", "Tower #2093"), ("E1280", "left-only", "Tower #2093"),
+    ("E1281", "left-only", "Tower #2093"), ("E1282", "left-only", "Tower #2093"), ("E1283", "left-only", "Tower #2093"), ("E1284", "left-only", "Tower #2093"),
+    ("E1285", "left-only", "Tower #2093"), ("E1286", "left-only", "Tower #2093"), ("E1287", "left-only", "Tower #2093"), ("E1288", "left-only", "Tower #2093"),
+    ("E1289", "left-only", "Tower #2093"), ("E1290", "left-only", "Tower #2093"), ("E1291", "left-only", "Tower #2093"), ("E1294", "left-only", "Tower #2093"),
+    ("E1316", "left-only", "Tower #2093"), ("E1320", "left-only", "Tower #2093"), ("E1329", "left-only", "Tower #2093"), ("E1330", "left-only", "Tower #2093"),
+    ("E1332", "left-only", "Tower #2093"), ("E1336", "left-only", "Tower #2093"), ("E1802", "left-only", "Tower #2093"), ("E1803", "left-only", "Tower #2093"),
+    ("E2106", "left-only", "Tower #2093"), ("E2202", "left-only", "Tower #2093"), ("E2203", "left-only", "Tower #2093"), ("E2204", "left-only", "Tower #2093"),
+    ("E2210", "left-only", "Tower #2093"), ("E2601", "left-only", "Tower #2093"), ("E2602", "left-only", "Tower #2093"), ("E2603", "left-only", "Tower #2093"),
+    ("E2604", "left-only", "Tower #2093"), ("E2605", "left-only", "Tower #2093"), ("E2606", "left-only", "Tower #2093"), ("E2712", "left-only", "Tower #2093"),
+    ("E2901", "left-only", "Tower #2093"), ("E2906", "left-only", "Tower #2093"), ("E2907", "left-only", "Tower #2093"), ("E2908", "left-only", "Tower #2093"),
+    ("E3002", "left-only", "Tower #2093"), ("E3201", "left-only", "Tower #2093"), ("E3209", "left-only", "Tower #2093"), ("E3210", "left-only", "Tower #2093"),
+    ("E3504", "left-only", "Tower #2093"), ("L0204", "left-only", "Tower #2093"), ("L0205", "left-only", "Tower #2093"), ("L3102", "left-only", "Tower #2093"),
+    ("E0060", "right-only", "Tower #2093"), ("E0065", "right-only", "Tower #2093"), ("E0066", "right-only", "Tower #2093"), ("E0067", "right-only", "Tower #2093"),
+    ("E0146", "right-only", "Tower #2093"), ("E0214", "right-only", "Tower #2093"), ("E0341", "right-only", "Tower #2093"), ("E0351", "right-only", "Tower #2093"),
+    ("E0358", "right-only", "Tower #2093"), ("E0374", "right-only", "Tower #2093"), ("E0375", "right-only", "Tower #2093"), ("E0376", "right-only", "Tower #2093"),
+    ("E0377", "right-only", "Tower #2093"), ("E0426", "right-only", "Tower #2093"), ("E0431", "right-only", "Tower #2093"), ("E0432", "right-only", "Tower #2093"),
+    ("E0922", "right-only", "Tower #2093"), ("E0929", "right-only", "Tower #2093"), ("E0960", "right-only", "Tower #2093"), ("E0988", "right-only", "Tower #2093"),
+    ("E1002", "right-only", "Tower #2093"), ("E1105", "right-only", "Tower #2093"), ("E1107", "right-only", "Tower #2093"), ("E1115", "right-only", "Tower #2093"),
+    ("E1209", "right-only", "Tower #2093"), ("E1210", "right-only", "Tower #2093"), ("E1306", "right-only", "Tower #2093"), ("E1342", "right-only", "Tower #2093"),
+    ("E1343", "right-only", "Tower #2093"), ("E2101", "right-only", "Tower #2093"), ("E2510", "right-only", "Tower #2093"), ("E2714", "right-only", "Tower #2093"),
+    ("E2805", "right-only", "Tower #2093"), ("E2935", "right-only", "Tower #2093"), ("E2936", "right-only", "Tower #2093"), ("E3206", "right-only", "Tower #2093"), ("E3530", "right-only", "Tower #2093"),
+]
+// Rust: tests/diagnostics_coverage.rs:1466
+pub const DIAGNOSTIC_COVERAGE_ALLOWLIST_CEILING: Int = 152
+// Rust: tests/diagnostics_coverage.rs:1469
+pub fn all_exclusions() -> Set<String> {
+    RUSTC_CODES_IN_SOURCE.iter().chain(INTERNAL_PLACEHOLDER.iter()).chain(RETIRED_WITH_LEGACY_EMISSION.iter()).chain(STAGED_BEHIND_GATE.iter()).chain(UNTESTABLE_VIA_SNAPSHOT.iter()).cloned().collect()
+}
+// Rust: tests/diagnostics_coverage.rs:1483
+pub fn coverage_allowlist_codes(side: String) -> Set<String> { DIAGNOSTIC_COVERAGE_ALLOWLIST.iter().filter((row) -> row.1 == side).map((row) -> row.0.to_string()).collect() }
+// Rust: tests/diagnostics_coverage.rs:1491
+pub fn coverage_allowlist_errors() -> [String] {
+    registered :: registered_codes()
+    seen := Set<String>.new()
+    errors := [String]{}
+    for (code, side, owner) in DIAGNOSTIC_COVERAGE_ALLOWLIST {
+        if !is_report_code(code) { errors.push("{code}: invalid diagnostic code") }
+        if side != "left-only" && side != "right-only" { errors.push("{code}: side must be `left-only` or `right-only`") }
+        if owner.trim().is_empty() { errors.push("{code}: coverage owner is empty") }
+        if !registered.contains(code) { errors.push("{code}: coverage allowlist row is not registered") }
+        if !seen.insert(code) { errors.push("{code}: duplicate coverage allowlist row") }
+    }
+    errors
+}
+// Rust: tests/diagnostics_coverage.rs:1520
+pub fn coverage_left() -> Set<String> {
+    emitted :: emitted_codes()
+    exclusions :: all_exclusions()
+    registered_codes().into_iter().filter((code) -> emitted.contains(code)).filter((code) -> Registry.diagnostic(code).is_some_and((row) -> row.status == Registry.DiagnosticStatus.Active)).filter((code) -> !exclusions.contains(code)).collect()
+}
+// Rust: tests/diagnostics_coverage.rs:1534
+pub fn coverage_right() -> Set<String> {
+    exclusions :: all_exclusions()
+    rendered_report_codes().into_iter().filter((code) -> !exclusions.contains(code)).collect()
+}
+// Rust: tests/diagnostics_coverage.rs:1542
+pub fn coverage_set_diff(left: &Set<String>, right: &Set<String>) -> (Set<String>, Set<String>) { (left.difference(right).cloned().collect(), right.difference(left).cloned().collect()) }
+// Rust: tests/diagnostics_coverage.rs:1552
+pub fn format_code_set(codes: &Set<String>) -> String {
+    if codes.is_empty() { "(none)" }
+    else { ordered := codes.iter().cloned().collect::<[String]>(); ordered.sort(); ordered.join("\n  ") }
+}
+// Rust: tests/diagnostics_coverage.rs:1713
+pub fn collect_rs_paths(dir: &OSPath, out: &[OSPath]) -> {
+    entries :: match fs.read_dir(dir) { Ok(entries) -> entries, Err(_) -> return }
+    for entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() { collect_rs_paths(&path, out) }
+        else if path.extension().and_then((ext) -> ext.to_str()) == Some("rs") { out.push(path) }
+    }
+    out.sort()
+}
+// Rust: tests/diagnostics_coverage.rs:1728
+pub fn allowed_backend_voice_snapshot(path: &OSPath, text: String, needle: String) -> Bool {
+    p :: path.to_string_lossy()
+    if p.ends_with("ffi_bad_path.stderr") { return needle == ".rs:" || needle == "rustc rejected generated code" }
+    if p.ends_with("os_target_unmatched_call.stderr") && text.contains("raw rustc") { return true }
+    false
+}
+// Rust: tests/diagnostics_coverage.rs:1826
+pub fn check_json_snapshots_for_edits(path: &OSPath, failures: &[String]) -> {
+    entries :: match fs.read_dir(path) { Ok(entries) -> entries, Err(_) -> return }
+    for entry in entries.flatten() {
+        child :: entry.path()
+        if child.is_dir() { check_json_snapshots_for_edits(&child, failures); continue }
+        if child.extension().and_then((ext) -> ext.to_str()) != Some("txt") { continue }
+        text :: match fs.read_to_string(&child) { Ok(text) -> text, Err(_) -> continue }
+        for (line, raw) in text.lines().enumerate() {
+            report :: match JSON.parse_json(raw) { Ok(report) -> report, Err(_) -> continue }
+            schema :: match JSON.json_get(&report, "schema").and_then(JSON.json_str) { Some(schema) -> schema, None -> continue }
+            if schema != "jet.report/v1" { continue }
+            fix :: match JSON.json_get(&report, "fix").and_then(JSON.json_str) { Some(fix) -> fix, None -> continue }
+            if !names_one_exact_replacement(fix) { continue }
+            edits :: JSON.json_get(&report, "fix_edits")
+            has_edit :: match edits { Some(DataTree.Array(items)) -> !items.is_empty(), _ -> false }
+            if !has_edit { failures.push("{child.display()}:{line + 1} — {fix}"); continue }
+            has_applicability :: match JSON.json_get(&report, "applicability") { Some(DataTree.Text(value)) | Some(DataTree.TypedText(value)) -> value == "safe" || value == "suggested", _ -> false }
+            if !has_applicability { failures.push("{child.display()}:{line + 1} — machine edit has no closed applicability grade") }
+            has_safety :: match edits {
+                Some(DataTree.Array(items)) -> items.iter().all((edit) -> match JSON.json_get(edit, "safety") {
+                    Some(DataTree.Text(value)) | Some(DataTree.TypedText(value)) -> [Report.FixSafety.Formatting, Report.FixSafety.BehaviorPreserving, Report.FixSafety.ApiChanging, Report.FixSafety.TargetChanging, Report.FixSafety.NeedsReview].iter().any((grade) -> grade.as_str() == value.as_str())
+                    _ -> false
+                })
+                _ -> false
+            }
+            if !has_safety { failures.push("{child.display()}:{line + 1} — machine edit has no closed safety grade") }
+        }
+    }
+}
+// Rust: tests/diagnostics_coverage.rs:1910
+pub fn names_one_exact_replacement(fix: String) -> Bool { (fix.starts_with("did you mean `") && fix.ends_with("`?")) || (fix.starts_with("replace `") && fix.contains("` with `")) || (fix.starts_with("declare it with `") && fix.contains(" := ")) }

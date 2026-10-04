@@ -1,753 +1,408 @@
-// PORT-PENDING 2079 compiler-bootstrap-host-runtimemircodec-slice-1801: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1801-2549
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         | ("MIRConstantDef", "module") => "module_id".to_string(),
-//RS         ("MIRNameDeclaration", "module") | ("MIRNameAlias", "module") => {
-//RS             "module_index".to_string()
-//RS         }
-//RS         // `comptime` is a Jet keyword, so the Source field carries the prefix.
-//RS         ("MIRLocal", "comptime") => "is_comptime".to_string(),
-//RS         _ => host_field.to_string(),
-//RS     }
-//RS }
-//RS 
-//RS /// A Source field whose native value another field's conversion carries.
-//RS fn source_field_is_host_derived(owner: &str, field: &str) -> bool {
-//RS     matches!((owner, field), ("MIRFunction", "memo_unbounded"))
-//RS }
-//RS 
-//RS /// Native fields that no single Source field maps onto: a fact the native
-//RS /// compiler derives itself (absent in Source MIR), the one-variant kernel
-//RS /// mode, and the memo bound Source MIR splits into bound + unbounded.
-//RS fn custom_struct_field_to_host(
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     owner: &str,
-//RS     host_field: &str,
-//RS ) -> Result<Option<String>, BootstrapHostCodecError> {
-//RS     Ok(match (owner, host_field) {
-//RS         ("MIRCaptureFacts", "frame_schedule" | "frame_schedule_derivation") => {
-//RS             Some("None".to_string())
-//RS         }
-//RS         ("MIRKernelFacts", "mode") => Some("::jet_foundation::MIR::MirKernelMode::Parallel".to_string()),
-//RS         ("MIRFunction", "memo_bound") => {
-//RS             let bound = symbols.field_symbol(owner, "memo_bound")?;
-//RS             let unbounded = symbols.field_symbol(owner, "memo_unbounded")?;
-//RS             Some(format!(
-//RS                 "if value.{unbounded} {{ Some(None) }} else {{ value.{bound}.as_ref().ok().map(|__bound| -> Result<_, String> {{ Ok(Some(__bound.to_string_rep().parse::<usize>().map_err(|_| \"MIR memo bound is outside native range\".to_string())?)) }}).transpose()? }}"
-//RS             ))
-//RS         }
-//RS         _ => None,
-//RS     })
-//RS }
-//RS 
-//RS /// The Source side of [`custom_struct_field_to_host`]'s memo split and of
-//RS /// [`HOST_PRIVATE_FIELDS`]' crate-private native fields.
-//RS fn custom_struct_field_from_host(owner: &str, source_field: &str) -> Option<String> {
-//RS     if let Some((_, _, getter, _)) = host_private_row(owner, source_field) {
-//RS         return Some(format!(
-//RS             "value.{getter}().ok_or(jet_foundation::Outcome::JetAbsent)"
-//RS         ));
-//RS     }
-//RS     match (owner, source_field) {
-//RS         ("MIRFunction", "memo_bound") => Some(
-//RS             "match &value.memo_bound { Some(Some(__bound)) => Ok(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&__bound.to_string())?)), _ => Err(jet_foundation::Outcome::JetAbsent) }".to_string(),
-//RS         ),
-//RS         ("MIRFunction", "memo_unbounded") => Some("matches!(value.memo_bound, Some(None))".to_string()),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Crate-private native fields glue outside `jet_foundation` can neither read
-//RS /// nor write directly, each crossing through a public accessor pair:
-//RS /// `(owner, field, getter -> Option<String>, setter(Option<&str>) -> Result)`.
-//RS /// The native image codec persists these fields, so a restored compiler image
-//RS /// only survives the Source MIR round trip when they cross both ways.
-//RS /// `MirOptimizationFacts.derived_from_digest` is the optimizer pipeline seal;
-//RS /// Source MIR carries it as the lowercase hex `mir_program_digest` spells.
-//RS /// Carrying it (rather than re-digesting the program) keeps image restore
-//RS /// linear in the program and free of whole-program digests.
-//RS const HOST_PRIVATE_FIELDS: &[(&str, &str, &str, &str)] = &[(
-//RS     "MIROptimizationFacts",
-//RS     "derived_from_digest",
-//RS     "pipeline_seal_hex",
-//RS     "set_pipeline_seal_hex",
-//RS )];
-//RS 
-//RS fn host_private_row(owner: &str, host_field: &str) -> Option<&'static (&'static str, &'static str, &'static str, &'static str)> {
-//RS     HOST_PRIVATE_FIELDS
-//RS         .iter()
-//RS         .find(|(row_owner, row_field, _, _)| *row_owner == owner && *row_field == host_field)
-//RS }
-//RS 
-//RS fn host_private_field(owner: &str, host_field: &str) -> bool {
-//RS     host_private_row(owner, host_field).is_some()
-//RS }
-//RS 
-//RS /// For each native payload field of a variant, the Source payload field it
-//RS /// converts from. Same-arity variants pair by position; otherwise both sides
-//RS /// pair by field name and every unpaired field must be a known one-sided field.
-//RS fn align_variant_fields(
-//RS     owner: &str,
-//RS     source: &Variant,
-//RS     host: &Variant,
-//RS ) -> Result<Vec<Option<usize>>, BootstrapHostCodecError> {
-//RS     if source.fields.len() == host.fields.len() {
-//RS         return Ok((0..host.fields.len()).map(Some).collect());
-//RS     }
-//RS     let arity = || {
-//RS         BootstrapHostCodecError::InvalidMetadata(format!(
-//RS             "MIR enum variant `{owner}::{}` changes payload arity",
-//RS             source.name
-//RS         ))
-//RS     };
-//RS     let mut aligned = Vec::with_capacity(host.fields.len());
-//RS     for host_field in &host.fields {
-//RS         let name = host_field.name.as_deref().ok_or_else(arity)?;
-//RS         let index = source.fields.iter().position(|field| field.name.as_deref() == Some(name));
-//RS         if index.is_none() && host_only_variant_field(owner, &source.name, name).is_none() {
-//RS             return Err(arity());
-//RS         }
-//RS         aligned.push(index);
-//RS     }
-//RS     for (index, field) in source.fields.iter().enumerate() {
-//RS         let derived = field
-//RS             .name
-//RS             .as_deref()
-//RS             .is_some_and(|name| derived_source_variant_field(owner, &source.name, name));
-//RS         if !aligned.contains(&Some(index)) && !derived {
-//RS             return Err(arity());
-//RS         }
-//RS     }
-//RS     Ok(aligned)
-//RS }
-//RS 
-//RS /// Why a variant cannot cross the boundary, when a native-only payload field
-//RS /// has no Source counterpart.
-//RS fn unrepresentable_host_field(
-//RS     owner: &str,
-//RS     source: &Variant,
-//RS     host: &Variant,
-//RS     aligned: &[Option<usize>],
-//RS ) -> Option<&'static str> {
-//RS     host.fields
-//RS         .iter()
-//RS         .zip(aligned)
-//RS         .find_map(|(field, source_index)| match source_index {
-//RS             Some(_) => None,
-//RS             None => host_only_variant_field(owner, &source.name, field.name.as_deref()?),
-//RS         })
-//RS }
-//RS 
-//RS /// Native-only payload fields Source MIR does not carry, with the reason the
-//RS /// variant is refused in both directions.
-//RS fn host_only_variant_field(owner: &str, variant: &str, field: &str) -> Option<&'static str> {
-//RS     match (owner, variant, field) {
-//RS         ("MIRTerminator", "Yield", "cancel") => Some(
-//RS             "Source MIR generator yield has no cancel target; generator cancellation (D-CANCELMODEL1) is not in Source MIR",
-//RS         ),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Source-only payload fields native MIR derives from the variant's other
-//RS /// fields. `Binary.overflow` is `Trap` exactly when the dispatch is a
-//RS /// fixed-width trap route (`{width}.trap.{op}`) for an overflowing operator,
-//RS /// the route `jet_codegen_binary_dispatch` picks for the same condition; native
-//RS /// MIR carries the trap in that route. Going to native MIR the field must equal
-//RS /// that derivation (else the conversion fails); coming back it is re-derived.
-//RS fn derived_source_variant_field(owner: &str, variant: &str, field: &str) -> bool {
-//RS     matches!((owner, variant, field), ("MIROperation", "Binary", "overflow"))
-//RS }
-//RS 
-//RS /// The variant field a derived Source field is derived from.
-//RS fn derived_field_basis(owner: &str, variant: &str) -> Result<&'static str, BootstrapHostCodecError> {
-//RS     match (owner, variant) {
-//RS         ("MIROperation", "Binary") => Ok("dispatch"),
-//RS         _ => Err(BootstrapHostCodecError::InvalidMetadata(format!(
-//RS             "MIR enum variant `{owner}::{variant}` has no derivation for its Source-only field"
-//RS         ))),
-//RS     }
-//RS }
-//RS 
-//RS fn variant_field_index(fields: &[VariantField], name: &str, owner: &str, variant: &str) -> Result<usize, BootstrapHostCodecError> {
-//RS     fields.iter().position(|field| field.name.as_deref() == Some(name)).ok_or_else(|| {
-//RS         BootstrapHostCodecError::InvalidMetadata(format!(
-//RS             "MIR enum variant `{owner}::{variant}` has no `{name}` field"
-//RS         ))
-//RS     })
-//RS }
-//RS 
-//RS /// The `to_host` statement that refuses a derived Source field whose value
-//RS /// disagrees with its derivation from the converted native fields
-//RS /// (`__host_{index}`, bound in native field order).
-//RS fn derived_field_to_host_check(
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     owner: &str,
-//RS     source: &Variant,
-//RS     host: &Variant,
-//RS     field_index: usize,
-//RS     bindings: &[String],
-//RS ) -> Result<String, BootstrapHostCodecError> {
-//RS     let basis = derived_field_basis(owner, &source.name)?;
-//RS     let host_basis = variant_field_index(&host.fields, basis, owner, &source.name)?;
-//RS     let trap = symbols.variant_path("MIRBinaryOverflow", "Trap")?;
-//RS     Ok(format!(
-//RS         "if __jet_bootstrap_binary_traps(&__host_{host_basis})? != matches!({}, {trap}) {{ return Err(\"Source MIR Binary overflow disagrees with its dispatch: Trap is exactly a fixed-width trap route for an overflowing operator\".to_string()); }}",
-//RS         bindings[field_index]
-//RS     ))
-//RS }
-//RS 
-//RS /// The `from_host` expression that re-derives a derived Source field.
-//RS fn derived_field_from_host(
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS     owner: &str,
-//RS     source: &Variant,
-//RS     host: &Variant,
-//RS     bindings: &[String],
-//RS ) -> Result<String, BootstrapHostCodecError> {
-//RS     let basis = derived_field_basis(owner, &source.name)?;
-//RS     let host_basis = variant_field_index(&host.fields, basis, owner, &source.name)?;
-//RS     let trap = symbols.variant_path("MIRBinaryOverflow", "Trap")?;
-//RS     let unchecked = symbols.variant_path("MIRBinaryOverflow", "Unchecked")?;
-//RS     Ok(format!(
-//RS         "if __jet_bootstrap_binary_traps({})? {{ {trap} }} else {{ {unchecked} }}",
-//RS         bindings[host_basis]
-//RS     ))
-//RS }
-//RS 
-//RS /// The program-level context `Binary.overflow` derives from: the ids of the
-//RS /// fixed-width trap routes, collected from the program being converted and in
-//RS /// scope only while that one program converts.
-//RS fn emit_binary_overflow_derivation(
-//RS     out: &mut String,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let program = symbols.type_symbol("MIRProgram")?;
-//RS     let prelude_calls = symbols.field_symbol("MIRProgram", "prelude_calls")?;
-//RS     let family = symbols.field_symbol("MIRPreludeCall", "family")?;
-//RS     let member = symbols.field_symbol("MIRPreludeCall", "member")?;
-//RS     let id = symbols.field_symbol("MIRPreludeCall", "id")?;
-//RS     let id_value = symbols.field_symbol("MIRPreludeCallID", "value")?;
-//RS     let overflow = symbols.variant_path("MIRPreludeFamily", "Overflow")?;
-//RS     writeln!(
-//RS         out,
-//RS         "thread_local! {{\n    static __JET_BOOTSTRAP_TRAP_ROUTES: ::std::cell::RefCell<Option<::std::collections::BTreeSet<u64>>> = ::std::cell::RefCell::new(None);\n}}\n\
-//RS          fn __jet_bootstrap_fixed_trap_member(member: &str) -> bool {{\n    member.split_once(\".trap.\").is_some_and(|(width, op)| matches!(width, \"i8\" | \"i16\" | \"i32\" | \"i64\" | \"u8\" | \"u16\" | \"u32\" | \"u64\") && matches!(op, \"add\" | \"sub\" | \"mul\" | \"div\" | \"pow\" | \"shl\" | \"shr\"))\n}}\n\
-//RS          fn __jet_bootstrap_with_trap_routes<T>(routes: ::std::collections::BTreeSet<u64>, convert: impl FnOnce() -> Result<T, String>) -> Result<T, String> {{\n    let previous = __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.replace(Some(routes)));\n    let result = convert();\n    __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| *cell.borrow_mut() = previous);\n    result\n}}\n\
-//RS          fn __jet_bootstrap_binary_traps(dispatch: &::jet_foundation::MIR::MirBinaryDispatch) -> Result<bool, String> {{\n    match dispatch {{\n        ::jet_foundation::MIR::MirBinaryDispatch::Primitive => Ok(false),\n        ::jet_foundation::MIR::MirBinaryDispatch::Prelude {{ call, .. }} => __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.borrow().as_ref().map(|routes| routes.contains(&call.0))).ok_or_else(|| \"MIR Binary overflow derives from the program's Prelude routes; convert the whole program\".to_string()),\n    }}\n}}\n\
-//RS          fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{\n    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()\n}}\n\
-//RS          fn __jet_bootstrap_host_trap_routes(value: &::jet_foundation::MIR::MirProgram) -> ::std::collections::BTreeSet<u64> {{\n    value.prelude_calls.iter().filter(|row| matches!(row.family, ::jet_foundation::MIR::MirPreludeFamily::Overflow) && __jet_bootstrap_fixed_trap_member(&row.member)).map(|row| row.id.0).collect()\n}}\n"
-//RS     )
-//RS     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))
-//RS }
-//RS 
-//RS /// Jet cannot spell a variant `None` (it is the absent-value keyword), so the
-//RS /// Source enums name the empty case after their subject.
-//RS fn host_variant_name(owner: &str, variant: &str) -> String {
-//RS     match (owner, variant) {
-//RS         ("MIRDropKind", "NoDrop")
-//RS         | ("MIRCopyCost", "NoCopy")
-//RS         | ("MIREntryOutput", "NoOutput")
-//RS         | ("MIRAllocatorPolicy", "NoAllocator")
-//RS         | ("MIRClockPolicy", "NoClock")
-//RS         | ("MIREntropyPolicy", "NoEntropy")
-//RS         | ("MIRSchedulerPolicy", "NoScheduler")
-//RS         | ("MIRByteSinkPolicy", "NoByteSink")
-//RS         | ("MIRMMIOPolicy", "NoMMIO")
-//RS         | ("CoreCallPureRoute", "NoPureRoute")
-//RS         | ("CoreCallInterpreterRoute", "NoRoute") => {
-//RS             "None".to_string()
-//RS         }
-//RS         _ => variant.to_string(),
-//RS     }
-//RS }
-//RS fn validate_unique_definitions(definitions: &[Definition]) -> Result<(), String> {
-//RS     let mut names = BTreeMap::new();
-//RS     for definition in definitions {
-//RS         if names.insert(definition.name.as_str(), ()).is_some() {
-//RS             return Err(format!("duplicate MIR schema type `{}`", definition.name));
-//RS         }
-//RS         match &definition.body {
-//RS             Body::Struct(fields) => {
-//RS                 let mut field_names = BTreeMap::new();
-//RS                 for field in fields {
-//RS                     if field_names.insert(field.name.as_str(), ()).is_some() {
-//RS                         return Err(format!(
-//RS                             "duplicate MIR schema field `{}.{}`",
-//RS                             definition.name, field.name
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Body::Enum(variants) => {
-//RS                 let mut variant_names = BTreeMap::new();
-//RS                 for variant in variants {
-//RS                     if variant_names.insert(variant.name.as_str(), ()).is_some() {
-//RS                         return Err(format!(
-//RS                             "duplicate MIR schema variant `{}::{}`",
-//RS                             definition.name, variant.name
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS             Body::Tuple => {}
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS 
-//RS 
-//RS 
-//RS 
-//RS 
-//RS 
-//RS 
-//RS fn parse_type(input: &str) -> Result<TypeExpr, String> {
-//RS     let input = input.trim().trim_end_matches(',').trim();
-//RS     if input.is_empty() {
-//RS         return Err("empty MIR field type".to_string());
-//RS     }
-//RS     if let Some(rest) = input.strip_prefix('?').or_else(|| input.strip_suffix('?')) {
-//RS         return Ok(TypeExpr::Optional(Box::new(parse_type(rest)?)));
-//RS     }
-//RS     if input.starts_with('[') && input.ends_with(']') {
-//RS         let body = &input[1..input.len() - 1];
-//RS         if let Some(index) = top_level_colon(body) {
-//RS             return Ok(TypeExpr::Map(
-//RS                 Box::new(parse_type(&body[..index])?),
-//RS                 Box::new(parse_type(&body[index + 1..])?),
-//RS             ));
-//RS         }
-//RS         return Ok(TypeExpr::List(Box::new(parse_type(body)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Option") {
-//RS         return Ok(TypeExpr::Optional(Box::new(parse_type(inner)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Vec") {
-//RS         return Ok(TypeExpr::List(Box::new(parse_type(inner)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "BTreeSet").or_else(|| generic_inner(input, "HashSet")) {
-//RS         return Ok(TypeExpr::Named(format!("BTreeSet<{inner}>")));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Box") {
-//RS         return Ok(TypeExpr::Named(format!("Box<{}>", inner.trim())));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "BTreeMap").or_else(|| generic_inner(input, "HashMap")) {
-//RS         let parts = split_top_level(inner, ',');
-//RS         if parts.len() != 2 {
-//RS             return Err(format!("map type `{input}` does not have two parameters"));
-//RS         }
-//RS         return Ok(TypeExpr::Map(
-//RS             Box::new(parse_type(&parts[0])?),
-//RS             Box::new(parse_type(&parts[1])?),
-//RS         ));
-//RS     }
-//RS     Ok(TypeExpr::Named(input.to_string()))
-//RS }
-//RS 
-//RS fn generic_inner<'a>(input: &'a str, name: &str) -> Option<&'a str> {
-//RS     let prefix = format!("{name}<");
-//RS     input
-//RS         .strip_prefix(&prefix)
-//RS         .and_then(|rest| rest.strip_suffix('>'))
-//RS }
-//RS 
-//RS fn parse_definitions(input: &str) -> Result<Vec<Definition>, String> {
-//RS     let input = strip_comments(input);
-//RS     let mut definitions = Vec::new();
-//RS     let mut cursor = 0;
-//RS     while let Some((keyword, start)) = find_next_definition(&input, cursor) {
-//RS         cursor = start + keyword.len();
-//RS         let mut position = cursor;
-//RS         skip_space(&input, &mut position);
-//RS         // A `macro_rules!` template (`pub struct $name(...)`) declares no
-//RS         // schema row; its expansions are not visible to this source scan.
-//RS         if input.as_bytes().get(position) == Some(&b'$') {
-//RS             cursor = position;
-//RS             continue;
-//RS         }
-//RS         let name = read_identifier(&input, &mut position)?;
-//RS         let (definition, end) = parse_definition_body(&input, keyword, name, position)?;
-//RS         definitions.push(definition);
-//RS         cursor = end;
-//RS     }
-//RS     Ok(definitions)
-//RS }
-//RS 
-//RS /// Parse the body of the `struct`/`enum` declaration `name` whose identifier
-//RS /// ends at `position`; returns it and the offset just past the body. `Self`
-//RS /// in a field type is spelled as the declaring type.
-//RS fn parse_definition_body(
-//RS     input: &str,
-//RS     keyword: &str,
-//RS     name: String,
-//RS     mut position: usize,
-//RS ) -> Result<(Definition, usize), String> {
-//RS     skip_space(input, &mut position);
-//RS     let body = match input.as_bytes().get(position).copied() {
-//RS         Some(b'{') => {
-//RS             let end = matching_delimiter(input, position, b'{', b'}')?;
-//RS             let body = &input[position + 1..end];
-//RS             position = end + 1;
-//RS             if keyword == "struct" {
-//RS                 Body::Struct(
-//RS                     parse_fields(body)?
-//RS                         .into_iter()
-//RS                         .map(|field| Field {
-//RS                             ty: spell_self(&field.ty, &name),
-//RS                             ..field
-//RS                         })
-//RS                         .collect(),
-//RS                 )
-//RS             } else {
-//RS                 Body::Enum(
-//RS                     parse_variants(body)?
-//RS                         .into_iter()
-//RS                         .map(|variant| Variant {
-//RS                             fields: variant
-//RS                                 .fields
-//RS                                 .into_iter()
-//RS                                 .map(|field| VariantField {
-//RS                                     ty: spell_self(&field.ty, &name),
-//RS                                     ..field
-//RS                                 })
-//RS                                 .collect(),
-//RS                             ..variant
-//RS                         })
-//RS                         .collect(),
-//RS                 )
-//RS             }
-//RS         }
-//RS         Some(b'(') => {
-//RS             let end = matching_delimiter(input, position, b'(', b')')?;
-//RS             position = end + 1;
-//RS             Body::Tuple
-//RS         }
-//RS         _ => return Err(format!("MIR declaration `{name}` has no body")),
-//RS     };
-//RS     Ok((Definition { name, body }, position))
-//RS }
-//RS 
-//RS /// `ty` with each `Self` path segment spelled as `owner`.
-//RS fn spell_self(ty: &str, owner: &str) -> String {
-//RS     let bytes = ty.as_bytes();
-//RS     let identifier = |index: usize| bytes.get(index).is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_');
-//RS     let mut out = String::with_capacity(ty.len());
-//RS     let mut cursor = 0;
-//RS     while let Some(relative) = ty[cursor..].find("Self") {
-//RS         let start = cursor + relative;
-//RS         let end = start + "Self".len();
-//RS         out.push_str(&ty[cursor..start]);
-//RS         if identifier(start.wrapping_sub(1)) || identifier(end) {
-//RS             out.push_str("Self");
-//RS         } else {
-//RS             out.push_str(owner);
-//RS         }
-//RS         cursor = end;
-//RS     }
-//RS     out.push_str(&ty[cursor..]);
-//RS     out
-//RS }
-//RS 
-//RS fn strip_comments(input: &str) -> String {
-//RS     input
-//RS         .lines()
-//RS         .map(|line| line.split_once("//").map_or(line, |(line, _)| line))
-//RS         .collect::<Vec<_>>()
-//RS         .join("\n")
-//RS }
-//RS 
-//RS fn find_next_definition(input: &str, from: usize) -> Option<(&'static str, usize)> {
-//RS     let struct_position = find_keyword(input, "pub struct", from);
-//RS     let enum_position = find_keyword(input, "pub enum", from);
-//RS     match (struct_position, enum_position) {
-//RS         (Some(left), Some(right)) if left < right => Some(("struct", left + 4)),
-//RS         (Some(_), Some(right)) => Some(("enum", right + 4)),
-//RS         (Some(position), None) => Some(("struct", position + 4)),
-//RS         (None, Some(position)) => Some(("enum", position + 4)),
-//RS         (None, None) => None,
-//RS     }
-//RS }
-//RS 
-//RS fn find_keyword(input: &str, keyword: &str, from: usize) -> Option<usize> {
-//RS     let mut cursor = from;
-//RS     while let Some(relative) = input[cursor..].find(keyword) {
-//RS         let position = cursor + relative;
-//RS         let before = input.as_bytes().get(position.wrapping_sub(1)).copied();
-//RS         let after = input.as_bytes().get(position + keyword.len()).copied();
-//RS         if !before.is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-//RS             && !after.is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
-//RS         {
-//RS             return Some(position);
-//RS         }
-//RS         cursor = position + keyword.len();
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn parse_fields(input: &str) -> Result<Vec<Field>, String> {
-//RS     let starts = top_level_keyword_starts(input, "pub");
-//RS     let mut fields = Vec::new();
-//RS     for (index, start) in starts.iter().enumerate() {
-//RS         let end = starts.get(index + 1).copied().unwrap_or(input.len());
-//RS         let field = input[*start..end].trim().trim_end_matches(',').trim();
-//RS         let mut cursor = 3;
-//RS         skip_space(field, &mut cursor);
-//RS         if field[cursor..].starts_with("(") {
-//RS             let end = matching_delimiter(field, cursor, b'(', b')')?;
-//RS             cursor = end + 1;
-//RS             skip_space(field, &mut cursor);
-//RS         }
-//RS         let name = read_identifier(field, &mut cursor)?;
-//RS         skip_space(field, &mut cursor);
-//RS         if field.as_bytes().get(cursor) != Some(&b':') {
-//RS             return Err(format!("field `{name}` has no type"));
-//RS         }
-//RS         cursor += 1;
-//RS         // The type ends at the field's comma; field attributes that follow
-//RS         // (`#[serde(..)]`) belong to the next field.
-//RS         let ty = split_top_level(&field[cursor..], ',')
-//RS             .into_iter()
-//RS             .next()
-//RS             .unwrap_or_default()
-//RS             .trim()
-//RS             .to_string();
-//RS         fields.push(Field { name, ty });
-//RS     }
-//RS     Ok(fields)
-//RS }
-//RS 
-//RS fn parse_named_fields(input: &str) -> Result<Vec<Field>, String> {
-//RS     split_top_level(input, ',')
-//RS         .into_iter()
-//RS         .filter(|part| !part.trim().is_empty())
-//RS         .map(|part| {
-//RS             let index = top_level_colon(&part)
-//RS                 .ok_or_else(|| format!("named MIR field `{part}` has no type"))?;
-//RS             Ok(Field {
-//RS                 name: part[..index].trim().to_string(),
-//RS                 ty: part[index + 1..].trim().to_string(),
-//RS             })
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn parse_variants(input: &str) -> Result<Vec<Variant>, String> {
-//RS     let mut variants = Vec::new();
-//RS     let mut cursor = 0;
-//RS     while cursor < input.len() {
-//RS         skip_space_and_commas(input, &mut cursor);
-//RS         // Variant attributes (`#[default]`) carry no schema shape.
-//RS         while input[cursor..].starts_with("#[") {
-//RS             cursor = matching_delimiter(input, cursor + 1, b'[', b']')? + 1;
-//RS             skip_space_and_commas(input, &mut cursor);
-//RS         }
-//RS         if cursor >= input.len() {
-//RS             break;
-//RS         }
-//RS         let name = read_identifier(input, &mut cursor)?;
-//RS         skip_space(input, &mut cursor);
-//RS         let fields = match input.as_bytes().get(cursor).copied() {
-//RS             Some(b'(') => {
-//RS                 let end = matching_delimiter(input, cursor, b'(', b')')?;
-//RS                 let fields = split_top_level(&input[cursor + 1..end], ',')
-//RS                     .into_iter()
-//RS                     .filter(|part| !part.trim().is_empty())
-//RS                     .map(parse_variant_field)
-//RS                     .collect::<Result<Vec<_>, _>>()?;
-//RS                 cursor = end + 1;
-//RS                 fields
-//RS             }
-//RS             Some(b'{') => {
-//RS                 let end = matching_delimiter(input, cursor, b'{', b'}')?;
-//RS                 let fields = parse_named_fields(&input[cursor + 1..end])?
-//RS                     .into_iter()
-//RS                     .map(|field| VariantField {
-//RS                         name: Some(field.name),
-//RS                         ty: field.ty,
-//RS                     })
-//RS                     .collect();
-//RS                 cursor = end + 1;
-//RS                 fields
-//RS             }
-//RS             _ => Vec::new(),
-//RS         };
-//RS         // An explicit discriminant (`Core = 0`) carries no schema shape.
-//RS         skip_space(input, &mut cursor);
-//RS         if input[cursor..].starts_with('=') {
-//RS             cursor += split_top_level(&input[cursor..], ',')[0].len();
-//RS         }
-//RS         variants.push(Variant { name, fields });
-//RS     }
-//RS     Ok(variants)
-//RS }
-//RS 
-//RS fn parse_variant_field(input: String) -> Result<VariantField, String> {
-//RS     let input = input.trim().to_string();
-//RS     if let Some(index) = top_level_colon(&input) {
-//RS         Ok(VariantField {
-//RS             name: Some(input[..index].trim().to_string()),
-//RS             ty: input[index + 1..].trim().to_string(),
-//RS         })
-//RS     } else {
-//RS         Ok(VariantField {
-//RS             name: None,
-//RS             ty: input,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS fn top_level_keyword_starts(input: &str, keyword: &str) -> Vec<usize> {
-//RS     let mut starts = Vec::new();
-//RS     let mut cursor = 0;
-//RS     let mut depth = 0usize;
-//RS     while cursor < input.len() {
-//RS         match input.as_bytes()[cursor] {
-//RS             b'[' | b'(' | b'{' | b'<' => depth += 1,
-//RS             b']' | b')' | b'}' | b'>' => depth = depth.saturating_sub(1),
-//RS             _ => {}
-//RS         }
-//RS         if depth == 0
-//RS             && input[cursor..].starts_with(keyword)
-//RS             && (cursor == 0 || !input.as_bytes()[cursor - 1].is_ascii_alphanumeric())
-//RS             && input
-//RS                 .as_bytes()
-//RS                 .get(cursor + keyword.len())
-//RS                 .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == b'(')
-//RS         {
-//RS             starts.push(cursor);
-//RS         }
-//RS         cursor += 1;
-//RS     }
-//RS     starts
-//RS }
-//RS 
-//RS fn split_top_level(input: &str, delimiter: char) -> Vec<String> {
-//RS     let mut pieces = Vec::new();
-//RS     let mut start = 0;
-//RS     let mut depth = 0usize;
-//RS     for (index, character) in input.char_indices() {
-//RS         match character {
-//RS             '[' | '(' | '{' | '<' => depth += 1,
-//RS             ']' | ')' | '}' | '>' => depth = depth.saturating_sub(1),
-//RS             character if character == delimiter && depth == 0 => {
-//RS                 pieces.push(input[start..index].to_string());
-//RS                 start = index + character.len_utf8();
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     pieces.push(input[start..].to_string());
-//RS     pieces
-//RS }
-//RS 
-//RS fn top_level_colon(input: &str) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     for (index, character) in input.char_indices() {
-//RS         match character {
-//RS             '[' | '(' | '{' | '<' => depth += 1,
-//RS             ']' | ')' | '}' | '>' => depth = depth.saturating_sub(1),
-//RS             // `crate::Type` path separators are not a field's colon.
-//RS             ':' if depth == 0
-//RS                 && !input[..index].ends_with(':')
-//RS                 && !input[index + 1..].starts_with(':') =>
-//RS             {
-//RS                 return Some(index)
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn matching_delimiter(input: &str, start: usize, open: u8, close: u8) -> Result<usize, String> {
-//RS     let mut depth = 0usize;
-//RS     for index in start..input.len() {
-//RS         match input.as_bytes()[index] {
-//RS             byte if byte == open => depth += 1,
-//RS             byte if byte == close => {
-//RS                 depth = depth.saturating_sub(1);
-//RS                 if depth == 0 {
-//RS                     return Ok(index);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     Err(format!("unclosed MIR delimiter at byte {start}"))
-//RS }
-//RS 
-//RS fn skip_space(input: &str, cursor: &mut usize) {
-//RS     while input
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .is_some_and(|byte| byte.is_ascii_whitespace())
-//RS     {
-//RS         *cursor += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn skip_space_and_commas(input: &str, cursor: &mut usize) {
-//RS     while input
-//RS         .as_bytes()
-//RS         .get(*cursor)
-//RS         .is_some_and(|byte| byte.is_ascii_whitespace() || *byte == b',')
-//RS     {
-//RS         *cursor += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn read_identifier(input: &str, cursor: &mut usize) -> Result<String, String> {
-//RS     let start = *cursor;
-//RS     while input.as_bytes().get(*cursor).is_some_and(|byte| {
-//RS         byte.is_ascii_alphanumeric() || *byte == b'_'
-//RS     }) {
-//RS         *cursor += 1;
-//RS     }
-//RS     if *cursor == start {
-//RS         Err(format!("expected MIR identifier at byte {start}"))
-//RS     } else {
-//RS         Ok(input[start..*cursor].to_string())
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{parse_definitions, parse_type, Body, TypeExpr};
-//RS 
-//RS     #[test]
-//RS     fn source_schema_parser_retains_nested_typed_rows() {
-//RS         let definitions = parse_definitions(
-//RS             "pub struct Row { pub id: Int pub values: [String] pub attrs: [String: ?MirType] }\n\
-//RS              pub enum Choice { Empty Full(name: String, row: Row) }",
-//RS         )
-//RS         .expect("schema parser");
-//RS         assert_eq!(definitions.len(), 2);
-//RS         let Body::Struct(fields) = &definitions[0].body else {
-//RS             panic!("expected struct");
-//RS         };
-//RS         assert_eq!(fields[2].ty, "[String: ?MirType]");
-//RS         let Body::Enum(variants) = &definitions[1].body else {
-//RS             panic!("expected enum");
-//RS         };
-//RS         assert_eq!(variants[1].fields.len(), 2);
-//RS         assert_eq!(variants[1].fields[1].ty, "Row");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn type_parser_distinguishes_optional_list_and_map() {
-//RS         assert_eq!(
-//RS             parse_type("?[String: ?MirType]").expect("type"),
-//RS             TypeExpr::Optional(Box::new(TypeExpr::Map(
-//RS                 Box::new(TypeExpr::Named("String".to_string())),
-//RS                 Box::new(TypeExpr::Optional(Box::new(TypeExpr::Named(
-//RS                     "MIRType".to_string(),
-//RS                 )))),
-//RS             )))
-//RS         );
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2079 Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1801-2549
+use JetBootstrap.Native.[BootstrapCodecSymbols, BootstrapHostCodecError]
+use JetBootstrap.RuntimeMirCodec.[Definition, Body, Field, Variant, VariantField, TypeExpr]
 
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1801-1809
+// source_field_name's split tail remains in the canonical first slice.
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1812
+pub fn source_field_is_host_derived(owner: String, field: String) -> Bool { (owner, field) == ("MIRFunction", "memo_unbounded") }
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1819
+pub fn custom_struct_field_to_host(symbols: &BootstrapCodecSymbols, owner: String, host_field: String) -> String? BootstrapHostCodecError! {
+    if (owner, host_field) == {
+        ("MIRCaptureFacts", "frame_schedule" | "frame_schedule_derivation") -> Val("None")
+        ("MIRKernelFacts", "mode") -> Val("::jet_foundation::MIR::MirKernelMode::Parallel")
+        ("MIRFunction", "memo_bound") -> {
+            bound := symbols.field_symbol(owner, "memo_bound")?
+            unbounded := symbols.field_symbol(owner, "memo_unbounded")?
+            Val("if value.{unbounded} {{ Some(None) }} else {{ value.{bound}.as_ref().ok().map(|__bound| -> Result<_, String> {{ Ok(Some(__bound.to_string_rep().parse::<usize>().map_err(|_| \"MIR memo bound is outside native range\".to_string())?)) }}).transpose()? }}")
+        }
+        _ -> None
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1842
+pub fn custom_struct_field_from_host(owner: String, source_field: String) -> String? {
+    if host_private_row(owner, source_field) == Val((_, _, getter, _)) { return Val("value.{getter}().ok_or(jet_foundation::Outcome::JetAbsent)") }
+    if (owner, source_field) == {
+        ("MIRFunction", "memo_bound") -> Val("match &value.memo_bound {{ Some(Some(__bound)) => Ok(jet_foundation::Numeric::JetInt::from_big(jet_foundation::Numeric::CtBigInt::from_str(&__bound.to_string())?)), _ => Err(jet_foundation::Outcome::JetAbsent) }}")
+        ("MIRFunction", "memo_unbounded") -> Val("matches!(value.memo_bound, Some(None))")
+        _ -> None
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1866
+// Carry the optimizer's seal rather than re-digesting the restored program.
+pub const HOST_PRIVATE_FIELDS: [(String, String, String, String)] = [("MIROptimizationFacts", "derived_from_digest", "pipeline_seal_hex", "set_pipeline_seal_hex")]
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1873
+pub fn host_private_row(owner: String, host_field: String) -> &(String, String, String, String)? {
+    HOST_PRIVATE_FIELDS.iter().find(fn((row_owner, row_field, _, _)) -> row_owner == owner && row_field == host_field)
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1879
+pub fn host_private_field(owner: String, host_field: String) -> Bool { host_private_row(owner, host_field).is_some() }
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1886
+pub fn align_variant_fields(owner: String, source: &Variant, host: &Variant) -> [USize?] BootstrapHostCodecError! {
+    if source.fields.len() == host.fields.len() { return (0..<host.fields.len()).map(fn(index) -> Val(index)).collect() }
+    arity := fn() -> BootstrapHostCodecError.InvalidMetadata("MIR enum variant `{owner}::{source.name}` changes payload arity")
+    aligned: [USize?] = []
+    for host_field in &host.fields {
+        name := host_field.name.as_deref().ok_or_else(arity)?
+        index := source.fields.iter().position(fn(field) -> field.name.as_deref() == Val(name))
+        if index.is_none() && host_only_variant_field(owner, source.name, name).is_none() { throw arity() }
+        aligned.push(index)
+    }
+    for (index, field) in source.fields.iter().enumerate() {
+        derived := field.name.as_deref().is_some_and(fn(name) -> derived_source_variant_field(owner, source.name, name))
+        if !aligned.contains(Val(index)) && !derived { throw arity() }
+    }
+    ^aligned
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1923
+pub fn unrepresentable_host_field(owner: String, source: &Variant, host: &Variant, aligned: &[USize?]) -> String? {
+    host.fields.iter().zip(aligned).find_map(fn((field, source_index)) -> if source_index == {
+        Val(_) -> None
+        None -> host_only_variant_field(owner, source.name, field.name.as_deref()?)
+    })
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1940
+pub fn host_only_variant_field(owner: String, variant: String, field: String) -> String? {
+    if (owner, variant, field) == ("MIRTerminator", "Yield", "cancel") -> Val("Source MIR generator yield has no cancel target; generator cancellation (D-CANCELMODEL1) is not in Source MIR") else -> None
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1955
+pub fn derived_source_variant_field(owner: String, variant: String, field: String) -> Bool { (owner, variant, field) == ("MIROperation", "Binary", "overflow") }
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1960
+pub fn derived_field_basis(owner: String, variant: String) -> String BootstrapHostCodecError! {
+    if (owner, variant) == ("MIROperation", "Binary") { return "dispatch" }
+    throw BootstrapHostCodecError.InvalidMetadata("MIR enum variant `{owner}::{variant}` has no derivation for its Source-only field")
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1969
+pub fn variant_field_index(fields: &[VariantField], name: String, owner: String, variant: String) -> USize BootstrapHostCodecError! {
+    fields.iter().position(fn(field) -> field.name.as_deref() == Val(name)).ok_or_else(fn() -> BootstrapHostCodecError.InvalidMetadata("MIR enum variant `{owner}::{variant}` has no `{name}` field"))?
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1980
+pub fn derived_field_to_host_check(symbols: &BootstrapCodecSymbols, owner: String, source: &Variant, host: &Variant, field_index: USize, bindings: &[String]) -> String BootstrapHostCodecError! {
+    basis := derived_field_basis(owner, source.name)?
+    host_basis := variant_field_index(&host.fields, basis, owner, source.name)?
+    trap := symbols.variant_path("MIRBinaryOverflow", "Trap")?
+    "if __jet_bootstrap_binary_traps(&__host_{host_basis})? != matches!({bindings[field_index]}, {trap}) {{ return Err(\"Source MIR Binary overflow disagrees with its dispatch: Trap is exactly a fixed-width trap route for an overflowing operator\".to_string()); }}"
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:1998
+pub fn derived_field_from_host(symbols: &BootstrapCodecSymbols, owner: String, source: &Variant, host: &Variant, bindings: &[String]) -> String BootstrapHostCodecError! {
+    basis := derived_field_basis(owner, source.name)?
+    host_basis := variant_field_index(&host.fields, basis, owner, source.name)?
+    trap := symbols.variant_path("MIRBinaryOverflow", "Trap")?
+    unchecked := symbols.variant_path("MIRBinaryOverflow", "Unchecked")?
+    "if __jet_bootstrap_binary_traps({bindings[host_basis]})? {{ {trap} }} else {{ {unchecked} }}"
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2018
+pub fn emit_binary_overflow_derivation(out: &String, symbols: &BootstrapCodecSymbols) -> Unit BootstrapHostCodecError! {
+    program := symbols.type_symbol("MIRProgram")?
+    prelude_calls := symbols.field_symbol("MIRProgram", "prelude_calls")?
+    family := symbols.field_symbol("MIRPreludeCall", "family")?
+    member := symbols.field_symbol("MIRPreludeCall", "member")?
+    id := symbols.field_symbol("MIRPreludeCall", "id")?
+    id_value := symbols.field_symbol("MIRPreludeCallID", "value")?
+    overflow := symbols.variant_path("MIRPreludeFamily", "Overflow")?
+    // GATE #4494: generated native TLS retains program-local derivation context.
+    out.push_str("""
+thread_local! {{
+    static __JET_BOOTSTRAP_TRAP_ROUTES: ::std::cell::RefCell<Option<::std::collections::BTreeSet<u64>>> = ::std::cell::RefCell::new(None);
+}}
+fn __jet_bootstrap_fixed_trap_member(member: &str) -> bool {{
+    member.split_once(".trap.").is_some_and(|(width, op)| matches!(width, "i8" | "i16" | "i32" | "i64" | "u8" | "u16" | "u32" | "u64") && matches!(op, "add" | "sub" | "mul" | "div" | "pow" | "shl" | "shr"))
+}}
+fn __jet_bootstrap_with_trap_routes<T>(routes: ::std::collections::BTreeSet<u64>, convert: impl FnOnce() -> Result<T, String>) -> Result<T, String> {{
+    let previous = __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.replace(Some(routes)));
+    let result = convert();
+    __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| *cell.borrow_mut() = previous);
+    result
+}}
+fn __jet_bootstrap_binary_traps(dispatch: &::jet_foundation::MIR::MirBinaryDispatch) -> Result<bool, String> {{
+    match dispatch {{
+        ::jet_foundation::MIR::MirBinaryDispatch::Primitive => Ok(false),
+        ::jet_foundation::MIR::MirBinaryDispatch::Prelude {{ call, .. }} => __JET_BOOTSTRAP_TRAP_ROUTES.with(|cell| cell.borrow().as_ref().map(|routes| routes.contains(&call.0))).ok_or_else(|| "MIR Binary overflow derives from the program's Prelude routes; convert the whole program".to_string()),
+    }}
+}}
+fn __jet_bootstrap_source_trap_routes(value: &{program}) -> ::std::collections::BTreeSet<u64> {{
+    value.{prelude_calls}.iter().filter(|row| matches!(row.{family}, {overflow}) && __jet_bootstrap_fixed_trap_member(&row.{member})).map(|row| row.{id}.{id_value}).collect()
+}}
+fn __jet_bootstrap_host_trap_routes(value: &::jet_foundation::MIR::MirProgram) -> ::std::collections::BTreeSet<u64> {{
+    value.prelude_calls.iter().filter(|row| matches!(row.family, ::jet_foundation::MIR::MirPreludeFamily::Overflow) && __jet_bootstrap_fixed_trap_member(&row.member)).map(|row| row.id.0).collect()
+}}
+""")
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2043
+pub fn host_variant_name(owner: String, variant: String) -> String {
+    if (owner, variant) == {
+        ("MIRDropKind", "NoDrop") | ("MIRCopyCost", "NoCopy") | ("MIREntryOutput", "NoOutput") | ("MIRAllocatorPolicy", "NoAllocator") | ("MIRClockPolicy", "NoClock") | ("MIREntropyPolicy", "NoEntropy") | ("MIRSchedulerPolicy", "NoScheduler") | ("MIRByteSinkPolicy", "NoByteSink") | ("MIRMMIOPolicy", "NoMMIO") | ("CoreCallPureRoute", "NoPureRoute") | ("CoreCallInterpreterRoute", "NoRoute") -> "None"
+        _ -> variant.to_string()
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2061
+pub fn validate_unique_definitions(definitions: &[Definition]) -> Unit Err! {
+    names: [String: Unit] = [:]
+    for definition in definitions {
+        if names.insert(definition.name, ()).is_some() { throw "duplicate MIR schema type `{definition.name}`" }
+        if definition.body == {
+            .Struct(fields) -> {
+                field_names: [String: Unit] = [:]
+                for field in fields { if field_names.insert(field.name, ()).is_some() { throw "duplicate MIR schema field `{definition.name}.{field.name}`" } }
+            }
+            .Enum(variants) -> {
+                variant_names: [String: Unit] = [:]
+                for variant in variants { if variant_names.insert(variant.name, ()).is_some() { throw "duplicate MIR schema variant `{definition.name}::{variant.name}`" } }
+            }
+            .Tuple -> {}
+        }
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2104
+pub fn parse_type(input: String) -> TypeExpr Err! {
+    input := input.trim().trim_end_matches(',').trim() // #4303
+    if input.is_empty() { throw "empty MIR field type" }
+    if input.strip_prefix('?').or_else(fn() -> input.strip_suffix('?')) == Val(rest) { return TypeExpr.Optional(Box.new(parse_type(rest)?)) }
+    if input.starts_with('[') && input.ends_with(']') {
+        body := input[1..input.len() - 1]
+        if top_level_colon(body) == Val(index) { return TypeExpr.Map(Box.new(parse_type(body[..index])?), Box.new(parse_type(body[index + 1..])?)) }
+        return TypeExpr.List(Box.new(parse_type(body)?))
+    }
+    if generic_inner(input, "Option") == Val(inner) { return TypeExpr.Optional(Box.new(parse_type(inner)?)) }
+    if generic_inner(input, "Vec") == Val(inner) { return TypeExpr.List(Box.new(parse_type(inner)?)) }
+    if generic_inner(input, "BTreeSet").or_else(fn() -> generic_inner(input, "HashSet")) == Val(inner) { return TypeExpr.Named("BTreeSet<{inner}>") }
+    if generic_inner(input, "Box") == Val(inner) { trimmed := inner.trim(); return TypeExpr.Named("Box<{trimmed}>") } // #4303
+    if generic_inner(input, "BTreeMap").or_else(fn() -> generic_inner(input, "HashMap")) == Val(inner) {
+        parts := split_top_level(inner, ',')
+        if parts.len() != 2 { throw "map type `{input}` does not have two parameters" }
+        return TypeExpr.Map(Box.new(parse_type(parts[0])?), Box.new(parse_type(parts[1])?))
+    }
+    TypeExpr.Named(input.to_string())
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2147
+pub fn generic_inner(input: String, name: String) -> String? { input.strip_prefix("{name}<").and_then(fn(rest) -> rest.strip_suffix('>')) }
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2154
+pub fn parse_definitions(input: String) -> [Definition] Err! {
+    input := strip_comments(input)
+    definitions: [Definition] = []
+    cursor: USize = 0
+    while find_next_definition(input, cursor) == Val((keyword, start)) {
+        cursor = start + keyword.len()
+        position := cursor
+        skip_space(input, &position)
+        // Macro template $name declares no visible schema expansion.
+        if input.as_bytes().get(position) == Val('$' as U8) { cursor = position; continue }
+        name := read_identifier(input, &position)?
+        (definition, end) := parse_definition_body(input, keyword, ^name, position)?
+        definitions.push(^definition)
+        cursor = end
+    }
+    ^definitions
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2179
+pub fn parse_definition_body(input: String, keyword: String, name: String, position: USize) -> (Definition, USize) Err! {
+    skip_space(input, &position)
+    body := if input.as_bytes().get(position).copied() == {
+        Val('{' as U8) -> {
+            end := matching_delimiter(input, position, '{' as U8, '}' as U8)?
+            contents := input[position + 1..end]
+            position = end + 1
+            if keyword == "struct" {
+                fields := parse_fields(contents)?
+                for field in &fields { field.ty = spell_self(field.ty, name) }
+                Body.Struct(^fields)
+            } else {
+                variants := parse_variants(contents)?
+                for variant in &variants { for field in &variant.fields { field.ty = spell_self(field.ty, name) } }
+                Body.Enum(^variants)
+            }
+        }
+        Val('(' as U8) -> { end := matching_delimiter(input, position, '(' as U8, ')' as U8)?; position = end + 1; Body.Tuple }
+        _ -> { throw "MIR declaration `{name}` has no body" }
+    }
+    (Definition(name: ^name, body: ^body), position)
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2231
+pub fn spell_self(ty: String, owner: String) -> String {
+    bytes := ty.as_bytes()
+    identifier := fn(index: USize) -> bytes.get(index).is_some_and(fn(byte) -> byte.is_ascii_alphanumeric() || byte == '_' as U8)
+    out := String.with_capacity(ty.len())
+    cursor: USize = 0
+    while ty[cursor..].find("Self") == Val(relative) {
+        start := cursor + relative
+        end := start + "Self".len()
+        out.push_str(ty[cursor..start])
+        if identifier(start.wrapping_sub(1)) || identifier(end) { out.push_str("Self") } else { out.push_str(owner) }
+        cursor = end
+    }
+    out.push_str(ty[cursor..])
+    ^out
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2251
+pub fn strip_comments(input: String) -> String { input.lines().map(fn(line) -> line.split_once("//").map_or(line, fn((line, _)) -> line)).collect<[String]>().join("\n") }
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2259
+pub fn find_next_definition(input: String, from: USize) -> (String, USize)? {
+    struct_position := find_keyword(input, "pub struct", from)
+    enum_position := find_keyword(input, "pub enum", from)
+    if (struct_position, enum_position) == {
+        (Val(left), Val(right)) if left < right -> Val(("struct", left + 4))
+        (Val(_), Val(right)) -> Val(("enum", right + 4))
+        (Val(position), None) -> Val(("struct", position + 4))
+        (None, Val(position)) -> Val(("enum", position + 4))
+        (None, None) -> None
+    }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2271
+pub fn find_keyword(input: String, keyword: String, from: USize) -> USize? {
+    cursor := from
+    while input[cursor..].find(keyword) == Val(relative) {
+        position := cursor + relative
+        before := input.as_bytes().get(position.wrapping_sub(1)).copied()
+        after := input.as_bytes().get(position + keyword.len()).copied()
+        if !before.is_some_and(fn(byte) -> byte.is_ascii_alphanumeric() || byte == '_' as U8) && !after.is_some_and(fn(byte) -> byte.is_ascii_alphanumeric() || byte == '_' as U8) { return Val(position) }
+        cursor = position + keyword.len()
+    }
+    None
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2287
+pub fn parse_fields(input: String) -> [Field] Err! {
+    starts := top_level_keyword_starts(input, "pub")
+    fields: [Field] = []
+    for (index, start) in starts.iter().enumerate() {
+        end := starts.get(index + 1).copied().unwrap_or(input.len())
+        field := input[start..end].trim().trim_end_matches(',').trim() // #4303
+        cursor: USize = 3
+        skip_space(field, &cursor)
+        if field[cursor..].starts_with("(") { end := matching_delimiter(field, cursor, '(' as U8, ')' as U8)?; cursor = end + 1; skip_space(field, &cursor) }
+        name := read_identifier(field, &cursor)?
+        skip_space(field, &cursor)
+        if field.as_bytes().get(cursor) != Val(':' as U8) { throw "field `{name}` has no type" }
+        cursor += 1
+        // Field attributes after the comma belong to the next field.
+        ty := split_top_level(field[cursor..], ',').into_iter().next().unwrap_or_default().trim().to_string() // #4303
+        fields.push(Field(name: ^name, ty: ^ty))
+    }
+    ^fields
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2319
+pub fn parse_named_fields(input: String) -> [Field] Err! {
+    fields: [Field] = []
+    for part in split_top_level(input, ',') {
+        if part.trim().is_empty() { continue }
+        index := top_level_colon(part).ok_or_else(fn() -> "named MIR field `{part}` has no type")?
+        name := part[..index].trim().to_string() // #4303
+        ty := part[index + 1..].trim().to_string() // #4303
+        fields.push(Field(name: ^name, ty: ^ty))
+    }
+    ^fields
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2334
+pub fn parse_variants(input: String) -> [Variant] Err! {
+    variants: [Variant] = []
+    cursor: USize = 0
+    while cursor < input.len() {
+        skip_space_and_commas(input, &cursor)
+        while input[cursor..].starts_with("#[") { cursor = matching_delimiter(input, cursor + 1, '[' as U8, ']' as U8)? + 1; skip_space_and_commas(input, &cursor) }
+        if cursor >= input.len() { break }
+        name := read_identifier(input, &cursor)?
+        skip_space(input, &cursor)
+        fields: [VariantField] = []
+        if input.as_bytes().get(cursor).copied() == {
+            Val('(' as U8) -> {
+                end := matching_delimiter(input, cursor, '(' as U8, ')' as U8)?
+                for part in split_top_level(input[cursor + 1..end], ',') { if !part.trim().is_empty() { fields.push(parse_variant_field(^part)?) } }
+                cursor = end + 1
+            }
+            Val('{' as U8) -> {
+                end := matching_delimiter(input, cursor, '{' as U8, '}' as U8)?
+                for field in parse_named_fields(input[cursor + 1..end])? { fields.push(VariantField(name: Val(^field.name), ty: ^field.ty)) }
+                cursor = end + 1
+            }
+            _ -> {}
+        }
+        // Explicit discriminants carry no schema shape.
+        skip_space(input, &cursor)
+        if input[cursor..].starts_with('=') { cursor += split_top_level(input[cursor..], ',')[0].len() }
+        variants.push(Variant(name: ^name, fields: ^fields))
+    }
+    ^variants
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2384
+pub fn parse_variant_field(input: String) -> VariantField Err! {
+    input := input.trim().to_string() // #4303
+    if top_level_colon(input) == Val(index) {
+        name := input[..index].trim().to_string() // #4303
+        ty := input[index + 1..].trim().to_string() // #4303
+        VariantField(name: Val(^name), ty: ^ty)
+    } else { VariantField(name: None, ty: ^input) }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2399
+pub fn top_level_keyword_starts(input: String, keyword: String) -> [USize] {
+    starts: [USize] = []
+    cursor: USize = 0
+    depth: USize = 0
+    bytes := input.as_bytes()
+    while cursor < input.len() {
+        if bytes[cursor] == {
+            '[' as U8 | '(' as U8 | '{' as U8 | '<' as U8 -> { depth += 1 }
+            ']' as U8 | ')' as U8 | '}' as U8 | '>' as U8 -> { depth = depth.saturating_sub(1) }
+            _ -> {}
+        }
+        if depth == 0 && input[cursor..].starts_with(keyword) && (cursor == 0 || !bytes[cursor - 1].is_ascii_alphanumeric()) && bytes.get(cursor + keyword.len()).is_some_and(fn(byte) -> byte.is_ascii_whitespace() || byte == '(' as U8) { starts.push(cursor) }
+        cursor += 1
+    }
+    ^starts
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2424
+pub fn split_top_level(input: String, delimiter: Char) -> [String] {
+    pieces: [String] = []
+    start: USize = 0
+    depth: USize = 0
+    for (index, character) in input.char_indices() {
+        if character == {
+            '[' | '(' | '{' | '<' -> { depth += 1 }
+            ']' | ')' | '}' | '>' -> { depth = depth.saturating_sub(1) }
+            character if character == delimiter && depth == 0 -> { pieces.push(input[start..index].to_string()); start = index + character.len_utf8() }
+            _ -> {}
+        }
+    }
+    pieces.push(input[start..].to_string())
+    ^pieces
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2443
+pub fn top_level_colon(input: String) -> USize? {
+    depth: USize = 0
+    for (index, character) in input.char_indices() {
+        if character == {
+            '[' | '(' | '{' | '<' -> { depth += 1 }
+            ']' | ')' | '}' | '>' -> { depth = depth.saturating_sub(1) }
+            ':' if depth == 0 && !input[..index].ends_with(':') && !input[index + 1..].starts_with(':') -> { return Val(index) }
+            _ -> {}
+        }
+    }
+    None
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2462
+pub fn matching_delimiter(input: String, start: USize, open: U8, close: U8) -> USize Err! {
+    depth: USize = 0
+    bytes := input.as_bytes()
+    for index in start..<input.len() {
+        if bytes[index] == {
+            byte if byte == open -> { depth += 1 }
+            byte if byte == close -> { depth = depth.saturating_sub(1); if depth == 0 { return index } }
+            _ -> {}
+        }
+    }
+    throw "unclosed MIR delimiter at byte {start}"
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2479
+pub fn skip_space(input: String, cursor: &USize) -> Unit {
+    while input.as_bytes().get(cursor.*).is_some_and(fn(byte) -> byte.is_ascii_whitespace()) { cursor.* += 1 }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2489
+pub fn skip_space_and_commas(input: String, cursor: &USize) -> Unit {
+    while input.as_bytes().get(cursor.*).is_some_and(fn(byte) -> byte.is_ascii_whitespace() || byte == ',' as U8) { cursor.* += 1 }
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2499
+pub fn read_identifier(input: String, cursor: &USize) -> String Err! {
+    start := cursor.*
+    while input.as_bytes().get(cursor.*).is_some_and(fn(byte) -> byte.is_ascii_alphanumeric() || byte == '_' as U8) { cursor.* += 1 }
+    if cursor.* == start { throw "expected MIR identifier at byte {start}" }
+    input[start..cursor.*].to_string()
+}
+// Rust: Compiler/Bootstrap/Host/RuntimeMirCodec.rs:2513-2549
+// Tests live in Compiler/JetBootstrap/Tests/RuntimeMirCodec02.jet.

@@ -1,1804 +1,731 @@
-// PORT-PENDING 2007 crates-jet-codegen-src-codegen-mirrust-slice-10801: crates/jet-codegen/src/Codegen/MIRRust.rs:10801-12600
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                     format!("&{name}")
-//RS                 } else {
-//RS                     name
-//RS                 });
-//RS             }
-//RS             let call = format!("{}({})", self.function_name(function.id), args.join(", "));
-//RS             let call = if function.is_unsafe {
-//RS                 format!("unsafe {{ {call} }}")
-//RS             } else {
-//RS                 call
-//RS             };
-//RS             let success = match &function.failure {
-//RS                 MirFailureCarrier::Result { success, .. } => success,
-//RS                 MirFailureCarrier::Optional { value } => value,
-//RS                 MirFailureCarrier::Infallible | MirFailureCarrier::Diverges { .. } => {
-//RS                     &function.return_type
-//RS                 }
-//RS             };
-//RS             let ret = self.web_abi_type(success).0;
-//RS             let encoded = self.web_abi_encode(success, "__jet_value");
-//RS             let body = match &function.failure {
-//RS                 MirFailureCarrier::Result { .. } => format!(
-//RS                     "match {call} {{ Ok(__jet_value) => {encoded}, Err(__jet_error) => {{ jet_wasm_store_error(&__jet_error); Default::default() }} }}"
-//RS                 ),
-//RS                 MirFailureCarrier::Optional { .. } => format!(
-//RS                     "match {call} {{ Ok(__jet_value) => {encoded}, Err(_) => {{ jet_wasm_store_absent(); Default::default() }} }}"
-//RS                 ),
-//RS                 MirFailureCarrier::Infallible | MirFailureCarrier::Diverges { .. } => {
-//RS                     format!("let __jet_value = {call};\n    {encoded}")
-//RS                 }
-//RS             };
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "#[export_name = {:?}]\npub extern \"C\" fn __jet_web_export_{}({}) -> {ret} {{\n    jet_wasm_error_clear();\n{decode}    {body}\n}}\n",
-//RS                 format!("jet_export_{}", function.name),
-//RS                 function.id.0,
-//RS                 params.join(", "),
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_cli_input_metadata(&self, input: &MirCliInput, out: &mut String) {
-//RS         let shape = match &input.shape {
-//RS             MirCliInputShape::Flag => "flag".to_string(),
-//RS             MirCliInputShape::Value {
-//RS                 kind,
-//RS                 optional,
-//RS                 default,
-//RS             } => format!("value:{kind:?}:optional={optional}:default={default:?}"),
-//RS         };
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "// jet-mir-cli-input: parameter={} name={} label={} type={} zone={:?} short={:?} env={:?} metavar={:?} positional={:?} variadic={} shape={}",
-//RS             input.parameter,
-//RS             input.name,
-//RS             input.label,
-//RS             self.rust_type(&input.ty),
-//RS             input.zone,
-//RS             input.short,
-//RS             input.env,
-//RS             input.metavar,
-//RS             input.positional,
-//RS             input.variadic,
-//RS             shape
-//RS         );
-//RS     }
-//RS     fn cli_value_kind(&self, kind: MirCliValueKind) -> &'static str {
-//RS         match kind {
-//RS             MirCliValueKind::Bool | MirCliValueKind::String | MirCliValueKind::Path => "String",
-//RS             MirCliValueKind::Int => "Int",
-//RS             MirCliValueKind::Float => "Float",
-//RS         }
-//RS     }
-//RS 
-//RS     fn cli_default_expr(&self, default: &Option<MirCliDefault>, ty: &MirType) -> String {
-//RS         match default {
-//RS             None => "None".to_string(),
-//RS             Some(MirCliDefault::TypeDefault) => {
-//RS                 format!(
-//RS                     "Some((Default::default() as {}).jet_show())",
-//RS                     self.rust_type(ty)
-//RS                 )
-//RS             }
-//RS             Some(MirCliDefault::Value(value)) => {
-//RS                 format!("Some(({}).jet_show())", self.constant_for_type(value, ty))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn cli_spec_expr(
-//RS         &self,
-//RS         inputs: &[MirCliInput],
-//RS         description: Option<&str>,
-//RS         standard: bool,
-//RS         version: Option<&str>,
-//RS         program: &str,
-//RS     ) -> String {
-//RS         let root = &self.config.root_prefix;
-//RS         let mut spec = format!("{root}jet_args_program({root}jet_args_spec(), {program})");
-//RS         if let Some(description) = description {
-//RS             spec = format!("{root}jet_args_description({spec}, &{description:?}.to_string())");
-//RS         }
-//RS         if standard {
-//RS             spec = format!(
-//RS                 "{root}jet_args_flag_short({spec}, &\"verbose\".to_string(), &\"v\".to_string(), &\"print extra detail\".to_string())"
-//RS             );
-//RS             spec = format!(
-//RS                 "{root}jet_args_flag_short({spec}, &\"quiet\".to_string(), &\"q\".to_string(), &\"suppress normal output\".to_string())"
-//RS             );
-//RS             spec = format!(
-//RS                 "{root}jet_args_option_choice({spec}, &\"color\".to_string(), &\"control terminal color\".to_string(), &\"MODE\".to_string(), &\"auto,always,never\".to_string())"
-//RS             );
-//RS             if let Some(version) = version {
-//RS                 spec = format!("{root}jet_args_version({spec}, &{version:?}.to_string())");
-//RS             }
-//RS         }
-//RS         for input in inputs {
-//RS             if input.name.is_empty() || input.help.is_empty() {
-//RS                 panic!("MIR CLI input has no canonical name/help");
-//RS             }
-//RS             match &input.shape {
-//RS                 MirCliInputShape::Flag => {
-//RS                     if !input.ty.is_bool() || input.variadic {
-//RS                         panic!("MIR CLI flag row is not a non-variadic Bool");
-//RS                     }
-//RS                     spec = match &input.short {
-//RS                         Some(short) => format!(
-//RS                             "{root}jet_args_flag_short({spec}, &{:?}.to_string(), &{:?}.to_string(), &{:?}.to_string())",
-//RS                             input.name, short, input.help
-//RS                         ),
-//RS                         None => format!(
-//RS                             "{root}jet_args_flag({spec}, &{:?}.to_string(), &{:?}.to_string())",
-//RS                             input.name, input.help
-//RS                         ),
-//RS                     };
-//RS                 }
-//RS                 MirCliInputShape::Value {
-//RS                     kind,
-//RS                     optional,
-//RS                     default,
-//RS                 } => {
-//RS                     let metavar = input.metavar.as_deref().unwrap_or("VALUE");
-//RS                     let default = self.cli_default_expr(default, &input.ty);
-//RS                     let required = !optional && default == "None" && input.positional.is_none();
-//RS                     let value_kind = self.cli_value_kind(*kind);
-//RS                     let short = input
-//RS                         .short
-//RS                         .as_ref()
-//RS                         .map(|short| format!("Some({short:?}.to_string())"))
-//RS                         .unwrap_or_else(|| "None".to_string());
-//RS                     let env = input
-//RS                         .env
-//RS                         .as_ref()
-//RS                         .map(|env| format!("Some({env:?}.to_string())"))
-//RS                         .unwrap_or_else(|| "None".to_string());
-//RS                     spec = format!(
-//RS                         "{root}jet_args_option_base({spec}, &{:?}.to_string(), {short}, &{:?}.to_string(), &{:?}.to_string(), {default}, {env}, {required}, {}, {root}JetArgValueKind::{value_kind})",
-//RS                         input.name,
-//RS                         input.help,
-//RS                         metavar,
-//RS                         input.variadic
-//RS                     );
-//RS                     if input.positional.is_some() {
-//RS                         spec = format!(
-//RS                             "{root}jet_args_positional({spec}, &{:?}.to_string(), &{:?}.to_string())",
-//RS                             input.name, input.help
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         spec
-//RS     }
-//RS 
-//RS     fn cli_scalar_expr(&self, input: &MirCliInput, raw: &str) -> String {
-//RS         let root = &self.config.root_prefix;
-//RS         let MirCliInputShape::Value { kind, .. } = &input.shape else {
-//RS             panic!("MIR CLI scalar decoder received a flag row");
-//RS         };
-//RS         match kind {
-//RS             MirCliValueKind::Bool => format!(
-//RS                 "match {raw}.to_ascii_lowercase().as_str() {{ \"true\" => true, \"false\" => false, _ => return Err(format!(\"invalid value for --{{}}: `{{}}` is not true or false\\n\\n{{}}\", {:?}, {raw}, __spec.help())) }}",
-//RS                 input.name
-//RS             ),
-//RS             MirCliValueKind::Int => match input.ty.kind() {
-//RS                 MirTypeKind::Int => format!(
-//RS                     "match {root}jet_std::jet_int_owned_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {:?}, {raw}, __spec.help())) }}",
-//RS                     input.name
-//RS                 ),
-//RS                 MirTypeKind::IntN { .. } => format!(
-//RS                     "(match {root}jet_std::jet_int_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {:?}, {raw}, __spec.help())) }}) as {}",
-//RS                     input.name,
-//RS                     self.rust_type(&input.ty)
-//RS                 ),
-//RS                 MirTypeKind::InlineRange { lo, hi, .. } => format!(
-//RS                     "match {root}jet_inline_range_from_int(match {raw}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {:?}, {raw}, __spec.help())) }}, {lo}, {hi}) {{ Ok(__n) => __n, Err(__reason) => return Err(format!(\"invalid value for --{{}}: {{}}\\n\\n{{}}\", {:?}, __reason, __spec.help())) }}",
-//RS                     input.name,
-//RS                     input.name
-//RS                 ),
-//RS                 MirTypeKind::Tagged { inner, .. } | MirTypeKind::Quantity { base: inner, .. } => {
-//RS                     let mut nested = input.clone();
-//RS                     nested.ty = (**inner).clone();
-//RS                     self.cli_scalar_expr(&nested, raw)
-//RS                 }
-//RS                 MirTypeKind::Float
-//RS                 | MirTypeKind::Bool
-//RS                 | MirTypeKind::String
-//RS                 | MirTypeKind::Char
-//RS                 | MirTypeKind::List(_)
-//RS                 | MirTypeKind::Map { .. }
-//RS                 | MirTypeKind::Shared(_)
-//RS                 | MirTypeKind::Option(_)
-//RS                 | MirTypeKind::Result { .. }
-//RS                 | MirTypeKind::Fn(_)
-//RS                 | MirTypeKind::SendFn { .. }
-//RS                 | MirTypeKind::Apply { .. }
-//RS                 | MirTypeKind::TraitObject(_)
-//RS                 | MirTypeKind::Tuple(_)
-//RS                 | MirTypeKind::FixedList { .. }
-//RS                 | MirTypeKind::Float32
-//RS                 | MirTypeKind::Union(_)
-//RS                 | MirTypeKind::Measure(_) => {
-//RS                     panic!("MIR CLI Int row has a non-integer checked type")
-//RS                 }
-//RS             },
-//RS             MirCliValueKind::Float => match input.ty.kind() {
-//RS                 MirTypeKind::Float => format!(
-//RS                     "match {raw}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {:?}, {raw}, __spec.help())) }}",
-//RS                     input.name
-//RS                 ),
-//RS                 MirTypeKind::Float32 => format!(
-//RS                     "(match {raw}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {:?}, {raw}, __spec.help())) }}) as f32",
-//RS                     input.name
-//RS                 ),
-//RS                 MirTypeKind::Int
-//RS                 | MirTypeKind::IntN { .. }
-//RS                 | MirTypeKind::Bool
-//RS                 | MirTypeKind::String
-//RS                 | MirTypeKind::Char
-//RS                 | MirTypeKind::List(_)
-//RS                 | MirTypeKind::Map { .. }
-//RS                 | MirTypeKind::Shared(_)
-//RS                 | MirTypeKind::Option(_)
-//RS                 | MirTypeKind::Result { .. }
-//RS                 | MirTypeKind::Fn(_)
-//RS                 | MirTypeKind::SendFn { .. }
-//RS                 | MirTypeKind::Apply { .. }
-//RS                 | MirTypeKind::TraitObject(_)
-//RS                 | MirTypeKind::Tuple(_)
-//RS                 | MirTypeKind::FixedList { .. }
-//RS                 | MirTypeKind::InlineRange { .. }
-//RS                 | MirTypeKind::Tagged { .. }
-//RS                 | MirTypeKind::Quantity { .. }
-//RS                 | MirTypeKind::Union(_)
-//RS                 | MirTypeKind::Measure(_) => {
-//RS                     panic!("MIR CLI Float row has a non-floating checked type")
-//RS                 }
-//RS             },
-//RS             MirCliValueKind::String => {
-//RS                 if !matches!(input.ty.kind(), MirTypeKind::String) {
-//RS                     panic!("MIR CLI String row has a non-String checked type");
-//RS                 }
-//RS                 format!("{raw}.clone()")
-//RS             }
-//RS             MirCliValueKind::Path => {
-//RS                 if input.ty.nominal_name() != Some("Path") {
-//RS                     panic!("MIR CLI Path row has a non-Path checked type");
-//RS                 }
-//RS                 format!("{root}jet_path_from(&{raw})")
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn cli_scalar_result_expr(&self, input: &MirCliInput, raw: &str) -> String {
-//RS         format!("Ok({})", self.cli_scalar_expr(input, raw))
-//RS     }
-//RS 
-//RS     fn cli_decode_lines(&self, inputs: &[MirCliInput], indent: usize, prefix: &str) -> String {
-//RS         let root = &self.config.root_prefix;
-//RS         let pad = " ".repeat(indent);
-//RS         let mut lines = String::new();
-//RS         for input in inputs {
-//RS             let variable = format!("{prefix}{}", input.parameter);
-//RS             match &input.shape {
-//RS                 MirCliInputShape::Flag => {
-//RS                     if !input.ty.is_bool() {
-//RS                         panic!("MIR CLI flag decoder has a non-Bool type");
-//RS                     }
-//RS                     let _ = writeln!(
-//RS                         lines,
-//RS                         "{pad}let {variable}: bool = {root}jet_parsed_flag(&__parsed, &{:?}.to_string());",
-//RS                         input.name
-//RS                     );
-//RS                 }
-//RS                 MirCliInputShape::Value {
-//RS                     optional, default, ..
-//RS                 } if input.variadic => {
-//RS                     let MirTypeKind::List(inner) = input.ty.kind() else {
-//RS                         panic!("MIR variadic CLI input must have a List type");
-//RS                     };
-//RS                     let element_ty = self.rust_type(inner);
-//RS                     let mut scalar_input = input.clone();
-//RS                     scalar_input.ty = (**inner).clone();
-//RS                     let result = self.cli_scalar_result_expr(&scalar_input, "__v");
-//RS                     let _ = writeln!(
-//RS                         lines,
-//RS                         "{pad}let {variable}: Vec<{element_ty}> = match {root}jet_parsed_options(&__parsed, &{:?}.to_string()).into_iter().map(|__v| {result}).collect::<Result<Vec<_>, String>>() {{ Ok(__v) => __v, Err(__e) => return Err(__e) }};",
-//RS                         input.name
-//RS                     );
-//RS                     let _ = (optional, default);
-//RS                 }
-//RS                 MirCliInputShape::Value { optional: true, .. } => {
-//RS                     let MirTypeKind::Option(inner) = input.ty.kind() else {
-//RS                         panic!("MIR optional CLI input must have an Option type");
-//RS                     };
-//RS                     let inner_ty = self.rust_type(inner);
-//RS                     let mut scalar_input = input.clone();
-//RS                     scalar_input.ty = (**inner).clone();
-//RS                     let value = self.cli_scalar_expr(&scalar_input, "__v");
-//RS                     let _ = writeln!(
-//RS                         lines,
-//RS                         "{pad}let {variable}: {root}JetOutcome<{inner_ty}, {root}JetAbsent> = match {root}jet_parsed_option(&__parsed, &{:?}.to_string()) {{ Ok(__v) => Ok({value}), Err({root}JetAbsent) => Err({root}JetAbsent) }};",
-//RS                         input.name
-//RS                     );
-//RS                 }
-//RS                 MirCliInputShape::Value {
-//RS                     optional: false,
-//RS                     default,
-//RS                     ..
-//RS                 } => {
-//RS                     let value = self.cli_scalar_expr(input, "__v");
-//RS                     let fallback = match default {
-//RS                         None => format!(
-//RS                             "return Err(format!(\"missing required argument --{{}}\\n\\n{{}}\", {:?}, __spec.help()))",
-//RS                             input.name
-//RS                         ),
-//RS                         Some(MirCliDefault::TypeDefault) => "Default::default()".to_string(),
-//RS                         Some(MirCliDefault::Value(value)) => self.constant_for_type(value, &input.ty),
-//RS                     };
-//RS                     let ty = self.rust_type(&input.ty);
-//RS                     let _ = writeln!(
-//RS                         lines,
-//RS                         "{pad}let {variable}: {ty} = match {root}jet_parsed_option(&__parsed, &{:?}.to_string()) {{ Ok(__v) => {value}, Err(_) => {fallback} }};",
-//RS                         input.name
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         lines
-//RS     }
-//RS     fn cli_record_fields(&self, ty: &MirType) -> Option<&[MirField]> {
-//RS         let identity = ty.identity?;
-//RS         match &self.try_type_def(identity)?.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => Some(fields.as_slice()),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     /// A job whose one parameter is a `#CLI` record carries that record's
-//RS     /// fields as its inputs and decodes like a record entry. A job with one
-//RS     /// scalar parameter (`fn migrate(to: String)`) carries that parameter as
-//RS     /// its single input instead.
-//RS     fn job_record_inputs(&self, function: &MirFunction, job: &MirJob) -> bool {
-//RS         if function.params.len() != 1 {
-//RS             return false;
-//RS         }
-//RS         let Some(fields) = self.cli_record_fields(&function.params[0].ty) else {
-//RS             return false;
-//RS         };
-//RS         let fields = fields.iter().filter(|field| !field.computed).collect::<Vec<_>>();
-//RS         fields.len() == job.inputs.len()
-//RS             && fields.iter().all(|field| {
-//RS                 job.inputs
-//RS                     .iter()
-//RS                     .any(|input| field.name == input.name || field.shape_names.args == input.name)
-//RS             })
-//RS     }
-//RS     fn cli_record_argument<F>(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         inputs: &[MirCliInput],
-//RS         render_input: F,
-//RS     ) -> String
-//RS     where
-//RS         F: Fn(&MirCliInput) -> String,
-//RS     {
-//RS         let fields = self
-//RS             .cli_record_fields(&function.params[0].ty)
-//RS             .expect("MIR CLI record fields validated above");
-//RS         let values = fields
-//RS             .iter()
-//RS             .filter(|field| !field.computed)
-//RS             .map(|field| {
-//RS                 let input = inputs
-//RS                     .iter()
-//RS                     .find(|input| field.name == input.name || field.shape_names.args == input.name)
-//RS                     .expect("MIR CLI record input validated above");
-//RS                 format!("{}: {}", self.field_name(field.id), render_input(input))
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let record = format!(
-//RS             "{} {{ {} }}",
-//RS             self.rust_type(&function.params[0].ty),
-//RS             values.join(", ")
-//RS         );
-//RS         match function.params[0].access {
-//RS             MirAccess::Write => format!("&mut {record}"),
-//RS             MirAccess::Read if self.is_scalar(&function.params[0].ty) => record,
-//RS             MirAccess::Read => format!("&{record}"),
-//RS             MirAccess::Move => record,
-//RS         }
-//RS     }
-//RS 
-//RS     fn cli_web_default_argument(&self, input: &MirCliInput) -> Option<String> {
-//RS         match &input.shape {
-//RS             MirCliInputShape::Flag => Some("false".to_string()),
-//RS             MirCliInputShape::Value {
-//RS                 default, optional, ..
-//RS             } => match default {
-//RS                 Some(MirCliDefault::TypeDefault) => Some("Default::default()".to_string()),
-//RS                 Some(MirCliDefault::Value(value)) => Some(self.constant_for_type(value, &input.ty)),
-//RS                 None if *optional => Some("Default::default()".to_string()),
-//RS                 None => None,
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     fn cli_web_record_argument(&self, function: &MirFunction, cli: &MirCliEntry) -> Option<String> {
-//RS         if !cli.record_inputs || function.params.len() != 1 {
-//RS             return None;
-//RS         }
-//RS         let fields = self.cli_record_fields(&function.params[0].ty)?;
-//RS         if fields.iter().filter(|field| !field.computed).count() != cli.inputs.len() {
-//RS             return None;
-//RS         }
-//RS         for field in fields.iter().filter(|field| !field.computed) {
-//RS             let input = cli
-//RS                 .inputs
-//RS                 .iter()
-//RS                 .find(|input| field.name == input.name || field.shape_names.args == input.name)?;
-//RS             self.cli_web_default_argument(input)?;
-//RS         }
-//RS         Some(self.cli_record_argument(function, &cli.inputs, |input| {
-//RS             self.cli_web_default_argument(input)
-//RS                 .expect("MIR Web CLI record default validated above")
-//RS         }))
-//RS     }
-//RS 
-//RS     /// Decode one CLI entry or command and call it. A command method also
-//RS     /// receives `receiver_inputs`: the root `#CLI` record fields, decoded into
-//RS     /// the method's `self` value before the call.
-//RS     #[allow(clippy::too_many_arguments)]
-//RS     fn cli_decode_and_invoke(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         inputs: &[MirCliInput],
-//RS         record_inputs: bool,
-//RS         receiver_inputs: Option<&[MirCliInput]>,
-//RS         output: MirEntryOutput,
-//RS         serves_until_stopped: bool,
-//RS         service: bool,
-//RS         indent: &str,
-//RS     ) -> String {
-//RS         match (&function.form, receiver_inputs) {
-//RS             (MirFunctionForm::TopLevel, None) => {}
-//RS             (MirFunctionForm::TopLevel, Some(_)) if !record_inputs && !function.params.is_empty() => {}
-//RS             (MirFunctionForm::Method { .. }, Some(_))
-//RS                 if !record_inputs && self.receiver_param(function).is_some() => {}
-//RS             _ => panic!(
-//RS                 "MIR CLI entry function {:?} is neither a top-level callable nor a command method",
-//RS                 function.id
-//RS             ),
-//RS         }
-//RS         // With receiver inputs, parameter 0 receives the decoded program
-//RS         // struct: `self` for a command method, the first argument for a bound
-//RS         // function. Command inputs cover the remaining parameters.
-//RS         let program_param = receiver_inputs.map(|_| function.params[0].index);
-//RS         if !function.capture_params.is_empty() {
-//RS             panic!("MIR CLI entry function {:?} has captures", function.id);
-//RS         }
-//RS         if let Some(receiver_inputs) = receiver_inputs {
-//RS             let fields = self
-//RS                 .cli_record_fields(&function.params[0].ty)
-//RS                 .unwrap_or_else(|| {
-//RS                     panic!(
-//RS                         "MIR CLI command method {:?} receiver is not a record",
-//RS                         function.id
-//RS                     )
-//RS                 });
-//RS             for input in receiver_inputs {
-//RS                 let present = fields.iter().any(|field| {
-//RS                     !field.computed
-//RS                         && (field.name == input.name || field.shape_names.args == input.name)
-//RS                         && field.ty.same_checked_type(&input.ty)
-//RS                 });
-//RS                 if !present {
-//RS                     panic!(
-//RS                         "MIR CLI root input `{}` is absent from command receiver {:?}",
-//RS                         input.name, function.id
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         let mut seen_parameters = BTreeSet::new();
-//RS         for input in inputs {
-//RS             if !seen_parameters.insert(input.parameter) {
-//RS                 panic!("MIR CLI input parameter {} is duplicated", input.parameter);
-//RS             }
-//RS         }
-//RS         if record_inputs {
-//RS             if function.params.len() != 1 {
-//RS                 panic!(
-//RS                     "MIR CLI record entry function {:?} must have one parameter",
-//RS                     function.id
-//RS                 );
-//RS             }
-//RS             let fields = self
-//RS                 .cli_record_fields(&function.params[0].ty)
-//RS                 .unwrap_or_else(|| {
-//RS                     panic!(
-//RS                         "MIR CLI record entry function {:?} parameter is not a record",
-//RS                         function.id
-//RS                     )
-//RS                 });
-//RS             if fields.iter().filter(|field| !field.computed).count() != inputs.len() {
-//RS                 panic!(
-//RS                     "MIR CLI record input count disagrees with function {:?}",
-//RS                     function.id
-//RS                 );
-//RS             }
-//RS             for input in inputs {
-//RS                 let field = fields
-//RS                     .iter()
-//RS                     .find(|field| {
-//RS                         !field.computed
-//RS                             && (field.name == input.name || field.shape_names.args == input.name)
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "MIR CLI record input `{}` is absent from function {:?}",
-//RS                             input.name, function.id
-//RS                         )
-//RS                     });
-//RS                 if !field.ty.same_checked_type(&input.ty) {
-//RS                     panic!(
-//RS                         "MIR CLI record input `{}` type disagrees with function {:?}",
-//RS                         input.name, function.id
-//RS                     );
-//RS                 }
-//RS             }
-//RS         } else {
-//RS             for input in inputs {
-//RS                 let parameter = function
-//RS                     .params
-//RS                     .iter()
-//RS                     .find(|parameter| parameter.index == input.parameter)
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "MIR CLI input parameter {} is absent from function {:?}",
-//RS                             input.parameter, function.id
-//RS                         )
-//RS                     });
-//RS                 if !parameter.ty.same_checked_type(&input.ty) {
-//RS                     panic!(
-//RS                         "MIR CLI input parameter {} type disagrees with function {:?}",
-//RS                         input.parameter, function.id
-//RS                     );
-//RS                 }
-//RS             }
-//RS             for parameter in &function.params {
-//RS                 if program_param != Some(parameter.index)
-//RS                     && !seen_parameters.contains(&parameter.index)
-//RS                 {
-//RS                     panic!(
-//RS                         "MIR CLI entry function {:?} has no input row for parameter {}",
-//RS                         function.id, parameter.index
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         let args = if record_inputs {
-//RS             self.cli_record_argument(function, inputs, |input| {
-//RS                 format!("__jet_cli_{}", input.parameter)
-//RS             })
-//RS         } else {
-//RS             function
-//RS                 .params
-//RS                 .iter()
-//RS                 .filter(|parameter| program_param != Some(parameter.index))
-//RS                 .map(|parameter| self.cli_argument(parameter))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ")
-//RS         };
-//RS         let call = match receiver_inputs {
-//RS             Some(receiver_inputs) => {
-//RS                 let receiver = self.cli_record_argument(function, receiver_inputs, |input| {
-//RS                     format!("__jet_cli_self_{}", input.parameter)
-//RS                 });
-//RS                 if matches!(function.form, MirFunctionForm::Method { .. }) {
-//RS                     format!("({receiver}).{}({args})", self.rust_method_symbol(function))
-//RS                 } else {
-//RS                     let separator = if args.is_empty() { "" } else { ", " };
-//RS                     format!("{}({receiver}{separator}{args})", self.function_name(function.id))
-//RS                 }
-//RS             }
-//RS             None => format!("{}({args})", self.function_name(function.id)),
-//RS         };
-//RS         let pad = " ".repeat(indent.len() + 4);
-//RS         let mut decode = String::new();
-//RS         if let Some(receiver_inputs) = receiver_inputs {
-//RS             decode.push_str(&self.cli_decode_lines(
-//RS                 receiver_inputs,
-//RS                 indent.len() + 4,
-//RS                 "__jet_cli_self_",
-//RS             ));
-//RS         }
-//RS         decode.push_str(&self.cli_decode_lines(inputs, indent.len() + 4, "__jet_cli_"));
-//RS         let invoke =
-//RS             self.entry_invoke(function, &call, output, serves_until_stopped, service, &pad);
-//RS         format!(
-//RS             "{indent}let __jet_cli_result = (|| -> Result<(), String> {{\n{decode}{invoke}{pad}Ok(())\n{indent}}})();\n{indent}if let Err(__jet_error) = __jet_cli_result {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__jet_error)); std::process::exit(2); }}\n",
-//RS             root = self.config.root_prefix,
-//RS         )
-//RS     }
-//RS 
-//RS     fn cli_argument(&self, parameter: &MirParam) -> String {
-//RS         let variable = format!("__jet_cli_{}", parameter.index);
-//RS         match parameter.access {
-//RS             MirAccess::Write => format!("&mut {variable}"),
-//RS             MirAccess::Read if self.is_scalar(&parameter.ty) => variable,
-//RS             MirAccess::Read => format!("&{variable}"),
-//RS             MirAccess::Move => variable,
-//RS         }
-//RS     }
-//RS 
-//RS     fn entry_error_exit(&self, function: &MirFunction, error: &str, service: bool) -> String {
-//RS         let function = match &function.failure {
-//RS             MirFailureCarrier::Result { error: ty, .. } => Some(ty),
-//RS             MirFailureCarrier::Optional { .. } => None,
-//RS             MirFailureCarrier::Diverges { .. } => {
-//RS                 panic!("MIR entry error edge requested for a diverging function")
-//RS             }
-//RS             MirFailureCarrier::Infallible => {
-//RS                 panic!("MIR entry error edge requested for an infallible function")
-//RS             }
-//RS         };
-//RS         let is_jet_err = function
-//RS             .is_some_and(|ty| ty.nominal_name() == Some(jet_foundation::Syntax::TYPE_ERR));
-//RS         // `[FieldError]` (the typed-decode carrier) has no definition row; it
-//RS         // shows through the one Prelude FieldError projection, like `print`.
-//RS         // Otherwise only a declared nominal carries the Printable entry voice.
-//RS         let field_errors = function.is_some_and(|ty| {
-//RS             matches!(ty.kind(), MirTypeKind::List(inner)
-//RS                 if matches!(inner.kind(), MirTypeKind::Apply { name, args }
-//RS                     if name.name == "FieldError" && args.is_empty()))
-//RS         });
-//RS         let has_jet_show = !is_jet_err
-//RS             && (field_errors
-//RS                 || function
-//RS                     .and_then(|ty| ty.nominal_id().or(ty.identity))
-//RS                     .and_then(|id| self.try_type_def(id))
-//RS                     .is_some_and(|def| {
-//RS                         def.key == jet_foundation::Syntax::TYPE_IO_ERROR
-//RS                             || def.auto_printable
-//RS                             || self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE)
-//RS                     }));
-//RS         let root = &self.config.root_prefix;
-//RS         if self.config.target_kind == MirRustTarget::WebWasm {
-//RS             return if is_jet_err {
-//RS                 format!("{root}jet_wasm_store_error(&{error})")
-//RS             } else if function.is_none() {
-//RS                 format!("{root}jet_wasm_store_error(&{root}jet_err_from_message(\"entry returned no value\".to_string()))")
-//RS             } else if has_jet_show {
-//RS                 format!(
-//RS                     "{root}jet_wasm_store_error(&{root}jet_err_from_message({root}jet_entry_error_text_show(&{error})))"
-//RS                 )
-//RS             } else {
-//RS                 format!("{root}jet_wasm_store_error(&{root}jet_err_from_message(format!(\"{{:?}}\", {error})))")
-//RS             };
-//RS         }
-//RS         if self.is_no_os() {
-//RS             return if function.is_none() {
-//RS                 format!("{root}jet_entry_error_exit(\"entry returned no value\")")
-//RS             } else if has_jet_show {
-//RS                 format!("{root}jet_entry_error_exit({root}jet_entry_error_text_show(&{error}))")
-//RS             } else {
-//RS                 format!("{root}jet_entry_error_exit({error})")
-//RS             };
-//RS         }
-//RS 
-//RS         let helper = if service {
-//RS             if is_jet_err {
-//RS                 "jet_service_edge_report_jet"
-//RS             } else {
-//RS                 "jet_service_edge_report"
-//RS             }
-//RS         } else if is_jet_err {
-//RS             "jet_entry_error_exit_jet"
-//RS         } else {
-//RS             "jet_entry_error_exit"
-//RS         };
-//RS         if helper.ends_with("_jet") {
-//RS             format!("{root}{helper}({error})")
-//RS         } else if function.is_none() {
-//RS             format!("{root}{helper}(\"entry returned no value\".to_string())")
-//RS         } else if has_jet_show {
-//RS             format!("{root}{helper}({root}jet_entry_error_text_show(&{error}))")
-//RS         } else {
-//RS             format!("{root}{helper}(format!(\"{{:?}}\", {error}))")
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_no_os(&self) -> bool {
-//RS         self.program
-//RS             .facts
-//RS             .target_dossier
-//RS             .machine
-//RS             .as_deref()
-//RS             .is_some_and(|machine| machine.no_os)
-//RS     }
-//RS     fn is_core_layer(&self) -> bool {
-//RS         self.program.facts.target_dossier.layer == jet_foundation::RingLayer::RuntimeLayer::Core
-//RS     }
-//RS     /// The `#require` helper ABI follows the emitted Prelude, not the layer: a
-//RS     /// hosted build always links the std Prelude (rendered `&str` debug text and
-//RS     /// locals) even when its selected closure is the Core layer; only the no-OS
-//RS     /// Core Prelude takes `Display` operands and `Option<fmt::Arguments>` locals.
-//RS     fn portable_require_abi(&self) -> bool {
-//RS         self.is_no_os() && self.is_core_layer()
-//RS     }
-//RS 
-//RS     fn entry_output(&self, output: MirEntryOutput, value: &str, app: bool) -> String {
-//RS         if app {
-//RS             return format!("{value}.serve();");
-//RS         }
-//RS         match output {
-//RS             MirEntryOutput::None | MirEntryOutput::ReturnValue => format!("let _ = {value};"),
-//RS             MirEntryOutput::StandardOutput => format!("print!(\"{{}}\", {value});"),
-//RS             MirEntryOutput::ExitStatus => {
-//RS                 if self.is_no_os() {
-//RS                     return format!(
-//RS                         "{}jet_target_exit(({value}) as i32);",
-//RS                         self.config.root_prefix
-//RS                     );
-//RS                 }
-//RS                 format!("std::process::exit(({value}) as i32);")
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn entry_invoke(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         call: &str,
-//RS         output: MirEntryOutput,
-//RS         serves_until_stopped: bool,
-//RS         service: bool,
-//RS         indent: &str,
-//RS     ) -> String {
-//RS         let app = serves_until_stopped
-//RS             && (function.return_type.nominal_name() == Some("App")
-//RS                 || function
-//RS                     .return_type
-//RS                     .result_parts()
-//RS                     .is_some_and(|(ok, _)| ok.nominal_name() == Some("App")));
-//RS         let action = match &function.failure {
-//RS             MirFailureCarrier::Diverges { .. } => call.to_string(),
-//RS             MirFailureCarrier::Infallible => self.entry_output(output, call, app),
-//RS             MirFailureCarrier::Result { .. } | MirFailureCarrier::Optional { .. } => {
-//RS                 let error = self.entry_error_exit(function, "__jet_error", service);
-//RS                 let value = self.entry_output(output, "__jet_value", app);
-//RS                 format!(
-//RS                     "match {call} {{ Ok(__jet_value) => {{ {value} }}, Err(__jet_error) => {{ {error} }} }}"
-//RS                 )
-//RS             }
-//RS         };
-//RS         format!(
-//RS             "{indent}{root}jet_runtime_boundary(|| {{\n{indent}    {action}\n{indent}}});\n",
-//RS             root = self.config.root_prefix,
-//RS         )
-//RS     }
-//RS 
-//RS     fn emit_hardware_facts(&self, out: &mut String) {
-//RS         let Some(profile) = self.program.facts.hardware_profile.as_ref() else {
-//RS             return;
-//RS         };
-//RS         let root = &self.config.root_prefix;
-//RS         for (block_index, block) in profile.register_blocks.iter().enumerate() {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "static __JET_HARDWARE_REGISTERS_{block_index}: &[{root}JetRegisterSpec<'static>] = &["
-//RS             );
-//RS             for register in &block.registers {
-//RS                 let width = match register.width {
-//RS                     jet_foundation::TargetMachine::RegisterWidth::U8 => "U8",
-//RS                     jet_foundation::TargetMachine::RegisterWidth::U16 => "U16",
-//RS                     jet_foundation::TargetMachine::RegisterWidth::U32 => "U32",
-//RS                     jet_foundation::TargetMachine::RegisterWidth::U64 => "U64",
-//RS                 };
-//RS                 let access = match register.access {
-//RS                     jet_foundation::TargetMachine::TargetRegisterAccessMode::ReadOnly => "ReadOnly",
-//RS                     jet_foundation::TargetMachine::TargetRegisterAccessMode::WriteOnly => {
-//RS                         "WriteOnly"
-//RS                     }
-//RS                     jet_foundation::TargetMachine::TargetRegisterAccessMode::ReadWrite => {
-//RS                         "ReadWrite"
-//RS                     }
-//RS                 };
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    {root}JetRegisterSpec::new({:?}, {}u64, {root}JetRegisterWidth::{width}, {root}JetRegisterAccessMode::{access}, {}),",
-//RS                     register.name,
-//RS                     register.offset,
-//RS                     register.volatile,
-//RS                 );
-//RS             }
-//RS             out.push_str("];\n");
-//RS         }
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "static __JET_HARDWARE_BLOCKS: &[{root}JetRegisterBlockSpec<'static>] = &["
-//RS         );
-//RS         for (block_index, block) in profile.register_blocks.iter().enumerate() {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    {root}JetRegisterBlockSpec::new({:?}, {}u64, {}u64, __JET_HARDWARE_REGISTERS_{block_index}),",
-//RS                 block.name,
-//RS                 block.base,
-//RS                 block.size.bytes,
-//RS             );
-//RS         }
-//RS         out.push_str("];\n");
-//RS 
-//RS         for (interrupt_index, interrupt) in profile.interrupts.iter().enumerate() {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "static __JET_HARDWARE_INTERRUPT_EFFECTS_{interrupt_index}: &[&'static str] = &["
-//RS             );
-//RS             for effect in &interrupt.forbidden_effects {
-//RS                 let _ = writeln!(out, "    {:?},", effect);
-//RS             }
-//RS             out.push_str("];\n");
-//RS         }
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "static __JET_HARDWARE_INTERRUPTS: &[{root}JetInterruptSpec<'static>] = &["
-//RS         );
-//RS         for (interrupt_index, interrupt) in profile.interrupts.iter().enumerate() {
-//RS             if interrupt.forbidden_effects.is_empty() {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    {root}JetInterruptSpec::new({:?}, {}u16, {}),",
-//RS                     interrupt.name, interrupt.vector, interrupt.bounded,
-//RS                 );
-//RS             } else {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    {root}JetInterruptSpec::with_effects({:?}, {}u16, __JET_HARDWARE_INTERRUPT_EFFECTS_{interrupt_index}, {}),",
-//RS                     interrupt.name,
-//RS                     interrupt.vector,
-//RS                     interrupt.bounded,
-//RS                 );
-//RS             }
-//RS         }
-//RS         out.push_str("];\n");
-//RS 
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "static __JET_HARDWARE_DMA_CHANNELS: &[{root}JetDmaChannelSpec<'static>] = &["
-//RS         );
-//RS         for channel in &profile.dma_channels {
-//RS             let width = match channel.transfer_width {
-//RS                 jet_foundation::TargetMachine::RegisterWidth::U8 => "U8",
-//RS                 jet_foundation::TargetMachine::RegisterWidth::U16 => "U16",
-//RS                 jet_foundation::TargetMachine::RegisterWidth::U32 => "U32",
-//RS                 jet_foundation::TargetMachine::RegisterWidth::U64 => "U64",
-//RS             };
-//RS             let ownership = match channel.ownership {
-//RS                 jet_foundation::TargetMachine::TargetDmaOwnership::Borrowed => "Borrowed",
-//RS                 jet_foundation::TargetMachine::TargetDmaOwnership::Transfer => "Transfer",
-//RS             };
-//RS             let limit = channel
-//RS                 .max_transfer_bytes
-//RS                 .map(|bytes| format!("Some({bytes}u64)"))
-//RS                 .unwrap_or_else(|| "None".to_string());
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    {root}JetDmaChannelSpec::with_transfer({:?}, {}u16, {root}JetRegisterWidth::{width}, {root}JetDmaOwnership::{ownership}, {limit}),",
-//RS                 channel.name,
-//RS                 channel.channel,
-//RS             );
-//RS         }
-//RS         out.push_str("];\n");
-//RS 
-//RS         let capabilities = self
-//RS             .program
-//RS             .facts
-//RS             .hardware_capabilities
-//RS             .iter()
-//RS             .map(|capability| format!("{capability:?}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let svd_source = profile
-//RS             .svd
-//RS             .as_ref()
-//RS             .map(|svd| format!("Some({:?})", svd.source))
-//RS             .unwrap_or_else(|| "None".to_string());
-//RS         let svd_sha256 = profile
-//RS             .svd
-//RS             .as_ref()
-//RS             .map(|svd| format!("Some({:?})", svd.sha256))
-//RS             .unwrap_or_else(|| "None".to_string());
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "static __JET_HARDWARE_FACTS: {root}JetHardwareFacts<'static> = {root}JetHardwareFacts::with_profile({:?}, &[{capabilities}], {svd_source}, {svd_sha256}, __JET_HARDWARE_BLOCKS, __JET_HARDWARE_INTERRUPTS, __JET_HARDWARE_DMA_CHANNELS);",
-//RS             self.program.facts.hardware_profile_id,
-//RS         );
-//RS         out.push('\n');
-//RS         out.push_str("#[cfg(target_os = \"none\")]\n");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "static __JET_HARDWARE_VOLATILE_BACKEND: {root}JetVolatileRegisterBackend = {root}JetVolatileRegisterBackend;"
-//RS         );
-//RS         self.emit_hardware_register_helpers(out, profile);
-//RS         self.emit_hardware_interrupt_runtime(out);
-//RS         out.push('\n');
-//RS     }
-//RS     fn hardware_register_helper_name(
-//RS         &self,
-//RS         operation: &str,
-//RS         profile_id: &str,
-//RS         block: &str,
-//RS         register: &str,
-//RS     ) -> String {
-//RS         mangle_path(&format!(
-//RS             "hardware_register_{operation}.{profile_id}.{block}.{register}"
-//RS         ))
-//RS     }
-//RS 
-//RS     fn emit_hardware_register_helpers(
-//RS         &self,
-//RS         out: &mut String,
-//RS         profile: &jet_foundation::TargetMachine::TargetHardwareFacts,
-//RS     ) {
-//RS         let profile_id = self.program.facts.hardware_profile_id.as_str();
-//RS         for (block_index, block) in profile.register_blocks.iter().enumerate() {
-//RS             for (register_index, register) in block.registers.iter().enumerate() {
-//RS                 if register.access.can_read() {
-//RS                     self.emit_hardware_register_helper(
-//RS                         out,
-//RS                         profile_id,
-//RS                         block_index,
-//RS                         register_index,
-//RS                         block,
-//RS                         register,
-//RS                         "read",
-//RS                     );
-//RS                 }
-//RS                 if register.access.can_write() {
-//RS                     self.emit_hardware_register_helper(
-//RS                         out,
-//RS                         profile_id,
-//RS                         block_index,
-//RS                         register_index,
-//RS                         block,
-//RS                         register,
-//RS                         "write",
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_hardware_register_helper(
-//RS         &self,
-//RS         out: &mut String,
-//RS         profile_id: &str,
-//RS         block_index: usize,
-//RS         _register_index: usize,
-//RS         block: &jet_foundation::TargetMachine::TargetRegisterBlockFact,
-//RS         register: &jet_foundation::TargetMachine::TargetRegisterFact,
-//RS         operation: &str,
-//RS     ) {
-//RS         let root = &self.config.root_prefix;
-//RS         let name =
-//RS             self.hardware_register_helper_name(operation, profile_id, &block.name, &register.name);
-//RS         let (value_type, width) = match register.width {
-//RS             jet_foundation::TargetMachine::RegisterWidth::U8 => ("u8", 1u64),
-//RS             jet_foundation::TargetMachine::RegisterWidth::U16 => ("u16", 2u64),
-//RS             jet_foundation::TargetMachine::RegisterWidth::U32 => ("u32", 4u64),
-//RS             jet_foundation::TargetMachine::RegisterWidth::U64 => ("u64", 8u64),
-//RS         };
-//RS         let access_type = match register.access {
-//RS             jet_foundation::TargetMachine::TargetRegisterAccessMode::ReadOnly => "JetReadOnly",
-//RS             jet_foundation::TargetMachine::TargetRegisterAccessMode::WriteOnly => "JetWriteOnly",
-//RS             jet_foundation::TargetMachine::TargetRegisterAccessMode::ReadWrite => "JetReadWrite",
-//RS         };
-//RS         let _ = writeln!(out, "#[inline]");
-//RS         if operation == "read" {
-//RS             let _ = writeln!(out, "fn {name}() -> i64 {{");
-//RS         } else {
-//RS             let _ = writeln!(out, "fn {name}(value: i64) -> i64 {{");
-//RS         }
-//RS         let _ = writeln!(out, "    #[cfg(target_os = \"none\")]");
-//RS         out.push_str("    {\n");
-//RS         let _ = writeln!(out, "        let __jet_block = {root}JetRegisterBlock::<{root}JetVolatileRegisterBackend>::new(");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "            &__JET_HARDWARE_VOLATILE_BACKEND, &__JET_HARDWARE_BLOCKS[{block_index}],"
-//RS         );
-//RS         out.push_str("        );\n");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "        let __jet_register = __jet_block.register::<{value_type}, {root}{access_type}, {}>({register:?})",
-//RS             register.volatile,
-//RS         );
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "            .unwrap_or_else(|_| panic!(\"hardware register {}.{} has inconsistent generated facts\"));",
-//RS             block.name,
-//RS             register.name,
-//RS         );
-//RS         if operation == "read" {
-//RS             out.push_str("        __jet_register.read() as i64\n");
-//RS         } else {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "        __jet_register.write(<{value_type} as {root}JetRegisterValue>::from_bits(value as u64));"
-//RS             );
-//RS             out.push_str("        0\n");
-//RS         }
-//RS         out.push_str("    }\n");
-//RS         let _ = writeln!(out, "    #[cfg(not(target_os = \"none\"))]");
-//RS         out.push_str("    {\n");
-//RS         if operation == "read" {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "        {root}jet_hardware_register_read_typed({profile_id:?}, {block:?}, {register:?}, {width}i64)"
-//RS             );
-//RS         } else {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "        {root}jet_hardware_register_write_typed({profile_id:?}, {block:?}, {register:?}, {width}i64, value)"
-//RS             );
-//RS         }
-//RS         out.push_str("    }\n");
-//RS         out.push_str("}\n\n");
-//RS     }
-//RS 
-//RS     fn has_hardware_interrupts(&self) -> bool {
-//RS         self.program
-//RS             .facts
-//RS             .hardware_setups
-//RS             .iter()
-//RS             .any(|setup| matches!(setup, MirHardwareSetup::InterruptBind { .. }))
-//RS     }
-//RS 
-//RS     fn interrupt_handler_function(&self, handler_symbol: &str) -> &MirFunction {
-//RS         let mut functions = self
-//RS             .program
-//RS             .functions
-//RS             .iter()
-//RS             .filter(|function| function.key == handler_symbol);
-//RS         let function = functions.next().unwrap_or_else(|| {
-//RS             panic!("MIR interrupt handler `{handler_symbol}` has no function row")
-//RS         });
-//RS         if functions.next().is_some() {
-//RS             panic!("MIR interrupt handler `{handler_symbol}` resolves to multiple function rows");
-//RS         }
-//RS         if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS             panic!("MIR interrupt handler `{handler_symbol}` targets an unselected function");
-//RS         }
-//RS         if !matches!(&function.form, MirFunctionForm::TopLevel)
-//RS             || !function.generic_params.is_empty()
-//RS             || !function.capture_params.is_empty()
-//RS             || !function.params.is_empty()
-//RS             || !function.return_type.is_unit()
-//RS             || !matches!(&function.failure, MirFailureCarrier::Infallible)
-//RS             || function.generator.is_some()
-//RS             || function.is_unsafe
-//RS         {
-//RS             panic!(
-//RS                 "MIR interrupt handler `{handler_symbol}` must have a capture-free zero-argument Unit ABI"
-//RS             );
-//RS         }
-//RS         function
-//RS     }
-//RS 
-//RS     fn emit_hardware_interrupt_runtime(&self, out: &mut String) {
-//RS         if !self.has_hardware_interrupts() {
-//RS             return;
-//RS         }
-//RS         let root = &self.config.root_prefix;
-//RS         for (setup_index, setup) in self.program.facts.hardware_setups.iter().enumerate() {
-//RS             let MirHardwareSetup::InterruptBind { handler_symbol, .. } = setup else {
-//RS                 continue;
-//RS             };
-//RS             let function = self.interrupt_handler_function(handler_symbol);
-//RS             let handler = self.function_name(function.id);
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "extern \"C\" fn __jet_hardware_interrupt_trampoline_{setup_index}() {{"
-//RS             );
-//RS             let _ = writeln!(out, "    {handler}();");
-//RS             out.push_str("}\n\n");
-//RS         }
-//RS         if self.is_no_os() {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "static mut __JET_HARDWARE_INTERRUPT_REGISTRY: {root}JetHardwareInterruptRegistry = {root}JetHardwareInterruptRegistry::new();"
-//RS             );
-//RS             out.push_str(
-//RS                 "static __JET_HARDWARE_INTERRUPT_REGISTRY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);\n",
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "fn __jet_hardware_registry() -> &'static {root}JetHardwareInterruptRegistry {{"
-//RS             );
-//RS             out.push_str(
-//RS                 "    if !__JET_HARDWARE_INTERRUPT_REGISTRY_READY.swap(true, core::sync::atomic::Ordering::AcqRel) {\n",
-//RS             );
-//RS             out.push_str("        unsafe {\n");
-//RS             out.push_str(
-//RS                 "            let __jet_hardware_registry = &mut *core::ptr::addr_of_mut!(__JET_HARDWARE_INTERRUPT_REGISTRY);\n",
-//RS             );
-//RS             for (setup_index, setup) in self.program.facts.hardware_setups.iter().enumerate() {
-//RS                 let MirHardwareSetup::InterruptBind { vector, .. } = setup else {
-//RS                     continue;
-//RS                 };
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "            if !__jet_hardware_registry.register({vector}u16, {root}JetHardwareInterruptHandler {{ fn_ptr: __jet_hardware_interrupt_trampoline_{setup_index} as usize as i64, env: 0, has_env: false }}) {{"
-//RS                 );
-//RS                 out.push_str(
-//RS                     "                panic!(\"duplicate MIR hardware interrupt vector binding\");\n            }\n",
-//RS                 );
-//RS             }
-//RS             out.push_str("        }\n    }\n");
-//RS             out.push_str(
-//RS                 "    unsafe { &*core::ptr::addr_of!(__JET_HARDWARE_INTERRUPT_REGISTRY) }\n}\n\n",
-//RS             );
-//RS             let _ = writeln!(out, "#[inline]");
-//RS             let _ = writeln!(out, "fn __jet_hardware_poll() {{");
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    let __jet_hardware_registry = __jet_hardware_registry();"
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    if !{root}jet_hardware_has_pending() {{ return; }}"
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    let __jet_hardware_callbacks = {root}jet_hardware_dispatch_pending(__jet_hardware_registry);"
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    {root}jet_hardware_invoke_pending(__jet_hardware_callbacks);"
-//RS             );
-//RS             out.push_str("}\n");
-//RS             return;
-//RS         }
-//RS 
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "static __JET_HARDWARE_INTERRUPT_REGISTRY: std::sync::LazyLock<{root}JetHardwareInterruptRegistry> = std::sync::LazyLock::new(|| {{"
-//RS         );
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "    let mut __jet_hardware_registry = {root}JetHardwareInterruptRegistry::default();"
-//RS         );
-//RS         for (setup_index, setup) in self.program.facts.hardware_setups.iter().enumerate() {
-//RS             let MirHardwareSetup::InterruptBind { vector, .. } = setup else {
-//RS                 continue;
-//RS             };
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    if !__jet_hardware_registry.register({vector}u16, {root}JetHardwareInterruptHandler {{ fn_ptr: __jet_hardware_interrupt_trampoline_{setup_index} as usize as i64, env: 0, has_env: false }}) {{"
-//RS             );
-//RS             out.push_str(
-//RS                 "        panic!(\"duplicate MIR hardware interrupt vector binding\");\n    }\n",
-//RS             );
-//RS         }
-//RS         out.push_str("    __jet_hardware_registry\n});\n\n");
-//RS         let _ = writeln!(out, "#[inline]");
-//RS         let _ = writeln!(out, "fn __jet_hardware_poll() {{");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "    if !{root}jet_hardware_has_pending() {{ return; }}"
-//RS         );
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "    let __jet_hardware_callbacks = {root}jet_hardware_dispatch_pending(&*__JET_HARDWARE_INTERRUPT_REGISTRY);"
-//RS         );
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "    {root}jet_hardware_invoke_pending(__jet_hardware_callbacks);"
-//RS         );
-//RS         out.push_str("}\n");
-//RS     }
-//RS 
-//RS     fn emit_hardware_setups(&self, out: &mut String, indent: &str) {
-//RS         let root = &self.config.root_prefix;
-//RS         if self.is_no_os() {
-//RS             // Interrupt bindings are installed by the fixed no-OS registry
-//RS             // emitted above. DMA needs a target-owned mapping/provider ABI;
-//RS             // fail explicitly rather than linking a hosted replay bridge or a
-//RS             // success-shaped no-op.
-//RS             for setup in &self.program.facts.hardware_setups {
-//RS                 if matches!(setup, MirHardwareSetup::DmaConfigure { .. }) {
-//RS                     let _ = writeln!(
-//RS                         out,
-//RS                         "{indent}{root}jet_target_failure_bytes(b\"DMA setup requires a target provider\", -1);"
-//RS                     );
-//RS                 }
-//RS             }
-//RS             return;
-//RS         }
-//RS 
-//RS         for setup in &self.program.facts.hardware_setups {
-//RS             let call = match setup {
-//RS                 MirHardwareSetup::DmaConfigure {
-//RS                     profile_id,
-//RS                     channel,
-//RS                     transfer_width,
-//RS                     ownership,
-//RS                 } => format!(
-//RS                     "{root}jet_hardware_setup_typed({profile_id:?}, {root}JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME, {channel:?}, {}i64, {:?})",
-//RS                     transfer_width.bytes(),
-//RS                     ownership.as_str(),
-//RS                 ),
-//RS                 MirHardwareSetup::InterruptBind {
-//RS                     profile_id,
-//RS                     interrupt,
-//RS                     vector,
-//RS                     handler_symbol,
-//RS                     forbidden_effects: _,
-//RS                 } => format!(
-//RS                     "{root}jet_hardware_setup_typed({profile_id:?}, {root}JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME, {interrupt:?}, {}i64, {handler_symbol:?})",
-//RS                     vector
-//RS                 ),
-//RS             };
-//RS             let _ = writeln!(out, "{indent}let _ = {call};");
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_entry(&self, out: &mut String) {
-//RS         // JS owns the loader, but a checked Wasm entry remains Wasm code.
-//RS         if self.config.target_kind == MirRustTarget::WebWasm {
-//RS             let Some(entry) = &self.artifact.entry else {
-//RS                 return;
-//RS             };
-//RS             let Some(function_id) = entry.function else {
-//RS                 return;
-//RS             };
-//RS             let function = self.function_row(function_id);
-//RS             if function.web_bucket == Some(jet_foundation::WebPartition::WebBucket::JS) {
-//RS                 return;
-//RS             }
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 panic!("MIR Web entry function is not selected for this artifact");
-//RS             }
-//RS             let web_cli_argument = entry
-//RS                 .cli
-//RS                 .as_ref()
-//RS                 .and_then(|cli| self.cli_web_record_argument(function, cli));
-//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS                 || !function.capture_params.is_empty()
-//RS                 || (!function.params.is_empty() && web_cli_argument.is_none())
-//RS             {
-//RS                 panic!("MIR Web entry has no checked zero-argument invocation");
-//RS             }
-//RS             let root = &self.config.root_prefix;
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "#[no_mangle]\npub extern \"C\" fn jet_entry_{}() {{\n    jet_wasm_error_clear();",
-//RS                 function.id.0,
-//RS             );
-//RS             if entry.initialize_environment {
-//RS                 let _ = writeln!(out, "    {root}jet_std_env_init();");
-//RS             }
-//RS             if entry.initialize_gc {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());",
-//RS                 );
-//RS             }
-//RS             let call = web_cli_argument.map_or_else(
-//RS                 || format!("{}()", self.function_name(function.id)),
-//RS                 |args| format!("{}({args})", self.function_name(function.id)),
-//RS             );
-//RS             out.push_str(&self.entry_invoke(function, &call, entry.output, false, false, "    "));
-//RS             out.push_str("}\n\n");
-//RS             return;
-//RS         }
-//RS         let Some(entry) = &self.artifact.entry else {
-//RS             return;
-//RS         };
-//RS         let service = match entry.kind {
-//RS             MirEntryKind::Library
-//RS             | MirEntryKind::Command
-//RS             | MirEntryKind::App
-//RS             | MirEntryKind::Test => false,
-//RS             MirEntryKind::Service => true,
-//RS         };
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "// jet-mir-entry: kind={:?} output={:?} version={} init_env={} init_gc={} serves_until_stopped={}",
-//RS             entry.kind,
-//RS             entry.output,
-//RS             entry.package_version,
-//RS             entry.initialize_environment,
-//RS             entry.initialize_gc,
-//RS             entry.serves_until_stopped
-//RS         );
-//RS         if let Some(cli) = &entry.cli {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "// jet-mir-cli: standard={} description={:?}",
-//RS                 cli.standard, cli.description
-//RS             );
-//RS             for input in &cli.inputs {
-//RS                 self.emit_cli_input_metadata(input, out);
-//RS             }
-//RS             for command in &cli.commands {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "// jet-mir-cli-command: name={} description={:?} receiver={:?}",
-//RS                     command.name, command.description, command.receiver
-//RS                 );
-//RS                 let function = self.function_row(command.function);
-//RS                 if !self.module_selected(function.module_id) || !self.selected_for_target(function)
-//RS                 {
-//RS                     panic!(
-//RS                         "MIR CLI command {:?} targets an unselected function",
-//RS                         command.name
-//RS                     );
-//RS                 }
-//RS                 for input in &command.inputs {
-//RS                     self.emit_cli_input_metadata(input, out);
-//RS                 }
-//RS             }
-//RS         }
-//RS         if matches!(entry.kind, MirEntryKind::Library) {
-//RS             return;
-//RS         }
-//RS         let root = &self.config.root_prefix;
-//RS         let mut generated = String::new();
-//RS         if self.is_no_os() {
-//RS             generated.push_str("#[no_mangle]\npub extern \"C\" fn __jet_program_entry() {\n");
-//RS         } else {
-//RS             generated.push_str("fn main() {\n");
-//RS         }
-//RS         let has_hardware_host = self.program.facts.hardware_profile.is_some() && !self.is_no_os();
-//RS         if !self.artifact.jobs.is_empty() {
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    let _jet_job_registry = {root}jet_job_register_specs(__JET_JOB_SPECS);"
-//RS             );
-//RS         }
-//RS         if has_hardware_host {
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    let mut __jet_hardware_host = {root}JetHardwareReplayHost::new(__JET_HARDWARE_FACTS);"
-//RS             );
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    let _jet_hardware_facts_scope = {root}jet_hardware_facts_scope(&__JET_HARDWARE_FACTS);"
-//RS             );
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    {root}jet_hardware_with_host(&mut __jet_hardware_host, || {{"
-//RS             );
-//RS         }
-//RS         self.emit_hardware_setups(&mut generated, "    ");
-//RS         if self.has_hardware_interrupts() {
-//RS             let _ = writeln!(generated, "    __jet_hardware_poll();");
-//RS         }
-//RS         if entry.initialize_environment {
-//RS             let _ = writeln!(generated, "    {root}jet_std_env_init();");
-//RS         }
-//RS         if entry.initialize_gc {
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());"
-//RS             );
-//RS         }
-//RS         let needs_argv = !self.artifact.jobs.is_empty() || entry.cli.is_some();
-//RS         if needs_argv {
-//RS             let _ = writeln!(generated, "    let __argv = {root}jet_std_io_args();");
-//RS             if !self.artifact.jobs.is_empty() {
-//RS                 let _ = writeln!(
-//RS                     generated,
-//RS                     "    if __jet_job_dispatch(&__argv, {service}) {{ return; }}"
-//RS                 );
-//RS             }
-//RS         }
-//RS         if matches!(entry.kind, MirEntryKind::Test) && self.artifact.harness.is_some() {
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    {root}jet_runtime_boundary(|| {{ if !__jet_harness_run() {{ std::process::exit(1); }} }});"
-//RS             );
-//RS         } else if let Some(cli) = &entry.cli {
-//RS             let program = format!(
-//RS                 "&{root}jet_args_source_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"))"
-//RS             );
-//RS             let mut spec = self.cli_spec_expr(
-//RS                 &cli.inputs,
-//RS                 cli.description.as_deref(),
-//RS                 cli.standard,
-//RS                 cli.standard.then_some(entry.package_version.as_str()),
-//RS                 &program,
-//RS             );
-//RS             // Each command keeps its own spec, named `<program> <command>`, so
-//RS             // `<command> --help` prints that command's options (the JIT builds
-//RS             // the same per-command spec).
-//RS             let mut command_specs = Vec::with_capacity(cli.commands.len());
-//RS             for (index, command) in cli.commands.iter().enumerate() {
-//RS                 let command_program = format!(
-//RS                     "&{root}jet_args_source_program_name(&format!(\"{{}} {{}}\", {program}, {name:?}))",
-//RS                     name = command.name
-//RS                 );
-//RS                 let command_spec = self.cli_spec_expr(
-//RS                     &command.inputs,
-//RS                     command.description.as_deref(),
-//RS                     false,
-//RS                     None,
-//RS                     &command_program,
-//RS                 );
-//RS                 let binding = format!("__jet_command_spec_{index}");
-//RS                 let _ = writeln!(generated, "    let {binding} = {command_spec};");
-//RS                 spec = format!(
-//RS                     "{root}jet_args_subcommand({spec}, &{:?}.to_string(), &{:?}.to_string(), {binding}.clone())",
-//RS                     command.name,
-//RS                     command.description.clone().unwrap_or_default()
-//RS                 );
-//RS                 command_specs.push((command.name.as_str(), binding));
-//RS             }
-//RS             let _ = writeln!(generated, "    let __spec = {spec};");
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    let __argv = match {root}jet_args_guided_argv_tui(&__spec, &__argv) {{ Ok(__guided) => __guided, Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }} }};"
-//RS             );
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "    match {root}jet_args_parse(&__spec, &__argv) {{"
-//RS             );
-//RS             let _ = writeln!(generated, "        Ok(__parsed) => {{");
-//RS             let help_text = if command_specs.is_empty() {
-//RS                 "__spec.help()".to_string()
-//RS             } else {
-//RS                 let arms: String = command_specs
-//RS                     .iter()
-//RS                     .map(|(name, binding)| format!("Some({name:?}) => {binding}.help(), "))
-//RS                     .collect();
-//RS                 format!(
-//RS                     "match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{ {arms}_ => __spec.help() }}"
-//RS                 )
-//RS             };
-//RS             let _ = writeln!(
-//RS                 generated,
-//RS                 "            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&{help_text})); return; }}"
-//RS             );
-//RS             if cli.standard {
-//RS                 let _ = writeln!(
-//RS                     generated,
-//RS                     "            if {root}jet_parsed_flag(&__parsed, &\"version\".to_string()) {{ println!({:?}); return; }}",
-//RS                     entry.package_version
-//RS                 );
-//RS             }
-//RS             if cli.commands.is_empty() {
-//RS                 let function_id = entry
-//RS                     .function
-//RS                     .unwrap_or_else(|| panic!("MIR CLI entry has no function row"));
-//RS                 let function = self.function_row(function_id);
-//RS                 if !self.module_selected(function.module_id) || !self.selected_for_target(function)
-//RS                 {
-//RS                     panic!("MIR entry function is not selected for this artifact");
-//RS                 }
-//RS                 generated.push_str(&self.cli_decode_and_invoke(
-//RS                     function,
-//RS                     &cli.inputs,
-//RS                     cli.record_inputs,
-//RS                     None,
-//RS                     entry.output,
-//RS                     entry.serves_until_stopped,
-//RS                     service,
-//RS                     "            ",
-//RS                 ));
-//RS             } else {
-//RS                 let _ = writeln!(
-//RS                     generated,
-//RS                     "            match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{"
-//RS                 );
-//RS                 for command in &cli.commands {
-//RS                     let function = self.function_row(command.function);
-//RS                     generated
-//RS                         .push_str(&format!("                Some({:?}) => {{\n", command.name));
-//RS                     generated.push_str(&self.cli_decode_and_invoke(
-//RS                         function,
-//RS                         &command.inputs,
-//RS                         false,
-//RS                         command.receiver.map(|_| cli.inputs.as_slice()),
-//RS                         entry.output,
-//RS                         entry.serves_until_stopped,
-//RS                         service,
-//RS                         "                    ",
-//RS                     ));
-//RS                     generated.push_str("                }\n");
-//RS                 }
-//RS                 // A bare invocation of a command program asks what it can do:
-//RS                 // print the root command list and exit 0, the same as the JIT
-//RS                 // and interpreter tiers. `run` is not a hidden default command.
-//RS                 let _ = writeln!(
-//RS                     generated,
-//RS                     "                None => {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}"
-//RS                 );
-//RS                 generated.push_str(
-//RS                     "                Some(__other) => { eprintln!(\"unknown command: {}\", __other); std::process::exit(2); }\n            }\n",
-//RS                 );
-//RS             }
-//RS             generated.push_str("        }\n");
-//RS             generated.push_str(&format!(
-//RS                 "        Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n"
-//RS             ));
-//RS         } else {
-//RS             let function_id = entry
-//RS                 .function
-//RS                 .unwrap_or_else(|| panic!("MIR executable entry has no function row"));
-//RS             let function = self.function_row(function_id);
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 panic!("MIR entry function is not selected for this artifact");
-//RS             }
-//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS                 || !function.capture_params.is_empty()
-//RS                 || !function.params.is_empty()
-//RS             {
-//RS                 panic!("MIR entry function has no checked CLI decoder row");
-//RS             }
-//RS             let call = format!("{}()", self.function_name(function.id));
-//RS             generated.push_str(&self.entry_invoke(
-//RS                 function,
-//RS                 &call,
-//RS                 entry.output,
-//RS                 entry.serves_until_stopped,
-//RS                 service,
-//RS                 "    ",
-//RS             ));
-//RS         }
-//RS         if has_hardware_host {
-//RS             generated.push_str("    });\n");
-//RS         }
-//RS         generated.push_str("}\n\n");
-//RS         out.push_str(&generated);
-//RS     }
-//RS 
-//RS     fn emit_jobs(&self, out: &mut String) {
-//RS         let root = &self.config.root_prefix;
-//RS         for job_id in &self.artifact.jobs {
-//RS             let job = self
-//RS                 .program
-//RS                 .jobs
-//RS                 .iter()
-//RS                 .find(|job| job.id == *job_id)
-//RS                 .unwrap_or_else(|| panic!("MIR job ID {:?} has no row", job_id));
-//RS             let function = self.function_row(job.function);
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 panic!("MIR job {:?} targets an unselected function", job.name);
-//RS             }
-//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS                 || !function.capture_params.is_empty()
-//RS             {
-//RS                 panic!(
-//RS                     "MIR job {:?} requires a top-level non-capturing function",
-//RS                     job.name
-//RS                 );
-//RS             }
-//RS             let wrapper = format!("__jet_job_{}", job.id.0);
-//RS             let validator = format!("__jet_job_validate_{}", job.id.0);
-//RS             let record_inputs = self.job_record_inputs(function, job);
-//RS             if job.inputs.is_empty() {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "fn {validator}(__argv: &[String]) -> Result<(), String> {{ if __argv.is_empty() {{ Ok(()) }} else {{ Err(\"job takes no arguments\".to_string()) }} }}"
-//RS                 );
-//RS             } else {
-//RS                 let validator_spec =
-//RS                     self.cli_spec_expr(&job.inputs, Some(&job.name), false, None, "\"job\"");
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "fn {validator}(__argv: &[String]) -> Result<(), String> {{ let mut __job_argv = vec![\"job\".to_string()]; __job_argv.extend_from_slice(__argv); let __spec = {validator_spec}; match {root}jet_args_parse(&__spec, &__job_argv) {{ Ok(_) => Ok(()), Err(__e) => Err(__e) }} }}"
-//RS                 );
-//RS             }
-//RS             let _ = writeln!(out, "fn {wrapper}(__program: &str, __argv: &[String]) {{");
-//RS             if job.inputs.is_empty() {
-//RS                 if !function.params.is_empty() {
-//RS                     panic!(
-//RS                         "MIR job {:?} has parameters but no checked input rows",
-//RS                         job.name
-//RS                     );
-//RS                 }
-//RS                 let call = format!("{}()", self.function_name(function.id));
-//RS                 out.push_str(&self.entry_invoke(
-//RS                     function,
-//RS                     &call,
-//RS                     MirEntryOutput::None,
-//RS                     false,
-//RS                     false,
-//RS                     "    ",
-//RS                 ));
-//RS             } else {
-//RS                 let program = "__program";
-//RS                 let spec = self.cli_spec_expr(&job.inputs, Some(&job.name), false, None, program);
-//RS                 let _ = writeln!(out, "    let mut __job_argv = vec![__program.to_string()];");
-//RS                 let _ = writeln!(out, "    __job_argv.extend_from_slice(__argv);");
-//RS                 let _ = writeln!(out, "    let __spec = {spec};");
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    match {root}jet_args_parse(&__spec, &__job_argv) {{\n        Ok(__parsed) => {{"
-//RS                 );
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}"
-//RS                 );
-//RS                 out.push_str(&self.cli_decode_and_invoke(
-//RS                     function,
-//RS                     &job.inputs,
-//RS                     record_inputs,
-//RS                     None,
-//RS                     MirEntryOutput::None,
-//RS                     false,
-//RS                     false,
-//RS                     "            ",
-//RS                 ));
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "        }}\n        Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}"
-//RS                 );
-//RS             }
-//RS             let _ = writeln!(out, "}}\n");
-//RS             if function.params.len() == 1 && (record_inputs || job.inputs.len() == 1) {
-//RS                 let queue_wrapper = format!("__jet_job_queue_{}", job.id.0);
-//RS                 let param = &function.params[0];
-//RS                 let payload_rust = self.rust_type(&param.ty);
-//RS                 // The decoded payload is an owned local; pass it with the
-//RS                 // checked parameter convention, as every other call does.
-//RS                 let (binding, argument) = match param.access {
-//RS                     MirAccess::Write => ("let mut __value", "&mut __value"),
-//RS                     MirAccess::Read if self.parameter_borrowed(param) => {
-//RS                         ("let __value", "&__value")
-//RS                     }
-//RS                     MirAccess::Read | MirAccess::Move => ("let __value", "__value"),
-//RS                 };
-//RS                 let result_encoding = if function.return_type.is_unit() {
-//RS                     format!(
-//RS                         "    {}({argument});\n\
-//RS                          Ok({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }})\n",
-//RS                         self.function_name(function.id)
-//RS                     )
-//RS                 } else {
-//RS                     match function.return_type.kind() {
-//RS                         MirTypeKind::Result { ok, .. } => {
-//RS                             let ok_type = ok.display_name();
-//RS                             format!(
-//RS                                 "    let __job_result = {}({argument});\n\
-//RS                                  match __job_result {{\n\
-//RS                                      Ok(__ok) => {{\n\
-//RS                                          let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{\n\
-//RS                                              Ok(__bytes) => __bytes,\n\
-//RS                                              Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
-//RS                                          }};\n\
-//RS                                          Ok({root}JetJobResult {{ type_id: {:?}.to_string(), bytes: __bytes, publish: false }})\n\
-//RS                                      }}\n\
-//RS                                  }}\n",
-//RS                                 self.function_name(function.id),
-//RS                                 ok_type
-//RS                             )
-//RS                         }
-//RS                         _ => {
-//RS                             let result_type = function.return_type.display_name();
-//RS                             format!(
-//RS                                 "    let __job_result = {}({argument});\n\
-//RS                                  let __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__job_result) {{\n\
-//RS                                      Ok(__bytes) => __bytes,\n\
-//RS                                      Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n\
-//RS                                  }};\n\
-//RS                                  Ok({root}JetJobResult {{ type_id: {:?}.to_string(), bytes: __bytes, publish: false }})\n",
-//RS                                 self.function_name(function.id),
-//RS                                 result_type
-//RS                             )
-//RS                         }
-//RS                     }
-//RS                 };
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "fn {queue_wrapper}(__payload: &{root}JetJobPayload) -> Result<{root}JetJobResult, {root}JetJobError> {{"
-//RS                 );
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    let __bytes = __payload.bytes.clone();\n    {binding} = match {root}jet_enc_cbor_decode::<{payload_rust}>(&__bytes, {root}jet_std::CBOROptions::safe()) {{ Ok(__value) => __value, Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"decode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}), }};"
-//RS                 );
-//RS                 out.push_str(&result_encoding);
-//RS                 out.push_str("}\n\n");
-//RS             }
-//RS         }
-//RS         let _ = writeln!(out, "static __JET_JOB_SPECS: &[{root}JetJobSpec] = &[");
-//RS         for job_id in &self.artifact.jobs {
-//RS             let job = self
-//RS                 .program
-//RS                 .jobs
-//RS                 .iter()
-//RS                 .find(|job| job.id == *job_id)
-//RS                 .unwrap_or_else(|| panic!("MIR job ID {:?} has no row", job_id));
-//RS             let function = self.function_row(job.function);
-//RS             let scope = match job.scope {
-//RS                 MirJobScope::Dev => format!("{root}JetJobScope::Dev"),
-//RS                 MirJobScope::Ship => format!("{root}JetJobScope::Ship"),
-//RS                 MirJobScope::Internal => format!("{root}JetJobScope::Internal"),
-//RS             };
-//RS             let schedule = match job.schedule {
-//RS                 None => "None".to_string(),
-//RS                 Some(MirJobSchedule::Duration { nanos }) => {
-//RS                     format!("Some({root}JetJobSchedule::Duration {{ nanos: {nanos} }})")
-//RS                 }
-//RS                 Some(MirJobSchedule::WallClockTime { hour, minute }) => format!(
-//RS                     "Some({root}JetJobSchedule::WallClockTime {{ hour: {hour}, minute: {minute} }})"
-//RS                 ),
-//RS             };
-//RS             let dispatch = match job.dispatch {
-//RS                 MirJobDispatch::Direct => format!("{root}JetJobDispatch::Direct"),
-//RS                 MirJobDispatch::Spawn => format!("{root}JetJobDispatch::Spawn"),
-//RS                 MirJobDispatch::Scheduled => format!("{root}JetJobDispatch::Scheduled"),
-//RS             };
-//RS             let skip = match &job.skip {
-//RS                 None => "None".to_string(),
-//RS                 Some(MirJobSkip::Always(reason)) => {
-//RS                     format!("Some({root}JetJobSkip::Always({reason:?}))")
-//RS                 }
-//RS                 Some(MirJobSkip::UnlessPlatform(platform)) => {
-//RS                     format!("Some({root}JetJobSkip::UnlessPlatform({platform:?}))")
-//RS                 }
-//RS             };
-//RS             let cache = match job.cache {
-//RS                 MirJobCachePolicy::Uncached => format!("{root}JetJobCachePolicy::Uncached"),
-//RS                 MirJobCachePolicy::Local => format!("{root}JetJobCachePolicy::Local"),
-//RS                 MirJobCachePolicy::Shared => format!("{root}JetJobCachePolicy::Shared"),
-//RS             };
-//RS             let packages = format!(
-//RS                 "&[{}]",
-//RS                 job.packages
-//RS                     .iter()
-//RS                     .map(|package| format!("{package:?}"))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             );
-//RS             let input_paths = format!(
-//RS                 "&[{}]",
-//RS                 job.input_paths
-//RS                     .iter()
-//RS                     .map(|path| format!("{path:?}"))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             );
-//RS             let output_paths = format!(
-//RS                 "&[{}]",
-//RS                 job.output_paths
-//RS                     .iter()
-//RS                     .map(|path| format!("{path:?}"))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             );
-//RS             let limits = format!(
-//RS                 "&[{}]",
-//RS                 job.limits
-//RS                     .iter()
-//RS                     .map(|(name, value)| format!("({name:?}, {value:?})"))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             );
-//RS             let after = format!(
-//RS                 "&[{}]",
-//RS                 job.after
-//RS                     .iter()
-//RS                     .map(|dependency| format!("{dependency:?}"))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             );
-//RS             let working_directory = job
-//RS                 .working_directory
-//RS                 .as_ref()
-//RS                 .map(|directory| format!("Some({directory:?})"))
-//RS                 .unwrap_or_else(|| "None".to_string());
-//RS             let record_inputs = self.job_record_inputs(function, job);
-//RS             let queue_enabled =
-//RS                 function.params.len() == 1 && (record_inputs || job.inputs.len() == 1);
-//RS             let payload_type = if queue_enabled {
-//RS                 let payload = if record_inputs {
-//RS                     &function.params[0].ty
-//RS                 } else {
-//RS                     &job.inputs[0].ty
-// END-PORT-PENDING 2007 crates/jet-codegen/src/Codegen/MIRRust.rs:10801-12600
+use jet_foundation.MIR.*
+use jet_foundation.TargetMachine.[TargetHardwareFacts, TargetRegisterBlockFact, TargetRegisterFact, RegisterWidth, TargetRegisterAccessMode, TargetDmaOwnership]
+use jet_foundation.RingLayer.RuntimeLayer
+use jet_foundation.Syntax.[TYPE_ERR, TYPE_IO_ERROR]
+use jet_codegen.Generics.PRINTABLE
+use jet_codegen.Codegen.MIRRust.[RustEmitter, MirRustTarget, mangle_path, quote_rust_string]
 
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10842
+    fn emit_cli_input_metadata(self, input: &MirCliInput, out: &String) -> Unit {
+        shape :: if input.shape == {
+            .Flag -> "flag"
+            .Value(kind, optional, default) -> "value:{kind:?}:optional={optional}:default={default:?}"
+        }
+        out.push_str("// jet-mir-cli-input: parameter={input.parameter} name={input.name} label={input.label} type={self.rust_type(input.ty)} zone={input.zone:?} short={input.short:?} env={input.env:?} metavar={input.metavar:?} positional={input.positional:?} variadic={input.variadic} shape={shape}\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10867
+    fn cli_value_kind(self, kind: MirCliValueKind) -> String {
+        if kind == { .Bool | .String | .Path -> "String" .Int -> "Int" .Float -> "Float" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10875
+    fn cli_default_expr(self, default: MirCliDefault?, ty: &MirType) -> String {
+        if default == {
+            .None -> "None"
+            .Some(.TypeDefault) -> "Some((Default::default() as {self.rust_type(ty)}).jet_show())"
+            .Some(.Value(value)) -> "Some(({self.constant_for_type(value, ty)}).jet_show())"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10890
+    fn cli_spec_expr(self, inputs: &[MirCliInput], description: String?, standard: Bool, version: String?, program: &String) -> String {
+        root :: self.config.root_prefix
+        spec := "{root}jet_args_program({root}jet_args_spec(), {program})"
+        if description == .Some(description) { spec = "{root}jet_args_description({spec}, &{quote_rust_string(description)}.to_string())" }
+        if standard {
+            spec = "{root}jet_args_flag_short({spec}, &\"verbose\".to_string(), &\"v\".to_string(), &\"print extra detail\".to_string())"
+            spec = "{root}jet_args_flag_short({spec}, &\"quiet\".to_string(), &\"q\".to_string(), &\"suppress normal output\".to_string())"
+            spec = "{root}jet_args_option_choice({spec}, &\"color\".to_string(), &\"control terminal color\".to_string(), &\"MODE\".to_string(), &\"auto,always,never\".to_string())"
+            if version == .Some(version) { spec = "{root}jet_args_version({spec}, &{quote_rust_string(version)}.to_string())" }
+        }
+        for input in inputs {
+            if input.name.is_empty() || input.help.is_empty() { panic("MIR CLI input has no canonical name/help") }
+            name :: quote_rust_string(input.name)
+            help :: quote_rust_string(input.help)
+            if input.shape == {
+                .Flag -> {
+                    if !input.ty.is_bool() || input.variadic { panic("MIR CLI flag row is not a non-variadic Bool") }
+                    spec = if input.short == {
+                        .Some(short) -> "{root}jet_args_flag_short({spec}, &{name}.to_string(), &{quote_rust_string(short)}.to_string(), &{help}.to_string())"
+                        .None -> "{root}jet_args_flag({spec}, &{name}.to_string(), &{help}.to_string())"
+                    }
+                }
+                .Value(kind, optional, default) -> {
+                    metavar :: quote_rust_string(input.metavar.unwrap_or("VALUE"))
+                    default_expr :: self.cli_default_expr(default, input.ty)
+                    required :: !optional && default_expr == "None" && input.positional.is_none()
+                    value_kind :: self.cli_value_kind(kind)
+                    short :: input.short.map(fn(short) { "Some({quote_rust_string(short)}.to_string())" }).unwrap_or("None")
+                    env :: input.env.map(fn(env) { "Some({quote_rust_string(env)}.to_string())" }).unwrap_or("None")
+                    spec = "{root}jet_args_option_base({spec}, &{name}.to_string(), {short}, &{help}.to_string(), &{metavar}.to_string(), {default_expr}, {env}, {required}, {input.variadic}, {root}JetArgValueKind::{value_kind})"
+                    if input.positional.is_some() { spec = "{root}jet_args_positional({spec}, &{name}.to_string(), &{help}.to_string())" }
+                }
+            }
+        }
+        spec
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10975
+    fn cli_scalar_expr(self, input: &MirCliInput, raw: &String) -> String {
+        root :: self.config.root_prefix
+        kind :: if input.shape == { .Value(kind, _, _) -> kind _ -> panic("MIR CLI scalar decoder received a flag row") }
+        name :: quote_rust_string(input.name)
+        if kind == {
+            .Bool -> "match {raw}.to_ascii_lowercase().as_str() {{ \"true\" => true, \"false\" => false, _ => return Err(format!(\"invalid value for --{{}}: `{{}}` is not true or false\\n\\n{{}}\", {name}, {raw}, __spec.help())) }}"
+            .Int -> if input.ty.kind() == {
+                .Int -> "match {root}jet_std::jet_int_owned_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {name}, {raw}, __spec.help())) }}"
+                .IntN(_, _) -> "(match {root}jet_std::jet_int_from_str(&{raw}) {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {name}, {raw}, __spec.help())) }}) as {self.rust_type(input.ty)}"
+                .InlineRange(_, lo, hi) -> "match {root}jet_inline_range_from_int(match {raw}.parse::<i64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a whole number\\n\\n{{}}\", {name}, {raw}, __spec.help())) }}, {lo}, {hi}) {{ Ok(__n) => __n, Err(__reason) => return Err(format!(\"invalid value for --{{}}: {{}}\\n\\n{{}}\", {name}, __reason, __spec.help())) }}"
+                .Tagged(_, inner) | .Quantity(_, inner) -> {
+                    nested := input.clone()
+                    nested.ty = inner.clone()
+                    self.cli_scalar_expr(&nested, raw)
+                }
+                .Float | .Bool | .String | .Char | .List(_) | .Map(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_) | .SendFn(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .Float32 | .Union(_) | .Measure(_) -> panic("MIR CLI Int row has a non-integer checked type")
+            }
+            .Float -> if input.ty.kind() == {
+                .Float -> "match {raw}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {name}, {raw}, __spec.help())) }}"
+                .Float32 -> "(match {raw}.parse::<f64>() {{ Ok(__n) => __n, Err(_) => return Err(format!(\"invalid value for --{{}}: `{{}}` is not a number\\n\\n{{}}\", {name}, {raw}, __spec.help())) }}) as f32"
+                .Int | .IntN(_, _) | .Bool | .String | .Char | .List(_) | .Map(_, _) | .Shared(_) | .Option(_) | .Result(_, _) | .Fn(_) | .SendFn(_, _) | .Apply(_, _) | .TraitObject(_) | .Tuple(_) | .FixedList(_, _) | .InlineRange(_, _, _) | .Tagged(_, _) | .Quantity(_, _) | .Union(_) | .Measure(_) -> panic("MIR CLI Float row has a non-floating checked type")
+            }
+            .String -> {
+                if input.ty.kind() != MirTypeKind.String { panic("MIR CLI String row has a non-String checked type") }
+                "{raw}.clone()"
+            }
+            .Path -> {
+                if input.ty.nominal_name() != Some("Path") { panic("MIR CLI Path row has a non-Path checked type") }
+                "{root}jet_path_from(&{raw})"
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11074
+    fn cli_scalar_result_expr(self, input: &MirCliInput, raw: &String) -> String { "Ok({self.cli_scalar_expr(input, raw)})" }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11078
+    fn cli_decode_lines(self, inputs: &[MirCliInput], indent: USize, prefix: &String) -> String {
+        root :: self.config.root_prefix
+        pad :: " ".repeat(indent)
+        lines := String.new()
+        for input in inputs {
+            variable :: "{prefix}{input.parameter}"
+            name :: quote_rust_string(input.name)
+            if input.shape == {
+                .Flag -> {
+                    if !input.ty.is_bool() { panic("MIR CLI flag decoder has a non-Bool type") }
+                    lines.push_str("{pad}let {variable}: bool = {root}jet_parsed_flag(&__parsed, &{name}.to_string());\n")
+                }
+                .Value(_, _, _) if input.variadic -> {
+                    inner :: if input.ty.kind() == { .List(inner) -> inner _ -> panic("MIR variadic CLI input must have a List type") }
+                    element_ty :: self.rust_type(inner)
+                    scalar_input := input.clone()
+                    scalar_input.ty = inner.clone()
+                    result :: self.cli_scalar_result_expr(&scalar_input, "__v")
+                    lines.push_str("{pad}let {variable}: Vec<{element_ty}> = match {root}jet_parsed_options(&__parsed, &{name}.to_string()).into_iter().map(|__v| {result}).collect::<Result<Vec<_>, String>>() {{ Ok(__v) => __v, Err(__e) => return Err(__e) }};\n")
+                }
+                .Value(_, true, _) -> {
+                    inner :: if input.ty.kind() == { .Option(inner) -> inner _ -> panic("MIR optional CLI input must have an Option type") }
+                    inner_ty :: self.rust_type(inner)
+                    scalar_input := input.clone()
+                    scalar_input.ty = inner.clone()
+                    value :: self.cli_scalar_expr(&scalar_input, "__v")
+                    lines.push_str("{pad}let {variable}: {root}JetOutcome<{inner_ty}, {root}JetAbsent> = match {root}jet_parsed_option(&__parsed, &{name}.to_string()) {{ Ok(__v) => Ok({value}), Err({root}JetAbsent) => Err({root}JetAbsent) }};\n")
+                }
+                .Value(_, false, default) -> {
+                    value :: self.cli_scalar_expr(input, "__v")
+                    fallback :: if default == {
+                        .None -> "return Err(format!(\"missing required argument --{{}}\\n\\n{{}}\", {name}, __spec.help()))"
+                        .Some(.TypeDefault) -> "Default::default()"
+                        .Some(.Value(value)) -> self.constant_for_type(value, input.ty)
+                    }
+                    ty :: self.rust_type(input.ty)
+                    lines.push_str("{pad}let {variable}: {ty} = match {root}jet_parsed_option(&__parsed, &{name}.to_string()) {{ Ok(__v) => {value}, Err(_) => {fallback} }};\n")
+                }
+            }
+        }
+        lines
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11151
+    fn cli_record_fields(self, ty: &MirType) -> [MirField]? {
+        if ty.identity == .Some(identity) {
+            if self.try_type_def(identity) == .Some(def) {
+                if def.kind == .Struct(fields, _) { return Some(fields) }
+            }
+        }
+        None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11159
+    // One #CLI record parameter carries its fields; one scalar carries itself.
+    fn job_record_inputs(self, function: &MirFunction, job: &MirJob) -> Bool {
+        if function.params.len() != 1 { return false }
+        fields_opt :: self.cli_record_fields(function.params[0].ty)
+        if fields_opt.is_none() { return false }
+        fields :: fields_opt.unwrap().iter().filter(fn(field) { !field.computed }).collect()
+        names := [String:Bool].new()
+        for input in job.inputs { names[input.name] = true }
+        fields.len() == job.inputs.len() && fields.iter().all(fn(field) { names.contains_key(field.name) || names.contains_key(field.shape_names.args) })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11178
+    fn cli_record_argument(self, function: &MirFunction, inputs: &[MirCliInput], render_input: fn(&MirCliInput) -> String) -> String {
+        fields :: self.cli_record_fields(function.params[0].ty).expect("MIR CLI record fields validated above")
+        by_name := [String:USize].new()
+        for (index, input) in inputs.iter().enumerate() { by_name.entry(input.name).or_insert(index) }
+        values := [String].new()
+        for field in fields {
+            if field.computed { continue }
+            // Preserve first matching input when both aliases are present.
+            first :: by_name.get(field.name)
+            second :: by_name.get(field.shape_names.args)
+            index :: if (first, second) == {
+                (.Some(a), .Some(b)) -> a.min(b)
+                (.Some(a), .None) -> a
+                (.None, .Some(b)) -> b
+                _ -> panic("MIR CLI record input validated above")
+            }
+            values.push("{self.field_name(field.id)}: {render_input(inputs[index])}")
+        }
+        record :: "{self.rust_type(function.params[0].ty)} {{ {values.join(", ")} }}"
+        if function.params[0].access == {
+            .Write -> "&mut {record}"
+            .Read if self.is_scalar(function.params[0].ty) -> record
+            .Read -> "&{record}"
+            .Move -> record
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11214
+    fn cli_web_default_argument(self, input: &MirCliInput) -> String? {
+        if input.shape == {
+            .Flag -> Some("false")
+            .Value(_, optional, default) -> if default == {
+                .Some(.TypeDefault) -> Some("Default::default()")
+                .Some(.Value(value)) -> Some(self.constant_for_type(value, input.ty))
+                .None if optional -> Some("Default::default()")
+                .None -> None
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11228
+    fn cli_web_record_argument(self, function: &MirFunction, cli: &MirCliEntry) -> String? {
+        if !cli.record_inputs || function.params.len() != 1 { return None }
+        fields_opt :: self.cli_record_fields(function.params[0].ty)
+        if fields_opt.is_none() { return None }
+        fields :: fields_opt.unwrap()
+        if fields.iter().filter(fn(field) { !field.computed }).count() != cli.inputs.len() { return None }
+        by_name := [String:USize].new()
+        for (index, input) in cli.inputs.iter().enumerate() { by_name.entry(input.name).or_insert(index) }
+        for field in fields {
+            if field.computed { continue }
+            first :: by_name.get(field.name)
+            second :: by_name.get(field.shape_names.args)
+            index :: if (first, second) == { (.Some(a), .Some(b)) -> a.min(b) (.Some(a), .None) -> a (.None, .Some(b)) -> b _ -> return None }
+            if self.cli_web_default_argument(cli.inputs[index]).is_none() { return None }
+        }
+        Some(self.cli_record_argument(function, cli.inputs, fn(input) { self.cli_web_default_argument(input).expect("MIR Web CLI record default validated above") }))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11249
+    // Receiver inputs decode the program record into self (or bound argument 0).
+    fn cli_decode_and_invoke(self, function: &MirFunction, inputs: &[MirCliInput], record_inputs: Bool, receiver_inputs: [MirCliInput]?, output: MirEntryOutput, serves_until_stopped: Bool, service: Bool, indent: &String) -> String {
+        valid :: if (function.form, receiver_inputs) == {
+            (.TopLevel, .None) -> true
+            (.TopLevel, .Some(_)) if !record_inputs && !function.params.is_empty() -> true
+            (.Method(_, _), .Some(_)) if !record_inputs && self.receiver_param(function).is_some() -> true
+            _ -> false
+        }
+        if !valid { panic("MIR CLI entry function {function.id:?} is neither a top-level callable nor a command method") }
+        program_param :: receiver_inputs.map(fn(_) { function.params[0].index })
+        if !function.capture_params.is_empty() { panic("MIR CLI entry function {function.id:?} has captures") }
+        if receiver_inputs == .Some(receiver_inputs) {
+            fields :: self.cli_record_fields(function.params[0].ty).unwrap_or_else(fn() { panic("MIR CLI command method {function.id:?} receiver is not a record") })
+            by_name := [String:[USize]].new()
+            for (index, field) in fields.iter().enumerate() {
+                if field.computed { continue }
+                by_name.entry(field.name).or_default().push(index)
+                if field.shape_names.args != field.name { by_name.entry(field.shape_names.args).or_default().push(index) }
+            }
+            for input in receiver_inputs {
+                present :: by_name.get(input.name).is_some_and(fn(indices) { indices.iter().any(fn(index) { fields[index].ty.same_checked_type(input.ty) }) })
+                if !present { panic("MIR CLI root input `{input.name}` is absent from command receiver {function.id:?}") }
+            }
+        }
+        seen_parameters := [USize:Bool].new()
+        for input in inputs {
+            if seen_parameters.contains_key(input.parameter) { panic("MIR CLI input parameter {input.parameter} is duplicated") }
+            seen_parameters[input.parameter] = true
+        }
+        if record_inputs {
+            if function.params.len() != 1 { panic("MIR CLI record entry function {function.id:?} must have one parameter") }
+            fields :: self.cli_record_fields(function.params[0].ty).unwrap_or_else(fn() { panic("MIR CLI record entry function {function.id:?} parameter is not a record") })
+            if fields.iter().filter(fn(field) { !field.computed }).count() != inputs.len() { panic("MIR CLI record input count disagrees with function {function.id:?}") }
+            by_name := [String:USize].new()
+            for (index, field) in fields.iter().enumerate() {
+                if field.computed { continue }
+                by_name.entry(field.name).or_insert(index)
+                by_name.entry(field.shape_names.args).or_insert(index)
+            }
+            for input in inputs {
+                index :: by_name.get(input.name).unwrap_or_else(fn() { panic("MIR CLI record input `{input.name}` is absent from function {function.id:?}") })
+                if !fields[index].ty.same_checked_type(input.ty) { panic("MIR CLI record input `{input.name}` type disagrees with function {function.id:?}") }
+            }
+        } else {
+            parameters := [USize:USize].new()
+            for (index, parameter) in function.params.iter().enumerate() { parameters.entry(parameter.index).or_insert(index) }
+            for input in inputs {
+                index :: parameters.get(input.parameter).unwrap_or_else(fn() { panic("MIR CLI input parameter {input.parameter} is absent from function {function.id:?}") })
+                if !function.params[index].ty.same_checked_type(input.ty) { panic("MIR CLI input parameter {input.parameter} type disagrees with function {function.id:?}") }
+            }
+            for parameter in function.params {
+                if program_param != Some(parameter.index) && !seen_parameters.contains_key(parameter.index) { panic("MIR CLI entry function {function.id:?} has no input row for parameter {parameter.index}") }
+            }
+        }
+        args :: if record_inputs {
+            self.cli_record_argument(function, inputs, fn(input) { "__jet_cli_{input.parameter}" })
+        } else {
+            function.params.iter().filter(fn(parameter) { program_param != Some(parameter.index) }).map(fn(parameter) { self.cli_argument(parameter) }).collect[[String]]().join(", ")
+        }
+        call :: if receiver_inputs == {
+            .Some(receiver_inputs) -> {
+                receiver :: self.cli_record_argument(function, receiver_inputs, fn(input) { "__jet_cli_self_{input.parameter}" })
+                if function.form == .Method(_, _) { "({receiver}).{self.rust_method_symbol(function)}({args})" }
+                else { separator :: if args.is_empty() { "" } else { ", " }; "{self.function_name(function.id)}({receiver}{separator}{args})" }
+            }
+            .None -> "{self.function_name(function.id)}({args})"
+        }
+        pad :: " ".repeat(indent.len() + 4)
+        decode := String.new()
+        if receiver_inputs == .Some(receiver_inputs) { decode.push_str(self.cli_decode_lines(receiver_inputs, indent.len() + 4, "__jet_cli_self_")) }
+        decode.push_str(self.cli_decode_lines(inputs, indent.len() + 4, "__jet_cli_"))
+        invoke :: self.entry_invoke(function, call, output, serves_until_stopped, service, pad)
+        root :: self.config.root_prefix
+        "{indent}let __jet_cli_result = (|| -> Result<(), String> {{\n{decode}{invoke}{pad}Ok(())\n{indent}}})();\n{indent}if let Err(__jet_error) = __jet_cli_result {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__jet_error)); std::process::exit(2); }}\n"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11426
+    fn cli_argument(self, parameter: &MirParam) -> String {
+        variable :: "__jet_cli_{parameter.index}"
+        if parameter.access == { .Write -> "&mut {variable}" .Read if self.is_scalar(parameter.ty) -> variable .Read -> "&{variable}" .Move -> variable }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11436
+    fn entry_error_exit(self, function: &MirFunction, error: &String, service: Bool) -> String {
+        error_ty :: if function.failure == {
+            .Result(_, ty) -> Some(ty)
+            .Optional(_) -> None
+            .Diverges(_) -> panic("MIR entry error edge requested for a diverging function")
+            .Infallible -> panic("MIR entry error edge requested for an infallible function")
+        }
+        is_jet_err :: error_ty.is_some_and(fn(ty) { ty.nominal_name() == Some(TYPE_ERR) })
+        // [FieldError] has no definition row; use its one Prelude projection.
+        field_errors :: error_ty.is_some_and(fn(ty) {
+            if ty.kind() == .List(inner) { if inner.kind() == .Apply(name, args) { return name.name == "FieldError" && args.is_empty() } }
+            false
+        })
+        has_jet_show :: !is_jet_err && (field_errors || error_ty.and_then(fn(ty) { ty.nominal_id().or(ty.identity) }).and_then(fn(id) { self.try_type_def(id) }).is_some_and(fn(def) { def.key == TYPE_IO_ERROR || def.auto_printable || self.selected_trait_impl_for_type(def, PRINTABLE) }))
+        root :: self.config.root_prefix
+        if self.config.target_kind == MirRustTarget.WebWasm {
+            return if is_jet_err { "{root}jet_wasm_store_error(&{error})" }
+            else if error_ty.is_none() { "{root}jet_wasm_store_error(&{root}jet_err_from_message(\"entry returned no value\".to_string()))" }
+            else if has_jet_show { "{root}jet_wasm_store_error(&{root}jet_err_from_message({root}jet_entry_error_text_show(&{error})))" }
+            else { "{root}jet_wasm_store_error(&{root}jet_err_from_message(format!(\"{{:?}}\", {error})))" }
+        }
+        if self.is_no_os() {
+            return if error_ty.is_none() { "{root}jet_entry_error_exit(\"entry returned no value\")" }
+            else if has_jet_show { "{root}jet_entry_error_exit({root}jet_entry_error_text_show(&{error}))" }
+            else { "{root}jet_entry_error_exit({error})" }
+        }
+        helper :: if service { if is_jet_err { "jet_service_edge_report_jet" } else { "jet_service_edge_report" } }
+        else if is_jet_err { "jet_entry_error_exit_jet" } else { "jet_entry_error_exit" }
+        if helper.ends_with("_jet") { "{root}{helper}({error})" }
+        else if error_ty.is_none() { "{root}{helper}(\"entry returned no value\".to_string())" }
+        else if has_jet_show { "{root}{helper}({root}jet_entry_error_text_show(&{error}))" }
+        else { "{root}{helper}(format!(\"{{:?}}\", {error}))" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11513
+    fn is_no_os(self) -> Bool { self.program.facts.target_dossier.machine.is_some_and(fn(machine) { machine.no_os }) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11521
+    fn is_core_layer(self) -> Bool { self.program.facts.target_dossier.layer == RuntimeLayer.Core }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11524
+    // Hosted builds use std Prelude even at Core; only no-OS Core uses portable ABI.
+    fn portable_require_abi(self) -> Bool { self.is_no_os() && self.is_core_layer() }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11532
+    fn entry_output(self, output: MirEntryOutput, value: &String, app: Bool) -> String {
+        if app { return "{value}.serve();" }
+        if output == {
+            .None | .ReturnValue -> "let _ = {value};"
+            .StandardOutput -> "print!(\"{{}}\", {value});"
+            .ExitStatus -> if self.is_no_os() { "{self.config.root_prefix}jet_target_exit(({value}) as i32);" } else { "std::process::exit(({value}) as i32);" }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11551
+    fn entry_invoke(self, function: &MirFunction, call: &String, output: MirEntryOutput, serves_until_stopped: Bool, service: Bool, indent: &String) -> String {
+        app :: serves_until_stopped && (function.return_type.nominal_name() == Some("App") || function.return_type.result_parts().is_some_and(fn((ok, _)) { ok.nominal_name() == Some("App") }))
+        action :: if function.failure == {
+            .Diverges(_) -> call.to_string()
+            .Infallible -> self.entry_output(output, call, app)
+            .Result(_, _) | .Optional(_) -> {
+                error :: self.entry_error_exit(function, "__jet_error", service)
+                value :: self.entry_output(output, "__jet_value", app)
+                "match {call} {{ Ok(__jet_value) => {{ {value} }}, Err(__jet_error) => {{ {error} }} }}"
+            }
+        }
+        root :: self.config.root_prefix
+        "{indent}{root}jet_runtime_boundary(|| {{\n{indent}    {action}\n{indent}}});\n"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11583
+    fn emit_hardware_facts(self, out: &String) -> Unit {
+        if self.program.facts.hardware_profile.is_none() { return }
+        profile :: self.program.facts.hardware_profile.unwrap()
+        root :: self.config.root_prefix
+        for (block_index, block) in profile.register_blocks.iter().enumerate() {
+            out.push_str("static __JET_HARDWARE_REGISTERS_{block_index}: &[{root}JetRegisterSpec<'static>] = &[\n")
+            for register in block.registers {
+                width :: if register.width == { .U8 -> "U8" .U16 -> "U16" .U32 -> "U32" .U64 -> "U64" }
+                access :: if register.access == { .ReadOnly -> "ReadOnly" .WriteOnly -> "WriteOnly" .ReadWrite -> "ReadWrite" }
+                out.push_str("    {root}JetRegisterSpec::new({quote_rust_string(register.name)}, {register.offset}u64, {root}JetRegisterWidth::{width}, {root}JetRegisterAccessMode::{access}, {register.volatile}),\n")
+            }
+            out.push_str("];\n")
+        }
+        out.push_str("static __JET_HARDWARE_BLOCKS: &[{root}JetRegisterBlockSpec<'static>] = &[\n")
+        for (block_index, block) in profile.register_blocks.iter().enumerate() {
+            out.push_str("    {root}JetRegisterBlockSpec::new({quote_rust_string(block.name)}, {block.base}u64, {block.size.bytes}u64, __JET_HARDWARE_REGISTERS_{block_index}),\n")
+        }
+        out.push_str("];\n")
+        for (interrupt_index, interrupt) in profile.interrupts.iter().enumerate() {
+            out.push_str("static __JET_HARDWARE_INTERRUPT_EFFECTS_{interrupt_index}: &[&'static str] = &[\n")
+            for effect in interrupt.forbidden_effects { out.push_str("    {quote_rust_string(effect)},\n") }
+            out.push_str("];\n")
+        }
+        out.push_str("static __JET_HARDWARE_INTERRUPTS: &[{root}JetInterruptSpec<'static>] = &[\n")
+        for (interrupt_index, interrupt) in profile.interrupts.iter().enumerate() {
+            if interrupt.forbidden_effects.is_empty() { out.push_str("    {root}JetInterruptSpec::new({quote_rust_string(interrupt.name)}, {interrupt.vector}u16, {interrupt.bounded}),\n") }
+            else { out.push_str("    {root}JetInterruptSpec::with_effects({quote_rust_string(interrupt.name)}, {interrupt.vector}u16, __JET_HARDWARE_INTERRUPT_EFFECTS_{interrupt_index}, {interrupt.bounded}),\n") }
+        }
+        out.push_str("];\n")
+        out.push_str("static __JET_HARDWARE_DMA_CHANNELS: &[{root}JetDmaChannelSpec<'static>] = &[\n")
+        for channel in profile.dma_channels {
+            width :: if channel.transfer_width == { .U8 -> "U8" .U16 -> "U16" .U32 -> "U32" .U64 -> "U64" }
+            ownership :: if channel.ownership == { .Borrowed -> "Borrowed" .Transfer -> "Transfer" }
+            limit :: channel.max_transfer_bytes.map(fn(bytes) { "Some({bytes}u64)" }).unwrap_or("None")
+            out.push_str("    {root}JetDmaChannelSpec::with_transfer({quote_rust_string(channel.name)}, {channel.channel}u16, {root}JetRegisterWidth::{width}, {root}JetDmaOwnership::{ownership}, {limit}),\n")
+        }
+        out.push_str("];\n")
+        capabilities :: self.program.facts.hardware_capabilities.iter().map(fn(capability) { quote_rust_string(capability) }).collect[[String]]().join(", ")
+        svd_source :: profile.svd.map(fn(svd) { "Some({quote_rust_string(svd.source)})" }).unwrap_or("None")
+        svd_sha256 :: profile.svd.map(fn(svd) { "Some({quote_rust_string(svd.sha256)})" }).unwrap_or("None")
+        out.push_str("static __JET_HARDWARE_FACTS: {root}JetHardwareFacts<'static> = {root}JetHardwareFacts::with_profile({quote_rust_string(self.program.facts.hardware_profile_id)}, &[{capabilities}], {svd_source}, {svd_sha256}, __JET_HARDWARE_BLOCKS, __JET_HARDWARE_INTERRUPTS, __JET_HARDWARE_DMA_CHANNELS);\n\n")
+        out.push_str("#[cfg(target_os = \"none\")]\nstatic __JET_HARDWARE_VOLATILE_BACKEND: {root}JetVolatileRegisterBackend = {root}JetVolatileRegisterBackend;\n")
+        self.emit_hardware_register_helpers(out, profile)
+        self.emit_hardware_interrupt_runtime(out)
+        out.push('\n')
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11728
+    fn hardware_register_helper_name(self, operation: &String, profile_id: &String, block: &String, register: &String) -> String { mangle_path("hardware_register_{operation}.{profile_id}.{block}.{register}") }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11740
+    fn emit_hardware_register_helpers(self, out: &String, profile: &TargetHardwareFacts) -> Unit {
+        profile_id :: self.program.facts.hardware_profile_id
+        for (block_index, block) in profile.register_blocks.iter().enumerate() {
+            for (register_index, register) in block.registers.iter().enumerate() {
+                if register.access.can_read() { self.emit_hardware_register_helper(out, profile_id, block_index, register_index, block, register, "read") }
+                if register.access.can_write() { self.emit_hardware_register_helper(out, profile_id, block_index, register_index, block, register, "write") }
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11774
+    fn emit_hardware_register_helper(self, out: &String, profile_id: &String, block_index: USize, _register_index: USize, block: &TargetRegisterBlockFact, register: &TargetRegisterFact, operation: &String) -> Unit {
+        root :: self.config.root_prefix
+        name :: self.hardware_register_helper_name(operation, profile_id, block.name, register.name)
+        (value_type, width) :: if register.width == { .U8 -> ("u8", 1) .U16 -> ("u16", 2) .U32 -> ("u32", 4) .U64 -> ("u64", 8) }
+        access_type :: if register.access == { .ReadOnly -> "JetReadOnly" .WriteOnly -> "JetWriteOnly" .ReadWrite -> "JetReadWrite" }
+        out.push_str("#[inline]\n")
+        if operation == "read" { out.push_str("fn {name}() -> i64 {{\n") }
+        else { out.push_str("fn {name}(value: i64) -> i64 {{\n") }
+        // Both selected target arms are emitted; no host-platform pruning.
+        out.push_str("    #[cfg(target_os = \"none\")]\n    {{\n        let __jet_block = {root}JetRegisterBlock::<{root}JetVolatileRegisterBackend>::new(\n            &__JET_HARDWARE_VOLATILE_BACKEND, &__JET_HARDWARE_BLOCKS[{block_index}],\n        );\n")
+        out.push_str("        let __jet_register = __jet_block.register::<{value_type}, {root}{access_type}, {register.volatile}>({register:?})\n")
+        out.push_str("            .unwrap_or_else(|_| panic!(\"hardware register {block.name}.{register.name} has inconsistent generated facts\"));\n")
+        if operation == "read" { out.push_str("        __jet_register.read() as i64\n") }
+        else { out.push_str("        __jet_register.write(<{value_type} as {root}JetRegisterValue>::from_bits(value as u64));\n        0\n") }
+        out.push_str("    }\n    #[cfg(not(target_os = \"none\"))]\n    {\n")
+        if operation == "read" { out.push_str("        {root}jet_hardware_register_read_typed({profile_id:?}, {block:?}, {register:?}, {width}i64)\n") }
+        else { out.push_str("        {root}jet_hardware_register_write_typed({profile_id:?}, {block:?}, {register:?}, {width}i64, value)\n") }
+        out.push_str("    }\n}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11850
+    fn has_hardware_interrupts(self) -> Bool { self.program.facts.hardware_setups.iter().any(fn(setup) { if setup == .InterruptBind(_, _, _, _, _) { true } else { false } }) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11858
+    fn interrupt_handler_function(self, handler_symbol: &String) -> MirFunction {
+        functions := self.program.functions.iter().filter(fn(function) { function.key == handler_symbol })
+        function :: functions.next().unwrap_or_else(fn() { panic("MIR interrupt handler `{handler_symbol}` has no function row") })
+        if functions.next().is_some() { panic("MIR interrupt handler `{handler_symbol}` resolves to multiple function rows") }
+        if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR interrupt handler `{handler_symbol}` targets an unselected function") }
+        if function.form != MirFunctionForm.TopLevel || !function.generic_params.is_empty() || !function.capture_params.is_empty() || !function.params.is_empty() || !function.return_type.is_unit() || function.failure != MirFailureCarrier.Infallible || function.generator.is_some() || function.is_unsafe { panic("MIR interrupt handler `{handler_symbol}` must have a capture-free zero-argument Unit ABI") }
+        function
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:11889
+    fn emit_hardware_interrupt_runtime(self, out: &String) -> Unit {
+        if !self.has_hardware_interrupts() { return }
+        root :: self.config.root_prefix
+        for (setup_index, setup) in self.program.facts.hardware_setups.iter().enumerate() {
+            if setup == .InterruptBind(_, _, _, handler_symbol, _) {
+                function :: self.interrupt_handler_function(handler_symbol)
+                handler :: self.function_name(function.id)
+                out.push_str("extern \"C\" fn __jet_hardware_interrupt_trampoline_{setup_index}() {{\n    {handler}();\n}}\n\n")
+            }
+        }
+        if self.is_no_os() {
+            // GATE #4494: generated atomic/unsafe registry ABI is target-owned.
+            out.push_str("static mut __JET_HARDWARE_INTERRUPT_REGISTRY: {root}JetHardwareInterruptRegistry = {root}JetHardwareInterruptRegistry::new();\n")
+            out.push_str("static __JET_HARDWARE_INTERRUPT_REGISTRY_READY: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);\n")
+            out.push_str("fn __jet_hardware_registry() -> &'static {root}JetHardwareInterruptRegistry {{\n")
+            out.push_str("    if !__JET_HARDWARE_INTERRUPT_REGISTRY_READY.swap(true, core::sync::atomic::Ordering::AcqRel) {\n        unsafe {\n            let __jet_hardware_registry = &mut *core::ptr::addr_of_mut!(__JET_HARDWARE_INTERRUPT_REGISTRY);\n")
+            for (setup_index, setup) in self.program.facts.hardware_setups.iter().enumerate() {
+                if setup == .InterruptBind(_, _, vector, _, _) {
+                    out.push_str("            if !__jet_hardware_registry.register({vector}u16, {root}JetHardwareInterruptHandler {{ fn_ptr: __jet_hardware_interrupt_trampoline_{setup_index} as usize as i64, env: 0, has_env: false }}) {{\n                panic!(\"duplicate MIR hardware interrupt vector binding\");\n            }}\n")
+                }
+            }
+            out.push_str("        }\n    }\n    unsafe { &*core::ptr::addr_of!(__JET_HARDWARE_INTERRUPT_REGISTRY) }\n}\n\n")
+            out.push_str("#[inline]\nfn __jet_hardware_poll() {{\n    let __jet_hardware_registry = __jet_hardware_registry();\n    if !{root}jet_hardware_has_pending() {{ return; }}\n    let __jet_hardware_callbacks = {root}jet_hardware_dispatch_pending(__jet_hardware_registry);\n    {root}jet_hardware_invoke_pending(__jet_hardware_callbacks);\n}}\n")
+            return
+        }
+        // GATE #4494: generated LazyLock registry retains one initialization.
+        out.push_str("static __JET_HARDWARE_INTERRUPT_REGISTRY: std::sync::LazyLock<{root}JetHardwareInterruptRegistry> = std::sync::LazyLock::new(|| {{\n    let mut __jet_hardware_registry = {root}JetHardwareInterruptRegistry::default();\n")
+        for (setup_index, setup) in self.program.facts.hardware_setups.iter().enumerate() {
+            if setup == .InterruptBind(_, _, vector, _, _) {
+                out.push_str("    if !__jet_hardware_registry.register({vector}u16, {root}JetHardwareInterruptHandler {{ fn_ptr: __jet_hardware_interrupt_trampoline_{setup_index} as usize as i64, env: 0, has_env: false }}) {{\n        panic!(\"duplicate MIR hardware interrupt vector binding\");\n    }}\n")
+            }
+        }
+        out.push_str("    __jet_hardware_registry\n});\n\n")
+        out.push_str("#[inline]\nfn __jet_hardware_poll() {{\n    if !{root}jet_hardware_has_pending() {{ return; }}\n    let __jet_hardware_callbacks = {root}jet_hardware_dispatch_pending(&*__JET_HARDWARE_INTERRUPT_REGISTRY);\n    {root}jet_hardware_invoke_pending(__jet_hardware_callbacks);\n}}\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:12002
+    fn emit_hardware_setups(self, out: &String, indent: &String) -> Unit {
+        root :: self.config.root_prefix
+        if self.is_no_os() {
+            // DMA requires a target provider; preserve explicit failure, never replay.
+            for setup in self.program.facts.hardware_setups {
+                if setup == .DmaConfigure(_, _, _, _) { out.push_str("{indent}{root}jet_target_failure_bytes(b\"DMA setup requires a target provider\", -1);\n") }
+            }
+            return
+        }
+        for setup in self.program.facts.hardware_setups {
+            call :: if setup == {
+                .DmaConfigure(profile_id, channel, transfer_width, ownership) -> "{root}jet_hardware_setup_typed({profile_id:?}, {root}JET_HARDWARE_SETUP_DMA_CONFIGURE_NAME, {channel:?}, {transfer_width.bytes()}i64, {ownership.as_str():?})"
+                .InterruptBind(profile_id, interrupt, vector, handler_symbol, _) -> "{root}jet_hardware_setup_typed({profile_id:?}, {root}JET_HARDWARE_SETUP_INTERRUPT_BIND_NAME, {interrupt:?}, {vector}i64, {handler_symbol:?})"
+            }
+            out.push_str("{indent}let _ = {call};\n")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:12047
+    fn emit_entry(self, out: &String) -> Unit {
+        // JS owns loading; a checked Wasm entry remains Wasm code.
+        if self.config.target_kind == MirRustTarget.WebWasm {
+            if self.artifact.entry.is_none() { return }
+            entry :: self.artifact.entry.unwrap()
+            if entry.function.is_none() { return }
+            function :: self.function_row(entry.function.unwrap())
+            if function.web_bucket == Some(jet_foundation.WebPartition.WebBucket.JS) { return }
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR Web entry function is not selected for this artifact") }
+            web_cli_argument :: entry.cli.and_then(fn(cli) { self.cli_web_record_argument(function, cli) })
+            if function.form != MirFunctionForm.TopLevel || !function.capture_params.is_empty() || (!function.params.is_empty() && web_cli_argument.is_none()) { panic("MIR Web entry has no checked zero-argument invocation") }
+            root :: self.config.root_prefix
+            out.push_str("#[no_mangle]\npub extern \"C\" fn jet_entry_{function.id.0}() {{\n    jet_wasm_error_clear();\n")
+            if entry.initialize_environment { out.push_str("    {root}jet_std_env_init();\n") }
+            if entry.initialize_gc { out.push_str("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());\n") }
+            call :: web_cli_argument.map_or_else(fn() { "{self.function_name(function.id)}()" }, fn(args) { "{self.function_name(function.id)}({args})" })
+            out.push_str(self.entry_invoke(function, call, entry.output, false, false, "    "))
+            out.push_str("}\n\n")
+            return
+        }
+        if self.artifact.entry.is_none() { return }
+        entry :: self.artifact.entry.unwrap()
+        service :: if entry.kind == { .Library | .Command | .App | .Test -> false .Service -> true }
+        out.push_str("// jet-mir-entry: kind={entry.kind:?} output={entry.output:?} version={entry.package_version} init_env={entry.initialize_environment} init_gc={entry.initialize_gc} serves_until_stopped={entry.serves_until_stopped}\n")
+        if entry.cli == .Some(cli) {
+            out.push_str("// jet-mir-cli: standard={cli.standard} description={cli.description:?}\n")
+            for input in cli.inputs { self.emit_cli_input_metadata(input, out) }
+            for command in cli.commands {
+                out.push_str("// jet-mir-cli-command: name={command.name} description={command.description:?} receiver={command.receiver:?}\n")
+                function :: self.function_row(command.function)
+                if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR CLI command {command.name:?} targets an unselected function") }
+                for input in command.inputs { self.emit_cli_input_metadata(input, out) }
+            }
+        }
+        if entry.kind == MirEntryKind.Library { return }
+        root :: self.config.root_prefix
+        generated := String.new()
+        if self.is_no_os() { generated.push_str("#[no_mangle]\npub extern \"C\" fn __jet_program_entry() {\n") }
+        else { generated.push_str("fn main() {\n") }
+        has_hardware_host :: self.program.facts.hardware_profile.is_some() && !self.is_no_os()
+        if !self.artifact.jobs.is_empty() { generated.push_str("    let _jet_job_registry = {root}jet_job_register_specs(__JET_JOB_SPECS);\n") }
+        if has_hardware_host {
+            generated.push_str("    let mut __jet_hardware_host = {root}JetHardwareReplayHost::new(__JET_HARDWARE_FACTS);\n")
+            generated.push_str("    let _jet_hardware_facts_scope = {root}jet_hardware_facts_scope(&__JET_HARDWARE_FACTS);\n")
+            generated.push_str("    {root}jet_hardware_with_host(&mut __jet_hardware_host, || {{\n")
+        }
+        self.emit_hardware_setups(&generated, "    ")
+        if self.has_hardware_interrupts() { generated.push_str("    __jet_hardware_poll();\n") }
+        if entry.initialize_environment { generated.push_str("    {root}jet_std_env_init();\n") }
+        if entry.initialize_gc { generated.push_str("    {root}jet_gc::runtime_or_exit({root}jet_gc::initialize_trace());\n") }
+        needs_argv :: !self.artifact.jobs.is_empty() || entry.cli.is_some()
+        if needs_argv {
+            generated.push_str("    let __argv = {root}jet_std_io_args();\n")
+            if !self.artifact.jobs.is_empty() { generated.push_str("    if __jet_job_dispatch(&__argv, {service}) {{ return; }}\n") }
+        }
+        if entry.kind == MirEntryKind.Test && self.artifact.harness.is_some() {
+            generated.push_str("    {root}jet_runtime_boundary(|| {{ if !__jet_harness_run() {{ std::process::exit(1); }} }});\n")
+        } else if entry.cli == .Some(cli) {
+            program :: "&{root}jet_args_source_program_name(__argv.first().map(String::as_str).unwrap_or(\"\"))"
+            version :: if cli.standard { Some(entry.package_version) } else { None }
+            spec := self.cli_spec_expr(cli.inputs, cli.description, cli.standard, version, program)
+            // Per-command help owns the command's options and program name.
+            command_specs := [(String, String)].with_capacity(cli.commands.len())
+            for (index, command) in cli.commands.iter().enumerate() {
+                command_program :: "&{root}jet_args_source_program_name(&format!(\"{{}} {{}}\", {program}, {command.name:?}))"
+                command_spec :: self.cli_spec_expr(command.inputs, command.description, false, None, command_program)
+                binding :: "__jet_command_spec_{index}"
+                generated.push_str("    let {binding} = {command_spec};\n")
+                description :: command.description.unwrap_or_default()
+                spec = "{root}jet_args_subcommand({spec}, &{command.name:?}.to_string(), &{description:?}.to_string(), {binding}.clone())"
+                command_specs.push((command.name, binding))
+            }
+            generated.push_str("    let __spec = {spec};\n")
+            generated.push_str("    let __argv = match {root}jet_args_guided_argv_tui(&__spec, &__argv) {{ Ok(__guided) => __guided, Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }} }};\n")
+            generated.push_str("    match {root}jet_args_parse(&__spec, &__argv) {{\n        Ok(__parsed) => {{\n")
+            help_text :: if command_specs.is_empty() { "__spec.help()" } else {
+                arms :: command_specs.iter().map(fn((name, binding)) { "Some({name:?}) => {binding}.help(), " }).collect[String]()
+                "match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{ {arms}_ => __spec.help() }}"
+            }
+            generated.push_str("            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&{help_text})); return; }}\n")
+            if cli.standard { generated.push_str("            if {root}jet_parsed_flag(&__parsed, &\"version\".to_string()) {{ println!({entry.package_version:?}); return; }}\n") }
+            if cli.commands.is_empty() {
+                function_id :: entry.function.unwrap_or_else(fn() { panic("MIR CLI entry has no function row") })
+                function :: self.function_row(function_id)
+                if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR entry function is not selected for this artifact") }
+                generated.push_str(self.cli_decode_and_invoke(function, cli.inputs, cli.record_inputs, None, entry.output, entry.serves_until_stopped, service, "            "))
+            } else {
+                generated.push_str("            match {root}jet_parsed_subcommand(&__parsed).ok().as_deref() {{\n")
+                for command in cli.commands {
+                    function :: self.function_row(command.function)
+                    generated.push_str("                Some({command.name:?}) => {{\n")
+                    receiver_inputs :: command.receiver.map(fn(_) { cli.inputs })
+                    generated.push_str(self.cli_decode_and_invoke(function, command.inputs, false, receiver_inputs, entry.output, entry.serves_until_stopped, service, "                    "))
+                    generated.push_str("                }\n")
+                }
+                // Bare command-program invocation prints the list; no hidden run.
+                generated.push_str("                None => {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}\n")
+                generated.push_str("                Some(__other) => { eprintln!(\"unknown command: {}\", __other); std::process::exit(2); }\n            }\n")
+            }
+            generated.push_str("        }\n")
+            generated.push_str("        Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n")
+        } else {
+            function_id :: entry.function.unwrap_or_else(fn() { panic("MIR executable entry has no function row") })
+            function :: self.function_row(function_id)
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR entry function is not selected for this artifact") }
+            if function.form != MirFunctionForm.TopLevel || !function.capture_params.is_empty() || !function.params.is_empty() { panic("MIR entry function has no checked CLI decoder row") }
+            call :: "{self.function_name(function.id)}()"
+            generated.push_str(self.entry_invoke(function, call, entry.output, entry.serves_until_stopped, service, "    "))
+        }
+        if has_hardware_host { generated.push_str("    });\n") }
+        generated.push_str("}\n\n")
+        out.push_str(generated)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:12357
+    fn emit_jobs(self, out: &String) -> Unit {
+        root :: self.config.root_prefix
+        // Index once rather than rescanning all program jobs for each artifact ID.
+        jobs := [MirJobId:USize].new()
+        for (index, job) in self.program.jobs.iter().enumerate() { jobs.entry(job.id).or_insert(index) }
+        for job_id in self.artifact.jobs {
+            index :: jobs.get(job_id).unwrap_or_else(fn() { panic("MIR job ID {job_id:?} has no row") })
+            job :: self.program.jobs[index]
+            function :: self.function_row(job.function)
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR job {job.name:?} targets an unselected function") }
+            if function.form != MirFunctionForm.TopLevel || !function.capture_params.is_empty() { panic("MIR job {job.name:?} requires a top-level non-capturing function") }
+            wrapper :: "__jet_job_{job.id.0}"
+            validator :: "__jet_job_validate_{job.id.0}"
+            record_inputs :: self.job_record_inputs(function, job)
+            if job.inputs.is_empty() {
+                out.push_str("fn {validator}(__argv: &[String]) -> Result<(), String> {{ if __argv.is_empty() {{ Ok(()) }} else {{ Err(\"job takes no arguments\".to_string()) }} }}\n")
+            } else {
+                validator_spec :: self.cli_spec_expr(job.inputs, Some(job.name), false, None, "\"job\"")
+                out.push_str("fn {validator}(__argv: &[String]) -> Result<(), String> {{ let mut __job_argv = vec![\"job\".to_string()]; __job_argv.extend_from_slice(__argv); let __spec = {validator_spec}; match {root}jet_args_parse(&__spec, &__job_argv) {{ Ok(_) => Ok(()), Err(__e) => Err(__e) }} }}\n")
+            }
+            out.push_str("fn {wrapper}(__program: &str, __argv: &[String]) {{\n")
+            if job.inputs.is_empty() {
+                if !function.params.is_empty() { panic("MIR job {job.name:?} has parameters but no checked input rows") }
+                call :: "{self.function_name(function.id)}()"
+                out.push_str(self.entry_invoke(function, call, MirEntryOutput.None, false, false, "    "))
+            } else {
+                spec :: self.cli_spec_expr(job.inputs, Some(job.name), false, None, "__program")
+                out.push_str("    let mut __job_argv = vec![__program.to_string()];\n    __job_argv.extend_from_slice(__argv);\n    let __spec = {spec};\n")
+                out.push_str("    match {root}jet_args_parse(&__spec, &__job_argv) {{\n        Ok(__parsed) => {{\n")
+                out.push_str("            if {root}jet_parsed_flag(&__parsed, &\"help\".to_string()) {{ print!(\"{{}}\", {root}jet_cli_banner(&__spec.help())); return; }}\n")
+                out.push_str(self.cli_decode_and_invoke(function, job.inputs, record_inputs, None, MirEntryOutput.None, false, false, "            "))
+                out.push_str("        }}\n        Err(__e) => {{ eprint!(\"{{}}\", {root}jet_cli_banner(&__e)); std::process::exit(2); }}\n    }}\n")
+            }
+            out.push_str("}\n\n")
+            if function.params.len() == 1 && (record_inputs || job.inputs.len() == 1) {
+                queue_wrapper :: "__jet_job_queue_{job.id.0}"
+                param :: function.params[0]
+                payload_rust :: self.rust_type(param.ty)
+                // Decoded owned local uses the same checked parameter convention.
+                (binding, argument) :: if param.access == {
+                    .Write -> ("let mut __value", "&mut __value")
+                    .Read if self.parameter_borrowed(param) -> ("let __value", "&__value")
+                    .Read | .Move -> ("let __value", "__value")
+                }
+                result_encoding :: if function.return_type.is_unit() {
+                    "    {self.function_name(function.id)}({argument});\nOk({root}JetJobResult {{ type_id: \"Unit\".to_string(), bytes: Vec::new(), publish: false }})\n"
+                } else {
+                    if function.return_type.kind() == {
+                        .Result(ok, _) -> {
+                            ok_type :: ok.display_name()
+                            "    let __job_result = {self.function_name(function.id)}({argument});\nmatch __job_result {{\nOk(__ok) => {{\nlet __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__ok) {{\nOk(__bytes) => __bytes,\nErr(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n}};\nOk({root}JetJobResult {{ type_id: {ok_type:?}.to_string(), bytes: __bytes, publish: false }})\n}}\n}}\n"
+                        }
+                        _ -> {
+                            result_type :: function.return_type.display_name()
+                            "    let __job_result = {self.function_name(function.id)}({argument});\nlet __bytes = match {root}jet_enc_cbor_to_bytes_canonical(&__job_result) {{\nOk(__bytes) => __bytes,\nErr(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"encode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}),\n}};\nOk({root}JetJobResult {{ type_id: {result_type:?}.to_string(), bytes: __bytes, publish: false }})\n"
+                        }
+                    }
+                }
+                out.push_str("fn {queue_wrapper}(__payload: &{root}JetJobPayload) -> Result<{root}JetJobResult, {root}JetJobError> {{\n")
+                out.push_str("    let __bytes = __payload.bytes.clone();\n    {binding} = match {root}jet_enc_cbor_decode::<{payload_rust}>(&__bytes, {root}jet_std::CBOROptions::safe()) {{ Ok(__value) => __value, Err(__error) => return Err({root}JetJobError {{ type_id: __payload.type_id.clone(), reason: \"decode\".to_string(), detail: Some(format!(\"{{:?}}\", __error)) }}), }};\n")
+                out.push_str(result_encoding)
+                out.push_str("}\n\n")
+            }
+        }
+        out.push_str("static __JET_JOB_SPECS: &[{root}JetJobSpec] = &[\n")
+        for job_id in self.artifact.jobs {
+            index :: jobs.get(job_id).unwrap_or_else(fn() { panic("MIR job ID {job_id:?} has no row") })
+            job :: self.program.jobs[index]
+            function :: self.function_row(job.function)
+            scope :: if job.scope == { .Dev -> "{root}JetJobScope::Dev" .Ship -> "{root}JetJobScope::Ship" .Internal -> "{root}JetJobScope::Internal" }
+            schedule :: if job.schedule == {
+                .None -> "None"
+                .Some(.Duration(nanos)) -> "Some({root}JetJobSchedule::Duration {{ nanos: {nanos} }})"
+                .Some(.WallClockTime(hour, minute)) -> "Some({root}JetJobSchedule::WallClockTime {{ hour: {hour}, minute: {minute} }})"
+            }
+            dispatch :: if job.dispatch == { .Direct -> "{root}JetJobDispatch::Direct" .Spawn -> "{root}JetJobDispatch::Spawn" .Scheduled -> "{root}JetJobDispatch::Scheduled" }
+            skip :: if job.skip == {
+                .None -> "None"
+                .Some(.Always(reason)) -> "Some({root}JetJobSkip::Always({reason:?}))"
+                .Some(.UnlessPlatform(platform)) -> "Some({root}JetJobSkip::UnlessPlatform({platform:?}))"
+            }
+            cache :: if job.cache == { .Uncached -> "{root}JetJobCachePolicy::Uncached" .Local -> "{root}JetJobCachePolicy::Local" .Shared -> "{root}JetJobCachePolicy::Shared" }
+            packages :: "&[{job.packages.iter().map(fn(package) { quote_rust_string(package) }).collect[[String]]().join(", ")}]"
+            input_paths :: "&[{job.input_paths.iter().map(fn(path) { quote_rust_string(path) }).collect[[String]]().join(", ")}]"
+            output_paths :: "&[{job.output_paths.iter().map(fn(path) { quote_rust_string(path) }).collect[[String]]().join(", ")}]"
+            limits :: "&[{job.limits.iter().map(fn((name, value)) { "({name:?}, {value:?})" }).collect[[String]]().join(", ")}]"
+            after :: "&[{job.after.iter().map(fn(dependency) { quote_rust_string(dependency) }).collect[[String]]().join(", ")}]"
+            working_directory :: job.working_directory.map(fn(directory) { "Some({directory:?})" }).unwrap_or("None")
+            record_inputs :: self.job_record_inputs(function, job)
+            queue_enabled :: function.params.len() == 1 && (record_inputs || job.inputs.len() == 1)
+            payload_type :: if queue_enabled {
+                payload :: if record_inputs { function.params[0].ty } else { job.inputs[0].ty }
+                payload.nominal_name().map(fn(name) { "Some({name:?})" }).unwrap_or("None")
+            } else { "None" }
+            // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:12609
+            queue_invoke :: if queue_enabled { "Some(__jet_job_queue_{job.id.0})" } else { "None" }
+            out.push_str("        {root}JetJobSpec {{ entry: {root}JetJobEntry {{ name: {job.name:?}, scope: {scope}, schedule: {schedule}, invoke: __jet_job_{job.id.0} }}, payload_type: {payload_type}, queue_invoke: {queue_invoke}, dispatch: {dispatch}, packages: {packages}, working_directory: {working_directory}, input_paths: {input_paths}, output_paths: {output_paths}, skip: {skip}, cache: {cache}, limits: {limits}, after: {after}, parallel: {job.parallel.max(1)}, validate: Some(__jet_job_validate_{job.id.0}) }},\n")
+        }
+        out.push_str("];\nfn __jet_job_dispatch(__argv: &[String], __service: bool) -> bool {\n    let __jobs = __JET_JOB_SPECS;\n")
+        if self.artifact.runtime_parts.contains(MirRuntimePartId.Services) {
+            out.push_str("    let __job_service_endpoint = match {root}jet_services_active_execution_endpoint_if_present() {{\n        Ok(__endpoint) => Ok(__endpoint),\n        Err(__error) => Err(format!(\"{{__error:?}}\")),\n    }};\n    let __job_scope = move || -> Result<Option<{root}JetServiceExecutionScope>, String> {{\n        match &__job_service_endpoint {{\n            Ok(Some(__endpoint)) => {root}jet_services_execution_scope(__endpoint)\n                .map(Some)\n                .map_err(|__error| format!(\"{{__error:?}}\")),\n            Ok(None) => Ok(None),\n            Err(__reason) => Err(__reason.clone()),\n        }}\n    }};\n    if {root}jet_job_dispatch_specs(__argv, __jobs, __job_scope.clone()) {{ return true; }}\n    if __service {{\n        {root}jet_job_service_tick_specs_retained(\n            __jobs,\n            __argv.first().map(String::as_str).unwrap_or(\"program\"),\n            __job_scope,\n        );\n    }}\n    false\n}}\n")
+        } else {
+            out.push_str("    if {root}jet_job_dispatch_specs(__argv, __jobs, {root}jet_job_no_scope) {{ return true; }}\n    if __service {{\n        {root}jet_job_service_tick_specs_retained(\n            __jobs,\n            __argv.first().map(String::as_str).unwrap_or(\"program\"),\n            {root}jet_job_no_scope,\n        );\n    }}\n    false\n}}\n")
+        }
+    }
+}

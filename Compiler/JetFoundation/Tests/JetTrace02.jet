@@ -1,0 +1,91 @@
+use JetFoundation.Trace.JetTrace.*
+use JetFoundation.Trace.Carriers.*
+use JetFoundation.Trace.Content.*
+use JetFoundation.Trace.Validate.*
+use JetFoundation.CanonicalJSON.*
+// Reuse the existing paired Rust2594-3044/3151-3176/3287-3368 tests and fixtures.
+use JetFoundation.Tests.Trace.JetTrace.[jettrace_sample_skeleton, jettrace_test_symbol, jettrace_test_task, jettrace_test_set, jettrace_test_wrap, jettrace_test_error_bytes]
+
+// Fixture mutation from Rust3048-3070,3101-3115,3120-3132,3137-3147,
+// 3179-3217,3222-3283. Retain all non-policy fields, remove exactly named keys.
+fn jettrace_legacy_fixture_content(skeleton: TraceSkeleton, schema: String, removed: [String]) -> CanonicalJSON Never! {
+    content := trace_skeleton_content_json(skeleton) ?? panic(err.message)
+    policy :: capture_policy_to_json(skeleton.capture_policy) ?? panic(err.message)
+    fields :: jettrace_object_view(policy, "capture_policy") ?? panic(err.message)
+    retained := [CanonicalJSONField]{}
+    loop field in fields {
+        if !removed.contains(field.key) {
+            &retained.push(CanonicalJSONField{key: ~field.key, value: if field.key == "schema" -> .Integer(~schema) else -> ~field.value})
+        }
+    }
+    replacement :: canonical_json_object(^retained) ?? panic(err.message)
+    jettrace_test_set(&content, "capture_policy", ^replacement)
+    ^content
+}
+
+// Rust: crates/jet-foundation/src/JetTrace.rs:3047
+#Test("legacy_capture_policy_v1_keeps_unknown_limit_semantics") {
+    removed :: [String]{"browser_row_limit", "browser_rows_truncated", "io_row_limit", "io_rows_truncated", "native_row_limit", "native_rows_truncated", "span_row_limit", "span_rows_truncated", "task_row_limit", "task_rows_truncated"}
+    content :: jettrace_legacy_fixture_content(jettrace_sample_skeleton(), "1", removed)
+    bytes :: jettrace_test_wrap(^content)
+    text :: String.from_bytes(bytes) ?? panic("UTF8")
+    assert(text.contains("\"capture_policy\":{{\"allowlist\":[]"), text)
+    assert(text.contains("\"schema\":1},\"command\""), text)
+    policy_start :: text.find("\"capture_policy\":{{") ?? panic("capture policy")
+    policy_len :: text[policy_start..<text.len()].find("\"schema\":1}") ?? panic("capture policy schema")
+    policy :: text[policy_start..<policy_start + policy_len] // #4303
+    assert(!policy.contains("row_limit"), "legacy limits were fabricated: {policy}")
+    assert(!policy.contains("rows_truncated"), "legacy truncation was fabricated: {policy}")
+    assert(text.contains("\"version\":1"), "outer version changed: {text}")
+    _ :: verify_jettrace(bytes) ?? panic(err.message)
+}
+
+// Rust: crates/jet-foundation/src/JetTrace.rs:3100
+#Test("capture_policy_v2_remains_readable_with_unknown_native_limit") {
+    removed :: [String]{"browser_row_limit", "browser_rows_truncated", "native_row_limit", "native_rows_truncated", "span_row_limit", "span_rows_truncated"}
+    content :: jettrace_legacy_fixture_content(jettrace_sample_skeleton(), "2", removed)
+    _ :: verify_jettrace(jettrace_test_wrap(^content)) ?? panic(err.message)
+}
+
+// Rust: crates/jet-foundation/src/JetTrace.rs:3119
+#Test("capture_policy_v3_remains_readable_with_unknown_span_limit") {
+    removed :: [String]{"browser_row_limit", "browser_rows_truncated", "span_row_limit", "span_rows_truncated"}
+    content :: jettrace_legacy_fixture_content(jettrace_sample_skeleton(), "3", removed)
+    _ :: verify_jettrace(jettrace_test_wrap(^content)) ?? panic(err.message)
+}
+
+// Rust: crates/jet-foundation/src/JetTrace.rs:3136
+#Test("capture_policy_v4_remains_readable_with_empty_browser_domain") {
+    removed :: [String]{"browser_row_limit", "browser_rows_truncated"}
+    content :: jettrace_legacy_fixture_content(jettrace_sample_skeleton(), "4", removed)
+    _ :: verify_jettrace(jettrace_test_wrap(^content)) ?? panic(err.message)
+}
+
+// Rust: crates/jet-foundation/src/JetTrace.rs:3179
+#Test("legacy_capture_policy_v3_still_rejects_malformed_spans") {
+    skeleton := jettrace_sample_skeleton()
+    &skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "done", ""))
+    &skeleton.spans.push(TraceSpan{clock: "monotonic", end_ns: Val(U64{10}), kind: "task_observed", parent_task_id: None, reason: "", start_ns: Val(U64{20}), status: "captured", symbol: jettrace_test_symbol(), task_id: Val(U64{1})})
+    removed :: [String]{"browser_row_limit", "browser_rows_truncated", "span_row_limit", "span_rows_truncated"}
+    content :: jettrace_legacy_fixture_content(skeleton, "3", removed)
+    error :: jettrace_test_error_bytes(jettrace_test_wrap(^content))
+    assert(error.contains("ends before it starts"), error)
+}
+
+// Rust: crates/jet-foundation/src/JetTrace.rs:3221
+#Test("legacy_capture_policies_still_reject_malformed_native_rows") {
+    schemas :: [String]{"1", "2"}
+    loop schema in schemas {
+        skeleton := jettrace_sample_skeleton()
+        &skeleton.tasks.push(jettrace_test_task(U64{1}, U64{0}, "done", ""))
+        &skeleton.native.push(TraceNative{clock: "process_cpu", duration_ns: Val(U64{42}), observed_at_ns: U64{99}, reason: "", status: "forged", symbol: jettrace_test_symbol(), target: "x86_64-unknown-linux-gnu", task_id: Val(U64{1})})
+        removed := [String]{"browser_row_limit", "browser_rows_truncated", "native_row_limit", "native_rows_truncated", "span_row_limit", "span_rows_truncated"}
+        if schema == "1" {
+            keys :: [String]{"io_row_limit", "io_rows_truncated", "task_row_limit", "task_rows_truncated"}
+            loop key in keys -> &removed.push(~key)
+        }
+        content :: jettrace_legacy_fixture_content(skeleton, schema, removed)
+        error :: jettrace_test_error_bytes(jettrace_test_wrap(^content))
+        assert(error.contains("status must be captured or unavailable"), "{schema}: {error}")
+    }
+}

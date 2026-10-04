@@ -1,421 +1,93 @@
-// PORT-PENDING 2087 crates-jet-foundation-src-devtools-slice-1801: crates/jet-foundation/src/Devtools.rs:1801-2217
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             render_text_field("phase", phase, &mut out)?;
-//RS             render_text_field("domain", domain, &mut out)?;
-//RS             render_u64_field("start_ns", *start_ns, &mut out);
-//RS             render_u64_field("duration_ns", *duration_ns, &mut out);
-//RS             render_optional_text_field("object_id", object_id.as_deref(), &mut out)?;
-//RS             render_optional_text_field("resource_id", resource_id.as_deref(), &mut out)?;
-//RS         }
-//RS         JetDevtoolsEventBody::GameLaunchProfile {
-//RS             target,
-//RS             run_mode,
-//RS             headless_compatible,
-//RS             phases,
-//RS         } => {
-//RS             if phases.len() > 256 {
-//RS                 return Err("jet.devtools.v1 game launch profile exceeds phase limit".to_string());
-//RS             }
-//RS             render_text_field("target", target, &mut out)?;
-//RS             render_text_field("run_mode", run_mode, &mut out)?;
-//RS             render_bool_field("headless_compatible", *headless_compatible, &mut out);
-//RS             render_field_prefix("phases", &mut out);
-//RS             out.push('[');
-//RS             for (index, phase) in phases.iter().enumerate() {
-//RS                 if index != 0 {
-//RS                     out.push(',');
-//RS                 }
-//RS                 render_launch_phase(phase, &mut out)?;
-//RS             }
-//RS             out.push(']');
-//RS         }
-//RS         JetDevtoolsEventBody::GameSwap {
-//RS             sequence,
-//RS             path,
-//RS             kind,
-//RS             status,
-//RS             old_schema_id,
-//RS             new_schema_id,
-//RS             migration,
-//RS             reason,
-//RS         } => {
-//RS             render_u64_field("sequence", *sequence, &mut out);
-//RS             render_text_field("path", path, &mut out)?;
-//RS             render_text_field("kind", kind, &mut out)?;
-//RS             render_text_field("status", status, &mut out)?;
-//RS             render_optional_text_field("old_schema_id", old_schema_id.as_deref(), &mut out)?;
-//RS             render_optional_text_field("new_schema_id", new_schema_id.as_deref(), &mut out)?;
-//RS             render_text_field("migration", migration, &mut out)?;
-//RS             render_text_field("reason", reason, &mut out)?;
-//RS         }
-//RS         JetDevtoolsEventBody::Request {
-//RS             id,
-//RS             method,
-//RS             path,
-//RS             status,
-//RS         } => {
-//RS             render_text_field("id", id, &mut out)?;
-//RS             render_text_field("method", method, &mut out)?;
-//RS             render_text_field("path", path, &mut out)?;
-//RS             render_u64_field("status", u64::from(*status), &mut out);
-//RS         }
-//RS         JetDevtoolsEventBody::Response { id, status, bytes } => {
-//RS             render_text_field("id", id, &mut out)?;
-//RS             render_u64_field("status", u64::from(*status), &mut out);
-//RS             render_u64_field("bytes", *bytes, &mut out);
-//RS         }
-//RS     }
-//RS     out.push('}');
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn render_payload(payload: &JetDevtoolsPayload, out: &mut String) -> Result<(), String> {
-//RS     payload.validate()?;
-//RS     let mut ordered: Vec<&JetDevtoolsField> = payload.fields.iter().collect();
-//RS     ordered.sort_by(|left, right| left.key.cmp(&right.key));
-//RS     out.push_str("{\"fields\":{");
-//RS     for (index, field) in ordered.into_iter().enumerate() {
-//RS         if index != 0 {
-//RS             out.push(',');
-//RS         }
-//RS         render_text(&field.key, out)?;
-//RS         out.push(':');
-//RS         render_value(&field.value, out)?;
-//RS     }
-//RS     out.push_str("}}");
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub fn render_value(value: &JetDevtoolsValue, out: &mut String) -> Result<(), String> {
-//RS     value.validate()?;
-//RS     match value {
-//RS         JetDevtoolsValue::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-//RS         JetDevtoolsValue::Int(value) => out.push_str(&value.to_string()),
-//RS         JetDevtoolsValue::Float(value) => out.push_str(&value.to_string()),
-//RS         JetDevtoolsValue::Text(value) => render_text(value, out)?,
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn render_text_field(key: &str, value: &str, out: &mut String) -> Result<(), String> {
-//RS     render_field_prefix(key, out);
-//RS     render_text(value, out)
-//RS }
-//RS 
-//RS fn render_u64_field(key: &str, value: u64, out: &mut String) {
-//RS     render_field_prefix(key, out);
-//RS     out.push_str(&value.to_string());
-//RS }
-//RS fn render_null_field(key: &str, out: &mut String) {
-//RS     render_field_prefix(key, out);
-//RS     out.push_str("null");
-//RS }
-//RS 
-//RS fn render_optional_text_field(
-//RS     key: &str,
-//RS     value: Option<&str>,
-//RS     out: &mut String,
-//RS ) -> Result<(), String> {
-//RS     render_field_prefix(key, out);
-//RS     match value {
-//RS         Some(value) => render_text(value, out),
-//RS         None => {
-//RS             out.push_str("null");
-//RS             Ok(())
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn render_launch_phase(
-//RS     phase: &JetDevtoolsGameLaunchPhase,
-//RS     out: &mut String,
-//RS ) -> Result<(), String> {
-//RS     phase.validate()?;
-//RS     out.push('{');
-//RS     render_text_field("phase", &phase.phase, out)?;
-//RS     render_text_field("status", &phase.status, out)?;
-//RS     render_text_field("detail", &phase.detail, out)?;
-//RS     out.push('}');
-//RS     Ok(())
-//RS }
-//RS fn render_function_field(
-//RS     key: &str,
-//RS     function: &JetDevtoolsFunctionIdentity,
-//RS     out: &mut String,
-//RS ) -> Result<(), String> {
-//RS     render_field_prefix(key, out);
-//RS     render_function_identity(function, out)
-//RS }
-//RS 
-//RS fn render_function_identity(
-//RS     function: &JetDevtoolsFunctionIdentity,
-//RS     out: &mut String,
-//RS ) -> Result<(), String> {
-//RS     function.validate()?;
-//RS     out.push('{');
-//RS     render_text_field("function_id", &function.function_id, out)?;
-//RS     render_text_field("name", &function.name, out)?;
-//RS     render_field_prefix("source", out);
-//RS     render_source_span(&function.source, out)?;
-//RS     out.push('}');
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn render_source_span(span: &JetDevtoolsSourceSpan, out: &mut String) -> Result<(), String> {
-//RS     span.validate()?;
-//RS     out.push('{');
-//RS     render_text_field("source_id", &span.source_id, out)?;
-//RS     render_text_field("file", &span.file, out)?;
-//RS     render_u64_field("start_line", u64::from(span.start_line), out);
-//RS     render_u64_field("start_column", u64::from(span.start_column), out);
-//RS     render_u64_field("end_line", u64::from(span.end_line), out);
-//RS     render_u64_field("end_column", u64::from(span.end_column), out);
-//RS     out.push('}');
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn render_bool_field(key: &str, value: bool, out: &mut String) {
-//RS     render_field_prefix(key, out);
-//RS     out.push_str(if value { "true" } else { "false" });
-//RS }
-//RS 
-//RS fn render_field_prefix(key: &str, out: &mut String) {
-//RS     if !out.ends_with('{') {
-//RS         out.push(',');
-//RS     }
-//RS     out.push('"');
-//RS     out.push_str(key);
-//RS     out.push_str("\":");
-//RS }
-//RS 
-//RS fn validate_text(value: &str, field: &str) -> Result<(), String> {
-//RS     if value.len() > JET_DEVTOOLS_MAX_TEXT_BYTES {
-//RS         return Err(format!(
-//RS             "jet.devtools.v1 {field} exceeds the Prelude text limit"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// This is deliberately a framing check, not a second JSON implementation.
-//RS /// Adapters own typed payload construction; the shared boundary only prevents
-//RS /// malformed fragments and control bytes from crossing into the envelope.
-//RS fn validate_json_object(value: &str, field: &str) -> Result<(), String> {
-//RS     let trimmed = value.trim();
-//RS     if trimmed.len() > JET_DEVTOOLS_MAX_TEXT_BYTES
-//RS         || !trimmed.starts_with('{')
-//RS         || !trimmed.ends_with('}')
-//RS     {
-//RS         return Err(format!(
-//RS             "jet.devtools.v1 {field} must be a bounded JSON object"
-//RS         ));
-//RS     }
-//RS     let mut depth = 0usize;
-//RS     let mut in_string = false;
-//RS     let mut escaped = false;
-//RS     for character in trimmed.chars() {
-//RS         if character.is_control() {
-//RS             return Err(format!(
-//RS                 "jet.devtools.v1 {field} contains a control character"
-//RS             ));
-//RS         }
-//RS         if in_string {
-//RS             if escaped {
-//RS                 escaped = false;
-//RS             } else if character == '\\' {
-//RS                 escaped = true;
-//RS             } else if character == '"' {
-//RS                 in_string = false;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         match character {
-//RS             '"' => in_string = true,
-//RS             '{' => depth = depth.saturating_add(1),
-//RS             '}' => {
-//RS                 if depth == 0 {
-//RS                     return Err(format!("jet.devtools.v1 {field} has unbalanced braces"));
-//RS                 }
-//RS                 depth -= 1;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     if in_string || escaped || depth != 0 {
-//RS         return Err(format!("jet.devtools.v1 {field} has unbalanced JSON"));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub fn render_text(value: &str, out: &mut String) -> Result<(), String> {
-//RS     validate_text(value, "text")?;
-//RS     out.push('"');
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 out.push_str("\\u00");
-//RS                 let code = character as u32;
-//RS                 out.push(hex_digit((code >> 4) as u8));
-//RS                 out.push(hex_digit(code as u8));
-//RS             }
-//RS             character => out.push(character),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     Ok(())
-//RS }
-//RS 
-//RS pub fn hex_digit(value: u8) -> char {
-//RS     match value & 0x0f {
-//RS         0..=9 => (b'0' + (value & 0x0f)) as char,
-//RS         value => (b'a' + value - 10) as char,
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod jet_devtools_protocol_tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn envelope_uses_one_canonical_wire_shape_and_payload_is_opt_in() {
-//RS         let mut envelope = JetDevtoolsEnvelope::new("session", 10);
-//RS         envelope.push(
-//RS             JetDevtoolsEvent::try_new(
-//RS                 11,
-//RS                 "test",
-//RS                 JetDevtoolsEventBody::Query {
-//RS                     name: "orders".into(),
-//RS                     state: JetDevtoolsQueryState::Fresh,
-//RS                     footprint: 3,
-//RS                 },
-//RS             )
-//RS             .unwrap(),
-//RS         );
-//RS         envelope.set_selection(Some(JetDevtoolsSelection::new(
-//RS             "Queries",
-//RS             Some("orders".into()),
-//RS         )));
-//RS         let event = envelope.events().next().expect("event");
-//RS         assert_eq!(event.sequence(), 1);
-//RS         assert!(event.payload_json().is_none());
-//RS         assert_eq!(
-//RS             envelope.serialize().unwrap(),
-//RS             "{\"protocol\":\"jet.devtools.v1\",\"session_id\":\"session\",\"started_at_ms\":10,\"events\":[{\"sequence\":1,\"timestamp_ms\":11,\"source\":\"test\",\"kind\":\"Query\",\"entity\":\"orders\",\"fields\":{\"name\":\"orders\",\"state\":\"fresh\",\"footprint\":3},\"payload\":null}],\"selection\":{\"panel_id\":\"Queries\",\"item_key\":\"orders\"},\"cursor\":1}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn typed_publication_attaches_opt_in_payload_without_reframing_envelope() {
-//RS         let mut envelope = JetDevtoolsEnvelope::new("game", 1);
-//RS         let event = JetDevtoolsEvent::try_new(
-//RS             2,
-//RS             "game",
-//RS             JetDevtoolsEventBody::Frame {
-//RS                 name: "scene".into(),
-//RS                 status: "ready".into(),
-//RS                 duration_ms: 1,
-//RS             },
-//RS         )
-//RS         .unwrap()
-//RS         .publish(JetDevtoolsPayload::one(
-//RS             "index",
-//RS             JetDevtoolsValue::Int(1),
-//RS         ))
-//RS         .unwrap();
-//RS         envelope.push(event);
-//RS         let json = envelope.serialize().unwrap();
-//RS         assert!(json.contains("\"protocol\":\"jet.devtools.v1\""));
-//RS         assert!(json.contains("\"payload\":{\"fields\":{\"index\":1}}"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn state_ring_returns_the_newest_past_cursor_and_drops_oldest() {
-//RS         let mut ring = JetDevtoolsStateRing::with_capacity(2);
-//RS         for cursor in [10, 20, 30] {
-//RS             ring.push(JetDevtoolsStateSnapshot::new(
-//RS                 cursor,
-//RS                 vec![JetDevtoolsStateEntry::new("cart", "ready", cursor)],
-//RS                 vec![JetDevtoolsStateEntry::new("orders", "fresh", cursor)],
-//RS             ))
-//RS             .unwrap();
-//RS         }
-//RS         assert!(ring.at(10).is_none());
-//RS         assert_eq!(ring.at(25).unwrap().cursor, 20);
-//RS         assert_eq!(ring.store_at(30).unwrap()[0].revision, 30);
-//RS         assert_eq!(ring.query_cache_at(30).unwrap()[0].key, "orders");
-//RS     }
-//RS }
-//RS // JET_HOST_DEVTOOLS_NATIVE_BEGIN
-//RS // Host-crate projection of the native devtools registry. Compiled consumers
-//RS // (`jet_foundation::Devtools::*`) reach the registry through this include and
-//RS // these always-on wrappers. Codegen strips this whole region when it splices
-//RS // `Prelude/Devtools.rs` (a symlink to this file) into a generated program:
-//RS // the program receives `DevtoolsNative.rs` as its own Prelude part exactly
-//RS // once and wrappers gated on `JET_DEVTOOLS_RUNTIME_ENABLED` instead.
-//RS include!("DevtoolsNative.rs");
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_install_native_host(
-//RS     session_id: impl Into<String>,
-//RS     host: JetDevtoolsNativeHostHandle,
-//RS ) -> Result<JetDevtoolsNativeHostGuard, String> {
-//RS     jet_devtools_install_native_host_unchecked(session_id, host)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_bind_session(session_id: &str) -> Result<(), String> {
-//RS     jet_devtools_native_bind_session_unchecked(session_id)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_clear_session(session_id: &str) {
-//RS     jet_devtools_native_clear_session_unchecked(session_id);
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_publish_event_for_session(session_id: &str, event: JetDevtoolsEvent) {
-//RS     jet_devtools_publish_event_for_session_unchecked(session_id, event);
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_window_open(width: u32, height: u32) {
-//RS     jet_devtools_native_window_open_unchecked(width, height);
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_window_close() {
-//RS     jet_devtools_native_window_close_unchecked();
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_input(input: JetDevtoolsNativeInput) -> bool {
-//RS     jet_devtools_native_input_unchecked(input)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_frame_begin(
-//RS     frame_index: u64,
-//RS     width: u32,
-//RS     height: u32,
-//RS ) -> Vec<JetDevtoolsNativeDrawCommand> {
-//RS     jet_devtools_native_frame_begin_unchecked(frame_index, width, height)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_draw(command: JetDevtoolsNativeDrawCommand) {
-//RS     jet_devtools_native_draw_unchecked(command);
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_frame_end() {
-//RS     jet_devtools_native_frame_end_unchecked();
-//RS }
-//RS // JET_HOST_DEVTOOLS_NATIVE_END
-//RS 
-// END-PORT-PENDING 2087 crates/jet-foundation/src/Devtools.rs:1801-2217
+// Rust: crates/jet-foundation/src/Devtools.rs:1801-1868
+// The render_body_fields continuation (GameDrawEvent, GameLaunchProfile,
+// GameSwap, Request, Response) is already implemented by the canonical
+// Devtools/Wire.jet jet_devtools_render_body_fields; do not split its match.
+// Rust: crates/jet-foundation/src/Devtools.rs:1870
+// render_payload: Devtools/Wire.jet jet_devtools_render_payload.
+// Rust: crates/jet-foundation/src/Devtools.rs:1887
+// render_value: Devtools/Wire.jet render_value.
+// Rust: crates/jet-foundation/src/Devtools.rs:1898
+// render_text_field: Devtools/Wire.jet jet_devtools_render_text_field.
+// Rust: crates/jet-foundation/src/Devtools.rs:1903
+// render_u64_field: Devtools/Wire.jet jet_devtools_render_u64_field.
+// Rust: crates/jet-foundation/src/Devtools.rs:1907
+// render_null_field: Devtools/Wire.jet jet_devtools_render_null_field.
+// Rust: crates/jet-foundation/src/Devtools.rs:1912
+// render_optional_text_field: Devtools/Wire.jet jet_devtools_render_optional_text_field.
+// Rust: crates/jet-foundation/src/Devtools.rs:1927
+// render_launch_phase: Devtools/Wire.jet jet_devtools_render_launch_phase.
+// Rust: crates/jet-foundation/src/Devtools.rs:1939
+// render_function_field: Devtools/Wire.jet jet_devtools_render_function_field.
+// Rust: crates/jet-foundation/src/Devtools.rs:1948
+// render_function_identity: Devtools/Wire.jet jet_devtools_render_function_identity.
+// Rust: crates/jet-foundation/src/Devtools.rs:1962
+// render_source_span: Devtools/Wire.jet jet_devtools_render_source_span.
+// Rust: crates/jet-foundation/src/Devtools.rs:1975
+// render_bool_field: Devtools/Wire.jet jet_devtools_render_bool_field.
+// Rust: crates/jet-foundation/src/Devtools.rs:1980
+// render_field_prefix: Devtools/Wire.jet jet_devtools_render_field_prefix.
+// Rust: crates/jet-foundation/src/Devtools.rs:1989
+// validate_text: Devtools/EventBody.jet jet_devtools_validate_text.
+// Rust: crates/jet-foundation/src/Devtools.rs:1998
+// validate_json_object: Devtools/Wire.jet jet_devtools_validate_json_object.
+// Rust: crates/jet-foundation/src/Devtools.rs:2048
+// render_text: Devtools/Wire.jet render_text.
+// Rust: crates/jet-foundation/src/Devtools.rs:2071
+// hex_digit: Devtools/Wire.jet jet_devtools_hex_digit (byte-oriented writer).
+// Rust: crates/jet-foundation/src/Devtools.rs:2078-2150
+// Paired protocol tests: Compiler/JetFoundation/Tests/Devtools02.jet.
 
+// Rust: crates/jet-foundation/src/Devtools.rs:2151-2158
+// The native registry is a separate canonical Jet module, not an include of Rust.
+use JetFoundation.DevtoolsNative.*
+use JetFoundation.Devtools.Observation.JetDevtoolsEvent
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2160
+pub fn jet_devtools_install_native_host(^session_id: String, host: JetDevtoolsNativeHostHandle) -> JetDevtoolsNativeHostGuard Err! {
+    jet_devtools_install_native_host_unchecked(^session_id, host)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2168
+pub fn jet_devtools_native_bind_session(session_id: String) -> Err! {
+    jet_devtools_native_bind_session_unchecked(session_id)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2173
+pub fn jet_devtools_native_clear_session(session_id: String) -> {
+    jet_devtools_native_clear_session_unchecked(session_id)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2178
+pub fn jet_devtools_publish_event_for_session(session_id: String, ^event: JetDevtoolsEvent) -> {
+    jet_devtools_publish_event_for_session_unchecked(session_id, ^event)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2183
+pub fn jet_devtools_native_window_open(width: U32, height: U32) -> {
+    jet_devtools_native_window_open_unchecked(width, height)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2188
+pub fn jet_devtools_native_window_close() -> {
+    jet_devtools_native_window_close_unchecked()
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2193
+pub fn jet_devtools_native_input(^input: JetDevtoolsNativeInput) -> Bool {
+    jet_devtools_native_input_unchecked(^input)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2198
+pub fn jet_devtools_native_frame_begin(frame_index: U64, width: U32, height: U32) -> [JetDevtoolsNativeDrawCommand] {
+    jet_devtools_native_frame_begin_unchecked(frame_index, width, height)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2207
+pub fn jet_devtools_native_draw(^command: JetDevtoolsNativeDrawCommand) -> {
+    jet_devtools_native_draw_unchecked(^command)
+}
+
+// Rust: crates/jet-foundation/src/Devtools.rs:2212
+pub fn jet_devtools_native_frame_end() -> {
+    jet_devtools_native_frame_end_unchecked()
+}

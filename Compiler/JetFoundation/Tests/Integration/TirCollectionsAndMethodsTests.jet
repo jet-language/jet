@@ -1,0 +1,1291 @@
+use TirSupport.[assert_release_error_tiers_agree, assert_release_tiers_agree, assert_tiers_agree, build_and_run, compile, have_rustc]
+use TirSupport as tir_support
+use jet_interpreter.[dev_iteration, RunOutcome]
+use jet_driver
+use jet_fix_engine
+// GATE #4494: retained compiler invocation and build-time fixture/environment facts.
+use std.env
+// Rust generated-code shape assertions remain independent reference comparators.
+
+// Rust: tests/tir_collections_and_methods.rs:15
+#Test("generated_temporaries_do_not_collide_with_collection_locals") {
+    src :: """
+fn run() -> {
+    value :: 2
+    v :: 3
+    k :: "apple"
+    item :: 0
+    i :: 9
+    if i < 0 { print(item) }
+    xs := [value, v]
+    xs[1] = value
+    loop (list_index, list_item) in xs { print("{list_index}:{list_item}") }
+    counts := [String:Int]{}
+    counts[k] = value
+    loop (map_key, map_value) in counts { print("{map_key}={map_value}") }
+}
+"""
+    assert_tiers_agree("tir_generated_name_collections", src, "0:2\n1:2\napple=2\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:49
+#Test("list_literal_index_slice_and_iteration") {
+    if !have_rustc() { return }
+    src :: """
+fn total(xs: [Int]) -[]> Int {
+    sum := 0
+    loop x in xs { sum = (sum + x) }
+    return sum
+}
+fn run() -> {
+    nums := [10, 20, 30, 40]
+    print(nums[0])
+    print(nums[1..2])
+    print(total(nums))
+}
+"""
+    (code, stdout) :: build_and_run("tir_list", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "10\n[20, 30]\n100\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:75
+#Test("list_two_binding_and_indexes") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    xs := [10, 20, 30]
+    loop (i, v) in xs { print("{i}:{v}") }
+    loop i in xs.indexes() { print(i) }
+    empty := [Int]{}
+    count := 0
+    loop i in empty.indexes() { count = (count + 1) }
+    print(count)
+    loop pair in xs.indexed() { print("{pair.idx}:{pair.item}") }
+}
+"""
+    (code, stdout) :: build_and_run("tir_list_index_idioms", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "0:10\n1:20\n2:30\n0\n1\n2\n0\n0:10\n1:20\n2:30\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:106
+#Test("list_index_assignment") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    nums := [1, 2, 3]
+    nums[1] = 99
+    print(nums[0])
+    print(nums[1])
+    print(nums[2])
+}
+"""
+    (code, stdout) :: build_and_run("tir_list_assign", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n99\n3\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:128
+#Test("nested_index_assignment_updates_live_collections") {
+    src :: """
+fn run() -> {
+    list_lists := [[1, 2], [3, 4]]
+    list_lists[1][0] = 9
+    print(list_lists[1][0])
+    map_lists := [String:[Int]]{}
+    map_lists["row"] = [5, 6]
+    map_lists["row"][1] = 8
+    print(map_lists["row"][1])
+    list_maps := [[String:Int]]{[String:Int]{}, [String:Int]{}}
+    list_maps[1]["new"] = 7
+    print(list_maps[1]["new"])
+    map_maps := [String:[String:Int]]{}
+    map_maps["outer"] = [String:Int]{}
+    map_maps["outer"]["inner"] = 6
+    print(map_maps["outer"]["inner"])
+    cube := [[[1, 2], [3, 4]], [[5, 6], [7, 8]]]
+    cube[1][0][1] = 42
+    print(cube[1][0][1])
+    selectors := [8, 0, 0, 1]
+    rows := [[10, 11], [12, 13]]
+    rows[&selectors.pop() ?? 0][&selectors.pop() ?? 0] = &selectors.pop() ?? 0
+    print(selectors.len())
+    print(rows[0][0])
+}
+"""
+    assert_tiers_agree("tir_nested_index_assignment", src, "9\n8\n7\n6\n42\n1\n1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:167
+#Test("map_literal_index_insert_and_iteration") {
+    src :: """
+fn run() -> {
+    counts := [String:Int]{}
+    counts["banana"] = 3
+    counts["apple"] = 5
+    print(counts["apple"])
+    loop (k, v) in counts { print("{k}={v}") }
+    loop entry in counts { print("{entry.key}:{entry.value}") }
+}
+"""
+    assert_tiers_agree("tir_map", src, "5\napple=5\nbanana=3\napple:5\nbanana:3\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:188
+#Test("map_get_update_is_total_for_missing_key") {
+    src :: """
+fn run() -> {
+    counts := [String:Int]{}
+    counts["missing"] = (counts.get("missing") ?? 0) + 1
+    counts["other"] = (counts.get("other") ?? 0) - 1
+    counts["product"] = (counts.get("product") ?? 1) * 2
+    print(counts["missing"])
+    print(counts["other"])
+    print(counts["product"])
+}
+"""
+    assert_tiers_agree("tir_map_get_update", src, "1\n-1\n2\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:204
+#Test("list_get_fallback_classifies_option_carrier") {
+    src :: """
+fn run() -> {
+    values :: [Int]{}
+    print(values.get(0) ?? 0)
+}
+"""
+    assert_tiers_agree("tir_list_get_fallback_option", src, "0\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:215
+#Test("numeric_methods_resolve_literal_and_bound_receivers") {
+    src :: """
+fn run() -> {
+    value :: -17
+    print(17.div_euclid(5))
+    print(value.div_euclid(5))
+}
+"""
+    assert_tiers_agree("tir_numeric_method_return_type", src, "3\n-4\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:227
+#Test("bare_run_rejects_non_unit_entry_contract") {
+    src :: """
+fn run() -> Int { return 42 }
+"""
+    diagnostics :: tir_support.compile_source("bare_run_contract", src).expect_err("a bare executable run must have a unit return")
+    diagnostic :: diagnostics.find(fn(diagnostic) { diagnostic.code == "E1321" }).unwrap_or_else(fn() { panic("missing E1321: {diagnostics:?}") })
+    assert_eq(diagnostic.what, "Output entry `run` has the wrong callable contract")
+    assert_eq(diagnostic.why, "an Executable takes zero or one typed CLI parameter and returns `()` or `() ?`")
+    assert_eq(diagnostic.fix, "declare the entry as `fn run()` or `fn run() ()?`")
+    assert(diagnostic.span.is_some(), "{diagnostic:?}")
+}
+// Rust: tests/tir_collections_and_methods.rs:255
+#Test("map_top_n_keeps_rank_order_and_bounds") {
+    src :: """
+fn run() -> {
+    counts := [String:Int]{}
+    counts["b"] = 2
+    counts["d"] = 1
+    counts["a"] = 2
+    counts["c"] = 3
+    loop item in counts.top_n(2) -> print("{item.key}:{item.value}")
+    print(counts.top_n(0).len())
+    print(counts.top_n(-1).len())
+    loop item in counts.top_n(10) -> print("{item.key}:{item.value}")
+}
+"""
+    assert_tiers_agree("tir_map_top_n_bounds", src, "c:3\na:2\n0\n0\nc:3\na:2\nb:2\nd:1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:277
+#Test("card_2254_variable_operands_use_shared_hot_kernels") {
+    src :: """
+fn kernels(left: Int, right: Int, suffix: String) -> {
+    print(left + right)
+    print(left - right)
+    print(left * right)
+    print(left < right)
+    text := "a"
+    print("{text}{suffix}")
+    text += suffix
+    print(text)
+}
+fn run() -> { kernels(7, 2, "b") }
+"""
+    rust :: compile("card_2254_variable_kernels", src)
+    assert(rust.contains("jet_std::jet_int_add_hot!") && rust.contains("jet_std::jet_int_sub_hot!") && rust.contains("jet_std::jet_int_mul_hot!") && rust.contains("jet_std::jet_int_compare_hot!") && rust.contains("jet_string_concat_hot!(&("), "variable operands must use the shared hot kernels:\n{rust}")
+    assert_tiers_agree("card_2254_variable_kernels", src, "9\n5\n14\nfalse\nab\nab\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:310
+#Test("card_2254_map_hoist_requires_unique_owner") {
+    src :: """
+fn run() -> {
+    counts := [String:Int]{}
+    alias := counts.copy()
+    loop key in ["hot"] { counts[key] = (counts.get(key) ?? 0) + 1 }
+    print(alias.get("hot") ?? 0)
+    print(counts.get("hot") ?? 0)
+}
+"""
+    rust :: compile("card_2254_map_alias", src)
+    assert(!rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"), "an aliased map must keep the ordinary COW path:\n{rust}")
+    assert_tiers_agree("card_2254_map_alias", src, "0\n1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:331
+#Test("card_2254_map_hoist_rejects_unknown_calls") {
+    src :: """
+fn observe(value: Int) -> Int { return value }
+fn run() -> {
+    counts := [String:Int]{}
+    loop key in ["hot"] {
+        observe(1)
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    print(counts.get("hot") ?? 0)
+}
+"""
+    rust :: compile("card_2254_map_call", src)
+    assert(!rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"), "a loop with an unknown call must keep the ordinary map path:\n{rust}")
+    assert_tiers_agree("card_2254_map_call", src, "1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:354
+#Test("card_2254_witnesses_keep_tier_parity") {
+    int_src :: include_str("tests/fixtures/card_2254_int_loop.jet")
+    int_rust :: compile("card_2254_int_loop_shape", int_src)
+    assert(int_rust.contains("jet_std::jet_int_add_hot!") && int_rust.contains("jet_keep"), "integer witness must keep the packed fast path and its observable value:\n{int_rust}")
+    map_src :: include_str("tests/fixtures/card_2254_map_insert.jet")
+    map_rust :: compile("card_2254_map_insert_shape", map_src)
+    assert(map_rust.contains("let mut __jet_counts = jet_map_make_mut(&mut (__jet_counts));"), "map witness must hoist one make_mut borrow outside its mutation loop:\n{map_rust}")
+    assert_tiers_agree("card_2254_int_loop", int_src, "49999995000000\n")
+    assert_tiers_agree("card_2254_sized_int_loop", include_str("tests/fixtures/card_2254_sized_int_loop.jet"), "100000\n")
+    assert_tiers_agree("card_2254_map_insert", map_src, "1000\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:385
+#Test("card_2254_list_hoist_requires_unique_owner") {
+    src :: """
+fn run() -> {
+    values := [Int]{0, 0, 0, 0}
+    loop i in [0, 1, 2, 3] { values[i] = i + 1 }
+    print(values)
+}
+"""
+    rust :: compile("card_2254_list_unique", src)
+    assert(rust.contains("let mut __jet_values = &mut *(__jet_values);"), "list witness must hoist one make_mut borrow outside its mutation loop:\n{rust}")
+    assert_tiers_agree("card_2254_list_unique", src, "[1, 2, 3, 4]\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:404
+#Test("card_2254_list_hoist_rejects_aliases") {
+    src :: """
+fn run() -> {
+    values := [Int]{0, 0, 0, 0}
+    alias := values.copy()
+    loop i in [0, 1, 2, 3] { values[i] = i + 1 }
+    print(alias)
+    print(values)
+}
+"""
+    rust :: compile("card_2254_list_alias", src)
+    assert(!rust.contains("let mut __jet_values = &mut *(__jet_values);"), "an aliased list must keep the ordinary COW path:\n{rust}")
+    assert_tiers_agree("card_2254_list_alias", src, "[0, 0, 0, 0]\n[1, 2, 3, 4]\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:429
+#Test("card_2254_string_bytes_map_update_borrows_key") {
+    src :: """
+fn run() -> {
+    counts := [String:Int]{}
+    token := [U8]{97, 98}
+    key :: String.from_bytes(token) ?? panic("invalid utf8")
+    counts[key] = (counts.get(key) ?? 0) + 1
+    print(counts["ab"])
+}
+"""
+    rust :: compile("card_2254_string_bytes_map", src)
+    assert(rust.contains("jet_map_update_string_bytes(&mut") && !rust.contains("jet_map_update_string(&mut"), "a strict byte-key update must borrow bytes without a temporary String:\n{rust}")
+    assert_tiers_agree("card_2254_string_bytes_map", src, "1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:449
+#Test("card_2254_string_bytes_invalid_utf8_keeps_fallback") {
+    src :: """
+fn run() -> {
+    tokens := [[U8]]{{255}}
+    counts := [String:Int]{}
+    loop token in tokens {
+        key :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+}
+"""
+    rust :: compile("card_2254_string_bytes_invalid", src)
+    assert(rust.contains("JetStringCountBuilder::new") && rust.contains("jet_map_update_string_bytes(&mut") && rust.contains("invalid utf8"), "invalid UTF-8 must stay on the strict helper's original fallback:\n{rust}")
+}
+// Rust: tests/tir_collections_and_methods.rs:470
+#Test("card_2254_string_count_loop_uses_hash_builder_then_restores_order") {
+    src :: """
+fn run() -> {
+    tokens :: [[U8]]{{97}, {98}, {97}}
+    counts := [String:Int]{}
+    loop token in tokens {
+        key :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[key] = (counts.get(key) ?? 0) + 1
+    }
+    print(counts)
+}
+"""
+    rust :: compile("card_2254_string_count_builder", src)
+    assert(rust.contains("JetStringCountBuilder::new") && rust.contains("JetStringCountBuildHasher") && rust.contains("HashMap<Vec<u8>, i64, JetStringCountBuildHasher>") && rust.contains("jet_map_update_string_bytes(&mut"), "an isolated String:Int count loop must use byte-key hashing and restore the ordered map:\n{rust}")
+    assert_tiers_agree("card_2254_string_count_builder", src, "[a: 2, b: 1]\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:494
+#Test("card_2254_string_count_loop_rejects_visible_map_reads") {
+    src :: """
+fn run() -> {
+    tokens :: [[U8]]{{97}, {98}}
+    counts := [String:Int]{}
+    loop token in tokens {
+        key :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[key] = (counts.get(key) ?? 0) + 1
+        print(counts.len())
+    }
+}
+"""
+    rust :: compile("card_2254_string_count_visible_read", src)
+    assert(!rust.contains("JetStringCountBuilder::new"), "a map read inside the loop must retain immediate ordered-map updates:\n{rust}")
+    assert_tiers_agree("card_2254_string_count_visible_read", src, "1\n2\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:515
+#Test("card_2254_string_bytes_alias_keeps_ordinary_update") {
+    src :: """
+fn run() -> {
+    counts := [String:Int]{}
+    token := [U8]{97}
+    key :: String.from_bytes(token) ?? panic("invalid utf8")
+    alias := key
+    counts[alias] = (counts.get(alias) ?? 0) + 1
+    print(counts["a"])
+}
+"""
+    rust :: compile("card_2254_string_bytes_alias", src)
+    assert(!rust.contains("jet_map_update_string_bytes(&mut"), "an aliased decoded key must retain the ordinary update path:\n{rust}")
+    assert_tiers_agree("card_2254_string_bytes_alias", src, "1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:535
+#Test("card_2269_ascii_whitespace_scan_borrows_tokens") {
+    src :: """
+fn run() -> {
+    input := [U8]{97, 32, 98, 10, 99}
+    counts := [String:Int]{}
+    total := 0
+    token := [U8]{}
+    space :: U8{32}
+    ascii_ws_start :: U8{9}
+    ascii_ws_end :: U8{13}
+    loop byte in input {
+        if {
+            byte == space || (byte >= ascii_ws_start && byte <= ascii_ws_end) -> {
+                if !token.is_empty() {
+                    word :: String.from_bytes(token) ?? panic("invalid utf8")
+                    counts[word] = (counts.get(word) ?? 0) + 1
+                    total += 1
+                    &token.clear()
+                }
+            }
+            else -> &token.push(byte)
+        }
+    }
+    if !token.is_empty() {
+        word :: String.from_bytes(token) ?? panic("invalid utf8")
+        counts[word] = (counts.get(word) ?? 0) + 1
+        total += 1
+    }
+    loop item in counts.top_n(20) -> print("{item.value} {item.key}")
+    print("distinct {counts.len()} total {total}")
+}
+"""
+    rust :: compile("card_2269_ascii_whitespace_scan", src)
+    assert(rust.contains("jet_bytes_ascii_whitespace_for_each") && rust.contains("JetStringCountBuilder::new"), "a unique-owner ASCII token loop must scan borrowed slices into the count builder:\n{rust}")
+    assert_tiers_agree("card_2269_ascii_whitespace_scan", src, "1 a\n1 b\n1 c\ndistinct 3 total 3\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:580
+#Test("card_2269_wordfreq_source_uses_ascii_whitespace_scan") {
+    src :: include_str("Tools/gauntlet/entries/wordfreq/jet/run.jet")
+    rust :: compile("card_2269_wordfreq_source", src)
+    assert(rust.contains("jet_bytes_ascii_whitespace_for_each(&("), "the wordfreq corpus shape must use the borrowed ASCII token scanner:\n{rust}")
+}
+// Rust: tests/tir_collections_and_methods.rs:591
+#Test("card_2254_bounded_induction_uses_native_integer_paths") {
+    src :: """
+fn run() -> {
+    total := 0
+    loop i in 0..<10 {
+        a :: i + 1
+        b :: a * 2
+        c :: b - 1
+        total = total + c + (i /% 2) + (i % 2)
+    }
+    print(total)
+}
+"""
+    rust :: compile("card_2254_bounded_integer_paths", src)
+    assert(rust.contains("jet_std::jet_int_add_inline!") && rust.contains("jet_std::jet_int_mul_inline!") && rust.contains("jet_std::jet_int_sub_inline!") && rust.contains("((__jet_i) / (") && rust.contains("((__jet_i) % (") && !rust.contains("jet_std::jet_int_floor_div") && !rust.contains("jet_std::jet_int_mod"), "bounded induction must remove checked arithmetic and floor/mod helpers:\n{rust}")
+    assert_tiers_agree("card_2254_bounded_integer_paths", src, "125\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:619
+#Test("card_2872_exact_int_division_family_uses_hot_kernels") {
+    src :: """
+fn probe(value: Int) -> Int {
+    return (value /% 3) + (value % 3) + (value %% 3) + (value << 1) + (value >> 1)
+}
+fn run() -> {
+    total := 0
+    loop i in 0..<10 {
+        total = total + (i /% 3)
+        total = total + (i % 3)
+        total = total + (i %% 3)
+        total = total + (i << 1)
+        total = total + (i >> 1)
+    }
+    print(total)
+    print(probe(9223372036854775808))
+}
+"""
+    rust :: compile("card_2872_exact_int_division_family", src)
+    assert(rust.contains("jet_std::jet_int_floor_div_hot!") && rust.contains("jet_std::jet_int_mod_hot!") && rust.contains("jet_std::jet_int_rem_hot!") && rust.contains("jet_std::jet_int_shl_hot!") && rust.contains("jet_std::jet_int_shr_hot!"), "exact-Int division-family operations must use shared hot kernels:\n{rust}")
+    assert_tiers_agree("card_2872_exact_int_division_family", src, "140\n26132887437755198128\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:654
+#Test("card_2254_integer_paths_reject_uncertain_negative_and_overflow") {
+    uncertain :: """
+fn body(limit: Int) -> {
+    loop i in 0..<limit { print(i + 1) }
+}
+fn run() -> { body(3) }
+"""
+    uncertain_rust :: compile("card_2254_uncertain_integer", uncertain)
+    assert(!uncertain_rust.contains("jet_std::jet_int_add_inline!") && uncertain_rust.contains("jet_std::jet_int_add_hot!"), "an uncertain loop bound must retain checked integer arithmetic:\n{uncertain_rust}")
+    negative :: """
+fn run() -> {
+    loop i in -5..<5 {
+        print((i /% 2))
+        print((i % 2))
+    }
+}
+"""
+    negative_rust :: compile("card_2254_negative_floor", negative)
+    assert(negative_rust.contains("jet_std::jet_int_floor_div") && negative_rust.contains("jet_std::jet_int_mod") && !negative_rust.contains("((__jet_i) / (") && !negative_rust.contains("((__jet_i) % ("), "sign-crossing floor/mod must retain exact helpers:\n{negative_rust}")
+    overflow :: """
+fn run() -> {
+    max :: 4611686018427387903
+    print(max + 1)
+}
+"""
+    overflow_rust :: compile("card_2254_integer_overflow", overflow)
+    assert(!overflow_rust.contains("jet_std::jet_int_add_inline!") && overflow_rust.contains("jet_std::jet_int_add_hot!"), "an affine result outside signed-63 must retain checked addition:\n{overflow_rust}")
+}
+// Rust: tests/tir_collections_and_methods.rs:710
+#Test("covered_fn_returns_cloned_string_field") {
+    if !have_rustc() { return }
+    src :: """
+struct Person { name: String; age: Int }
+fn name_of(p: Person) -[]> String { return ~p.name }
+fn run() -> {
+    p :: Person{ name: "Grace", age: 40 }
+    print(name_of(p))
+}
+"""
+    (code, stdout) :: build_and_run("tir_clone_getter", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "Grace\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:737
+#Test("user_method_with_scalar_args") {
+    if !have_rustc() { return }
+    src :: """
+struct Calc {
+    base: Int
+    fn add(self, x: Int, y: Int) -[]> Int { return ((self.base + x) + y) }
+}
+fn calc(c: Calc) -[]> Int { return c.add(10, 20) }
+fn run() -> {
+    c :: Calc{ base: 1 }
+    print(calc(c))
+}
+"""
+    (code, stdout) :: build_and_run("tir_method_args", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "31\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:766
+#Test("user_method_with_string_arg_implicit_clone") {
+    if !have_rustc() { return }
+    src :: """
+struct Crate {
+    label: String
+    fn combine(self, other: String) -[]> String { return "{self.label}-{other}" }
+}
+fn calc(b: Crate) -[..E]> String {
+    name :: "x"
+    return b.combine(name)
+}
+fn run() -> {
+    b :: Crate{ label: "t" }
+    print(calc(b))
+}
+"""
+    (code, stdout) :: build_and_run("tir_method_string_arg", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "t-x\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:796
+#Test("generated_same_name_methods_keep_owner_identity") {
+    src :: """
+struct D { value: Int }
+struct Pair { a: Int; b: Int }
+fn align(left: D, right: D) -> Pair { Pair{a: left.value, b: right.value} }
+impl D.Add {
+    fn add(self, rhs: D) -> D {
+        pair :: align(self, rhs)
+        return D{value: pair.a + pair.b}
+    }
+}
+fn run() -> {
+    sum :: (D{value: 1} + D{value: 2})
+    print(sum.value)
+    print(Pair{a: 1, b: 2} == Pair{a: 1, b: 2})
+}
+"""
+    assert_release_tiers_agree("tir_generated_method_owner_identity", src, "3\ntrue\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:825
+#Test("trait_impl_method_call_no_mangle") {
+    if !have_rustc() { return }
+    src :: """
+trait Named { fn label(self) -> String }
+struct Dog { sound: String }
+impl Dog.Named { fn label(self) -> String { return "dog" } }
+fn describe(d: Dog) -> String { return d.label() }
+fn run() -> {
+    d :: Dog{ sound: "woof" }
+    print(describe(d))
+}
+"""
+    (code, stdout) :: build_and_run("tir_trait_method", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "dog\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:857
+#Test("user_method_on_covered_enum") {
+    if !have_rustc() { return }
+    src :: """
+enum Light {
+    Red
+    Green
+    fn code(self) -[]> Int {
+        if self == { .Red -> { return 1 }; .Green -> { return 2 } }
+    }
+}
+fn calc(l: Light) -[]> Int { return l.code() }
+fn run() -> { print(calc(Light.Green)) }
+"""
+    (code, stdout) :: build_and_run("tir_enum_method", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:888
+#Test("map_literal_with_entries") {
+    if !have_rustc() { return }
+    src :: """
+fn scores() -[]> [String:Int] { return ["a": 1, "b": 2] }
+fn run() -> {
+    s := scores()
+    print(s["a"])
+    print(s["b"])
+}
+"""
+    (code, stdout) :: build_and_run("tir_map_entries", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n2\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:917
+#Test("static_constructor_and_self_getter") {
+    if !have_rustc() { return }
+    src :: """
+struct Counter {
+    n: Int
+    fn make(v: Int) -[]> Counter { return Counter{ n: v } }
+    fn value(self) -[]> Int { return self.n }
+}
+fn run() -> {
+    c :: Counter.make(5)
+    print(c.value())
+}
+"""
+    (code, stdout) :: build_and_run("tir_static_ctor", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "5\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:945
+#Test("mut_self_method_body") {
+    if !have_rustc() { return }
+    src :: """
+struct Acc {
+    total: Int
+    fn doubled(&self) -[]> Int { return (self.total + self.total) }
+}
+fn run() -> {
+    a := Acc{ total: 7 }
+    print(a.doubled())
+}
+"""
+    (code, stdout) :: build_and_run("tir_mut_self", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "14\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:970
+#Test("enum_method_body_and_static_call") {
+    if !have_rustc() { return }
+    src :: """
+enum Sign {
+    Pos
+    Neg
+    Zero
+    fn make_pos() -[]> Sign { return Sign.Pos }
+    fn to_num(self) -[]> Int {
+        if self == {
+            .Pos -> { return 1 }
+            .Neg -> { return 0 }
+            .Zero -> { return 0 }
+        }
+    }
+}
+fn run() -> {
+    s :: Sign.make_pos()
+    print(s.to_num())
+}
+"""
+    (code, stdout) :: build_and_run("tir_enum_method_static", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1005
+#Test("method_calls_method_and_returns_struct") {
+    if !have_rustc() { return }
+    src :: """
+struct Vec2 {
+    x: Int
+    y: Int
+    fn make(x: Int, y: Int) -[]> Vec2 { return Vec2{ x: x, y: y } }
+    fn sum(self) -[]> Int { return (self.x + self.y) }
+    fn shifted(self, dx: Int) -[]> Vec2 { return Vec2{ x: (self.x + dx), y: self.y } }
+}
+fn run() -> {
+    p :: Vec2.make(3, 4)
+    q :: p.shifted(10)
+    print(q.sum())
+}
+"""
+    (code, stdout) :: build_and_run("tir_method_chain", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "17\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1041
+#Test("fallible_try_and_or_fallback") {
+    if !have_rustc() { return }
+    src :: """
+#Error
+enum ParseError { Empty; BadDigit(Int) }
+fn parse_age(raw: Int) -> Int ParseError! {
+    if raw == 0 { return Err(ParseError.Empty) }
+    if raw == 1 { return Err(ParseError.BadDigit(raw)) }
+    return Ok((raw * 2))
+}
+fn load(raw: Int) -> Int ParseError! {
+    n :: parse_age(raw)
+    return Ok((n + 1))
+}
+fn run() -> {
+    a :: load(21) ?? 0
+    print(a)
+    b :: load(0) ?? 99
+    print(b)
+}
+"""
+    (code, stdout) :: build_and_run("tir_fallible", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "43\n99\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1080
+#Test("or_fallback_return_form") {
+    if !have_rustc() { return }
+    src :: """
+fn checked(x: Int) -> Int Err! {
+    if x == 0 { return Err("zero") }
+    return Ok((100 /% x))
+}
+fn safe(x: Int) -> Int { return checked(x) ?? return -1 }
+fn run() -> {
+    print(safe(4))
+    print(safe(0))
+}
+"""
+    (code, stdout) :: build_and_run("tir_or_return", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "25\n-1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1107
+#Test("optional_val_none_and_fallback") {
+    if !have_rustc() { return }
+    src :: """
+fn first_even(limit: Int) -[]> Float? {
+    loop i in 1..limit {
+        if (i % 2) == 0 { return Val(Float.from_int(i)) }
+    }
+    return None
+}
+fn run() -> {
+    print((first_even(9) ?? 0.0) == 2.0)
+    print((first_even(1) ?? 7.5) == 7.5)
+}
+"""
+    assert_tiers_agree("tir_optional", src, "true\ntrue\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1131
+#Test("optional_chaining") {
+    if !have_rustc() { return }
+    src :: """
+struct Profile { handle: (String?) }
+struct Account { details: Profile }
+fn handle_of(a: (Account?)) -[]> (String?) { return a?.details?.handle }
+fn run() -> {
+    p :: Profile{ handle: Val("jay") }
+    acct :: Account{ details: p }
+    print(handle_of(Val(acct)) ?? "none")
+    print(handle_of(None) ?? "none")
+}
+"""
+    (code, stdout) :: build_and_run("tir_optchain", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "jay\nnone\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1165
+#Test("list_builtin_methods") {
+    if !have_rustc() { return }
+    src :: """
+fn build() -[]> [Int] {
+    xs := [3, 1, 2]
+    xs.push(5)
+    xs.insert(0, 0)
+    xs.sort()
+    xs.reverse()
+    return xs
+}
+fn run() -> {
+    xs := build()
+    print(xs.len())
+    print(xs.contains(5))
+    print(xs.index_of(2))
+    g := xs.get(0)
+    print(g ?? 0)
+    f := xs.first()
+    print(f ?? 0)
+}
+"""
+    (code, stdout) :: build_and_run("tir_list_builtins", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "5\ntrue\n2\n5\n5\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1197
+#Test("list_insert_bounds_have_release_tier_parity") {
+    if !have_rustc() { return }
+    valid :: """
+fn insert_at(index: Int) -[]> [Int] {
+    values := [1, 3]
+    &values.insert(index, 2)
+    return values
+}
+fn run() -> {
+    print(insert_at(0))
+    print(insert_at(1))
+    print(insert_at(2))
+}
+"""
+    assert_release_tiers_agree("tir_list_insert_valid", valid, "[2, 1, 3]\n[1, 2, 3]\n[1, 3, 2]\n")
+    negative :: """
+fn insert_at(index: Int) -[]> [Int] {
+    values := [1, 3]
+    &values.insert(index, 2)
+    return values
+}
+fn run() -> { print(insert_at(-1)) }
+"""
+    assert_release_error_tiers_agree("tir_list_insert_negative", negative, "the list has 2 items, so position -1 doesn't exist")
+    too_large :: """
+fn insert_at(index: Int) -[]> [Int] {
+    values := [1, 3]
+    &values.insert(index, 2)
+    return values
+}
+fn run() -> { print(insert_at(3)) }
+"""
+    assert_release_error_tiers_agree("tir_list_insert_too_large", too_large, "the list has 2 items, so position 3 doesn't exist")
+}
+// Rust: tests/tir_collections_and_methods.rs:1255
+#Test("string_builtin_methods") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    s := "  Hello, World  "
+    t := s.trim() // #4303
+    print(t.to_upper())
+    print(t.to_lower())
+    print(t.len())
+    print(t.starts_with("Hello"))
+    print(t.ends_with("World"))
+    print(t.replace("World", "Jet"))
+    print("ab".repeat(3))
+    print(t.contains("World"))
+    parts := "a,b,c".split(",")
+    print(parts.len())
+}
+"""
+    (code, stdout) :: build_and_run("tir_string_builtins", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "HELLO, WORLD\nhello, world\n12\ntrue\ntrue\nHello, Jet\nababab\ntrue\n3\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1288
+#Test("copied_string_slice_uses_string_builtin") {
+    src :: """
+fn strip_hash(reference: String) -> String {
+    text := ~reference
+    if (~text).starts_with("#") -> text = (~text).slice(1, (~text).len() - 1)
+    return text
+}
+fn run() -> { print(strip_hash("#é🙂")) }
+"""
+    assert_tiers_agree("tir_copied_string_slice", src, "é🙂\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1306
+#Test("string_surface_breadth") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    s := "  hello jet world  "
+    print(s.trim_start())
+    print(s.trim_end())
+    print(s.pad_start(22, "."))
+    print(s.pad_end(22, "."))
+    print(s.index_of("jet"))
+    print(s.count("l"))
+    print("Hello".is_alphabetic())
+    print("123".is_numeric())
+    print(" \t".is_whitespace())
+    print("Jet lang".is_ascii())
+    print("hELLO jet".to_title())
+    pair :: "left:right".split_once(":") ?? panic("split")
+    print(pair.before)
+    print(pair.after)
+}
+"""
+    (code, stdout) :: build_and_run("tir_string_surface_breadth", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "hello jet world  \n  hello jet world\n...  hello jet world  \n  hello jet world  ...\n8\n3\ntrue\ntrue\ntrue\ntrue\nHello Jet\nleft\nright\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1340
+#Test("set_algebra_methods") {
+    if !have_rustc() { return }
+    src :: """
+fn sorted(xs: [Int]) -[]> [Int] {
+    ys := ~xs
+    ys.sort()
+    return ys
+}
+fn run() -> {
+    a := Set.from([1, 2, 3])
+    b := Set.from([3, 4])
+    i := a.intersection(b).to_list()
+    d := a.difference(b).to_list()
+    x := a.symmetric_difference(b).to_list()
+    print(sorted(i))
+    print(sorted(d))
+    print(sorted(x))
+    print(a.is_subset(Set.from([1, 2, 3, 4])))
+    print(a.is_superset(Set.from([1, 2])))
+    print(a.is_disjoint(Set.from([8])))
+    s := Rank.from([1, 2, 3])
+    t := Rank.from([3, 4])
+    print(s.intersection(t).to_list())
+    print(s.difference(t).to_list())
+    print(s.symmetric_difference(t).to_list())
+    print(s.is_subset(Rank.from([1, 2, 3, 4])))
+    print(s.is_superset(Rank.from([1, 2])))
+    print(s.is_disjoint(Rank.from([8])))
+}
+"""
+    (code, stdout) :: build_and_run("tir_set_algebra", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[3]\n[1, 2]\n[1, 2, 4]\ntrue\ntrue\ntrue\n[3]\n[1, 2]\n[1, 2, 4]\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1384
+#Test("string_after_before") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    email := "nate@jet-lang.dev"
+    print(email.after("@"))
+    print(email.before("@"))
+    plain := "no-separator"
+    print(plain.after("@"))
+    print(plain.before("@"))
+}
+"""
+    (code, stdout) :: build_and_run("tir_string_after_before", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "jet-lang.dev\nnate\nno-separator\nno-separator\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1406
+#Test("map_builtin_methods") {
+    src :: """
+fn run() -> {
+    probe := [String:Int]{ "k": 41 }
+    print(probe.add("k", 5) ?? 0)
+    print(probe.add("new", 9) ?? -99)
+    m := [String:Int]{}
+    print(m.add("banana", 3) ?? 0)
+    print(m.add("apple", 5) ?? 0)
+    print(m.add("apple", 7) ?? 0)
+    print(&m.add_new("apple", 9))
+    print(&m.add_new("cherry", 11))
+    print(m.len())
+    print(m.has_key("apple"))
+    v := m.get("apple")
+    print(v ?? 0)
+    ks := m.keys()
+    print(ks.len())
+    vs := m.values()
+    print(vs.len())
+}
+"""
+    assert_tiers_agree("tir_map_builtins", src, "41\n-99\n0\n0\n5\nfalse\ntrue\n3\ntrue\n7\n3\n3\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1438
+#Test("collection_pop_table") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    xs := [10, 20, 30]
+    print(xs.pop() ?? -1)
+    print(xs.replace(0, 99))
+    counts := [String:Int]{ "words": 4 }
+    print(counts.pop("words") ?? -1)
+    seen := Set.from([7, 8])
+    print(seen.pop(8) ?? -1)
+    queue := Queue.init([1, 2, 3])
+    print(queue.pop_front() ?? -1)
+    priorities := PriorityQueue.from([2, 9, 4])
+    print(priorities.pop() ?? -1)
+}
+"""
+    (code, stdout) :: build_and_run("tir_collection_pop_table", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "30\n[99, 20]\n4\n8\n1\n9\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1465
+#Test("eager_container_adapters_and_lazy_opt_in") {
+    src :: """
+fn count_and_keep(n: Int, visits: Cell<Int>) -> Bool {
+    visits.edit(count -> count += 1)
+    return n % 2 == 0
+}
+fn run() -> {
+    nums := [1, 2, 3, 4]
+    mapped := nums.map((n: Int) -> n + 1)
+    print(mapped)
+    print(mapped.len())
+    visits := Cell.new(0)
+    visits_copy :: ~visits
+    even := nums.map((n: Int) -> n + 1).filter((n: Int) -> count_and_keep(n, visits_copy) ?? false)
+    print(even)
+    print(visits.get())
+    lazy_values := nums.lazy().filter((n: Int) -> n > 2).map((n: Int) -> n * 10).to_list()
+    print(lazy_values)
+    parts := "a,b,c".split(",")
+    print(parts.to_list())
+}
+"""
+    rust :: compile("tir_eager_container_adapters", src)
+    assert(rust.contains("jet_list_map_filter(("), "adjacent eager adapters did not use the fused Prelude kernel")
+    assert(rust.contains("jet_iter_filter("))
+    assert(rust.contains("jet_iter_map("))
+    assert(rust.contains("jet_iter_string_split("))
+    assert_tiers_agree("tir_eager_container_adapters", src, "[2, 3, 4, 5]\n4\n[2, 4]\n4\n[30, 40]\n[a, b, c]\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1504
+#Test("iter_positional_pick_uses_skip_then_first") {
+    src :: """
+fn run() -> {
+    nums := [10, 20, 30]
+    print(nums.skip(1).first() ?? -1)
+    print(nums.skip(9).first() ?? -1)
+    words := ["zero", "one"]
+    print(words.skip(1).first() ?? "missing")
+    decimals := [1.5, 2.5]
+    print(decimals.skip(1).first() ?? 0.0)
+}
+"""
+    rust :: compile("tir_iter_positional_pick", src)
+    assert(rust.contains("jet_iter_first("))
+    assert(!rust.contains("jet_iter_nth("))
+    assert_tiers_agree("tir_iter_positional_pick", src, "20\n-1\none\n2.5\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1525
+#Test("list_and_map_remove") {
+    if !have_rustc() { return }
+    src :: """
+fn drop_first(xs: [Int]) -[]> Int {
+    ys := ~xs
+    r := ys.remove(0, .Slot)
+    return ys.len()
+}
+fn drop_key(m: [String:Int]) -[]> Int {
+    m2 := ~m
+    r := m2.remove("a")
+    return m2.len()
+}
+fn run() -> {
+    print(drop_first([10, 20, 30]))
+    counts := [String:Int]{}
+    counts["a"] = 1
+    counts["b"] = 2
+    print(drop_key(counts))
+}
+"""
+    (code, stdout) :: build_and_run("tir_remove", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2\n1\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1557
+#Test("list_remove_modes_and_surface_gaps") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    xs := [1, 2, 1]
+    print(xs.remove(1) ?? 0)
+    print(xs.count(1))
+    print(xs.remove(0, .Slot) ?? 0)
+    xs.extend([3, 4])
+    print(xs.concat([5]).len())
+    print(xs.len())
+    by :: RemoveBy.Val
+    print(xs.remove(1, by) ?? 0)
+    print(xs.len())
+    ss := ["a", "b", "a"]
+    print(ss.remove("a", .Val) ?? "")
+    print(ss.len())
+}
+"""
+    (code, stdout) :: build_and_run("tir_list_remove_modes", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n1\n2\n4\n3\n1\n2\na\n2\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1586
+#Test("list_surface_forced_interpreter") {
+    path :: "{env(\"CARGO_MANIFEST_DIR\")}/Examples/features/collections/list_surface.jet"
+    if dev_iteration(path, false, true) == {
+        .Ran(stdout, stderr, exit_code) -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stderr, "")
+            assert_eq(stdout, "true\ntrue\n[2, 3, 4]\ntrue\n2\n[1, 2, 3, 4, 5, 6]\n[2, 4]\n[1, 3, 5]\n5\n1\n5\n1\n1\n[1, 9, 1]\n")
+        }
+        .Problems(diagnostics) -> panic("forced interpreter rejected list surface: {diagnostics:?}")
+    }
+}
+// Rust: tests/tir_collections_and_methods.rs:1616
+#Test("bare_member_shorthand_forced_interpreter") {
+    path :: "{env(\"CARGO_MANIFEST_DIR\")}/Examples/features/basics/method_chain.jet"
+    if dev_iteration(path, false, true) == {
+        .Ran(stdout, stderr, exit_code) -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stderr, "")
+            assert_eq(stdout, "HELL0 W0RLD\n3\n[1, 2]\n[Ada]\n[ADA, GRACE]\n")
+        }
+        .Problems(diagnostics) -> panic("forced interpreter rejected bare member shorthand: {diagnostics:?}")
+    }
+}
+// Rust: tests/tir_collections_and_methods.rs:1640
+#Test("bare_method_head_shorthand_in_callable_slot") {
+    source :: """
+fn run() -> {
+    words := ["a", "bb"]
+    lengths :: words.map(.len())
+    print(lengths)
+}
+"""
+    assert_tiers_agree("tir_subject_method_head", source, "[1, 2]\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1654
+#Test("subject_shorthand_nesting_lint_and_allow") {
+    source :: """
+fn run() -> {
+    words := [["a", "bb"]]
+    print(words.map(.map(.len())))
+    #allow(subject_shorthand_nesting) print(words.map(.map(.len())))
+}
+"""
+    compiled :: jet_driver.compile(source).expect("nested subject shorthand should remain legal")
+    lints :: compiled.lints.filter(fn(diagnostic) { diagnostic.code == "L0512" })
+    lint_count :: lints.len()
+    assert_eq(lint_count, 1, "local #allow should suppress one nested lint; got {lint_count}")
+}
+// Rust: tests/tir_collections_and_methods.rs:1679
+#Test("redundant_fixed_cleanup_lint_has_exact_fix_and_allow") {
+    source :: """
+fn run() -> {
+    value :: Float{1234.5}
+    print("{value:Fixed(2)}".replace(",", ""))
+    #allow(redundant_fixed_cleanup) print("{value:Fixed(2)}".replace(",", ""))
+    print("{value:Grouped(2)}".replace(",", ""))
+    print("1,234".replace(",", ""))
+    print("{value:Fixed(2)}".replace(",", ","))
+}
+"""
+    compiled :: jet_driver.compile(source).expect("the formatting lint fixture should compile")
+    lints :: compiled.lints.filter(fn(diagnostic) { diagnostic.code == "L0518" })
+    assert_eq(lints.len(), 1, "only the exact unallowed workaround should warn")
+    edit :: lints[0].edit.expect("L0518 must carry a mechanical deletion fix")
+    assert_eq(source[edit.span.start..<edit.span.end], ".replace(\",\", \"\")")
+    assert_eq(edit.new_text, "")
+    fixed :: jet_fix_engine.apply_edits(source, [edit]).expect("the L0518 edit must apply")
+    assert(fixed.contains("print(\"{{value:Fixed(2)}}\")"), "fixed source:\n{fixed}")
+}
+// Rust: tests/tir_collections_and_methods.rs:1710
+#Test("list_join_with_separator") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    words := ["a", "b", "c"]
+    print(words.join("-"))
+}
+"""
+    (code, stdout) :: build_and_run("tir_join", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "a-b-c\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1727
+#Test("view_join_with_separator") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    words := ["a", "b", "c"]
+    middle :: words[0..1]
+    print(middle.join("-"))
+}
+"""
+    (code, stdout) :: build_and_run("tir_view_join", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "a-b\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1745
+#Test("view_mut_join_with_separator") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    words := ["a", "b", "c"]
+    middle := &words[0..1]
+    print(middle.join("-"))
+}
+"""
+    (code, stdout) :: build_and_run("tir_view_mut_join", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "a-b\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1764
+#Test("fallible_when_match") {
+    if !have_rustc() { return }
+    src :: """
+#Error
+enum ClassifyError { Bad(String) }
+fn classify(x: Int) -> Int ClassifyError! {
+    if x == 0 { return Err(ClassifyError.Bad("bad")) }
+    return Ok((x + 10))
+}
+fn run() -> {
+    classify(5) ? n -> { print(n) } ! e -> { print(e) }
+    classify(0) ? n -> { print(n) } ! e -> { print(e) }
+}
+"""
+    (code, stdout) :: build_and_run("tir_fallible_when", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "15\nBad(bad)\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1791
+#Test("list_predicate_operations") {
+    src :: """
+fn run() -> {
+    values := [1, 2, 2, 3]
+    print(values.count_where(item -> item % 2 == 0))
+    print(&values.update_first(item -> item == 2, 9))
+    print(values)
+    print(&values.update_first(item -> item == 8, 7))
+    print(values)
+}
+"""
+    rust :: compile("tir_list_predicate_operations", src)
+    assert(rust.contains("jet_list_count_where"))
+    assert(rust.contains("jet_list_update_first"))
+    assert_tiers_agree("tir_list_predicate_operations", src, "2\ntrue\n[1, 9, 2, 3]\nfalse\n[1, 9, 2, 3]\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1814
+#Test("card_2830_float_sum_tier_parity") {
+    src :: """
+fn run() -> {
+    values :: [Float]{1.0, 2.0}
+    result :: values.sum()
+    print(result)
+}
+"""
+    assert_tiers_agree("tir_card_2830_float_sum", src, "3.0\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1827
+#Test("card_2844_struct_key_set_from_tier_parity") {
+    src :: """
+struct CacheKey { user: String; resource: String }
+fn run() -> {
+    scores := [CacheKey:Int]{}
+    print(scores.add(CacheKey{user: "ada", resource: "profile"}, 7) ?? -1)
+    keys :: scores.keys().to_list()
+    key_set :: Set.from(keys)
+    print(keys.len())
+    print(key_set.len())
+    print(key_set.has(CacheKey{user: "ada", resource: "profile"}))
+}
+"""
+    assert_tiers_agree("tir_card_2844_struct_key_set_from", src, "-1\n1\n1\ntrue\n")
+}
+// Rust: tests/tir_collections_and_methods.rs:1855
+#Test("collection_mutation_intents_preserve_declared_contracts") {
+    src :: """
+fn count_work(work: &[Int]) -> Int {
+    visits := 0
+    loop work.len() > 0 {
+        _value :: &work.pop() ?? -1
+        visits += 1
+    }
+    return visits
+}
+fn run() -> {
+    input :: [Int]{3, -1, 0, 2}
+    selected := [Int]{}
+    loop value in input { if value > 0 -> &selected.push(value) }
+    print("separate input={input}")
+    print("separate result={selected}")
+    values := [Int]{3, -1, 0, 2}
+    fixed_len :: values.len()
+    loop index in 0..<fixed_len { values[index] = values[index] + 1 }
+    print("fixed values={values}")
+    work := [Int]{1, 2}
+    seen := [Int]{}
+    loop work.len() > 0 {
+        value :: &work.pop() ?? -1
+        &seen.push(value)
+        if value < 3 -> &work.push(value + 2)
+    }
+    print("work seen={seen} empty={work.len() == 0}")
+    empty := [Int]{}
+    print("empty visits={count_work(&empty)}")
+}
+"""
+    assert_tiers_agree("tir_collection_mutation_intents", src, "separate input=[3, -1, 0, 2]\nseparate result=[3, 2]\nfixed values=[4, 0, 1, 3]\nwork seen=[2, 4, 1, 3] empty=true\nempty visits=0\n")
+}

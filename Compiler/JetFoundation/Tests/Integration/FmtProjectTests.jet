@@ -1,0 +1,290 @@
+use std.[fs, env]
+use std.process.[Command, Stdio]
+use std.io.Write
+use jet_foundation.Tests.Integration.Common.jetpack_bin
+use jet_foundation.Tests.Integration.FmtProject.*
+// GATE #4494: real subprocesses, piped stdin, filesystem and permissions.
+// Rust: tests/fmt_project.rs:74
+#Test("top_level_jet_fmt_delegates_non_jet_file_to_realized_formatter") {
+    dir :: tmpdir("74")
+    root :: dir.join("root")
+    formatter_repo :: dir.join("formatter-repo")
+    formatter :: formatter_repo.join("bin/nixfmt")
+    fs.create_dir_all(formatter.parent().unwrap()).unwrap()
+    fs.write(&formatter, "#!/bin/sh\nset -e\nfor path do\n    printf 'formatted\\n' > \"$path\"\ndone\n").unwrap()
+    make_executable(&formatter)
+    fs.write(formatter_repo.join("package.jet"), "name: \"formatter-repo\"\nversion: \"0.1.0\"\npackages: { nixfmt: executable }\n").unwrap()
+    fs.write(formatter_repo.join("nixfmt.jet"), "module nixfmt { }\n").unwrap()
+    fs.write(dir.join("env.jet"), "module env.dev {{\n    sources: {{ local: {formatter_repo.to_string_lossy()} }}\n    formatter: \"nixfmt@local\"\n}}\n").unwrap()
+    file :: write(&dir, "flake.nix", "unformatted\n")
+    jetpack_path :: jetpack_bin()
+    jetpack_dir :: jetpack_path.parent().unwrap()
+    path_entries := [jetpack_dir.to_path_buf()]
+    for value in env.var_os("PATH").into_iter() { path_entries.extend(env.split_paths(&value)) }
+    path :: env.join_paths(path_entries).unwrap()
+    out :: Command.new(jet()).args(["fmt", "--lang", "nix", "--trust", "--offline", "--no-color"]).current_dir(&dir).env("JETPACK_ROOT", &root).env("JETPACK_SHARED_CAS", dir.join("shared-cas")).env("PATH", path).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "jet fmt delegation failed\nstdout: {String.from_utf8_lossy(&out.stdout)}\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert_eq(read(&file), "formatted\n")
+}
+// Rust: tests/fmt_project.rs:138
+#Test("no_arg_discovery_formats_files") {
+    dir :: tmpdir("138")
+    f :: write(&dir, "main.jet", UNFORMATTED)
+    out :: Command.new(jet()).arg("fmt").current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "fmt with no args should exit 0\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    after :: read(&f)
+    assert_ne(after, UNFORMATTED, "unformatted file should have been rewritten")
+}
+// Rust: tests/fmt_project.rs:162
+#Test("explicit_dir_arg_formats_files") {
+    dir :: tmpdir("162")
+    sub :: dir.join("src")
+    fs.create_dir_all(&sub).unwrap()
+    f :: write(&sub, "foo.jet", UNFORMATTED)
+    out :: Command.new(jet()).arg("fmt").arg(&sub).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0))
+    assert_ne(read(&f), UNFORMATTED)
+}
+// Rust: tests/fmt_project.rs:180
+#Test("explicit_dir_reports_invalid_package_manifest") {
+    dir :: tmpdir("180")
+    source :: write(&dir, "src/main.jet", UNFORMATTED)
+    manifest :: write(&dir, jet.Syntax.PACKAGE_FILE, "name: \"demo\"\ndeps: {\n    helpers: notaref,\n}\n")
+    manifest_before :: fs.read(&manifest).unwrap()
+    check :: Command.new(jet()).args(["fmt", "--check"]).arg(&dir).current_dir(&dir).output().unwrap()
+    assert_eq(check.status.code(), Some(jet.ExitCodes.USER_ERROR), "invalid package manifest must fail project formatting\nstderr: {String.from_utf8_lossy(&check.stderr)}")
+    assert(String.from_utf8_lossy(&check.stderr).contains(jet.Syntax.PACKAGE_FILE), "the rejection must name the manifest\nstderr: {String.from_utf8_lossy(&check.stderr)}")
+    assert(check.stdout.is_empty(), "a rejected manifest must abort the run, not list dirty files\nstdout: {String.from_utf8_lossy(&check.stdout)}")
+    assert_eq(read(&source), UNFORMATTED)
+    assert_eq(fs.read(&manifest).unwrap(), manifest_before)
+    format :: Command.new(jet()).arg("fmt").arg(&dir).current_dir(&dir).output().unwrap()
+    assert_eq(format.status.code(), Some(2), "directory format should reject invalid package.jet\nstderr: {String.from_utf8_lossy(&format.stderr)}")
+    assert_eq(read(&source), UNFORMATTED)
+    assert_eq(fs.read(&manifest).unwrap(), manifest_before)
+    explicit :: Command.new(jet()).arg("fmt").arg(&manifest).current_dir(&dir).output().unwrap()
+    assert_eq(explicit.status.code(), Some(2), "an explicit package.jet path must still reach the formatter")
+}
+// Rust: tests/fmt_project.rs:249
+#Test("epoch5_package_and_config_files_use_typed_formatter") {
+    dir :: tmpdir("249")
+    package :: write(&dir, jet.Syntax.PACKAGE_FILE, "name: \"demo\"\noutputs: {app: .Executable{entry: run}}\n")
+    config :: write(&dir, "config/dev.jet", "dev :: Config{deps: {ripgrep: \"ripgrep@nixpkgs\"} environments: {dev: Environment{tools: [\"ripgrep@nixpkgs\"]}}}\n")
+    before_package :: read(&package)
+    before_config :: read(&config)
+    formatted :: Command.new(jet()).arg("fmt").arg(&dir).current_dir(&dir).output().unwrap()
+    assert_eq(formatted.status.code(), Some(0), "Epoch 5 package/config formatting failed\nstderr: {String.from_utf8_lossy(&formatted.stderr)}")
+    assert_ne(read(&package), before_package)
+    assert_ne(read(&config), before_config)
+    clean :: Command.new(jet()).args(["fmt", "--check"]).arg(&dir).current_dir(&dir).output().unwrap()
+    assert_eq(clean.status.code(), Some(0), "typed package/config formatter must be idempotent\nstdout: {String.from_utf8_lossy(&clean.stdout)}\nstderr: {String.from_utf8_lossy(&clean.stderr)}")
+    assert(jet.Package.PackageFacts.parse(&read(&package), "package.jet").is_ok(), "formatted package must remain typed")
+    assert(jet.Package.ConfigFacts.parse(&read(&config), "config/dev.jet").is_ok(), "formatted Config must remain typed")
+}
+// Rust: tests/fmt_project.rs:304
+#Test("explicit_file_arg_formats_file") {
+    dir :: tmpdir("304")
+    f :: write(&dir, "a.jet", UNFORMATTED)
+    out :: Command.new(jet()).arg("fmt").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0))
+    assert_ne(read(&f), UNFORMATTED)
+}
+// Rust: tests/fmt_project.rs:320
+#Test("already_canonical_no_write") {
+    dir :: tmpdir("320")
+    f :: write(&dir, "main.jet", CANONICAL)
+    before :: read(&f)
+    out :: Command.new(jet()).arg("fmt").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0))
+    assert_eq(read(&f), before, "canonical file must not be rewritten")
+}
+// Rust: tests/fmt_project.rs:337
+#Test("check_exits_1_when_dirty") {
+    dir :: tmpdir("337")
+    f :: write(&dir, "main.jet", UNFORMATTED)
+    before :: read(&f)
+    out :: Command.new(jet()).arg("fmt").arg("--check").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(1), "--check should exit 1 when file would change\nstdout: {String.from_utf8_lossy(&out.stdout)}")
+    assert_eq(read(&f), before, "--check must not modify the file")
+}
+// Rust: tests/fmt_project.rs:361
+#Test("check_exits_0_when_clean") {
+    dir :: tmpdir("361")
+    f :: write(&dir, "main.jet", CANONICAL)
+    out :: Command.new(jet()).arg("fmt").arg("--check").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "--check should exit 0 when no file would change")
+}
+// Rust: tests/fmt_project.rs:381
+#Test("check_lists_changed_paths") {
+    dir :: tmpdir("381")
+    _ :: write(&dir, "main.jet", UNFORMATTED)
+    out :: Command.new(jet()).args(["fmt", "--check", "main.jet"]).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(1))
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(stdout.contains("main.jet"), "stdout should list the changed file, got: {stdout}")
+}
+// Rust: tests/fmt_project.rs:403
+#Test("dry_run_prints_unified_diff") {
+    dir :: tmpdir("403")
+    f :: write(&dir, "main.jet", UNFORMATTED)
+    before :: read(&f)
+    out :: Command.new(jet()).args(["fmt", "--dry-run", "main.jet"]).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(1))
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(stdout.contains("---") || stdout.contains("+++") || stdout.contains("@@"), "expected diff output, got: {stdout}")
+    assert_eq(read(&f), before, "--dry-run must not modify the file")
+}
+// Rust: tests/fmt_project.rs:428
+#Test("changed_outside_git_exits_2") {
+    dir :: tmpdir("428")
+    _ :: write(&dir, "main.jet", CANONICAL)
+    out :: Command.new(jet()).args(["fmt", "--changed"]).current_dir(&dir).env("GIT_CEILING_DIRECTORIES", dir.parent().expect("isolated temp directory has a parent")).output().unwrap()
+    assert_eq(out.status.code(), Some(2), "--changed outside git should exit 2")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("git"), "diagnostic should mention git, got: {stderr}")
+}
+// Rust: tests/fmt_project.rs:461
+#Test("stdin_mode_formats_and_writes_stdout") {
+    dir :: tmpdir("461")
+    child := Command.new(jet()).args(["fmt", "-", "--stdin-path=src/a.jet"]).current_dir(&dir).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    {
+        stdin :: child.stdin.as_mut().unwrap()
+        stdin.write_all(UNFORMATTED.as_bytes()).unwrap()
+    }
+    out :: child.wait_with_output().unwrap()
+    assert_eq(out.status.code(), Some(0), "stdin mode should exit 0\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(!stdout.is_empty(), "stdout should contain formatted source")
+}
+// Rust: tests/fmt_project.rs:493
+#Test("stdin_mode_parse_error_exits_2") {
+    dir :: tmpdir("493")
+    child := Command.new(jet()).args(["fmt", "-"]).current_dir(&dir).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    { child.stdin.as_mut().unwrap().write_all(INVALID.as_bytes()).unwrap() }
+    out :: child.wait_with_output().unwrap()
+    assert_eq(out.status.code(), Some(2), "stdin parse error should exit 2")
+}
+// Rust: tests/fmt_project.rs:525
+#Test("preflight_zero_write_on_bad_file") {
+    dir :: tmpdir("525")
+    good :: write(&dir, "good.jet", UNFORMATTED)
+    bad :: write(&dir, "bad.jet", INVALID)
+    before_good :: read(&good)
+    before_bad :: read(&bad)
+    out :: Command.new(jet()).arg("fmt").current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(2), "preflight failure should exit 2\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert_eq(read(&good), before_good, "good file must not be written when preflight fails")
+    assert_eq(read(&bad), before_bad, "bad file must not be written")
+}
+// Rust: tests/fmt_project.rs:555
+#Test("parse_error_exits_2_not_1") {
+    dir :: tmpdir("555")
+    f :: write(&dir, "bad.jet", INVALID)
+    out :: Command.new(jet()).arg("fmt").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(2), "parse error should exit 2, not 1")
+}
+// Rust: tests/fmt_project.rs:574
+#Test("check_parse_error_exits_1_like_check") {
+    dir :: tmpdir("574")
+    _ :: write(&dir, "bad.jet", INVALID)
+    fmt :: Command.new(jet()).args(["fmt", "--check", "bad.jet"]).current_dir(&dir).output().unwrap()
+    check :: Command.new(jet()).args(["check", "bad.jet"]).current_dir(&dir).output().unwrap()
+    assert_eq(fmt.status.code(), Some(jet.ExitCodes.USER_ERROR))
+    assert_eq(check.status.code(), Some(jet.ExitCodes.USER_ERROR))
+}
+// Rust: tests/fmt_project.rs:595
+#Test("ignore_vendor_dir_on_discovery") {
+    dir :: tmpdir("595")
+    _ :: write(&dir, "vendor/lib.jet", INVALID)
+    good :: write(&dir, "main.jet", UNFORMATTED)
+    before :: read(&good)
+    out :: Command.new(jet()).arg("fmt").current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "fmt should succeed (vendor/ ignored)\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert_ne(read(&good), before, "root file should have been formatted")
+}
+// Rust: tests/fmt_project.rs:619
+#Test("ignore_other_generated_dirs") {
+    dir :: tmpdir("619")
+    for ignored in ["target", "build", "node_modules"] { _ :: write(&dir, "{ignored}/junk.jet", INVALID) }
+    good :: write(&dir, "main.jet", UNFORMATTED)
+    out :: Command.new(jet()).arg("fmt").current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "generated dirs should be ignored\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    assert_ne(read(&good), UNFORMATTED)
+}
+// Rust: tests/fmt_project.rs:642
+#Test("idempotent_format") {
+    dir :: tmpdir("642")
+    f :: write(&dir, "main.jet", UNFORMATTED)
+    out1 :: Command.new(jet()).arg("fmt").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out1.status.code(), Some(0))
+    after_first :: read(&f)
+    out2 :: Command.new(jet()).arg("fmt").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(out2.status.code(), Some(0))
+    assert_eq(read(&f), after_first, "formatting twice must produce the same result")
+}
+// Rust: tests/fmt_project.rs:674
+#Test("simplify_mode_is_stable_across_a_project") {
+    dir :: tmpdir("674")
+    sources :: [write(&dir, "examples/answer.jet", "fn answer() -> Int {\n    return 42\n}\n"), write(&dir, "tests/double.jet", "fn double(value: Int) -> Int {\n    return value * 2\n}\n"), write(&dir, "docs/spec/reference/sample.jet", "fn label() -> String {\n    return \"sample\"\n}\n")]
+    corpus :: [dir.join("examples"), dir.join("tests"), dir.join("docs/reference")]
+    first :: Command.new(jet()).args(["fmt", "--simplify"]).args(&corpus).current_dir(&dir).output().unwrap()
+    assert_eq(first.status.code(), Some(0))
+    // D-SIG-AFTER1=A: simplification retains exactly one arrow and a braced body.
+    assert_eq(read(&sources[0]), "fn answer() -> Int { 42 }\n")
+    assert_eq(read(&sources[1]), "fn double(value: Int) -> Int { value * 2 }\n")
+    assert_eq(read(&sources[2]), "fn label() -> String { \"sample\" }\n")
+    before_second :: sources.iter().map(fn(source) { fs.read(source).unwrap() }).collect()
+    second :: Command.new(jet()).args(["fmt", "--simplify", "--check"]).args(&corpus).current_dir(&dir).output().unwrap()
+    assert_eq(second.status.code(), Some(0))
+    assert_eq(sources.iter().map(fn(source) { fs.read(source).unwrap() }).collect(), before_second, "the second simplify corpus check must not change bytes")
+}
+// Rust: tests/fmt_project.rs:736
+#Test("map_type_spacing_is_project_stable") {
+    dir :: tmpdir("736")
+    f :: write(&dir, "main.jet", "fn read(values: [String: Int]) -> [String: Int] {\n    return [\"key\": 1]\n}\n")
+    first :: Command.new(jet()).arg("fmt").arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(first.status.code(), Some(0))
+    assert_eq(read(&f), "fn read(values: [String:Int]) -> [String:Int] { return [\"key\": 1] }\n")
+    before :: read(&f)
+    second :: Command.new(jet()).args(["fmt", "--check"]).arg(&f).current_dir(&dir).output().unwrap()
+    assert_eq(second.status.code(), Some(0))
+    assert_eq(read(&f), before)
+}
+// Rust: tests/fmt_project.rs:769
+#Test("check_json_output") {
+    dir :: tmpdir("769")
+    _ :: write(&dir, "main.jet", UNFORMATTED)
+    out :: Command.new(jet()).args(["fmt", "--check", "--json", "main.jet"]).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(1))
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(stdout.contains("\"schema\":\"jet.status/v1\"") && stdout.contains("\"fmt\":") && stdout.contains("dirty"), "JSON output should contain the shared envelope and dirty status, got: {stdout}")
+}
+// Rust: tests/fmt_project.rs:796
+#Test("explicit_copy_format_matches_copy_audit") {
+    dir :: tmpdir("796")
+    source :: "fn make() -> String {\n    owner := \"a@b\"\n    domain :: owner.after(\"@\")\n    return domain\n}\nfn run() { print(make()) }\n"
+    file :: write(&dir, "main.jet", source)
+    audit :: Command.new(jet()).args(["audit", "copies", "--json"]).arg(&file).current_dir(&dir).output().unwrap()
+    assert_eq(audit.status.code(), Some(0), "copy audit failed\nstderr: {String.from_utf8_lossy(&audit.stderr)}")
+    audit_json :: String.from_utf8_lossy(&audit.stdout)
+    assert(audit_json.contains("\"action\":\"audit.copies\""))
+    assert(audit_json.contains("\"kind\":\"implicit\""), "{audit_json}")
+    formatted :: Command.new(jet()).args(["fmt", "--explicit-copies"]).arg(&file).current_dir(&dir).output().unwrap()
+    assert_eq(formatted.status.code(), Some(0), "explicit-copy formatting failed\nstderr: {String.from_utf8_lossy(&formatted.stderr)}")
+    assert(read(&file).contains("return ~domain"), "{read(&file)}")
+}
+// Rust: tests/fmt_project.rs:933
+#Test("explicit_copies_probe_p31") {
+    source :: "struct User {\n    name: String\n    tags: [String]\n}\n\nfn make(name: String) -> User {\n    User{name: name, tags: [String]{}}\n}\n\nfn run() {\n    first :: \"Ada\"\n    names := [String]{}\n    &names.push(first)\n    u :: make(first)\n    label :: \"  admin  \".trim()\n    kept :: User{name: label, tags: names}\n    print(\"{first} {names.len()} {u.name} {kept.name} {kept.tags.len()}\")\n}\n"
+    assert_explicit_copy_probe("933", source, &["7:16", "16:37"], &["User{name: ~name", "tags: ~names}"])
+}
+// Rust: tests/fmt_project.rs:963
+#Test("explicit_copies_probe_p33") {
+    source :: "// probe p33 (#3738)\n\nstruct Holder {\n    xs: [Int]\n}\n\nfn run() {\n    a := [1, 2, 3]\n    b :: Holder{xs: a}\n    &a.push(9)\n    print(\"{a.len()} {b.xs.len()}\")\n    c := a\n    print(\"{c.len()}\")\n}\n"
+    assert_explicit_copy_probe("963", source, &["9:21"], &["Holder{xs: ~a}"])
+}
+// Rust: tests/fmt_project.rs:990
+#Test("empty_dir_exits_0") {
+    dir :: tmpdir("990")
+    out :: Command.new(jet()).arg("fmt").current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0), "empty dir should exit 0\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+}

@@ -1,707 +1,384 @@
-// PORT-PENDING 2132 crates-jet-sema-src-sema-bundle-genericmodules-expansion: crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:1-703
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS pub(crate) fn expand_generic_module_aliases(
-//RS     bundle: &mut ProgramBundle,
-//RS     diags: &mut Vec<Diagnostic>,
-//RS ) {
-//RS     let build_facts = bundle.build_facts.clone();
-//RS     let template_snapshots: Vec<HashMap<String, TemplateInfo>> = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(source_module, module)| {
-//RS             let enums: HashMap<String, bool> = module
-//RS                 .items
-//RS                 .iter()
-//RS                 .filter_map(|item| match item {
-//RS                     Item::Enum(def) => Some((
-//RS                         def.name.clone(),
-//RS                         def.variants
-//RS                             .iter()
-//RS                             .all(|variant| matches!(variant.payload, VariantPayload::Unit)),
-//RS                     )),
-//RS                     _ => None,
-//RS                 })
-//RS                 .collect();
-//RS             let funcs: HashMap<String, &Func> = module
-//RS                 .items
-//RS                 .iter()
-//RS                 .filter_map(|item| match item {
-//RS                     Item::Func(def) => Some((def.name.clone(), def)),
-//RS                     _ => None,
-//RS                 })
-//RS                 .collect();
-//RS             let mut source_values = HashMap::new();
-//RS             if module
-//RS                 .items
-//RS                 .iter()
-//RS                 .any(|item| matches!(item, Item::GenericModule(_)))
-//RS             {
-//RS                 for item in &module.items {
-//RS                     if let Item::Const(def) = item {
-//RS                         if let Ok(value) = crate::Comptime::evaluate_closed_value(
-//RS                             &def.value,
-//RS                             &funcs,
-//RS                             &HashSet::new(),
-//RS                             Path::new("."),
-//RS                             &source_values,
-//RS                             &build_facts,
-//RS                         ) {
-//RS                             source_values.insert(def.name.clone(), value);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS             let source_items = clone_definition_items(&module.items);
-//RS             module
-//RS                 .items
-//RS                 .iter()
-//RS                 .filter_map(|item| match item {
-//RS                     Item::GenericModule(gm) => {
-//RS                         let (package_root, dependency_name) = owning_package(bundle, &module.path);
-//RS                         let package_identity =
-//RS                             package_identity(bundle, package_root, dependency_name);
-//RS                         let module_path = module
-//RS                             .path
-//RS                             .strip_prefix(package_root)
-//RS                             .unwrap_or(&module.path)
-//RS                             .to_string_lossy()
-//RS                             .replace('\\', "/");
-//RS                         let full_key =
-//RS                             definition_full_key(&package_identity, &module_path, "", &gm.name);
-//RS                         Some((
-//RS                             gm.name.clone(),
-//RS                             TemplateInfo {
-//RS                                 def: gm.clone(),
-//RS                                 definition_id: crate::SHA256::sha256_hex(&full_key),
-//RS                                 definition_full_key: full_key,
-//RS                                 params: resolve_params(gm, &enums, diags),
-//RS                                 source_module,
-//RS                                 source_items: clone_definition_items(&source_items),
-//RS                                 source_values: source_values.clone(),
-//RS                                 source_rule_facts: module.rule_facts.clone(),
-//RS                                 build_facts: build_facts.clone(),
-//RS                             },
-//RS                         ))
-//RS                     }
-//RS                     _ => None,
-//RS                 })
-//RS                 .collect()
-//RS         })
-//RS         .collect();
-//RS     // `use alias.Item` has its own span and therefore no direct import-target
-//RS     // entry. Resolve it through the namespace import which established
-//RS     // `alias`, exactly like the later ordinary-import registration pass.
-//RS     let import_bindings: Vec<HashMap<String, usize>> = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .enumerate()
-//RS         .map(|(module_idx, module)| {
-//RS             module
-//RS                 .imports
-//RS                 .iter()
-//RS                 .filter(|import| !matches!(import.kind, ImportKind::Unqualified { .. }))
-//RS                 .filter_map(|import| {
-//RS                     bundle
-//RS                         .name_ledger
-//RS                         .import_target(module_idx, import.span)
-//RS                         .map(|target| (import.import_alias(), target))
-//RS                 })
-//RS                 .collect()
-//RS         })
-//RS         .collect();
-//RS 
-//RS     let mut bundle_instances: HashMap<ModuleInstanceKey, String> = HashMap::new();
-//RS     let mut bundle_instance_nominals: HashMap<String, Vec<String>> = HashMap::new();
-//RS     let mut fingerprint_keys: HashMap<String, Vec<u8>> = HashMap::new();
-//RS     let mut instance_applications: HashMap<String, Vec<crate::AST::ModuleInstanceApplication>> =
-//RS         HashMap::new();
-//RS 
-//RS     // Snapshot aliases up front — the mut loop below can't re-borrow `bundle.modules`
-//RS     // for an E0609 message that names the source module.
-//RS     let module_aliases: Vec<String> = bundle.modules.iter().map(|m| m.alias.clone()).collect();
-//RS 
-//RS     for (module_idx, module) in bundle.modules.iter_mut().enumerate() {
-//RS         let mut generic_module_spans = Vec::new();
-//RS         collect_generic_module_spans(&module.items, &mut generic_module_spans);
-//RS         if report_generic_module_cycles(&module.items, diags) {
-//RS             continue;
-//RS         }
-//RS         // Same disposable-registry rationale as the `template_snapshots` prepass
-//RS         // above: only used for bound resolution, never the diagnostic source of
-//RS         // truth — register the builtin hook traits and swallow its diags.
-//RS         let mut traits = TraitRegistry::default();
-//RS         traits.register_synthetic_rollback();
-//RS         traits.register_synthetic_display_debug();
-//RS         traits.register_synthetic_close();
-//RS         traits.register_synthetic_operators();
-//RS         traits.register_synthetic_iter_index();
-//RS         traits.register_synthetic_io();
-//RS         traits.register_synthetic_driver();
-//RS         traits.register_items(&module.items, &mut Vec::new());
-//RS         let enums: HashMap<String, bool> = module
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| {
-//RS                 if let Item::Enum(def) = item {
-//RS                     Some((
-//RS                         def.name.clone(),
-//RS                         def.variants
-//RS                             .iter()
-//RS                             .all(|v| matches!(v.payload, VariantPayload::Unit)),
-//RS                     ))
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             })
-//RS             .collect();
-//RS         let funcs: HashMap<String, &Func> = module
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| {
-//RS                 if let Item::Func(f) = item {
-//RS                     Some((f.name.clone(), f))
-//RS                 } else {
-//RS                     None
-//RS                 }
-//RS             })
-//RS             .collect();
-//RS         let mut globals: HashMap<String, crate::AST::CtValue> = HashMap::new();
-//RS         if module
-//RS             .items
-//RS             .iter()
-//RS             .any(|item| matches!(item, Item::ModuleAlias(_)))
-//RS         {
-//RS             for item in &module.items {
-//RS                 if let Item::Const(c) = item {
-//RS                     if let Ok(value) = crate::Comptime::evaluate_closed_value(
-//RS                         &c.value,
-//RS                         &funcs,
-//RS                         &HashSet::new(),
-//RS                         Path::new("."),
-//RS                         &globals,
-//RS                         &build_facts,
-//RS                     ) {
-//RS                         globals.insert(c.name.clone(), value);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         // Parameter declarations were resolved once in the immutable prepass.
-//RS         // Reuse that result locally so invalid declarations emit one diagnostic.
-//RS         let mut templates = template_snapshots[module_idx].clone();
-//RS         let mut denied_templates = HashSet::new();
-//RS 
-//RS         for import in &mut module.imports {
-//RS             let ImportKind::Unqualified { module_alias, .. } = &import.kind else {
-//RS                 continue;
-//RS             };
-//RS             let Some(source_idx) = import_bindings[module_idx]
-//RS                 .get(module_alias.as_str())
-//RS                 .copied()
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             let bindings = import.walk_bindings();
-//RS             let mut consumed = HashSet::new();
-//RS             for binding in &bindings {
-//RS                 let original = binding
-//RS                     .original
-//RS                     .expect("member walker returned a binding without a member");
-//RS                 let Some(source) = template_snapshots[source_idx].get(original) else {
-//RS                     continue;
-//RS                 };
-//RS                 consumed.insert(original.to_string());
-//RS                 let local = binding.local.clone();
-//RS                 if !source.def.is_pub && !source.def.is_package_pub {
-//RS                     denied_templates.insert(local.clone());
-//RS                     diags.push(Diagnostic::error(
-//RS                         "E0609",
-//RS                         format!(
-//RS                             "`{original}` is private in module `{}`",
-//RS                             module_aliases[source_idx]
-//RS                         ),
-//RS                         "only `pub` items can be brought into scope with `use`".to_string(),
-//RS                         format!("add `pub` before `module {original}` in the defining file"),
-//RS                         Some(import.span),
-//RS                     ));
-//RS                     continue;
-//RS                 }
-//RS                 templates.insert(local, source.clone());
-//RS             }
-//RS             // Generic templates are compile-time namespace inputs, not runtime
-//RS             // values for the ordinary unqualified-import pass below.
-//RS             if let ImportKind::Unqualified { items, .. } = &mut import.kind {
-//RS                 items.retain(|(original, _)| !consumed.contains(original));
-//RS             }
-//RS         }
-//RS 
-//RS         let aliases: HashMap<String, &ModuleAliasDef> = module
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| match item {
-//RS                 Item::ModuleAlias(alias) => Some((alias.name.clone(), alias)),
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         let type_aliases: HashMap<String, Type> = module
-//RS             .items
-//RS             .iter()
-//RS             .filter_map(|item| {
-//RS                 let Item::TypeAlias(alias) = item else {
-//RS                     return None;
-//RS                 };
-//RS                 Some((alias.name.clone(), alias.target.clone()))
-//RS             })
-//RS             .collect();
-//RS         let mut projections = HashMap::new();
-//RS         for alias in aliases.values().copied() {
-//RS             if aliases.contains_key(&alias.target) {
-//RS                 let mut terminal = aliases[&alias.target];
-//RS                 while let Some(next) = aliases.get(&terminal.target).copied() {
-//RS                     terminal = next;
-//RS                 }
-//RS                 projections.insert(alias.name.clone(), terminal.name.clone());
-//RS             }
-//RS         }
-//RS 
-//RS         // Expand aliases into CodeModules, collect separately.
-//RS         let mut expansions: Vec<(usize, AliasExpansion)> = Vec::new();
-//RS         let mut ordered_aliases: Vec<(usize, &ModuleAliasDef)> = module
-//RS             .items
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter_map(|(idx, item)| match item {
-//RS                 Item::ModuleAlias(alias) => Some((idx, alias)),
-//RS                 _ => None,
-//RS             })
-//RS             .collect();
-//RS         ordered_aliases.sort_by_key(|(_, alias)| local_alias_depth(alias, &aliases));
-//RS         let mut invalid_aliases = HashSet::new();
-//RS         for (idx, alias) in ordered_aliases {
-//RS             if alias_chain_contains(alias, &aliases, &invalid_aliases) {
-//RS                 continue;
-//RS             }
-//RS             let Some(resolved) = resolve_local_alias(alias, &aliases, &templates, diags) else {
-//RS                 invalid_aliases.insert(alias.name.clone());
-//RS                 continue;
-//RS             };
-//RS             if denied_templates.contains(&resolved.target) {
-//RS                 invalid_aliases.insert(alias.name.clone());
-//RS                 continue;
-//RS             }
-//RS             // A valid forward alias is a projection of the already-bound
-//RS             // terminal instance, not a second specialization.
-//RS             if aliases.contains_key(&alias.target) {
-//RS                 continue;
-//RS             }
-//RS             let Some(info) = templates.get(&resolved.target) else {
-//RS                 // The alias names a template that does not exist. This guard
-//RS                 // runs before `expand_alias` (the other E0850 site), so it
-//RS                 // must report the unknown target itself — otherwise the
-//RS                 // alias is silently dropped and the program checks clean.
-//RS                 diags.push(Diagnostic::error(
-//RS                     "E0850",
-//RS                     format!(
-//RS                         "generic module `{}` not found in this scope",
-//RS                         resolved.target
-//RS                     ),
-//RS                     "check the module template name and make sure it is defined in the same file"
-//RS                         .to_string(),
-//RS                     format!("example: `module {} :: MyTemplate<String>`", resolved.name),
-//RS                     Some(resolved.target_span),
-//RS                 ));
-//RS                 invalid_aliases.insert(alias.name.clone());
-//RS                 continue;
-//RS             };
-//RS             let Some(args) = resolve_args(
-//RS                 &resolved,
-//RS                 info,
-//RS                 &traits,
-//RS                 &funcs,
-//RS                 &globals,
-//RS                 &build_facts,
-//RS                 &enums,
-//RS                 diags,
-//RS             ) else {
-//RS                 invalid_aliases.insert(alias.name.clone());
-//RS                 continue;
-//RS             };
-//RS             let key = instance_key(info, &args, &type_aliases);
-//RS             let fingerprint = crate::SHA256::sha256_hex(&key.bytes());
-//RS             instance_applications
-//RS                 .entry(fingerprint.clone())
-//RS                 .or_default()
-//RS                 .push(crate::AST::ModuleInstanceApplication {
-//RS                     name: resolved.name.clone(),
-//RS                     source_module: module.display.clone(),
-//RS                     semantic_identity: format!("instance:{fingerprint}"),
-//RS                     span: resolved.name_span,
-//RS                 });
-//RS             if let Some(canonical) = bundle_instances.get(&key) {
-//RS                 projections.insert(alias.name.clone(), canonical.clone());
-//RS                 if let Some(nominals) = bundle_instance_nominals.get(canonical).cloned() {
-//RS                     bundle_instance_nominals.insert(alias.name.clone(), nominals);
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             let identity_args = args.clone();
-//RS             if let Some(mut cm) = expand_alias(
-//RS                 &resolved,
-//RS                 module_idx,
-//RS                 &module.display,
-//RS                 &key.bytes(),
-//RS                 &templates,
-//RS                 diags,
-//RS                 &traits,
-//RS                 &funcs,
-//RS                 &globals,
-//RS                 &build_facts,
-//RS                 &enums,
-//RS                 &mut bundle_instances,
-//RS                 &mut fingerprint_keys,
-//RS                 &mut instance_applications,
-//RS                 Some(args),
-//RS             ) {
-//RS                 let identity =
-//RS                     instance_identity(&key, info, &resolved, &module.display, &identity_args);
-//RS                 register_instance_fingerprint(&mut fingerprint_keys, &identity, alias.span);
-//RS                 cm.module.instance_identity = Some(identity);
-//RS                 bundle_instance_nominals.insert(
-//RS                     alias.name.clone(),
-//RS                     cm.declarations
-//RS                         .iter()
-//RS                         .filter_map(|item| match item {
-//RS                             Item::Struct(def) => Some(def.name.clone()),
-//RS                             Item::Enum(def) => Some(def.name.clone()),
-//RS                             _ => None,
-//RS                         })
-//RS                         .collect(),
-//RS                 );
-//RS                 bundle_instances.insert(key, alias.name.clone());
-//RS                 expansions.push((idx, cm));
-//RS             } else {
-//RS                 invalid_aliases.insert(alias.name.clone());
-//RS             }
-//RS         }
-//RS 
-//RS         // Replace/erase: iterate in reverse to preserve indices.
-//RS         // For each alias, replace it with the expanded CodeModule.
-//RS         // GenericModule items are erased (replaced with nothing).
-//RS         // We need to:
-//RS         // 1. Replace each ModuleAlias with its CodeModule expansion (collected above)
-//RS         // 2. Remove all GenericModule items
-//RS         let mut declarations = Vec::new();
-//RS         let mut generated_rule_facts = Vec::new();
-//RS         for (idx, expansion) in expansions {
-//RS             module.items[idx] = Item::CodeModule(expansion.module);
-//RS             declarations.extend(expansion.declarations);
-//RS             generated_rule_facts.extend(expansion.rule_facts);
-//RS         }
-//RS         module.rule_facts.retain(|application| {
-//RS             let span = application.marker.span;
-//RS             !generic_module_spans
-//RS                 .iter()
-//RS                 .any(|generic| span.start >= generic.start && span.end <= generic.end)
-//RS         });
-//RS         module.rule_facts.extend(generated_rule_facts);
-//RS         module
-//RS             .rule_facts
-//RS             .sort_by_key(|application| application.marker.span.start);
-//RS         // Collapse forward-alias chains through the applicative canonical
-//RS         // instance selected above.
-//RS         for alias in projections.clone().keys() {
-//RS             let mut canonical = projections[alias].clone();
-//RS             let mut seen = HashSet::new();
-//RS             while seen.insert(canonical.clone()) {
-//RS                 let Some(next) = projections.get(&canonical) else {
-//RS                     break;
-//RS                 };
-//RS                 canonical = next.clone();
-//RS             }
-//RS             projections.insert(alias.clone(), canonical);
-//RS         }
-//RS         // Resolve projected nominal spellings before registration/codegen. No
-//RS         // duplicate declaration or zero-parameter surface alias leaks out.
-//RS         let mut projection_types = HashMap::new();
-//RS         for (alias, nominals) in &bundle_instance_nominals {
-//RS             let canonical = projections.get(alias).unwrap_or(alias);
-//RS             let prefix = module_type_prefix(canonical);
-//RS             for canonical_name in nominals {
-//RS                 let Some(suffix) = canonical_name.strip_prefix(&prefix) else {
-//RS                     continue;
-//RS                 };
-//RS                 let resolved = Type::Named(canonical_name.clone());
-//RS                 // Rewrite the source-facing member path as well as the
-//RS                 // generated spelling used by specialized declarations.
-//RS                 projection_types.insert(format!("{alias}.{suffix}"), resolved.clone());
-//RS                 projection_types.insert(module_type_name(alias, suffix), resolved);
-//RS             }
-//RS         }
-//RS         for (alias, canonical) in &projections {
-//RS             let prefix = module_type_prefix(canonical);
-//RS             for canonical_name in bundle_instance_nominals
-//RS                 .get(canonical)
-//RS                 .into_iter()
-//RS                 .flatten()
-//RS             {
-//RS                 if let Some(suffix) = canonical_name.strip_prefix(&prefix) {
-//RS                     let resolved = Type::Named(canonical_name.clone());
-//RS                     projection_types.insert(format!("{alias}.{suffix}"), resolved.clone());
-//RS                     projection_types.insert(module_type_name(alias, suffix), resolved);
-//RS                 }
-//RS             }
-//RS         }
-//RS         for (alias, canonical) in &projections {
-//RS             let names = HashSet::from([alias.clone()]);
-//RS             for item in &mut module.items {
-//RS                 if let Item::Func(func) = item {
-//RS                     rewrite_inline_calls_stmts(&mut func.body, &names, canonical);
-//RS                 }
-//RS             }
-//RS         }
-//RS         for item in &mut module.items {
-//RS             if let Item::Func(func) = item {
-//RS                 for param in &mut func.params {
-//RS                     param.ty = crate::Generics::substitute_type(&param.ty, &projection_types);
-//RS                 }
-//RS                 if let Some(ret) = &mut func.return_type {
-//RS                     *ret = crate::Generics::substitute_type(ret, &projection_types);
-//RS                 }
-//RS                 substitute_stmts(&mut func.body, &projection_types, &HashMap::new());
-//RS             }
-//RS         }
-//RS         module
-//RS             .items
-//RS             .retain(|i| !matches!(i, Item::GenericModule(_) | Item::ModuleAlias(_)));
-//RS         module.items.extend(declarations);
-//RS         debug_assert!(!module
-//RS             .items
-//RS             .iter()
-//RS             .any(|item| matches!(item, Item::ModuleAlias(_))));
-//RS     }
-//RS     for module in &mut bundle.modules {
-//RS         for item in &mut module.items {
-//RS             let Item::CodeModule(instance) = item else {
-//RS                 continue;
-//RS             };
-//RS             let Some(identity) = &mut instance.instance_identity else {
-//RS                 continue;
-//RS             };
-//RS             if let Some(applications) = instance_applications.get(&identity.fingerprint) {
-//RS                 identity.applications = applications.clone();
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Give an inline module's member TYPES the same lifted member
-//RS /// identity its member functions already have.
-//RS ///
-//RS /// Registration and every engine only ever learn TOP-LEVEL type declarations:
-//RS /// `Bundle/Pipeline.rs`'s `Item::CodeModule` arm registers member `Item::Func`
-//RS /// rows only, and codegen's item loops list `Item::CodeModule` among the items
-//RS /// that declare no type. So a `struct` written inside `module bank { … }` was
-//RS /// invisible everywhere — E0119 "there's no type called `Account`" inside its
-//RS /// own module (card #2054), while a generic module's member struct worked
-//RS /// because `expand_alias` renames and lifts it.
-//RS ///
-//RS /// This is that same mechanism, with no arguments to substitute: one member
-//RS /// naming scheme (`module_type_name`), one lifting step, one display
-//RS /// projection (`plain_inline_module_display_paths`), no engine change. Generic
-//RS /// instances are skipped — `expand_alias` already lifted their members.
-//RS ///
-//RS /// Visibility is preserved: the bare name and the qualified `bank.Account`
-//RS /// spelling resolve inside the module body, but only a `pub` member's
-//RS /// qualified spelling resolves in the rest of the file, so a private member
-//RS /// stays unreachable from outside exactly as `pub` promises.
-//RS pub(crate) fn hoist_inline_module_member_types(bundle: &mut ProgramBundle) {
-//RS     for module in bundle.modules.iter_mut() {
-//RS         let mut declarations: Vec<Item> = Vec::new();
-//RS         let mut exported: HashMap<String, Type> = HashMap::new();
-//RS         for item in module.items.iter_mut() {
-//RS             let Item::CodeModule(code_module) = item else {
-//RS                 continue;
-//RS             };
-//RS             let source_path = code_module.name.clone();
-//RS             hoist_inline_module_types(code_module, &source_path, &mut declarations, &mut exported);
-//RS         }
-//RS         if declarations.is_empty() {
-//RS             continue;
-//RS         }
-//RS         // The rest of the file reaches a lifted member only through its
-//RS         // qualified `module.Type` spelling, and only when it is `pub` — the
-//RS         // same consumer rewrite generic-module instances get.
-//RS         if !exported.is_empty() {
-//RS             rewrite_exported_inline_types(&mut module.items, &exported);
-//RS         }
-//RS         module.items.extend(declarations);
-//RS     }
-//RS }
-//RS 
-//RS /// Rewrite public inline-module type projections in every function scope in
-//RS /// one file. A sibling inline module is outside the declaring module's body,
-//RS /// but it still uses the enclosing file's public module surface. Private
-//RS /// members never enter `exported`, so this cannot widen their reach.
-//RS fn rewrite_exported_inline_types(items: &mut [Item], exported: &HashMap<String, Type>) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(func) => {
-//RS                 *func = specialize_function_types(func.clone(), exported);
-//RS             }
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &mut module.body {
-//RS                     rewrite_exported_inline_types(body, exported);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn inline_type_alias(source_path: &str) -> String {
-//RS     source_path.replace('.', "_")
-//RS }
-//RS 
-//RS fn hoist_inline_module_types(
-//RS     code_module: &mut CodeModule,
-//RS     source_path: &str,
-//RS     declarations: &mut Vec<Item>,
-//RS     exported: &mut HashMap<String, Type>,
-//RS ) -> HashMap<String, Type> {
-//RS     if code_module.instance_identity.is_some() {
-//RS         return HashMap::new();
-//RS     }
-//RS     let Some(body) = &mut code_module.body else {
-//RS         return HashMap::new();
-//RS     };
-//RS 
-//RS     let module_alias = inline_type_alias(source_path);
-//RS     let module_name = code_module.name.clone();
-//RS     let mut direct_types = HashMap::new();
-//RS     let mut direct_names = Vec::new();
-//RS     let display_alias = inline_type_alias(&module_name);
-//RS     for inner in body.iter() {
-//RS         let (name, is_pub) = match inner {
-//RS             Item::Struct(def) => (&def.name, def.is_pub || def.is_package_pub),
-//RS             Item::Enum(def) => (&def.name, def.is_pub || def.is_package_pub),
-//RS             Item::Trait(def) => (&def.name, def.is_pub || def.is_package_pub),
-//RS             Item::Tag(def) => (&def.name, def.is_pub || def.is_package_pub),
-//RS             _ => continue,
-//RS         };
-//RS         let resolved = Type::Named(module_type_name(&module_alias, name));
-//RS         direct_types.insert(name.clone(), resolved.clone());
-//RS         direct_types.insert(format!("{module_name}.{name}"), resolved.clone());
-//RS         direct_types.insert(format!("{source_path}.{name}"), resolved.clone());
-//RS         // A file imported under an alias can still carry a compiler-owned
-//RS         // nominal spelling from its defining module. Normalize that spelling
-//RS         // to the wrapper's canonical identity before body checking.
-//RS         direct_types.insert(module_type_name(&display_alias, name), resolved.clone());
-//RS         direct_names.push(name.clone());
-//RS         if is_pub {
-//RS             exported.insert(format!("{source_path}.{name}"), resolved.clone());
-//RS             exported.insert(format!("{module_name}.{name}"), resolved);
-//RS         }
-//RS     }
-//RS 
-//RS     let mut kept = Vec::with_capacity(body.len());
-//RS     let mut lifted = Vec::new();
-//RS     let mut descendant_types = HashMap::new();
-//RS     for inner in std::mem::take(body) {
-//RS         match inner {
-//RS             Item::CodeModule(mut child) => {
-//RS                 let child_path = format!("{source_path}.{}", child.name);
-//RS                 descendant_types.extend(hoist_inline_module_types(
-//RS                     &mut child,
-//RS                     &child_path,
-//RS                     declarations,
-//RS                     exported,
-//RS                 ));
-//RS                 kept.push(Item::CodeModule(child));
-//RS             }
-//RS             Item::Struct(_) | Item::Enum(_) | Item::Trait(_) | Item::Tag(_) | Item::Impl(_) => {
-//RS                 lifted.push(inner)
-//RS             }
-//RS             other => kept.push(other),
-//RS         }
-//RS     }
-//RS 
-//RS     let mut visible_types = direct_types.clone();
-//RS     for (full_path, ty) in &descendant_types {
-//RS         visible_types.insert(full_path.clone(), ty.clone());
-//RS         if let Some(relative) = full_path.strip_prefix(&format!("{source_path}.")) {
-//RS             visible_types.insert(relative.to_string(), ty.clone());
-//RS         }
-//RS     }
-//RS     let values: HashMap<String, crate::AST::CtValue> = HashMap::new();
-//RS     for inner in &mut kept {
-//RS         match inner {
-//RS             Item::Func(def) => {
-//RS                 *def = specialize_func(def.clone(), &[], &[], &visible_types, &values)
-//RS             }
-//RS             Item::Const(def) => {
-//RS                 substitute_expr(&mut def.value, &visible_types, &values);
-//RS                 def.ty = def
-//RS                     .ty
-//RS                     .as_ref()
-//RS                     .map(|ty| specialize_module_type(ty, &visible_types, &values));
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     for inner in lifted {
-//RS         match inner {
-//RS             Item::Struct(def) => declarations.push(Item::Struct(specialize_struct(
-//RS                 &def,
-//RS                 &module_alias,
-//RS                 &[],
-//RS                 &[],
-//RS                 &visible_types,
-//RS                 &values,
-//RS             ))),
-//RS             Item::Enum(def) => declarations.push(Item::Enum(specialize_enum(
-//RS                 &def,
-//RS                 &module_alias,
-//RS                 &[],
-//RS                 &[],
-//RS                 &visible_types,
-//RS                 &values,
-//RS             ))),
-//RS             Item::Trait(def) => declarations.push(Item::Trait(specialize_trait(
-//RS                 &def,
-//RS                 &[],
-//RS                 &[],
-//RS                 &visible_types,
-//RS                 &values,
-//RS             ))),
-//RS             Item::Tag(def) => {
-//RS                 declarations.push(Item::Tag(specialize_tag(&def, &visible_types, &values)))
-//RS             }
-//RS             Item::Impl(def) => declarations.push(Item::Impl(specialize_impl(
-//RS                 &def,
-//RS                 &[],
-//RS                 &[],
-//RS                 &visible_types,
-//RS                 &values,
-//RS             ))),
-//RS             _ => unreachable!("only type declarations and impls are lifted"),
-//RS         }
-//RS     }
-//RS     *body = kept;
-//RS 
-//RS     let mut all_types = HashMap::new();
-//RS     for name in direct_names {
-//RS         if let Some(ty) = direct_types.get(&name) {
-//RS             all_types.insert(format!("{source_path}.{name}"), ty.clone());
-//RS         }
-//RS     }
-//RS     all_types.extend(descendant_types);
-//RS     all_types
-//RS }
-//RS 
-//RS 
-//RS 
-// END-PORT-PENDING 2132 crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:1-703
+use jet_foundation.[ProgramBundle, Diagnostic, Item, Type, CodeModule, CtValue, Func, Span, ModuleAliasDef, AppliedRuleApplication, ModuleInstanceApplication, import_alias, import_walk_bindings]
+use jet_sema.[TemplateInfo, ModuleInstanceKey, AliasExpansion, TraitRegistry, clone_definition_items, owning_package, package_identity, definition_full_key, resolve_params, collect_generic_module_spans, report_generic_module_cycles, local_alias_depth, alias_chain_contains, resolve_local_alias, resolve_args, instance_key, expand_alias, instance_identity, register_instance_fingerprint, module_type_prefix, module_type_name, rewrite_inline_calls_stmts, substitute_stmts, substitute_expr, specialize_function_types, specialize_func, specialize_struct, specialize_enum, specialize_trait, specialize_tag, specialize_impl, specialize_module_type]
+use jet_foundation.SHA256
+use jet_sema.Comptime
+use jet_sema.Generics
+use std.path.Path // GATE #4494: target-native path construction.
 
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:3
+pub fn expand_generic_module_aliases(bundle: &ProgramBundle, diags: &[Diagnostic]) Never! {
+    build_facts :: ~bundle.build_facts
+    template_snapshots := [[String:TemplateInfo]]{}
+    loop (source_module, module) in bundle.modules {
+        enums := [String:Bool]{}
+        funcs := [String:Func]{}
+        has_generic := false
+        loop item in module.items {
+            if item == {
+                .Enum(def) -> enums[def.name] = def.variants.all((variant) -> variant.payload == .Unit)
+                .Func(def) -> funcs[def.name] = def
+                .GenericModule(_) -> has_generic = true
+                else -> {}
+            }
+        }
+        source_values := [String:CtValue]{}
+        if has_generic {
+            loop item in module.items {
+                if item == .Const(def) {
+                    if Comptime.evaluate_closed_value(def.value, funcs, Set.new<String>(), Path.new("."), source_values, build_facts) == .Ok(value) -> source_values[def.name] = value
+                }
+            }
+        }
+        source_items :: clone_definition_items(module.items)
+        templates := [String:TemplateInfo]{}
+        loop item in module.items {
+            if item == .GenericModule(gm) {
+                (package_root, dependency_name) :: owning_package(bundle, module.path)
+                identity :: package_identity(bundle, package_root, dependency_name)
+                module_path :: (module.path.strip_prefix(package_root) ?? module.path).to_string_lossy().replace("\\", "/")
+                full_key :: definition_full_key(identity, module_path, "", gm.name)
+                templates[gm.name] = TemplateInfo{def: ~gm, definition_id: SHA256.sha256_hex(full_key), definition_full_key: full_key, params: resolve_params(gm, enums, &diags), source_module: source_module, source_items: clone_definition_items(source_items), source_values: ~source_values, source_rule_facts: ~module.rule_facts, build_facts: ~build_facts}
+            }
+        }
+        &template_snapshots.push(^templates)
+    }
+    // Unqualified imports resolve through the namespace that established their alias.
+    import_bindings := [[String:Int]]{}
+    module_aliases := [String]{}
+    loop (module_idx, module) in bundle.modules {
+        bindings := [String:Int]{}
+        loop import in module.imports {
+            if import.kind == .Unqualified(_, _, _, _, _) -> continue
+            if bundle.name_ledger.import_target(module_idx, import.span) == .Val(target) -> bindings[import_alias(import)] = target
+        }
+        &import_bindings.push(^bindings)
+        &module_aliases.push(module.alias)
+    }
+    bundle_instances := [ModuleInstanceKey:String]{}
+    bundle_instance_nominals := [String:[String]]{}
+    fingerprint_keys := [String:[U8]]{}
+    instance_applications := [String:[ModuleInstanceApplication]]{}
+    loop (module_idx, module) in &bundle.modules {
+        generic_module_spans := [Span]{}
+        collect_generic_module_spans(module.items, &generic_module_spans)
+        if report_generic_module_cycles(module.items, &diags) -> continue
+        traits := TraitRegistry.default()
+        &traits.register_synthetic_rollback()
+        &traits.register_synthetic_display_debug()
+        &traits.register_synthetic_close()
+        &traits.register_synthetic_operators()
+        &traits.register_synthetic_iter_index()
+        &traits.register_synthetic_io()
+        &traits.register_synthetic_driver()
+        discarded := [Diagnostic]{}
+        &traits.register_items(module.items, &discarded)
+        enums := [String:Bool]{}
+        funcs := [String:Func]{}
+        has_alias := false
+        loop item in module.items {
+            if item == {
+                .Enum(def) -> enums[def.name] = def.variants.all((variant) -> variant.payload == .Unit)
+                .Func(def) -> funcs[def.name] = def
+                .ModuleAlias(_) -> has_alias = true
+                else -> {}
+            }
+        }
+        globals := [String:CtValue]{}
+        if has_alias {
+            loop item in module.items {
+                if item == .Const(c) {
+                    if Comptime.evaluate_closed_value(c.value, funcs, Set.new<String>(), Path.new("."), globals, build_facts) == .Ok(value) -> globals[c.name] = value
+                }
+            }
+        }
+        templates := ~template_snapshots[module_idx]
+        denied_templates := Set.new<String>()
+        loop import in &module.imports {
+            if import.kind != .Unqualified(_, _, _, _, _) -> continue
+            if import.kind == .Unqualified(module_alias, _, _, _, _) {
+                source_idx :: import_bindings[module_idx].get(module_alias) ?? continue
+                bindings :: import_walk_bindings(import)
+                consumed := Set.new<String>()
+                loop binding in bindings {
+                    original :: binding.original.expect("member walker returned a binding without a member")
+                    source :: template_snapshots[source_idx].get(original) ?? continue
+                    &consumed.insert(original)
+                    local :: binding.local
+                    if !source.def.is_pub && !source.def.is_package_pub {
+                        &denied_templates.insert(local)
+                        &diags.push(Diagnostic.error("E0609", "`{original}` is private in module `{module_aliases[source_idx]}`", "only `pub` items can be brought into scope with `use`", "add `pub` before `module {original}` in the defining file", Val(import.span)))
+                        continue
+                    }
+                    templates[local] = ~source
+                }
+                if import.kind == .Unqualified(_, _, items, _, _) -> &items.retain((item) -> !consumed.contains(item.original))
+            }
+        }
+        aliases := [String:ModuleAliasDef]{}
+        type_aliases := [String:Type]{}
+        ordered_aliases := [(Int, ModuleAliasDef)]{}
+        loop (idx, item) in module.items {
+            if item == {
+                .ModuleAlias(alias) -> {
+                    aliases[alias.name] = alias
+                    &ordered_aliases.push((idx, alias))
+                }
+                .TypeAlias(alias) -> type_aliases[alias.name] = alias.target
+                else -> {}
+            }
+        }
+        projections := [String:String]{}
+        loop alias in aliases.values() {
+            if aliases.has_key(alias.target) {
+                terminal := aliases[alias.target]
+                loop aliases.get(terminal.target) == .Val(next) -> terminal = next
+                projections[alias.name] = terminal.name
+            }
+        }
+        expansions := [(Int, AliasExpansion)]{}
+        &ordered_aliases.sort_by((left, right) -> local_alias_depth(left.1, aliases) <=> local_alias_depth(right.1, aliases))
+        invalid_aliases := Set.new<String>()
+        loop (idx, alias) in ordered_aliases {
+            if alias_chain_contains(alias, aliases, invalid_aliases) -> continue
+            resolved_option :: resolve_local_alias(alias, aliases, templates, &diags)
+            if resolved_option == .None {
+                &invalid_aliases.insert(alias.name)
+                continue
+            }
+            resolved :: resolved_option.unwrap()
+            if denied_templates.contains(resolved.target) {
+                &invalid_aliases.insert(alias.name)
+                continue
+            }
+            if aliases.has_key(alias.target) -> continue
+            info_option :: templates.get(resolved.target)
+            if info_option == .None {
+                &diags.push(Diagnostic.error("E0850", "generic module `{resolved.target}` not found in this scope", "check the module template name and make sure it is defined in the same file", "example: `module {resolved.name} :: MyTemplate<String>`", Val(resolved.target_span)))
+                &invalid_aliases.insert(alias.name)
+                continue
+            }
+            info :: info_option.unwrap()
+            args_option :: resolve_args(resolved, info, traits, funcs, globals, build_facts, enums, &diags)
+            if args_option == .None {
+                &invalid_aliases.insert(alias.name)
+                continue
+            }
+            args :: args_option.unwrap()
+            key :: instance_key(info, args, type_aliases)
+            fingerprint :: SHA256.sha256_hex(key.bytes())
+            applications := instance_applications.get(fingerprint) ?? []
+            &applications.push(ModuleInstanceApplication{name: resolved.name, source_module: module.display, semantic_identity: "instance:{fingerprint}", span: resolved.name_span})
+            instance_applications[fingerprint] = ^applications
+            if bundle_instances.get(key) == .Val(canonical) {
+                projections[alias.name] = canonical
+                if bundle_instance_nominals.get(canonical) == .Val(nominals) -> bundle_instance_nominals[alias.name] = ~nominals
+                continue
+            }
+            identity_args :: ~args
+            cm_option :: expand_alias(resolved, module_idx, module.display, key.bytes(), templates, &diags, traits, funcs, globals, build_facts, enums, &bundle_instances, &fingerprint_keys, &instance_applications, Val(^args))
+            if cm_option == .Val(cm) {
+                identity :: instance_identity(key, info, resolved, module.display, identity_args)
+                register_instance_fingerprint(&fingerprint_keys, identity, alias.span)
+                cm.module.instance_identity = Val(identity)
+                nominals := [String]{}
+                loop item in cm.declarations {
+                    if item == { .Struct(def) -> &nominals.push(def.name), .Enum(def) -> &nominals.push(def.name), else -> {} }
+                }
+                bundle_instance_nominals[alias.name] = ^nominals
+                bundle_instances[key] = alias.name
+                &expansions.push((idx, ^cm))
+            } else -> &invalid_aliases.insert(alias.name)
+        }
+        declarations := [Item]{}
+        generated_rule_facts := [AppliedRuleApplication]{}
+        loop (idx, expansion) in expansions {
+            module.items[idx] = Item.CodeModule(^expansion.module)
+            &declarations.extend(^expansion.declarations)
+            &generated_rule_facts.extend(^expansion.rule_facts)
+        }
+        &module.rule_facts.retain((application) -> !generic_module_spans.any((generic) -> application.marker.span.start >= generic.start && application.marker.span.end <= generic.end))
+        &module.rule_facts.extend(^generated_rule_facts)
+        &module.rule_facts.sort_by((a, b) -> a.marker.span.start <=> b.marker.span.start)
+        projection_names :: projections.keys().collect()
+        loop alias in projection_names {
+            canonical := projections[alias]
+            seen := Set.new<String>()
+            loop !seen.contains(canonical) {
+                &seen.insert(canonical)
+                next :: projections.get(canonical) ?? break
+                canonical = next
+            }
+            projections[alias] = canonical
+        }
+        projection_types := [String:Type]{}
+        loop (alias, nominals) in bundle_instance_nominals {
+            canonical :: projections.get(alias) ?? alias
+            prefix :: module_type_prefix(canonical)
+            loop canonical_name in nominals {
+                if !canonical_name.starts_with(prefix) -> continue
+                suffix := canonical_name.after(prefix) // #4303
+                resolved :: Type.Named(canonical_name)
+                projection_types["{alias}.{suffix}"] = resolved
+                projection_types[module_type_name(alias, suffix)] = resolved
+            }
+        }
+        loop (alias, canonical) in projections {
+            prefix :: module_type_prefix(canonical)
+            loop canonical_name in bundle_instance_nominals.get(canonical) ?? [] {
+                if canonical_name.starts_with(prefix) {
+                    suffix := canonical_name.after(prefix) // #4303
+                    resolved :: Type.Named(canonical_name)
+                    projection_types["{alias}.{suffix}"] = resolved
+                    projection_types[module_type_name(alias, suffix)] = resolved
+                }
+            }
+        }
+        loop (alias, canonical) in projections {
+            names :: Set.from([alias])
+            loop item in &module.items {
+                if item == .Func(func) -> rewrite_inline_calls_stmts(&func.body, names, canonical)
+            }
+        }
+        loop item in &module.items {
+            if item == .Func(func) {
+                loop param in &func.params -> param.ty = Generics.substitute_type(param.ty, projection_types)
+                if func.return_type == .Val(ret) -> func.return_type = Val(Generics.substitute_type(ret, projection_types))
+                substitute_stmts(&func.body, projection_types, [:])
+            }
+        }
+        &module.items.retain((item) -> if item == { .GenericModule(_) -> false, .ModuleAlias(_) -> false, else -> true })
+        &module.items.extend(^declarations)
+        debug_assert(!module.items.any((item) -> item == .ModuleAlias(_)))
+    }
+    loop module in &bundle.modules {
+        loop item in &module.items {
+            if item == .CodeModule(instance) {
+                if instance.instance_identity == .Val(identity) {
+                    if instance_applications.get(identity.fingerprint) == .Val(applications) -> identity.applications = ~applications
+                }
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:518
+pub fn hoist_inline_module_member_types(bundle: &ProgramBundle) Never! {
+    loop module in &bundle.modules {
+        declarations := [Item]{}
+        exported := [String:Type]{}
+        loop item in &module.items {
+            if item == .CodeModule(code_module) {
+                source_path :: code_module.name
+                _ :: hoist_inline_module_types(&code_module, source_path, &declarations, &exported)
+            }
+        }
+        if declarations.is_empty() -> continue
+        if !exported.is_empty() -> rewrite_exported_inline_types(&module.items, exported)
+        &module.items.extend(^declarations)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:546
+fn rewrite_exported_inline_types(items: &[Item], exported: [String:Type]) Never! {
+    loop item in &items {
+        if item == {
+            .Func(func) -> func = specialize_function_types(^func, exported)
+            .CodeModule(module) -> {
+                if module.body == .Val(body) -> rewrite_exported_inline_types(&body, exported)
+            }
+            else -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:562
+pub fn inline_type_alias(source_path: String) -> String Never! { source_path.replace(".", "_") }
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Expansion.rs:566
+fn hoist_inline_module_types(code_module: &CodeModule, source_path: String, declarations: &[Item], exported: &[String:Type]) -> [String:Type] Never! {
+    if code_module.instance_identity != .None -> return [:]
+    if code_module.body == .None -> return [:]
+    body := &code_module.body.unwrap()
+    module_alias :: inline_type_alias(source_path)
+    module_name :: code_module.name
+    direct_types := [String:Type]{}
+    direct_names := [String]{}
+    display_alias :: inline_type_alias(module_name)
+    loop inner in body {
+        name := ""
+        is_pub := false
+        if inner == {
+            .Struct(def) -> { name = def.name; is_pub = def.is_pub || def.is_package_pub }
+            .Enum(def) -> { name = def.name; is_pub = def.is_pub || def.is_package_pub }
+            .Trait(def) -> { name = def.name; is_pub = def.is_pub || def.is_package_pub }
+            .Tag(def) -> { name = def.name; is_pub = def.is_pub || def.is_package_pub }
+            else -> continue
+        }
+        resolved :: Type.Named(module_type_name(module_alias, name))
+        direct_types[name] = resolved
+        direct_types["{module_name}.{name}"] = resolved
+        direct_types["{source_path}.{name}"] = resolved
+        direct_types[module_type_name(display_alias, name)] = resolved
+        &direct_names.push(name)
+        if is_pub {
+            exported["{source_path}.{name}"] = resolved
+            exported["{module_name}.{name}"] = resolved
+        }
+    }
+    kept := [Item].with_capacity(body.len())
+    lifted := [Item]{}
+    descendant_types := [String:Type]{}
+    old_body :: &body.replace([])
+    loop inner in old_body {
+        if inner == {
+            .CodeModule(child) -> {
+                child_path :: "{source_path}.{child.name}"
+                &descendant_types.extend(hoist_inline_module_types(&child, child_path, &declarations, &exported))
+                &kept.push(Item.CodeModule(^child))
+            }
+            .Struct(_) -> &lifted.push(^inner)
+            .Enum(_) -> &lifted.push(^inner)
+            .Trait(_) -> &lifted.push(^inner)
+            .Tag(_) -> &lifted.push(^inner)
+            .Impl(_) -> &lifted.push(^inner)
+            else -> &kept.push(^inner)
+        }
+    }
+    visible_types := ~direct_types
+    loop (full_path, ty) in descendant_types {
+        visible_types[full_path] = ty
+        prefix :: "{source_path}."
+        if full_path.starts_with(prefix) {
+            relative := full_path.after(prefix) // #4303
+            visible_types[relative] = ty
+        }
+    }
+    values :: [String:CtValue]{}
+    loop inner in &kept {
+        if inner == {
+            .Func(def) -> def = specialize_func(^def, [], [], visible_types, values)
+            .Const(def) -> {
+                substitute_expr(&def.value, visible_types, values)
+                if def.ty == .Val(ty) -> def.ty = Val(specialize_module_type(ty, visible_types, values))
+            }
+            else -> {}
+        }
+    }
+    loop inner in lifted {
+        if inner == {
+            .Struct(def) -> &declarations.push(Item.Struct(specialize_struct(def, module_alias, [], [], visible_types, values)))
+            .Enum(def) -> &declarations.push(Item.Enum(specialize_enum(def, module_alias, [], [], visible_types, values)))
+            .Trait(def) -> &declarations.push(Item.Trait(specialize_trait(def, [], [], visible_types, values)))
+            .Tag(def) -> &declarations.push(Item.Tag(specialize_tag(def, visible_types, values)))
+            .Impl(def) -> &declarations.push(Item.Impl(specialize_impl(def, [], [], visible_types, values)))
+            else -> unreachable("only type declarations and impls are lifted")
+        }
+    }
+    body = ^kept
+    all_types := [String:Type]{}
+    loop name in direct_names {
+        if direct_types.get(name) == .Val(ty) -> all_types["{source_path}.{name}"] = ty
+    }
+    &all_types.extend(^descendant_types)
+    all_types
+}

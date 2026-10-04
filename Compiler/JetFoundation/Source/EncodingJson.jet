@@ -1,478 +1,281 @@
-// PORT-PENDING 2144 crates-jet-foundation-src-encodingjson: crates/jet-foundation/src/EncodingJson.rs:1-474
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use crate::DataTree::DataTree;
-//RS 
-//RS // One JSON parser for the embedded Prelude and comptime adapters.
-//RS 
-//RS pub const MAX_JSON_DEPTH: usize = 64;
-//RS 
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn hostile_nested_json_is_rejected_before_unbounded_recursion() {
-//RS         let depth = MAX_JSON_DEPTH + 1;
-//RS         let input = format!("{}0{}", "[".repeat(depth), "]".repeat(depth));
-//RS         let error = parse_json(&input, false).expect_err("depth limit must reject input");
-//RS         assert!(error.message.contains("nested too deeply"));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn integer_tokens_never_round_through_float() {
-//RS         assert_eq!(
-//RS             parse_json("-9223372036854775808", false),
-//RS             Ok(DataTree::Int(i64::MIN))
-//RS         );
-//RS         assert_eq!(
-//RS             parse_json("9223372036854775808", false),
-//RS             Ok(DataTree::Number("9223372036854775808".to_string()))
-//RS         );
-//RS         assert_eq!(
-//RS             parse_json("123456789012345678901234567890", false),
-//RS             Ok(DataTree::Number("123456789012345678901234567890".to_string()))
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn typed_json_keeps_quoted_numbers_distinct() {
-//RS         assert_eq!(
-//RS             parse_json_typed(r#"["123",123]"#, false),
-//RS             Ok(DataTree::Array(vec![
-//RS                 DataTree::TypedText("123".to_string()),
-//RS                 DataTree::Number("123".to_string()),
-//RS             ]))
-//RS         );
-//RS         assert_eq!(
-//RS             parse_json_exact_numbers(r#""123""#, false),
-//RS             Ok(DataTree::Text("123".to_string()))
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn rejects_trailing_commas_and_non_finite_numbers() {
-//RS         for input in ["[1,]", "{\"a\":1,}", "1e400", "-1e400"] {
-//RS             parse_json(input, false).expect_err("invalid JSON must be rejected");
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct Error {
-//RS     pub line: i64,
-//RS     pub message: String,
-//RS }
-//RS 
-//RS pub fn parse_json(text: &str, reject_duplicate_keys: bool) -> Result<DataTree, Error> {
-//RS     parse_json_with_modes(text, reject_duplicate_keys, false, false)
-//RS }
-//RS 
-//RS pub fn parse_json_exact_numbers(
-//RS     text: &str,
-//RS     reject_duplicate_keys: bool,
-//RS ) -> Result<DataTree, Error> {
-//RS     parse_json_with_modes(text, reject_duplicate_keys, true, false)
-//RS }
-//RS 
-//RS pub fn parse_json_typed(
-//RS     text: &str,
-//RS     reject_duplicate_keys: bool,
-//RS ) -> Result<DataTree, Error> {
-//RS     parse_json_with_modes(text, reject_duplicate_keys, true, true)
-//RS }
-//RS 
-//RS fn parse_json_with_modes(
-//RS     text: &str,
-//RS     reject_duplicate_keys: bool,
-//RS     preserve_numbers: bool,
-//RS     preserve_strings: bool,
-//RS ) -> Result<DataTree, Error> {
-//RS     let mut parser = Parser {
-//RS         chars: text.chars().collect(),
-//RS         pos: 0,
-//RS         reject_duplicate_keys,
-//RS         preserve_numbers,
-//RS         preserve_strings,
-//RS     };
-//RS     let value = parser.value(0)?;
-//RS     parser.ws();
-//RS     if parser.pos != parser.chars.len() {
-//RS         return Err(parser.err(super::jet_encoding_errors::JSON_EXTRA_TEXT));
-//RS     }
-//RS     Ok(value)
-//RS }
-//RS 
-//RS pub fn is_json_structural_whitespace(c: char) -> bool {
-//RS     matches!(c, ' ' | '\t' | '\r' | '\n')
-//RS }
-//RS 
-//RS struct Parser {
-//RS     chars: Vec<char>,
-//RS     pos: usize,
-//RS     reject_duplicate_keys: bool,
-//RS     preserve_numbers: bool,
-//RS     preserve_strings: bool,
-//RS }
-//RS 
-//RS impl Parser {
-//RS     fn err(&self, message: &str) -> Error {
-//RS         let line = self.chars[..self.pos.min(self.chars.len())]
-//RS             .iter()
-//RS             .filter(|c| **c == '\n')
-//RS             .count() as i64
-//RS             + 1;
-//RS         Error {
-//RS             line,
-//RS             message: message.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn peek(&self) -> Option<char> {
-//RS         self.chars.get(self.pos).copied()
-//RS     }
-//RS 
-//RS     fn ws(&mut self) {
-//RS         while self.pos < self.chars.len() && is_json_structural_whitespace(self.chars[self.pos]) {
-//RS             self.pos += 1;
-//RS         }
-//RS     }
-//RS 
-//RS     fn value(&mut self, depth: usize) -> Result<DataTree, Error> {
-//RS         self.ws();
-//RS         match self.peek() {
-//RS             Some('n') => self.word("null", DataTree::Null),
-//RS             Some('t') => self.word("true", DataTree::Bool(true)),
-//RS             Some('f') => self.word("false", DataTree::Bool(false)),
-//RS             Some('"') => {
-//RS                 let text = self.string()?;
-//RS                 Ok(if self.preserve_strings {
-//RS                     DataTree::TypedText(text)
-//RS                 } else {
-//RS                     DataTree::Text(text)
-//RS                 })
-//RS             }
-//RS             Some('[') => self.array(depth),
-//RS             Some('{') => self.object(depth),
-//RS             Some('-') | Some('0'..='9') => self.number(),
-//RS             _ => Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_VALUE)),
-//RS         }
-//RS     }
-//RS 
-//RS     fn word(&mut self, word: &str, value: DataTree) -> Result<DataTree, Error> {
-//RS         for ch in word.chars() {
-//RS             if self.peek() != Some(ch) {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_WORD));
-//RS             }
-//RS             self.pos += 1;
-//RS         }
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     fn string(&mut self) -> Result<String, Error> {
-//RS         if self.peek() != Some('"') {
-//RS             return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_QUOTED_TEXT));
-//RS         }
-//RS         self.pos += 1;
-//RS         let mut out = String::new();
-//RS         while let Some(c) = self.peek() {
-//RS             self.pos += 1;
-//RS             match c {
-//RS                 '"' => return Ok(out),
-//RS                 '\\' => {
-//RS                     let Some(escape) = self.peek() else {
-//RS                         return Err(self.err(super::jet_encoding_errors::JSON_UNFINISHED_ESCAPE));
-//RS                     };
-//RS                     self.pos += 1;
-//RS                     match escape {
-//RS                         '"' => out.push('"'),
-//RS                         '\\' => out.push('\\'),
-//RS                         '/' => out.push('/'),
-//RS                         'b' => out.push('\u{0008}'),
-//RS                         'f' => out.push('\u{000c}'),
-//RS                         'n' => out.push('\n'),
-//RS                         'r' => out.push('\r'),
-//RS                         't' => out.push('\t'),
-//RS                         'u' => self.unicode_escape(&mut out)?,
-//RS                         _ => return Err(self.err(super::jet_encoding_errors::JSON_INVALID_ESCAPE)),
-//RS                     }
-//RS                 }
-//RS                 c if (c as u32) < 0x20 => {
-//RS                     return Err(self.err(super::jet_encoding_errors::JSON_CONTROL_CHARACTER));
-//RS                 }
-//RS                 other => out.push(other),
-//RS             }
-//RS         }
-//RS         Err(self.err(super::jet_encoding_errors::JSON_MISSING_CLOSING_QUOTE))
-//RS     }
-//RS 
-//RS     fn unicode_escape(&mut self, out: &mut String) -> Result<(), Error> {
-//RS         let code_point = self.hex4()?;
-//RS         if (0xD800..=0xDBFF).contains(&code_point) {
-//RS             if self.peek() != Some('\\') {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-//RS             }
-//RS             self.pos += 1;
-//RS             if self.peek() != Some('u') {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-//RS             }
-//RS             self.pos += 1;
-//RS             let low = self.hex4()?;
-//RS             if !(0xDC00..=0xDFFF).contains(&low) {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-//RS             }
-//RS             let combined = 0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00);
-//RS             match char::from_u32(combined) {
-//RS                 Some(ch) => out.push(ch),
-//RS                 None => {
-//RS                     return Err(self.err(super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
-//RS                 }
-//RS             }
-//RS         } else if (0xDC00..=0xDFFF).contains(&code_point) {
-//RS             return Err(self.err(super::jet_encoding_errors::JSON_UNPAIRED_SURROGATE));
-//RS         } else {
-//RS             match char::from_u32(code_point) {
-//RS                 Some(ch) => out.push(ch),
-//RS                 None => {
-//RS                     return Err(self.err(super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE));
-//RS                 }
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn hex4(&mut self) -> Result<u32, Error> {
-//RS         let mut value = 0u32;
-//RS         for _ in 0..4 {
-//RS             let Some(ch) = self.peek() else {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_TRUNCATED_UNICODE_ESCAPE));
-//RS             };
-//RS             let digit = ch
-//RS                 .to_digit(16)
-//RS                 .ok_or_else(|| self.err(super::jet_encoding_errors::JSON_INVALID_UNICODE_ESCAPE))?;
-//RS             value = value * 16 + digit;
-//RS             self.pos += 1;
-//RS         }
-//RS         Ok(value)
-//RS     }
-//RS 
-//RS     fn number(&mut self) -> Result<DataTree, Error> {
-//RS         let start = self.pos;
-//RS         if self.peek() == Some('-') {
-//RS             self.pos += 1;
-//RS         }
-//RS         match self.peek() {
-//RS             Some('0') => self.pos += 1,
-//RS             Some('1'..='9') => {
-//RS                 self.pos += 1;
-//RS                 while matches!(self.peek(), Some('0'..='9')) {
-//RS                     self.pos += 1;
-//RS                 }
-//RS             }
-//RS             _ => return Err(self.err(super::jet_encoding_errors::JSON_BAD_NUMBER)),
-//RS         }
-//RS         if self.peek() == Some('.') {
-//RS             self.pos += 1;
-//RS             if !matches!(self.peek(), Some('0'..='9')) {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_BAD_NUMBER));
-//RS             }
-//RS             while matches!(self.peek(), Some('0'..='9')) {
-//RS                 self.pos += 1;
-//RS             }
-//RS         }
-//RS         if matches!(self.peek(), Some('e' | 'E')) {
-//RS             self.pos += 1;
-//RS             if matches!(self.peek(), Some('+' | '-')) {
-//RS                 self.pos += 1;
-//RS             }
-//RS             if !matches!(self.peek(), Some('0'..='9')) {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_BAD_NUMBER));
-//RS             }
-//RS             while matches!(self.peek(), Some('0'..='9')) {
-//RS                 self.pos += 1;
-//RS             }
-//RS         }
-//RS         let text: String = self.chars[start..self.pos].iter().collect();
-//RS         let is_integer = !text.contains('.') && !text.contains('e') && !text.contains('E');
-//RS         if self.preserve_numbers {
-//RS             super::jet_json_number::validate_json_number(&text)
-//RS                 .map_err(|message| self.err(&message))?;
-//RS             return Ok(DataTree::Number(text));
-//RS         }
-//RS         if is_integer {
-//RS             if let Ok(value) = text.parse::<i64>() {
-//RS                 return Ok(DataTree::Int(value));
-//RS             }
-//RS             super::jet_json_number::validate_json_number(&text)
-//RS                 .map_err(|message| self.err(&message))?;
-//RS             return Ok(DataTree::Number(text));
-//RS         }
-//RS         let value = text
-//RS             .parse::<f64>()
-//RS             .map_err(|_| self.err(super::jet_encoding_errors::JSON_BAD_NUMBER))?;
-//RS         if !value.is_finite() {
-//RS             return Err(self.err(super::jet_encoding_errors::JSON_BAD_NUMBER));
-//RS         }
-//RS         Ok(DataTree::Float(value))
-//RS     }
-//RS 
-//RS     fn array(&mut self, depth: usize) -> Result<DataTree, Error> {
-//RS         if depth >= MAX_JSON_DEPTH {
-//RS             return Err(self.err("JSON value is nested too deeply"));
-//RS         }
-//RS         self.pos += 1;
-//RS         let mut values = Vec::new();
-//RS         loop {
-//RS             self.ws();
-//RS             if self.peek() == Some(']') {
-//RS                 self.pos += 1;
-//RS                 return Ok(DataTree::Array(values));
-//RS             }
-//RS             values.push(self.value(depth + 1)?);
-//RS             self.ws();
-//RS             match self.peek() {
-//RS                 Some(',') => {
-//RS                     self.pos += 1;
-//RS                     self.ws();
-//RS                     if self.peek() == Some(']') {
-//RS                         return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR));
-//RS                     }
-//RS                 }
-//RS                 Some(']') => {}
-//RS                 _ => {
-//RS                     return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_ARRAY_SEPARATOR));
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn object(&mut self, depth: usize) -> Result<DataTree, Error> {
-//RS         if depth >= MAX_JSON_DEPTH {
-//RS             return Err(self.err("JSON value is nested too deeply"));
-//RS         }
-//RS         self.pos += 1;
-//RS         let mut fields = Vec::new();
-//RS         loop {
-//RS             self.ws();
-//RS             if self.peek() == Some('}') {
-//RS                 self.pos += 1;
-//RS                 return Ok(DataTree::Object(fields));
-//RS             }
-//RS             let key = self.string()?;
-//RS             self.ws();
-//RS             if self.peek() != Some(':') {
-//RS                 return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_COLON));
-//RS             }
-//RS             self.pos += 1;
-//RS             if self.reject_duplicate_keys && fields.iter().any(|(field, _)| field == &key) {
-//RS                 return Err(self.err(&format!(
-//RS                     "{} `{key}`",
-//RS                     super::jet_encoding_errors::JSON_DUPLICATE_OBJECT_KEY
-//RS                 )));
-//RS             }
-//RS             let value = self.value(depth + 1)?;
-//RS             if let Some((_, current)) = fields.iter_mut().find(|(field, _)| field == &key) {
-//RS                 *current = value;
-//RS             } else {
-//RS                 fields.push((key, value));
-//RS             }
-//RS             self.ws();
-//RS             match self.peek() {
-//RS                 Some(',') => {
-//RS                     self.pos += 1;
-//RS                     self.ws();
-//RS                     if self.peek() == Some('}') {
-//RS                         return Err(self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR));
-//RS                     }
-//RS                 }
-//RS                 Some('}') => {}
-//RS                 _ => {
-//RS                     return Err(
-//RS                         self.err(super::jet_encoding_errors::JSON_EXPECTED_OBJECT_SEPARATOR)
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS     pub fn render_json(j: &DataTree, pretty: bool, depth: usize) -> String {
-//RS         match j {
-//RS             DataTree::Null => "null".to_string(),
-//RS             DataTree::Bool(value) => value.to_string(),
-//RS             DataTree::Int(value) => value.to_string(),
-//RS             DataTree::Float(value) => {
-//RS                 assert!(value.is_finite(), "JSON cannot encode a non-finite Float");
-//RS                 format!("{value:?}")
-//RS             }
-//RS             DataTree::Number(value) => value.clone(),
-//RS             DataTree::TypedText(value) | DataTree::Text(value) => quote_json(value),
-//RS             DataTree::Bytes(_) => panic!("JSON cannot encode Bytes"),
-//RS             DataTree::Array(items) => {
-//RS                 if items.is_empty() {
-//RS                     return "[]".to_string();
-//RS                 }
-//RS                 if !pretty {
-//RS                     let parts: Vec<String> =
-//RS                         items.iter().map(|x| render_json(x, false, depth)).collect();
-//RS                     return format!("[{}]", parts.join(","));
-//RS                 }
-//RS                 let pad = "  ".repeat(depth + 1);
-//RS                 let end = "  ".repeat(depth);
-//RS                 let parts: Vec<String> = items
-//RS                     .iter()
-//RS                     .map(|x| format!("{}{}", pad, render_json(x, true, depth + 1)))
-//RS                     .collect();
-//RS                 format!("[\n{}\n{}]", parts.join(",\n"), end)
-//RS             }
-//RS             DataTree::Object(entries) => {
-//RS                 if entries.is_empty() {
-//RS                     return "{}".to_string();
-//RS                 }
-//RS                 if !pretty {
-//RS                     let parts: Vec<String> = entries
-//RS                         .iter()
-//RS                         .map(|(key, value)| {
-//RS                             format!("{}:{}", quote_json(key), render_json(value, false, depth))
-//RS                         })
-//RS                         .collect();
-//RS                     return format!("{{{}}}", parts.join(","));
-//RS                 }
-//RS                 let pad = "  ".repeat(depth + 1);
-//RS                 let end = "  ".repeat(depth);
-//RS                 let parts: Vec<String> = entries
-//RS                     .iter()
-//RS                     .map(|(key, value)| {
-//RS                         format!(
-//RS                             "{}{}: {}",
-//RS                             pad,
-//RS                             quote_json(key),
-//RS                             render_json(value, true, depth + 1)
-//RS                         )
-//RS                     })
-//RS                     .collect();
-//RS                 format!("{{\n{}\n{}}}", parts.join(",\n"), end)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn quote_json(s: &str) -> String {
-//RS         let mut out = String::from("\"");
-//RS         for c in s.chars() {
-//RS             match c {
-//RS                 '"' => out.push_str("\\\""),
-//RS                 '\\' => out.push_str("\\\\"),
-//RS                 '\u{0008}' => out.push_str("\\b"),
-//RS                 '\u{000c}' => out.push_str("\\f"),
-//RS                 '\n' => out.push_str("\\n"),
-//RS                 '\r' => out.push_str("\\r"),
-//RS                 '\t' => out.push_str("\\t"),
-//RS                 c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
-//RS                 _ => out.push(c),
-//RS             }
-//RS         }
-//RS         out.push('"');
-//RS         out
-//RS     }
-//RS 
-// END-PORT-PENDING 2144 crates/jet-foundation/src/EncodingJson.rs:1-474
+// One JSON parser for the embedded Prelude and comptime adapters.
+use DataTree.[DataTree]
+use EncodingErrors
+use JSONNumber.[validate_json_number]
 
+// Rust: crates/jet-foundation/src/EncodingJson.rs:5
+pub MAX_JSON_DEPTH :: prep { 64 }
+// Rust: crates/jet-foundation/src/EncodingJson.rs:60
+#Error
+pub struct Error { pub line: I64, pub message: String }
+// Rust: crates/jet-foundation/src/EncodingJson.rs:65
+pub fn parse_json(text: String, reject_duplicate_keys: Bool) -> DataTree Error! {
+    parse_json_with_modes(text, reject_duplicate_keys, false, false)
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:69
+pub fn parse_json_exact_numbers(text: String, reject_duplicate_keys: Bool) -> DataTree Error! {
+    parse_json_with_modes(text, reject_duplicate_keys, true, false)
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:76
+pub fn parse_json_typed(text: String, reject_duplicate_keys: Bool) -> DataTree Error! {
+    parse_json_with_modes(text, reject_duplicate_keys, true, true)
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:83
+fn parse_json_with_modes(text: String, reject_duplicate_keys: Bool, preserve_numbers: Bool, preserve_strings: Bool) -> DataTree Error! {
+    parser := Parser{chars: text.chars().collect(), pos: 0, reject_duplicate_keys: reject_duplicate_keys, preserve_numbers: preserve_numbers, preserve_strings: preserve_strings}
+    value :: parser.value(0)?
+    parser.ws()
+    if parser.pos != parser.chars.len() -> return err(parser.err(EncodingErrors.JSON_EXTRA_TEXT))
+    ^value
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:104
+pub fn is_json_structural_whitespace(c: Char) -> Bool { c == ' ' || c == '\t' || c == '\r' || c == '\n' }
+
+// Rust: crates/jet-foundation/src/EncodingJson.rs:108
+struct Parser {
+    chars: [Char]
+    pos: Int
+    reject_duplicate_keys: Bool
+    preserve_numbers: Bool
+    preserve_strings: Bool
+
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:117
+    fn err(self: Parser, message: String) -> Error {
+        line :: I64{self.chars.slice(0, self.pos.min(self.chars.len())).iter().filter(|c| -> c == '\n').count()} + 1
+        Error{line: line, message: ~message}
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:129
+    fn peek(self: Parser) -> Char? { self.chars.get(self.pos) }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:133
+    fn ws(self: &Parser) -> {
+        loop self.pos < self.chars.len() && is_json_structural_whitespace(self.chars[self.pos]) { self.pos += 1 }
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:139
+    fn value(self: &Parser, depth: Int) -> DataTree Error! {
+        self.ws()
+        match self.peek() {
+            Val('n') => self.word("null", DataTree.Null)
+            Val('t') => self.word("true", DataTree.Bool(true))
+            Val('f') => self.word("false", DataTree.Bool(false))
+            Val('"') => {
+                text :: self.string()?
+                if self.preserve_strings -> DataTree.TypedText(^text) else -> DataTree.Text(^text)
+            }
+            Val('[') => self.array(depth)
+            Val('{') => self.object(depth)
+            Val('-') | Val('0'..='9') => self.number()
+            _ => err(self.err(EncodingErrors.JSON_EXPECTED_VALUE))
+        }
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:160
+    fn word(self: &Parser, word: String, value: DataTree) -> DataTree Error! {
+        loop ch in word.chars() {
+            if self.peek() != Val(ch) -> return err(self.err(EncodingErrors.JSON_EXPECTED_WORD))
+            self.pos += 1
+        }
+        ^value
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:170
+    fn string(self: &Parser) -> String Error! {
+        if self.peek() != Val('"') -> return err(self.err(EncodingErrors.JSON_EXPECTED_QUOTED_TEXT))
+        self.pos += 1
+        out := ""
+        loop {
+            c :: self.peek() ?? break
+            self.pos += 1
+            match c {
+                '"' => return ^out
+                '\\' => {
+                    escape :: self.peek() ?? return err(self.err(EncodingErrors.JSON_UNFINISHED_ESCAPE))
+                    self.pos += 1
+                    match escape {
+                        '"' => out.push('"')
+                        '\\' => out.push('\\')
+                        '/' => out.push('/')
+                        'b' => out.push('\u{0008}')
+                        'f' => out.push('\u{000c}')
+                        'n' => out.push('\n')
+                        'r' => out.push('\r')
+                        't' => out.push('\t')
+                        'u' => self.unicode_escape(&out)?
+                        _ => return err(self.err(EncodingErrors.JSON_INVALID_ESCAPE))
+                    }
+                }
+                c if U32{c} < 0x20 => return err(self.err(EncodingErrors.JSON_CONTROL_CHARACTER))
+                other => out.push(other)
+            }
+        }
+        err(self.err(EncodingErrors.JSON_MISSING_CLOSING_QUOTE))
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:207
+    fn unicode_escape(self: &Parser, out: &String) -> Unit Error! {
+        code_point :: self.hex4()?
+        if code_point >= 0xD800 && code_point <= 0xDBFF {
+            if self.peek() != Val('\\') -> return err(self.err(EncodingErrors.JSON_UNPAIRED_SURROGATE))
+            self.pos += 1
+            if self.peek() != Val('u') -> return err(self.err(EncodingErrors.JSON_UNPAIRED_SURROGATE))
+            self.pos += 1
+            low :: self.hex4()?
+            if low < 0xDC00 || low > 0xDFFF -> return err(self.err(EncodingErrors.JSON_UNPAIRED_SURROGATE))
+            combined :: 0x10000 + ((code_point - 0xD800) << 10) + (low - 0xDC00)
+            ch :: Char.from_u32(combined) ?? return err(self.err(EncodingErrors.JSON_INVALID_UNICODE_ESCAPE))
+            out.push(ch)
+        } else if code_point >= 0xDC00 && code_point <= 0xDFFF {
+            return err(self.err(EncodingErrors.JSON_UNPAIRED_SURROGATE))
+        } else {
+            ch :: Char.from_u32(code_point) ?? return err(self.err(EncodingErrors.JSON_INVALID_UNICODE_ESCAPE))
+            out.push(ch)
+        }
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:242
+    fn hex4(self: &Parser) -> U32 Error! {
+        value := U32{0}
+        loop _ in 0..4 {
+            ch :: self.peek() ?? return err(self.err(EncodingErrors.JSON_TRUNCATED_UNICODE_ESCAPE))
+            digit :: ch.to_digit(16) ?? return err(self.err(EncodingErrors.JSON_INVALID_UNICODE_ESCAPE))
+            value = value * 16 + digit
+            self.pos += 1
+        }
+        value
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:257
+    fn number(self: &Parser) -> DataTree Error! {
+        start :: self.pos
+        if self.peek() == Val('-') { self.pos += 1 }
+        match self.peek() {
+            Val('0') => { self.pos += 1 }
+            Val('1'..='9') => {
+                self.pos += 1
+                loop self.peek().is_some_and(|c| -> c >= '0' && c <= '9') { self.pos += 1 }
+            }
+            _ => return err(self.err(EncodingErrors.JSON_BAD_NUMBER))
+        }
+        if self.peek() == Val('.') {
+            self.pos += 1
+            if !self.peek().is_some_and(|c| -> c >= '0' && c <= '9') -> return err(self.err(EncodingErrors.JSON_BAD_NUMBER))
+            loop self.peek().is_some_and(|c| -> c >= '0' && c <= '9') { self.pos += 1 }
+        }
+        if self.peek() == Val('e') || self.peek() == Val('E') {
+            self.pos += 1
+            if self.peek() == Val('+') || self.peek() == Val('-') { self.pos += 1 }
+            if !self.peek().is_some_and(|c| -> c >= '0' && c <= '9') -> return err(self.err(EncodingErrors.JSON_BAD_NUMBER))
+            loop self.peek().is_some_and(|c| -> c >= '0' && c <= '9') { self.pos += 1 }
+        }
+        text: String :: self.chars.slice(start, self.pos).iter().collect()
+        is_integer :: !text.contains('.') && !text.contains('e') && !text.contains('E')
+        if self.preserve_numbers {
+            validate_json_number(text) catch message -> return err(self.err(message))
+            return DataTree.Number(^text)
+        }
+        if is_integer {
+            if value :: text.parse<I64>().ok() -> return DataTree.Int(value)
+            validate_json_number(text) catch message -> return err(self.err(message))
+            return DataTree.Number(^text)
+        }
+        value :: text.parse<F64>() catch _ -> return err(self.err(EncodingErrors.JSON_BAD_NUMBER))
+        if !value.is_finite() -> return err(self.err(EncodingErrors.JSON_BAD_NUMBER))
+        DataTree.Float(value)
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:317
+    fn array(self: &Parser, depth: Int) -> DataTree Error! {
+        if depth >= MAX_JSON_DEPTH -> return err(self.err("JSON value is nested too deeply"))
+        self.pos += 1
+        values := [DataTree]{}
+        loop {
+            self.ws()
+            if self.peek() == Val(']') { self.pos += 1; return DataTree.Array(^values) }
+            values.push(self.value(depth + 1)?)
+            self.ws()
+            match self.peek() {
+                Val(',') => {
+                    self.pos += 1
+                    self.ws()
+                    if self.peek() == Val(']') -> return err(self.err(EncodingErrors.JSON_EXPECTED_ARRAY_SEPARATOR))
+                }
+                Val(']') => {}
+                _ => return err(self.err(EncodingErrors.JSON_EXPECTED_ARRAY_SEPARATOR))
+            }
+        }
+    }
+    // Rust: crates/jet-foundation/src/EncodingJson.rs:347
+    fn object(self: &Parser, depth: Int) -> DataTree Error! {
+        if depth >= MAX_JSON_DEPTH -> return err(self.err("JSON value is nested too deeply"))
+        self.pos += 1
+        fields := [(String, DataTree)]{}
+        loop {
+            self.ws()
+            if self.peek() == Val('}') { self.pos += 1; return DataTree.Object(^fields) }
+            key :: self.string()?
+            self.ws()
+            if self.peek() != Val(':') -> return err(self.err(EncodingErrors.JSON_EXPECTED_OBJECT_COLON))
+            self.pos += 1
+            if self.reject_duplicate_keys && fields.iter().any(|(field, _)| -> field == key) -> return err(self.err("{EncodingErrors.JSON_DUPLICATE_OBJECT_KEY} `{key}`"))
+            value :: self.value(depth + 1)?
+            if current :: fields.iter_mut().find(|(field, _)| -> field == key) { current.1 = ^value }
+            else { fields.push((^key, ^value)) }
+            self.ws()
+            match self.peek() {
+                Val(',') => {
+                    self.pos += 1
+                    self.ws()
+                    if self.peek() == Val('}') -> return err(self.err(EncodingErrors.JSON_EXPECTED_OBJECT_SEPARATOR))
+                }
+                Val('}') => {}
+                _ => return err(self.err(EncodingErrors.JSON_EXPECTED_OBJECT_SEPARATOR))
+            }
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:396
+pub fn render_json(j: DataTree, pretty: Bool, depth: Int) -> String {
+    match j {
+        DataTree.Null => "null"
+        DataTree.Bool(value) => value.to_string()
+        DataTree.Int(value) => value.to_string()
+        DataTree.Float(value) => { assert(value.is_finite(), "JSON cannot encode a non-finite Float"); value.debug() }
+        DataTree.Number(value) => ~value
+        DataTree.TypedText(value) | DataTree.Text(value) => quote_json(value)
+        DataTree.Bytes(_) => panic("JSON cannot encode Bytes")
+        DataTree.Array(items) => {
+            if items.is_empty() -> return "[]"
+            if !pretty {
+                parts :: items.iter().map(|x| -> render_json(x, false, depth)).collect()
+                return "[" + parts.join(",") + "]"
+            }
+            pad :: "  ".repeat(depth + 1)
+            end :: "  ".repeat(depth)
+            parts :: items.iter().map(|x| -> pad + render_json(x, true, depth + 1)).collect()
+            "[\n" + parts.join(",\n") + "\n" + end + "]"
+        }
+        DataTree.Object(entries) => {
+            if entries.is_empty() -> return "{}"
+            if !pretty {
+                parts :: entries.iter().map(|(key, value)| -> quote_json(key) + ":" + render_json(value, false, depth)).collect()
+                return "{" + parts.join(",") + "}"
+            }
+            pad :: "  ".repeat(depth + 1)
+            end :: "  ".repeat(depth)
+            parts :: entries.iter().map(|(key, value)| -> pad + quote_json(key) + ": " + render_json(value, true, depth + 1)).collect()
+            "{\n" + parts.join(",\n") + "\n" + end + "}"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/EncodingJson.rs:456
+pub fn quote_json(s: String) -> String {
+    out := "\""
+    loop c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\"")
+            '\\' => out.push_str("\\\\")
+            '\u{0008}' => out.push_str("\\b")
+            '\u{000c}' => out.push_str("\\f")
+            '\n' => out.push_str("\\n")
+            '\r' => out.push_str("\\r")
+            '\t' => out.push_str("\\t")
+            c if U32{c} < 0x20 => { out.push_str("\\u"); out.push_str(U32{c}.to_radix_string(16).pad_left(4, '0')) }
+            _ => out.push(c)
+        }
+    }
+    out.push('"')
+    ^out
+}

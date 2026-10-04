@@ -1,0 +1,659 @@
+use jet_foundation.Tests.Integration.TirSupport.[assert_tiers_agree, build_and_run, build_and_run_full, compile, have_rustc]
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.TirDataMathReactive.[compile_rust, COLUMNAR_PROG]
+
+// Rust: tests/tir_control_and_data.rs:1821
+#Test("labeled_break_and_continue") {
+    if !have_rustc() { return }
+    src :: """
+fn run() {{
+    outer :: loop i in 1..3 {{
+        loop j in 1..3 {{
+            if (j == 2) {{ next(outer) }}
+            print("{{i}}-{{j}}")
+            if (i == 2) {{ break(outer) }}
+        }}
+    }}
+    print("done")
+}}
+"""
+    rust :: compile("tir_labeled", src)
+    assert(rust.contains("continue '__jet_outer;"), "{rust}")
+    assert(rust.contains("break '__jet_outer;"), "{rust}")
+    (code, stdout) :: build_and_run("tir_labeled", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1-1\n2-1\ndone\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:1854
+// Named exits in ?? target the named loop's continuation/break edges.
+#Test("labeled_break_and_continue_fallbacks") {
+    if !have_rustc() { return }
+    src :: """
+fn run() {{
+    outer :: loop text in ["skip", "7"] {{
+        loop {{
+            value :: Int.parse(text) ?? next(outer)
+            print(value)
+            Int.parse("stop") ?? break(outer)
+        }}
+    }}
+    print("done")
+}}
+"""
+    (code, stdout) :: build_and_run("tir_labeled_fallbacks", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "7\ndone\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:1876
+#Test("yielding_and_result_loops_compile_and_run") {
+    if !have_rustc() { return }
+    src :: """
+fn find(xs: [Int]) -> Int {{
+    found :: loop {{
+        loop x in xs {{ if x > 2 -> break(found, x) }}
+        break -1
+    }}
+    found
+}}
+fn outer_result() -> Int {{
+    result :: loop {{
+        ignored :: loop {{ break(result, 9) }}
+        break 0
+    }}
+    result
+}}
+fn identity(value: Int) -> Int {{ value }}
+fn nested_binary_exit() -> Int {{
+    result :: loop {{
+        ignored :: (loop {{ break(result, 11); break 1 }}) + 2
+        break 0
+    }}
+    result
+}}
+fn nested_call_exit() -> Int {{
+    result :: loop {{
+        ignored :: identity(loop {{ break(result, 12); break 1 }})
+        break 0
+    }}
+    result
+}}
+fn nested_condition_exit() -> Int {{
+    result :: loop {{
+        if (loop {{ break(result, 13); break 1 }}) > 0 {{ break 0 }}
+        break -1
+    }}
+    result
+}}
+fn counted_init_exit() -> Int {{
+    result :: loop {{
+        loop i := (loop {{ break(result, 14); break 0 }}), i < 1 {{ i += 1 }}
+        break 0
+    }}
+    result
+}}
+fn counted_step_exit() -> Int {{
+    result :: loop {{
+        loop i := 0, i < 2 {{ i = (loop {{ break(result, 15); break 0 }}) }}
+        break 0
+    }}
+    result
+}}
+fn value_if_exit() -> Int {{
+    result :: loop {{
+        ignored :: if true -> {{ break(result, 16); 0 }} else -> 0
+        break 0
+    }}
+    result
+}}
+fn run() {{
+    xs :: [Int]{{ 1, 2, 3, 4 }}
+    prefix :: loop x in xs -> {{ if x > 3 -> break; x * 2 }}
+    rows :: loop x in xs, y in [10, 20] -> {{ if x == 2 && y == 20 -> break; x + y }}
+    outer :: loop x in xs {{
+        ignored :: loop {{
+            if x == 1 -> next(outer)
+            if x == 2 -> break(outer)
+            break 0
+        }}
+        print(ignored)
+    }}
+    print(prefix)
+    print(rows)
+    print(find(xs))
+    print(outer_result())
+    print(nested_binary_exit())
+    print(nested_call_exit())
+    print(nested_condition_exit())
+    print(counted_init_exit())
+    print(counted_step_exit())
+    print(value_if_exit())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_loop_values", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[2, 4, 6]\n[11, 21, 12]\n3\n9\n11\n12\n13\n14\n15\n16\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2019
+// D-LOOP-COMMA1 / D-LOOP-ADVANCE2: source and stride evaluate once; next advances.
+#Test("unified_loop_headers_stride_and_next_edges") {
+    if !have_rustc() { return }
+    src :: """
+fn source() -> [Int] {{ print("source"); return [0, 1, 2, 3, 4, 5, 6] }}
+fn stride() -> Int {{ print("stride"); return 3 }}
+fn run() {{
+    loop item in source(), stride() {{ print(item); if item == 0 {{ next }} }}
+    outer :: loop i in 0..<3 {{
+        loop {{ if i < 2 {{ next(outer) }}; break }}
+        print("state {{i}}")
+    }}
+}}
+"""
+    (code, stdout) :: build_and_run("tir_unified_loops", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "source\nstride\n0\n3\n6\nstate 2\n")
+    invalid :: """
+fn source() -> [Int] {{ print("source"); return [1] }}
+fn stride() -> Int {{ print("stride"); return 0 }}
+fn run() {{ loop item in source(), stride() {{ print(item) }} }}
+"""
+    (invalid_code, invalid_stdout, stderr) :: build_and_run_full("jet_tir_test", "tir_unified_loop_invalid_stride", invalid)
+    assert_eq(invalid_code, 70)
+    assert_eq(invalid_stdout, "source\nstride\n", "no source item may be pulled")
+    assert(stderr.contains("E0123: loop stride must be positive"))
+}
+
+// Rust: tests/tir_control_and_data.rs:2084
+#Test("struct_literal_field_read_and_return") {
+    if !have_rustc() { return }
+    src :: """
+struct Point {{ x: Int; y: Int }}
+fn sum_pt(p: Point) -> Int {{ return (p.x + p.y) }}
+fn origin() -> Point {{ return Point{{ x: 0, y: 0 }} }}
+fn run() {{
+    p :: Point{{ x: 3, y: 4 }}
+    print(sum_pt(p))
+    print(p.x)
+    o :: origin()
+    print(sum_pt(o))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_struct_pt", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "7\n3\n0\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2116
+#Test("struct_string_field_in_interpolation") {
+    if !have_rustc() { return }
+    src :: """
+struct Person {{ name: String; age: Int }}
+fn describe(p: Person) {{ print("{{p.name}} is {{p.age}}") }}
+fn run() {{
+    label :: "Ada"
+    p :: Person{{ name: label, age: 36 }}
+    describe(p)
+    print(p.age)
+}}
+"""
+    (code, stdout) :: build_and_run("tir_struct_person", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "Ada is 36\n36\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2144
+#Test("nested_struct_literal_and_chained_field") {
+    if !have_rustc() { return }
+    src :: """
+struct Inner {{ v: Int }}
+struct Outer {{ inner: Inner; label: Int }}
+fn deep(o: Outer) -> Int {{ return (o.inner.v + o.label) }}
+fn run() {{
+    o :: Outer{{ inner: Inner{{ v: 10 }}, label: 5 }}
+    print(deep(o))
+    print(o.inner.v)
+}}
+"""
+    (code, stdout) :: build_and_run("tir_struct_nested", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "15\n10\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2177
+#Test("enum_unit_variants_and_exhaustive_match") {
+    src :: """
+enum Light {{ Red; Yellow; Green }}
+fn next(light: Light) -> Light {{
+    if light == {{
+        .Red -> {{ return Light.Yellow }}
+        .Yellow -> {{ return Light.Green }}
+        .Green -> {{ return Light.Red }}
+    }}
+}}
+fn label(light: Light) -> String {{
+    if light == {{
+        .Red -> {{ return "stop" }}
+        .Yellow -> {{ return "caution" }}
+        .Green -> {{ return "go" }}
+    }}
+}}
+fn run() {{ start :: Light.Red; print(label(start)); print(label(next(start))) }}
+"""
+    assert_tiers_agree("tir_enum_unit", src, "stop\ncaution\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2208
+#Test("data_tree_pattern_dispatch_binds_payload_and_wildcard_on_all_tiers") {
+    if !have_rustc() { return }
+    src :: """
+fn classify(tree: DataTree) -> String {{
+    if tree == {{
+        .Object(entries) -> {{ return "object:{{entries.len()}}" }}
+        .Int(_) -> {{ return "int" }}
+        else -> {{ return "other" }}
+    }}
+}}
+fn run() {{
+    print(classify(DataTree.Object(["a": DataTree.Int(7)])))
+    print(classify(DataTree.Int(3)))
+    print(classify(DataTree.Text("x")))
+}}
+"""
+    (aot_code, aot_stdout) :: build_and_run("tir_data_tree_pattern_dispatch", src)
+    assert_eq(aot_code, 0)
+    assert_eq(aot_stdout, "object:1\nint\nother\n")
+    // Retired resident-JIT tier becomes O0/O1/O2/Web parity over the same fixture.
+    assert_tiers_agree("tir_data_tree_pattern_dispatch", src, aot_stdout)
+}
+
+// Rust: tests/tir_control_and_data.rs:2238
+#Test("enum_payload_or_pattern_and_binding") {
+    src :: """
+enum Conn {{ Active(Int); Reconnecting(Int); Blocked(String); Idle(Int); Closed }}
+fn describe(c: Conn) -> String {{
+    if c == {{
+        .Active(id) | .Reconnecting(id) -> {{ return "live:{{id}}" }}
+        .Blocked(id) -> {{ return "blocked:{{id}}" }}
+        .Idle(_) -> {{ return "idle" }}
+        .Closed -> {{ return "closed" }}
+    }}
+    return "unknown"
+}}
+fn run() {{
+    print(describe(Conn.Active(42)))
+    print(describe(Conn.Reconnecting(7)))
+    print(describe(Conn.Blocked("waiting")))
+    print(describe(Conn.Idle(99)))
+    print(describe(Conn.Closed))
+}}
+"""
+    assert_tiers_agree("tir_enum_payload", src, "live:42\nlive:7\nblocked:waiting\nidle\nclosed\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2274
+#Test("multi_head_functions_use_table_dispatch") {
+    assert(have_rustc(), "multi-head AOT parity requires rustc; project harness must provision it")
+    src :: """
+enum Shape {{ Circle(Float); Rect(w: Float, h: Float) }}
+fn area(Circle(r: Float)) -> Float {{ return r * r }}
+fn area(Rect(w: Float, h: Float)) -> Float {{ return w * h }}
+fn run() {{ print(area(Shape.Circle(3.0))); print(area(.Rect{{ w: 2.0, h: 4.0 }})) }}
+"""
+    (code, stdout) :: build_and_run("tir_multi_head_functions", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "9.0\n8.0\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2303
+#Test("enum_payload_range_pattern_guard") {
+    if !have_rustc() { return }
+    src :: """
+enum HTTP {{ Good(Int); Fail(Int) }}
+fn classify(r: HTTP) -> String {{
+    if r == {{
+        .Good(200..299) -> {{ return "success" }}
+        .Good(400..499) -> {{ return "client error" }}
+        .Good(_) -> {{ return "other" }}
+        .Fail(_) -> {{ return "network error" }}
+    }}
+    return "unknown"
+}}
+fn run() {{
+    print(classify(HTTP.Good(201)))
+    print(classify(HTTP.Good(404)))
+    print(classify(HTTP.Good(302)))
+    print(classify(HTTP.Fail(0)))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_enum_range", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "success\nclient error\nother\nnetwork error\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2334
+#Test("datatree_array_accepts_explicit_empty_payload_on_all_tiers") {
+    if !have_rustc() { return }
+    src :: """
+fn run() {{ _value := DataTree.Array([DataTree]{{}}) }}
+"""
+    assert_tiers_agree("tir_datatree_empty_array_payload", src, "")
+}
+
+// Rust: tests/tir_control_and_data.rs:2350
+#Test("arm_head_range_dispatch") {
+    if !have_rustc() { return }
+    src :: """
+fn grade(score: Int) -> String {{
+    if score == {{
+        0..59 -> {{ return "F" }}
+        60..69 -> {{ return "D" }}
+        70..89 -> {{ return "C" }}
+        90..100 -> {{ return "A" }}
+        else -> {{ return "?" }}
+    }}
+}}
+fn run() {{ print(grade(95)); print(grade(72)); print(grade(45)); print(grade(120)) }}
+"""
+    (code, stdout) :: build_and_run("tir_range_dispatch", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "A\nC\nF\n?\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2377
+#Test("literal_dispatch_emits_nested_comparisons_and_preserves_order") {
+    table :: compile("tir_branch_table", """
+fn dense(n: Int) -> String {{
+    if n == {{
+        1 -> {{ return "one" }}
+        2 -> {{ return "two" }}
+        3 -> {{ return "three" }}
+        else -> {{ return "other" }}
+    }}
+}}
+fn sparse(n: Int) -> String {{
+    if n == {{
+        1 -> {{ return "one" }}
+        100 -> {{ return "hundred" }}
+        else -> {{ return "other" }}
+    }}
+}}
+fn truth(flag: Bool) -> String {{
+    if flag == {{
+        true -> {{ return "yes" }}
+        false -> {{ return "no" }}
+        else -> {{ return "no" }}
+    }}
+}}
+fn run() {{ print(dense(1)); print(sparse(100)); print(truth(true)) }}
+""")
+    // Keep source assertions tied to comparisons, not retired classifiers or match shape.
+    dense :: table.split("pub fn __jet_dense").nth(1).expect("dense dispatch function should be emitted")
+    dense_needles :: ["jet_int_compare_hot!((__jet_n), (1i64)) == 0", "jet_int_compare_hot!((__jet_n), (2i64)) == 0", "jet_int_compare_hot!((__jet_n), (3i64)) == 0"]
+    dense_positions :: dense_needles.iter().map((needle) -> dense.find(needle).expect("dense arm comparison was removed")).collect::<[Int]>()
+    assert(dense_positions.windows(2).all((pair) -> pair[0] < pair[1]), "dense comparisons changed authored order: {table}")
+    sparse :: table.split("pub fn __jet_sparse").nth(1).expect("sparse dispatch function should be emitted")
+    sparse_one :: sparse.find("jet_int_compare_hot!((__jet_n), (1i64)) == 0").expect("sparse first arm comparison was removed")
+    sparse_hundred :: sparse.find("jet_int_compare_hot!((__jet_n), (100i64)) == 0").expect("sparse second arm comparison was removed")
+    assert(sparse_one < sparse_hundred, "sparse comparisons changed authored order: {table}")
+    truth :: table.split("pub fn __jet_truth").nth(1).expect("Bool dispatch function should be emitted")
+    truth_true :: truth.find("((__jet_flag) == (true))").expect("Bool true comparison was removed")
+    truth_false :: truth.find("((__jet_flag) == (false))").expect("Bool false comparison was removed")
+    assert(truth_true < truth_false, "Bool comparisons changed authored order: {table}")
+    ordered :: compile("tir_branch_ordered", """
+fn subject() -> Int {{ return 7 }}
+fn run() {{
+    if subject() == {{
+        0..3 -> {{ print("low") }}
+        4..9 -> {{ print("mid") }}
+        42 -> {{ print("answer") }}
+        else -> {{ print("other") }}
+    }}
+}}
+""")
+    assert(ordered.contains("let __jet___switch_subject"), "dispatch subject was not retained once: {ordered}")
+    assert(ordered.contains("__jet___switch_subject"), "conditions must reuse the evaluated subject: {ordered}")
+    assert_eq(ordered.matches("jet_trace_err(__jet_subject()").count(), 1, "branch subject was evaluated more than once: {ordered}")
+    assert(!ordered.contains("__jet___switch_subject.clone()"), "branch dispatch must not clone its subject: {ordered}")
+}
+
+// Rust: tests/tir_control_and_data.rs:2496
+#Test("user_arithmetic_hooks_preserve_values_on_all_tiers") {
+    if !have_rustc() { return }
+    src :: """
+struct Money {{ cents: Int }}
+impl Money.Add {{ fn add(self, rhs: Money) -> Money {{ return Money{{ cents: self.cents + rhs.cents }} }} }}
+impl Money.Sub {{ fn sub(self, rhs: Money) -> Money {{ return Money{{ cents: self.cents - rhs.cents }} }} }}
+impl Money.Mul {{ fn mul(self, rhs: Money) -> Money {{ return Money{{ cents: self.cents * rhs.cents }} }} }}
+impl Money.Div {{ fn div(self, rhs: Money) -> Money {{ return Money{{ cents: self.cents /% rhs.cents }} }} }}
+fn run() {{
+    base :: Money{{ cents: 8 }}
+    add :: base + Money{{ cents: 2 }}
+    sub :: base - Money{{ cents: 2 }}
+    mul :: base * Money{{ cents: 2 }}
+    div :: base / Money{{ cents: 2 }}
+    compound := Money{{ cents: 8 }}
+    compound += Money{{ cents: 2 }}
+    print("{{add.cents}} {{sub.cents}} {{mul.cents}} {{div.cents}} {{compound.cents}}")
+}}
+"""
+    assert_tiers_agree("tir_user_arithmetic_hooks", src, "10 6 16 4 10\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2540
+#Test("card_2841_labeled_loop_value_tier_parity") {
+    src :: """
+fn run() {{
+    outer :: loop {{ loop {{ break(outer, 7) }} }}
+    answer :: outer ?? 0
+    print(answer)
+}}
+"""
+    assert_tiers_agree("tir_card_2841_labeled_loop_value", src, "7\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:2557
+#Test("card_2834_negative_stride_tier_parity") {
+    src :: """
+fn run() {{
+    total := 0
+    loop i in 5..1, -2 {{ total += i }}
+    print(total)
+}}
+"""
+    assert_tiers_agree("tir_card_2834_negative_stride", src, "9\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:66
+#Test("columnar_list_core_surface_runs") {
+    if !have_rustc() { return }
+    (code, stdout) :: build_and_run("tir_columnar_core", COLUMNAR_PROG)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\n2.0\n2.0\n6.0\n8.0\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:78
+#Test("columnar_lowers_to_struct_of_arrays_no_unsafe") {
+    rust :: compile_rust("tir_columnar_gen", COLUMNAR_PROG)
+    assert(rust.contains("struct __jet_P_columns"), "expected a generated struct-of-arrays type")
+    assert(rust.contains("from_aos") && rust.contains("gather_at") && rust.contains("iter_aos"), "expected the columnar inherent API in the output")
+    assert(!tir_support.strip_vetted_prelude_modules(&rust).contains("unsafe"), "columnar codegen must emit no `unsafe`")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:98
+#Test("columnar_serialization_is_transparent") {
+    if !have_rustc() { return }
+    src :: """
+use core.encoding.json as json
+#[Codable, Layout(columnar)]
+struct Pt {{ a: Int, b: Int }}
+#Codable
+struct PlainPt {{ a: Int, b: Int }}
+fn run() {{
+    cs :: [Pt]{{ Pt{{ a: 1, b: 2 }}, Pt{{ a: 3, b: 4 }} }}
+    ps :: [PlainPt]{{ PlainPt{{ a: 1, b: 2 }}, PlainPt{{ a: 3, b: 4 }} }}
+    print(json.to_string(cs) == json.to_string(ps))
+    print(json.to_string(cs))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_columnar_serde", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "true\n[{{\"a\":1,\"b\":2}},{{\"a\":3,\"b\":4}}]\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:123
+#Test("linalg_vectors_and_matrices") {
+    if !have_rustc() { return }
+    src :: """
+fn run() {{
+    a :: Vec3(1.0, 2.0, 3.0)
+    b :: Vec3(4.0, 5.0, 6.0)
+    print(a.dot(b))
+    c :: Vec3{{ a + b }}
+    print(c.to_array())
+    print(a.cross(b).to_array())
+    scale :: Mat3(2.0, 0.0, 0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 2.0)
+    out :: Vec3{{ scale * a }}
+    print(out.to_array())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_linalg", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "32.0\n[5.0, 7.0, 9.0]\n[-3.0, 6.0, -3.0]\n[2.0, 4.0, 6.0]\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:151
+#Test("simd_lanes_ops_and_reductions") {
+    if !have_rustc() { return }
+    src :: """
+fn run() {{
+    v :: F32x4(1.0, 2.0, 3.0, 4.0)
+    w :: F32x4(10.0, 20.0, 30.0, 40.0)
+    s :: F32x4{{ v + w }}
+    print(s.to_array())
+    print(v[2])
+    print(v.sum())
+    print(v.reduce(.Max))
+    print(v.reduce(.Mul))
+    print(v.reduce(.Avg))
+    print(F32x4.splat(5.0).to_array())
+    d :: F64x2.from_array([1.5, 2.5])
+    print(d.sum())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_simd", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[11.0, 22.0, 33.0, 44.0]\n3.0\n10.0\n4.0\n24.0\n2.5\n[5.0, 5.0, 5.0, 5.0]\n4.0\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:182
+#Test("user_type_shadows_builtin_math_name") {
+    if !have_rustc() { return }
+    src :: """
+struct Vec3 {{ x: Int, y: Int }}
+fn run() {{ v :: Vec3{{ x: 3, y: 4 }}; print(v.x); print(v.y) }}
+"""
+    (code, stdout) :: build_and_run("tir_user_vec3", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\n4\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:202
+#Test("reactive_signal_derived_effect") {
+    if !have_rustc() { return }
+    src :: """
+use core.reactive as reactive
+fn run() {{
+    n := reactive.signal(1)
+    doubled := reactive.derived(() -> (n.get() * 2))
+    print(doubled.get())
+    subscription := reactive.effect(() -> {{ print(doubled.get()) }})
+    n.set(5)
+    print(doubled.get())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_reactive_flow", src)
+    assert_eq(code, 0, "reactive program should run cleanly")
+    assert_eq(stdout, "2\n2\n10\n10\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:228
+#Test("reactive_scope_marker") {
+    if !have_rustc() { return }
+    src :: """
+use core.reactive as reactive
+fn run() {{
+    n := reactive.signal(1)
+    doubled := reactive.computed(() -> (n.get() * 2))
+    print(doubled.get())
+    #Reactive {{ print(doubled.get()) }}
+    n.set(5)
+    print(doubled.get())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_reactive_scope", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2\n2\n10\n10\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:253
+#Test("reactive_string_signal") {
+    if !have_rustc() { return }
+    src :: """
+use core.reactive as reactive
+fn run() {{
+    name := reactive.signal("world")
+    greeting := reactive.derived(() -> "hello, {{name.get()}}")
+    print(greeting.get())
+    name.set("jet")
+    print(greeting.get())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_reactive_string", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "hello, world\nhello, jet\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:275
+#Test("reactive_effect_replaces_stale_dependencies") {
+    if !have_rustc() { return }
+    src :: """
+use core.reactive as reactive
+fn run() {{
+    choose_left := reactive.signal(true)
+    left := reactive.signal(1)
+    right := reactive.signal(10)
+    subscription := reactive.effect(() -> {{
+        if choose_left.get() {{ print(left.get()) }} else {{ print(right.get()) }}
+    }})
+    choose_left.set(false)
+    left.set(2)
+    right.set(11)
+}}
+"""
+    (code, stdout) :: build_and_run("tir_reactive_effect_stale_deps", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n10\n11\n")
+}
+
+// Rust: tests/tir_data_math_reactive.rs:305
+#Test("reactive_effect_unsubscribe_and_activity") {
+    if !have_rustc() { return }
+    src :: """
+use core.reactive as reactive
+fn run() {{
+    value := reactive.signal(1)
+    subscription := reactive.effect(() -> {{ print(value.get()) }})
+    print(subscription.is_active())
+    value.set(2)
+    subscription.unsubscribe()
+    print(subscription.is_active())
+    subscription.unsubscribe()
+    value.set(3)
+}}
+"""
+    (code, stdout) :: build_and_run("tir_reactive_effect_lifecycle", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\ntrue\n2\nfalse\n")
+}

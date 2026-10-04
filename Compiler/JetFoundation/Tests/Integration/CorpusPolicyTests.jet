@@ -1,0 +1,279 @@
+use jet_foundation.Tests.Integration.Support.CorpusPolicy.[CorpusPolicy, RuleScopeRow, SemanticViolation, SourceRole]
+// GATE #4494: CorpusPolicy.load reads the real checked-in manifest.
+// Rust: tests/corpus_policy.rs:8
+#Test("checked_manifest_has_all_audited_findings_and_provenance") {
+    policy :: CorpusPolicy.load().expect("checked-in corpus manifest is valid")
+    assert_eq(policy.manifest().findings.len(), 38)
+    assert_eq(policy.manifest().producers.len(), 26)
+    assert(policy.manifest().artifacts.iter().any((artifact) -> artifact.selector == "family:lua-binding"))
+    lua :: policy.manifest().producers.iter().find((producer) -> producer.selector.contains("LuaBind.rs")).expect("Lua renderer is inventoried")
+    assert_eq(lua.protocol, "override:lua-raw-json:differs-from-ordinary-envelope")
+}
+// Rust: tests/corpus_policy.rs:30
+#Test("inventory_is_manifest_scoped") {
+    policy :: CorpusPolicy.load().unwrap()
+    inventory :: policy.inventory().unwrap()
+    assert(inventory.files.iter().any((entry) -> entry.path == "Docs/spec/guides/first-hour.md"))
+    assert_eq(inventory.provenance.len(), inventory.artifacts.len(), "every artifact must retain producer provenance")
+    assert(!inventory.files.iter().any((entry) -> entry.path == "scratch-parser-call.jet"))
+}
+// Rust: tests/corpus_policy.rs:49
+#Test("cli_recipe_inventory_is_manifest_owned_and_ast_checked") {
+    policy :: CorpusPolicy.load().unwrap()
+    policy.check_cli_recipe_inventory().expect("the ratified CLI recipe inventory must stay checked")
+    source_profile :: (selector: String) -> policy.manifest().sources.iter().find((source) -> source.selector == selector).map((source) -> source.profile).unwrap_or_else(() -> panic("missing CLI recipe source row: {selector}"))
+    for selector in ["file:Tools/adoption/fixtures/clean-project/run.jet", "file:Examples/features/basics/first_hour.jet", "file:Examples/features/basics/onboarding/run.jet", "file:Docs/spec/guides/first-hour.md", "root:Tools/gauntlet/entries", "root:tests/agent_workloads/adapters", "root:tests/compiled_workloads/adapters/jet", "file:dogfood/jetpack/src/cli/main.jet"] {
+        profile :: source_profile(selector)
+        assert(profile == "typed-cli" || profile == "typed-cli-doc", "canonical CLI source is not typed: {selector}")
+    }
+    for selector in ["file:Examples/features/io/args_spec.jet", "file:Examples/features/io/args_audit.jet"] {
+        assert_eq(source_profile(selector), "builder-cli", "builder boundary drifted: {selector}")
+    }
+    for selector in ["file:Examples/features/io/cli_args.jet", "file:Examples/features/io/watcher.jet", "file:Tools/gauntlet/entries/taskfile-cli/jet/run.jet"] {
+        assert_eq(source_profile(selector), "raw-cli", "raw boundary drifted: {selector}")
+    }
+    assert_eq(source_profile("file:dogfood/tower/run.jet"), "non-cli", "domain-policy dogfood is not a CLI recipe")
+    for selector in ["producer:Source/CmdCompile.rs#run_new.native_run_src", "producer:crates/jet-pkg-model/src/Package/Convert.rs#new_template"] {
+        assert(policy.manifest().producers.iter().any((producer) -> producer.selector == selector), "missing CLI starter producer row: {selector}")
+    }
+}
+// Rust: tests/corpus_policy.rs:112
+#Test("fixture_roles_and_approved_builder_boundary_are_explicit") {
+    policy :: CorpusPolicy.load().unwrap()
+    policy.check_fixture_inventory().expect("fixture roots and profiles must agree")
+    fixture :: policy.evaluate_source("tests/ui/args_spec_bad_parse_arity.jet", "fn run() {{ process.argv() }}").unwrap()
+    assert(fixture.is_empty(), "negative fixtures are role-gated: {fixture:Debug}")
+    builder :: policy.evaluate_source("dogfood/jetpack/src/cli/main.jet", "fn run() {{\n    args.spec()\n    process.argv()\n}}").unwrap()
+    assert(builder.iter().all((violation) -> violation.rule != "raw-cli-fixed-shape" && violation.rule != "raw-cli-builder-shape"))
+}
+// Rust: tests/corpus_policy.rs:138
+#Test("inventory_rejects_new_source_or_producer_without_a_row") {
+    policy :: CorpusPolicy.load().unwrap()
+    error :: policy.audit_inventory(["unclassified/new-maintained-program.jet"], []).expect_err("a synthetic source without a classification must fail")
+    assert(error.contains("unclassified eligible source"))
+    assert(error.contains("rule=corpus-inventory"))
+    assert(error.contains("site=inventory:source@0..0"))
+    assert(error.contains("replacement="))
+    producer_error :: policy.audit_inventory(["Examples/features/basics/hello.jet"], ["producer:new.rs#render"]).expect_err("a synthetic producer without provenance must fail")
+    assert(producer_error.contains("unclassified generated-source producer"))
+}
+// Rust: tests/corpus_policy.rs:155
+#Test("manifest_rejects_a_scope_without_source_coverage") {
+    policy :: CorpusPolicy.load().unwrap()
+    manifest := policy.manifest().clone()
+    manifest.scopes.push(RuleScopeRow{rule: "entry-implicit", selector: "file:unclassified/entry.jet", reason: "synthetic uncovered scope"})
+    error :: manifest.validate().expect_err("a rule scope must be covered by a source row")
+    assert(error.contains("unclassified source selector"), "{error}")
+}
+// Rust: tests/corpus_policy.rs:170
+#Test("manifest_rejects_a_finding_without_an_executable_guard") {
+    policy :: CorpusPolicy.load().unwrap()
+    manifest := policy.manifest().clone()
+    manifest.scopes.retain((scope) -> scope.rule != "entry-implicit")
+    error :: manifest.validate().expect_err("every finding must retain a corpus or domain guard")
+    assert(error.contains("entry-implicit has no executable corpus or domain guard"), "{error}")
+}
+// Rust: tests/corpus_policy.rs:181
+#Test("exception_matching_is_occurrence_scoped") {
+    policy :: CorpusPolicy.load().unwrap()
+    site :: "fn:run@0..0"
+    candidate :: SemanticViolation.new("tests/ui/E-CALL-VALUE_call_result_not_called.jet", "entry-implicit", site)
+    policy.validate_occurrences("tests/ui/E-CALL-VALUE_call_result_not_called.jet", &[candidate]).expect("the recorded single occurrence is accepted")
+    duplicate :: [candidate.clone(), ^candidate]
+    error :: policy.validate_occurrences("tests/ui/E-CALL-VALUE_call_result_not_called.jet", &duplicate).expect_err("a second occurrence cannot reuse one exception")
+    assert(error.contains("expected 1"))
+}
+// Rust: tests/corpus_policy.rs:206
+#Test("exceptions_are_limited_to_expert_or_negative_sources") {
+    policy :: CorpusPolicy.load().unwrap()
+    for exception in &policy.manifest().exceptions {
+        path :: exception.selector.strip_prefix("file:").expect("exceptions use exact file selectors")
+        source :: policy.manifest().sources.iter().filter((source) -> {
+            selector_path :: source.selector.strip_prefix("file:").or_else(() -> source.selector.strip_prefix("root:")).expect("manifest source selector has a path")
+            source.selector.starts_with("file:") && selector_path == path || source.selector.starts_with("root:") && (path == selector_path || path.strip_prefix(selector_path).is_some_and((rest) -> rest.starts_with('/')))
+        }).max_by_key((source) -> source.selector.strip_prefix("file:").map_or_else(() -> source.selector.len(), (text) -> text.len())).expect("exception source is classified")
+        assert(exception.site.starts_with("allow:") || source.role == SourceRole.ExpertLesson || source.role == SourceRole.NegativeDiagnostic, "{exception.selector} is classified as {source.role:Debug} without an allowance site")
+    }
+}
+// Rust: tests/corpus_policy.rs:249
+#Test("semantic_rules_use_ast_shapes_not_source_text") {
+    policy :: CorpusPolicy.load().unwrap()
+    positive :: policy.evaluate_source("Examples/features/basics/first_hour.jet", "fn run() {{ args :: process.argv() }}").unwrap()
+    assert(positive.iter().any((violation) -> violation.rule == "raw-cli-fixed-shape"))
+    assert(positive.iter().all((violation) -> violation.file == "Examples/features/basics/first_hour.jet"))
+    literal :: policy.evaluate_source("Examples/features/basics/first_hour.jet", "fn run() {{ print(\"process.argv()\") }}").unwrap()
+    assert(!literal.iter().any((violation) -> violation.rule == "raw-cli-fixed-shape"))
+}
+// Rust: tests/corpus_policy.rs:272
+#Test("cli_boundary_rules_cover_builder_views_and_repeated_process_reads") {
+    policy :: CorpusPolicy.load().unwrap()
+    builder_view :: policy.evaluate_source("Examples/features/basics/first_hour.jet", "fn run() {{ args :: process.argv().skip(1) }}").unwrap()
+    assert(builder_view.iter().any((violation) -> violation.rule == "raw-cli-builder-shape"))
+    repeated :: policy.evaluate_source("Examples/features/basics/first_hour.jet", "fn run() {{\n    first :: process.argv()\n    second :: process.argv()\n}}").unwrap()
+    assert(repeated.iter().any((violation) -> violation.rule == "raw-cli-process-boundary"))
+    single :: policy.evaluate_source("Examples/features/basics/first_hour.jet", "fn run() {{ args :: process.argv() }}").unwrap()
+    assert(!single.iter().any((violation) -> violation.rule == "raw-cli-process-boundary"))
+}
+// Rust: tests/corpus_policy.rs:309
+#Test("maintained_guidance_allow_requires_an_occurrence_manifest_row") {
+    policy :: CorpusPolicy.load().unwrap()
+    error :: policy.evaluate_source("Examples/features/text/unreviewed_allow.jet", "fn run() {{ #allow(unit_scalar_rewrap) print(\"kept\") }}").expect_err("maintained guidance allowance must be recorded")
+    assert(error.contains("occurrence-scoped manifest reason"), "{error}")
+}
+// Rust: tests/corpus_policy.rs:321
+#Test("card_2375_rules_reject_each_reintroduced_ceremony") {
+    policy :: CorpusPolicy.load().unwrap()
+    cases :: [
+        ("Examples/features/basics/hello.jet", "fn run() {{ print(\"hello\") }}", "entry-implicit"),
+        ("Docs/spec/guides/first-hour.md", "jet build Examples/features/basics/first_hour.jet", "first-hour-doc-recipe"),
+        ("Examples/features/types/typed_literal_forms.jet", "fn run() {{ print(\"jet build Examples/features/types/typed_literal_forms.jet\") }}", "first-hour-doc-recipe"),
+        ("Examples/features/serde/reintroduced.jet", "#Codable\nstruct Sample {{\n    value: Int\n}}\nfn run() {{}}", "codable-structural"),
+        ("Examples/features/memory/reintroduced.jet", "fn run() {{\n    delay :: Duration.hours(2) ?? return Err(\"duration\")\n}}", "duration-constant-safe"),
+        ("Examples/features/basics/reintroduced_effect.jet", "use core.files as fs\nfn run() -[FS, IO]> {{\n    path :: \"input.txt\"\n    text :: fs.read(path)\n    print(text)\n}}", "effect-row-inference"),
+        ("Examples/features/concurrency/parallel_scan.jet", "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(~path)\n}}", "readonly-copy"),
+        ("Examples/features/io/reintroduced.jet", "use core.files as fs\nfn run() {{\n    path :: \"input.txt\"\n    text :: fs.read(path) ?? return Err(\"read\")\n}}", "error-identity"),
+        ("Examples/features/concurrency/reintroduced.jet", "fn run() {{\n    task.group g {{\n        task.race {{1, 2}}\n    }}\n}}", "task-one-child"),
+        ("Examples/features/concurrency/reintroduced.jet", "fn run() {{\n    task.group g {{\n        task.any {{1, 2}}\n    }}\n}}", "task-one-child"),
+        ("tests/agent_workloads/adapters/reintroduced.jet", "fn run() {{\n    line_number := 0\n    loop item in items {{\n        line_number += 1\n        seen :: line_number\n    }}\n}}", "indexed-sequence"),
+        ("Tools/gauntlet/entries/bulkrename/jet/run.jet", "fn run() {{\n    value :: Regex{{\"IMG\"}}\n}}", "regex-capture-recipe")
+    ]
+    for (path, source, rule) in cases {
+        violations :: policy.evaluate_source(path, source).unwrap()
+        violation :: violations.iter().find((violation) -> violation.rule == rule).unwrap_or_else(() -> panic("{path} did not reject {rule}: {violations:Debug}"))
+        rendered :: violation.to_string()
+        assert(rendered.contains("file={path}"), "{rendered}")
+        assert(rendered.contains("rule={rule}"), "{rendered}")
+        assert(rendered.contains("site="), "{rendered}")
+        assert(rendered.contains("why="), "{rendered}")
+        assert(rendered.contains("replacement="), "{rendered}")
+    }
+}
+// Rust: tests/corpus_policy.rs:437
+#Test("generated_protocol_check_requires_one_decoder_for_response_protocols") {
+    policy :: CorpusPolicy.load().unwrap()
+    violations :: policy.evaluate_generated("producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn run() {{}}").unwrap()
+    assert_eq(violations.len(), 1)
+    assert_eq(violations[0].rule, "bindgen-one-decoder")
+    assert(violations[0].to_string().contains("replacement="))
+    no_response :: policy.evaluate_generated("producer:crates/jet-pkg-model/src/CBind.rs#render_jet", "fn run() {{}}").unwrap()
+    assert(no_response.is_empty())
+}
+// Rust: tests/corpus_policy.rs:459
+#Test("every_response_binding_renderer_uses_the_shared_decoder_policy") {
+    policy :: CorpusPolicy.load().unwrap()
+    response_producers :: policy.manifest().producers.iter().filter((producer) -> producer.selector.contains("Bind.rs#render_jet") && producer.protocol != "no-response-protocol").collect()
+    assert_eq(response_producers.len(), 7)
+    source :: "fn decode_response(raw: String, code: Int) -> DataTree Err! {{ return Ok(DataTree.Null) }}"
+    for producer in response_producers {
+        violations :: policy.evaluate_generated(&producer.selector, source).unwrap_or_else((error) -> panic("{producer.selector}: {error}"))
+        assert(violations.is_empty(), "{producer.selector} did not accept one shared response decoder: {violations:Debug}")
+    }
+}
+// Rust: tests/corpus_policy.rs:486
+#Test("walk_policy_distinguishes_file_only_filters_from_directory_tree_walks") {
+    policy :: CorpusPolicy.load().unwrap()
+    file_only :: policy.evaluate_source("dogfood/jetpack/tests/transcript.jet", "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if !entry.is_dir -> print(entry.path)\n    }}\n}}").unwrap()
+    assert(file_only.iter().any((violation) -> violation.rule == "walk-files-filter"))
+    unrelated_walk_and_filter :: policy.evaluate_source("dogfood/jetpack/tests/transcript.jet", "use core.files as fs\nfn walk() {{\n    entries :: fs.walk(root)\n}}\nfn filter(entry: Entry) {{\n    if !entry.is_dir -> print(entry.path)\n}}").unwrap()
+    assert(!unrelated_walk_and_filter.iter().any((violation) -> violation.rule == "walk-files-filter"))
+    tree :: policy.evaluate_source("dogfood/jetpack/tests/transcript.jet", "use core.files as fs\nfn run() {{\n    entries :: fs.walk(root)\n    loop entry in entries {{\n        if entry.is_dir -> print(entry.relative) else -> print(entry.path)\n    }}\n}}").unwrap()
+    assert(!tree.iter().any((violation) -> violation.rule == "walk-files-filter"))
+}
+// Rust: tests/corpus_policy.rs:538
+#Test("semantic_migration_rules_match_only_their_structural_shapes") {
+    policy :: CorpusPolicy.load().unwrap()
+    duration :: policy.evaluate_source("Examples/features/memory/reintroduced.jet", "fn run() {{ delay :: Duration.seconds(1.5) }}").unwrap()
+    assert(duration.iter().any((violation) -> violation.rule == "duration-constant-safe"))
+    runtime_duration :: policy.evaluate_source("Examples/features/memory/reintroduced.jet", "fn run(seconds: Float) {{ delay :: Duration.seconds(seconds) }}").unwrap()
+    assert(!runtime_duration.iter().any((violation) -> violation.rule == "duration-constant-safe"))
+    unit :: policy.evaluate_source("Examples/features/text/reintroduced.jet", "fn run() {{ value :: Meter.from_float(source.raw() * 2) }}").unwrap()
+    assert(unit.iter().any((violation) -> violation.rule == "unit-scalar-rewrap"))
+    converted_unit :: policy.evaluate_source("Examples/features/types/unit_family.jet", "fn subtotal(price: Usd, qty: Int) -> Usd {{ Usd.from_float(price.raw() * Float.from_int(qty)) }}").unwrap()
+    assert(converted_unit.iter().any((violation) -> violation.rule == "unit-scalar-rewrap"))
+    helper_unit :: policy.evaluate_source("Examples/features/text/reintroduced.jet", "fn run() {{ value :: Meter.from_float(source.raw() * calibrate(2.0)) }}").unwrap()
+    assert(!helper_unit.iter().any((violation) -> violation.rule == "unit-scalar-rewrap"))
+    format :: policy.evaluate_source("Tools/gauntlet/entries/bulkrename/jet/run.jet", "fn run() {{ print(\"{{value:Fixed(2)}}\".replace(\",\", \"\")) }}").unwrap()
+    assert(format.iter().any((violation) -> violation.rule == "plain-format-fact"))
+    grouped :: policy.evaluate_source("Tools/gauntlet/entries/bulkrename/jet/run.jet", "fn run() {{ print(\"{{value:Grouped(2)}}\".replace(\",\", \"\")) }}").unwrap()
+    assert(!grouped.iter().any((violation) -> violation.rule == "plain-format-fact"))
+    directory :: policy.evaluate_source("Docs/site/generate.jet", "fn run() {{ files.create_dir(\"dist\") }}").unwrap()
+    assert(directory.iter().any((violation) -> violation.rule == "dogfood-directory-setup"))
+    idempotent :: policy.evaluate_source("Docs/site/generate.jet", "fn run() {{ files.create_dir_all(\"dist\") }}").unwrap()
+    assert(!idempotent.iter().any((violation) -> violation.rule == "dogfood-directory-setup"))
+    generic_policy :: policy.evaluate_source("dogfood/tower/run.jet", "fn duplicate_equal(left: DataTree, right: DataTree) -> Bool {{ return true }}").unwrap()
+    assert(generic_policy.iter().any((violation) -> violation.rule == "datatree-domain-policy"))
+    named_policy :: policy.evaluate_source("dogfood/tower/run.jet", "fn javascript_truthy(value: DataTree) -> Bool {{ return true }}").unwrap()
+    assert(!named_policy.iter().any((violation) -> violation.rule == "datatree-domain-policy"))
+    lower_ladder := "\"text\""
+    for (from, to) in ('A'..='Z').zip('a'..='z') { lower_ladder.push_str(".replace(\"{from}\", \"{to}\")") }
+    ladder :: policy.evaluate_source("dogfood/jetpack/src/store/path_laws.jet", "fn run() {{ value :: {lower_ladder} }}").unwrap()
+    assert(ladder.iter().any((violation) -> violation.rule == "dogfood-ascii"))
+    partial :: policy.evaluate_source("dogfood/jetpack/src/store/path_laws.jet", "fn run() {{ value :: \"text\".replace(\"A\", \"a\").replace(\"B\", \"b\") }}").unwrap()
+    assert(!partial.iter().any((violation) -> violation.rule == "dogfood-ascii"))
+    unrelated_regex_recipe :: policy.evaluate_source("Tools/gauntlet/entries/bulkrename/jet/run.jet", "fn pattern() {{ value :: Regex{{\"^x$\"}} }}\nfn run(value: String) {{\n    matched :: re.match(Regex{{\"x\"}}, value)\n    print(matched.group(1) ?? \"\")\n}}").unwrap()
+    assert(unrelated_regex_recipe.iter().any((violation) -> violation.rule == "regex-capture-recipe"))
+    docs_without_runner :: policy.evaluate_source("Docs/spec/guides/first-hour.md", "```jet\n#CLI\nstruct Args {{ name: String }}\n```\n```bash\njet build\n```").unwrap()
+    assert(docs_without_runner.iter().any((violation) -> violation.rule == "first-hour-doc-recipe"))
+}
+// Rust: tests/corpus_policy.rs:694
+#Test("crypto_digest_rule_uses_the_resolved_core_module") {
+    policy :: CorpusPolicy.load().unwrap()
+    legacy :: policy.evaluate_source("Examples/features/crypto/reintroduced.jet", "use core.crypto as crypto\nfn run() {{ crypto.sha256_bytes(\"abc\".bytes()) }}").unwrap()
+    assert(legacy.iter().any((violation) -> violation.rule == "crypto-naming-fact"))
+    canonical :: policy.evaluate_source("Examples/features/crypto/reintroduced.jet", "use core.crypto as crypto\nfn run() {{ crypto.sha256(\"abc\".bytes()).hex() }}").unwrap()
+    assert(!canonical.iter().any((violation) -> violation.rule == "crypto-naming-fact"))
+    unrelated :: policy.evaluate_source("Examples/features/crypto/reintroduced.jet", "fn run() {{ sha256_bytes(\"abc\".bytes()) }}").unwrap()
+    assert(!unrelated.iter().any((violation) -> violation.rule == "crypto-naming-fact"))
+}
+// Rust: tests/corpus_policy.rs:730
+#Test("scoped_dogfood_and_workload_recipes_have_positive_and_negative_shapes") {
+    policy :: CorpusPolicy.load().unwrap()
+    delimited :: policy.evaluate_source("tests/agent_workloads/adapters/incident_report.jet", "fn run() {{ rows :: input.split(\"\\t\") }}").unwrap()
+    assert(delimited.iter().any((violation) -> violation.rule == "delimited-reader-config"))
+    other_delimiter :: policy.evaluate_source("tests/agent_workloads/adapters/incident_report.jet", "fn run() {{ rows :: input.split(\"|\") }}").unwrap()
+    assert(!other_delimiter.iter().any((violation) -> violation.rule == "delimited-reader-config"))
+    http :: policy.evaluate_source("tests/agent_workloads/adapters/http_api.jet", "fn run(req: HTTPRequest) {{ payload :: req.body(Json) }}").unwrap()
+    assert(http.iter().any((violation) -> violation.rule == "http-wrapper-json"))
+    assert(http.iter().any((violation) -> violation.rule == "http-typed-json"))
+    bounded_http :: policy.evaluate_source("tests/agent_workloads/adapters/http_api.jet", "fn run() {{ answer :: response.body().text(100) }}").unwrap()
+    assert(bounded_http.iter().any((violation) -> violation.rule == "http-message-text"))
+    direct_http :: policy.evaluate_source("tests/agent_workloads/adapters/http_api.jet", "fn run() {{ answer :: response.text() }}").unwrap()
+    assert(!direct_http.iter().any((violation) -> violation.rule == "http-message-text"))
+    canonical_http :: policy.evaluate_source("tests/agent_workloads/adapters/http_api.jet", "fn run(req: HTTPRequest) {{ payload :: req.json(Json) }}").unwrap()
+    assert(!canonical_http.iter().any((violation) -> violation.rule == "http-wrapper-json" || violation.rule == "http-typed-json"))
+    unused_request :: policy.evaluate_source("tests/agent_workloads/adapters/http_api.jet", "fn handle(req: HTTPRequest) -> HTTPResponse {{ return response }}").unwrap()
+    assert(unused_request.iter().any((violation) -> violation.rule == "http-unused-request"))
+    used_request :: policy.evaluate_source("tests/agent_workloads/adapters/http_api.jet", "fn handle(req: HTTPRequest) -> HTTPResponse {{ return req.response() }}").unwrap()
+    assert(!used_request.iter().any((violation) -> violation.rule == "http-unused-request"))
+    path :: policy.evaluate_source("dogfood/jetpack/src/store/ingest.jet", "fn run() {{ allowed :: candidate.starts_with(\"root/\") }}").unwrap()
+    assert(path.iter().any((violation) -> violation.rule == "dogfood-path-containment"))
+    path_without_prefix :: policy.evaluate_source("dogfood/jetpack/src/store/ingest.jet", "fn run() {{ allowed :: candidate == root }}").unwrap()
+    assert(!path_without_prefix.iter().any((violation) -> violation.rule == "dogfood-path-containment"))
+    json :: policy.evaluate_source("dogfood/jetpack/src/cli/main.jet", "fn run() {{ wire :: \"{{{{\\\"key\\\": {{value}}}}}}\" }}").unwrap()
+    assert(json.iter().any((violation) -> violation.rule == "dogfood-json"))
+    typed_json :: policy.evaluate_source("dogfood/jetpack/src/cli/main.jet", "fn run() {{ wire :: json.to_string(value) }}").unwrap()
+    assert(!typed_json.iter().any((violation) -> violation.rule == "dogfood-json"))
+    query :: policy.evaluate_source("dogfood/tower/run.jet", "fn run() {{ fields :: query.split(\"&\") }}").unwrap()
+    assert(query.iter().any((violation) -> violation.rule == "dogfood-url-query"))
+    query_api :: policy.evaluate_source("dogfood/tower/run.jet", "fn run() {{ fields :: url.query() }}").unwrap()
+    assert(!query_api.iter().any((violation) -> violation.rule == "dogfood-url-query"))
+    equality :: policy.evaluate_source("dogfood/jetpack/src/plan/plan.jet", "fn run() {{ same_strings(left, right) }}").unwrap()
+    assert(equality.iter().any((violation) -> violation.rule == "dogfood-list-equality"))
+    direct_equality :: policy.evaluate_source("dogfood/jetpack/src/plan/plan.jet", "fn run() {{ left == right }}").unwrap()
+    assert(!direct_equality.iter().any((violation) -> violation.rule == "dogfood-list-equality"))
+}
+// Rust: tests/corpus_policy.rs:892
+#Test("generated_decoder_policy_requires_the_canonical_decoder_symbol") {
+    policy :: CorpusPolicy.load().unwrap()
+    violations :: policy.evaluate_generated("producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_other(raw: String, code: Int) -> DataTree Err! {{ return Ok(DataTree.Null) }}").unwrap()
+    assert_eq(violations.len(), 1)
+    assert_eq(violations[0].rule, "bindgen-one-decoder")
+}
+// Rust: tests/corpus_policy.rs:905
+#Test("generated_protocol_override_requires_a_distinct_envelope_shape") {
+    policy :: CorpusPolicy.load().unwrap()
+    raw_json :: policy.evaluate_generated("producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_response(raw: String, code: Int) -> DataTree Err! {{ return Ok(json.parse(raw)) }}").unwrap()
+    assert(raw_json.is_empty(), "raw JSON override is distinct: {raw_json:Debug}")
+    ordinary :: policy.evaluate_generated("producer:crates/jet-pkg-model/src/LuaBind.rs#render_jet", "fn decode_response(raw: String, code: Int) -> DataTree Err! {{\n    response :: json.parse(raw)\n    ok :: response.field(\"ok\")\n    return Ok(response)\n}}").unwrap()
+    assert(ordinary.iter().any((violation) -> violation.rule == "generated-protocol-override"))
+}

@@ -1,0 +1,40 @@
+use core.fs as fs
+use core.sys.target
+use std.[env, process]
+use std.process.[Command, Output]
+use std.sync.atomic.[AtomicU64, Ordering]
+
+// GATE #4494: real filesystem, process spawning and atomic providers.
+// Rust: tests/report.rs:8
+NEXT :: AtomicU64.new(0)
+// Rust: tests/report.rs:10
+fn jet() -> OSPath { OSPath.from(env.jet_bin()) }
+// Rust: tests/report.rs:14
+fn scratch(tag: String) -> OSPath {
+    path :: env.temp_dir().join("jet-report-{tag}-{process.id()}-{NEXT.fetch_add(1, Ordering.Relaxed)}")
+    fs.create_dir_all(&path).unwrap()
+    path
+}
+// Rust: tests/report.rs:99
+fn walkdir(root: OSPath) -> [OSPath] {
+    out := []
+    stack := [root.to_path_buf()]
+    loop {
+        dir :: stack.pop() ?? break
+        entries :: fs.read_dir(&dir) ?? continue
+        for entry in entries.flatten() {
+            path :: entry.path()
+            if path.is_dir() { stack.push(path) } else { out.push(path) }
+        }
+    }
+    out
+}
+// Rust: tests/report.rs:119
+fn traced_network_calls(root: OSPath, tag: String, args: [String]) -> (Output, [String]) {
+    assert(target.selected_os() == "linux", "strace network proof requires Linux")
+    _ :: Command.new("strace").arg("-V").output().expect("strace is required for the Linux no-network proof")
+    trace :: root.join("{tag}.network.trace")
+    output :: Command.new("strace").args(["-f", "-qq", "-e", "trace=network", "-o"]).arg(&trace).arg(jet()).args(args).current_dir(root).output().unwrap()
+    calls :: fs.read_to_string(&trace).unwrap().lines().filter((line) -> !line.contains("--- SIG")).map((line) -> line.to_string()).collect()
+    (output, calls)
+}

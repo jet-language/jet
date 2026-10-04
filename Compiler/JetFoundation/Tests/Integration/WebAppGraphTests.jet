@@ -1,0 +1,387 @@
+use std.[fs, env, process]
+use std.process.Command
+use jet_foundation.Tests.Integration.Common.Mod as common
+use jet_foundation.Tests.Integration.TirSupport.Mod as tir_support
+use jet_foundation.Tests.Integration.WebAppGraph.[check_facts, codes]
+use jet_foundation.Tests.Integration.WebBrowser.[assert_nest_p001_form_stages, have_tool, jet_bin, repo_root, unused_local_port, resolve_executable, web_tools, NativeAppServer, StaticServer, prepare_acceptance_root]
+// GATE #4494: real executable/browser/TCP providers; no Rust bridge.
+
+// Rust: tests/web_app_graph.rs:29
+#Test("example_app_hello_graph_records_policy_and_modes") {
+    path :: "{repo_root().display()}/Examples/features/web/app_hello.jet"
+    facts :: check_facts(&path)
+    graph :: facts.web_app.expect("fn run() -> App graph")
+    assert(graph.shared_tir)
+    assert_eq(graph.hydration, "dev-overlay")
+    assert_eq(graph.routes.len(), 1)
+    assert_eq(graph.routes[0].path, "/")
+    assert_eq(graph.routes[0].handler, "home")
+    assert_eq(graph.routes[0].render.as_str(), "csr")
+    assert_eq(graph.actions.len(), 1)
+    assert_eq(graph.actions[0].name, "save")
+    assert_eq(graph.policy.security, ["csp"])
+    assert_eq(graph.policy.assets, ["public"])
+    assert_eq(graph.policy.a11y, ["wcag"])
+    assert_eq(graph.policy.adapters, ["node"])
+}
+// Rust: tests/web_app_graph.rs:51
+#Test("server_function_action_exposes_checked_wire_contract") {
+    path :: "{repo_root().display()}/Examples/features/web/web_app.jet"
+    graph :: check_facts(&path).web_app.expect("fn run() -> App graph")
+    action :: graph.actions.iter().find(fn(action) { action.name == "save" }).unwrap()
+    assert(!action.input_type.is_empty())
+    assert(!action.output_type.is_empty())
+    assert(!action.error_type.is_empty())
+    assert_eq(action.endpoint, "/actions/save")
+    assert_eq(action.method, "POST")
+    assert_eq(action.csrf, "same-origin")
+    assert_eq(action.middleware, ["context", "auth", "csp", "logging", "observability"])
+}
+// Rust: tests/web_app_graph.rs:77
+#Test("tanstack_start_graph_keeps_one_typed_reference_application") {
+    path :: "{repo_root().display()}/Examples/features/web/tanstack_start/run.jet"
+    graph :: check_facts(&path).web_app.expect("tanstack_start App graph")
+    route_paths :: graph.routes.iter().map(fn(route) { route.path.as_str() }).collect()
+    assert_eq(route_paths, ["/", "/orders", "/orders/:id", "/settings"], "reference app must register one canonical route graph")
+    orders :: graph.routes.iter().find(fn(route) { route.path == "/orders" }).expect("orders route")
+    assert_eq(orders.handler, "orders_page")
+    assert_eq(orders.loader.as_ref().map(fn(loader) { loader.handler.as_str() }), Some("load_orders"))
+    assert(orders.search_params.iter().any(fn(field) { field.name == "q" && field.ty == "String" }))
+    assert(graph.actions.iter().any(fn(action) { action.name == "ship-order" && action.endpoint == "/actions/ship-order" }))
+    assert(graph.actions.iter().any(fn(action) { action.name == "ship-order-progressive" && action.endpoint == "/actions/ship-order-progressive" }))
+    assert_eq(graph.queries.len(), 1)
+    assert_eq(graph.queries[0].key, "orders.list")
+    assert_eq(graph.queries[0].footprint, "orders")
+    assert_eq(graph.stores.len(), 1)
+    assert_eq(graph.stores[0].name, "Cart")
+    assert_eq(graph.stores[0].history_limit, "8")
+}
+// Rust: tests/web_app_graph.rs:127
+#Test("query_graph_facts_keep_explicit_key_and_dependency_identity") {
+    root :: common.unique_tmp("jet_query_graph")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("app.jet"), """use core.web as web
+#Target(Web)
+use core.web.query as query
+fn home() -> WebPage {
+    first :: query.subscribe("orders")
+    second :: query.subscribe("orders")
+    return web.page("Orders", first.get())
+}
+fn run() -> App { return web.app().route("/", home).csr() }
+""").unwrap()
+    graph :: check_facts(root.join("app.jet").to_str().unwrap()).web_app.expect("fn run() -> App graph")
+    assert_eq(graph.queries.len(), 1)
+    assert_eq(graph.queries[0].key, "orders")
+    assert_eq(graph.queries[0].footprint, "ext:orders")
+    assert_eq(graph.queries[0].kind, "subscribe")
+    assert_eq(graph.queries[0].source, "home")
+}
+// Rust: tests/web_app_graph.rs:156
+#Test("routes_from_expands_convention_files") {
+    root :: common.unique_tmp("jet_app_routes_from")
+    fs.create_dir_all(root.join("routes/about")).unwrap()
+    fs.write(root.join("app.jet"), """use core.web as web
+fn about_page() -> WebPage { return web.page("About", "us") }
+fn run() -> App { return web.app().routes(from: "routes").ssr() }
+""").unwrap()
+    fs.write(root.join("routes/index.jet"), "fn page() {}\n").unwrap()
+    fs.write(root.join("routes/about/page.jet"), "fn page() {}\n").unwrap()
+    facts :: check_facts(root.join("app.jet").to_str().unwrap())
+    graph :: facts.web_app.unwrap()
+    paths :: graph.routes.iter().map(fn(r) { r.path.as_str() }).collect()
+    assert(paths.contains(&"/"))
+    assert(paths.contains(&"/about"))
+    assert(graph.routes.iter().all(fn(r) { r.render.as_str() == "ssr" }))
+}
+// Rust: tests/web_app_graph.rs:188
+#Test("router_path_and_search_plus_decoding_are_distinct") {
+    tir_support.assert_tiers_agree("router_plus_decoding", """use core.web.router as router
+fn page(nav: WebNavigation) -> String { return "" }
+fn rejects_invalid_utf8(r: WebRouter) -> Bool {
+    if router.navigate(r, "/item/%FF") == {
+        .Err(_) -> return true
+        .Ok(_) -> return false
+    }
+}
+fn run() {
+    r :: router.route(
+        router.new(),
+        "/item/:slug",
+        [WebRouterField]{WebRouterField{name: "slug", value: ""}},
+        [WebRouterField]{WebRouterField{name: "q", value: ""}},
+        page
+    ) ?? panic("route")
+    nav :: router.navigate(r, "/item/a+b?q=a+b") ?? panic("navigate")
+    if nav.params[0].value != "a+b" -> panic("path plus changed")
+    if nav.search[0].value != "a b" -> panic("query plus did not decode")
+    rejected :: rejects_invalid_utf8(r)
+    if !rejected -> panic("invalid UTF-8 was accepted")
+    print("ok")
+}
+""", "ok\n")
+}
+// Rust: tests/web_app_graph.rs:220
+#Test("collision_and_stray_and_dynamic_diagnose") {
+    root :: common.unique_tmp("jet_app_diags")
+    fs.create_dir_all(root.join("routes")).unwrap()
+    fs.write(root.join("routes/index.jet"), "fn page() {}\n").unwrap()
+    fs.write(root.join("routes/stray.jet"), "fn helper() {}\n").unwrap()
+    fs.write(root.join("collision.jet"), """use core.web as web
+#Target(Web)
+fn home() -> WebPage { return web.page("h", "b") }
+fn run() -> App { return web.app().route("/", home).routes(from: "routes").csr() }
+""").unwrap()
+    collision :: codes(root.join("collision.jet").to_str().unwrap())
+    assert(collision.contains(&"E2807"))
+    fs.write(root.join("stray.jet"), """use core.web as web
+#Target(Web)
+fn run() -> App { return web.app().routes(from: "routes").csr() }
+""").unwrap()
+    stray :: codes(root.join("stray.jet").to_str().unwrap())
+    assert(stray.contains(&"E2806"))
+    fs.write(root.join("dynamic.jet"), """use core.web as web
+#Target(Web)
+fn pick() -> Int { return 1 }
+fn run() -> App {
+    return web.app().route("/", pick()).csr()
+}
+""").unwrap()
+    dynamic :: codes(root.join("dynamic.jet").to_str().unwrap())
+    assert(dynamic.contains(&"E2810"))
+}
+// Rust: tests/web_app_graph.rs:264
+#Test("render_modes_mount_island_and_shared_tir") {
+    root :: common.unique_tmp("jet_app_modes")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("app.jet"), """use core.web as web
+#Target(Web)
+fn home() -> WebPage { return web.page("H", "b") }
+fn dash() -> WebPage { return web.page("D", "b") }
+fn plugins(prefix: String) {}
+fn run() -> App {
+    return web.app()
+        .route("/", home)
+        .ssg()
+        .route("/dash", dash)
+        .stream()
+        .island()
+        .mount("/plugins", plugins, "Net", "csrf")
+        .security("csp")
+        .cache("revalidate")
+        .split("dash")
+        .hydration_release()
+}
+""").unwrap()
+    facts :: check_facts(root.join("app.jet").to_str().unwrap())
+    graph :: facts.web_app.unwrap()
+    assert(graph.shared_tir)
+    assert_eq(graph.hydration, "release-keep-server")
+    assert_eq(graph.mounts.len(), 1)
+    assert_eq(graph.mounts[0].prefix, "/plugins")
+    assert_eq(graph.mounts[0].effects, ["Net"])
+    assert_eq(graph.mounts[0].security, ["csrf"])
+    assert(graph.policy.cache.contains(&"revalidate"))
+    assert(graph.policy.split.contains(&"dash"))
+    modes :: graph.routes.iter().map(fn(r) { r.render.as_str() }).collect()
+    assert(modes.contains(&"ssg") || modes.contains(&"stream") || modes.contains(&"island"))
+}
+// Rust: tests/web_app_graph.rs:305
+#Test("expand_web_lens_and_explain_web_graph_json") {
+    path :: "{repo_root().display()}/Examples/features/web/app_hello.jet"
+    jet :: jet_bin()
+    expand :: Command.new(&jet).args(["inspect", "expand", "--facts", "web", &path]).output().unwrap()
+    assert(expand.status.success(), "{String.from_utf8_lossy(&expand.stderr)}")
+    stdout :: String.from_utf8_lossy(&expand.stdout)
+    assert(stdout.contains("web —"))
+    assert(stdout.contains("hydration: dev-overlay (shared TIR: true)"))
+    assert(stdout.contains("  / [client] -> home"))
+    explain :: Command.new(&jet).args(["explain", "--web-graph", &path, "--json"]).output().unwrap()
+    assert(explain.status.success(), "{String.from_utf8_lossy(&explain.stderr)}")
+    json :: String.from_utf8_lossy(&explain.stdout)
+    compact: String = json.chars().filter(fn(character) { !character.is_whitespace() }).collect()
+    assert(compact.contains("\"shared_tir\":true"), "{json}")
+    assert(compact.contains("\"hydration\":\"dev-overlay\""), "{json}")
+    assert(compact.contains("\"render\":\"csr\""), "{json}")
+}
+
+// Rust: tests/web_browser.rs:87
+#Test("forms_table_browser_submit_reaches_typed_action") {
+    assert_nest_p001_form_stages()
+    tools :: web_tools()
+    if tools.is_none() { eprintln("note: skipping forms table browser fixture (need chromium + node)"); return }
+    (chromium, node) :: tools.unwrap()
+    port :: unused_local_port()
+    _server :: NativeAppServer.start(port)
+    script := String.from("""
+const { CdpDriver } = await import(`file://${process.cwd()}/Tools/canvas-test/driver.mjs`);
+const driver = await new CdpDriver().launch();
+try {
+  await driver.navigate(""")
+    script.push_str("\"http://127.0.0.1:{port}/\"")
+    script.push_str(""");
+  const markup = await driver.evaluate("document.querySelector('form')?.outerHTML || ''");
+  const expectedMarkup = [
+    'method="post" action="/actions/save"',
+    '<input name="name" id="Person-name" type="text" aria-label="name" aria-invalid="false" required',
+    'value="Ada">',
+    '<button type="submit">Submit</button>',
+  ];
+  for (const fragment of expectedMarkup) {
+    if (!markup.includes(fragment)) throw new Error(`typed form lost generated ${fragment}: ${markup}`);
+  }
+  await driver.evaluate(`(() => {
+    const form = document.querySelector("form");
+    form.elements.namedItem("id").value = "7";
+    form.elements.namedItem("name").value = "Ada";
+    form.elements.namedItem("active").checked = true;
+    form.requestSubmit();
+  })()`);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  let body = "";
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    body = await driver.evaluate("document.body?.textContent || ''");
+    if (body.includes("saved Ada")) break;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  if (!body.includes("saved Ada")) throw new Error(`typed form action did not return the observable result: ${body}`);
+  console.log("PASS forms table typed action browser fixture");
+} finally { await driver.close(); }
+""")
+    output :: Command.new(&node).current_dir(repo_root()).env("CHROMIUM", &chromium).args(["--input-type=module", "-e"]).arg(script).output().expect("run forms table browser fixture")
+    assert(output.status.success(), "forms table browser fixture failed:\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+}
+
+// Rust: tests/web_browser.rs:421
+#Test("web_server_function_browser_adapter_keeps_native_and_scripted_paths_typed") {
+    node_opt :: resolve_executable(&OSPath.from("node"))
+    if node_opt.is_none() { eprintln("note: skipping server-function browser adapter smoke (need node)"); return }
+    node :: node_opt.unwrap()
+    runtime :: repo_root().join("crates/jet-codegen/src/Prelude/DomRuntime.js").canonicalize().expect("DomRuntime.js path")
+    runtime :: runtime.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    script := String.from("""
+globalThis.location = { origin: "http://localhost", href: "http://localhost/" };
+const calls = [];
+globalThis.fetch = async (url, options) => {
+  calls.push({ url, options });
+  return new Response(JSON.stringify({ saved: true }), {
+    status: 200, headers: { "content-type": "application/json" },
+  });
+};
+const { attachWebForm, webServerFunctionCall, webServerFunctionForm } = await import("file://""")
+    script.push_str(&runtime)
+    script.push_str("""");
+const boundary = {
+  name: "save", endpoint: "/actions/save", method: "POST",
+  input: "SaveInput", output: "SaveResult", error: "SaveError",
+  csrf: "same-origin", revalidate: ["orders"],
+};
+const result = await webServerFunctionCall(boundary, { id: 7 });
+if (!result.value.saved || result.attempts !== 1 || result.revalidate[0] !== "orders") {
+  throw new Error("typed scripted call did not return its checked result");
+}
+if (calls[0].options.credentials !== "same-origin" ||
+    calls[0].options.headers["content-type"] !== "application/json") {
+  throw new Error("scripted call crossed the wrong transport boundary");
+}
+const nativeAttrs = {};
+const nativeForm = {
+  dataset: {}, setAttribute(name, value) { nativeAttrs[name] = value; },
+  querySelector() { return null; },
+};
+const native = webServerFunctionForm(boundary, nativeForm);
+if (!native.no_script || nativeAttrs.action !== "/actions/save" ||
+    nativeAttrs.method !== "POST" || nativeForm.dataset.jetPending !== "false") {
+  throw new Error("native form path was not configured");
+}
+let revalidated = null;
+const enhancedAttrs = {};
+const enhanced = {
+  dataset: {}, setAttribute(name, value) { enhancedAttrs[name] = value; },
+  addEventListener(name, handler) { this.handler = handler; },
+  removeEventListener() {}, dispatchEvent() {},
+};
+attachWebForm(boundary, enhanced, {
+  enhance: true, encode: () => ({ id: 7 }),
+  revalidate: (keys) => { revalidated = keys; },
+});
+enhanced.handler({ preventDefault() {} });
+await new Promise((resolve) => setTimeout(resolve, 0));
+if (!Array.isArray(revalidated) || revalidated[0] !== "orders" || enhanced.dataset.jetPending !== "false") {
+  throw new Error("hydrated form did not settle and revalidate dependencies");
+}
+try {
+  await webServerFunctionCall({ endpoint: "https://evil.invalid/actions/save" }, {});
+  throw new Error("cross-origin server function was accepted");
+} catch (error) {
+  if (!(error instanceof TypeError) && error.code !== "csrf_rejected") throw error;
+}
+const cycle = {};
+cycle.self = cycle;
+try {
+  await webServerFunctionCall(boundary, cycle);
+  throw new Error("non-serializable input was accepted");
+} catch (error) { if (error.code !== "invalid_input") throw error; }
+""")
+    output :: Command.new(node).args(["--input-type=module", "-e", &script]).output().expect("run server-function browser adapter smoke")
+    assert(output.status.success(), "server-function browser adapter smoke failed:\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+}
+// Rust: tests/web_browser.rs:522
+#Test("tanstack_start_browser_reference_loop_uses_rendered_routes_and_actions") {
+    if !have_tool("rustc") { eprintln("note: skipping TanStack reference browser loop (need rustc)"); return }
+    assert_nest_p001_form_stages()
+    tools :: web_tools()
+    if tools.is_none() { eprintln("note: skipping TanStack reference browser loop (need chromium + node)"); return }
+    (chromium, node) :: tools.unwrap()
+    repo :: repo_root()
+    root :: env.temp_dir().join("jet_tanstack_reference_browser_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(root.join("public")).unwrap()
+    for path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
+        source :: repo.join("Examples/features/web/tanstack_start").join(path)
+        destination :: root.join(path)
+        if destination.parent() == {
+            .Some(parent) -> { fs.create_dir_all(parent).unwrap() }
+            .None -> {}
+        }
+        fs.copy(source, destination).unwrap()
+    }
+    output :: Command.new(&node).env("CHROMIUM", chromium).arg(repo.join("Tools/web-dev-test/reference_app.mjs")).args(["--metric", "first_run", "--manifest"]).arg(repo.join("Tools/agent-eval/dx/manifest.json")).args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"]).arg(repo.join("Tools/agent/jet-env")).current_dir(&root).output().expect("run TanStack reference browser loop")
+    assert(output.status.success(), "TanStack reference browser loop failed\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert(String.from_utf8_lossy(&output.stdout).contains("REFERENCE_METRIC:first_run"), "reference browser loop did not report first-run measurement")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/web_browser.rs:573
+#Test("web_browser_aot_acceptance_proves_dom_reactive_wasm_bundle_and_maps") {
+    if !have_tool("rustc") { eprintln("note: skipping web_browser acceptance (need rustc)"); return }
+    tools :: web_tools()
+    if tools.is_none() { eprintln("note: skipping web_browser acceptance (need chromium + node)"); return }
+    (chromium, node) :: tools.unwrap()
+    root :: env.temp_dir().join("jet_web_browser_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    prepare_acceptance_root(&root)
+    port :: unused_local_port()
+    _server :: StaticServer.start(&node, &root, port)
+    output :: Command.new(&node).current_dir(repo_root()).env("CHROMIUM", &chromium).arg("Tools/web-test/acceptance.mjs").arg("--port").arg(port.to_string()).output().expect("run web browser acceptance")
+    assert(output.status.success(), "web browser acceptance failed\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert(String.from_utf8_lossy(&output.stdout).contains("PASS web backend browser acceptance matrix"), "acceptance did not report completion")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/web_browser.rs:613
+#Test("web_browser_source_map_cdp_jet_breakpoint") {
+    if !have_tool("rustc") { eprintln("note: skipping web source-map CDP (need rustc)"); return }
+    tools :: web_tools()
+    if tools.is_none() { eprintln("note: skipping web source-map CDP (need chromium + node)"); return }
+    (chromium, node) :: tools.unwrap()
+    root :: env.temp_dir().join("jet_web_sourcemap_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    prepare_acceptance_root(&root)
+    port :: unused_local_port()
+    _server :: StaticServer.start(&node, &root, port)
+    output :: Command.new(&node).current_dir(repo_root()).env("CHROMIUM", &chromium).arg("Tools/web-test/sourcemap.mjs").arg("--port").arg(port.to_string()).arg("--prefix").arg("/click").arg("--wasm-prefix").arg("/compute").output().expect("run web source-map CDP")
+    assert(output.status.success(), "web source-map CDP failed\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert(String.from_utf8_lossy(&output.stdout).contains("PASS web source-map CDP"), "source-map CDP did not report completion")
+    _ :: fs.remove_dir_all(&root)
+}

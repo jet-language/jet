@@ -1,0 +1,108 @@
+use std.[fs, env, process, time, panic]
+use std.path.OSPath
+use std.process.Command
+use std.sync.[Arc, Mutex]
+use std.collections.VecDeque
+use std.thread.Builder
+use jet_foundation.Tests.Integration.Common.[fixture_filter, fixture_matches, have_rustc, panic_message, strip_vetted_prelude_modules, test_worker_count]
+use jet_foundation.Tests.Integration.Common.CorpusPolicy.CorpusPolicy
+use jet_foundation.Tests.Integration.Golden.*
+use jet
+// GATE #4494: subprocesses, filesystem, shared mutexes and native worker threads with 64 MiB stacks.
+// Rust: tests/golden.rs:225
+#Test("statement_attributes_codegen_shape") {
+    root :: OSPath.from(env.manifest_dir())
+    path :: root.join("Examples/features/tooling/statement_attributes.jet")
+    src :: fs.read_to_string(&path).unwrap()
+    out :: jet.compile_with_path(&src, "Examples/features/tooling/statement_attributes.jet").unwrap_or_else(fn(diags) {
+        panic("statement attributes example failed front end:\n{jet.render_diagnostics("Examples/features/tooling/statement_attributes.jet", &src, &diags)}")
+    })
+    core_end :: out.rust.rfind("// jet:cached-core-end").expect("generated output has cached-core boundary")
+    entry_end :: out.rust.find("// jet-mir-entry").expect("generated output has MIR entry boundary")
+    generated_entry :: &out.rust[core_end..entry_end]
+    assert(!generated_entry.contains("\"off\"") && !generated_entry.contains("\"off block\""), "`#Off` body must not appear in generated entry:\n{generated_entry}")
+    assert(generated_entry.contains("#[cfg(not(jet_release))]") && generated_entry.contains("debug"), "`#DebugOnly` body must be cfg-gated for release:\n{generated_entry}")
+}
+// Rust: tests/golden.rs:366
+#Test("feature_entry_discovery_stops_at_project_roots") {
+    root :: OSPath.from(env.manifest_dir())
+    entries :: collect_feature_golden_entries(&root.join("Examples/features"), "jet")
+    assert(entries.iter().any(fn(entry) { entry.stem == "basics/onboarding" }), "nested run.jet project was not discovered")
+    for module in ["foundations/storage/cache", "foundations/tooling/load", "packages/sandbox_mathkit/sandbox_src"] {
+        assert(!entries.iter().any(fn(entry) { entry.stem == module }), "module/member fixture was incorrectly treated as an executable: {module}")
+    }
+}
+// Rust: tests/golden.rs:387
+#Test("examples_compile_and_run") {
+    root :: OSPath.from(env.manifest_dir())
+    ex_dir :: root.join("Examples/features")
+    ext :: jet.Syntax.FILE_EXT
+    have_rustc :: have_rustc()
+    have_cargo :: Command.new("cargo").arg("--version").output().is_ok()
+    have_gtk :: Command.new("pkg-config").args(["--exists", "gtk4"]).status().map(fn(s) { s.success() }).unwrap_or(false)
+    scratch :: env.temp_dir().join("jet-golden-scratch-{process.id()}-{time.SystemTime.now().duration_since(time.UNIX_EPOCH).expect("system clock is after Unix epoch").as_nanos()}")
+    ffi_cache :: scratch.join("ffi")
+    // Digest verification makes the shared content-addressed runtime store safe.
+    store :: OSPath.from(env.target_tmpdir()).join("jet-golden-store")
+    env.set_var("JET_STORE_DIR", &store)
+    env.set_var("JET_FFI_CACHE_DIR", &ffi_cache)
+    _scratch :: GoldenScratch { path: ^scratch }
+    if !have_rustc { eprintln("note: rustc not found; checking codegen only, skipping build+run") }
+    entries := collect_feature_golden_entries(&ex_dir, ext)
+    filter :: fixture_filter("JET_GOLDEN_FILTER")
+    entries.retain(fn(entry) { fixture_matches(filter.as_deref(), &entry.shown) })
+    assert(!entries.is_empty(), "JET_GOLDEN_FILTER matched no examples: {filter.as_deref().unwrap_or("<unfiltered>")}")
+    update_expected :: match env.var("JET_UPDATE_GOLDEN") {
+        Err(_) -> false,
+        Ok(value) -> if value == "1" {
+            assert(filter.is_some(), "JET_UPDATE_GOLDEN=1 requires JET_GOLDEN_FILTER so updates stay scoped")
+            true
+        } else { panic("JET_UPDATE_GOLDEN must be exactly 1, got {value:?}") },
+    }
+    golden_env :: Arc.new(GoldenEnv { ex_dir: ^ex_dir, ext, have_rustc, have_cargo, have_gtk, update_expected })
+    jobs :: Arc.new(Mutex.new(VecDeque.from(^entries)))
+    failures :: Arc.new(Mutex.new([]))
+    checked :: Arc.new(Mutex.new(0))
+    handles := []
+    for _ in 0..test_worker_count(16) {
+        worker_env :: Arc.clone(&golden_env)
+        worker_jobs :: Arc.clone(&jobs)
+        worker_failures :: Arc.clone(&failures)
+        worker_checked :: Arc.clone(&checked)
+        handles.push(Builder.new().stack_size(64 * 1024 * 1024).spawn(fn() {
+            loop {
+                entry :: match worker_jobs.lock().unwrap().pop_front() { Some(value) -> value, None -> break }
+                stem :: entry.stem.clone()
+                result :: panic.catch_unwind(panic.AssertUnwindSafe(fn() { check_golden_entry(&entry, &worker_env) }))
+                match result {
+                    Ok(_) -> { guard := worker_checked.lock().unwrap(); *guard += 1 },
+                    Err(payload) -> worker_failures.lock().unwrap().push("{stem}: {panic_message(payload)}"),
+                }
+            }
+        }).expect("golden worker thread"))
+    }
+    for handle in handles { handle.join().expect("golden worker panicked outside harness") }
+    failures :: failures.lock().unwrap()
+    assert(failures.is_empty(), "golden example failures:\n{failures.join("\n\n")}")
+    checked :: *checked.lock().unwrap()
+    assert(filter.is_some() || checked >= 2, "expected at least 2 examples, found {checked}")
+}
+// Rust: tests/golden.rs:1331
+#Test("watcher_process_probe_is_vetted_without_hiding_user_unsafe") {
+    generated :: "// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe\nunsafe { ffi() }\n// JET_VETTED_UNSAFE_END: jet_watch_process_probe\nunsafe { user_pointer() }"
+    stripped :: strip_vetted_prelude_modules(generated)
+    assert(!stripped.contains("ffi()"))
+    assert(stripped.contains("unsafe { user_pointer() }"))
+}
+// Rust: tests/golden.rs:1339
+#Test("shared_guard_runtime_is_vetted_without_hiding_user_unsafe") {
+    generated :: "// jet:shared-guard-internal-begin\nunsafe { first() }\n// jet:shared-guard-internal-end\n// jet:shared-guard-internal-begin\nunsafe { second() }\n// jet:shared-guard-internal-end\nunsafe { user_pointer() }"
+    stripped :: strip_vetted_prelude_modules(generated)
+    assert(!stripped.contains("first()"))
+    assert(!stripped.contains("second()"))
+    assert(stripped.contains("unsafe { user_pointer() }"))
+}
+// Rust: tests/golden.rs:1348
+#Test("semantic_corpus_policy_runs_with_the_golden_gate") {
+    CorpusPolicy.load().expect("corpus manifest").check_gate("golden").expect("golden corpus semantic policy")
+}

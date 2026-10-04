@@ -1,0 +1,460 @@
+use jet_foundation.Tests.Integration.AllocatorFamilies.[emit_native_aot, temp_dir, compile_rust_harness, compile_program_allocator_harness, write_program_allocator_project, compile_jet, run_jet]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use std.[fs, env]
+use std.process.Command
+use jet.[Loader, Sema, Diagnostics, TargetMachine]
+
+// Rust: tests/allocator_families.rs:258
+#Test("arena_bump_and_slab_have_distinct_aligned_drop_and_retention_laws") {
+    if !common.have_rustc() { return }
+    ran :: compile_rust_harness("""
+use std::sync::Mutex;
+static DROPS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+struct Dropped(usize);
+impl Drop for Dropped { fn drop(&mut self) { DROPS.lock().unwrap().push(self.0); } }
+#[repr(align(64))]
+struct Aligned(u8);
+fn main() {
+    let mut arena = jet_mem::JetArena::with_capacity(64);
+    let first_chunk = arena.alloc(1u8) as *mut u8 as usize;
+    let aligned = arena.alloc(Aligned(7)) as *mut Aligned as usize;
+    let _drop1 = arena.alloc(Dropped(1));
+    let _drop2 = arena.alloc(Dropped(2));
+    assert_eq!(aligned % 64, 0);
+    let before = arena.facts();
+    assert!(before.live_bytes >= 1 && before.retained_bytes >= before.live_bytes);
+    arena.reset();
+    assert_eq!(*DROPS.lock().unwrap(), vec![2, 1]);
+    let after = arena.facts();
+    assert_eq!(after.live_bytes, 0);
+    assert_eq!(after.retained_bytes, before.retained_bytes);
+    assert!(after.high_water_bytes >= before.live_bytes);
+    let observed = jet_observe_allocator_memory();
+    assert!(observed.0 >= after.retained_bytes);
+    assert!(observed.1 >= before.live_bytes);
+    let reused_first_chunk = arena.alloc(2u8) as *mut u8 as usize;
+    assert_eq!(reused_first_chunk, first_chunk);
+    let mut bump = jet_mem::JetBump::with_capacity(128);
+    let first = bump.alloc(1u8) as *mut u8 as usize;
+    let second = bump.alloc(2u64) as *mut u64 as usize;
+    assert!(second > first && second - first < 128);
+    let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = bump.alloc([0u8; 256]);
+    }));
+    assert!(exhausted.is_err());
+    let bump_before = bump.facts();
+    bump.reset();
+    let bump_after = bump.facts();
+    assert_eq!(bump_after.retained_bytes, bump_before.retained_bytes);
+    assert_eq!(bump_after.high_water_bytes, bump_before.high_water_bytes);
+    let mut pool = jet_mem::JetPool::with_slots(2);
+    let generation = pool.generation();
+    let p0 = pool.alloc(10u64) as *mut u64 as usize;
+    let _p1 = pool.alloc(20u64) as *mut u64 as usize;
+    assert!(std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = pool.alloc(30u64);
+    })).is_err());
+    pool.reset();
+    assert_ne!(pool.generation(), generation);
+    let reused = pool.alloc(40u64) as *mut u64 as usize;
+    assert_eq!(reused, p0);
+    let large = pool.alloc([7u8; 513]);
+    assert_eq!(large[512], 7);
+    assert!(pool.facts().retained_bytes >= 521);
+    let mut classes = jet_mem::JetPool::with_slots(1);
+    let _small = classes.alloc(1u8);
+    classes.reset();
+    let small_retained = classes.facts().retained_bytes;
+    let wide = classes.alloc([9u64; 80]);
+    assert_eq!(wide[79], 9);
+    assert!(classes.facts().retained_bytes > small_retained);
+    println!("ok");
+}
+""")
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "ok\n")
+}
+// Rust: tests/allocator_families.rs:341
+#Test("fixed_uses_one_borrowed_buffer_for_payload_alignment_and_reverse_drop_metadata") {
+    if !common.have_rustc() { return }
+    ran :: compile_rust_harness("""
+use std::sync::Mutex;
+static DROPS: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+struct Dropped(usize);
+impl Drop for Dropped { fn drop(&mut self) { DROPS.lock().unwrap().push(self.0); } }
+#[repr(align(64))]
+struct Aligned(u8);
+fn main() {
+    let mut bytes = [0u8; 256];
+    let mut fixed = jet_mem::JetFixed::over(&mut bytes);
+    let aligned = fixed.alloc(Aligned(7)) as *mut Aligned as usize;
+    let _first = fixed.alloc(Dropped(1));
+    let _second = fixed.alloc(Dropped(2));
+    assert_eq!(aligned % 64, 0);
+    let before = fixed.facts();
+    assert_eq!(before.retained_bytes, 256);
+    fixed.reset();
+    assert_eq!(*DROPS.lock().unwrap(), vec![2, 1]);
+    assert_eq!(fixed.facts().retained_bytes, 256);
+    assert_eq!(fixed.facts().live_allocations, 0);
+    let mut try_bytes = [0u8; 40];
+    let try_fixed = jet_mem::JetFixed::over(&mut try_bytes);
+    assert_eq!(*try_fixed.try_alloc(7u64).unwrap(), 7);
+    let error = match try_fixed.try_alloc(9u64) {
+        Ok(_) => panic!("fallible Fixed allocation unexpectedly succeeded"),
+        Err(error) => error,
+    };
+    assert_eq!(error.requested_bytes, 8);
+    assert_eq!(error.allocator, "Fixed");
+    drop(try_fixed);
+    let exhausted = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _ = fixed.alloc([0u8; 233]);
+    }));
+    assert!(exhausted.is_err());
+    assert_eq!(fixed.facts().live_allocations, 0);
+    assert_eq!(jet_observe_allocator_memory().0, 256);
+    drop(fixed);
+    assert_eq!(jet_observe_allocator_memory().0, 0);
+    println!("ok");
+}
+""")
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "ok\n")
+}
+// Rust: tests/allocator_families.rs:400
+#Test("fixed_source_synthesizes_inline_backing_and_rejects_dynamic_or_live_reset") {
+    output :: compile_jet("""
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128 + 128)
+    value :: fixed.alloc(7)
+    print(value)
+    close(^fixed)
+}
+""").expect("positive comptime Fixed size should compile")
+    user :: common.strip_vetted_prelude_modules(&output.rust)
+    assert(user.contains("[std::mem::MaybeUninit::<u8>::uninit(); 256]"), "{user}")
+    assert(user.contains("JetFixed::over_uninit"), "{user}")
+    assert(user.contains("impl __jet_Close for jet_mem::JetFixed"), "{user}")
+    over_src :: """
+use core.mem
+fn run() {
+    bytes := [U8#128]{ uninit }
+    fixed :: mem.Fixed.over(&bytes)
+    value :: fixed.alloc(9)
+    print(value)
+    close(^fixed)
+}
+"""
+    over :: compile_jet(over_src).expect("Fixed.over should accept one mutable inline byte array")
+    over_user :: common.strip_vetted_prelude_modules(&over.rust)
+    assert(over_user.contains("JetFixed::over_uninit_fixed(&mut __jet_bytes)"), "{over_user}")
+    if common.have_rustc() {
+        (code, stdout, stderr) :: run_jet("fixed_over", over_src)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, "9\n")
+    }
+    dynamic :: compile_jet("""
+use core.mem
+fn make(size: Int) {
+    fixed :: mem.Fixed.new(size: size)
+    close(^fixed)
+}
+""").expect_err("runtime Fixed sizes cannot synthesize inline backing")
+    assert(dynamic.iter().any(fn(code) { code == "E0103" }), "{dynamic:?}")
+    live_reset :: compile_jet("""
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128)
+    value :: fixed.alloc(1)
+    &fixed.reset()
+    print(value)
+}
+""").expect_err("reset cannot invalidate a live Fixed allocation view")
+    assert(live_reset.iter().any(fn(code) { code == "E0212" }), "{live_reset:?}")
+    stored :: compile_jet("""
+use core.mem
+fn run() {
+    fixed :: mem.Fixed.new(size: 128)
+    handles :: [fixed]
+    print(handles.len())
+}
+""").expect_err("Fixed handles cannot be stored in aggregates")
+    assert(stored.iter().any(fn(code) { code == "E0631" }), "{stored:?}")
+}
+// Rust: tests/allocator_families.rs:492
+#Test("allocator_close_impls_require_resolved_core_constructors") {
+    output :: compile_jet("""
+use core.mem as mem
+fn run() {
+    text := "mem.Fixed.new(size: 128); notmem.Fixed.new()"
+    // mem.Fixed.new(size: 128)
+    // notmem.Fixed.new()
+    print(text)
+}
+""").expect("non-Core allocator lookalikes should compile")
+    user :: common.strip_vetted_prelude_modules(&output.rust)
+    assert(!user.contains("impl __jet_Close for jet_mem::"), "{user}")
+}
+// Rust: tests/allocator_families.rs:511
+#Test("fixed_over_exclusively_borrows_one_inline_byte_array") {
+    borrowed :: compile_jet("""
+use core.mem
+fn run() {
+    bytes := [U8#8]{ uninit }
+    fixed :: mem.Fixed.over(&bytes)
+    bytes[0] = 1
+    close(^fixed)
+}
+""").expect_err("the backing array stays exclusively borrowed while Fixed is live")
+    assert(borrowed.iter().any(fn(code) { code == "E0212" }), "{borrowed:?}")
+}
+// Rust: tests/allocator_families.rs:528
+#Test("allocator_handles_are_thread_confined") {
+    src :: """
+use core.mem
+fn run() {
+    arena :: mem.Arena.new()
+    handle :: task {
+        value :: arena.alloc(1)
+        print(value)
+    }
+    handle.join() ?? panic("task failed")
+}
+"""
+    diags :: compile_jet(src).expect_err("allocators must not cross task boundaries")
+    assert(diags.iter().any(fn(code) { code == "E1102" }), "{diags:?}")
+}
+// Rust: tests/allocator_families.rs:545
+#Test("pool_ids_reuse_slots_without_reviving_stale_generations") {
+    if !common.have_rustc() { return }
+    src :: """
+struct Item { value: Int }
+fn run() {
+    pool := Pool<Item>.new()
+    first :: pool.add(Item{ value: 10 })
+    stale :: first
+    removed :: pool.remove(first)
+    second :: pool.add(Item{ value: 20 })
+    if removed == Val(item) { print(item.value) } else { print(-1) }
+    print(stale == second)
+    print(pool[second].value)
+}
+"""
+    (code, stdout, stderr) :: run_jet("pool_generation", src)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, "10\nfalse\n20\n")
+}
+// Rust: tests/allocator_families.rs:573
+#Test("stale_pool_id_panics_instead_of_reading_reused_slot") {
+    if !common.have_rustc() { return }
+    src :: """
+struct Item { value: Int }
+fn run() {
+    pool := Pool<Item>.new()
+    first :: pool.add(Item{ value: 10 })
+    stale :: first
+    _removed :: pool.remove(first)
+    _second :: pool.add(Item{ value: 20 })
+    print(pool[stale].value)
+}
+"""
+    (code, _stdout, stderr) :: run_jet("pool_stale", src)
+    assert_eq(code, 70, "{stderr}")
+    assert(stderr.contains("no longer refers to a live value"), "{stderr}")
+}
+// Rust: tests/allocator_families.rs:598
+#Test("default_dev_runs_allocator_constructors_natively") {
+    if !common.have_rustc() { return }
+    src :: """
+use core.mem
+fn run() {
+    arena :: mem.Arena.new(capacity: 32)
+    a :: arena.alloc(1)
+    print(a)
+    &arena.reset()
+    again :: arena.alloc(2)
+    print(again)
+    bump :: mem.Bump.new(capacity: 32)
+    b :: bump.alloc(3)
+    print(b)
+    pool :: mem.Pool.new(slots: 2)
+    p :: pool.alloc(4)
+    print(p)
+    fixed :: mem.Fixed.new(size: 128)
+    f :: fixed.alloc(5)
+    print(f)
+}
+"""
+    root :: temp_dir("dev")
+    fs.create_dir_all(&root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(&path, src).unwrap()
+    bundle := Loader.load_entry(path.to_str().unwrap()).unwrap()
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(fn(d) { d.severity == Diagnostics.Severity.Error }).collect()
+    assert(errors.is_empty(), "{errors:?}")
+    // Retired resident-JIT/deopt representation assertions become native tier behavior.
+    tir_support.assert_tiers_agree("allocator_constructors", src, "1\n2\n3\n4\n5\n")
+    (code, stdout, _) :: run_jet("pool_generation", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1\n2\n3\n4\n5\n")
+}
+// Rust: tests/allocator_families.rs:665
+#Test("try_allocation_example_reports_exhaustion_as_a_value") {
+    src :: fs.read_to_string("Examples/features/memory/try_allocation.jet").unwrap()
+    expected :: fs.read_to_string("Examples/features/expected/memory/try_allocation.out").unwrap()
+    if common.have_rustc() {
+        (code, stdout, stderr) :: run_jet("try_allocation", src)
+        assert_eq(code, 0, "{stderr}")
+        assert_eq(stdout, expected)
+        dir :: temp_dir("try_allocation_dev")
+        fs.create_dir_all(&dir).unwrap()
+        path :: dir.join("main.jet")
+        fs.write(&path, src).unwrap()
+        tir_support.assert_tiers_agree("try_allocation_dev", src, expected)
+        _ :: fs.remove_dir_all(&dir)
+    } else {
+        _ :: compile_jet(src).expect("try allocation example should pass the front end")
+    }
+}
+// Rust: tests/allocator_families.rs:706
+#Test("fault_scheduler_reaches_allocator_try_alloc") {
+    if !common.have_rustc() { return }
+    ran :: compile_rust_harness("""
+fn main() {
+    let (result, injected, counts) = jet_fault_run_once(
+        &["FS.Write"], Some(1), 1, &mut || {
+            let mut bytes = [0u8; 64];
+            let fixed = jet_mem::JetFixed::over(&mut bytes);
+            match fixed.try_alloc(7u64) {
+                Ok(_) => Err("allocator fault was not injected".to_string()),
+                Err(_) => Ok(()),
+            }
+        },
+    ).unwrap();
+    assert!(result.is_ok());
+    assert!(injected);
+    assert_eq!(counts[1], 1);
+    println!("ok");
+}
+""")
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "ok\n")
+}
+// Rust: tests/allocator_families.rs:743
+#Test("program_allocator_fact_selects_counting_wrapper_for_aot") {
+    entry :: write_program_allocator_project("program_allocator_counting", Val("mem.Counting.over(mem.Heap, cap: 2.kb)"))
+    bundle := Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    assert(bundle.program_allocator == TargetMachine.AllocatorPolicy.Counting { cap: Val(TargetMachine.ByteSize { bytes: 2048 }) })
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(fn(diagnostic) { diagnostic.severity == Diagnostics.Severity.Error }).collect()
+    assert(errors.is_empty(), "{errors:?}")
+    rust :: emit_native_aot(&bundle)
+    assert(rust.contains("static __JET_PROGRAM_ALLOCATOR: JetProgramAllocator = JetProgramAllocator::counting(2048)"))
+}
+// Rust: tests/allocator_families.rs:767
+#Test("missing_program_allocator_keeps_hidden_system_heap") {
+    entry :: write_program_allocator_project("program_allocator_default", nil)
+    bundle := Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    assert_eq(bundle.program_allocator, TargetMachine.AllocatorPolicy.HostedDefault)
+    errors :: Sema.check_bundle(&bundle, Sema.CompileMode.Run).into_iter().filter(fn(diagnostic) { diagnostic.severity == Diagnostics.Severity.Error }).collect()
+    assert(errors.is_empty(), "{errors:?}")
+    rust :: emit_native_aot(&bundle)
+    assert(!rust.contains("__JET_PROGRAM_ALLOCATOR"))
+}
+// Rust: tests/allocator_families.rs:784
+#Test("invalid_program_allocator_fact_is_a_teaching_diagnostic") {
+    entry :: write_program_allocator_project("program_allocator_invalid", Val("mem.Mystery"))
+    diagnostics :: Loader.load_entry(entry.to_str().unwrap()).unwrap_err()
+    diagnostic :: diagnostics.iter().find(fn(diagnostic) { diagnostic.code == "E1206" }).expect("invalid allocator fact must use the registered manifest diagnostic")
+    assert_eq(diagnostic.what, "Invalid hosted program allocator")
+    assert(diagnostic.fix.contains("mem.Counting.over"))
+}
+// Rust: tests/allocator_families.rs:796
+#Test("program_allocator_kernel_caps_fallible_allocations") {
+    if !common.have_rustc() { return }
+    ran :: compile_program_allocator_harness("""
+use std::alloc::{GlobalAlloc, Layout};
+fn main() {
+    let allocator = allocator::JetProgramAllocator::counting(64);
+    let first_layout = Layout::from_size_align(48, 16).unwrap();
+    let second_layout = Layout::from_size_align(32, 16).unwrap();
+    let first = unsafe { GlobalAlloc::alloc(&allocator, first_layout) };
+    assert!(!first.is_null());
+    let exhausted = unsafe { GlobalAlloc::alloc(&allocator, second_layout) };
+    assert!(exhausted.is_null());
+    let facts = allocator.facts();
+    assert_eq!(facts.allocations, 1);
+    assert_eq!(facts.requested_bytes, 48);
+    assert_eq!(facts.live_bytes, 48);
+    assert_eq!(facts.high_water_bytes, 48);
+    unsafe { GlobalAlloc::dealloc(&allocator, first, first_layout) };
+    assert_eq!(allocator.facts().live_bytes, 0);
+    println!("ok");
+}
+""")
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "ok\n")
+}
+// Rust: tests/allocator_families.rs:832
+#Test("hosted_allocator_reservations_are_cumulative_and_released") {
+    if !common.have_rustc() { return }
+    ran :: compile_program_allocator_harness("""
+fn main() {
+    let ((), facts) = allocator::jet_with_host_program_allocator(Some(64), || {
+        assert!(allocator::jet_host_program_allocator_try_reserve(48));
+        assert!(!allocator::jet_host_program_allocator_try_reserve(32));
+        assert_eq!(allocator::JET_HOST_PROGRAM_ALLOCATOR.facts().live_bytes, 48);
+    });
+    assert_eq!(facts.live_bytes, 0);
+    assert_eq!(allocator::JET_HOST_PROGRAM_ALLOCATOR.facts().live_bytes, 0);
+    println!("ok");
+}
+""")
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "ok\n")
+}
+// Rust: tests/allocator_families.rs:859
+#Test("program_allocator_default_blocks_survive_counting_swap_without_tracking") {
+    if !common.have_rustc() { return }
+    ran :: compile_program_allocator_harness("""
+use std::alloc::{GlobalAlloc, Layout};
+fn main() {
+    let allocator = allocator::JetProgramAllocator::system();
+    let layout = Layout::from_size_align(32, 16).unwrap();
+    let default_block = unsafe { GlobalAlloc::alloc(&allocator, layout) };
+    assert!(!default_block.is_null());
+    assert_eq!(allocator.facts().allocations, 0);
+    let previous = allocator.configure_counting(64);
+    let counted_block = unsafe { GlobalAlloc::alloc(&allocator, layout) };
+    assert!(!counted_block.is_null());
+    assert_eq!(allocator.facts().live_bytes, 32);
+    unsafe { GlobalAlloc::dealloc(&allocator, default_block, layout) };
+    assert_eq!(allocator.facts().live_bytes, 32);
+    allocator.restore(previous);
+    unsafe { GlobalAlloc::dealloc(&allocator, counted_block, layout) };
+    assert_eq!(allocator.facts().live_bytes, 0);
+    println!("ok");
+}
+""")
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "ok\n")
+}
+// Rust: tests/allocator_families.rs:897
+#Test("program_allocator_example_matches_aot_jit_and_interpreter") {
+    if !common.have_rustc() { return }
+    source_project :: fs.canonicalize("Examples/features/memory/program_allocator").unwrap()
+    staged :: common.ProjectScratch.for_project(&source_project, "program-allocator")
+    expected :: fs.read_to_string("Examples/features/expected/memory/program_allocator.out").unwrap()
+    for (name, args) in [
+        ("jit", ["run", "run.jet"]),
+        ("interpreter", ["run", "--interpret", "run.jet"]),
+        ("aot", ["run", "--release", "run.jet"])
+    ] {
+        output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(args).current_dir(&staged.path)
+            .env("NO_COLOR", "1").env("JET_RUN_CACHE_DIR", temp_dir("program_allocator_{name}")).output().unwrap()
+        assert(output.status.success(), "{name} failed:\n{String.from_utf8_lossy(&output.stderr)}")
+        assert_eq(String.from_utf8_lossy(&output.stdout), expected, "{name}")
+        assert(!source_project.join(".jet").exists(), "{name} created `.jet` in the checked-in allocator project")
+    }
+}

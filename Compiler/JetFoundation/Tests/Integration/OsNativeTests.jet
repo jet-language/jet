@@ -1,0 +1,126 @@
+use OsNative.*
+use std.[env, fs, thread]
+use std.io.BufReader
+use std.process.[Command, Stdio]
+use std.sync.mpsc
+use std.time.Duration
+use core.sys as sys
+
+// Rust: tests/os_native.rs:281
+#Test("termios_ffi_layout_matches_target_header_and_shared_by_native_tiers") {
+    if sys.selected_family() != "unix" { return }
+    if !termios_target_supported() {
+        eprintln("not applicable: Term.rs rejects target_os={sys.selected_os()}")
+        return
+    }
+    dir :: temp_dir("termios-layout")
+    (c_target, c_values) :: run_c_header_layout_probe(&dir)
+    assert_eq(c_target, sys.selected_os(), "the C probe and Rust test must run for the same target")
+    assert_ne(c_target, "unsupported", "C header probe target is unsupported")
+    rust_values :: run_rust_layout_probe(&dir)
+    keys :: ["size", "align", "flag_size", "c_iflag", "c_oflag", "c_cflag", "c_lflag", "c_line", "c_cc", "c_ispeed", "c_ospeed", "nccs", "vmin", "vtime", "tcsanow", "echo", "icanon", "line_size", "speed_size", "cc_size"]
+    assert_eq(c_values.len(), keys.len(), "C probe metric set drifted")
+    assert_eq(rust_values.len(), keys.len(), "Rust probe metric set drifted")
+    for key in keys { assert_eq(c_values.get(key), rust_values.get(key), "Term.rs disagrees with <termios.h> for {key}") }
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/os_native.rs:690
+#Test("termios_pty_mode_and_restore_are_hostile_proven_across_native_tiers") {
+    if sys.selected_family() != "unix" { return }
+    if !termios_target_supported() {
+        eprintln("not applicable: Term.rs rejects target_os={sys.selected_os()}")
+        return
+    }
+    dir :: temp_dir("termios-pty-layout")
+    (_, layout) :: run_c_header_layout_probe(&dir)
+    _ :: fs.remove_dir_all(&dir)
+    for mode in ["O2", "O1", "O0"] {
+        run_termios_pty_case(mode, TERM_PTY_SUCCESS_SOURCE, false, &layout)
+        run_termios_pty_case(mode, TERM_PTY_FAILURE_SOURCE, true, &layout)
+    }
+}
+
+// Rust: tests/os_native.rs:708
+#Test("process_pty_reuses_the_canonical_termios_abi") {
+    // Peer Rust source assertions retain the canonical ABI ownership contract.
+    root :: env.manifest_dir()
+    term :: fs.read_to_string(root.join("crates/jet-codegen/src/Prelude/Term.rs")).unwrap()
+    pty :: fs.read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs")).unwrap()
+    assert_eq(term.matches("struct Termios").count(), 1, "the canonical terminal Prelude must own the only Termios definition")
+    assert(!pty.contains("Termios") && !pty.contains("tcgetattr") && !pty.contains("tcsetattr") && !pty.contains("cfmakeraw"), "the PTY backend must not carry a second termios ABI")
+    assert(term.contains("pub(super) fn configure_fd(fd: i32, raw: bool)") && term.contains("fn cfmakeraw(termios: *mut u8)") && pty.contains("super::super::jet_term_configure_fd(slave.as_raw_fd(), raw)?;"), "PTY configuration must use the canonical Termios seam")
+}
+
+// Rust: tests/os_native.rs:732
+#Test("native_os_facts_match_host_and_are_nonempty") {
+    dir :: temp_dir("facts")
+    binary :: compile(&dir, "facts", """
+use core.sys as os
+fn run() -> {
+    print(os.name())
+    print(os.family())
+    print(os.arch())
+    print(os.cpu_count() >= 1)
+    print(os.pid() >= 1)
+    print(os.hostname().len() > 0)
+    print(os.temp_dir().len() > 0)
+    print(os.executable().len() > 0)
+}
+""")
+    output :: Command.new(binary).output().unwrap()
+    assert(output.status.success(), "facts child failed: {String.from_utf8_lossy(&output.stderr)}")
+    stdout :: String.from_utf8(output.stdout).unwrap().replace("\r\n", "\n")
+    lines :: stdout.lines().collect()
+    assert_eq(lines.len(), 8, "unexpected facts output: {stdout:?}")
+    assert_eq(lines[0], sys.selected_os())
+    assert_eq(lines[1], sys.selected_family())
+    assert_eq(lines[2], sys.selected_arch())
+    assert_eq(&lines[3..], &["true", "true", "true", "true", "true"])
+}
+
+// Rust: tests/os_native.rs:771
+// GATE #4494: real POSIX signal, native thread/channel and child pipes.
+#Test("native_interrupt_runs_ordered_handlers_after_first_panics") {
+    if sys.selected_family() != "unix" { return }
+    dir :: temp_dir("interrupt")
+    binary :: compile(&dir, "interrupt", """
+use core.sys as os
+use core.process as process
+fn run() -> {
+    os.on_interrupt(() -> { panic("first handler failed") })
+    os.on_interrupt(() -> {
+        print("second")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
+}
+""")
+    child := Command.new(binary).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    (lines_tx, lines_rx) :: mpsc.channel()
+    child_stdout :: child.stdout.take().unwrap()
+    _ :: thread.spawn(fn() {
+        for line in BufReader.new(child_stdout).lines() {
+            if lines_tx.send(line).is_err() { break }
+        }
+    })
+    ready :: match lines_rx.recv_timeout(Duration.from_secs(10)) {
+        .Ok(line) -> line.unwrap()
+        .Err(error) -> {
+            _ :: child.kill()
+            _ :: child.wait()
+            panic("interrupt child did not become ready within 10 seconds: {error}")
+        }
+    }
+    assert_eq(ready, "ready")
+    #Unsafe("send SIGINT only to the real fixture child that reported ready") { assert_eq(kill(child.id() as I32, 2), 0) }
+    status :: wait_bounded(&child, "interrupt child")
+    assert(status.success(), "interrupt child failed: {status}")
+    stderr := ""
+    child.stderr.take().unwrap().read_to_string(&stderr).unwrap()
+    second :: lines_rx.recv_timeout(Duration.from_secs(1)).expect("second handler produced no output").unwrap()
+    assert_eq(second, "second")
+    assert(lines_rx.try_recv().is_err(), "unexpected handler output")
+    assert(stderr.contains("panic: first handler failed"), "first handler panic lost its interrupt boundary diagnostic: {stderr:?}")
+}

@@ -1,0 +1,466 @@
+use std.[fs, env]
+use std.process.[Command, Stdio]
+use core.sys.target
+use jet
+use jet.Diagnostics.ReportPath
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.Common.Scratch
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.EngineDispatch.[real_jet, isolated_jet, write_script, output_with_retry, hook_commands]
+// GATE #4494: actual executable dispatch, filesystem fixtures and native AOT test execution.
+// GATE #4483: all Unix tests dispatch using selected target family.
+
+// Rust: tests/engine_dispatch.rs:66
+#Test("missing_engine_binary_is_e1228") {
+    if target.selected_family() != "unix" { return }
+    jet_dir :: Scratch.new("missing-jet")
+    jet_bin :: isolated_jet(&jet_dir)
+    empty_path_dir :: Scratch.new("missing-path")
+    out :: output_with_retry(Command.new(&jet_bin).arg("env").env("PATH", &empty_path_dir.path))
+    assert_eq(out.status.code(), Val(1), "engine-missing is USER_ERROR")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E1228"), "expected E1228 in stderr: {stderr}")
+    assert(stderr.contains("jetpack"), "names the missing engine: {stderr}")
+}
+// Rust: tests/engine_dispatch.rs:91
+#Test("version_skew_is_e1227") {
+    if target.selected_family() != "unix" { return }
+    jet_dir :: Scratch.new("skew-jet")
+    jet_bin :: isolated_jet(&jet_dir)
+    path_dir :: Scratch.new("skew-path")
+    fake_jetpack :: path_dir.join("jetpack")
+    write_script(&fake_jetpack, "if [ \"$1\" = \"--engine-protocol\" ]; then echo \"0.0.0-skew-test\"; exit 0; fi\nexit 0")
+    out :: output_with_retry(Command.new(&jet_bin).arg("env").env("PATH", &path_dir.path))
+    assert_eq(out.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E1227"), "expected E1227 in stderr: {stderr}")
+    assert(stderr.contains("0.0.0-skew-test"), "names the mismatched version: {stderr}")
+}
+// Rust: tests/engine_dispatch.rs:124
+#Test("engine_too_old_for_handshake_is_e1227") {
+    if target.selected_family() != "unix" { return }
+    jet_dir :: Scratch.new("oldengine-jet")
+    jet_bin :: isolated_jet(&jet_dir)
+    path_dir :: Scratch.new("oldengine-path")
+    fake_jetpack :: path_dir.join("jetpack")
+    write_script(&fake_jetpack, "echo \"jetpack: unknown flag $1\" >&2\nexit 2")
+    out :: output_with_retry(Command.new(&jet_bin).arg("env").env("PATH", &path_dir.path))
+    assert_eq(out.status.code(), Val(1))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E1227"), "expected E1227 in stderr: {stderr}")
+}
+// Rust: tests/engine_dispatch.rs:152
+#Test("exit_code_propagates_from_engine") {
+    if target.selected_family() != "unix" { return }
+    jet_bin_version :: env.build("CARGO_PKG_VERSION")
+    jet_dir :: Scratch.new("exitcode-jet")
+    jet_bin :: isolated_jet(&jet_dir)
+    path_dir :: Scratch.new("exitcode-path")
+    fake_jetpack :: path_dir.join("jetpack")
+    write_script(&fake_jetpack, "if [ \"$1\" = \"--engine-protocol\" ]; then echo \"{jet_bin_version}\"; exit 0; fi\nexit 37")
+    out :: output_with_retry(Command.new(&jet_bin).arg("env").env("PATH", &path_dir.path))
+    assert_eq(out.status.code(), Val(37), "jet must return the engine's exit code verbatim")
+}
+// Rust: tests/engine_dispatch.rs:181
+#Test("json_flag_forwarded_verbatim_to_engine") {
+    if target.selected_family() != "unix" { return }
+    jet_bin_version :: env.build("CARGO_PKG_VERSION")
+    jet_dir :: Scratch.new("json-jet")
+    jet_bin :: isolated_jet(&jet_dir)
+    path_dir :: Scratch.new("json-path")
+    fake_jetpack :: path_dir.join("jetpack")
+    log :: path_dir.join("argv.log")
+    write_script(&fake_jetpack, "if [ \"$1\" = \"--engine-protocol\" ]; then echo \"{jet_bin_version}\"; exit 0; fi\necho \"$@\" > \"{log.display()}\"\nexit 0")
+    out :: output_with_retry(Command.new(&jet_bin).arg("env").arg("--json").env("PATH", &path_dir.path))
+    assert_eq(out.status.code(), Val(0))
+    logged :: fs.read_to_string(&log).unwrap_or_default()
+    assert(logged.contains("--json"), "--json must reach the engine verbatim, got argv: {logged}")
+}
+// Rust: tests/engine_dispatch.rs:216
+#Test("typo_of_engine_verb_still_suggests_it") {
+    out :: output_with_retry(Command.new(real_jet()).arg("envx"))
+    assert_eq(out.status.code(), Val(2), "unknown command is USAGE")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E2101"), "expected E2101 in stderr: {stderr}")
+    assert(stderr.contains("env"), "did-you-mean should suggest `env`: {stderr}")
+}
+// Rust: tests/engine_dispatch.rs:235
+#Test("real_engine_pair_passes_handshake") {
+    out :: output_with_retry(Command.new(real_jet()).arg("env").env("NO_COLOR", "1").stdin(Stdio.null()))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(!stderr.contains("E1227") && !stderr.contains("E1228"), "the co-built jet/jetpack pair must pass their own handshake: {stderr}")
+}
+
+// Rust: tests/error_conversions.rs:6
+#Test("declared_conversion_reaches_default_error") {
+    source :: """
+#Error
+enum StoreErr { Missing }
+impl StoreErr -> Err { return Err("missing") }
+fn read_store() -> Int StoreErr! { return Err(StoreErr.Missing) }
+fn get_user() -> Int { return Ok(read_store()) }
+fn run() -> { get_user() }
+"""
+    compiled :: jet.compile(source).expect("declared StoreErr -> Err must compile")
+    assert(compiled.rust.contains("errconv_StoreErr_to_Err"))
+}
+// Rust: tests/error_conversions.rs:32
+#Test("conversion_names_with_to_preserve_type_identity_and_symbol_uniqueness") {
+    if !common.have_rustc() { eprintln("rustc unavailable; skipping AOT conversion regression"); return }
+    left :: jet.Sema.error_conv_fn_name("Source_to_Left", "Target")
+    right :: jet.Sema.error_conv_fn_name("Source", "Left_to_Target")
+    assert_ne(left, right, "error conversion helper names must be injective")
+    source :: """
+#Error
+struct SourceErr { message: String }
+#Error
+struct TargetErr { message: String }
+impl SourceErr -> TargetErr { return TargetErr{message: "converted from source"} }
+impl TargetErr -> Err { return Err("converted from target") }
+fn read() -> Int SourceErr! { return Err(SourceErr{message: "source failure"}) }
+fn middle() -> Int TargetErr! {
+    value :: read()
+    return Ok(value)
+}
+fn outer() -> Int {
+    value :: middle()
+    return Ok(value)
+}
+fn run() -> { outer() }
+"""
+    (status, stdout, stderr) :: common.build_and_run("jet_error_conversion", "names_with_to", source)
+    assert_eq(status, 1, "expected converted error, got: {stderr}")
+    assert(stdout.is_empty(), "unexpected stdout: {stdout}")
+    assert(stderr.contains("type: TargetErr"), "converted error lost its source family: {stderr}")
+    assert(stderr.contains("conversion: TargetErr -> Err"), "converted error lost its conversion trail: {stderr}")
+}
+// Rust: tests/error_conversions.rs:100
+#Test("foreign_source_may_target_default_error") {
+    source :: """
+impl String -> Err { return Err(self) }
+fn run() -> {}
+"""
+    jet.compile(source).expect("foreign String source may convert into default Err")
+}
+// Rust: tests/error_conversions.rs:112
+#Test("declared_conversion_reaches_typed_error") {
+    source :: """
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+impl SourceErr -> TargetErr { return TargetErr.One }
+fn read() -> Int SourceErr! { return Err(SourceErr.One) }
+fn outer() -> Int TargetErr! {
+    value :: read()
+    return Ok(value)
+}
+fn run() -> TargetErr! { outer() }
+"""
+    compiled :: jet.compile(source).expect("declared typed conversion must compile")
+    assert(compiled.rust.contains("errconv_SourceErr_to_TargetErr"))
+}
+// Rust: tests/error_conversions.rs:141
+#Test("missing_typed_conversion_reports_e2404") {
+    source :: """
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+fn read() -> Int SourceErr! { return Err(SourceErr.One) }
+fn run() -> Int TargetErr! {
+    value :: read()
+    return Ok(value)
+}
+"""
+    diagnostics :: jet.compile(source).expect_err("missing typed conversion must be rejected")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E2404"), "expected E2404, got {diagnostics:Debug}")
+}
+// Rust: tests/error_conversions.rs:167
+#Test("missing_typed_conversion_preserves_helper_provenance") {
+    source :: include_str("tests/ui/e2392_linked_cascade.jet")
+    diagnostics :: jet.compile(source).expect_err("the linked conversion fixture must be rejected")
+    e2404 :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E2404").expect("linked conversion fixture must contain E2404")
+    detail :: e2404.detail.as_deref().expect("E2404 must expose provenance detail")
+    for expected in ["failure-domain:load_row|SourceErr|TargetErr", "callee: load_row", "effective contract: explicit !SourceErr", "caller contract: explicit !TargetErr"] {
+        assert(detail.contains(expected), "E2404 provenance missing {expected:Debug}: {detail}")
+    }
+}
+// Rust: tests/error_conversions.rs:193
+#Test("conversion_cascade_links_same_span_root_and_orders_it_first") {
+    source :: include_str("tests/ui/e2392_linked_cascade.jet")
+    diagnostics :: jet.compile(source).expect_err("the linked conversion fixture must be rejected")
+    root :: diagnostics.iter().position((diagnostic) -> diagnostic.code == "E0104").expect("wrong-arity root must be retained")
+    dependent :: diagnostics.iter().position((diagnostic) -> diagnostic.code == "E2404").expect("conversion dependent must be retained")
+    assert(root < dependent, "root diagnostics must precede dependents: {diagnostics:Debug}")
+    root_span :: diagnostics[root].span
+    causes :: &diagnostics[dependent].cause
+    assert(causes.iter().any((cause) -> cause.code == "E0104" && cause.span == root_span), "E2404 must link the same-span E0104 root: {diagnostics:Debug}")
+    json :: jet.render_all_json(&ReportPath.from_process("e2392_linked_cascade.jet"), source, &diagnostics)
+    lines :: json.lines().collect()
+    assert(lines.iter().any((line) -> line.contains("\"code\":\"E0104\"") && line.contains("\"cause\":[],\"clears\":1")), "JSON must expose the root and its dependent count: {json}")
+    assert(lines.iter().any((line) -> line.contains("\"code\":\"E2404\"") && line.contains("\"cause\":[\"E0104\"]")), "JSON must expose the linked cause chain: {json}")
+}
+// Rust: tests/error_conversions.rs:241
+#Test("repeated_conversion_sites_dedupe_but_independent_roots_remain") {
+    source :: include_str("tests/ui/e2392_root_cascade.jet")
+    diagnostics :: jet.compile(source).expect_err("the root cascade fixture must be rejected")
+    mismatches :: diagnostics.iter().filter((diagnostic) -> diagnostic.code == "E2404").collect()
+    assert_eq(mismatches.len(), 2, "five repeated sites must collapse while the independent domain remains: {diagnostics:Debug}")
+    assert(mismatches[0].detail.as_deref().is_some_and((detail) -> detail.starts_with("failure-domain:load_row|SourceErr|TargetErr")), "first retained root must be load_row's domain: {diagnostics:Debug}")
+    assert(mismatches[1].detail.as_deref().is_some_and((detail) -> detail.starts_with("failure-domain:load_other|OtherSourceErr|OtherTargetErr")), "independent load_other root must remain: {diagnostics:Debug}")
+    assert(mismatches.iter().all((diagnostic) -> diagnostic.cause.is_empty()), "independent failure domains must not be linked to one another: {diagnostics:Debug}")
+}
+// Rust: tests/error_conversions.rs:279
+#Test("seeded_error_cascade_metric_keeps_one_first_root_per_domain") {
+    source :: include_str("tests/ui/e2392_root_cascade.jet")
+    diagnostics :: jet.compile(source).expect_err("the seeded cascade fixture must be rejected")
+    assert_eq(diagnostics.len(), 2, "the seeded witness must emit only its two independent roots: {diagnostics:Debug}")
+    emitted :: diagnostics.iter().filter((diagnostic) -> diagnostic.code == "E2404").count()
+    assert_eq(emitted, 2, "five load_row sites plus two independent load_other sites must emit one root per domain: {diagnostics:Debug}")
+    seeded :: diagnostics.iter().filter((diagnostic) -> diagnostic.detail.as_deref().is_some_and((detail) -> detail.starts_with("failure-domain:load_row|"))).collect()
+    assert_eq(seeded.len(), 1, "the seeded helper must emit one report for five repeated sites: {diagnostics:Debug}")
+    first :: diagnostics.first().expect("the seeded cascade must emit a diagnostic")
+    assert_eq(first.code, "E2404")
+    assert(first.what.contains("from `load_row`"), "the first emitted report must name the seeded helper: {diagnostics:Debug}")
+    assert(first.cause.is_empty(), "the first report must be a root: {diagnostics:Debug}")
+}
+// Rust: tests/error_conversions.rs:325
+#Test("fixing_the_named_helper_domain_clears_all_repeated_sites") {
+    source :: """
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+fn fetch() -> Int SourceErr! { return Err(SourceErr.One) }
+fn run() -> Int TargetErr! {
+    fetch()
+    fetch()
+    fetch()
+    fetch()
+    fetch()
+    return Ok(0)
+}
+"""
+    diagnostics :: jet.compile(source).expect_err("the repeated domain must be rejected")
+    assert_eq(diagnostics.len(), 1, "one seeded bad helper feeding five sites must emit one report: {diagnostics:Debug}")
+    first :: diagnostics.first().expect("the seeded report must exist")
+    assert_eq(first.code, "E2404")
+    assert(first.what.contains("from `fetch`"), "{first:Debug}")
+    assert(first.cause.is_empty(), "the seeded report must be root-first: {first:Debug}")
+    mismatches :: diagnostics.iter().filter((diagnostic) -> diagnostic.code == "E2404").collect()
+    assert_eq(mismatches.len(), 1, "one helper root must represent five sites")
+    assert(mismatches[0].detail.as_deref().is_some_and((detail) -> detail.contains("callee: fetch")))
+    fixed :: source.replacen("fn fetch() -> Int SourceErr!", "fn fetch() -> Int TargetErr!", 1).replacen("Err(SourceErr.One)", "Err(TargetErr.One)", 1)
+    jet.compile(&fixed).expect("changing the named helper domain must clear every site")
+}
+// Rust: tests/error_conversions.rs:375
+#Test("failed_propagation_poisons_derived_bindings_without_unknown_cascade") {
+    source :: """
+#Error
+enum SourceErr { One }
+#Error
+enum TargetErr { One }
+fn fetch() -> [U8] SourceErr! { return Err(SourceErr.One) }
+fn width(bytes: [U8]) -> Int Never! { bytes.len() }
+fn load() -> Int TargetErr! {
+    raw :: fetch()
+    owned :: ~raw
+    size :: owned.len() + 1
+    doubled :: size * 2
+    if width(owned) != doubled -> return Ok(1)
+    count := size
+    count = count + 1
+    return Ok(0)
+}
+fn run() -> { print(load() ?? 0) }
+"""
+    diagnostics :: jet.compile(source).expect_err("the failure-domain mismatch must be rejected")
+    assert_eq(diagnostics.iter().map((diagnostic) -> diagnostic.code.as_str()).collect(), ["E2404"], "only the root mismatch may be reported: {diagnostics:Debug}")
+}
+// Rust: tests/error_conversions.rs:418
+#Test("typed_foreign_target_keeps_the_orphan_rule") {
+    source :: """
+impl Int -> String { return "number" }
+fn run() -> {}
+"""
+    diagnostics :: jet.compile(source).expect_err("foreign typed target must be rejected")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E2406"))
+}
+// Rust: tests/error_conversions.rs:433
+#Test("declared_default_conversion_reaches_web_artifact") {
+    source :: """
+#Error
+enum StoreErr { Missing }
+impl StoreErr -> Err { return Err("store unavailable") }
+fn read_store() -> Int StoreErr! { return Err(StoreErr.Missing) }
+fn get_user() -> Int {
+    value :: read_store()
+    return Ok(value)
+}
+#Target(Wasm)
+fn run() -> { value :: get_user() }
+"""
+    output :: jet.compile_web_with_path(source, "default_error_conversion_web.jet").expect("declared default conversion must compile for web")
+    web :: output.web.expect("web target must produce artifacts")
+    assert(web.wasm_rust.contains("store unavailable"))
+    assert(web.wasm_rust.contains("errconv_StoreErr_to_Err"))
+}
+// Rust: tests/error_conversions.rs:464
+#Test("conversion_registration_does_not_depend_on_type_order") {
+    source :: """
+impl SourceErr -> TargetErr { return TargetErr.One }
+enum SourceErr { One }
+enum TargetErr { One }
+fn run() -> {}
+"""
+    jet.compile(source).expect("a local conversion may precede its type declarations")
+}
+// Rust: tests/error_conversions.rs:477
+#Test("cyclic_error_conversions_report_e2418") {
+    source :: """
+enum SourceErr { One }
+enum TargetErr { One }
+impl SourceErr -> TargetErr { return TargetErr.One }
+impl TargetErr -> SourceErr { return SourceErr.One }
+fn run() -> {}
+"""
+    diagnostics :: jet.compile(source).expect_err("cyclic conversions must be rejected")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E2418"))
+}
+// Rust: tests/error_conversions.rs:494
+#Test("branched_error_conversions_report_e2419") {
+    source :: """
+enum RootErr { One }
+enum LeftErr { One }
+enum RightErr { One }
+enum TargetErr { One }
+impl RootErr -> LeftErr { return LeftErr.One }
+impl RootErr -> RightErr { return RightErr.One }
+impl LeftErr -> TargetErr { return TargetErr.One }
+impl RightErr -> TargetErr { return TargetErr.One }
+fn run() -> {}
+"""
+    diagnostics :: jet.compile(source).expect_err("ambiguous conversions must be rejected")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E2419"))
+}
+
+// Rust: tests/event_hooks.rs:106
+#Test("decision_hook_outcomes_transform_and_short_circuit") {
+    if !tir_support.have_rustc() { return }
+    (code, stdout) :: tir_support.build_and_run("decision_hook_outcomes", """
+use core.event as event
+fn show(outcome: HookOutcome<String, String>) -> {
+    if outcome == {
+        .Continue(value) -> print("continue {value}")
+        .Cancel -> print("cancel")
+        .Fail(error) -> print("fail {error}")
+    }
+}
+fn run() -> {
+    zero :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    show(zero.run("original"))
+    scope :: event.scope()
+    transformed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    transformed.on_priority(scope, 10, (value: String) -> {
+        print("first {value}")
+        HookDecision.Transform("{value}-one")
+    })
+    transformed.on(scope, (value: String) -> {
+        print("second {value}")
+        HookDecision.Continue
+    })
+    show(transformed.run("start"))
+    cancelled :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    cancelled.on_priority(scope, 10, (value: String) -> HookDecision.Cancel)
+    cancelled.on(scope, (value: String) -> {
+        print("must not run {value}")
+        HookDecision.Continue
+    })
+    show(cancelled.run("stop"))
+    failed :: event.decision_hook<String, String>(HookPolicy.FirstCancelElseTransform)
+    failed.on_priority(scope, 10, (value: String) -> HookDecision.Fail("denied {value}"))
+    failed.on(scope, (value: String) -> {
+        print("must not run {value}")
+        HookDecision.Continue
+    })
+    show(failed.run("save"))
+}
+""")
+    assert_eq(code, 0)
+    assert_eq(stdout, "continue original\nfirst start\nsecond start-one\ncontinue start-one\ncancel\nfail denied save\n")
+}
+// Rust: tests/event_hooks.rs:165
+#Test("decision_hook_lifetime_order_once_mutation_and_reentrancy") {
+    if !tir_support.have_rustc() { return }
+    (code, stdout) :: tir_support.build_and_run("decision_hook_lifetime", """
+use core.event as event
+fn run() -> {
+    scope :: event.scope()
+    hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    late :: hook.on(scope, (value: Int) -> {
+        print("late {value}")
+        HookDecision.Continue
+    })
+    hook.on_priority(scope, 10, (value: Int) -> {
+        print("first {value}")
+        late.unsubscribe()
+        HookDecision.Transform(value + 1)
+    })
+    hook.once(scope, (value: Int) -> {
+        print("once {value}")
+        if value == 2 { hook.run(10) }
+        HookDecision.Continue
+    })
+    hook.on(scope, (value: Int) -> {
+        print("last {value}")
+        HookDecision.Continue
+    })
+    hook.run(1)
+    hook.run(2)
+    print("active {scope.active_count()}")
+    scope.cancel()
+    hook.run(3)
+    owned :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    if true {
+        owner :: event.scope()
+        owned.on(owner, (value: Int) -> {
+            print("leaked {value}")
+            HookDecision.Continue
+        })
+    }
+    owned.run(9)
+}
+""")
+    assert_eq(code, 0)
+    assert_eq(stdout, "first 1\nonce 2\nfirst 10\nlast 11\nlast 2\nfirst 2\nlast 3\nactive 2\n")
+}
+// Rust: tests/event_hooks.rs:222
+#Test("claude_hooks_follow_project_dir_for_hostile_paths") {
+    if target.selected_family() != "unix" { return }
+    settings_path :: OSPath.from(env.build("CARGO_MANIFEST_DIR")).join(".claude/settings.json")
+    settings :: fs.read_to_string(&settings_path).expect("Claude hook settings must be readable")
+    commands :: hook_commands(&settings)
+    script_names :: ["clean-nix-tmp.sh", "check-worktree-layout.sh", "require-clean-tree.sh"]
+    assert_eq(commands.len(), script_names.len(), "Claude settings must keep one command for each guarded hook")
+    scratch :: Scratch.new("claude-hostile-project-path")
+    project :: scratch.join("project with spaces;$(touch \"$HOOK_INJECTION_MARKER\")")
+    attacker :: scratch.join("attacker cwd")
+    project_scripts :: project.join("Tools/agent")
+    attacker_scripts :: attacker.join("Tools/agent")
+    fs.create_dir_all(&project_scripts).expect("create project hook directory")
+    fs.create_dir_all(&attacker_scripts).expect("create attacker hook directory")
+    marker :: scratch.join("claude-hook-origin")
+    injection_marker :: scratch.join("claude-hook-injected")
+    for script_name in script_names {
+        fs.write(project_scripts.join(script_name), "printf 'project\\n' >> \"$HOOK_MARKER\"\n").expect("write project hook fixture")
+        fs.write(attacker_scripts.join(script_name), "printf 'attacker\\n' >> \"$HOOK_MARKER\"\n").expect("write attacker hook fixture")
+    }
+    for script_name in script_names {
+        command :: commands.iter().find((command) -> command.contains(script_name)).unwrap_or_else(() -> panic("missing configured hook {script_name}"))
+        output :: Command.new("bash").current_dir(&attacker).args(["-c", command]).env("CLAUDE_PROJECT_DIR", &project).env("HOOK_MARKER", &marker).env("HOOK_INJECTION_MARKER", &injection_marker).stdin(Stdio.null()).output().expect("run Claude hook command")
+        assert(output.status.success(), "Claude hook {script_name} failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    }
+    assert_eq(fs.read_to_string(&marker).expect("project hook marker"), "project\nproject\nproject\n", "hooks must execute the project scripts, not cwd-relative attacker scripts")
+    assert(!injection_marker.exists(), "CLAUDE_PROJECT_DIR was reparsed as shell syntax")
+}

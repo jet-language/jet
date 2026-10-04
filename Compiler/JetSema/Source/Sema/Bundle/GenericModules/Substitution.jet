@@ -1,559 +1,335 @@
-// PORT-PENDING 2142 crates-jet-sema-src-sema-bundle-genericmodules-substitution: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:1-555
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS fn ct_value_expr(value: &crate::AST::CtValue, span: crate::Diagnostics::Span) -> Expr {
-//RS     match value {
-//RS         crate::AST::CtValue::Bool(v) => Expr::Bool(*v, span),
-//RS         crate::AST::CtValue::Int(v) => Expr::Int(*v, span, None, None),
-//RS         crate::AST::CtValue::Char(v) => Expr::Char(*v, span),
-//RS         crate::AST::CtValue::Str(v) => Expr::Str(vec![StrPart::Lit(v.clone())], span),
-//RS         crate::AST::CtValue::Enum {
-//RS             type_name,
-//RS             variant,
-//RS             args,
-//RS         } if args.is_empty() => Expr::EnumLit {
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS             variant_span: None,
-//RS             args: Vec::new(),
-//RS             leading_dot: false,
-//RS             span,
-//RS         },
-//RS         _ => unreachable!("generic-module value domain was checked before substitution"),
-//RS     }
-//RS }
-//RS pub(super) fn substitute_meta(
-//RS     meta: &mut Option<crate::AST::MetaAttr>,
-//RS     types: &HashMap<String, Type>,
-//RS     values: &HashMap<String, crate::AST::CtValue>,
-//RS ) {
-//RS     let Some(meta) = meta else {
-//RS         return;
-//RS     };
-//RS     for field in &mut meta.fields {
-//RS         match field {
-//RS             crate::AST::MetaField::Category { value, .. }
-//RS             | crate::AST::MetaField::Maturity { value, .. } => {
-//RS                 substitute_expr(value, types, values)
-//RS             }
-//RS             crate::AST::MetaField::Unknown {
-//RS                 value: Some(value), ..
-//RS             } => substitute_expr(value, types, values),
-//RS             crate::AST::MetaField::Tunable { .. }
-//RS             | crate::AST::MetaField::Unknown { value: None, .. } => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn substitute_marker(
-//RS     marker: &mut crate::AST::Marker,
-//RS     types: &HashMap<String, Type>,
-//RS     values: &HashMap<String, crate::AST::CtValue>,
-//RS ) {
-//RS     marker.args.iter_mut().for_each(|arg| {
-//RS         if let Some(expr) = arg.as_expr_mut() {
-//RS             substitute_expr(expr, types, values);
-//RS         }
-//RS     });
-//RS }
-//RS 
-//RS pub(super) fn substitute_markers(
-//RS     markers: &mut [crate::AST::Marker],
-//RS     types: &HashMap<String, Type>,
-//RS     values: &HashMap<String, crate::AST::CtValue>,
-//RS ) {
-//RS     markers
-//RS         .iter_mut()
-//RS         .for_each(|marker| substitute_marker(marker, types, values));
-//RS }
-//RS 
-//RS pub(super) fn substitute_expr(
-//RS     expr: &mut Expr,
-//RS     types: &HashMap<String, Type>,
-//RS     values: &HashMap<String, crate::AST::CtValue>,
-//RS ) {
-//RS     if let Expr::Ident(name, span) = expr {
-//RS         if let Some(value) = values.get(name) {
-//RS             *expr = ct_value_expr(value, *span);
-//RS             return;
-//RS         }
-//RS     }
-//RS     // D-META-STAGE1=B: `@` is part of the identifier, so generic-module
-//RS     // instantiation must substitute marked names by their written spelling.
-//RS     // Otherwise a generated `alias_@value` declaration leaves `@value`
-//RS     // references pointing at the template name, which is absent from the
-//RS     // instantiated comptime environment.
-//RS     if let Expr::ComptimeName { name, span, .. } = expr {
-//RS         if let Some(value) = values.get(name) {
-//RS             *expr = ct_value_expr(value, *span);
-//RS             return;
-//RS         }
-//RS     }
-//RS     match expr {
-//RS         Expr::Ident(..)
-//RS         | Expr::Char(..)
-//RS         | Expr::Int(..)
-//RS         | Expr::Float(..)
-//RS         | Expr::Bool(..)
-//RS         | Expr::Unit(..)
-//RS         | Expr::Absent(..)
-//RS         | Expr::ReduceMarker(..)
-//RS         | Expr::Todo { .. }
-//RS         | Expr::NoElse(_)
-//RS         | Expr::UnitLit { .. }
-//RS         | Expr::ComptimeName { .. }
-//RS         | Expr::StrMatchLit(..)
-//RS         | Expr::BinMatchLit(..) => {}
-//RS         Expr::Str(parts, _) => parts.iter_mut().for_each(|part| {
-//RS             if let StrPart::Interp(inner, _) = part {
-//RS                 substitute_expr(inner, types, values);
-//RS             }
-//RS         }),
-//RS         Expr::Call(call) => {
-//RS             for ty in &mut call.type_args {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS             if let Some(ty) = &mut call.resolved_ret {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS             call.args
-//RS                 .iter_mut()
-//RS                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
-//RS         }
-//RS         Expr::Unary(_, inner, _)
-//RS         | Expr::Deref(inner, _)
-//RS         | Expr::RawOf(inner, _)
-//RS         | Expr::Copy(inner, _)
-//RS         | Expr::Place(inner, _, _)
-//RS         | Expr::Field(inner, _, _)
-//RS         | Expr::Tainted(inner, _, _)
-//RS         | Expr::Present(inner, _)
-//RS         | Expr::Ok(inner, _)
-//RS         | Expr::Err(inner, _)
-//RS         | Expr::Paren(inner, _)
-//RS         | Expr::Spread(inner, _) => substitute_expr(inner, types, values),
-//RS         Expr::Try(inner, _, convert, note) => {
-//RS             substitute_expr(inner, types, values);
-//RS             if let crate::AST::TryConvert::Typed {
-//RS                 fn_name,
-//RS                 source,
-//RS                 target,
-//RS             } = convert
-//RS             {
-//RS                 *source = crate::Generics::substitute_type(source, types);
-//RS                 *target = crate::Generics::substitute_type(target, types);
-//RS                 *fn_name = crate::Sema::error_conv_fn_name(&source.name(), &target.name());
-//RS             }
-//RS             if let Some(note) = note {
-//RS                 substitute_expr(note, types, values);
-//RS             }
-//RS         }
-//RS         Expr::MemberSpread { base, .. } => substitute_expr(base, types, values),
-//RS         Expr::OptField { base, .. } => substitute_expr(base, types, values),
-//RS         Expr::Range { start, end, .. } => {
-//RS             substitute_expr(start, types, values);
-//RS             substitute_expr(end, types, values);
-//RS         }
-//RS         Expr::MethodCall {
-//RS             receiver,
-//RS             method,
-//RS             method_span,
-//RS             owner_type_args,
-//RS             type_args,
-//RS             args,
-//RS             recv_type,
-//RS             resolved_ret,
-//RS             operator_rhs,
-//RS             ..
-//RS         } => {
-//RS             if let Expr::Ident(name, _) = receiver.as_mut() {
-//RS                 if let Some(Type::Named(resolved)) = types.get(name) {
-//RS                     *name = resolved.clone();
-//RS                 }
-//RS             }
-//RS             substitute_expr(receiver, types, values);
-//RS             for ty in owner_type_args.iter_mut().chain(type_args.iter_mut()) {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS             if let Some(ty) = resolved_ret {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS             if let Some(ty) = operator_rhs {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS             args.iter_mut()
-//RS                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
-//RS             // Rewrite the sema-recorded receiver type through the same subst so
-//RS             // monomorphized JIT/AOT bodies see `DBConnection::query` rather than
-//RS             // a leftover type-parameter owner (`T::query`) after `T` is gone.
-//RS             if let Some(name) = recv_type.as_mut() {
-//RS                 match types.get(name) {
-//RS                     Some(Type::Named(resolved)) => *name = resolved.clone(),
-//RS                     Some(Type::Apply { name: resolved, .. }) => *name = resolved.clone(),
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS             let primitive = recv_type
-//RS                 .as_ref()
-//RS                 .and_then(|name| types.get(name))
-//RS                 .is_some_and(|ty| {
-//RS                     matches!(
-//RS                         ty,
-//RS                         Type::Int | Type::Float | Type::Bool | Type::Char | Type::String
-//RS                     )
-//RS                 });
-//RS             let op = match method.as_str() {
-//RS                 "add" => Some(crate::AST::BinOp::Add),
-//RS                 "sub" => Some(crate::AST::BinOp::Sub),
-//RS                 "mul" => Some(crate::AST::BinOp::Mul),
-//RS                 "div" => Some(crate::AST::BinOp::Div),
-//RS                 "equal" => Some(crate::AST::BinOp::Eq),
-//RS                 _ => None,
-//RS             };
-//RS             if primitive && args.len() == 1 {
-//RS                 if let Some(op) = op {
-//RS                     *expr = Expr::Binary(
-//RS                         op,
-//RS                         receiver.clone(),
-//RS                         Box::new(args[0].expr.clone()),
-//RS                         *method_span,
-//RS                     );
-//RS                 }
-//RS             }
-//RS         }
-//RS         Expr::StructLit {
-//RS             type_name,
-//RS             type_args,
-//RS             import_ns,
-//RS             fields,
-//RS             span,
-//RS             ..
-//RS         } => {
-//RS             for ty in type_args.iter_mut() {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS             fields
-//RS                 .iter_mut()
-//RS                 .for_each(|(_, _, value)| substitute_expr(value, types, values));
-//RS             let qualified = import_ns
-//RS                 .as_ref()
-//RS                 .map(|namespace| format!("{namespace}.{type_name}"));
-//RS             let resolved = qualified
-//RS                 .as_ref()
-//RS                 .and_then(|name| types.get(name))
-//RS                 .or_else(|| types.get(type_name));
-//RS             match resolved {
-//RS                 Some(Type::Named(resolved)) => {
-//RS                     *type_name = resolved.clone();
-//RS                     *import_ns = None;
-//RS                 }
-//RS                 // A type param may instantiate to a builtin (T=Int). The
-//RS                 // hand-written Int.{ … } parses as a TypedLit, so the
-//RS                 // substituted node must become one too — a StructLit with a
-//RS                 // builtin head is unnameable to sema (card #1797).
-//RS                 Some(resolved) => {
-//RS                     let body = if fields.len() == 1 {
-//RS                         crate::AST::TypedLitBody::Value(Box::new(fields.remove(0).2))
-//RS                     } else {
-//RS                         crate::AST::TypedLitBody::Fields(std::mem::take(fields))
-//RS                     };
-//RS                     *expr = Expr::TypedLit {
-//RS                         head: Some(resolved.clone()),
-//RS                         body,
-//RS                         span: *span,
-//RS                     };
-//RS                 }
-//RS                 None => {}
-//RS             }
-//RS         }
-//RS         Expr::TypedLit { head, body, .. } => {
-//RS             if let Some(h) = head {
-//RS                 *h = crate::Generics::substitute_type(h, types);
-//RS             }
-//RS             body.for_each_expr_mut(|e| substitute_expr(e, types, values));
-//RS         }
-//RS         Expr::EnumLit {
-//RS             type_name, args, ..
-//RS         } => {
-//RS             if let Some(Type::Named(resolved)) = types.get(type_name) {
-//RS                 *type_name = resolved.clone();
-//RS             }
-//RS             args.iter_mut().for_each(|arg| match arg {
-//RS                 EnumLitArg::Positional(value) | EnumLitArg::Named { expr: value, .. } => {
-//RS                     substitute_expr(value, types, values)
-//RS                 }
-//RS             });
-//RS         }
-//RS         Expr::OrFallback {
-//RS             value, fallback, ..
-//RS         } => {
-//RS             substitute_expr(value, types, values);
-//RS             match fallback {
-//RS                 OrFallback::Value(value) | OrFallback::Return(Some(value), _) => {
-//RS                     substitute_expr(value, types, values)
-//RS                 }
-//RS                 OrFallback::Block { body, value, .. } => {
-//RS                     substitute_stmts(body, types, values);
-//RS                     if let Some(value) = value {
-//RS                         substitute_expr(value, types, values);
-//RS                     }
-//RS                 }
-//RS                 OrFallback::Panic { args, .. } => args
-//RS                     .iter_mut()
-//RS                     .for_each(|arg| substitute_expr(&mut arg.expr, types, values)),
-//RS                 OrFallback::Return(None, _)
-//RS                 | OrFallback::Break(_)
-//RS                 | OrFallback::Continue(_)
-//RS                 | OrFallback::BreakLabel(..)
-//RS                 | OrFallback::ContinueLabel(..) => {}
-//RS             }
-//RS         }
-//RS         Expr::PatternTest { subject, .. } => substitute_expr(subject, types, values),
-//RS         Expr::Binary(_, left, right, _) => {
-//RS             substitute_expr(left, types, values);
-//RS             substitute_expr(right, types, values);
-//RS         }
-//RS         Expr::CompareChain { operands, .. } | Expr::ListLit(operands, _) => operands
-//RS             .iter_mut()
-//RS             .for_each(|value| substitute_expr(value, types, values)),
-//RS         Expr::TupleLit(fields, _, inferred) => {
-//RS             fields
-//RS                 .iter_mut()
-//RS                 .for_each(|(_, value)| substitute_expr(value, types, values));
-//RS             if let Some(ty) = inferred {
-//RS                 *ty = crate::Generics::substitute_type(ty, types);
-//RS             }
-//RS         }
-//RS         Expr::MapLit(entries, _) => entries.iter_mut().for_each(|(key, value)| {
-//RS             substitute_expr(key, types, values);
-//RS             substitute_expr(value, types, values);
-//RS         }),
-//RS         Expr::Index { base, index, .. } => {
-//RS             substitute_expr(base, types, values);
-//RS             substitute_expr(index, types, values);
-//RS         }
-//RS         Expr::Slice {
-//RS             base,
-//RS             start,
-//RS             end,
-//RS             range,
-//RS             ..
-//RS         } => {
-//RS             substitute_expr(base, types, values);
-//RS             if let Some(range) = range {
-//RS                 substitute_expr(range, types, values);
-//RS             } else {
-//RS                 substitute_expr(start, types, values);
-//RS                 substitute_expr(end, types, values);
-//RS             }
-//RS         }
-//RS         Expr::CallValue { callee, args, .. } => {
-//RS             substitute_expr(callee, types, values);
-//RS             args.iter_mut()
-//RS                 .for_each(|arg| substitute_expr(&mut arg.expr, types, values));
-//RS         }
-//RS         Expr::Lambda(lambda) => {
-//RS             for param in &mut lambda.params {
-//RS                 if let Some(ty) = &mut param.ty {
-//RS                     *ty = crate::Generics::substitute_type(ty, types);
-//RS                 }
-//RS             }
-//RS             match &mut lambda.body {
-//RS                 LambdaBody::Expr(value) => substitute_expr(value, types, values),
-//RS                 LambdaBody::Block(body) => substitute_stmts(body, types, values),
-//RS             }
-//RS         }
-//RS         Expr::If {
-//RS             cond,
-//RS             then_body,
-//RS             then_value,
-//RS             else_body,
-//RS             else_value,
-//RS             ..
-//RS         } => {
-//RS             substitute_expr(cond, types, values);
-//RS             substitute_stmts(then_body, types, values);
-//RS             substitute_expr(then_value, types, values);
-//RS             substitute_stmts(else_body, types, values);
-//RS             substitute_expr(else_value, types, values);
-//RS         }
-//RS         Expr::PtrFromAddr { elem, addr, .. } => {
-//RS             *elem = crate::Generics::substitute_type(elem, types);
-//RS             substitute_expr(addr, types, values);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn substitute_stmts(
-//RS     stmts: &mut [Stmt],
-//RS     types: &HashMap<String, Type>,
-//RS     values: &HashMap<String, crate::AST::CtValue>,
-//RS ) {
-//RS     // A binding shadows a module value for the rest of this lexical block.
-//RS     // Clone on entry so a nested block cannot leak its shadow back out.
-//RS     let mut values = values.clone();
-//RS 
-//RS     fn substitute_binding(
-//RS         binding: &mut crate::AST::Binding,
-//RS         types: &HashMap<String, Type>,
-//RS         values: &HashMap<String, crate::AST::CtValue>,
-//RS     ) {
-//RS         substitute_markers(&mut binding.markers, types, values);
-//RS         substitute_meta(&mut binding.meta, types, values);
-//RS         if let Some(ty) = &mut binding.ty {
-//RS             *ty = specialize_module_type(ty, types, values);
-//RS         }
-//RS         substitute_expr(&mut binding.init, types, values);
-//RS     }
-//RS 
-//RS     for stmt in stmts {
-//RS         match stmt {
-//RS             Stmt::Expr(value) | Stmt::Yield(value, _) | Stmt::DeferClose { close: value, .. } => {
-//RS                 substitute_expr(value, types, &values)
-//RS             }
-//RS             Stmt::Val(binding) => {
-//RS                 substitute_binding(binding, types, &values);
-//RS                 values.remove(&binding.name);
-//RS             }
-//RS             Stmt::Assign { value, .. } | Stmt::Return(Some(value), _) => {
-//RS                 substitute_expr(value, types, &values)
-//RS             }
-//RS             Stmt::BreakValue(value, _) | Stmt::BreakLabelValue(_, _, value, _) => {
-//RS                 substitute_expr(value, types, &values)
-//RS             }
-//RS             Stmt::Return(None, _)
-//RS             | Stmt::Break(_)
-//RS             | Stmt::Continue(_)
-//RS             | Stmt::BreakLabel(..)
-//RS             | Stmt::ContinueLabel(..) => {}
-//RS             Stmt::While { cond, body, .. } => {
-//RS                 substitute_expr(cond, types, &values);
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::For { kind, body, .. } => {
-//RS                 match kind {
-//RS                     ForKind::Range {
-//RS                         start,
-//RS                         end,
-//RS                         step,
-//RS                         exclusive: _,
-//RS                     } => {
-//RS                         substitute_expr(start, types, &values);
-//RS                         substitute_expr(end, types, &values);
-//RS                         if let Some(step) = step {
-//RS                             substitute_expr(step, types, &values);
-//RS                         }
-//RS                     }
-//RS                     ForKind::In { collection, step } => {
-//RS                         substitute_expr(collection, types, &values);
-//RS                         if let Some(step) = step {
-//RS                             substitute_expr(step, types, &values);
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::Switch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 ..
-//RS             }
-//RS             | Stmt::ComptimeSwitch {
-//RS                 subject,
-//RS                 arms,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 substitute_expr(subject, types, &values);
-//RS                 for arm in arms {
-//RS                     substitute_expr(&mut arm.cond, types, &values);
-//RS                     substitute_stmts(&mut arm.body, types, &values);
-//RS                 }
-//RS                 if let Some(body) = else_body {
-//RS                     substitute_stmts(body, types, &values);
-//RS                 }
-//RS             }
-//RS             Stmt::CountedLoop {
-//RS                 init,
-//RS                 cond,
-//RS                 step,
-//RS                 body,
-//RS                 ..
-//RS             } => {
-//RS                 let mut loop_values = values.clone();
-//RS                 substitute_binding(init, types, &loop_values);
-//RS                 loop_values.remove(&init.name);
-//RS                 substitute_expr(cond, types, &loop_values);
-//RS                 if let Some(step) = step {
-//RS                     substitute_stmts(std::slice::from_mut(step), types, &loop_values);
-//RS                 }
-//RS                 substitute_stmts(body, types, &loop_values);
-//RS             }
-//RS             Stmt::Loop { body, .. }
-//RS             | Stmt::Reactive { body, .. }
-//RS             | Stmt::Shield { body, .. }
-//RS             | Stmt::Region { body, .. }
-//RS             | Stmt::Policy { body, .. }
-//RS             | Stmt::TaskGroup { body, .. }
-//RS             | Stmt::Layout { body, .. }
-//RS             | Stmt::AuthorityScope { body, .. }
-//RS             | Stmt::Transact { body, .. }
-//RS             | Stmt::ComptimeBlock { body, .. }
-//RS             | Stmt::Live { body, .. } => substitute_stmts(body, types, &values),
-//RS             Stmt::Unsafe {
-//RS                 audit_expr, body, ..
-//RS             } => {
-//RS                 if let Some(expr) = audit_expr {
-//RS                     substitute_expr(expr, types, &values);
-//RS                 }
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::Impure {
-//RS                 reason_expr, body, ..
-//RS             } => {
-//RS                 if let Some(expr) = reason_expr {
-//RS                     substitute_expr(expr, types, &values);
-//RS                 }
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::Switched { marker, body, .. } => {
-//RS                 substitute_marker(marker, types, &values);
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::AssumeDet {
-//RS                 reason_expr, body, ..
-//RS             } => {
-//RS                 substitute_expr(reason_expr, types, &values);
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::ScopeMember { args, body, .. } => {
-//RS                 args.iter_mut()
-//RS                     .for_each(|arg| substitute_expr(arg, types, &values));
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS             Stmt::ComptimeIf {
-//RS                 cond,
-//RS                 then_body,
-//RS                 else_body,
-//RS                 ..
-//RS             } => {
-//RS                 substitute_expr(cond, types, &values);
-//RS                 substitute_stmts(then_body, types, &values);
-//RS                 if let Some(body) = else_body {
-//RS                     substitute_stmts(body, types, &values);
-//RS                 }
-//RS             }
-//RS             Stmt::ContextBlock { fields, body, .. } => {
-//RS                 fields
-//RS                     .iter_mut()
-//RS                     .for_each(|(_, value, _)| substitute_expr(value, types, &values));
-//RS                 substitute_stmts(body, types, &values);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2142 crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:1-555
+use jet_foundation.[Expr, Type, CtValue, Span, MetaAttr, MetaField, Marker, StrPart, TryConvert, BinOp, TypedLitBody, EnumLitArg, OrFallback, LambdaBody, Stmt, Binding, ForKind]
+use jet_sema.[specialize_module_type, error_conv_fn_name]
+use jet_sema.Generics
 
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:3
+fn ct_value_expr(value: CtValue, span: Span) -> Expr {
+    return if value == {
+        .Bool(v) -> .Bool(v, span)
+        .Int(v) -> .Int(v, span, None, None)
+        .Char(v) -> .Char(v, span)
+        .Str(v) -> .Str([.Lit(~v)], span)
+        .Enum{type_name, variant, args} if args.is_empty() -> .EnumLit{type_name: ~type_name, variant: ~variant, variant_span: None, args: [], leading_dot: false, span: span}
+        else -> panic("generic-module value domain was checked before substitution")
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:24
+pub fn substitute_meta(meta: &MetaAttr?, types: [String:Type], values: [String:CtValue]) -> {
+    if meta == .Val(attr) {
+        loop field in &attr.fields {
+            if field == {
+                .Category{value, ..} | .Maturity{value, ..} -> substitute_expr(&value, types, values)
+                .Unknown{value: .Val(value), ..} -> substitute_expr(&value, types, values)
+                .Tunable{..} | .Unknown{value: None, ..} -> {}
+            }
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:47
+pub fn substitute_marker(marker: &Marker, types: [String:Type], values: [String:CtValue]) -> {
+    loop arg in &marker.args {
+        if arg.as_expr_mut() == .Val(expr) -> substitute_expr(&expr, types, values)
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:59
+pub fn substitute_markers(markers: &[Marker], types: [String:Type], values: [String:CtValue]) -> {
+    loop marker in &markers -> substitute_marker(&marker, types, values)
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:69
+pub fn substitute_expr(expr: &Expr, types: [String:Type], values: [String:CtValue]) -> {
+    if expr == .Ident(name, span) {
+        if values.get(name) == .Val(value) {
+            expr = ct_value_expr(value, span)
+            return
+        }
+    }
+    // D-META-STAGE1=B: @ is part of the identifier; substitute its written spelling.
+    if expr == .ComptimeName{name, span, ..} {
+        if values.get(name) == .Val(value) {
+            expr = ct_value_expr(value, span)
+            return
+        }
+    }
+    if expr == {
+        .Ident(..) | .Char(..) | .Int(..) | .Float(..) | .Bool(..) | .Unit(..)
+        | .Absent(..) | .ReduceMarker(..) | .Todo{..} | .NoElse(_)
+        | .UnitLit{..} | .ComptimeName{..} | .StrMatchLit(..) | .BinMatchLit(..) -> {}
+        .Str(parts, _) -> {
+            loop part in &parts {
+                if part == .Interp(inner, _) -> substitute_expr(&inner, types, values)
+            }
+        }
+        .Call(call) -> {
+            loop ty in &call.type_args -> ty = Generics.substitute_type(ty, types)
+            if call.resolved_ret == .Val(ty) -> ty = Generics.substitute_type(ty, types)
+            loop arg in &call.args -> substitute_expr(&arg.expr, types, values)
+        }
+        .Unary(_, inner, _) | .Deref(inner, _) | .RawOf(inner, _) | .Copy(inner, _)
+        | .Place(inner, _, _) | .Field(inner, _, _) | .Tainted(inner, _, _)
+        | .Present(inner, _) | .Ok(inner, _) | .Err(inner, _) | .Paren(inner, _)
+        | .Spread(inner, _) -> substitute_expr(&inner, types, values)
+        .Try(inner, _, convert, note) -> {
+            substitute_expr(&inner, types, values)
+            if convert == .Typed{fn_name, source, target} {
+                source = Generics.substitute_type(source, types)
+                target = Generics.substitute_type(target, types)
+                fn_name = error_conv_fn_name(source.name(), target.name())
+            }
+            if note == .Val(value) -> substitute_expr(&value, types, values)
+        }
+        .MemberSpread{base, ..} | .OptField{base, ..} -> substitute_expr(&base, types, values)
+        .Range{start, end, ..} -> {
+            substitute_expr(&start, types, values)
+            substitute_expr(&end, types, values)
+        }
+        .MethodCall{receiver, method, method_span, owner_type_args, type_args, args, recv_type, resolved_ret, operator_rhs, ..} -> {
+            if receiver == .Ident(name, _) {
+                if types.get(name) == .Val(.Named(resolved)) -> name = ~resolved
+            }
+            substitute_expr(&receiver, types, values)
+            loop ty in &owner_type_args -> ty = Generics.substitute_type(ty, types)
+            loop ty in &type_args -> ty = Generics.substitute_type(ty, types)
+            if resolved_ret == .Val(ty) -> ty = Generics.substitute_type(ty, types)
+            if operator_rhs == .Val(ty) -> ty = Generics.substitute_type(ty, types)
+            loop arg in &args -> substitute_expr(&arg.expr, types, values)
+            // Rewrite recorded receiver ownership for monomorphized JIT/AOT bodies.
+            if recv_type == .Val(name) {
+                if types.get(name) == {
+                    .Val(.Named(resolved)) | .Val(.Apply{name: resolved, ..}) -> name = ~resolved
+                    else -> {}
+                }
+            }
+            primitive := false
+            if recv_type == .Val(name) {
+                if types.get(name) == .Val(ty) {
+                    primitive = if ty == {
+                        .Int | .Float | .Bool | .Char | .String -> true
+                        else -> false
+                    }
+                }
+            }
+            op: BinOp? :: if method == {
+                "add" -> Val(.Add)
+                "sub" -> Val(.Sub)
+                "mul" -> Val(.Mul)
+                "div" -> Val(.Div)
+                "equal" -> Val(.Eq)
+                else -> None
+            }
+            if primitive && args.len() == 1 {
+                if op == .Val(operator) -> expr = .Binary(operator, ~receiver, ~args[0].expr, method_span)
+            }
+        }
+        .StructLit{type_name, type_args, import_ns, fields, span, ..} -> {
+            loop ty in &type_args -> ty = Generics.substitute_type(ty, types)
+            loop (_, _, value) in &fields -> substitute_expr(&value, types, values)
+            qualified: String? :: if import_ns == {
+                .Val(namespace) -> Val("{namespace}.{type_name}")
+                else -> None
+            }
+            resolved: Type? := None
+            if qualified == .Val(name) -> resolved = types.get(name)
+            if resolved == None -> resolved = types.get(type_name)
+            if resolved == {
+                .Val(.Named(name)) -> {
+                    type_name = ~name
+                    import_ns = None
+                }
+                .Val(ty) -> {
+                    // A builtin instantiation needs TypedLit, not an unnameable StructLit.
+                    body :: if fields.len() == 1 {
+                        .Value(fields.remove(0).2)
+                    } else {
+                        taken :: ^fields
+                        fields = []
+                        .Fields(taken)
+                    }
+                    expr = .TypedLit{head: Val(~ty), body: body, span: span}
+                }
+                None -> {}
+            }
+        }
+        .TypedLit{head, body, ..} -> {
+            if head == .Val(ty) -> ty = Generics.substitute_type(ty, types)
+            &body.for_each_expr_mut((e) -> substitute_expr(&e, types, values))
+        }
+        .EnumLit{type_name, args, ..} -> {
+            if types.get(type_name) == .Val(.Named(resolved)) -> type_name = ~resolved
+            loop arg in &args {
+                if arg == {
+                    .Positional(value) | .Named{expr: value, ..} -> substitute_expr(&value, types, values)
+                }
+            }
+        }
+        .OrFallback{value, fallback, ..} -> {
+            substitute_expr(&value, types, values)
+            if fallback == {
+                .Value(value) | .Return(.Val(value), _) -> substitute_expr(&value, types, values)
+                .Block{body, value, ..} -> {
+                    substitute_stmts(&body, types, values)
+                    if value == .Val(inner) -> substitute_expr(&inner, types, values)
+                }
+                .Panic{args, ..} -> {
+                    loop arg in &args -> substitute_expr(&arg.expr, types, values)
+                }
+                .Return(None, _) | .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> {}
+            }
+        }
+        .PatternTest{subject, ..} -> substitute_expr(&subject, types, values)
+        .Binary(_, left, right, _) -> {
+            substitute_expr(&left, types, values)
+            substitute_expr(&right, types, values)
+        }
+        .CompareChain{operands, ..} | .ListLit(operands, _) -> {
+            loop value in &operands -> substitute_expr(&value, types, values)
+        }
+        .TupleLit(fields, _, inferred) -> {
+            loop (_, value) in &fields -> substitute_expr(&value, types, values)
+            if inferred == .Val(ty) -> ty = Generics.substitute_type(ty, types)
+        }
+        .MapLit(entries, _) -> {
+            loop (key, value) in &entries {
+                substitute_expr(&key, types, values)
+                substitute_expr(&value, types, values)
+            }
+        }
+        .Index{base, index, ..} -> {
+            substitute_expr(&base, types, values)
+            substitute_expr(&index, types, values)
+        }
+        .Slice{base, start, end, range, ..} -> {
+            substitute_expr(&base, types, values)
+            if range == .Val(value) {
+                substitute_expr(&value, types, values)
+            } else {
+                substitute_expr(&start, types, values)
+                substitute_expr(&end, types, values)
+            }
+        }
+        .CallValue{callee, args, ..} -> {
+            substitute_expr(&callee, types, values)
+            loop arg in &args -> substitute_expr(&arg.expr, types, values)
+        }
+        .Lambda(lambda) -> {
+            loop param in &lambda.params {
+                if param.ty == .Val(ty) -> ty = Generics.substitute_type(ty, types)
+            }
+            if lambda.body == {
+                .Expr(value) -> substitute_expr(&value, types, values)
+                .Block(body) -> substitute_stmts(&body, types, values)
+            }
+        }
+        .If{cond, then_body, then_value, else_body, else_value, ..} -> {
+            substitute_expr(&cond, types, values)
+            substitute_stmts(&then_body, types, values)
+            substitute_expr(&then_value, types, values)
+            substitute_stmts(&else_body, types, values)
+            substitute_expr(&else_value, types, values)
+        }
+        .PtrFromAddr{elem, addr, ..} -> {
+            elem = Generics.substitute_type(elem, types)
+            substitute_expr(&addr, types, values)
+        }
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:386
+pub fn substitute_stmts(stmts: &[Stmt], types: [String:Type], outer_values: [String:CtValue]) -> {
+    // Bindings shadow module values only within their lexical block.
+    values := ~outer_values
+
+    // Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Substitution.rs:395
+    fn substitute_binding(binding: &Binding, types: [String:Type], values: [String:CtValue]) -> {
+        substitute_markers(&binding.markers, types, values)
+        substitute_meta(&binding.meta, types, values)
+        if binding.ty == .Val(ty) -> ty = specialize_module_type(ty, types, values)
+        substitute_expr(&binding.init, types, values)
+    }
+
+    loop stmt in &stmts {
+        if stmt == {
+            .Expr(value) | .Yield(value, _) | .DeferClose{close: value, ..} -> substitute_expr(&value, types, values)
+            .Val(binding) -> {
+                substitute_binding(&binding, types, values)
+                _ :: &values.remove(binding.name)
+            }
+            .Assign{value, ..} | .Return(.Val(value), _) -> substitute_expr(&value, types, values)
+            .BreakValue(value, _) | .BreakLabelValue(_, _, value, _) -> substitute_expr(&value, types, values)
+            .Return(None, _) | .Break(_) | .Continue(_) | .BreakLabel(..) | .ContinueLabel(..) -> {}
+            .While{cond, body, ..} -> {
+                substitute_expr(&cond, types, values)
+                substitute_stmts(&body, types, values)
+            }
+            .For{kind, body, ..} -> {
+                if kind == {
+                    .Range{start, end, step, exclusive: _} -> {
+                        substitute_expr(&start, types, values)
+                        substitute_expr(&end, types, values)
+                        if step == .Val(value) -> substitute_expr(&value, types, values)
+                    }
+                    .In{collection, step} -> {
+                        substitute_expr(&collection, types, values)
+                        if step == .Val(value) -> substitute_expr(&value, types, values)
+                    }
+                }
+                substitute_stmts(&body, types, values)
+            }
+            .Switch{subject, arms, else_body, ..} | .ComptimeSwitch{subject, arms, else_body, ..} -> {
+                substitute_expr(&subject, types, values)
+                loop arm in &arms {
+                    substitute_expr(&arm.cond, types, values)
+                    substitute_stmts(&arm.body, types, values)
+                }
+                if else_body == .Val(body) -> substitute_stmts(&body, types, values)
+            }
+            .CountedLoop{init, cond, step, body, ..} -> {
+                loop_values := ~values
+                substitute_binding(&init, types, loop_values)
+                _ :: &loop_values.remove(init.name)
+                substitute_expr(&cond, types, loop_values)
+                if step == .Val(step_stmt) {
+                    // GATE #4494: mutable singleton slice preserves the step's AST identity.
+                    substitute_stmts(std.slice.from_mut(&step_stmt), types, loop_values)
+                }
+                substitute_stmts(&body, types, loop_values)
+            }
+            .Loop{body, ..} | .Reactive{body, ..} | .Shield{body, ..} | .Region{body, ..}
+            | .Policy{body, ..} | .TaskGroup{body, ..} | .Layout{body, ..}
+            | .AuthorityScope{body, ..} | .Transact{body, ..} | .ComptimeBlock{body, ..}
+            | .Live{body, ..} -> substitute_stmts(&body, types, values)
+            .Unsafe{audit_expr, body, ..} -> {
+                if audit_expr == .Val(value) -> substitute_expr(&value, types, values)
+                substitute_stmts(&body, types, values)
+            }
+            .Impure{reason_expr, body, ..} -> {
+                if reason_expr == .Val(value) -> substitute_expr(&value, types, values)
+                substitute_stmts(&body, types, values)
+            }
+            .Switched{marker, body, ..} -> {
+                substitute_marker(&marker, types, values)
+                substitute_stmts(&body, types, values)
+            }
+            .AssumeDet{reason_expr, body, ..} -> {
+                substitute_expr(&reason_expr, types, values)
+                substitute_stmts(&body, types, values)
+            }
+            .ScopeMember{args, body, ..} -> {
+                loop arg in &args -> substitute_expr(&arg, types, values)
+                substitute_stmts(&body, types, values)
+            }
+            .ComptimeIf{cond, then_body, else_body, ..} -> {
+                substitute_expr(&cond, types, values)
+                substitute_stmts(&then_body, types, values)
+                if else_body == .Val(body) -> substitute_stmts(&body, types, values)
+            }
+            .ContextBlock{fields, body, ..} -> {
+                loop (_, value, _) in &fields -> substitute_expr(&value, types, values)
+                substitute_stmts(&body, types, values)
+            }
+        }
+    }
+}

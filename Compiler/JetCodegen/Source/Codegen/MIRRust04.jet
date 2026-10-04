@@ -1,1804 +1,647 @@
-// PORT-PENDING 2004 crates-jet-codegen-src-codegen-mirrust-slice-5401: crates/jet-codegen/src/Codegen/MIRRust.rs:5401-7200
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(inner),
-//RS                 self.config.root_prefix
-//RS             ),
-//RS             MirTypeKind::Result { ok, err } => format!(
-//RS                 "{}JetOutcome<{}, {}>",
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(ok),
-//RS                 self.rust_type(err)
-//RS             ),
-//RS             MirTypeKind::Fn(signature) => {
-//RS                 let conventions = signature
-//RS                     .call_metadata
-//RS                     .as_ref()
-//RS                     .map(|metadata| metadata.conventions.as_slice());
-//RS                 self.callable_type(&signature.params, conventions, signature.ret.as_deref())
-//RS             }
-//RS             MirTypeKind::SendFn {
-//RS                 params,
-//RS                 ret,
-//RS                 conventions,
-//RS             } => {
-//RS                 let params = params
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(index, param)| {
-//RS                         let access =
-//RS                             Self::callable_parameter_access(Some(conventions.as_slice()), index);
-//RS                         self.callable_parameter_type(param, access)
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 let ret = ret
-//RS                     .as_ref()
-//RS                     .map(|ret| self.rust_type(ret))
-//RS                     .unwrap_or_else(|| "()".to_string());
-//RS                 format!("std::sync::Arc<dyn Fn({params}) -> {ret} + Send + Sync + 'static>")
-//RS             }
-//RS             MirTypeKind::Apply { name, args } => self.rust_apply_type(name, args),
-//RS             MirTypeKind::TraitObject(bounds) => format!(
-//RS                 "Box<dyn {}>",
-//RS                 bounds
-//RS                     .iter()
-//RS                     .map(|bound| {
-//RS                         self.traits_by_name
-//RS                             .get(&bound.name)
-//RS                             .cloned()
-//RS                             .unwrap_or_else(|| {
-//RS                                 panic!("MIR trait {:?} has no declaration row", bound.name)
-//RS                             })
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(" + ")
-//RS             ),
-//RS             MirTypeKind::Tuple(fields) => {
-//RS                 let values = fields
-//RS                     .iter()
-//RS                     .map(|(_, field)| self.rust_type(field))
-//RS                     .collect::<Vec<_>>();
-//RS                 match values.len() {
-//RS                     0 => "()".to_string(),
-//RS                     1 => format!("({},)", values[0]),
-//RS                     _ => format!("({})", values.join(", ")),
-//RS                 }
-//RS             }
-//RS             MirTypeKind::FixedList { elem, len } => {
-//RS                 format!("[{}; {}]", self.rust_type(elem), len.expression())
-//RS             }
-//RS             MirTypeKind::IntN { signed, bits } => {
-//RS                 format!("{}{}", if *signed { 'i' } else { 'u' }, bits)
-//RS             }
-//RS             MirTypeKind::Tagged {
-//RS                 marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
-//RS                 inner,
-//RS             } => format!("&mut {}", self.rust_type(inner)),
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.rust_type(base),
-//RS 
-//RS             MirTypeKind::Float32 => "f32".to_string(),
-//RS             MirTypeKind::Union(_) => self
-//RS                 .structural_type_def_for(ty)
-//RS                 .map(|def| mangle_path(&def.key))
-//RS                 .unwrap_or_else(|| {
-//RS                     ty.identity
-//RS                         .map(|id| self.type_name(id))
-//RS                         .unwrap_or_else(|| panic!("MIR union type has no canonical type identity"))
-//RS                 }),
-//RS             MirTypeKind::Measure(_) => "f64".to_string(),
-//RS         }
-//RS     }
-//RS     fn emit_web_data_type_registration(&self, out: &mut String) {
-//RS         if self.config.target_kind != MirRustTarget::WebWasm {
-//RS             return;
-//RS         }
-//RS         let mut types = BTreeMap::<String, String>::new();
-//RS         for function in &self.program.functions {
-//RS             for block in &function.blocks {
-//RS                 for instruction in &block.instructions {
-//RS                     let MirOperation::CoreCall {
-//RS                         route, type_args, ..
-//RS                     } = &instruction.operation
-//RS                     else {
-//RS                         continue;
-//RS                     };
-//RS                     let row = self
-//RS                         .program
-//RS                         .prelude_calls
-//RS                         .iter()
-//RS                         .find(|row| row.id == *route)
-//RS                         .unwrap_or_else(|| panic!("MIR Prelude call ID {:?} has no row", route));
-//RS                     let MirSymbol::Prelude(name) = &row.symbol else {
-//RS                         continue;
-//RS                     };
-//RS                     if !(name.starts_with("jet_data") || name.starts_with("jet_data.loader.")) {
-//RS                         continue;
-//RS                     }
-//RS                     let Some(ty) = type_args.first() else {
-//RS                         continue;
-//RS                     };
-//RS                     types.entry(ty.name()).or_insert_with(|| self.rust_type(ty));
-//RS                 }
-//RS             }
-//RS         }
-//RS         if types.is_empty() {
-//RS             return;
-//RS         }
-//RS         out.push_str("#[cfg(target_arch = \"wasm32\")]\n");
-//RS         out.push_str("#[no_mangle]\n");
-//RS         out.push_str("pub extern \"C\" fn jet_data_web_register_types() {\n");
-//RS         for (key, ty) in types {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    {}::<{}>({:?});",
-//RS                 format!("{}jet_data_web_register_type", self.config.root_prefix),
-//RS                 ty,
-//RS                 key
-//RS             );
-//RS         }
-//RS         out.push_str("}\n");
-//RS     }
-//RS     fn rust_root_prelude_type(&self, root_name: &str, args: &[MirType]) -> String {
-//RS         let head = format!("{}{}", self.config.root_prefix, root_name);
-//RS         if args.is_empty() {
-//RS             return head;
-//RS         }
-//RS         let args = args
-//RS             .iter()
-//RS             .map(|arg| self.rust_type(arg))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         format!("{head}<{args}>")
-//RS     }
-//RS 
-//RS     fn rust_apply_type(&self, name: &MirNominalRef, args: &[MirType]) -> String {
-//RS         if self.is_active_generic_param(&name.name) {
-//RS             if !args.is_empty() {
-//RS                 panic!(
-//RS                     "MIR generic type parameter {:?} has type arguments",
-//RS                     name.name
-//RS                 );
-//RS             }
-//RS             return self.nominal_name(&name.name);
-//RS         }
-//RS         let native_name = core_native_probe_name(&name.name);
-//RS         if args.is_empty() {
-//RS             if let Some(canonical) = self.anonymous_union_definition(&name.name) {
-//RS                 return mangle_path(&canonical.key);
-//RS             }
-//RS         }
-//RS         if args.is_empty() && name.name == jet_foundation::Syntax::INTERNAL_UNIT_TYPE {
-//RS             return "()".to_string();
-//RS         }
-//RS         if args.is_empty() && name.name == jet_foundation::Syntax::TYPE_NEVER {
-//RS             return "std::convert::Infallible".to_string();
-//RS         }
-//RS         if args.is_empty() && name.name == STM_TYPE {
-//RS             return format!("{}JetSharedTransaction", self.config.root_prefix);
-//RS         }
-//RS         if name.name == jet_foundation::Syntax::TYPE_PTR {
-//RS             let [element] = args else {
-//RS                 panic!("MIR Ptr type must have exactly one element argument");
-//RS             };
-//RS             return format!("*mut {}", self.rust_type(element));
-//RS         }
-//RS         // D-COLLBREADTH1=A: Set<T> uses the same HashSet carrier as
-//RS         // Context::rust_type; keep the AOT type projection in lockstep.
-//RS         if name.name == jet_foundation::Syntax::TYPE_SET {
-//RS             let [element] = args else {
-//RS                 panic!("MIR Set type must have exactly one element argument");
-//RS             };
-//RS             return format!("std::collections::HashSet<{}>", self.rust_type(element));
-//RS         }
-//RS         // D-TAG1: Tally<T> uses the same counted HashMap carrier as
-//RS         // Context::rust_type; keep the AOT type projection in lockstep.
-//RS         if name.name == jet_foundation::Syntax::TYPE_TALLY {
-//RS             let [element] = args else {
-//RS                 panic!("MIR Tally type must have exactly one element argument");
-//RS             };
-//RS             return format!(
-//RS                 "std::collections::HashMap<{}, usize>",
-//RS                 self.rust_type(element)
-//RS             );
-//RS         }
-//RS         // D-COLLBREADTH1=A: Rank<T> uses the same ordered-set carrier as
-//RS         // Context::rust_type; keep the AOT type projection in lockstep.
-//RS         if name.name == jet_foundation::Syntax::TYPE_RANK {
-//RS             let [element] = args else {
-//RS                 panic!("MIR Rank type must have exactly one element argument");
-//RS             };
-//RS             return format!("std::collections::BTreeSet<{}>", self.rust_type(element));
-//RS         }
-//RS         // D-COLLBREADTH1=A: PriorityQueue<T> uses the same BinaryHeap carrier as
-//RS         // Context::rust_type; keep the AOT type projection in lockstep.
-//RS         if name.name == jet_foundation::Syntax::TYPE_PRIORITY_QUEUE {
-//RS             let [element] = args else {
-//RS                 panic!("MIR PriorityQueue type must have exactly one element argument");
-//RS             };
-//RS             return format!("std::collections::BinaryHeap<{}>", self.rust_type(element));
-//RS         }
-//RS         // D-COLLBREADTH1=A: Queue<T> uses the same VecDeque carrier as
-//RS         // Context::rust_type; keep the AOT type projection in lockstep.
-//RS         if name.name == jet_foundation::Syntax::TYPE_QUEUE {
-//RS             let [element] = args else {
-//RS                 panic!("MIR Queue type must have exactly one element argument");
-//RS             };
-//RS             return format!("std::collections::VecDeque<{}>", self.rust_type(element));
-//RS         }
-//RS         if args.is_empty() && name.name == jet_foundation::Syntax::TYPE_TASKGROUP {
-//RS             return format!("{}jet_std::JetTaskGroup", self.config.root_prefix);
-//RS         }
-//RS         // D-DYNARRAY1: the checked `View<T>`/`ViewMut<T>` nominals are
-//RS         // borrow carriers, not user declarations.  The resident/JIT path
-//RS         // already treats them as borrowed windows; AOT must use the same
-//RS         // canonical Rust slice spelling before falling through to nominal
-//RS         // declaration lookup.
-//RS         if name.name == "View" && args.len() == 1 {
-//RS             if matches!(
-//RS                 args[0].kind(),
-//RS                 MirTypeKind::Apply { name, args }
-//RS                     if args.is_empty() && name.name == "str"
-//RS             ) {
-//RS                 return "&str".to_string();
-//RS             }
-//RS             return format!("&[{}]", self.rust_type(&args[0]));
-//RS         }
-//RS         if name.name == "ViewMut" && args.len() == 1 {
-//RS             return format!("&mut [{}]", self.rust_type(&args[0]));
-//RS         }
-//RS         if name.name == "Instant" {
-//RS             return self.rust_root_prelude_type("JetInstant", args);
-//RS         }
-//RS         if name.name == "RealtimeStream" {
-//RS             return format!("{}jet_std::JetRealtimeStream", self.config.root_prefix);
-//RS         }
-//RS         if name.name == "RealtimeReceipt" {
-//RS             return format!("{}jet_std::JetRealtimeReceipt", self.config.root_prefix);
-//RS         }
-//RS         if matches!(
-//RS             name.name.as_str(),
-//RS             "Cell" | "CellReadGuard" | "CellEditGuard"
-//RS         ) {
-//RS             let [element] = args else {
-//RS                 panic!("MIR Cell type must have exactly one value argument");
-//RS             };
-//RS             let carrier = self.rust_type(element);
-//RS             let carrier_name = match name.name.as_str() {
-//RS                 "Cell" => "JetCell",
-//RS                 "CellReadGuard" => "JetCellReadGuard",
-//RS                 "CellEditGuard" => "JetCellEditGuard",
-//RS                 _ => unreachable!(),
-//RS             };
-//RS             return format!(
-//RS                 "{}jet_std::{carrier_name}<{carrier}>",
-//RS                 self.config.root_prefix
-//RS             );
-//RS         }
-//RS         if let Some(root_name) = crate::Codegen::file_handle_rust_type(&name.name) {
-//RS             return format!("{}{}", self.config.root_prefix, root_name);
-//RS         }
-//RS         if let Some(root_name) = crate::Codegen::reflect_handle_rust_type(native_name) {
-//RS             return self.rust_root_prelude_type(root_name, args);
-//RS         }
-//RS         // D-SHIFT1 (c7shift): `binary.Reader` / `text.Cursor` are top-level
-//RS         // Prelude handles. Keep the collision guard so a user declaration with
-//RS         // the plausible name still wins over the built-in carrier.
-//RS         if let Some(root_name) = crate::Codegen::binary_text_handle_rust_type(native_name) {
-//RS             if name.name.starts_with("<corelib>/")
-//RS                 || !self.types_by_name.contains_key(&name.name)
-//RS             {
-//RS                 return format!("{}{}", self.config.root_prefix, root_name);
-//RS             }
-//RS         }
-//RS         // ScopeGuard is an inference-only carrier. The checked Core call
-//RS         // supplies its closure initializer, so no nominal declaration row is
-//RS         // required in the MIR type table.
-//RS         if name.name == "ScopeGuard" {
-//RS             return "_".to_string();
-//RS         }
-//RS         if name.name == "RangeCursor" {
-//RS             return "JetLoopRangeCursor".to_string();
-//RS         }
-//RS         if name.name == "IterCursor" {
-//RS             return "JetLoopIterCursor".to_string();
-//RS         }
-//RS         if name.name == "ByteIterCursor" {
-//RS             return "JetByteLoopIterCursor<'_>".to_string();
-//RS         }
-//RS         if name.name == "Atomic" {
-//RS             if args.len() != 1 {
-//RS                 panic!("MIR Atomic type must have exactly one value argument");
-//RS             }
-//RS             let inner = if matches!(args[0].kind(), MirTypeKind::Int) {
-//RS                 "JetAtomicInt".to_string()
-//RS             } else {
-//RS                 self.rust_type(&args[0])
-//RS             };
-//RS             return format!("{}JetAtomic<{inner}>", self.config.root_prefix);
-//RS         }
-//RS         if matches!(name.name.as_str(), "Tensor" | "Vec" | "Matrix")
-//RS             && (name.name != "Tensor" || args.len() <= 1)
-//RS         {
-//RS             return self.rust_root_prelude_type("JetTensor", &[]);
-//RS         }
-//RS         if name.name == "Task" {
-//RS             let [item] = args else {
-//RS                 panic!("MIR Task type must have exactly one value argument");
-//RS             };
-//RS             let carrier = self.rust_type(item);
-//RS             return format!("{}jet_std::JetTask<{carrier}>", self.config.root_prefix);
-//RS         }
-//RS         if matches!(
-//RS             name.name.as_str(),
-//RS             "KeyRef" | "MutationPlan" | "VaultWrite" | "Rotation" | "WrappedImportPlan"
-//RS         ) && args.len() == 1
-//RS         {
-//RS             let ffi = self
-//RS                 .config
-//RS                 .execution
-//RS                 .ffi
-//RS                 .map(|link| link.crate_name.as_str())
-//RS                 .unwrap_or("jet_ffi");
-//RS             let rust = match name.name.as_str() {
-//RS                 "KeyRef" => "JetVaultKeyRef",
-//RS                 "MutationPlan" => "JetVaultMutationPlan",
-//RS                 "VaultWrite" => "JetVaultWrite",
-//RS                 "Rotation" => "JetVaultRotation",
-//RS                 _ => "JetVaultWrappedImportPlan",
-//RS             };
-//RS             return format!("{ffi}::{rust}<{}>", self.rust_type(&args[0]));
-//RS         }
-//RS         if name.name == "ExpiringSecret" && args.len() == 1 {
-//RS             return format!("JetExpiringSecret<{}>", self.rust_type(&args[0]));
-//RS         }
-//RS         if name.name == crate::Syntax::EXPIRING_VALUE_TYPE && args.len() == 1 {
-//RS             return format!("JetExpiring<{}>", self.rust_type(&args[0]));
-//RS         }
-//RS         if let Some(email_name) = crate::Codegen::core_email_rust_type_name(&name.name) {
-//RS             if matches!(email_name, "SMTPAuth" | "DKIMConfig" | "SMTPConfig") && args.is_empty() {
-//RS                 let ffi = self
-//RS                     .config
-//RS                     .execution
-//RS                     .ffi
-//RS                     .map(|link| link.crate_name.as_str())
-//RS                     .unwrap_or("jet_ffi");
-//RS                 return format!("{}jet_email::{email_name}<{ffi}::Secret>", self.config.root_prefix);
-//RS             }
-//RS             let root_name = format!("jet_email::{email_name}");
-//RS             return self.rust_root_prelude_type(&root_name, args);
-//RS         }
-//RS         if let Some(ui_name) = crate::Codegen::core_ui_rust_type_name(native_name) {
-//RS             return self.rust_root_prelude_type(&format!("Jet{ui_name}"), args);
-//RS         }
-//RS         // D-TEXTHEAD-TYPE1=A: checked HTML remains the canonical String-backed
-//RS         // Prelude carrier used by interpolation and `.text()`.
-//RS         if name.name == jet_foundation::Syntax::TYPE_HTML && args.is_empty() {
-//RS             return "String".to_string();
-//RS         }
-//RS         if name.name == jet_foundation::Syntax::TYPE_MEASUREMENT && args.len() == 1 {
-//RS             return format!(
-//RS                 "{}jet_std::JetMeasurement<{}>",
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(&args[0])
-//RS             );
-//RS         }
-//RS         if let Some(root_name) = crate::Codegen::root_prelude_rust_type_name(native_name) {
-//RS             return self.rust_root_prelude_type(root_name, args);
-//RS         }
-//RS         if let Some(history_name) = crate::Codegen::history_rust_type_name(&name.name) {
-//RS             let carrier = self
-//RS                 .history_native_type_name(&name.name)
-//RS                 .unwrap_or_else(|| {
-//RS                     format!("crate::jet_testing_history_foundation::{history_name}")
-//RS                 });
-//RS             if args.is_empty() {
-//RS                 return carrier;
-//RS             }
-//RS             let args = args
-//RS                 .iter()
-//RS                 .map(|arg| self.rust_type(arg))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             return format!("{carrier}<{args}>");
-//RS         }
-//RS         if let Some(compute_name) = crate::Codegen::compute_handle_rust_type(native_name) {
-//RS             return self.rust_root_prelude_type(compute_name, args);
-//RS         }
-//RS         if let Some(service_name) = crate::Codegen::service_handle_rust_type(native_name) {
-//RS             return self.rust_root_prelude_type(service_name, args);
-//RS         }
-//RS         // `Pool` is both the allocator sentinel and the generic collection
-//RS         // family.  A bare `Pool` is the allocator handle; `Pool<T>` remains
-//RS         // the collection runtime type.
-//RS         if args.is_empty() {
-//RS             if let Some(allocator) = crate::Codegen::alloc_handle_rust_type(native_name) {
-//RS                 return format!("{}{}", self.config.root_prefix, allocator);
-//RS             }
-//RS         }
-//RS         // A bare trait name can survive in a checked Apply row when an
-//RS         // expression type was not re-spelled as TraitObject before MIR
-//RS         // identity assignment. Resolve only one declaration row, then use
-//RS         // its identity-backed Rust trait symbol; an unqualified collision
-//RS         // must not silently select an arbitrary trait.
-//RS         if args.is_empty() && !self.types_by_name.contains_key(&name.name) {
-//RS             let mut trait_rows =
-//RS                 self.program.traits.iter().filter(|definition| {
-//RS                     definition.key == name.name || definition.name == name.name
-//RS                 });
-//RS             if let Some(definition) = trait_rows.next() {
-//RS                 if trait_rows.next().is_none() {
-//RS                     if let Some(trait_name) = self.traits.get(&definition.id) {
-//RS                         return format!("Box<dyn {trait_name}>");
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-DATAFLOW1=A: Jet retains the row type in MIR for typed stream
-//RS         // operations, while the native stream handle is one opaque carrier.
-//RS         if name.name == "DataStream" && !args.is_empty() {
-//RS             return format!("{}jet_std::DataStream", self.config.root_prefix);
-//RS         }
-//RS         if let Some(core_name) = crate::Codegen::core_rust_type_name(&name.name) {
-//RS             // D-DBPOLICY-BIND1: RowPolicy is a root-level re-export from the
-//RS             // Sync carrier, not a `jet_std` import.
-//RS             if core_name == "JetRowPolicy" || core_name == "JetTaskFailure" {
-//RS                 return self.rust_root_prelude_type(core_name, args);
-//RS             }
-//RS             if let Some(root_name) = crate::Codegen::root_prelude_rust_type_name(core_name) {
-//RS                 return self.rust_root_prelude_type(root_name, args);
-//RS             }
-//RS             let mut native = format!("{}jet_std::{core_name}", self.config.root_prefix);
-//RS             if !args.is_empty() {
-//RS                 native.push('<');
-//RS                 for (index, arg) in args.iter().enumerate() {
-//RS                     if index > 0 {
-//RS                         native.push_str(", ");
-//RS                     }
-//RS                     native.push_str(&self.rust_type(arg));
-//RS                 }
-//RS                 native.push('>');
-//RS             }
-//RS             return native;
-//RS         }
-//RS         if name.name == "__JetDmaTransfer" {
-//RS             if args.len() != 1 {
-//RS                 panic!("MIR DMA transfer carrier must have exactly one buffer type argument");
-//RS             }
-//RS             return format!(
-//RS                 "{}jet_std::JetDmaTransfer<'static, {}>",
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(&args[0])
-//RS             );
-//RS         }
-//RS         if name.name == "StreamEventTime" {
-//RS             if args.len() != 1 {
-//RS                 panic!("MIR StreamEventTime type must have exactly one item argument");
-//RS             }
-//RS             return format!(
-//RS                 "{}jet_std::JetStream<{}jet_std::JetStreamEvent<{}>>",
-//RS                 self.config.root_prefix,
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(&args[0])
-//RS             );
-//RS         }
-//RS         if name.name == "KeyedStream" {
-//RS             if args.len() != 2 {
-//RS                 panic!("MIR KeyedStream type must have key and item arguments");
-//RS             }
-//RS             return format!(
-//RS                 "{}jet_std::JetKeyedStream<{}, {}>",
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(&args[0]),
-//RS                 self.rust_type(&args[1])
-//RS             );
-//RS         }
-//RS         if name.name == "Window" {
-//RS             if args.len() != 2 {
-//RS                 panic!("MIR Window type must have key and item arguments");
-//RS             }
-//RS             return format!(
-//RS                 "{}jet_std::JetStreamWindow<{}, {}>",
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(&args[0]),
-//RS                 self.rust_type(&args[1])
-//RS             );
-//RS         }
-//RS         if name.name == jet_foundation::Syntax::TYPE_STREAM {
-//RS             if args.len() != 1 {
-//RS                 panic!("MIR Stream type must have exactly one item argument");
-//RS             }
-//RS             return format!(
-//RS                 "{}jet_std::JetStream<{}>",
-//RS                 self.config.root_prefix,
-//RS                 self.rust_type(&args[0])
-//RS             );
-//RS         }
-//RS         if let Some(allocator) = crate::Codegen::alloc_handle_rust_type(native_name) {
-//RS             return format!("{}{}", self.config.root_prefix, allocator);
-//RS         }
-//RS         let head = self.nominal_name(&name.name);
-//RS         if args.is_empty() {
-//RS             head
-//RS         } else {
-//RS             let args = args
-//RS                 .iter()
-//RS                 .map(|arg| self.rust_type(arg))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             format!("{head}<{args}>")
-//RS         }
-//RS     }
-//RS 
-//RS     fn is_scalar(&self, ty: &MirType) -> bool {
-//RS         if self.is_core_layer() && ty.is_string() {
-//RS             return true;
-//RS         }
-//RS         // JetInt has scalar layout but owns a Foundation node. Treat it as an
-//RS         // aggregate for parameter passing so Read never moves its owner.
-//RS         if matches!(ty.kind(), MirTypeKind::Int) {
-//RS             return false;
-//RS         }
-//RS         match ty.layout.abi {
-//RS             MirAbi::Scalar(_) => true,
-//RS             MirAbi::Aggregate
-//RS             | MirAbi::Sequence
-//RS             | MirAbi::Function
-//RS             | MirAbi::Nominal
-//RS             | MirAbi::Dynamic
-//RS             | MirAbi::Never => false,
-//RS         }
-//RS     }
-//RS     fn is_handle_name(&self, name: &str) -> bool {
-//RS         self.program
-//RS             .handles
-//RS             .iter()
-//RS             .any(|handle| handle.ty.nominal_name() == Some(name))
-//RS     }
-//RS 
-//RS     fn is_handle_type(&self, ty: &MirType) -> bool {
-//RS         self.program.handles.iter().any(|handle| {
-//RS             handle.ty.same_checked_type(ty)
-//RS                 || handle.ty.nominal_name() == ty.nominal_name() && ty.nominal_name().is_some()
-//RS         })
-//RS     }
-//RS 
-//RS     fn handle_for_type(&self, ty: &MirType) -> Option<&MirHandleLifecycle> {
-//RS         self.program.handles.iter().find(|handle| {
-//RS             handle.ty.same_checked_type(ty)
-//RS                 || handle.ty.nominal_name() == ty.nominal_name() && ty.nominal_name().is_some()
-//RS         })
-//RS     }
-//RS 
-//RS     fn emit_handle_type(&self, handle: &MirHandleLifecycle, out: &mut String) {
-//RS         let name = self.rust_type(&handle.ty);
-//RS         let handle_id = handle.id.0;
-//RS         let close_foreign = handle.close_foreign.filter(|close_id| {
-//RS             self.program
-//RS                 .foreign
-//RS                 .iter()
-//RS                 .find(|foreign| foreign.id == *close_id)
-//RS                 .is_some_and(|foreign| self.target_applicable(foreign.target_applicability))
-//RS         });
-//RS         let close_function = handle
-//RS             .close
-//RS             .filter(|close_id| self.selected_for_target(self.function_row(*close_id)));
-//RS         let drop_impl = if matches!(handle.ownership, MirHandleOwnership::Owned) {
-//RS             if let Some(close_id) = close_foreign {
-//RS                 let close = self.foreign_name(close_id);
-//RS                 format!(
-//RS                     "impl Drop for {name} {{\n\
-//RS                          fn drop(&mut self) {{\n\
-//RS                              if let Some((_, __jet_raw)) = self.__jet_token.take_raw() {{\n\
-//RS                                  unsafe {{ let _ = {close}(__jet_raw as *mut core::ffi::c_void); }}\n\
-//RS                              }}\n\
-//RS                          }}\n\
-//RS                      }}\n"
-//RS                 )
-//RS             } else if let Some(close_id) = close_function {
-//RS                 let close = self.function_name(close_id);
-//RS                 let call = if self.function_row(close_id).is_unsafe {
-//RS                     format!("unsafe {{ {close}(__jet_handle) }}")
-//RS                 } else {
-//RS                     format!("{close}(__jet_handle)")
-//RS                 };
-//RS                 format!(
-//RS                     "impl Drop for {name} {{\n\
-//RS                          fn drop(&mut self) {{\n\
-//RS                              if let Some((_, __jet_raw)) = self.__jet_token.take_raw() {{\n\
-//RS                                  let __jet_handle = {name}::from_raw(__jet_raw as *mut core::ffi::c_void);\n\
-//RS                                  let _ = {call};\n\
-//RS                              }}\n\
-//RS                          }}\n\
-//RS                      }}\n"
-//RS                 )
-//RS             } else {
-//RS                 String::new()
-//RS             }
-//RS         } else {
-//RS             String::new()
-//RS         };
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "#[repr(transparent)]\n#[derive(Debug)]\npub struct {name} {{\n\
-//RS                  __jet_token: jet_foundation::MIR::MirHandleToken,\n\
-//RS              }}\n\
-//RS              impl {name} {{\n\
-//RS                  pub fn from_raw(raw: *mut core::ffi::c_void) -> Self {{\n\
-//RS                      Self {{\n\
-//RS                          __jet_token: jet_foundation::MIR::MirHandleToken::new(\n\
-//RS                              jet_foundation::MIR::MirHandleId({handle_id}), raw as i64\n\
-//RS                          ),\n\
-//RS                      }}\n\
-//RS                  }}\n\
-//RS                  pub fn as_raw(&self) -> *mut core::ffi::c_void {{\n\
-//RS                      self.__jet_token.raw()\n\
-//RS                          .map(|raw| raw as *mut core::ffi::c_void)\n\
-//RS                          .unwrap_or_else(|| panic!(\"opaque handle was already moved\"))\n\
-//RS                  }}\n\
-//RS                  pub fn into_raw(self) -> *mut core::ffi::c_void {{\n\
-//RS                      self.__jet_token\n\
-//RS                          .take_raw()\n\
-//RS                          .map(|(_, raw)| raw as *mut core::ffi::c_void)\n\
-//RS                          .unwrap_or_else(|| panic!(\"opaque handle was already moved\"))\n\
-//RS                  }}\n\
-//RS                  pub fn token_identity(&self) -> usize {{ self.__jet_token.identity() }}\n\
-//RS              }}\n"
-//RS         );
-//RS         out.push_str(&drop_impl);
-//RS     }
-//RS 
-//RS     fn foreign_param_type(
-//RS         &self,
-//RS         foreign: &MirForeign,
-//RS         param: &jet_foundation::MIR::MirParam,
-//RS     ) -> String {
-//RS         if foreign.callback_transport.as_deref() == Some("native-start") {
-//RS             if let MirTypeKind::Fn(signature) = param.ty.kind() {
-//RS                 let payload = signature
-//RS                     .params
-//RS                     .first()
-//RS                     .and_then(|ty| match ty.kind() {
-//RS                         MirTypeKind::Apply { name, args }
-//RS                             if name.name == "FfiCallbackEvent" && args.len() == 1 =>
-//RS                         {
-//RS                             Some(args[0].clone())
-//RS                         }
-//RS                         _ => None,
-//RS                     })
-//RS                     .unwrap_or_else(|| {
-//RS                         panic!("native callback start row has no FfiCallbackEvent payload")
-//RS                     });
-//RS                 let ret = signature
-//RS                     .ret
-//RS                     .as_deref()
-//RS                     .map(|ty| format!(" -> {}", self.rust_type(ty)))
-//RS                     .unwrap_or_default();
-//RS                 return format!(
-//RS                     "Option<unsafe extern \"C\" fn(*mut core::ffi::c_void, {}){}>",
-//RS                     self.rust_type(&payload),
-//RS                     ret
-//RS                 );
-//RS             }
-//RS         }
-//RS         if matches!(foreign.foreign_language, MirForeignLanguage::C) {
-//RS             if let Some(definition) = self.c_abi_record_def(&param.ty) {
-//RS                 let name = self.c_abi_record_name(definition);
-//RS                 return if param.access == MirAccess::Write {
-//RS                     format!("*mut {name}")
-//RS                 } else {
-//RS                     name
-//RS                 };
-//RS             }
-//RS             if let Some(native) = self.c_abi_type(&param.ty, param.access) {
-//RS                 return native;
-//RS             }
-//RS         }
-//RS         if matches!(foreign.foreign_language, MirForeignLanguage::C)
-//RS             && !foreign.bridge_eligible
-//RS             && param.access == MirAccess::Read
-//RS             && !self.is_scalar(&param.ty)
-//RS         {
-//RS             // CModule direct rows use the checked C ABI, where an aggregate
-//RS             // read parameter is passed by value rather than as Jet's ordinary
-//RS             // borrowed callable parameter.
-//RS             return self.rust_type(&param.ty);
-//RS         }
-//RS         if foreign.raw_scalar_abi && matches!(param.ty.kind(), MirTypeKind::Int) {
-//RS             return "i64".to_string();
-//RS         }
-//RS         if foreign.handle.is_some() && self.is_handle_type(&param.ty) {
-//RS             "*mut core::ffi::c_void".to_string()
-//RS         } else {
-//RS             self.parameter_type(param)
-//RS         }
-//RS     }
-//RS 
-//RS     fn foreign_return_type(&self, foreign: &MirForeign) -> String {
-//RS         if foreign.callback_transport.as_deref() == Some("native-start") {
-//RS             return "*mut core::ffi::c_void".to_string();
-//RS         }
-//RS         foreign
-//RS             .return_type
-//RS             .as_ref()
-//RS             .map(|ty| {
-//RS                 if matches!(foreign.foreign_language, MirForeignLanguage::C) {
-//RS                     if let Some(native) = self.c_abi_type(ty, MirAccess::Read) {
-//RS                         return native;
-//RS                     }
-//RS                 }
-//RS                 if foreign.handle.is_some() && self.is_handle_type(ty) {
-//RS                     "*mut core::ffi::c_void".to_string()
-//RS                 } else {
-//RS                     self.rust_type(ty)
-//RS                 }
-//RS             })
-//RS             .unwrap_or_else(|| "()".to_string())
-//RS     }
-//RS 
-//RS     fn callable_type(
-//RS         &self,
-//RS         params: &[MirType],
-//RS         conventions: Option<&[MirAccess]>,
-//RS         ret: Option<&MirType>,
-//RS     ) -> String {
-//RS         let parameter_types = params
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, param)| {
-//RS                 let access = Self::callable_parameter_access(conventions, index);
-//RS                 let rendered = self.rust_type(param);
-//RS                 let mode = self.callable_parameter_mode(param, access);
-//RS                 let callable = match mode {
-//RS                     'W' => format!("&mut {rendered}"),
-//RS                     'R' => format!("&{rendered}"),
-//RS                     'O' => rendered.clone(),
-//RS                     other => panic!("MIR callable has unknown mode `{other}`"),
-//RS                 };
-//RS                 (rendered, callable, mode)
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let params = parameter_types
-//RS             .iter()
-//RS             .map(|(_, callable, _)| callable.as_str())
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         let ret = ret
-//RS             .map(|ret| self.rust_type(ret))
-//RS             .unwrap_or_else(|| "()".to_string());
-//RS         if self.history_runtime_metadata_enabled() {
-//RS             let arity = parameter_types.len();
-//RS             let modes = parameter_types
-//RS                 .iter()
-//RS                 .map(|(_, _, mode)| *mode)
-//RS                 .collect::<String>();
-//RS             let borrowed_trait = modes.chars().any(|mode| mode != 'O');
-//RS             let callable_name = if borrowed_trait {
-//RS                 self.history_callable_modes
-//RS                     .borrow_mut()
-//RS                     .insert((arity, modes.clone()));
-//RS                 format!("{}JetHistoryFn{arity}B{modes}", self.config.root_prefix)
-//RS             } else {
-//RS                 self.history_callable_arities.borrow_mut().insert(arity);
-//RS                 format!("{}JetHistoryFn{arity}", self.config.root_prefix)
-//RS             };
-//RS             let generic_params = if borrowed_trait {
-//RS                 parameter_types
-//RS                     .iter()
-//RS                     .map(|(rendered, _, _)| rendered.as_str())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             } else {
-//RS                 params.clone()
-//RS             };
-//RS             let generic_params = if generic_params.is_empty() {
-//RS                 String::new()
-//RS             } else {
-//RS                 format!("{generic_params}, ")
-//RS             };
-//RS             let lifetime = self.history_callback_lifetime.get();
-//RS             format!(
-//RS                 "Box<dyn {callable_name}<{lifetime}, {generic_params}{ret}> + {lifetime}>"
-//RS             )
-//RS         } else {
-//RS             format!(
-//RS                 "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({params}) -> {ret}>>>>"
-//RS             )
-//RS         }
-//RS     }
-//RS 
-//RS     fn callable_parameter_access(conventions: Option<&[MirAccess]>, index: usize) -> MirAccess {
-//RS         conventions
-//RS             .and_then(|conventions| conventions.get(index))
-//RS             .copied()
-//RS             .unwrap_or(MirAccess::Read)
-//RS     }
-//RS 
-//RS     /// A `Read` parameter of non-scalar type crosses the call as `&T`. This
-//RS     /// one predicate decides the callee signature, the callee's parameter
-//RS     /// reads, and the caller's argument marshalling, so the three sides can
-//RS     /// never disagree on the Rust calling convention.
-//RS     fn callable_parameter_borrowed(&self, ty: &MirType, access: MirAccess) -> bool {
-//RS         access == MirAccess::Write || access == MirAccess::Read && !self.is_scalar(ty)
-//RS     }
-//RS 
-//RS     fn callable_parameter_mode(&self, ty: &MirType, access: MirAccess) -> char {
-//RS         if access == MirAccess::Write {
-//RS             'W'
-//RS         } else if self.callable_parameter_borrowed(ty, access) {
-//RS             'R'
-//RS         } else {
-//RS             'O'
-//RS         }
-//RS     }
-//RS 
-//RS     fn callable_parameter_type(&self, ty: &MirType, access: MirAccess) -> String {
-//RS         let rendered = self.rust_type(ty);
-//RS         match access {
-//RS             MirAccess::Write => format!("&mut {rendered}"),
-//RS             MirAccess::Read if self.callable_parameter_borrowed(ty, access) => {
-//RS                 format!("&{rendered}")
-//RS             }
-//RS             MirAccess::Read | MirAccess::Move => rendered,
-//RS         }
-//RS     }
-//RS 
-//RS     fn callable_argument_from_owned(
-//RS         &self,
-//RS         ty: &MirType,
-//RS         access: MirAccess,
-//RS         value: String,
-//RS     ) -> String {
-//RS         match access {
-//RS             MirAccess::Write => format!("&mut {value}"),
-//RS             MirAccess::Read if self.callable_parameter_borrowed(ty, access) => {
-//RS                 format!("&{value}")
-//RS             }
-//RS             MirAccess::Read | MirAccess::Move => value,
-//RS         }
-//RS     }
-//RS 
-//RS     fn callable_parameters(ty: &MirType) -> impl ExactSizeIterator<Item = (&MirType, MirAccess)> {
-//RS         let (params, conventions) = match ty.kind() {
-//RS             MirTypeKind::Fn(signature) => (
-//RS                 signature.params.as_slice(),
-//RS                 signature
-//RS                     .call_metadata
-//RS                     .as_ref()
-//RS                     .map(|metadata| metadata.conventions.as_slice()),
-//RS             ),
-//RS             MirTypeKind::SendFn {
-//RS                 params,
-//RS                 conventions,
-//RS                 ..
-//RS             } => (params.as_slice(), Some(conventions.as_slice())),
-//RS             other => panic!(
-//RS                 "MIR callable ABI requested for non-function type {}",
-//RS                 other.display_name()
-//RS             ),
-//RS         };
-//RS         params
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(move |(index, param)| (param, Self::callable_parameter_access(conventions, index)))
-//RS     }
-//RS 
-//RS     fn callable_borrow_mask(&self, ty: &MirType) -> Vec<bool> {
-//RS         Self::callable_parameters(ty)
-//RS             .map(|(param, access)| self.callable_parameter_borrowed(param, access))
-//RS             .collect()
-//RS     }
-//RS 
-//RS     fn parameter_borrowed(&self, param: &jet_foundation::MIR::MirParam) -> bool {
-//RS         self.callable_parameter_borrowed(&param.ty, param.access)
-//RS     }
-//RS 
-//RS     /// The receiver row of an instance method. The receiver is MIR parameter
-//RS     /// 0 whenever the function form carries a receiver access; the form spells
-//RS     /// it (`&self`/`&mut self`/`self`), so it is never emitted or marshalled
-//RS     /// as a named parameter.
-//RS     fn receiver_param<'f>(
-//RS         &self,
-//RS         function: &'f MirFunction,
-//RS     ) -> Option<&'f jet_foundation::MIR::MirParam> {
-//RS         let access = match &function.form {
-//RS             MirFunctionForm::Method { self_access, .. }
-//RS             | MirFunctionForm::TraitMethod { self_access, .. } => *self_access,
-//RS             MirFunctionForm::TopLevel => None,
-//RS         }?;
-//RS         let receiver = function
-//RS             .params
-//RS             .first()
-//RS             .filter(|param| param.index == 0 && param.name == jet_foundation::Syntax::KW_SELF)
-//RS             .unwrap_or_else(|| {
-//RS                 panic!(
-//RS                     "MIR instance method {:?} declares a receiver but parameter 0 is not `self`",
-//RS                     function.id
-//RS                 )
-//RS             });
-//RS         if receiver.access != access {
-//RS             panic!(
-//RS                 "MIR instance method {:?} receiver access {:?} disagrees with its form {:?}",
-//RS                 function.id, receiver.access, access
-//RS             );
-//RS         }
-//RS         Some(receiver)
-//RS     }
-//RS 
-//RS     fn is_receiver(&self, function: &MirFunction, param: &jet_foundation::MIR::MirParam) -> bool {
-//RS         self.receiver_param(function)
-//RS             .is_some_and(|receiver| receiver.index == param.index)
-//RS     }
-//RS 
-//RS     /// The declared parameters of a function: every row except the receiver.
-//RS     /// These line up with a trait method's parameter rows and with the
-//RS     /// arguments a caller passes after the receiver.
-//RS     fn declared_params<'f>(
-//RS         &self,
-//RS         function: &'f MirFunction,
-//RS     ) -> &'f [jet_foundation::MIR::MirParam] {
-//RS         match self.receiver_param(function) {
-//RS             Some(_) => &function.params[1..],
-//RS             None => &function.params,
-//RS         }
-//RS     }
-//RS 
-//RS     fn parameter_borrow_mask(&self, params: &[jet_foundation::MIR::MirParam]) -> Vec<bool> {
-//RS         params
-//RS             .iter()
-//RS             .map(|param| self.parameter_borrowed(param))
-//RS             .collect()
-//RS     }
-//RS 
-//RS     /// A declared parameter's Rust type inside its own function signature.
-//RS     /// A window row (`collect_window_params`) is a `&mut [T]` slice.
-//RS     fn function_parameter_type(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         param: &jet_foundation::MIR::MirParam,
-//RS     ) -> String {
-//RS         if self.window_params.contains(&(function.id, param.index)) {
-//RS             if let MirTypeKind::List(element) = param.ty.kind() {
-//RS                 return format!("&mut [{}]", self.rust_type(element));
-//RS             }
-//RS         }
-//RS         self.parameter_type(param)
-//RS     }
-//RS 
-//RS     /// True when `value` is a window parameter row of `function`.
-//RS     fn window_parameter_value(&self, function: &MirFunction, value: MirValueId) -> bool {
-//RS         matches!(
-//RS             self.value_definition(function, value),
-//RS             Some(MirOperation::Parameter { index, .. })
-//RS                 if self.window_params.contains(&(function.id, *index))
-//RS         )
-//RS     }
-//RS 
-//RS     fn parameter_type(&self, param: &jet_foundation::MIR::MirParam) -> String {
-//RS         let ty = self.rust_parameter_type(&param.ty);
-//RS         match param.access {
-//RS             MirAccess::Write => format!("&mut {ty}"),
-//RS             MirAccess::Read if self.parameter_borrowed(param) => format!("&{ty}"),
-//RS             MirAccess::Read | MirAccess::Move => ty,
-//RS         }
-//RS     }
-//RS     fn capture_param_name(&self, slot: usize) -> String {
-//RS         format!("__jet_capture_{slot}")
-//RS     }
-//RS 
-//RS     fn capture_parameter_type(&self, function: &MirFunction, capture: &MirCaptureParam) -> String {
-//RS         let ty = self.rust_parameter_type(&capture.ty);
-//RS         if self.capture_move_required(function, capture.slot) {
-//RS             return ty;
-//RS         }
-//RS         match capture.access {
-//RS             MirAccess::Read => format!("&{ty}"),
-//RS             MirAccess::Write => format!("&mut {ty}"),
-//RS             MirAccess::Move => ty,
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_program_metadata(&self, out: &mut String) {
-//RS         let identity = self.artifact_identity.canonical_json();
-//RS         let _ = writeln!(out, "// jet-mir-identity: {identity}");
-//RS         let _ = writeln!(out, "// MIR schema: {}", self.program.schema_version);
-//RS         let _ = writeln!(out, "// MIR package: {}", self.program.package_identity);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "// MIR target: {} pointer={} align={}",
-//RS             self.config.target.triple,
-//RS             self.config.target.pointer_size,
-//RS             self.config.target.pointer_alignment
-//RS         );
-//RS     }
-//RS 
-//RS     fn visibility(&self, visibility: MirVisibility) -> &'static str {
-//RS         match visibility {
-//RS             MirVisibility::Private => "",
-//RS             MirVisibility::Package => "pub(crate) ",
-//RS             MirVisibility::Public => "pub ",
-//RS         }
-//RS     }
-//RS     fn generic_params_from(&self, params: &[jet_foundation::MIR::MirGenericParam]) -> String {
-//RS         if params.is_empty() {
-//RS             return String::new();
-//RS         }
-//RS         let params = params
-//RS             .iter()
-//RS             .map(|param| {
-//RS                 let bounds = param
-//RS                     .bounds
-//RS                     .iter()
-//RS                     .map(|bound| self.trait_nominal_name(bound))
-//RS                     .collect::<Vec<_>>();
-//RS                 if bounds.is_empty() {
-//RS                     mangle(&param.name)
-//RS                 } else {
-//RS                     format!("{}: {}", mangle(&param.name), bounds.join(" + "))
-//RS                 }
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         format!("<{params}>")
-//RS     }
-//RS 
-//RS     fn module_row(&self, id: MirModuleId) -> &MirModule {
-//RS         self.program
-//RS             .modules
-//RS             .iter()
-//RS             .find(|module| module.id == id)
-//RS             .unwrap_or_else(|| panic!("MIR module ID {:?} has no row", id))
-//RS     }
-//RS     /// Source row of `function` and the line index of its text.
-//RS     fn function_source(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS     ) -> (
-//RS         &'a jet_foundation::MIR::MirSourceFile,
-//RS         &jet_foundation::Diagnostics::LineIndex,
-//RS     ) {
-//RS         let (source, lines) = self
-//RS             .source_lines
-//RS             .get(&function.source_file)
-//RS             .unwrap_or_else(|| panic!("MIR source file {:?} has no row", function.source_file));
-//RS         (*source, lines)
-//RS     }
-//RS     fn coverage_function_line(&self, function: &MirFunction) -> usize {
-//RS         let (source, lines) = self.function_source(function);
-//RS         lines.line_col(&source.source, function.span.start).0
-//RS     }
-//RS     fn function_stack_context(&self, function: &MirFunction) -> (String, u32, String) {
-//RS         let (source, lines) = self.function_source(function);
-//RS         let (line, _) = lines.line_col(&source.source, function.span.start);
-//RS         let source_line = lines
-//RS             .line_text(&source.source, line)
-//RS             .trim_end()
-//RS             .to_string();
-//RS         let line = u32::try_from(line)
-//RS             .unwrap_or_else(|_| panic!("MIR function source line {line} exceeds u32"));
-//RS         (source.path.clone(), line, source_line)
-//RS     }
-//RS     fn instruction_location(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         instruction: &MirInstruction,
-//RS     ) -> MirPanicLoc {
-//RS         let (source, lines) = self.function_source(function);
-//RS         let line = instruction
-//RS             .source_line
-//RS             .map(|line| line as usize)
-//RS             .unwrap_or_else(|| lines.line_col(&source.source, instruction.span.start).0);
-//RS         let line = u32::try_from(line)
-//RS             .unwrap_or_else(|_| panic!("MIR instruction source line {line} exceeds u32"));
-//RS         MirPanicLoc {
-//RS             file: function.source_file,
-//RS             line,
-//RS             column: 0,
-//RS         }
-//RS     }
-//RS 
-//RS     fn trait_name(&self, id: MirTraitId) -> String {
-//RS         self.traits
-//RS             .get(&id)
-//RS             .cloned()
-//RS             .unwrap_or_else(|| panic!("MIR trait ID {:?} has no declaration row", id))
-//RS     }
-//RS     fn trait_method_symbol(
-//RS         &self,
-//RS         definition: &MirTraitDef,
-//RS         method: &MirTraitMethod,
-//RS     ) -> String {
-//RS         if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(&definition.name) {
-//RS             compiler_trait_method_symbol(&definition.name, &method.name)
-//RS         } else {
-//RS             mangle(&method.name)
-//RS         }
-//RS     }
-//RS 
-//RS     fn trait_method_key(&self, definition: &MirTraitDef, method: &MirTraitMethod) -> String {
-//RS         format!("{}::{}", self.module_row(definition.module).key, method.name)
-//RS     }
-//RS 
-//RS 
-//RS     fn trait_nominal_name(&self, reference: &jet_foundation::MIR::MirTraitRef) -> String {
-//RS         let name = self
-//RS             .traits
-//RS             .get(&reference.id)
-//RS             .cloned()
-//RS             .or_else(|| self.traits_by_name.get(&reference.name).cloned())
-//RS             .unwrap_or_else(|| {
-//RS                 panic!(
-//RS                     "MIR trait reference {:?} has no declaration row",
-//RS                     reference.id
-//RS                 )
-//RS             });
-//RS         name
-//RS     }
-//RS 
-//RS     fn emit_modules_and_imports(&self, out: &mut String) {
-//RS         for module_id in &self.artifact.modules {
-//RS             let module = self.module_row(*module_id);
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "// jet-mir-module: id={} key={} name={} path={}",
-//RS                 module.id.0, module.key, module.name, module.path
-//RS             );
-//RS             for import_id in &module.imports {
-//RS                 let import = self
-//RS                     .program
-//RS                     .imports
-//RS                     .iter()
-//RS                     .find(|import| import.id == *import_id)
-//RS                     .unwrap_or_else(|| panic!("MIR import ID {:?} has no row", import_id));
-//RS                 if import.module != module.id {
-//RS                     panic!("MIR import {:?} belongs to another module", import.id);
-//RS                 }
-//RS                 let visibility = self.visibility(import.visibility);
-//RS                 match &import.kind {
-//RS                     MirImportKind::File { path } => {
-//RS                         let _ = writeln!(
-//RS                             out,
-//RS                             "// jet-mir-import: {visibility}file {} as {}",
-//RS                             path,
-//RS                             mangle(&import.alias)
-//RS                         );
-//RS                     }
-//RS                     MirImportKind::Module { path } => {
-//RS                         let _ = writeln!(
-//RS                             out,
-//RS                             "// jet-mir-import: {visibility}module {} as {}",
-//RS                             path,
-//RS                             mangle(&import.alias)
-//RS                         );
-//RS                     }
-//RS                     MirImportKind::Unqualified { module, items } => {
-//RS                         if !self.module_selected(*module) {
-//RS                             panic!(
-//RS                                 "MIR selected module {:?} imports unselected module {:?}",
-//RS                                 module_id, module
-//RS                             );
-//RS                         }
-//RS                         let items = items
-//RS                             .iter()
-//RS                             .map(|item| {
-//RS                                 format!("{}:{}", item.original, self.item_ref_name(item.item))
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ");
-//RS                         let _ = writeln!(
-//RS                             out,
-//RS                             "// jet-mir-import: {visibility}unqualified {} as {} [{}]",
-//RS                             self.module_row(*module).key,
-//RS                             mangle(&import.alias),
-//RS                             items
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         out.push('\n');
-//RS     }
-//RS 
-//RS     fn item_ref_name(&self, item: MirItemRef) -> String {
-//RS         match item {
-//RS             MirItemRef::Type(id) => self.type_name(id),
-//RS             MirItemRef::Trait(id) => self.trait_name(id),
-//RS             MirItemRef::Function(id) => self.function_name(id),
-//RS             MirItemRef::Constant(id) => self
-//RS                 .program
-//RS                 .constants
-//RS                 .iter()
-//RS                 .find(|constant| constant.id == id)
-//RS                 .map(|constant| mangle_path(&constant.key))
-//RS                 .unwrap_or_else(|| panic!("MIR constant ID {:?} has no row", id)),
-//RS             MirItemRef::Impl(id) => self
-//RS                 .program
-//RS                 .impls
-//RS                 .iter()
-//RS                 .find(|implementation| implementation.id == id)
-//RS                 .map(|implementation| mangle_path(&implementation.key))
-//RS                 .unwrap_or_else(|| panic!("MIR impl ID {:?} has no row", id)),
-//RS             MirItemRef::Foreign(id) => self.foreign_name(id),
-//RS             MirItemRef::Import(id) => self
-//RS                 .program
-//RS                 .imports
-//RS                 .iter()
-//RS                 .find(|import| import.id == id)
-//RS                 .map(|import| mangle(&import.alias))
-//RS                 .unwrap_or_else(|| panic!("MIR import ID {:?} has no row", id)),
-//RS         }
-//RS     }
-//RS     fn is_synthetic_rollback_trait(&self, definition: &MirTraitDef) -> bool {
-//RS         definition.name == crate::Syntax::TRAIT_ROLLBACK && definition.methods.is_empty()
-//RS     }
-//RS 
-//RS     fn rollback_snapshot_type() -> MirType {
-//RS         MirType::from_kind(MirTypeKind::Apply {
-//RS             name: MirNominalRef {
-//RS                 id: MirTypeId(0),
-//RS                 name: "Snapshot".to_string(),
-//RS             },
-//RS             args: Vec::new(),
-//RS         })
-//RS     }
-//RS 
-//RS     fn rollback_snapshot_return_type(function: &MirFunction, snapshot: &MirType) -> MirType {
-//RS         if let Some((_, error)) = function.return_type.result_parts() {
-//RS             MirType::from_kind(MirTypeKind::Result {
-//RS                 ok: Box::new(snapshot.clone()),
-//RS                 err: Box::new(error.clone()),
-//RS             })
-//RS         } else {
-//RS             snapshot.clone()
-//RS         }
-//RS     }
-//RS 
-//RS     fn synthetic_rollback_methods(&self, definition: &MirTraitDef) -> Vec<MirTraitMethod> {
-//RS         let snapshot = Self::rollback_snapshot_type();
-//RS         let mut methods = self
-//RS             .program
-//RS             .functions
-//RS             .iter()
-//RS             .filter_map(|function| {
-//RS                 let MirFunctionForm::TraitMethod {
-//RS                     trait_ref,
-//RS                     self_access,
-//RS                     serde,
-//RS                     ..
-//RS                 } = &function.form
-//RS                 else {
-//RS                     return None;
-//RS                 };
-//RS                 if trait_ref.name != crate::Syntax::TRAIT_ROLLBACK
-//RS                     || serde.is_some()
-//RS                     || !self.module_selected(function.module_id)
-//RS                     || !self.selected_for_target(function)
-//RS                 {
-//RS                     return None;
-//RS                 }
-//RS                 let mut params = self.declared_params(function).to_vec();
-//RS                 if function.name == "restore" {
-//RS                     for param in &mut params {
-//RS                         if param.name == "snap" {
-//RS                             param.ty = snapshot.clone();
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let (return_type, declared_return) = if function.name == "snapshot" {
-//RS                     (
-//RS                         Self::rollback_snapshot_return_type(function, &snapshot),
-//RS                         function.declared_return.as_ref().map(|_| snapshot.clone()),
-//RS                     )
-//RS                 } else {
-//RS                     (
-//RS                         function.return_type.clone(),
-//RS                         function.declared_return.clone(),
-//RS                     )
-//RS                 };
-//RS                 Some(MirTraitMethod {
-//RS                     id: MirTraitMethodId(stable_id(
-//RS                         "mir-trait-method",
-//RS                         &format!("{}::{}", definition.key, function.key),
-//RS                     )),
-//RS                     name: function.name.clone(),
-//RS                     span: function.span,
-//RS                     self_access: *self_access,
-//RS                     params,
-//RS                     declared_return,
-//RS                     return_type,
-//RS                     failure: function.failure.clone(),
-//RS                     effects: function.effects.clone(),
-//RS                     is_pure: function.is_pure,
-//RS                     return_view_provenance: function.return_view_provenance.clone(),
-//RS                     declared_return_view_provenance: None,
-//RS                     default: None,
-//RS                 })
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         methods.sort_by(|left, right| left.name.cmp(&right.name));
-//RS         methods.dedup_by(|left, right| left.name == right.name);
-//RS         methods
-//RS     }
-//RS 
-//RS     fn emit_trait_def(
-//RS         &self,
-//RS         definition: &MirTraitDef,
-//RS         emitted_methods: &mut BTreeSet<MirFunctionId>,
-//RS         out: &mut String,
-//RS     ) {
-//RS         let visibility = self.visibility(definition.visibility);
-//RS         let name = self.trait_name(definition.id);
-//RS         // A trait used as `Box<dyn T>` clones its boxed value through a
-//RS         // clone-box supertrait, so `Box<dyn T>` is `Clone` like every other
-//RS         // Jet value carrier.
-//RS         let dyn_clone = self.dyn_clone_traits.contains(&name);
-//RS         if dyn_clone {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "{visibility}trait {name}__JetCloneBox {{ fn __jet_clone_box(&self) -> Box<dyn {name}>; }}\n\
-//RS                  impl<JetSelf: {name} + Clone + 'static> {name}__JetCloneBox for JetSelf {{ fn __jet_clone_box(&self) -> Box<dyn {name}> {{ Box::new(self.clone()) }} }}\n\
-//RS                  impl Clone for Box<dyn {name}> {{ fn clone(&self) -> Self {{ (**self).__jet_clone_box() }} }}"
-//RS             );
-//RS             let _ = writeln!(out, "{visibility}trait {name}: {name}__JetCloneBox {{");
-//RS         } else {
-//RS             let _ = writeln!(out, "{visibility}trait {name} {{");
-//RS         }
-//RS         for associated in &definition.associated_types {
-//RS             let _ = writeln!(out, "    type {};", mangle(&associated.name));
-//RS         }
-//RS         if self.is_synthetic_rollback_trait(definition) {
-//RS             for method in self.synthetic_rollback_methods(definition) {
-//RS                 self.emit_trait_method(definition, &method, emitted_methods, out);
-//RS             }
-//RS         } else {
-//RS             for method in &definition.methods {
-//RS                 self.emit_trait_method(definition, method, emitted_methods, out);
-//RS             }
-//RS         }
-//RS         let _ = writeln!(out, "}}\n");
-//RS     }
-//RS 
-//RS     fn synthetic_rollback_type(&self, definition: &MirTraitDef, ty: &MirType) -> String {
-//RS         if !self.is_synthetic_rollback_trait(definition) {
-//RS             return self.rust_type(ty);
-//RS         }
-//RS         if ty.nominal_name() == Some("Snapshot") {
-//RS             return format!("Self::{}", mangle("Snapshot"));
-//RS         }
-//RS         if let Some((ok, error)) = ty.result_parts() {
-//RS             let ok = if ok.nominal_name() == Some("Snapshot") {
-//RS                 format!("Self::{}", mangle("Snapshot"))
-//RS             } else {
-//RS                 self.rust_type(ok)
-//RS             };
-//RS             return format!(
-//RS                 "{}JetOutcome<{}, {}>",
-//RS                 self.config.root_prefix,
-//RS                 ok,
-//RS                 self.rust_type(error)
-//RS             );
-//RS         }
-//RS         self.rust_type(ty)
-//RS     }
-//RS 
-//RS     fn synthetic_rollback_parameter_type(
-//RS         &self,
-//RS         definition: &MirTraitDef,
-//RS         param: &MirParam,
-//RS     ) -> String {
-//RS         let ty = self.synthetic_rollback_type(definition, &param.ty);
-//RS         match param.access {
-//RS             MirAccess::Write => format!("&mut {ty}"),
-//RS             MirAccess::Read if self.parameter_borrowed(param) => format!("&{ty}"),
-//RS             MirAccess::Read | MirAccess::Move => ty,
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_trait_method(
-//RS         &self,
-//RS         definition: &MirTraitDef,
-//RS         method: &MirTraitMethod,
-//RS         emitted_methods: &mut BTreeSet<MirFunctionId>,
-//RS         out: &mut String,
-//RS     ) {
-//RS         let previous_lifetime = self.history_callback_lifetime.replace("'__jet_callback");
-//RS         let mut params =
-//RS             Vec::with_capacity(method.params.len() + usize::from(method.self_access.is_some()));
-//RS         if let Some(access) = method.self_access {
-//RS             params.push(match access {
-//RS                 MirAccess::Read => "&self".to_string(),
-//RS                 MirAccess::Write => "&mut self".to_string(),
-//RS                 MirAccess::Move => "self".to_string(),
-//RS             });
-//RS         }
-//RS         params.extend(method.params.iter().map(|param| {
-//RS             format!(
-//RS                 "{}: {}",
-//RS                 mangle(&param.name),
-//RS                 self.synthetic_rollback_parameter_type(definition, param)
-//RS             )
-//RS         }));
-//RS         let params = params.join(", ");
-//RS         let ret = self.synthetic_rollback_type(definition, &method.return_type);
-//RS         self.history_callback_lifetime.set(previous_lifetime);
-//RS         let generics = if params.contains("'__jet_callback") || ret.contains("'__jet_callback") {
-//RS             "<'__jet_callback>"
-//RS         } else {
-//RS             ""
-//RS         };
-//RS         let method_name = self.trait_method_symbol(definition, method);
-//RS         let Some(default_id) = method.default else {
-//RS             let _ = writeln!(out, "    fn {method_name}{generics}({params}) -> {ret};",);
-//RS             return;
-//RS         };
-//RS         let function = self.function_row(default_id);
-//RS         if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS             panic!(
-//RS                 "MIR trait default {:?} is not selected for the emitted artifact",
-//RS                 default_id
-//RS             );
-//RS         }
-//RS         let MirFunctionForm::TraitMethod {
-//RS             owner,
-//RS             trait_ref,
-//RS             self_access,
-//RS             serde,
-//RS         } = &function.form
-//RS         else {
-//RS             panic!(
-//RS                 "MIR trait default {:?} has a non-trait function form",
-//RS                 default_id
-//RS             );
-//RS         };
-//RS         if trait_ref.id != definition.id || trait_ref.name != definition.name {
-//RS             panic!(
-//RS                 "MIR trait default {:?} references {:?}, expected {:?}",
-//RS                 default_id, trait_ref, definition.id
-//RS             );
-//RS         }
-//RS         if *self_access != method.self_access || serde.is_some() {
-//RS             panic!(
-//RS                 "MIR trait default {:?} receiver/codec contract does not match {}",
-//RS                 default_id, method.name
-//RS             );
-//RS         }
-//RS         if function.capture_params.len() != 0
-//RS             || self.declared_params(function).len() != method.params.len()
-//RS             || self
-//RS                 .declared_params(function)
-//RS                 .iter()
-//RS                 .zip(&method.params)
-//RS                 .any(|(actual, expected)| {
-//RS                     actual.index != expected.index
-//RS                         || actual.name != expected.name
-//RS                         || actual.access != expected.access
-//RS                         || !actual
-//RS                             .ty
-//RS                             .same_checked_type(&self.normalize_trait_type(&expected.ty, owner))
-//RS                 })
-//RS             || !function
-//RS                 .return_type
-//RS                 .same_checked_type(&self.normalize_trait_type(&method.return_type, owner))
-//RS             || function.failure != method.failure
-//RS         {
-//RS             panic!(
-//RS                 "MIR trait default {:?} signature does not match {}",
-//RS                 default_id, method.name
-//RS             );
-//RS         }
-//RS         self.emit_callable_named(
-//RS             function,
-//RS             out,
-//RS             Some(&function.form),
-//RS             Some(&mangle(&method.name)),
-//RS             None,
-//RS             None,
-//RS         );
-//RS         if !emitted_methods.insert(function.id) {
-//RS             panic!(
-//RS                 "MIR trait default {:?} was emitted more than once",
-//RS                 function.id
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_constant_def(&self, constant: &MirConstantDef, out: &mut String) {
-//RS         let name = mangle_path(&constant.key);
-//RS         let visibility = self.visibility(constant.visibility);
-//RS         let ty = self.rust_type(&constant.ty);
-//RS         // D-MEM-COPYSEM1: a folded aggregate is one per-thread value built
-//RS         // once; reads borrow it (`NAME_shared`). A large list is filled by
-//RS         // row chunks, a smaller one by the inline `vec![..]` of the same rows.
-//RS         let root = &self.config.root_prefix;
-//RS         if self.shared_constant(constant) {
-//RS             let init = match (constant.ty.kind(), &constant.value) {
-//RS                 (MirTypeKind::List(inner), MirConstant::List(values)) => {
-//RS                     let rows = values
-//RS                         .iter()
-//RS                         .map(|value| self.constant_for_type(value, inner))
-//RS                         .collect::<Vec<_>>();
-//RS                     if rows.iter().map(String::len).sum::<usize>() > CACHED_CONSTANT_BYTES {
-//RS                         emit_list_constant_chunks(out, &name, &ty, &rows)
-//RS                     } else {
-//RS                         format!("vec![{}]", rows.join(", "))
-//RS                     }
-//RS                 }
-//RS                 _ => self.constant_for_type(&constant.value, &constant.ty),
-//RS             };
-//RS             emit_shared_constant(out, root, visibility, &name, &ty, &init);
-//RS             return;
-//RS         }
-//RS         let value = self.constant_for_type(&constant.value, &constant.ty);
-//RS         if constant.is_storage {
-//RS             let cell = format!("{}JetPersistCell", self.config.root_prefix);
-//RS             if matches!(constant.ty.kind(), MirTypeKind::Int) {
-//RS                 // JetInt construction owns heap-backed exact arithmetic and is
-//RS                 // therefore not a Rust const expression. Keep the same cell
-//RS                 // ABI, but defer the pure initializer until the first read.
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "{visibility}static {name}: std::sync::LazyLock<{cell}<{ty}>> = std::sync::LazyLock::new(|| {cell}::new({value}));\n"
-//RS                 );
-//RS             } else {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "{visibility}static {name}: {cell}<{ty}> = {cell}::new({value});\n"
-//RS                 );
-//RS             }
-//RS         } else {
-//RS             // The value is already folded; materializing a heap-backed carrier is not a Rust const expression.
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}\n"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     /// D-MEM-COPYSEM1: a folded aggregate constant (text, list, map, option,
-//RS     /// result, tuple, or nominal value) on a hosted target is one shared
-//RS     /// per-thread value; a read holds it in a `JetSharedSlot` and borrows it
-//RS     /// in place, and only an owned use copies it. Scalars stay plain values.
-//RS     fn shared_constant(&self, constant: &MirConstantDef) -> bool {
-//RS         !constant.is_storage
-//RS             && !self.is_no_os()
-//RS             && matches!(
-//RS                 constant.ty.kind(),
-//RS                 MirTypeKind::String
-//RS                     | MirTypeKind::List(_)
-//RS                     | MirTypeKind::Map { .. }
-//RS                     | MirTypeKind::Option(_)
-//RS                     | MirTypeKind::Result { .. }
-//RS                     | MirTypeKind::Tuple(_)
-//RS                     | MirTypeKind::Apply { .. }
-//RS             )
-//RS     }
-//RS 
-//RS     /// The shared-value accessor a `Global` read of `name` stores in its
-//RS     /// value slot, when `name` is a shared constant.
-//RS     fn shared_constant_accessor(&self, name: &str) -> Option<String> {
-//RS         let constant = self
-//RS             .program
-//RS             .constants
-//RS             .iter()
-//RS             .find(|constant| constant.key.as_str() == name)?;
-//RS         self.shared_constant(constant).then(|| {
-//RS             format!(
-//RS                 "{}{}_shared()",
-//RS                 self.config.root_prefix,
-//RS                 mangle_path(&constant.key)
-//RS             )
-//RS         })
-//RS     }
-//RS 
-//RS     /// Whether `value` is a `Global` read of a shared constant, whose slot
-//RS     /// is a `JetSharedSlot`.
-//RS     fn shared_constant_value(&self, function: &MirFunction, value: MirValueId) -> bool {
-//RS         matches!(
-//RS             self.value_definition(function, value),
-//RS             Some(MirOperation::Global { name }) if self.shared_constant_accessor(name).is_some()
-//RS         )
-//RS     }
-//RS 
-//RS     fn global_expression(&self, name: &str) -> String {
-//RS         let root = &self.config.root_prefix;
-//RS         match name {
-//RS             "transaction" => return format!("{root}jet_transaction()"),
-//RS             "stm" => return format!("{root}jet_stm::begin()"),
-//RS             _ => {}
-//RS         }
-//RS         if let Some(constant) = self
-//RS             .program
-//RS             .constants
-//RS             .iter()
-//RS             .find(|constant| constant.key.as_str() == name)
-//RS         {
-//RS             let path = format!("{root}{}", mangle_path(&constant.key));
-//RS             return if constant.is_storage {
-//RS                 format!("({path}).get()")
-//RS             } else {
-//RS                 format!("{path}()")
-//RS             };
-//RS         }
-//RS         format!("{root}{}", mangle_path(name))
-//RS     }
-//RS     fn emit_impl(
-//RS         &self,
-//RS         implementation: &MirImplDef,
-//RS         emitted_methods: &mut BTreeSet<MirFunctionId>,
-//RS         out: &mut String,
-//RS     ) {
-//RS         if !self.module_selected(implementation.module)
-//RS             || !self.impl_selected_for_target(implementation)
-//RS         {
-//RS             panic!(
-//RS                 "MIR implementation {:?} is not selected for the emitted artifact",
-//RS                 implementation.id
-//RS             );
-//RS         }
-//RS         if implementation.serde.is_some() && implementation.trait_ref.is_none() {
-//RS             panic!(
-//RS                 "MIR implementation {:?} carries a serde codec without a trait",
-//RS                 implementation.id
-//RS             );
-//RS         }
-//RS         if let Some(field) = implementation.delegation {
-//RS             if implementation.trait_ref.is_none() {
-//RS                 panic!(
-//RS                     "MIR implementation {:?} delegates without a trait",
-//RS                     implementation.id
-//RS                 );
-//RS             }
-//RS             let row = self
-//RS                 .program
-//RS                 .fields
-//RS                 .iter()
-//RS                 .find(|row| row.id == field)
-//RS                 .unwrap_or_else(|| {
-//RS                     panic!(
-//RS                         "MIR implementation {:?} delegation field {:?} has no row",
-//RS                         implementation.id, field
-//RS                     )
-//RS                 });
-//RS             if row.owner != self.type_identity(&implementation.self_type) {
-//RS                 panic!(
-//RS                     "MIR implementation {:?} delegation field {:?} belongs to {:?}, expected {:?}",
-//RS                     implementation.id,
-//RS                     field,
-//RS                     row.owner,
-//RS                     self.type_identity(&implementation.self_type)
-//RS                 );
-//RS             }
-//RS         }
-//RS         let impl_generic_params = self.generic_params_for_type(&implementation.self_type);
-//RS         self.push_generic_scope(impl_generic_params);
-//RS         let generics = self.generic_params_from(impl_generic_params);
-//RS         let owner = self.rust_type(&implementation.self_type);
-//RS         let owner = if !impl_generic_params.is_empty()
-//RS             && matches!(implementation.self_type.kind(), MirTypeKind::Apply { args, .. } if args.is_empty())
-//RS         {
-//RS             let arguments = impl_generic_params
-//RS                 .iter()
-//RS                 .map(|param| mangle(&param.name))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             format!("{owner}<{arguments}>")
-//RS         } else {
-//RS             owner
-//RS         };
-//RS         // An inherent impl on a carrier the runtime declares (Core `URL` and
-//RS         // `MIME` are the Prelude's `JetURL`/`JetMIME`) is rejected once the
-//RS         // runtime is its own crate (E0116). Its methods form a crate-local
-//RS         // extension trait instead; the generated crate is one flat namespace,
-//RS         // so every `recv.__jet_method()` call site sees the trait.
-//RS         let carrier_trait = (implementation.trait_ref.is_none()
-//RS             && impl_generic_params.is_empty()
-//RS             && self
-//RS                 .implementation_owner_def(&implementation.self_type)
-//RS                 .is_some_and(|definition| !self.declares_type_def(definition)))
-//RS         .then(|| format!("__jet_ext{}", mangle_path(&implementation.key)));
-//RS         let trait_definition = implementation.trait_ref.as_ref().map(|trait_ref| {
-//RS             self.program
-//RS                 .traits
-//RS                 .iter()
-//RS                 .find(|definition| {
-//RS                     definition.id == trait_ref.id && definition.name == trait_ref.name
-//RS                 })
-//RS                 .unwrap_or_else(|| {
-//RS                     panic!(
-//RS                         "MIR implementation {:?} trait reference {:?} has no declaration row",
-//RS                         implementation.id, trait_ref
-//RS                     )
-//RS                 })
-//RS         });
-//RS         let operator = implementation.operator_rhs.as_ref();
-//RS         let rust_operator = operator.filter(|_| {
-//RS             implementation.trait_ref.as_ref().is_some_and(|trait_ref| {
-//RS                 matches!(
-//RS                     trait_ref.name.as_str(),
-//RS                     jet_foundation::Syntax::TRAIT_ADD
-//RS                         | jet_foundation::Syntax::TRAIT_SUB
-//RS                         | jet_foundation::Syntax::TRAIT_MUL
-//RS                         | jet_foundation::Syntax::TRAIT_DIV
-//RS                 )
-//RS             })
-//RS         });
-//RS         if let Some(rhs) = operator {
-//RS             let trait_ref = implementation.trait_ref.as_ref().unwrap_or_else(|| {
-//RS                 panic!(
-//RS                     "MIR operator implementation {:?} has no trait reference",
-//RS                     implementation.id
-//RS                 )
-//RS             });
-//RS             if !matches!(
-//RS                 trait_ref.name.as_str(),
-//RS                 jet_foundation::Syntax::TRAIT_ADD
-//RS                     | jet_foundation::Syntax::TRAIT_SUB
-//RS                     | jet_foundation::Syntax::TRAIT_MUL
-//RS                     | jet_foundation::Syntax::TRAIT_DIV
-//RS                     | jet_foundation::Syntax::TRAIT_EQUATABLE
-//RS                     | jet_foundation::Syntax::TRAIT_COMPARABLE
-//RS             ) {
-//RS                 panic!(
-//RS                     "MIR operator implementation {:?} has non-operator trait {:?}",
-//RS                     implementation.id, trait_ref.name
-//RS                 );
-//RS             }
-//RS             if rust_operator.is_some() {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "impl{generics} {}<{}> for {owner} {{",
-//RS                     self.trait_nominal_name(trait_ref),
-//RS                     self.rust_type(rhs)
-//RS                 );
-//RS             } else {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "impl{generics} {} for {owner} {{",
-//RS                     self.trait_nominal_name(trait_ref)
-//RS                 );
-//RS             }
-//RS         } else if let Some(trait_ref) = &implementation.trait_ref {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "impl{generics} {} for {owner} {{",
-//RS                 self.trait_nominal_name(trait_ref)
-//RS             );
-//RS         } else {
-//RS             if implementation.delegation.is_some()
-//RS                 || implementation.serde.is_some()
-//RS                 || !implementation.associated_types.is_empty()
-//RS             {
-//RS                 panic!(
-//RS                     "MIR inherent implementation {:?} carries trait-only metadata",
-//RS                     implementation.id
-//RS                 );
-//RS             }
-//RS             match &carrier_trait {
-//RS                 Some(carrier_trait) => {
-//RS                     let _ = writeln!(out, "impl {carrier_trait} for {owner} {{");
-//RS                 }
-//RS                 None => {
-//RS                     let _ = writeln!(out, "impl{generics} {owner} {{");
-//RS                 }
-//RS             }
-//RS         }
-//RS         let methods_start = out.len();
-//RS 
-//RS         if let Some(trait_definition) = trait_definition {
-//RS             for associated in &implementation.associated_types {
-//RS                 if !trait_definition
-//RS                     .associated_types
-//RS                     .iter()
-//RS                     .any(|declared| declared.name == associated.name)
-//RS                 {
-//RS                     panic!(
-//RS                         "MIR implementation {:?} defines unknown associated type {}",
-//RS                         implementation.id, associated.name
-//RS                     );
-//RS                 }
-//RS             }
-//RS             for declared in &trait_definition.associated_types {
-// END-PORT-PENDING 2004 crates/jet-codegen/src/Codegen/MIRRust.rs:5401-7200
+use jet_foundation.MIR.*
+use jet_foundation.Syntax as Syntax
+use jet_foundation.Diagnostics.LineIndex
+use jet_codegen.Codegen.MIRRust.[RustEmitter, MirRustTarget, mangle, mangle_path, core_native_probe_name, compiler_trait_method_symbol, STM_TYPE, CACHED_CONSTANT_BYTES, emit_list_constant_chunks, emit_shared_constant]
+use jet_codegen.Codegen as Codegen
+use jet_codegen.Codegen.TIR.tir_to_mir_types.is_compiler_owned_trait
+use jet_foundation.MIR.stable_id
+use std.collections.BTreeSet
+use std.iter.ExactSizeIterator
+// GATE #4499: exact (arity, modes), (function, index) and MirFunctionId key semantics.
+// GATE #4483: all emitted ABI/metadata follows config.target, never host layout.
+// GATE #4494: canonical history RefCell and shared-value/handle-token substrate.
+// This file extends the canonical RustEmitter; boundary fragments join its rust_type/emit_impl.
+// Generated Rust is the existing AOT output, not a callback into Rust implementation.
 
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5401
+    // Remaining rust_type match arms, including the Option expression split at 5401.
+    fn rust_type_remaining(self, ty: MirType) -> String {
+        if ty.kind() == {
+            .Option(inner) -> "{self.config.root_prefix}JetOutcome<{self.rust_type(inner)}, {self.config.root_prefix}JetAbsent>"
+            .Result(ok: ok, err: err) -> "{self.config.root_prefix}JetOutcome<{self.rust_type(ok)}, {self.rust_type(err)}>"
+            .Fn(signature) -> {
+                conventions :: signature.call_metadata.as_ref().map((metadata) -> metadata.conventions.as_slice())
+                self.callable_type(&signature.params, conventions, signature.ret.as_deref())
+            }
+            .SendFn(params: params, ret: ret, conventions: conventions) -> {
+                parameter_text :: params.iter().enumerate().map((pair) -> {
+                    access :: Self.callable_parameter_access(Val(conventions.as_slice()), pair.0)
+                    self.callable_parameter_type(pair.1, access)
+                }).collect::<[String]>().join(", ")
+                return_text :: ret.as_ref().map((ret) -> self.rust_type(ret)).unwrap_or_else(() -> "()")
+                "std::sync::Arc<dyn Fn({parameter_text}) -> {return_text} + Send + Sync + 'static>"
+            }
+            .Apply(name: name, args: args) -> self.rust_apply_type(name, args)
+            .TraitObject(bounds) -> {
+                names :: bounds.iter().map((bound) -> self.traits_by_name.get(&bound.name).cloned().unwrap_or_else(() -> panic("MIR trait {bound.name:?} has no declaration row"))).collect::<[String]>().join(" + ")
+                "Box<dyn {names}>"
+            }
+            .Tuple(fields) -> {
+                values :: fields.iter().map((pair) -> self.rust_type(pair.1)).collect::<[String]>()
+                if values.len() == 0 -> "()" else if values.len() == 1 -> "({values[0]},)" else -> "({values.join(", ")})"
+            }
+            .FixedList(elem: elem, len: len) -> "[{self.rust_type(elem)}; {len.expression()}]"
+            .IntN(signed: signed, bits: bits) -> "{if signed -> 'i' else -> 'u'}{bits}"
+            .Tagged(marker: .Internal(.AllocatorView), inner: inner) -> "&mut {self.rust_type(inner)}"
+            .InlineRange(base: base) | .Tagged(inner: base) | .Quantity(base: base) -> self.rust_type(base)
+            .Float32 -> "f32"
+            .Union(_) -> self.structural_type_def_for(ty).map((def) -> mangle_path(&def.key)).unwrap_or_else(() -> ty.identity.map((id) -> self.type_name(id)).unwrap_or_else(() -> panic("MIR union type has no canonical type identity")))
+            .Measure(_) -> "f64"
+            else -> panic("MIR rust_type leading arms must be handled by the canonical owner")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5492
+    fn emit_web_data_type_registration(self, out: &String) -> {
+        if self.config.target_kind != MirRustTarget.WebWasm { return }
+        types := [String: String]{}
+        loop function in &self.program.functions {
+            loop block in &function.blocks {
+                loop instruction in &block.instructions {
+                    if instruction.operation == .CoreCall(route: route, type_args: type_args) {
+                        row :: self.program.prelude_calls.iter().find((row) -> row.id == route).unwrap_or_else(() -> panic("MIR Prelude call ID {route:?} has no row"))
+                        if row.symbol == .Prelude(name) {
+                            if !(name.starts_with("jet_data") || name.starts_with("jet_data.loader.")) { next }
+                            ty :: type_args.first() ?? next
+                            _ :: types.entry(ty.name()).or_insert_with(() -> self.rust_type(ty))
+                        }
+                    }
+                }
+            }
+        }
+        if types.is_empty() { return }
+        out.push_str("#[cfg(target_arch = \"wasm32\")]\n#[no_mangle]\npub extern \"C\" fn jet_data_web_register_types() {{\n")
+        keys := types.keys().collect::<[String]>()
+        keys.sort()
+        loop key in keys { out.push_str("    {self.config.root_prefix}jet_data_web_register_type::<{types[key]}>({key:?});\n") }
+        out.push_str("}}\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5542
+    fn rust_root_prelude_type(self, root_name: String, args: [MirType]) -> String {
+        head :: "{self.config.root_prefix}{root_name}"
+        if args.is_empty() { return head }
+        arguments :: args.iter().map((arg) -> self.rust_type(arg)).collect::<[String]>().join(", ")
+        "{head}<{arguments}>"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5555
+    fn rust_apply_type(self, name: MirNominalRef, args: [MirType]) -> String {
+        if self.is_active_generic_param(&name.name) {
+            if !args.is_empty() { panic("MIR generic type parameter {name.name:?} has type arguments") }
+            return self.nominal_name(&name.name)
+        }
+        native_name :: core_native_probe_name(&name.name)
+        if args.is_empty() {
+            if self.anonymous_union_definition(&name.name) == Val(canonical) { return mangle_path(&canonical.key) }
+        }
+        if args.is_empty() && name.name == Syntax.INTERNAL_UNIT_TYPE { return "()" }
+        if args.is_empty() && name.name == Syntax.TYPE_NEVER { return "std::convert::Infallible" }
+        if args.is_empty() && name.name == STM_TYPE { return "{self.config.root_prefix}JetSharedTransaction" }
+        if name.name == Syntax.TYPE_PTR {
+            if args.len() != 1 { panic("MIR Ptr type must have exactly one element argument") }
+            return "*mut {self.rust_type(&args[0])}"
+        }
+        // Canonical collection carriers remain in lockstep with Context.rust_type.
+        if name.name == Syntax.TYPE_SET {
+            if args.len() != 1 { panic("MIR Set type must have exactly one element argument") }
+            return "std::collections::HashSet<{self.rust_type(&args[0])}>"
+        }
+        if name.name == Syntax.TYPE_TALLY {
+            if args.len() != 1 { panic("MIR Tally type must have exactly one element argument") }
+            return "std::collections::HashMap<{self.rust_type(&args[0])}, usize>"
+        }
+        if name.name == Syntax.TYPE_RANK {
+            if args.len() != 1 { panic("MIR Rank type must have exactly one element argument") }
+            return "std::collections::BTreeSet<{self.rust_type(&args[0])}>"
+        }
+        if name.name == Syntax.TYPE_PRIORITY_QUEUE {
+            if args.len() != 1 { panic("MIR PriorityQueue type must have exactly one element argument") }
+            return "std::collections::BinaryHeap<{self.rust_type(&args[0])}>"
+        }
+        if name.name == Syntax.TYPE_QUEUE {
+            if args.len() != 1 { panic("MIR Queue type must have exactly one element argument") }
+            return "std::collections::VecDeque<{self.rust_type(&args[0])}>"
+        }
+        if args.is_empty() && name.name == Syntax.TYPE_TASKGROUP { return "{self.config.root_prefix}jet_std::JetTaskGroup" }
+        if name.name == "View" && args.len() == 1 {
+            if args[0].kind() == .Apply(name: inner_name, args: inner_args) {
+                if inner_args.is_empty() && inner_name.name == "str" { return "&str" }
+            }
+            return "&[{self.rust_type(&args[0])}]"
+        }
+        if name.name == "ViewMut" && args.len() == 1 { return "&mut [{self.rust_type(&args[0])}]" }
+        if name.name == "Instant" { return self.rust_root_prelude_type("JetInstant", args) }
+        if name.name == "RealtimeStream" { return "{self.config.root_prefix}jet_std::JetRealtimeStream" }
+        if name.name == "RealtimeReceipt" { return "{self.config.root_prefix}jet_std::JetRealtimeReceipt" }
+        if ["Cell", "CellReadGuard", "CellEditGuard"].contains(name.name) {
+            if args.len() != 1 { panic("MIR Cell type must have exactly one value argument") }
+            carrier :: self.rust_type(&args[0])
+            carrier_name :: if name.name == "Cell" -> "JetCell" else if name.name == "CellReadGuard" -> "JetCellReadGuard" else -> "JetCellEditGuard"
+            return "{self.config.root_prefix}jet_std::{carrier_name}<{carrier}>"
+        }
+        if Codegen.file_handle_rust_type(&name.name) == Val(root_name) { return "{self.config.root_prefix}{root_name}" }
+        if Codegen.reflect_handle_rust_type(native_name) == Val(root_name) { return self.rust_root_prelude_type(root_name, args) }
+        if Codegen.binary_text_handle_rust_type(native_name) == Val(root_name) {
+            if name.name.starts_with("<corelib>/") || !self.types_by_name.contains_key(&name.name) { return "{self.config.root_prefix}{root_name}" }
+        }
+        if name.name == "ScopeGuard" { return "_" }
+        if name.name == "RangeCursor" { return "JetLoopRangeCursor" }
+        if name.name == "IterCursor" { return "JetLoopIterCursor" }
+        if name.name == "ByteIterCursor" { return "JetByteLoopIterCursor<'_>" }
+        if name.name == "Atomic" {
+            if args.len() != 1 { panic("MIR Atomic type must have exactly one value argument") }
+            inner :: if args[0].kind() == .Int -> "JetAtomicInt" else -> self.rust_type(&args[0])
+            return "{self.config.root_prefix}JetAtomic<{inner}>"
+        }
+        if ["Tensor", "Vec", "Matrix"].contains(name.name) && (name.name != "Tensor" || args.len() <= 1) { return self.rust_root_prelude_type("JetTensor", &[]) }
+        if name.name == "Task" {
+            if args.len() != 1 { panic("MIR Task type must have exactly one value argument") }
+            return "{self.config.root_prefix}jet_std::JetTask<{self.rust_type(&args[0])}>"
+        }
+        if ["KeyRef", "MutationPlan", "VaultWrite", "Rotation", "WrappedImportPlan"].contains(name.name) && args.len() == 1 {
+            ffi :: self.config.execution.ffi.map((link) -> link.crate_name.as_str()).unwrap_or("jet_ffi")
+            rust :: if name.name == "KeyRef" -> "JetVaultKeyRef" else if name.name == "MutationPlan" -> "JetVaultMutationPlan" else if name.name == "VaultWrite" -> "JetVaultWrite" else if name.name == "Rotation" -> "JetVaultRotation" else -> "JetVaultWrappedImportPlan"
+            return "{ffi}::{rust}<{self.rust_type(&args[0])}>"
+        }
+        if name.name == "ExpiringSecret" && args.len() == 1 { return "JetExpiringSecret<{self.rust_type(&args[0])}>" }
+        if name.name == Syntax.EXPIRING_VALUE_TYPE && args.len() == 1 { return "JetExpiring<{self.rust_type(&args[0])}>" }
+        if Codegen.core_email_rust_type_name(&name.name) == Val(email_name) {
+            if ["SMTPAuth", "DKIMConfig", "SMTPConfig"].contains(email_name) && args.is_empty() {
+                ffi :: self.config.execution.ffi.map((link) -> link.crate_name.as_str()).unwrap_or("jet_ffi")
+                return "{self.config.root_prefix}jet_email::{email_name}<{ffi}::Secret>"
+            }
+            return self.rust_root_prelude_type("jet_email::{email_name}", args)
+        }
+        if Codegen.core_ui_rust_type_name(native_name) == Val(ui_name) { return self.rust_root_prelude_type("Jet{ui_name}", args) }
+        if name.name == Syntax.TYPE_HTML && args.is_empty() { return "String" }
+        if name.name == Syntax.TYPE_MEASUREMENT && args.len() == 1 { return "{self.config.root_prefix}jet_std::JetMeasurement<{self.rust_type(&args[0])}>" }
+        if Codegen.root_prelude_rust_type_name(native_name) == Val(root_name) { return self.rust_root_prelude_type(root_name, args) }
+        if Codegen.history_rust_type_name(&name.name) == Val(history_name) {
+            carrier :: self.history_native_type_name(&name.name).unwrap_or_else(() -> "crate::jet_testing_history_foundation::{history_name}")
+            if args.is_empty() { return carrier }
+            arguments :: args.iter().map((arg) -> self.rust_type(arg)).collect::<[String]>().join(", ")
+            return "{carrier}<{arguments}>"
+        }
+        if Codegen.compute_handle_rust_type(native_name) == Val(compute_name) { return self.rust_root_prelude_type(compute_name, args) }
+        if Codegen.service_handle_rust_type(native_name) == Val(service_name) { return self.rust_root_prelude_type(service_name, args) }
+        // Bare Pool is an allocator, Pool<T> a collection.
+        if args.is_empty() {
+            if Codegen.alloc_handle_rust_type(native_name) == Val(allocator) { return "{self.config.root_prefix}{allocator}" }
+        }
+        if args.is_empty() && !self.types_by_name.contains_key(&name.name) {
+            trait_rows := self.program.traits.iter().filter((definition) -> definition.key == name.name || definition.name == name.name)
+            if trait_rows.next() == Val(definition) {
+                if trait_rows.next().is_none() {
+                    if self.traits.get(&definition.id) == Val(trait_name) { return "Box<dyn {trait_name}>" }
+                }
+            }
+        }
+        if name.name == "DataStream" && !args.is_empty() { return "{self.config.root_prefix}jet_std::DataStream" }
+        if Codegen.core_rust_type_name(&name.name) == Val(core_name) {
+            if core_name == "JetRowPolicy" || core_name == "JetTaskFailure" { return self.rust_root_prelude_type(core_name, args) }
+            if Codegen.root_prelude_rust_type_name(core_name) == Val(root_name) { return self.rust_root_prelude_type(root_name, args) }
+            native := "{self.config.root_prefix}jet_std::{core_name}"
+            if !args.is_empty() {
+                native.push('<')
+                loop (index, arg) in args.iter().enumerate() { if index > 0 { native.push_str(", ") }; native.push_str(&self.rust_type(arg)) }
+                native.push('>')
+            }
+            return native
+        }
+        if name.name == "__JetDmaTransfer" {
+            if args.len() != 1 { panic("MIR DMA transfer carrier must have exactly one buffer type argument") }
+            return "{self.config.root_prefix}jet_std::JetDmaTransfer<'static, {self.rust_type(&args[0])}>"
+        }
+        if name.name == "StreamEventTime" {
+            if args.len() != 1 { panic("MIR StreamEventTime type must have exactly one item argument") }
+            return "{self.config.root_prefix}jet_std::JetStream<{self.config.root_prefix}jet_std::JetStreamEvent<{self.rust_type(&args[0])}>>"
+        }
+        if name.name == "KeyedStream" {
+            if args.len() != 2 { panic("MIR KeyedStream type must have key and item arguments") }
+            return "{self.config.root_prefix}jet_std::JetKeyedStream<{self.rust_type(&args[0])}, {self.rust_type(&args[1])}>"
+        }
+        if name.name == "Window" {
+            if args.len() != 2 { panic("MIR Window type must have key and item arguments") }
+            return "{self.config.root_prefix}jet_std::JetStreamWindow<{self.rust_type(&args[0])}, {self.rust_type(&args[1])}>"
+        }
+        if name.name == Syntax.TYPE_STREAM {
+            if args.len() != 1 { panic("MIR Stream type must have exactly one item argument") }
+            return "{self.config.root_prefix}jet_std::JetStream<{self.rust_type(&args[0])}>"
+        }
+        if Codegen.alloc_handle_rust_type(native_name) == Val(allocator) { return "{self.config.root_prefix}{allocator}" }
+        head :: self.nominal_name(&name.name)
+        if args.is_empty() -> head else -> "{head}<{args.iter().map((arg) -> self.rust_type(arg)).collect::<[String]>().join(", ")}>"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5933
+    fn is_scalar(self, ty: MirType) -> Bool {
+        if self.is_core_layer() && ty.is_string() { return true }
+        // JetInt owns a Foundation node even with scalar layout: Read must not move it.
+        if ty.kind() == .Int { return false }
+        if ty.layout.abi == { .Scalar(_) -> true; .Aggregate | .Sequence | .Function | .Nominal | .Dynamic | .Never -> false }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5952
+    fn is_handle_name(self, name: String) -> Bool { self.program.handles.iter().any((handle) -> handle.ty.nominal_name() == Val(name)) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5959
+    fn is_handle_type(self, ty: MirType) -> Bool { self.program.handles.iter().any((handle) -> handle.ty.same_checked_type(ty) || handle.ty.nominal_name() == ty.nominal_name() && ty.nominal_name().is_some()) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5966
+    fn handle_for_type(self, ty: MirType) -> MirHandleLifecycle? { self.program.handles.iter().find((handle) -> handle.ty.same_checked_type(ty) || handle.ty.nominal_name() == ty.nominal_name() && ty.nominal_name().is_some()) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:5973
+    fn emit_handle_type(self, handle: MirHandleLifecycle, out: &String) -> {
+        name :: self.rust_type(&handle.ty)
+        handle_id :: handle.id.0
+        close_foreign :: handle.close_foreign.filter((close_id) -> self.program.foreign.iter().find((foreign) -> foreign.id == close_id).is_some_and((foreign) -> self.target_applicable(foreign.target_applicability)))
+        close_function :: handle.close.filter((close_id) -> self.selected_for_target(self.function_row(close_id)))
+        drop_impl := String.new()
+        if handle.ownership == .Owned {
+            if close_foreign == Val(close_id) {
+                close :: self.foreign_name(close_id)
+                drop_impl = "impl Drop for {name} {{\nfn drop(&mut self) {{\nif let Some((_, __jet_raw)) = self.__jet_token.take_raw() {{\nunsafe {{ let _ = {close}(__jet_raw as *mut core::ffi::c_void); }}\n}}\n}}\n}}\n"
+            } else if close_function == Val(close_id) {
+                close :: self.function_name(close_id)
+                call :: if self.function_row(close_id).is_unsafe -> "unsafe {{ {close}(__jet_handle) }}" else -> "{close}(__jet_handle)"
+                drop_impl = "impl Drop for {name} {{\nfn drop(&mut self) {{\nif let Some((_, __jet_raw)) = self.__jet_token.take_raw() {{\nlet __jet_handle = {name}::from_raw(__jet_raw as *mut core::ffi::c_void);\nlet _ = {call};\n}}\n}}\n}}\n"
+            }
+        }
+        out.push_str("""
+#[repr(transparent)]
+#[derive(Debug)]
+pub struct {name} {{ __jet_token: jet_foundation::MIR::MirHandleToken, }}
+impl {name} {{
+    pub fn from_raw(raw: *mut core::ffi::c_void) -> Self {{
+        Self {{ __jet_token: jet_foundation::MIR::MirHandleToken::new(jet_foundation::MIR::MirHandleId({handle_id}), raw as i64), }}
+    }}
+    pub fn as_raw(&self) -> *mut core::ffi::c_void {{
+        self.__jet_token.raw().map(|raw| raw as *mut core::ffi::c_void).unwrap_or_else(|| panic!("opaque handle was already moved"))
+    }}
+    pub fn into_raw(self) -> *mut core::ffi::c_void {{
+        self.__jet_token.take_raw().map(|(_, raw)| raw as *mut core::ffi::c_void).unwrap_or_else(|| panic!("opaque handle was already moved"))
+    }}
+    pub fn token_identity(&self) -> usize {{ self.__jet_token.identity() }}
+}}
+""")
+        out.push('\n')
+        out.push_str(&drop_impl)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6051
+    fn foreign_param_type(self, foreign: MirForeign, param: MirParam) -> String {
+        if foreign.callback_transport.as_deref() == Val("native-start") {
+            if param.ty.kind() == .Fn(signature) {
+                payload :: signature.params.first().and_then((ty) -> {
+                    if ty.kind() == .Apply(name: name, args: args) { if name.name == "FfiCallbackEvent" && args.len() == 1 { return Val(&args[0]) } }
+                    .None
+                }).unwrap_or_else(() -> panic("native callback start row has no FfiCallbackEvent payload"))
+                ret :: signature.ret.as_deref().map((ty) -> " -> {self.rust_type(ty)}").unwrap_or_default()
+                return "Option<unsafe extern \"C\" fn(*mut core::ffi::c_void, {self.rust_type(payload)}){ret}>"
+            }
+        }
+        if foreign.foreign_language == .C {
+            if self.c_abi_record_def(&param.ty) == Val(definition) { name :: self.c_abi_record_name(definition); return if param.access == .Write -> "*mut {name}" else -> name }
+            if self.c_abi_type(&param.ty, param.access) == Val(native) { return native }
+        }
+        if foreign.foreign_language == .C && !foreign.bridge_eligible && param.access == .Read && !self.is_scalar(&param.ty) { return self.rust_type(&param.ty) }
+        if foreign.raw_scalar_abi && param.ty.kind() == .Int { return "i64" }
+        if foreign.handle.is_some() && self.is_handle_type(&param.ty) -> "*mut core::ffi::c_void" else -> self.parameter_type(param)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6117
+    fn foreign_return_type(self, foreign: MirForeign) -> String {
+        if foreign.callback_transport.as_deref() == Val("native-start") { return "*mut core::ffi::c_void" }
+        foreign.return_type.as_ref().map((ty) -> {
+            if foreign.foreign_language == .C { if self.c_abi_type(ty, .Read) == Val(native) { return native } }
+            if foreign.handle.is_some() && self.is_handle_type(ty) -> "*mut core::ffi::c_void" else -> self.rust_type(ty)
+        }).unwrap_or_else(() -> "()")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6139
+    fn callable_type(self, params: [MirType], conventions: [MirAccess]?, ret: MirType?) -> String {
+        parameter_types :: params.iter().enumerate().map((pair) -> {
+            access :: Self.callable_parameter_access(conventions, pair.0)
+            rendered :: self.rust_type(pair.1)
+            mode :: self.callable_parameter_mode(pair.1, access)
+            callable :: if mode == 'W' -> "&mut {rendered}" else if mode == 'R' -> "&{rendered}" else if mode == 'O' -> rendered.clone() else -> panic("MIR callable has unknown mode `{mode}`")
+            (rendered, callable, mode)
+        }).collect::<[(String, String, Char)]>()
+        parameter_text :: parameter_types.iter().map((row) -> row.1.as_str()).collect::<[String]>().join(", ")
+        return_text :: ret.map((ret) -> self.rust_type(ret)).unwrap_or_else(() -> "()")
+        if self.history_runtime_metadata_enabled() {
+            arity :: parameter_types.len()
+            modes :: parameter_types.iter().map((row) -> row.2).collect::<String>()
+            borrowed_trait :: modes.chars().any((mode) -> mode != 'O')
+            callable_name := String.new()
+            if borrowed_trait { _ :: self.history_callable_modes.borrow_mut().insert((arity, modes.clone())); callable_name = "{self.config.root_prefix}JetHistoryFn{arity}B{modes}" }
+            else { _ :: self.history_callable_arities.borrow_mut().insert(arity); callable_name = "{self.config.root_prefix}JetHistoryFn{arity}" }
+            generic_values :: if borrowed_trait -> parameter_types.iter().map((row) -> row.0.as_str()).collect::<[String]>().join(", ") else -> &parameter_text
+            generic_params :: if generic_values.is_empty() -> "" else -> "{generic_values}, "
+            lifetime :: self.history_callback_lifetime.get()
+            "Box<dyn {callable_name}<{lifetime}, {generic_params}{return_text}> + {lifetime}>"
+        } else { "std::rc::Rc<std::cell::RefCell<Option<Box<dyn FnMut({parameter_text}) -> {return_text}>>>>" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6210
+    fn callable_parameter_access(conventions: [MirAccess]?, index: Int) -> MirAccess { conventions.and_then((rows) -> rows.get(index)).copied().unwrap_or(.Read) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6221
+    fn callable_parameter_borrowed(self, ty: MirType, access: MirAccess) -> Bool { access == .Write || access == .Read && !self.is_scalar(ty) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6225
+    fn callable_parameter_mode(self, ty: MirType, access: MirAccess) -> Char { if access == .Write -> 'W' else if self.callable_parameter_borrowed(ty, access) -> 'R' else -> 'O' }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6235
+    fn callable_parameter_type(self, ty: MirType, access: MirAccess) -> String {
+        rendered :: self.rust_type(ty)
+        if access == .Write -> "&mut {rendered}" else if access == .Read && self.callable_parameter_borrowed(ty, access) -> "&{rendered}" else -> rendered
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6246
+    fn callable_argument_from_owned(self, ty: MirType, access: MirAccess, value: String) -> String {
+        if access == .Write -> "&mut {value}" else if access == .Read && self.callable_parameter_borrowed(ty, access) -> "&{value}" else -> value
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6261
+    fn callable_parameters(ty: MirType) -> ExactSizeIterator<(MirType, MirAccess)> {
+        params := &[MirType]{}
+        conventions := [MirAccess]?.None
+        if ty.kind() == {
+            .Fn(signature) -> { params = &signature.params; conventions = signature.call_metadata.as_ref().map((metadata) -> metadata.conventions.as_slice()) }
+            .SendFn(params: values, conventions: access) -> { params = values.as_slice(); conventions = Val(access.as_slice()) }
+            else -> panic("MIR callable ABI requested for non-function type {ty.kind().display_name()}")
+        }
+        params.iter().enumerate().map((pair) -> (pair.1, Self.callable_parameter_access(conventions, pair.0)))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6286
+    fn callable_borrow_mask(self, ty: MirType) -> [Bool] { Self.callable_parameters(ty).map((pair) -> self.callable_parameter_borrowed(pair.0, pair.1)).collect() }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6292
+    fn parameter_borrowed(self, param: MirParam) -> Bool { self.callable_parameter_borrowed(&param.ty, param.access) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6300
+    fn receiver_param(self, function: MirFunction) -> MirParam? {
+        access :: (if function.form == { .Method(self_access: self_access) | .TraitMethod(self_access: self_access) -> self_access; .TopLevel -> .None }) ?? return .None
+        receiver :: function.params.first().filter((param) -> param.index == 0 && param.name == Syntax.KW_SELF).unwrap_or_else(() -> panic("MIR instance method {function.id:?} declares a receiver but parameter 0 is not `self`"))
+        if receiver.access != access { panic("MIR instance method {function.id:?} receiver access {receiver.access:?} disagrees with its form {access:?}") }
+        Val(receiver)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6328
+    fn is_receiver(self, function: MirFunction, param: MirParam) -> Bool { self.receiver_param(function).is_some_and((receiver) -> receiver.index == param.index) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6336
+    fn declared_params(self, function: MirFunction) -> [MirParam] { if self.receiver_param(function).is_some() -> &function.params[1..] else -> &function.params }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6346
+    fn parameter_borrow_mask(self, params: [MirParam]) -> [Bool] { params.iter().map((param) -> self.parameter_borrowed(param)).collect() }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6355
+    fn function_parameter_type(self, function: MirFunction, param: MirParam) -> String {
+        if self.window_params.contains(&(function.id, param.index)) { if param.ty.kind() == .List(element) { return "&mut [{self.rust_type(element)}]" } }
+        self.parameter_type(param)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6369
+    fn window_parameter_value(self, function: MirFunction, value: MirValueId) -> Bool {
+        if self.value_definition(function, value) == Val(.Parameter(index: index)) -> self.window_params.contains(&(function.id, index)) else -> false
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6377
+    fn parameter_type(self, param: MirParam) -> String {
+        ty :: self.rust_parameter_type(&param.ty)
+        if param.access == .Write -> "&mut {ty}" else if param.access == .Read && self.parameter_borrowed(param) -> "&{ty}" else -> ty
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6385
+    fn capture_param_name(self, slot: Int) -> String { "__jet_capture_{slot}" }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6389
+    fn capture_parameter_type(self, function: MirFunction, capture: MirCaptureParam) -> String {
+        ty :: self.rust_parameter_type(&capture.ty)
+        if self.capture_move_required(function, capture.slot) { return ty }
+        if capture.access == .Read -> "&{ty}" else if capture.access == .Write -> "&mut {ty}" else -> ty
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6401
+    fn emit_program_metadata(self, out: &String) -> {
+        identity :: self.artifact_identity.canonical_json()
+        out.push_str("// jet-mir-identity: {identity}\n// MIR schema: {self.program.schema_version}\n// MIR package: {self.program.package_identity}\n// MIR target: {self.config.target.triple} pointer={self.config.target.pointer_size} align={self.config.target.pointer_alignment}\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6415
+    fn visibility(self, visibility: MirVisibility) -> String { if visibility == { .Private -> ""; .Package -> "pub(crate) "; .Public -> "pub " } }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6422
+    fn generic_params_from(self, params: [MirGenericParam]) -> String {
+        if params.is_empty() { return "" }
+        rendered :: params.iter().map((param) -> {
+            bounds :: param.bounds.iter().map((bound) -> self.trait_nominal_name(bound)).collect::<[String]>()
+            if bounds.is_empty() -> mangle(&param.name) else -> "{mangle(&param.name)}: {bounds.join(" + ")}"
+        }).collect::<[String]>().join(", ")
+        "<{rendered}>"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6445
+    fn module_row(self, id: MirModuleId) -> MirModule { self.program.modules.iter().find((module) -> module.id == id).unwrap_or_else(() -> panic("MIR module ID {id:?} has no row")) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6453
+    fn function_source(self, function: MirFunction) -> (MirSourceFile, LineIndex) { self.source_lines.get(&function.source_file).unwrap_or_else(() -> panic("MIR source file {function.source_file:?} has no row")) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6466
+    fn coverage_function_line(self, function: MirFunction) -> Int { (source, lines) :: self.function_source(function); lines.line_col(&source.source, function.span.start).0 }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6470
+    fn function_stack_context(self, function: MirFunction) -> (String, U32, String) {
+        (source, lines) :: self.function_source(function)
+        (line, _) :: lines.line_col(&source.source, function.span.start)
+        source_line :: lines.line_text(&source.source, line).trim_end().to_string()
+        line32 :: U32.try_from(line).unwrap_or_else((_) -> panic("MIR function source line {line} exceeds u32"))
+        (source.path.clone(), line32, source_line)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6481
+    fn instruction_location(self, function: MirFunction, instruction: MirInstruction) -> MirPanicLoc {
+        (source, lines) :: self.function_source(function)
+        line :: instruction.source_line.map((line) -> line as Int).unwrap_or_else(() -> lines.line_col(&source.source, instruction.span.start).0)
+        line32 :: U32.try_from(line).unwrap_or_else((_) -> panic("MIR instruction source line {line} exceeds u32"))
+        MirPanicLoc{file: function.source_file, line: line32, column: 0}
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6500
+    fn trait_name(self, id: MirTraitId) -> String { self.traits.get(&id).cloned().unwrap_or_else(() -> panic("MIR trait ID {id:?} has no declaration row")) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6506
+    fn trait_method_symbol(self, definition: MirTraitDef, method: MirTraitMethod) -> String { if is_compiler_owned_trait(&definition.name) -> compiler_trait_method_symbol(&definition.name, &method.name) else -> mangle(&method.name) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6518
+    fn trait_method_key(self, definition: MirTraitDef, method: MirTraitMethod) -> String { "{self.module_row(definition.module).key}::{method.name}" }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6523
+    fn trait_nominal_name(self, reference: MirTraitRef) -> String {
+        self.traits.get(&reference.id).cloned().or_else(() -> self.traits_by_name.get(&reference.name).cloned()).unwrap_or_else(() -> panic("MIR trait reference {reference.id:?} has no declaration row"))
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6538
+    fn emit_modules_and_imports(self, out: &String) -> {
+        loop module_id in &self.artifact.modules {
+            module :: self.module_row(module_id)
+            out.push_str("// jet-mir-module: id={module.id.0} key={module.key} name={module.name} path={module.path}\n")
+            loop import_id in &module.imports {
+                import :: self.program.imports.iter().find((import) -> import.id == import_id).unwrap_or_else(() -> panic("MIR import ID {import_id:?} has no row"))
+                if import.module != module.id { panic("MIR import {import.id:?} belongs to another module") }
+                visibility :: self.visibility(import.visibility)
+                if import.kind == {
+                    .File(path) -> out.push_str("// jet-mir-import: {visibility}file {path} as {mangle(&import.alias)}\n")
+                    .Module(path) -> out.push_str("// jet-mir-import: {visibility}module {path} as {mangle(&import.alias)}\n")
+                    .Unqualified(imported_module, items) -> {
+                        if !self.module_selected(imported_module) { panic("MIR selected module {module_id:?} imports unselected module {imported_module:?}") }
+                        item_text :: items.iter().map((item) -> "{item.original}:{self.item_ref_name(item.item)}").collect::<[String]>().join(", ")
+                        out.push_str("// jet-mir-import: {visibility}unqualified {self.module_row(imported_module).key} as {mangle(&import.alias)} [{item_text}]\n")
+                    }
+                }
+            }
+        }
+        out.push('\n')
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6602
+    fn item_ref_name(self, item: MirItemRef) -> String {
+        if item == {
+            .Type(id) -> self.type_name(id)
+            .Trait(id) -> self.trait_name(id)
+            .Function(id) -> self.function_name(id)
+            .Constant(id) -> self.program.constants.iter().find((constant) -> constant.id == id).map((constant) -> mangle_path(&constant.key)).unwrap_or_else(() -> panic("MIR constant ID {id:?} has no row"))
+            .Impl(id) -> self.program.impls.iter().find((implementation) -> implementation.id == id).map((implementation) -> mangle_path(&implementation.key)).unwrap_or_else(() -> panic("MIR impl ID {id:?} has no row"))
+            .Foreign(id) -> self.foreign_name(id)
+            .Import(id) -> self.program.imports.iter().find((import) -> import.id == id).map((import) -> mangle(&import.alias)).unwrap_or_else(() -> panic("MIR import ID {id:?} has no row"))
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6631
+    fn is_synthetic_rollback_trait(self, definition: MirTraitDef) -> Bool { definition.name == Syntax.TRAIT_ROLLBACK && definition.methods.is_empty() }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6635
+    fn rollback_snapshot_type() -> MirType { MirType.from_kind(MirTypeKind.Apply(name: MirNominalRef{id: MirTypeId(0), name: "Snapshot"}, args: [])) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6645
+    fn rollback_snapshot_return_type(function: MirFunction, snapshot: MirType) -> MirType {
+        if function.return_type.result_parts() == Val(pair) -> MirType.from_kind(MirTypeKind.Result(ok: Box.new(snapshot.clone()), err: Box.new(pair.1.clone()))) else -> snapshot.clone()
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6656
+    fn synthetic_rollback_methods(self, definition: MirTraitDef) -> [MirTraitMethod] {
+        snapshot :: Self.rollback_snapshot_type()
+        methods := self.program.functions.iter().filter_map((function) -> {
+            if function.form == .TraitMethod(trait_ref: trait_ref, self_access: self_access, serde: serde) {
+                if trait_ref.name != Syntax.TRAIT_ROLLBACK || serde.is_some() || !self.module_selected(function.module_id) || !self.selected_for_target(function) { return .None }
+                params := self.declared_params(function).to_vec()
+                if function.name == "restore" { loop param in &params { if param.name == "snap" { param.ty = snapshot.clone() } } }
+                return_type :: if function.name == "snapshot" -> Self.rollback_snapshot_return_type(function, &snapshot) else -> function.return_type.clone()
+                declared_return :: if function.name == "snapshot" -> function.declared_return.as_ref().map((_) -> snapshot.clone()) else -> function.declared_return.clone()
+                return Val(MirTraitMethod{id: MirTraitMethodId(stable_id("mir-trait-method", "{definition.key}::{function.key}")), name: function.name.clone(), span: function.span, self_access: self_access, params: ^params, declared_return: ^declared_return, return_type: ^return_type, failure: function.failure.clone(), effects: function.effects.clone(), is_pure: function.is_pure, return_view_provenance: function.return_view_provenance.clone(), declared_return_view_provenance: .None, default: .None})
+            }
+            .None
+        }).collect::<[MirTraitMethod]>()
+        methods.sort_by((left, right) -> left.name.cmp(&right.name))
+        methods.dedup_by((left, right) -> left.name == right.name)
+        methods
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6723
+    fn emit_trait_def(self, definition: MirTraitDef, emitted_methods: &BTreeSet<MirFunctionId>, out: &String) -> {
+        visibility :: self.visibility(definition.visibility)
+        name :: self.trait_name(definition.id)
+        dyn_clone :: self.dyn_clone_traits.contains(&name)
+        if dyn_clone {
+            out.push_str("{visibility}trait {name}__JetCloneBox {{ fn __jet_clone_box(&self) -> Box<dyn {name}>; }}\nimpl<JetSelf: {name} + Clone + 'static> {name}__JetCloneBox for JetSelf {{ fn __jet_clone_box(&self) -> Box<dyn {name}> {{ Box::new(self.clone()) }} }}\nimpl Clone for Box<dyn {name}> {{ fn clone(&self) -> Self {{ (**self).__jet_clone_box() }} }}\n")
+            out.push_str("{visibility}trait {name}: {name}__JetCloneBox {{\n")
+        } else { out.push_str("{visibility}trait {name} {{\n") }
+        loop associated in &definition.associated_types { out.push_str("    type {mangle(&associated.name)};\n") }
+        if self.is_synthetic_rollback_trait(definition) { loop method in self.synthetic_rollback_methods(definition) { self.emit_trait_method(definition, &method, &emitted_methods, &out) } }
+        else { loop method in &definition.methods { self.emit_trait_method(definition, method, &emitted_methods, &out) } }
+        out.push_str("}}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6761
+    fn synthetic_rollback_type(self, definition: MirTraitDef, ty: MirType) -> String {
+        if !self.is_synthetic_rollback_trait(definition) { return self.rust_type(ty) }
+        if ty.nominal_name() == Val("Snapshot") { return "Self::{mangle("Snapshot")}" }
+        if ty.result_parts() == Val(pair) {
+            ok :: if pair.0.nominal_name() == Val("Snapshot") -> "Self::{mangle("Snapshot")}" else -> self.rust_type(pair.0)
+            return "{self.config.root_prefix}JetOutcome<{ok}, {self.rust_type(pair.1)}>"
+        }
+        self.rust_type(ty)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6784
+    fn synthetic_rollback_parameter_type(self, definition: MirTraitDef, param: MirParam) -> String {
+        ty :: self.synthetic_rollback_type(definition, &param.ty)
+        if param.access == .Write -> "&mut {ty}" else if param.access == .Read && self.parameter_borrowed(param) -> "&{ty}" else -> ty
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6797
+    fn emit_trait_method(self, definition: MirTraitDef, method: MirTraitMethod, emitted_methods: &BTreeSet<MirFunctionId>, out: &String) -> {
+        previous_lifetime :: self.history_callback_lifetime.replace("'__jet_callback")
+        params := [String].with_capacity(method.params.len() + Int.from(method.self_access.is_some()))
+        if method.self_access == Val(access) { params.push(if access == .Read -> "&self" else if access == .Write -> "&mut self" else -> "self") }
+        params.extend(method.params.iter().map((param) -> "{mangle(&param.name)}: {self.synthetic_rollback_parameter_type(definition, param)}"))
+        parameter_text :: params.join(", ")
+        ret :: self.synthetic_rollback_type(definition, &method.return_type)
+        self.history_callback_lifetime.set(previous_lifetime)
+        generics :: if parameter_text.contains("'__jet_callback") || ret.contains("'__jet_callback") -> "<'__jet_callback>" else -> ""
+        method_name :: self.trait_method_symbol(definition, method)
+        if method.default.is_none() { out.push_str("    fn {method_name}{generics}({parameter_text}) -> {ret};\n"); return }
+        default_id :: method.default.unwrap()
+        function :: self.function_row(default_id)
+        if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR trait default {default_id:?} is not selected for the emitted artifact") }
+        if function.form == .TraitMethod(owner: owner, trait_ref: trait_ref, self_access: self_access, serde: serde) {
+            if trait_ref.id != definition.id || trait_ref.name != definition.name { panic("MIR trait default {default_id:?} references {trait_ref:?}, expected {definition.id:?}") }
+            if self_access != method.self_access || serde.is_some() { panic("MIR trait default {default_id:?} receiver/codec contract does not match {method.name}") }
+            if function.capture_params.len() != 0 || self.declared_params(function).len() != method.params.len() || self.declared_params(function).iter().zip(&method.params).any((pair) -> pair.0.index != pair.1.index || pair.0.name != pair.1.name || pair.0.access != pair.1.access || !pair.0.ty.same_checked_type(&self.normalize_trait_type(&pair.1.ty, owner))) || !function.return_type.same_checked_type(&self.normalize_trait_type(&method.return_type, owner)) || function.failure != method.failure { panic("MIR trait default {default_id:?} signature does not match {method.name}") }
+        } else { panic("MIR trait default {default_id:?} has a non-trait function form") }
+        self.emit_callable_named(function, &out, Val(&function.form), Val(&mangle(&method.name)), .None, .None)
+        if !emitted_methods.insert(function.id) { panic("MIR trait default {function.id:?} was emitted more than once") }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6905
+    fn emit_constant_def(self, constant: MirConstantDef, out: &String) -> {
+        name :: mangle_path(&constant.key)
+        visibility :: self.visibility(constant.visibility)
+        ty :: self.rust_type(&constant.ty)
+        root :: &self.config.root_prefix
+        if self.shared_constant(constant) {
+            init := String.new()
+            if constant.ty.kind() == .List(inner) && constant.value == .List(values) {
+                rows :: values.iter().map((value) -> self.constant_for_type(value, inner)).collect::<[String]>()
+                init = if rows.iter().map((row) -> row.len()).sum::<Int>() > CACHED_CONSTANT_BYTES -> emit_list_constant_chunks(&out, &name, &ty, &rows) else -> "vec![{rows.join(", ")}]"
+            } else { init = self.constant_for_type(&constant.value, &constant.ty) }
+            emit_shared_constant(&out, root, visibility, &name, &ty, &init)
+            return
+        }
+        value :: self.constant_for_type(&constant.value, &constant.ty)
+        if constant.is_storage {
+            cell :: "{self.config.root_prefix}JetPersistCell"
+            if constant.ty.kind() == .Int { out.push_str("{visibility}static {name}: std::sync::LazyLock<{cell}<{ty}>> = std::sync::LazyLock::new(|| {cell}::new({value}));\n\n") }
+            else { out.push_str("{visibility}static {name}: {cell}<{ty}> = {cell}::new({value});\n\n") }
+        } else { out.push_str("#[inline]\n{visibility}fn {name}() -> {ty} {{ {value} }}\n\n") }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6961
+    fn shared_constant(self, constant: MirConstantDef) -> Bool {
+        !constant.is_storage && !self.is_no_os() && (if constant.ty.kind() == { .String | .List(_) | .Map(key: _, value: _) | .Option(_) | .Result(ok: _, err: _) | .Tuple(_) | .Apply(name: _, args: _) -> true; else -> false })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6978
+    fn shared_constant_accessor(self, name: String) -> String? {
+        constant :: self.program.constants.iter().find((constant) -> constant.key.as_str() == name) ?? return .None
+        if self.shared_constant(constant) -> Val("{self.config.root_prefix}{mangle_path(&constant.key)}_shared()") else -> .None
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:6995
+    fn shared_constant_value(self, function: MirFunction, value: MirValueId) -> Bool { if self.value_definition(function, value) == Val(.Global(name)) -> self.shared_constant_accessor(name).is_some() else -> false }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7002
+    fn global_expression(self, name: String) -> String {
+        root :: &self.config.root_prefix
+        if name == "transaction" { return "{root}jet_transaction()" }
+        if name == "stm" { return "{root}jet_stm::begin()" }
+        if self.program.constants.iter().find((constant) -> constant.key.as_str() == name) == Val(constant) {
+            path :: "{root}{mangle_path(&constant.key)}"
+            return if constant.is_storage -> "({path}).get()" else -> "{path}()"
+        }
+        "{root}{mangle_path(name)}"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7024-7200
+    // This is the complete leading fragment of emit_impl; the canonical owner continues at 7201.
+    fn emit_impl_head(self, implementation: MirImplDef, out: &String) -> ([MirGenericParam], String, String, String?, MirTraitDef?, MirType?, Int) {
+        if !self.module_selected(implementation.module) || !self.impl_selected_for_target(implementation) { panic("MIR implementation {implementation.id:?} is not selected for the emitted artifact") }
+        if implementation.serde.is_some() && implementation.trait_ref.is_none() { panic("MIR implementation {implementation.id:?} carries a serde codec without a trait") }
+        if implementation.delegation == Val(field) {
+            if implementation.trait_ref.is_none() { panic("MIR implementation {implementation.id:?} delegates without a trait") }
+            row :: self.program.fields.iter().find((row) -> row.id == field).unwrap_or_else(() -> panic("MIR implementation {implementation.id:?} delegation field {field:?} has no row"))
+            if row.owner != self.type_identity(&implementation.self_type) { panic("MIR implementation {implementation.id:?} delegation field {field:?} belongs to {row.owner:?}, expected {self.type_identity(&implementation.self_type):?}") }
+        }
+        impl_generic_params :: self.generic_params_for_type(&implementation.self_type)
+        self.push_generic_scope(impl_generic_params)
+        generics :: self.generic_params_from(impl_generic_params)
+        rendered_owner :: self.rust_type(&implementation.self_type)
+        owner := &rendered_owner
+        if !impl_generic_params.is_empty() {
+            if implementation.self_type.kind() == .Apply(args: args) {
+                if args.is_empty() { owner = "{rendered_owner}<{impl_generic_params.iter().map((param) -> mangle(&param.name)).collect::<[String]>().join(", ")}>" }
+            }
+        }
+        carrier_trait :: if implementation.trait_ref.is_none() && impl_generic_params.is_empty() && self.implementation_owner_def(&implementation.self_type).is_some_and((definition) -> !self.declares_type_def(definition)) -> Val("__jet_ext{mangle_path(&implementation.key)}") else -> String?.None
+        trait_definition :: implementation.trait_ref.as_ref().map((trait_ref) -> self.program.traits.iter().find((definition) -> definition.id == trait_ref.id && definition.name == trait_ref.name).unwrap_or_else(() -> panic("MIR implementation {implementation.id:?} trait reference {trait_ref:?} has no declaration row")))
+        operator :: implementation.operator_rhs.as_ref()
+        rust_operator :: operator.filter((_) -> implementation.trait_ref.as_ref().is_some_and((trait_ref) -> [Syntax.TRAIT_ADD, Syntax.TRAIT_SUB, Syntax.TRAIT_MUL, Syntax.TRAIT_DIV].contains(trait_ref.name)))
+        if operator == Val(rhs) {
+            trait_ref :: implementation.trait_ref.as_ref().unwrap_or_else(() -> panic("MIR operator implementation {implementation.id:?} has no trait reference"))
+            if ![Syntax.TRAIT_ADD, Syntax.TRAIT_SUB, Syntax.TRAIT_MUL, Syntax.TRAIT_DIV, Syntax.TRAIT_EQUATABLE, Syntax.TRAIT_COMPARABLE].contains(trait_ref.name) { panic("MIR operator implementation {implementation.id:?} has non-operator trait {trait_ref.name:?}") }
+            if rust_operator.is_some() { out.push_str("impl{generics} {self.trait_nominal_name(trait_ref)}<{self.rust_type(rhs)}> for {owner} {{\n") }
+            else { out.push_str("impl{generics} {self.trait_nominal_name(trait_ref)} for {owner} {{\n") }
+        } else if implementation.trait_ref == Val(trait_ref) { out.push_str("impl{generics} {self.trait_nominal_name(trait_ref)} for {owner} {{\n") }
+        else {
+            if implementation.delegation.is_some() || implementation.serde.is_some() || !implementation.associated_types.is_empty() { panic("MIR inherent implementation {implementation.id:?} carries trait-only metadata") }
+            if carrier_trait == Val(carrier) { out.push_str("impl {carrier} for {owner} {{\n") }
+            else { out.push_str("impl{generics} {owner} {{\n") }
+        }
+        methods_start :: out.len()
+        if trait_definition == Val(definition) {
+            loop associated in &implementation.associated_types {
+                if !definition.associated_types.iter().any((declared) -> declared.name == associated.name) { panic("MIR implementation {implementation.id:?} defines unknown associated type {associated.name}") }
+            }
+        }
+        (impl_generic_params, generics, owner, carrier_trait, trait_definition, rust_operator, methods_start)
+    }
+}

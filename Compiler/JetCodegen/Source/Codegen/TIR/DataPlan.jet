@@ -1,388 +1,209 @@
-// PORT-PENDING 2152 crates-jet-codegen-src-codegen-tir-data-plan: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:1-384
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! TIR carrier for checked table-plan facts.
-//RS //!
-//RS //! This is a total, backend-neutral copy of the sema plan.  It intentionally
-//RS //! has no evaluator, closure, row buffer, or target-specific operator.  A
-//RS //! future MIR boundary can attach this value to a typed expression and every
-//RS //! tier can consume the same decisions.
-//RS 
-//RS use super::{TExpr, TExprKind};
-//RS use crate::AST::{
-//RS     DataPlanCallable, DataPlanFact, DataPlanLogicalNode, DataPlanNodeId, DataPlanOperationKind,
-//RS     DataPlanPhysicalNode, DataPlanPhysicalOperatorKind, DataPlanSchema, DataPlanSourceKind,
-//RS     DataPlanStreamMode, DataPlanValidationError, Type,
-//RS };
-//RS use crate::Diagnostics::Span;
-//RS 
-//RS /// Version of the TIR table-plan carrier.
-//RS pub const TDATA_PLAN_SCHEMA_VERSION: u32 = 1;
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TDataPlanNode {
-//RS     pub id: DataPlanNodeId,
-//RS     pub operation: DataPlanOperationKind,
-//RS     pub inputs: Vec<DataPlanNodeId>,
-//RS     pub source: Option<DataPlanSourceKind>,
-//RS     pub schema: DataPlanSchema,
-//RS     pub callable: Option<DataPlanCallable>,
-//RS     pub stream: DataPlanStreamMode,
-//RS     pub span: Span,
-//RS }
-//RS 
-//RS impl From<&DataPlanLogicalNode> for TDataPlanNode {
-//RS     fn from(node: &DataPlanLogicalNode) -> Self {
-//RS         Self {
-//RS             id: node.id,
-//RS             operation: node.operation,
-//RS             inputs: node.inputs.clone(),
-//RS             source: node.source,
-//RS             schema: node.schema.clone(),
-//RS             callable: node.callable.clone(),
-//RS             stream: node.stream.clone(),
-//RS             span: node.span,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TDataPlanPhysicalNode {
-//RS     pub logical: DataPlanNodeId,
-//RS     pub operator: DataPlanPhysicalOperatorKind,
-//RS     pub stream: DataPlanStreamMode,
-//RS     pub reason: String,
-//RS }
-//RS 
-//RS impl From<&DataPlanPhysicalNode> for TDataPlanPhysicalNode {
-//RS     fn from(node: &DataPlanPhysicalNode) -> Self {
-//RS         Self {
-//RS             logical: node.logical,
-//RS             operator: node.operator,
-//RS             stream: node.stream.clone(),
-//RS             reason: node.reason.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Complete table-plan facts carried across the TIR seam.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct TDataPlan {
-//RS     pub source: DataPlanSourceKind,
-//RS     pub logical: Vec<TDataPlanNode>,
-//RS     pub physical: Vec<TDataPlanPhysicalNode>,
-//RS     pub output: DataPlanNodeId,
-//RS     pub source_span: Span,
-//RS }
-//RS 
-//RS impl TDataPlan {
-//RS     /// Copy checked sema facts into the total TIR carrier.  Validation occurs
-//RS     /// before copying so no later tier needs an optional or fallback path.
-//RS     pub fn from_fact(fact: &DataPlanFact) -> Result<Self, DataPlanError> {
-//RS         fact.validate().map_err(DataPlanError::Validation)?;
-//RS         let plan = Self {
-//RS             source: fact.source,
-//RS             logical: fact.logical.iter().map(TDataPlanNode::from).collect(),
-//RS             physical: fact
-//RS                 .physical
-//RS                 .iter()
-//RS                 .map(TDataPlanPhysicalNode::from)
-//RS                 .collect(),
-//RS             output: fact.output,
-//RS             source_span: fact.source_span,
-//RS         };
-//RS         plan.validate()?
-//RS             .then_some(plan)
-//RS             .ok_or(DataPlanError::InvalidProjection)
-//RS     }
-//RS 
-//RS     pub fn output_node(&self) -> Option<&TDataPlanNode> {
-//RS         self.logical.get(self.output.index())
-//RS     }
-//RS 
-//RS     pub fn output_schema(&self) -> Option<&DataPlanSchema> {
-//RS         self.output_node().map(|node| &node.schema)
-//RS     }
-//RS 
-//RS     pub fn output_type(&self) -> Option<&Type> {
-//RS         self.output_schema().map(|schema| &schema.row_type)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<bool, DataPlanError> {
-//RS         if self.logical.is_empty() || self.output.index() >= self.logical.len() {
-//RS             return Ok(false);
-//RS         }
-//RS         if self.logical[0].operation != DataPlanOperationKind::Scan
-//RS             || self.logical[0].source != Some(self.source)
-//RS         {
-//RS             return Ok(false);
-//RS         }
-//RS         for (index, node) in self.logical.iter().enumerate() {
-//RS             if node.id.index() != index || node.schema.validate().is_err() {
-//RS                 return Ok(false);
-//RS             }
-//RS             if node.inputs.iter().any(|input| input.index() >= index) {
-//RS                 return Ok(false);
-//RS             }
-//RS         }
-//RS         if self
-//RS             .physical
-//RS             .iter()
-//RS             .any(|node| node.logical.index() >= self.logical.len() || node.reason.trim().is_empty())
-//RS         {
-//RS             return Ok(false);
-//RS         }
-//RS         Ok(true)
-//RS     }
-//RS 
-//RS     /// Preserve every checked fact in the TIR identity.  A graph-only key
-//RS     /// aliases plans with different schemas or callbacks and can make an
-//RS     /// inspector/cache report the wrong physical plan.
-//RS     pub fn canonical_key(&self) -> String {
-//RS         let logical = self
-//RS             .logical
-//RS             .iter()
-//RS             .map(|node| {
-//RS                 let inputs = node
-//RS                     .inputs
-//RS                     .iter()
-//RS                     .map(|input| input.index().to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",");
-//RS                 let source = node
-//RS                     .source
-//RS                     .map(DataPlanSourceKind::as_str)
-//RS                     .unwrap_or("none");
-//RS                 let columns = node
-//RS                     .schema
-//RS                     .columns
-//RS                     .iter()
-//RS                     .map(|column| format!("{:?}:{}:nullable={}", column.name, column.ty.name(), column.nullable))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(",");
-//RS                 let callable = node
-//RS                     .callable
-//RS                     .as_ref()
-//RS                     .map(|callable| {
-//RS                         format!(
-//RS                             "{:?}:{}:{}:{}-{}",
-//RS                             callable.label,
-//RS                             callable.parameter.name(),
-//RS                             callable.result.name(),
-//RS                             callable.span.start,
-//RS                             callable.span.end
-//RS                         )
-//RS                     })
-//RS                     .unwrap_or_else(|| "none".to_string());
-//RS                 format!(
-//RS                     "{}:{}:{}:source={source}:row={}:columns=[{columns}]:callable={callable}:stream={:?}:span={}-{}",
-//RS                     node.id.index(),
-//RS                     node.operation.as_str(),
-//RS                     inputs,
-//RS                     node.schema.row_type.name(),
-//RS                     node.stream,
-//RS                     node.span.start,
-//RS                     node.span.end
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join("|");
-//RS         let physical = self
-//RS             .physical
-//RS             .iter()
-//RS             .map(|node| {
-//RS                 format!(
-//RS                     "{}:{}:stream={:?}:reason={:?}",
-//RS                     node.logical.index(),
-//RS                     node.operator.as_str(),
-//RS                     node.stream,
-//RS                     node.reason
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join("|");
-//RS         format!(
-//RS             "source={};output={};logical={logical};physical={physical}",
-//RS             self.source.as_str(),
-//RS             self.output.index()
-//RS         )
-//RS     }
-//RS     /// Reconstitute the foundation fact for a checked chained operation.
-//RS     /// The fields are a lossless projection, so extending a plan never
-//RS     /// re-infers a source, schema, or callback.
-//RS     pub(crate) fn to_fact(&self) -> DataPlanFact {
-//RS         DataPlanFact {
-//RS             source: self.source,
-//RS             logical: self
-//RS                 .logical
-//RS                 .iter()
-//RS                 .map(|node| DataPlanLogicalNode {
-//RS                     id: node.id,
-//RS                     operation: node.operation,
-//RS                     inputs: node.inputs.clone(),
-//RS                     source: node.source,
-//RS                     schema: node.schema.clone(),
-//RS                     callable: node.callable.clone(),
-//RS                     stream: node.stream.clone(),
-//RS                     span: node.span,
-//RS                 })
-//RS                 .collect(),
-//RS             physical: self
-//RS                 .physical
-//RS                 .iter()
-//RS                 .map(|node| DataPlanPhysicalNode {
-//RS                     logical: node.logical,
-//RS                     operator: node.operator,
-//RS                     stream: node.stream.clone(),
-//RS                     reason: node.reason.clone(),
-//RS                 })
-//RS                 .collect(),
-//RS             output: self.output,
-//RS             source_span: self.source_span,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn result_inner(ty: &Type) -> &Type {
-//RS     match ty {
-//RS         Type::Result { ok, .. } => result_inner(ok),
-//RS         _ => ty,
-//RS     }
-//RS }
-//RS 
-//RS fn row_type(ty: &Type) -> Option<Type> {
-//RS     match result_inner(ty) {
-//RS         Type::List(inner) | Type::FixedList { elem: inner, .. } => Some((**inner).clone()),
-//RS         Type::Apply { name, args }
-//RS             if matches!(name.as_str(), "Query" | "DataStream" | "DataLoader")
-//RS                 && args.len() == 1 =>
-//RS         {
-//RS             Some(args[0].clone())
-//RS         }
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS fn chained_fact(args: &[TExpr]) -> Option<DataPlanFact> {
-//RS     args.first().and_then(|arg| match &arg.kind {
-//RS         TExprKind::CoreCall {
-//RS             data_plan: Some(plan),
-//RS             ..
-//RS         } => Some(plan.to_fact()),
-//RS         _ => None,
-//RS     })
-//RS }
-//RS 
-//RS fn callable(arg: Option<&TExpr>, label: &str, span: Span) -> Result<DataPlanCallable, String> {
-//RS     let Some(TExpr {
-//RS         ty: Type::Fn {
-//RS             params,
-//RS             ret: Some(ret),
-//RS             ..
-//RS         },
-//RS         ..
-//RS     }) = arg
-//RS     else {
-//RS         return Err(format!("checked data call `{label}` has no typed callable"));
-//RS     };
-//RS     let [parameter] = params.as_slice() else {
-//RS         return Err(format!(
-//RS             "checked data call `{label}` callable must take one row parameter"
-//RS         ));
-//RS     };
-//RS     Ok(crate::Sema::callable_fact(
-//RS         label.to_string(),
-//RS         parameter.clone(),
-//RS         (**ret).clone(),
-//RS         span,
-//RS     ))
-//RS }
-//RS 
-//RS /// Build the one checked data-plan fact attached to a recognized Core call.
-//RS /// This is a projection of sema's builder, never an execution decision.
-//RS pub(crate) fn data_plan_for_core_call(
-//RS     record: &'static crate::Syntax::CoreCallRecord,
-//RS     args: &[TExpr],
-//RS     result_ty: &Type,
-//RS     span: Span,
-//RS ) -> Result<Option<TDataPlan>, String> {
-//RS     let Some(kind) = crate::Sema::classify_data_call(record.module, record.member)
-//RS         .or_else(|| crate::Sema::classify_data_receiver_call(record.receiver_types, record.member))
-//RS     else {
-//RS         return Ok(None);
-//RS     };
-//RS     let fact = chained_fact(args);
-//RS     let mut builder = match fact {
-//RS         Some(fact) => {
-//RS             crate::Sema::DataPlanBuilder::from_fact(fact).map_err(|error| error.to_string())?
-//RS         }
-//RS         None => {
-//RS             let source = match kind {
-//RS                 crate::Sema::DataPlanCallKind::Scan(source) => source,
-//RS                 _ => DataPlanSourceKind::Table,
-//RS             };
-//RS             let row_type = row_type(if matches!(kind, crate::Sema::DataPlanCallKind::Scan(_)) {
-//RS                 result_ty
-//RS             } else {
-//RS                 args.first().map(|arg| &arg.ty).unwrap_or(result_ty)
-//RS             })
-//RS             .ok_or_else(|| {
-//RS                 format!(
-//RS                     "checked data call `{}.{}` has no typed row schema",
-//RS                     record.module, record.member
-//RS                 )
-//RS             })?;
-//RS             crate::Sema::DataPlanBuilder::new(source, crate::Sema::scalar_schema(row_type), span)
-//RS         }
-//RS         .map_err(|error| error.to_string())?,
-//RS     };
-//RS     match kind {
-//RS         crate::Sema::DataPlanCallKind::Scan(_) => {}
-//RS         crate::Sema::DataPlanCallKind::Filter | crate::Sema::DataPlanCallKind::SortBy => {
-//RS             let label = format!("{}.{}", record.module, record.member);
-//RS             let callback = callable(args.get(1), &label, span)?;
-//RS             if matches!(kind, crate::Sema::DataPlanCallKind::Filter) {
-//RS                 builder
-//RS                     .filter(callback, span)
-//RS                     .map_err(|error| error.to_string())?;
-//RS             } else {
-//RS                 builder
-//RS                     .sort_by(callback, span)
-//RS                     .map_err(|error| error.to_string())?;
-//RS             }
-//RS         }
-//RS         crate::Sema::DataPlanCallKind::Collect => {
-//RS             builder.collect(span).map_err(|error| error.to_string())?;
-//RS         }
-//RS         crate::Sema::DataPlanCallKind::InspectPlan => {}
-//RS     }
-//RS     let fact = builder.finish().map_err(|error| error.to_string())?;
-//RS     TDataPlan::from_fact(&fact)
-//RS         .map(Some)
-//RS         .map_err(|error| error.to_string())
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum DataPlanError {
-//RS     Validation(DataPlanValidationError),
-//RS     InvalidProjection,
-//RS }
-//RS 
-//RS impl std::fmt::Display for DataPlanError {
-//RS     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//RS         match self {
-//RS             Self::Validation(error) => error.fmt(formatter),
-//RS             Self::InvalidProjection => formatter.write_str("TIR table-plan projection is invalid"),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for DataPlanError {}
-//RS 
-//RS /// Explicitly named handoff for callers that already use the `project_*`
-//RS /// vocabulary.  It performs the same checked conversion as `TDataPlan::from_fact`.
-//RS pub fn project_data_plan(fact: &DataPlanFact) -> Result<TDataPlan, DataPlanError> {
-//RS     TDataPlan::from_fact(fact)
-//RS }
-//RS 
-// END-PORT-PENDING 2152 crates/jet-codegen/src/Codegen/TIR/data_plan.rs:1-384
+// Total backend-neutral carrier for checked table-plan facts: no evaluator,
+// closure, row buffer, or target-specific operator.
+use jet_codegen.[TExpr, TExprKind]
+use jet_foundation.[DataPlanCallable, DataPlanFact, DataPlanLogicalNode, DataPlanNodeId, DataPlanOperationKind, DataPlanPhysicalNode, DataPlanPhysicalOperatorKind, DataPlanSchema, DataPlanSourceKind, DataPlanStreamMode, DataPlanValidationError, Type, Span]
+use jet_syntax.CoreCallRecord
+use jet_sema.[DataPlanBuilder, DataPlanCallKind, classify_data_call, classify_data_receiver_call, callable_fact, scalar_schema]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:17
+pub const TDATA_PLAN_SCHEMA_VERSION: U32 = 1
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:20
+pub struct TDataPlanNode {
+    pub id: DataPlanNodeId
+    pub operation: DataPlanOperationKind
+    pub inputs: [DataPlanNodeId]
+    pub source: DataPlanSourceKind?
+    pub schema: DataPlanSchema
+    pub callable: DataPlanCallable?
+    pub stream: DataPlanStreamMode
+    pub span: Span
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:31
+impl TDataPlanNode {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:32
+    pub fn from(node: DataPlanLogicalNode) -> TDataPlanNode {
+        TDataPlanNode{id: node.id, operation: node.operation, inputs: ~node.inputs, source: node.source, schema: ~node.schema, callable: ~node.callable, stream: ~node.stream, span: node.span}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:47
+pub struct TDataPlanPhysicalNode {
+    pub logical: DataPlanNodeId
+    pub operator: DataPlanPhysicalOperatorKind
+    pub stream: DataPlanStreamMode
+    pub reason: String
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:54
+impl TDataPlanPhysicalNode {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:55
+    pub fn from(node: DataPlanPhysicalNode) -> TDataPlanPhysicalNode {
+        TDataPlanPhysicalNode{logical: node.logical, operator: node.operator, stream: ~node.stream, reason: ~node.reason}
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:67
+pub struct TDataPlan {
+    pub source: DataPlanSourceKind
+    pub logical: [TDataPlanNode]
+    pub physical: [TDataPlanPhysicalNode]
+    pub output: DataPlanNodeId
+    pub source_span: Span
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:75
+impl TDataPlan {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:78
+    pub fn from_fact(fact: DataPlanFact) -> TDataPlan DataPlanError! {
+        fact.validate() catch error { fail DataPlanError.Validation(error) }
+        plan :: TDataPlan{source: fact.source, logical: fact.logical.map((node) -> TDataPlanNode.from(node)).collect(), physical: fact.physical.map((node) -> TDataPlanPhysicalNode.from(node)).collect(), output: fact.output, source_span: fact.source_span}
+        if !plan.validate() -> fail DataPlanError.InvalidProjection
+        plan
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:96
+    pub fn output_node(self) -> TDataPlanNode? { self.logical.get(self.output.index()) }
+
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:100
+    pub fn output_schema(self) -> DataPlanSchema? { self.output_node().map((node) -> node.schema) }
+
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:104
+    pub fn output_type(self) -> Type? { self.output_schema().map((schema) -> schema.row_type) }
+
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:108
+    pub fn validate(self) -> Bool DataPlanError! {
+        if self.logical.is_empty() || self.output.index() >= self.logical.len() -> return false
+        if self.logical[0].operation != .Scan || self.logical[0].source != Val(self.source) -> return false
+        loop (index, node) in self.logical.enumerate() {
+            if node.id.index() != index -> return false
+            node.schema.validate() catch _ { return false }
+            if node.inputs.any((input) -> input.index() >= index) -> return false
+        }
+        loop node in self.physical {
+            reason := node.reason.trim() // #4303
+            if node.logical.index() >= self.logical.len() || reason.is_empty() -> return false
+        }
+        true
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:138
+    pub fn canonical_key(self) -> String {
+        // Include schema/callback/stream facts, not just graph topology.
+        logical :: self.logical.map((node) -> {
+            inputs :: node.inputs.map((input) -> input.index().to_string()).collect().join(",")
+            source :: node.source.map((kind) -> kind.as_str()) ?? "none"
+            columns :: node.schema.columns.map((column) -> "{column.name:?}:{column.ty.name()}:nullable={column.nullable}").collect().join(",")
+            callable :: node.callable.map((callback) -> "{callback.label:?}:{callback.parameter.name()}:{callback.result.name()}:{callback.span.start}-{callback.span.end}") ?? "none"
+            "{node.id.index()}:{node.operation.as_str()}:{inputs}:source={source}:row={node.schema.row_type.name()}:columns=[{columns}]:callable={callable}:stream={node.stream:?}:span={node.span.start}-{node.span.end}"
+        }).collect().join("|")
+        physical :: self.physical.map((node) -> "{node.logical.index()}:{node.operator.as_str()}:stream={node.stream:?}:reason={node.reason:?}").collect().join("|")
+        "source={self.source.as_str()};output={self.output.index()};logical={logical};physical={physical}"
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:210
+    pub fn to_fact(self) -> DataPlanFact {
+        DataPlanFact{
+            source: self.source,
+            logical: self.logical.map((node) -> DataPlanLogicalNode{id: node.id, operation: node.operation, inputs: ~node.inputs, source: node.source, schema: ~node.schema, callable: ~node.callable, stream: ~node.stream, span: node.span}).collect(),
+            physical: self.physical.map((node) -> DataPlanPhysicalNode{logical: node.logical, operator: node.operator, stream: ~node.stream, reason: ~node.reason}).collect(),
+            output: self.output,
+            source_span: self.source_span,
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:243
+fn result_inner(ty: Type) -> Type {
+    if ty == {
+        .Result{ok, ..} -> result_inner(ok)
+        else -> ty
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:250
+fn row_type(ty: Type) -> Type? {
+    if result_inner(ty) == {
+        .List(inner) | .FixedList{elem: inner, ..} -> Val(~inner)
+        .Apply{name, args} if (name == "Query" || name == "DataStream" || name == "DataLoader") && args.len() == 1 -> Val(~args[0])
+        else -> None
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:263
+fn chained_fact(args: [TExpr]) -> DataPlanFact? {
+    if args.first() == .Val(arg) {
+        if arg.kind == .CoreCall{data_plan: .Val(plan), ..} -> return Val(plan.to_fact())
+    }
+    None
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:273
+fn callable(arg: TExpr?, label: String, span: Span) -> DataPlanCallable Err! {
+    if arg == .Val(TExpr{ty: .Fn{params, ret: .Val(ret), ..}, ..}) {
+        if params.len() != 1 -> fail "checked data call `{label}` callable must take one row parameter"
+        return callable_fact(~label, ~params[0], ~ret, span)
+    }
+    fail "checked data call `{label}` has no typed callable"
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:300
+pub fn data_plan_for_core_call(record: CoreCallRecord, args: [TExpr], result_ty: Type, span: Span) -> TDataPlan? Err! {
+    kind :: classify_data_call(record.module, record.member) ?? classify_data_receiver_call(record.receiver_types, record.member) ?? return None
+    fact :: chained_fact(args)
+    builder := if fact == {
+        .Val(fact) -> DataPlanBuilder.from_fact(fact) catch error { fail error.to_string() }
+        None -> {
+            source :: if kind == {
+                .Scan(source) -> source
+                else -> DataPlanSourceKind.Table
+            }
+            schema_ty :: if kind == {
+                .Scan(_) -> result_ty
+                else -> args.first().map((arg) -> arg.ty) ?? result_ty
+            }
+            row :: row_type(schema_ty) ?? fail "checked data call `{record.module}.{record.member}` has no typed row schema"
+            DataPlanBuilder.new(source, scalar_schema(row), span) catch error { fail error.to_string() }
+        }
+    }
+    if kind == {
+        .Scan(_) -> {}
+        .Filter | .SortBy -> {
+            label :: "{record.module}.{record.member}"
+            callback :: callable(args.get(1), label, span)
+            if kind == .Filter {
+                _ :: &builder.filter(callback, span) catch error { fail error.to_string() }
+            } else {
+                _ :: &builder.sort_by(callback, span) catch error { fail error.to_string() }
+            }
+        }
+        .Collect -> { _ :: &builder.collect(span) catch error { fail error.to_string() } }
+        .InspectPlan -> {}
+    }
+    finished :: builder.finish() catch error { fail error.to_string() }
+    Val(TDataPlan.from_fact(finished) catch error { fail error.to_string() })
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:363
+#Error
+pub enum DataPlanError {
+    Validation(DataPlanValidationError)
+    InvalidProjection
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:368
+impl DataPlanError {
+    // Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:369
+    pub fn to_string(self) -> String {
+        if self == {
+            .Validation(error) -> error.to_string()
+            .InvalidProjection -> "TIR table-plan projection is invalid"
+        }
+    }
+}
+
+// Rust: crates/jet-codegen/src/Codegen/TIR/data_plan.rs:381
+pub fn project_data_plan(fact: DataPlanFact) -> TDataPlan DataPlanError! {
+    TDataPlan.from_fact(fact)
+}

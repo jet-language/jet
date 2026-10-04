@@ -1,0 +1,37 @@
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use std.[env, process]
+use std.process.[Command]
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet
+
+// GATE #4494: real filesystem, process spawning and atomic providers.
+// Generated Rust and rustc are reference comparators, not a native bridge.
+// Rust: tests/regex.rs:15
+fn run_regex(src: String) -> String {
+    dir :: env.temp_dir().join("jet_regex_{process.id()}_{SEQ.fetch_add(1, Ordering.Relaxed)}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("regex_test.jet")
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: jet.compile_with_path(src, &shown).unwrap_or_else((diags) -> panic("front end rejected regex fixture:\n{jet.render_diagnostics(&shown, src, &diags)}"))
+    assert(out.ffi.is_none(), "core.regex must not produce an FFI bridge")
+    assert(!out.rust.contains("regex::") && !out.rust.contains("extern crate regex"), "core.regex must not reference the old regex crate")
+    user_rust :: common.strip_vetted_prelude_modules(&out.rust)
+    unsafe_lines :: user_rust.lines().filter((line) -> !common.unsafe_keyword_columns(line).is_empty()).collect()
+    assert(unsafe_lines.is_empty(), "I1: regex output must not contain unsafe: {unsafe_lines:?}")
+    rs :: dir.join("regex_test.rs")
+    bin :: dir.join("regex_test_bin")
+    fs.write(&rs, &out.rust).unwrap()
+    status :: Command.new("rustc").args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).status().unwrap()
+    assert(status.success(), "I2: rustc rejected regex output")
+    run :: Command.new(&bin).output().unwrap()
+    assert(run.status.success(), "regex program failed at runtime:\nstderr: {String.from_utf8_lossy(&run.stderr)}")
+    String.from_utf8_lossy(&run.stdout).into_owned()
+}
+// Rust: tests/regex.rs:20
+SEQ :: AtomicU64.new(0)
+// Rust: tests/regex.rs:76
+fn have_toolchain() -> Bool {
+    common.have_rustc() && Command.new("cargo").arg("--version").output().is_ok()
+}

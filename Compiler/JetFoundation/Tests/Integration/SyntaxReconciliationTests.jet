@@ -1,0 +1,338 @@
+use jet_foundation.Tests.Integration.SyntaxReconciliation.*
+use jet.[Syntax, Lexer, Parser, Policy, compile]
+use jet.Comptime.Build.[BuildCapability, BuildResourcePool]
+use std.fs
+// GATE #4494: tests inspect real repository files through the native filesystem.
+
+// Rust: tests/syntax_reconciliation.rs:11
+#Test("identifier_prefix_contract_is_canonical") {
+    assert_eq(Syntax.classify_identifier("name"), Syntax.IdentifierClass.Ordinary)
+    assert_eq(Syntax.classify_identifier("_name"), Syntax.IdentifierClass.SoftPublic)
+    assert_eq(Syntax.classify_identifier("_name_"), Syntax.IdentifierClass.SoftPublic)
+    assert_eq(Syntax.classify_identifier("__name"), Syntax.IdentifierClass.Reserved)
+    assert_eq(Syntax.classify_identifier("__name__"), Syntax.IdentifierClass.Reserved)
+    assert_eq(Syntax.classify_identifier("__"), Syntax.IdentifierClass.Reserved)
+    assert_eq(Syntax.classify_identifier("_"), Syntax.IdentifierClass.Ordinary)
+}
+// Rust: tests/syntax_reconciliation.rs:24
+#Test("every_double_underscore_source_identifier_is_rejected") {
+    source :: "\nmodule __module\nuse thing as __alias\nextern c {{ fn __ffi(__ffi_arg: Int) }}\nfn __call(__arg: Int) {{\n    __local :: __arg\n    value.__field\n}}\ntrait Contract {{ fn __method(self) }}\n"
+    (_, diagnostics) :: Lexer.lex(source)
+    reserved :: diagnostics.iter().filter(fn(diagnostic) { diagnostic.code == "E0067" }).count()
+    assert_eq(reserved, 10, "{diagnostics:#?}")
+}
+// Rust: tests/syntax_reconciliation.rs:44
+#Test("compiler_generated_identifiers_use_the_reserved_lane") {
+    source :: "fn __jet_generated() {{ print(\"{{__jet_value}}\") }}"
+    (_, user_diagnostics) :: Lexer.lex(source)
+    (tokens, generated_diagnostics) :: Lexer.lex_generated(source)
+    assert(user_diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0067" }))
+    assert(generated_diagnostics.is_empty(), "{generated_diagnostics:#?}")
+    assert(Parser.parse(&tokens).is_ok())
+}
+// Rust: tests/syntax_reconciliation.rs:59
+#Test("generated_symbol_ladder_has_one_canonical_prefix") {
+    assert_eq(Syntax.generated_name("lambda_7"), "__jet_lambda_7")
+    assert_eq(Syntax.generated_path("scoring.letter"), "__jet_scoring__letter")
+    assert_eq(Syntax.generated_suffix("__jet_lambda_7"), "lambda_7")
+}
+// Rust: tests/syntax_reconciliation.rs:68
+#Test("compiler_user_visible_enums_obey_acronym_lexicon") {
+    // Rust: tests/syntax_reconciliation.rs:72
+    fn assert_variants(enum_name: String, variants: &[(String, String, String, String)]) -> {
+        loop (retired, canonical, rendered, expected) in variants {
+            assert_eq(Syntax.respell_acronym_name(retired), canonical, "{enum_name} variant `{retired}` has no canonical acronym respell")
+            assert_eq(Syntax.respell_acronym_name(canonical), canonical, "{enum_name} canonical variant `{canonical}` is still retired")
+            assert_eq(rendered, expected, "{enum_name} variant `{canonical}` renders the wrong user-visible word")
+        }
+    }
+    assert_variants("BuildCapability", &[("Fs", "FS", BuildCapability.FS.name(), "FS"), ("Io", "IO", BuildCapability.IO.name(), "IO"), ("Db", "DB", BuildCapability.DB.name(), "DB"), ("Gpu", "GPU", BuildCapability.GPU.name(), "GPU")])
+    assert_variants("BuildResourcePool", &[("Cpu", "CPU", BuildResourcePool.CPU.as_str(), "cpu"), ("Gpu", "GPU", BuildResourcePool.GPU.as_str(), "gpu")])
+}
+// Rust: tests/syntax_reconciliation.rs:187
+#Test("live_surface_has_no_retired_spellings") {
+    failures := [String]{}
+    loop root in ROOTS {
+        loop path in files(&OSPath(root)) {
+            if should_skip(&path) -> next
+            text :: fs.read_to_string(&path) ?? next
+            loop (line_no, line) in scan_lines(&path, text) {
+                loop needle in forbidden_for_path(&path) {
+                    if forbidden_occurs(line, needle) { failures.push("{path.display()}:{line_no} contains `{needle}`") }
+                }
+            }
+        }
+    }
+    assert(failures.is_empty(), "retired syntax found:\n{failures.join("\n")}")
+}
+// Rust: tests/syntax_reconciliation.rs:219
+#Test("pipe_family_has_no_stale_flow_reservation") {
+    decision :: fs.read_to_string("Docs/spec/syntax-decisions.md").unwrap().split_whitespace().collect().join(" ")
+    assert(decision.contains("D-SHAPE-PIPE1=C — Bars mean alternatives, not general flow"))
+    assert(decision.contains("value-position `|` is bitwise OR"))
+    syntax :: fs.read_to_string("crates/jet-foundation/src/Syntax/math_layout.rs").unwrap().split_whitespace().collect().join(" ")
+    assert(syntax.contains("D-PATO / D-SHAPE-PIPE1=C / D-BITOREXPR1=A"))
+    assert(syntax.contains("`|=` remains bitwise-or-assign under S17"))
+}
+// Rust: tests/syntax_reconciliation.rs:232
+#Test("dynamic_encoding_surface_uses_datatree_name") {
+    failures := [String]{}
+    loop relative in DATATREE_NORMATIVE_SURFACES {
+        text :: fs.read_to_string(relative).unwrap_or_else(fn(error) { panic("cannot read DataTree inventory surface {relative}: {error}") })
+        markdown :: OSPath(relative).extension().is_some_and(fn(ext) { ext == "md" })
+        if markdown {
+            loop (line_no, line) in markdown_data_name_lines(text) {
+                if !historical_data_reference(line) { failures.push("{relative}:{line_no}: {line.trim()}") }
+            }
+        } else {
+            loop offset in source_identifier_offsets(text, "Data") {
+                line_no :: text[..offset].bytes().filter(fn(byte) { byte == U8{10} }).count() + 1
+                line :: text.lines().nth(line_no - 1).unwrap_or("")
+                failures.push("{relative}:{line_no}: {line.trim()}")
+            }
+        }
+    }
+    assert(failures.is_empty(), "current dynamic-encoding surfaces must use `DataTree`; label historical `Data` references explicitly:\n{failures.join("\n")}")
+}
+// Rust: tests/syntax_reconciliation.rs:263
+#Test("datatree_name_check_distinguishes_prose_and_type_names") {
+    loop lawful in ["| `conn.send_text(text)` | Data frames; client frames are masked |", "| Data ownership | Official UCD inputs are checked in. |"] {
+        assert(markdown_data_name_lines(lawful).is_empty())
+    }
+    loop prohibited in ["`Data.Object`", "`[Data]`", "`Data?`"] { assert_eq(markdown_data_name_lines(prohibited).len(), 1) }
+    tilde_fence :: "~~~jet\nvalue: Data\n~~~"
+    assert_eq(markdown_data_name_lines(tilde_fence)[0].0, 2)
+    four_tick_fence :: "````jet\nvalue: Data\n```\nother: Data\n````"
+    assert_eq(markdown_data_name_lines(four_tick_fence).iter().map(fn((line_no, _)) { line_no }).collect(), [2, 4])
+    multiline_fence :: "```jet\n/*\nData in a comment\n*/\ntext :: \"\"\"\nData in text\n\"\"\"\nvalue: Data\n```"
+    assert_eq(markdown_data_name_lines(multiline_fence).iter().map(fn((line_no, _)) { line_no }).collect(), [8])
+    assert_eq(markdown_data_name_lines("```jet\nvalue: Data")[0].0, 2)
+    lawful_source :: "// Data is retired\ntext :: \"Data\"\n/* Data */\nvalue: DataTree"
+    assert(source_identifier_offsets(lawful_source, "Data").is_empty())
+    assert_eq(source_identifier_offsets("value: Data", "Data").len(), 1)
+}
+// Rust: tests/syntax_reconciliation.rs:301
+#Test("active_maturity_docs_use_meta_field_only") {
+    retired :: ["#Experimental", "#Tested", "#Hardened", "#Experimental", "#Tested", "#Hardened"]
+    failures := [String]{}
+    loop relative in ACTIVE_MATURITY_DOCS {
+        text :: fs.read_to_string(relative).unwrap_or_else(fn(error) { panic("cannot read maturity surface {relative}: {error}") })
+        loop required in ["#Meta(maturity:", ".Experimental", ".Tested", ".Hardened"] {
+            if !text.contains(required) { failures.push("{relative} does not teach `{required}`") }
+        }
+        loop line in text.lines() {
+            loop spelling in retired {
+                if line.contains(spelling) && !line.contains("not grammar") { failures.push("{relative} teaches standalone `{spelling}`") }
+            }
+        }
+    }
+    assert(failures.is_empty(), "active maturity docs drifted from the sole `#Meta(maturity: ...)` surface:\n{failures.join("\n")}")
+}
+// Rust: tests/syntax_reconciliation.rs:335
+#Test("proposal_marker_census_matches_syntax_registry") {
+    rules :: Policy.APPLIED_RULES.iter().filter(fn(row) { row.status == .Active }).count()
+    assert(rules > 0, "applied-rule registry must be non-empty")
+    assert_eq(Syntax.RULE_PREFIX, "#", "registered applied rules must use the canonical `#` plane")
+    text :: fs.read_to_string(MARKER_CENSUS_DOC).unwrap_or_else(fn(error) { panic("cannot read marker census doc {MARKER_CENSUS_DOC}: {error}") })
+    normalized :: text.split_whitespace().collect().join(" ")
+    assert(normalized.contains("`#` is the sole prefix for attributes, instructions, and properties.")
+        && normalized.contains("Prefix `@` is now the compile-time and fact-read mark; infix `@`")
+        && normalized.contains("A leading `@Rule` in marker position produces E0063 with the canonical `#Rule` fix."),
+        "{MARKER_CENSUS_DOC} must teach the Syntax registry's canonical `#` applied-rule plane")
+}
+// Rust: tests/syntax_reconciliation.rs:362
+#Test("old_binding_migration_paths_stay_removed") {
+    failures := [String]{}
+    loop root in OLD_BINDING_SCAN_ROOTS {
+        loop path in files(&OSPath(root)) {
+            if should_skip(&path) -> next
+            text :: fs.read_to_string(&path) ?? next
+            scan_old_binding_codes(&path, text, &failures)
+            scan_old_binding_examples(&path, text, &failures)
+        }
+    }
+    assert(failures.is_empty(), "old binding migration path found:\n{failures.join("\n")}")
+}
+// Rust: tests/syntax_reconciliation.rs:443
+#Test("ratified_unshipped_spellings_are_listed_and_triaged") {
+    reference :: fs.read_to_string("Docs/spec/reference/syntax-surface.jet").expect("read syntax reference")
+    spec :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions")
+    expected := ratified_reference_gap_ids(reference)
+    loop id in ["S74", "D-ONCE-UITREE1"] { expected.insert(id, true) }
+    listed := [String: Bool]{}
+    loop (id, _, _, _, _) in RATIFIED_UNSHIPPED_SPELLINGS { listed.insert(id, true) }
+    assert_eq(listed, expected, "ratified unshipped spelling inventory drifted; add or retire the row before changing the spec")
+    loop (id, spelling, home, anchor, disposition) in RATIFIED_UNSHIPPED_SPELLINGS {
+        source :: if home == "Docs/spec/syntax-decisions.md" -> spec else -> reference
+        assert(source.contains(anchor), "{id} ({spelling}) has no source evidence in {home}: {anchor}")
+        assert(disposition.contains("card #") && (disposition.contains("retired") || disposition.contains("deferred") || disposition.contains("tracked")), "{id} ({spelling}) has no card-backed disposition: {disposition}")
+    }
+    (tokens, lex_diags) :: Lexer.lex("fn run() {{ .Ok(age) :: parse_age() ?? return }}\n")
+    assert(lex_diags.is_empty(), "retired S74 spelling should lex before parser rejection: {lex_diags:#?}")
+    assert(Parser.parse(&tokens).is_err(), "retired S74 spelling gained a parser path")
+    (tokens, _) :: Lexer.lex("fn run() {{ tree :: .Button.{{ label: \"OK\" }} }}\n")
+    assert(Parser.parse(&tokens).is_err(), "ratified-but-unbuilt UI dot-construction gained a parser path")
+}
+// Rust: tests/syntax_reconciliation.rs:506
+#Test("syntax_status_matrix_covers_unbuilt_notes") {
+    // FEATURE_CLAIM: claim.syntax-law / syntax-matrix
+    spec :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions")
+    assert(spec.contains("A ratified entry may sit unbuilt **only** when gated on"))
+    lines :: spec.lines().collect()
+    uncovered := [String]{}
+    loop (idx, line) in lines.iter().enumerate() {
+        lower :: line.to_ascii_lowercase()
+        if !(lower.contains("unbuilt") || lower.contains("not yet implemented")) -> next
+        if idx < 20 || lower.contains("have/have-not ledger") -> next
+        if !lower.contains("ratified") && !lower.contains("not yet implemented") -> next
+        start := idx
+        loop start > 0 && !lines[start - 1].trim().is_empty() { start -= 1 }
+        end := idx + 1
+        loop end < lines.len() && !lines[end].trim().is_empty() { end += 1 }
+        context :: lines[start..end].join("\n")
+        if !(context.contains("card #") || context.contains("cards #")) { uncovered.push("{idx + 1}: {line.trim()}") }
+    }
+    assert(uncovered.is_empty(), "unbuilt syntax note lacks a live card gate:\n{uncovered.join("\n")}")
+}
+// Rust: tests/syntax_reconciliation.rs:549
+#Test("environment_reference_is_canonical_and_navigable") {
+    reference :: fs.read_to_string(ENVIRONMENT_REFERENCE).expect("read canonical environment-variable reference")
+    docs_index :: fs.read_to_string("Docs/README.md").expect("read docs index")
+    assert(docs_index.contains("reference/environment.md"), "docs index must link the canonical environment-variable reference")
+    loop required in ["JET_PROP_SEED", "JET_RAYLIB_DISPLAY", "JET_UI_HEADLESS", "JET_ENV_DISABLE", "JET_TEST_JOBS", "JET_CANVAS_PREREQUISITES", "## Naming convention"] {
+        assert(reference.contains(required), "environment-variable reference missing `{required}`")
+    }
+}
+// Rust: tests/syntax_reconciliation.rs:575
+#Test("lexical_ledger_is_rendered_from_syntax") {
+    decisions :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions")
+    start :: decisions.find("<!-- BEGIN GENERATED LEXICAL LEDGER -->").expect("syntax decisions must render the lexical ledger")
+    end :: decisions.find("<!-- END GENERATED LEXICAL LEDGER -->").expect("syntax decisions must close the lexical ledger")
+    assert(start < end, "lexical ledger markers must be ordered")
+    block := decisions[start..end] // #4303
+    assert(block.contains("Generated by `Tools/agent/lexical-ledger.mjs`"), "lexical ledger must identify its renderer")
+    rendered_rows :: block.lines().filter(fn(line) { line.starts_with("| ") && !line.starts_with("| ---") }).count()
+    assert_eq(rendered_rows, Syntax.LEXICAL_LEDGER.len() + 1, "rendered ledger must contain its header plus every Syntax.rs row")
+    loop row in Syntax.LEXICAL_LEDGER {
+        if row.spelling == "`" { assert(block.contains("<code>`</code>"), "rendered ledger is missing the backtick spelling") }
+        else { assert(block.contains(row.spelling), "rendered ledger is missing spelling `{row.spelling}`") }
+    }
+    loop row in Syntax.LEXICAL_LEDGER {
+        assert(block.contains(row.meaning), "rendered ledger is missing meaning `{row.meaning}`")
+        if !row.decision.is_empty() { assert(block.contains(row.decision), "rendered ledger is missing decision `{row.decision}`") }
+    }
+}
+// Rust: tests/syntax_reconciliation.rs:632
+#Test("marker_plane_matrix_covers_current_marker_families") {
+    syntax :: fs.read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read Syntax.rs")
+    decisions :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions")
+    assert_eq(Syntax.RULE_PREFIX, "#", "the applied-rule registry must stay on the canonical `#` plane")
+    assert_eq(Syntax.EFFECT_ARROW_OPEN, "-[")
+    assert_eq(Syntax.EFFECT_ARROW_CLOSE, "]>")
+    assert(decisions.contains("**D-SHAPE8=A — Effects inside the arrow** *(ratified 2026-07-14,")
+        && decisions.contains("owner-amended by D-ARROW-CONTROL1 on 2026-07-26; card #543)*:"),
+        "syntax decisions must keep D-SHAPE8=A ratified, amended, and implemented")
+    unique := [String: Bool]{}
+    loop row in Policy.APPLIED_RULES.iter().filter(fn(row) { row.status == .Active }) {
+        rule :: row.name
+        assert(!rule.starts_with(['#', '@']), "registered applied-rule names are bare; RULE_PREFIX owns the `#` plane: {rule}")
+        assert(!unique.contains_key(rule), "duplicate applied rule `{rule}`")
+        unique.insert(rule, true)
+    }
+    loop rule in ["PubFile", "NoPrelude", "Target", "HTML", "WasmExport", "Layout", "SingleUse", "UnitFamily", "Rename", "Skip", "RenameAll", "Discriminant", "Untagged", "Codable", "Encode", "Decode", "Comparable", "MustUse", "Pre", "Post", "Inline", "Persist", "CLI", "Numeric", "Printable", "CodableAsBase", "FX", "Unsafe", "Impure", "Test", "Scrub", "Job", "Replayable", "State", "Transition", "Track", "Memo", "Meta"] {
+        assert(unique.contains_key(rule), "Syntax registry missing applied-rule family member `{rule}`")
+    }
+    assert_eq(Policy.applied_rule("Default").map(fn(row) { row.status }), Val(Policy.RuleStatus.Retired(replacement: "field: ...{{{{...}}}}")), "Default must remain a diagnostic-only tombstone")
+    loop syntax_anchor in ["MARKER_PUB_FILE", "MARKER_TARGET", "MARKER_LAYOUT", "MARKER_CODABLE", "APPLIED_RULES", "KW_FX", "KW_COMPTIME", "KW_DERIVE", "MARKER_TRACK", "MARKER_LOCAL", "MARKER_SHARED"] {
+        assert(syntax.contains(syntax_anchor), "Syntax.rs must retain live marker anchor `{syntax_anchor}`")
+    }
+    loop decision_anchor in ["D-MARKER-FAMILY1", "D-MARKERMOVE1", "D-UNSAFE2", "D-TESTPAREN1", "D-BENCH1", "D-CAPBUNDLE1", "D-CTMARKER1"] {
+        assert(decisions.contains(decision_anchor), "live syntax decisions must retain `{decision_anchor}`")
+    }
+}
+// Rust: tests/syntax_reconciliation.rs:751
+#Test("authority_vocabulary_has_one_live_name_and_retired_marker_tombstones") {
+    live_surfaces :: ["crates/jet-foundation/src/Syntax/effects_surface.rs", "crates/jet-foundation/src/Syntax/core_surface.rs", "crates/jet-foundation/src/AST/statements.rs", "crates/jet-parser/src/Parser/Statements/control.rs", "crates/jet-sema/src/Sema/CheckerCore/statements.rs", "crates/jet-sema/src/Sema/Effects.rs", "crates/jet-sema/src/Sema/GateLedger.rs", "crates/jet-repl/src/lib.rs", "crates/jet-pkg-model/src/EffectBudget.rs", "crates/jet-devserver/src/Canvas/graph_projection.rs", "Source/CmdCompile.rs", "Docs/spec/reference/syntax-surface.jet", "tests/cli/man.txt", "tests/cli/completions_bash.txt", "tests/cli/completions_fish.txt", "tests/cli/completions_powershell.txt", "tests/cli/completions_zsh.txt", "crates/jet-codegen/src/Codegen/TIR/lower/statements.rs"]
+    retired_words :: ["Abil" + "ity", "Abil" + "ities", "Capabil" + "ity", "Caps", "KW_CAPS", "TYPE_ABILITIES", "CAP_HANDLE_TYPE", "Stmt::Caps"]
+    failures := [String]{}
+    loop relative in live_surfaces {
+        text :: fs.read_to_string(relative).expect("read live authority surface")
+        loop retired in retired_words { if text.contains(retired) { failures.push("{relative} contains retired `{retired}`") } }
+    }
+    assert(failures.is_empty(), "live authority vocabulary drift:\n{failures:#?}")
+    assert_eq(Syntax.KW_FX, "FX")
+    assert_eq(Syntax.TYPE_AUTHORITY, "Authority")
+    loop retired in ["Abilities", "Caps"] {
+        assert_eq(Policy.applied_rule(retired).map(fn(row) { row.status }), Val(Policy.RuleStatus.Retired(replacement: "#FX")), "{retired} must remain a diagnostic-only tombstone")
+    }
+    assert(Policy.applied_rule("Authority").is_none())
+}
+// Rust: tests/syntax_reconciliation.rs:808
+#Test("retired_authority_types_and_markers_keep_exact_teaching_diagnostics") {
+    loop name in ["Ability", "Abilities", "Capability", "Caps"] {
+        source :: "fn audit(value: {name}) {{ print(\"x\") }}"
+        diagnostics :: compile(source).expect_err("retired Authority type must fail")
+        assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0119" && diagnostic.what.contains("`{name}` is retired") }), "missing exact retirement diagnostic for {name}: {diagnostics:#?}")
+    }
+    loop marker in ["Abilities", "Caps"] {
+        source :: "fn run() {{ #{marker}(IO) {{ print(\"x\") }} }}"
+        (tokens, lex_diagnostics) :: Lexer.lex(source)
+        assert(lex_diagnostics.is_empty(), "lexer rejected retired marker: {lex_diagnostics:#?}")
+        diagnostics :: Parser.parse(&tokens).expect_err("retired Authority marker must fail in the parser")
+        assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0927" && diagnostic.what.contains("`#{marker}` is retired") }), "missing exact retirement diagnostic for #{marker}: {diagnostics:#?}")
+    }
+}
+// Rust: tests/syntax_reconciliation.rs:840
+#Test("value_dispatch_accepts_range_arm_heads") {
+    source :: "\nfn ordered(n: Int) -> Int {{\n    return if n == {{\n        0..9 -> 1\n        10..99 -> 2\n        else -> 3\n    }}\n}}\nfn run() {{\n    print(\"{{ordered(40)}}\")\n}}\n"
+    (tokens, lex_diags) :: Lexer.lex(source)
+    assert(lex_diags.is_empty(), "{lex_diags:#?}")
+    program :: Parser.parse(&tokens).expect("value-dispatch range arms must parse")
+    assert(!program.items.is_empty(), "parsed program should retain the ordered fn")
+}
+// Rust: tests/syntax_reconciliation.rs:865
+#Test("card_511_census_matches_current_law") {
+    core :: fs.read_to_string("crates/jet-foundation/src/Syntax/core_surface.rs").expect("read core surface registry")
+    package :: fs.read_to_string("crates/jet-foundation/src/Syntax/package_files.rs").expect("read package surface registry")
+    markers :: fs.read_to_string("crates/jet-foundation/src/Syntax/markers.rs").expect("read marker registry")
+    decisions :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions")
+    assert(!core.contains("pub const KW_VIEW"), "D-MEM1 retired `view` as a keyword")
+    assert(package.contains("pub const METHOD_VIEW"), "D-SHAPE-PLACE1 keeps retired `.view(a..b)` registered for E0214 teaching")
+    loop retired in ["MARKER_WASM,", "MARKER_JS,", "MARKER_SUPPRESS,"] { assert(!markers.contains(retired), "retired marker remains registered: {retired}") }
+    loop value in ["MARKER_EXPERIMENTAL", "MARKER_TESTED", "MARKER_HARDENED"] {
+        assert(package.contains(value) && !markers.contains(value), "maturity value `{value}` must remain a #Meta value, not a standalone marker")
+    }
+    loop law in ["D-MARKER-FAMILY1", "D-DET1", "D-REPLAY1", "D-MARK-META1"] { assert(decisions.contains(law), "current syntax law omits `{law}`") }
+}
+// Rust: tests/syntax_reconciliation.rs:901
+#Test("module_internal_is_discovery_not_access_control") {
+    syntax :: fs.read_to_string("crates/jet-foundation/src/Syntax.rs").expect("read syntax registry")
+    config :: fs.read_to_string("crates/jet-foundation/src/Syntax/jetpack_config.rs").expect("read module syntax registry")
+    decisions :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("read syntax decisions")
+    assert(syntax.contains("D-SHAPE-MODULEINTERNAL1=A"))
+    assert(config.contains("D-SHAPE-MODULEINTERNAL1=A"))
+    assert(config.contains("pub const MODULE_INTERNAL_PREFIX: &str = \"_\";"))
+    assert(config.contains("pub const PROJECT_IMPORT_PREFIX: &str = \"project.\";"))
+    assert(decisions.contains("`use project._name` remains allowed"))
+    assert(decisions.contains("underscore changes discovery, not access"))
+    assert(!fs.read_to_string("crates/jet-foundation/src/AST/items.rs").expect("read module AST").contains("pub disabled: bool"))
+    assert(!decisions.contains("| D-SHAPE-MODULEINTERNAL1 |"))
+}
+// Rust: tests/syntax_reconciliation.rs:1310
+#Test("artifact_extensions_are_one_closed_kind_specific_family") {
+    assert_eq(Syntax.ARTIFACT_KINDS, [(Syntax.ArtifactKind.SourceMap, ".jetmap"), (Syntax.ArtifactKind.Notebook, ".jetnb"), (Syntax.ArtifactKind.Proof, ".jetproof"), (Syntax.ArtifactKind.Trace, ".jettrace"), (Syntax.ArtifactKind.GameReplay, ".jetreplay"), (Syntax.ArtifactKind.ProofReplay, ".jetproof-replay")])
+    loop (kind, suffix) in Syntax.ARTIFACT_KINDS { assert_eq(Syntax.artifact_kind("artifact{suffix}"), Val(kind)) }
+    assert_eq(Syntax.artifact_kind("run.jetproof-replay"), Val(Syntax.ArtifactKind.ProofReplay))
+    assert_ne(Syntax.artifact_kind("run.jetproof-replay"), Val(Syntax.ArtifactKind.GameReplay))
+    loop root in ["Source", "crates", "Examples", "tests", "Docs"] {
+        loop path in files(&OSPath(root)) {
+            if path.ends_with("tests/syntax_reconciliation.rs") -> next
+            text :: fs.read_to_string(&path) ?? next
+            loop (line_no, line) in text.lines().enumerate() {
+                loop retired in [".jproof", ".jtrace", ".jreplay"] {
+                    if line.contains(retired) && !line.contains("jet.jproof") { panic("{path.display()}:{line_no + 1} retains retired artifact suffix `{retired}`") }
+                }
+            }
+        }
+    }
+}

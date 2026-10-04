@@ -1,0 +1,376 @@
+use jet_foundation.Tests.Integration.Truthfulness.[root, RUSTC_PROBE_ALLOWED_HOMES, collect_rs_files, stray_probe_sites, PM_HISTORY_DIRS, extract_example_paths, feature_source_stem, collect_feature_golden_sources, example_serves_until_stopped, SurfaceUse, AST_CAPABILITY_SURFACES, MARKER_ZERO_USE_TRIAGE, AST_ZERO_USE_TRIAGE, collect_feature_jet_files, strip_jet_comments_and_strings, marker_used, surface_used, section_between_pub, ratified_decision_exists, exact_decision_token, decision_id_char, dependency_lines_with_context, table_header, DependencyTable, dependency_table, preceding_comments, inline_table_has_key, diagnostic_constructor_lines, rust_raw_string_end, is_include_macro_line, canonical_shared_include, markdown_table_cells, audit_card_refs, collect_markdown_paths, markdown_link_targets, contains_word, retired_vocabulary_senses, walk_md, rs_files]
+use std.fs
+use std.process.[Command, id]
+use std.env.temp_dir
+use std.collections.[HashSet, BTreeSet]
+use jet_foundation.JSON.[parse_json, json_get, json_str, json_int]
+use jet_foundation.Policy.RuleStatus
+use jet_foundation.Registry.marker_rows
+use core.path.OSPath
+// GATE #4494: actual CLI/Node child processes and filesystem; #4499: exact OSPath set keys.
+
+// Rust: tests/truthfulness.rs:80
+#Test("rustc_availability_probes_use_common_helper") {
+    repo :: root()
+    forbidden :: ["Command::new(\"rustc\").arg(\"--version\")", "Command::new(\"rustc\").arg(\"-V\")"]
+    violations := [String]{}
+    loop needle in forbidden {
+        loop finding in stray_probe_sites(&repo, needle) { violations.push("{finding}: direct `{needle}` availability probe") }
+    }
+    loop suite in ["tests/archive.rs", "tests/regex.rs"] {
+        source :: fs.read_to_string(repo.join(suite)).unwrap()
+        helper :: source.split("fn have_toolchain() -> bool {{").nth(1).and_then((tail) -> tail.split_once('}').map((pair) -> pair.0)).expect("have_toolchain helper")
+        rustc_pos :: helper.find("have_rustc()").expect("rustc gate")
+        cargo_pos :: helper.find("Command::new(\"cargo\")").expect("cargo probe")
+        if rustc_pos > cargo_pos { violations.push("{suite}: have_rustc must run before the cargo probe so JET_REQUIRE_RUSTC=1 cannot short-circuit") }
+    }
+    assert(violations.is_empty(), "rustc availability must use tests/common::have_rustc so JET_REQUIRE_RUSTC cannot be bypassed:\n{violations.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:115
+#Test("rustc_probe_scanner_detects_a_seeded_stray_probe") {
+    scratch :: temp_dir().join("jet_rustc_probe_guard_test_{id()}")
+    seed_dir :: scratch.join("tests")
+    fs.create_dir_all(&seed_dir).unwrap()
+    fs.write(seed_dir.join("seeded_probe.rs"), "fn f() {{ Command::new(\"rustc\")\n.arg(\"--version\"); }}\n").unwrap()
+    findings :: stray_probe_sites(&scratch, "Command::new(\"rustc\").arg(\"--version\")")
+    fs.remove_dir_all(&scratch).unwrap()
+    assert_eq(findings, ["tests/seeded_probe.rs"])
+}
+// Rust: tests/truthfulness.rs:131
+#Test("llm_digest_regenerates_byte_identically") {
+    repo :: root()
+    output :: Command.new(env.jet_bin()).args(["inspect", "digest"]).current_dir(&repo).output().expect("jet must run the digest command")
+    assert(output.status.success(), "jet inspect digest failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert(output.stderr.is_empty(), "digest wrote unexpected stderr: {String.from_utf8_lossy(&output.stderr)}")
+    generated :: String.from_utf8(^output.stdout).expect("digest is UTF-8")
+    loop registry_row in ["- fn", "- module", "active\tUnsafe\tmarker Unsafe", "E0001\tactive\tjet", "core.term\tReader, Writer"] { assert(generated.contains(registry_row), "digest lost registry row: {registry_row}") }
+    machine :: Command.new(env.jet_bin()).args(["inspect", "digest", "--json"]).current_dir(&repo).output().expect("jet must emit the digest machine form")
+    assert(machine.status.success(), "jet inspect digest --json failed:\n{String.from_utf8_lossy(&machine.stderr)}")
+    machine_text := String.from_utf8(machine.stdout).expect("digest machine output is UTF-8").trim() // #4303
+    report :: parse_json(machine_text).expect("digest machine output is JSON")
+    assert_eq(json_get(&report, "schema").and_then(json_str), Val("jet.status/v1"))
+    assert_eq(json_get(&report, "action").and_then(json_str), Val("inspect.digest"))
+    assert_eq(json_get(&report, "digest").and_then((digest) -> json_get(digest, "value")).and_then(json_str), Val(generated.as_str()))
+    inventory :: Command.new(env.jet_bin()).args(["inspect", "digest", "--list-topics"]).current_dir(&repo).output().expect("jet must list digest topics")
+    assert(inventory.status.success(), "jet inspect digest --list-topics failed:\n{String.from_utf8_lossy(&inventory.stderr)}")
+    topics :: String.from_utf8(inventory.stdout).expect("digest topic inventory is UTF-8").lines().map((topic) -> topic.to_string()).collect::<[String]>()
+    assert(topics.iter().any((topic) -> topic == "core.time"))
+    assert(topics.iter().any((topic) -> topic == "diagnostics"))
+    composed := [U8]{}
+    loop topic in &topics {
+        slice :: Command.new(env.jet_bin()).args(["inspect", "digest", "--topic", topic]).current_dir(&repo).output().expect("jet must emit each digest topic")
+        assert(slice.status.success(), "digest topic `{topic}` failed:\n{String.from_utf8_lossy(&slice.stderr)}")
+        composed.extend_from_slice(&slice.stdout)
+    }
+    assert_eq(composed, generated.as_bytes(), "digest topic slices drifted")
+    unknown :: Command.new(env.jet_bin()).args(["inspect", "digest", "--topic", "diagnostcs"]).current_dir(&repo).output().expect("jet must reject an unknown digest topic")
+    assert(!unknown.status.success())
+    assert(String.from_utf8_lossy(&unknown.stderr).contains("diagnostics"), "unknown topic did not name nearest topic:\n{String.from_utf8_lossy(&unknown.stderr)}")
+}
+// Rust: tests/truthfulness.rs:259
+#Test("docs_referenced_examples_exist") {
+    repo :: root()
+    docs_dir :: repo.join("Docs")
+    readme :: repo.join("README.md")
+    doc_content := String.new()
+    if fs.read_to_string(&readme).ok() == Val(s) { doc_content.push_str(&s) }
+    entries := fs.read_dir(&docs_dir).expect("Docs/ missing").flatten().collect()
+    entries.sort_by_key((e) -> e.path())
+    loop entry in entries {
+        path :: entry.path()
+        name :: entry.file_name().to_string_lossy().into_owned()
+        if path.is_dir() {
+            if PM_HISTORY_DIRS.contains(name) { next }
+            walk_md(&path, &(s) -> doc_content.push_str(s))
+        } else if path.extension().and_then((e) -> e.to_str()) == Val("md") {
+            if fs.read_to_string(&path).ok() == Val(s) { doc_content.push_str(&s) }
+        }
+    }
+    missing := [String]{}
+    loop cap in extract_example_paths(&doc_content) { if !repo.join(&cap).exists() { missing.push(^cap) } }
+    assert(missing.is_empty(), "docs reference example files that do not exist:\n{missing.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:326
+#Test("readme_subcommands_exist_in_cli") {
+    repo :: root()
+    cli_src :: fs.read_to_string(repo.join("crates/jet-cli/src/CLI.rs")).expect("jet-cli registry missing")
+    known := HashSet<String>.new()
+    rest := cli_src.as_str()
+    loop {
+        pos :: rest.find("name: \"") ?? break
+        rest = rest[pos + 7..]
+        if rest.find('"') == Val(end) { _ :: known.insert(rest[..end].to_string()) }
+    }
+    missing := [String]{}
+    loop cmd in ["run", "check", "build", "test", "fmt", "fix", "doctor", "publish", "gc"] { if !known.contains(cmd) { missing.push(cmd.to_string()) } }
+    assert(missing.is_empty(), "README/docs reference jet subcommands not present in jet-cli's registry:\n{missing.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:467
+#Test("every_feature_example_has_expected_output") {
+    // FEATURE_CLAIM: claim.examples-spec / expected-output-pairs
+    repo :: root()
+    ex_dir :: repo.join("Examples/features")
+    expected_dir :: ex_dir.join("expected")
+    missing := [String]{}
+    web_build :: fs.read_to_string(repo.join("tests/web_build.rs")).unwrap()
+    loop (path, stem) in collect_feature_golden_sources(&ex_dir) {
+        source :: fs.read_to_string(&path).unwrap()
+        out :: expected_dir.join("{stem}.out")
+        errout :: expected_dir.join("{stem}.err.out")
+        stderrout :: expected_dir.join("{stem}.stderr.out")
+        webout :: expected_dir.join("{stem}.web.out")
+        harnessout :: expected_dir.join("{stem}.harness.out")
+        is_service :: example_serves_until_stopped(&path)
+        is_web_harness :: stem == "web/web_compute_webgpu" && source.contains("#Target(JS)") && web_build.contains("include_str!(\"../Examples/features/web/web_compute_webgpu.jet\")")
+        if !out.is_file() && !errout.is_file() && !stderrout.is_file() && !webout.is_file() && !harnessout.is_file() && !is_service && !is_web_harness {
+            source_name :: if path.file_name().and_then((name) -> name.to_str()) == Val("run.jet") -> "Examples/features/{stem}/run.jet" else -> "Examples/features/{stem}.jet"
+            missing.push("{source_name} → missing expected output or canonical harness proof")
+        }
+    }
+    assert(missing.is_empty(), "feature examples without a matching expected output:\n{missing.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:782
+#Test("ast_capabilities_and_active_markers_have_zero_use_inventories") {
+    files := [OSPath]{}
+    collect_feature_jet_files(root().join("Examples/features"), &files)
+    files.sort()
+    clean_sources :: files.iter().map((path) -> strip_jet_comments_and_strings(&fs.read_to_string(path).expect("feature source is readable"))).collect::<[String]>()
+    marker_use := [String: Bool]{}
+    loop row in marker_rows() {
+        rule :: row.rule ?? next
+        if rule.status != RuleStatus.Active { next }
+        marker_use.insert(rule.name, clean_sources.iter().any((source) -> marker_used(source, rule.name)))
+    }
+    marker_zero :: marker_use.iter().filter_map((pair) -> if !pair.1 -> Val(pair.0.to_string()) else -> .None).collect::<BTreeSet<String>>()
+    marker_triage :: MARKER_ZERO_USE_TRIAGE.iter().map((pair) -> pair.0.to_string()).collect::<BTreeSet<String>>()
+    assert_eq(marker_zero, marker_triage, "active marker zero-use inventory changed; add a card/retirement row before adding or removing a marker")
+    loop (name, disposition) in MARKER_ZERO_USE_TRIAGE { assert(disposition.contains("card #") || disposition.contains("retired"), "marker #{name} has no triage disposition: {disposition}") }
+    ast_zero :: AST_CAPABILITY_SURFACES.iter().filter_map((surface) -> if !clean_sources.iter().any((source) -> surface_used(source, surface.spelling)) -> Val(surface.name.to_string()) else -> .None).collect::<BTreeSet<String>>()
+    ast_triage :: AST_ZERO_USE_TRIAGE.iter().map((pair) -> pair.0.to_string()).collect::<BTreeSet<String>>()
+    assert_eq(ast_zero, ast_triage, "AST capability zero-use inventory changed; add a card/retirement row before adding or removing a capability")
+    loop (name, disposition) in AST_ZERO_USE_TRIAGE { assert(disposition.contains("card #") || disposition.contains("retired"), "AST capability {name} has no triage disposition: {disposition}") }
+}
+// Rust: tests/truthfulness.rs:858
+#Test("cargo_and_flake_versions_match") {
+    repo :: root()
+    cargo :: fs.read_to_string(repo.join("Cargo.toml")).expect("Cargo.toml missing")
+    flake :: fs.read_to_string(repo.join("flake.nix")).expect("flake.nix missing")
+    cargo_version :: cargo.lines().find((l) -> l.starts_with("version")).and_then((l) -> l.split('"').nth(1)).expect("version not found in Cargo.toml")
+    flake_version :: flake.lines().find((l) -> l.contains("version = \"") && !l.trim_start().starts_with('#')).and_then((l) -> l.split('"').nth(1)).expect("version not found in flake.nix")
+    assert_eq(cargo_version, flake_version, "Cargo.toml version ({cargo_version}) and flake.nix version ({flake_version}) do not match")
+}
+// Rust: tests/truthfulness.rs:888
+#Test("cli_rs_is_declared_module") {
+    lib_src :: fs.read_to_string(root().join("Source/lib.rs")).expect("Source/lib.rs missing")
+    assert(lib_src.contains("pub use jet_cli::{{CLI, Explain, Help}};"), "Source/lib.rs must re-export the real jet-cli seam")
+    assert(!lib_src.contains("mod CLISpec;"), "Source/lib.rs declares mod CLISpec — jet-cli owns the only CLI registry")
+}
+// Rust: tests/truthfulness.rs:902
+#Test("cli_has_no_second_command_registry") {
+    repo :: root()
+    assert(!repo.join("Source/CLISpec.rs").exists(), "Source/CLISpec.rs must not exist — jet-cli owns the single CLI registry")
+    registries := [String]{}
+    loop path in rs_files(repo.join("Source")).into_iter().chain(rs_files(repo.join("crates/jet-cli/src"))) {
+        if path.extension().and_then((x) -> x.to_str()) != Val("rs") { next }
+        text :: fs.read_to_string(&path).unwrap_or_default()
+        if text.contains("pub const COMMANDS: &[CommandSpec]") { registries.push(path.strip_prefix(&repo).unwrap().display().to_string()) }
+    }
+    assert_eq(registries, ["crates/jet-cli/src/CLI.rs"], "found a second CLI command registry:\n{registries.join("\n")}")
+    main_src :: fs.read_to_string(repo.join("Source/main.rs")).expect("Source/main.rs missing")
+    assert(!main_src.contains("let known ="), "Source/main.rs must not rebuild the command registry; use jet::CLI::is_builtin")
+    assert(main_src.contains("jet::CLI::is_builtin(cmd)"), "Source/main.rs should dispatch unknown-command checks through jet-cli")
+}
+// Rust: tests/truthfulness.rs:944
+#Test("compiler_seam_crates_have_only_path_dependencies") {
+    // Rust: tests/truthfulness.rs:953
+    EXEMPTIONS :: [(String, [String])]{
+        ("<root>", ["D-DEP1"]), ("jet-jit", ["D-JITDEP1", "D-JIT2", "D-DEP1"]),
+        ("jet-net", ["D-DEP1"]), ("jetpack", ["D-DEP-CRYPTO1=A", "D-CODECS1"]),
+        ("jetpack-bin", ["D-DEP1", "D-DX5-HOOK1"]), ("jet-pkg-model", ["D-DEP1", "D-EMAIL-DKIM-CONFIG1"])
+    }
+    repo :: root()
+    decisions_doc :: fs.read_to_string(repo.join("Docs/spec/syntax-decisions.md")).expect("Docs/spec/syntax-decisions.md missing")
+    tower_live :: fs.read_to_string(repo.join("Tools/tower/.tower/tower.json")).expect("Tools/tower/.tower/tower.json missing")
+    tower_history :: fs.read_to_string(repo.join("Tools/tower/.tower/history.json")).unwrap_or_default()
+    tower :: "{tower_live}\n{tower_history}"
+    loop (crate_name, ids) in EXEMPTIONS {
+        loop decision in ids { assert(ratified_decision_exists(&decisions_doc, &tower, decision), "I6 exemption for `{crate_name}` cites {decision}, which is not ratified in Docs/spec/syntax-decisions.md or Tower (live+history) — revoke the exemption or get {decision} ratified") }
+    }
+    crate_manifests := [(String, OSPath)]{("<root>", repo.join("Cargo.toml"))}
+    dirs := fs.read_dir(repo.join("crates")).expect("crates/ missing").flatten().map((e) -> e.path()).filter((p) -> p.is_dir()).collect::<[OSPath]>()
+    dirs.sort()
+    loop dir in dirs {
+        manifest :: dir.join("Cargo.toml")
+        if manifest.is_file() { crate_manifests.push((dir.file_name().unwrap().to_string_lossy().into_owned(), ^manifest)) }
+    }
+    loop required in ["jet-repl", "jet-debug", "jet-cli", "jet-canvas", "jet-devserver"] { assert(crate_manifests.iter().any((pair) -> pair.0 == required), "D-ARCH-SOURCE1 requires the {required} workspace seam") }
+    root_lib :: fs.read_to_string(repo.join("Source/lib.rs")).expect("Source/lib.rs missing")
+    assert(root_lib.contains("pub use jet_debug as Debug;") && !repo.join("Source/Debug").exists(), "D-ARCH-SOURCE1 requires jet-debug ownership, not a root Debug wrapper")
+    assert(root_lib.contains("pub use jet_cli::{{CLI, Explain, Help}};") && !repo.join("Source/CLI.rs").exists() && !repo.join("Source/Explain.rs").exists() && !repo.join("Source/Help").exists(), "D-ARCH-SOURCE1 requires jet-cli ownership, not root CLI/help wrappers")
+    assert(root_lib.contains("pub use jet_devserver as DevServer;") && root_lib.contains("pub use jet_devserver::Canvas;") && !repo.join("Source/Canvas.rs").exists() && !repo.join("Source/Canvas").exists(), "D-ARCH-SOURCE1 requires jet-devserver ownership of Canvas semantics, not root wrappers")
+    root_main :: fs.read_to_string(repo.join("Source/main.rs")).expect("Source/main.rs missing")
+    root_compile :: fs.read_to_string(repo.join("Source/CmdCompile.rs")).expect("Source/CmdCompile.rs missing")
+    devserver :: fs.read_to_string(repo.join("crates/jet-devserver/src/lib.rs")).expect("jet-devserver missing")
+    assert(!repo.join("Source/CmdDevWeb.rs").exists() && !root_main.contains("mod CmdDevWeb;") && root_compile.contains("pub(crate) fn run_dev_web(") && root_compile.contains("jet_devserver::WebHost::WebHost::bind") && devserver.contains("pub mod WebHost;"), "D-ARCH-SOURCE1 requires inward web-host ownership with only the R5 executor in CmdCompile")
+    assert(root_lib.contains("pub use jet_canvas as CanvasUi;") && !repo.join("Source/Canvas/html.rs").exists() && !repo.join("Source/Canvas/js.rs").exists() && !repo.join("Source/Canvas/js").exists(), "Canvas browser projection assets must live in jet-canvas")
+    assert(root_lib.contains("pub use jet_driver::BudgetView;") && root_lib.contains("pub use jet_driver::FixEngine;") && !repo.join("Source/BudgetView.rs").exists() && !repo.join("Source/FixEngine.rs").exists(), "Canvas shared compiler helpers must live inward in jet-driver")
+    assert(root_lib.contains("pub use jet_foundation::ExitCodes;") && !repo.join("Source/ExitCodes.rs").exists() && !repo.join("Source/LSP/JSON.rs").exists(), "shared debugger/LSP policy must live in jet-foundation, not Source wrappers")
+    offenders := [String]{}
+    loop (name, manifest) in &crate_manifests {
+        text :: fs.read_to_string(manifest).unwrap_or_else((_) -> panic("{manifest.display()} missing"))
+        exemption :: EXEMPTIONS.iter().find((pair) -> pair.0 == name)
+        loop (line, context, has_path) in dependency_lines_with_context(&text) {
+            if has_path { next }
+            if exemption == Val(pair) {
+                ids :: pair.1
+                if ids.iter().any((decision) -> exact_decision_token(&context, decision)) { next }
+                offenders.push("{name}: {line} — external dep must cite one of {ids:?} in a comment directly above the dependency line")
+            } else { offenders.push("{name}: {line} — not an exempted crate; I6 forbids external dependencies in compiler seam crates (add to EXEMPTIONS with a ratified decision ID if this is intentional)") }
+        }
+    }
+    assert(offenders.is_empty(), "compiler seam crates must not add unexempted external dependencies (I6):\n{offenders.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:1164
+#Test("ratified_decision_lookup_requires_exact_id_and_ratified_status") {
+    docs :: "## Proposed\n**D-PENDING=A**: not law. See D-LIVE and D-CITED.\n## Ratified\n**D-LIVE=A**: supersedes D-CITED.\n## Declined\n**D-NOPE=A**: declined.\n"
+    assert(ratified_decision_exists(docs, "", "D-LIVE"))
+    assert(!ratified_decision_exists(docs, "", "D-LIV"))
+    assert(!ratified_decision_exists(docs, "", "D-CITED"))
+    assert(!ratified_decision_exists(docs, "", "D-PENDING=A"))
+    assert(!ratified_decision_exists(docs, "", "D-NOPE=A"))
+}
+// Rust: tests/truthfulness.rs:1343
+#Test("dependency_scanner_covers_target_tables_and_one_dependency_per_comment") {
+    manifest :: "[dependencies]\n# D-ONE=A\nfirst = \"1\"\nsecond = \"2\"\n[target.'cfg(unix)'.dependencies]\n# D-TWO=B\nthird = \"3\"\n[target.x86_64-unknown-linux-gnu.build-dependencies]\n# D-THREE=C\nfourth = \"4\"\n# D-FOUR=D\n\t[dependencies.local]\npath = \"../local\"\nversion = \"1\"\n# D-FIVE=E\n[dev-dependencies.remote]\ngit = \"https://example.test/repo\"\n[target.'cfg(unix)'.dependencies.target_remote]\nversion = \"2\"\n[package.metadata.dependencies]\nignored = \"5\"\n"
+    assert_eq(dependency_lines_with_context(manifest), [(String, String, Bool)]{
+        ("first = \"1\"", "# D-ONE=A\n", false), ("second = \"2\"", "", false),
+        ("third = \"3\"", "# D-TWO=B\n", false), ("fourth = \"4\"", "# D-THREE=C\n", false),
+        ("local: path = \"../local\", version = \"1\"", "# D-FOUR=D\n", true),
+        ("remote: git = \"https://example.test/repo\"", "# D-FIVE=E\n", false), ("target_remote: version = \"2\"", "", false)
+    })
+}
+// Rust: tests/truthfulness.rs:1392
+#Test("dependency_scanner_does_not_confuse_values_with_path_keys") {
+    manifest :: "[dependencies]\nremote = {{ version = \"1\", package = \"not, path = metadata\" }} # external\nlocal = {{ version = \"1\", path = \"../local\" }} # local\n"
+    dependencies :: dependency_lines_with_context(manifest)
+    assert(!dependencies[0].2, "{dependencies:#?}")
+    assert(dependencies[1].2, "{dependencies:#?}")
+}
+// Rust: tests/truthfulness.rs:1402
+#Test("dependency_scanner_accepts_commented_headers_and_rejects_junk") {
+    manifest :: "[dependencies.fake] junk\nversion = \"0\"\n# D-VALID=A\n  [ dependencies.remote ] # valid Cargo header\nversion = \"1\"\n"
+    assert_eq(dependency_lines_with_context(manifest), [(String, String, Bool)]{("remote: version = \"1\"", "# D-VALID=A\n", false)})
+}
+// Rust: tests/truthfulness.rs:1424
+#Test("codegen_never_constructs_diagnostics") {
+    repo :: root()
+    offenders := [String]{}
+    loop path in rs_files(repo.join("crates/jet-codegen/src")) {
+        text :: fs.read_to_string(&path).unwrap_or_default()
+        loop line in diagnostic_constructor_lines(&text) { offenders.push("{path.strip_prefix(&repo).unwrap().display()}:{line}: {text.lines().nth(line - 1).unwrap_or_default().trim()}") }
+    }
+    assert(offenders.is_empty(), "jet-codegen must never reference Diagnostic (I3 — codegen is dumb, all checking lives in sema):\n{offenders.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:1447
+#Test("codegen_diagnostic_scanner_rejects_constructors_without_matching_prose") {
+    forbidden :: "use jet_diagnostics::Diagnostic as D;\ntype D = Diagnostic;\nlet d = Diagnostic {{ code: code }};\nlet d = jet::Diagnostic::error(code);\n"
+    assert_eq(diagnostic_constructor_lines(forbidden), [3, 4])
+    allowed :: "// Diagnostic is forbidden in codegen.\nlet word = \"Diagnostic\";\nlet raw = r#\"Diagnostic\"#;\nlet DiagnosticFactory = factory;\nfn typed() -> Diagnostic {{}}\nJetParaRuntimeFailure::Diagnostic {{ rendered }}\n"
+    assert(diagnostic_constructor_lines(allowed).is_empty())
+}
+// Rust: tests/truthfulness.rs:1597
+#Test("compiler_code_has_no_include_splices") {
+    repo :: root()
+    sync_lite :: fs.read_to_string(repo.join("crates/jet-comptime/src/Comptime/SyncLite.rs")).expect("SyncLite.rs must be readable")
+    assert(!sync_lite.lines().any(is_include_macro_line), "SyncLite.rs must load its shared Prelude through a module seam, not include!")
+    dirs := [OSPath]{repo.join("Source")}
+    loop entry in fs.read_dir(repo.join("crates")).expect("crates/ missing").flatten() { path :: entry.path(); if path.is_dir() { dirs.push(^path) } }
+    offenders := [String]{}
+    loop dir in dirs {
+        loop path in rs_files(&dir) {
+            rel :: path.strip_prefix(&repo).unwrap().display().to_string()
+            text :: fs.read_to_string(&path).unwrap_or_default()
+            loop (i, line) in text.lines().enumerate() {
+                if !is_include_macro_line(line) || canonical_shared_include(&rel, line) { next }
+                offenders.push("{rel}:{i + 1}: {line.trim()}")
+            }
+        }
+    }
+    assert(offenders.is_empty(), "compiler code must not splice an unowned sibling .rs fragment — use the canonical Prelude or a real module instead (card #452 durability pattern):\n{offenders.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:1680
+#Test("vocabulary_page_has_one_definition_and_no_retired_senses") {
+    repo :: root()
+    vocabulary_path :: repo.join("Docs/spec/vocabulary.md")
+    hostile :: [(String, String)]{("codec mode called a stream", "The codec mode is called a stream."), ("event called a stream", "The event is called a stream."), ("collecting loop called yielding", "The collecting loop is called yielding.")}
+    loop (label, fixture) in hostile { assert(retired_vocabulary_senses(fixture).contains(label), "hostile fixture must be rejected: {label}") }
+    docs_path :: repo.join("Docs")
+    markdown := [OSPath]{}
+    collect_markdown_paths(&docs_path, &markdown)
+    canonical_vocabulary :: fs.canonicalize(vocabulary_path).expect("vocabulary path canonical")
+    docs_root :: fs.canonicalize(docs_path).expect("docs path canonical")
+    targets := HashSet<OSPath>.new()
+    loop source in markdown {
+        text :: fs.read_to_string(&source).ok() ?? next
+        loop target in markdown_link_targets(&text) {
+            stripped := target.trim_matches('<').trim_matches('>') // #4303
+            path_text := stripped.split(['#', '?']).next().unwrap_or_default() // #4303
+            if path_text.is_empty() || path_text.starts_with("/") || path_text.contains("://") { next }
+            candidate_path :: source.parent().unwrap_or(OSPath.from(".")).join(path_text)
+            candidate :: fs.canonicalize(candidate_path).ok() ?? next
+            if !candidate.starts_with(&docs_root) || candidate.extension().and_then((ext) -> ext.to_str()) != Val("md") { next }
+            _ :: targets.insert(^candidate)
+        }
+    }
+    violations := [String]{}
+    loop target in targets {
+        text :: fs.read_to_string(&target).ok() ?? next
+        if target != canonical_vocabulary {
+            retired :: retired_vocabulary_senses(&text)
+            if !retired.is_empty() { violations.push("{target.strip_prefix(&repo).unwrap_or(&target).display()}: retired senses: {retired.join(", ")}") }
+        }
+        if target != canonical_vocabulary && ["stream", "reader", "event", "collecting loop"].into_iter().any((word) -> contains_word(&text, word)) && !text.contains("vocabulary.md") { violations.push("{target.strip_prefix(&repo).unwrap_or(&target).display()}: uses Jet vocabulary without linking Docs/spec/vocabulary.md") }
+    }
+    assert(violations.is_empty(), "linked Markdown targets must use the vocabulary page and current senses:\n{violations.join("\n")}")
+}
+// Rust: tests/truthfulness.rs:1771
+#Test("accessibility_audit_findings_have_live_cards") {
+    repo :: root()
+    text :: fs.read_to_string(repo.join("Docs/audits/cli-diagnostics-accessibility.md")).expect("CLI accessibility audit is readable")
+    lines :: text.lines().collect::<[String]>()
+    expected_header :: ["id", "surface", "screen_reader", "state", "card"]
+    header :: lines.iter().position((line) -> markdown_table_cells(line).iter().eq(expected_header)).expect("accessibility audit must have the machine-readable findings header")
+    separator :: lines.get(header + 1).expect("accessibility findings table needs a separator row")
+    separator_cells :: markdown_table_cells(separator)
+    assert_eq(separator_cells.len(), expected_header.len(), "accessibility findings table separator must match its five columns")
+    assert(separator_cells.iter().all((cell) -> cell == "---"), "accessibility findings table needs a Markdown separator for every column")
+    rows := [[String]]{}
+    finding_ids := HashSet<String>.new()
+    loop line in lines.iter().skip(header + 2) {
+        if !line.trim_start().starts_with('|') { break }
+        cells :: markdown_table_cells(line)
+        assert_eq(cells.len(), expected_header.len(), "accessibility findings row must have id, surface, screen_reader, state, and card: {line}")
+        loop (name, cell) in expected_header.iter().zip(&cells) { assert(!cell.is_empty(), "accessibility finding {name} must not be empty: {line}") }
+        assert(finding_ids.insert(cells[0].clone()), "accessibility finding IDs must be unique: {cells[0]}")
+        assert(cells[3] == "pass" || cells[3] == "gap" || cells[3] == "not-proven", "accessibility finding {cells[0]} has an unknown state: {cells[3]}")
+        rows.push(^cells)
+    }
+    assert(!rows.is_empty(), "accessibility audit must list at least one finding")
+    loop row in rows {
+        if row[3].trim().eq_ignore_ascii_case("pass") { assert_eq(row[4], "—", "passing accessibility finding {row[0]} must not name a Tower card"); next }
+        cards :: audit_card_refs(&row[4])
+        assert(!cards.is_empty(), "non-pass accessibility finding {row[0]} must name a live Tower card")
+        unique_cards := HashSet<String>.new()
+        loop card in cards {
+            assert(unique_cards.insert(card), "accessibility finding {row[0]} must list each Tower card once: {card}")
+            output :: Command.new("node").args(["Tools/tower/tower.mjs", "card", "show", card, "--json"]).current_dir(&repo).output().expect("Tower card lookup must run")
+            assert(output.status.success(), "accessibility finding {row[0]} names missing Tower card {card}:\n{String.from_utf8_lossy(&output.stderr)}")
+            json := String.from_utf8_lossy(&output.stdout) // #4303
+            report :: parse_json(json.trim()).unwrap_or_else((error) -> panic("Tower lookup for {row[0]} returned invalid JSON: {error:?}\n{json}"))
+            resolved_num :: json_get(&report, "num").and_then(json_int).expect("Tower card JSON must contain a numeric num")
+            expected_num :: card[1..].parse::<I64>().expect("audit card reference must contain a numeric card ID")
+            assert(resolved_num == expected_num, "Tower lookup for {row[0]} resolved {card} as card {resolved_num}, not {expected_num}: {json}")
+        }
+    }
+    loop law in ["D-REPORT-LAW1=A", "D-REPORT-HOME1=A", "D-REPORT-MACHINE1=A", "D-REPORT-EDITOR1=A", "`jet.report/v2`"] { assert(text.contains(law), "accessibility audit must name the canonical report law `{law}`") }
+}

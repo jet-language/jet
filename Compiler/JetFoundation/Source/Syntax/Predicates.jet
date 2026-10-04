@@ -1,654 +1,308 @@
-// PORT-PENDING 2138 crates-jet-foundation-src-syntax-predicates: crates/jet-foundation/src/Syntax/predicates.rs:1-650
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-SHAPE2=A: is `name` a built-in applied rule? The I7/R3 dispatch
-//RS /// chokepoint — parser/formatter/sema/LSP ask here, never hand-roll the list.
-//RS pub fn is_applied_rule(name: &str) -> bool {
-//RS     crate::Policy::applied_rule(name)
-//RS         .is_some_and(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
-//RS }
-//RS 
-//RS /// D-META-AUTO1=A: the one structural auto-derive engine vocabulary. `Codable`
-//RS /// is the marker-family spelling for the two codec traits, so it is included
-//RS /// by `is_signed_auto_derive` below rather than duplicated in this trait list.
-//RS pub const STRUCTURAL_AUTO_DERIVE_TRAITS: &[&str] = &[
-//RS     crate::Generics::PRINTABLE,
-//RS     crate::Generics::EQUATABLE,
-//RS     crate::Generics::DEBUG,
-//RS     crate::Generics::COMPARABLE,
-//RS     crate::Generics::ENCODE,
-//RS     crate::Generics::DECODE,
-//RS ];
-//RS 
-//RS /// D-META-AUTO1=A / D-AUTODERIVE-SYNTAX1=D: `!` refuses any built-in
-//RS /// capability that the structural auto-derive engine can provide. Keep this
-//RS /// vocabulary in the owner-controlled Syntax surface so the parser, type
-//RS /// marker classifier, and engine cannot drift apart.
-//RS pub fn is_signed_auto_derive(name: &str) -> bool {
-//RS     STRUCTURAL_AUTO_DERIVE_TRAITS.contains(&name) || name == crate::Syntax::MARKER_CODABLE
-//RS }
-//RS 
-//RS // D-UNITLIT1: unit-suffix numeric literals (`500ms`) are not an enumerable
-//RS // keyword — the lexer resolves a literal's identifier suffix against
-//RS // #UnitFamily members in scope (MARKER_UNIT_FAMILY, D-QUAL3). One fixed rule:
-//RS /// D-UNITLIT1: a literal suffix shaped `e` + digits is reserved for float
-//RS /// exponent notation (`1e5`) and may never resolve as a unit name.
-//RS pub const UNIT_SUFFIX_EXPONENT_RESERVED: &str = "e"; // D-UNITLIT1
-//RS /// D-TYPE2-IMAG1=A (ratified 2026-08-06): numeric suffix `i` mints the
-//RS /// imaginary component of Complex through the existing unit-literal path;
-//RS /// bare `i` remains an ordinary identifier.
-//RS pub const UNIT_SUFFIX_IMAGINARY: &str = "i";
-//RS 
-//RS // D-TRAILBLOCK2=A (amends D-TRAILBLOCK1): no new token — code arguments are
-//RS // ordinary `() -> { … }` lambdas inside call parentheses. A bare `{` after a
-//RS // call is E0335 (retired trailing-block sugar), not a new lexical form.
-//RS // D-DESTRUCT1: no new token — reuses the D-DOTCTOR1 `.{` sigil in pattern
-//RS // position and `..` (OP_RANGE) as the now-mandatory partial-pattern rest
-//RS // marker.
-//RS // D-CHAINCMP1: no new token — same-direction `<`/`<=`/`>`/`>=` chains are a
-//RS // parser/sema desugaring (`0 <= sev < 10` → `0 <= sev && sev < 10`, middle
-//RS // operand evaluated once).
-//RS // D-CLIFLAG1: the struct-level CLI-derive marker and field-level doc marker
-//RS // spellings ride D-CONTRACTCASE1/D-VERDICT-732-1 (formerly D-MARKERMOVE1) —
-//RS // constants land with them.
-//RS // D-EFFBUDGET1: `effects`/`allow`/`deny`/`grants` are package.jet manifest
-//RS // keys (jet_pkg_model::Package), not language tokens; effect names reuse D-EFF4.
-//RS // D-ANY-JAI1 + D-VARARGBOUND1: reuses D-VARIADIC1 `...T`; multi-trait
-//RS // bounds use the owner-amended list form (`T: [A, B]`, `...items: [A, B]`).
-//RS // D-TRAIT-OVERLOAD1=A: no new token — `trait Name: [A, B] { … }` reuses the
-//RS // D-VARARGBOUND1 bound list after a trait name to list the traits it builds
-//RS // on (a single one stays bare: `trait Name: A`). A bound on such a trait
-//RS // admits the listed traits' operators and methods in generic bodies.
-//RS // D-UFCS1 (B), D-POINTERCHAIN1 (A), D-ERRCTX1 (D): no typeable surface.
-//RS 
-//RS // ── Module name resolution helpers ───────────────────────────────────────────
-//RS //
-//RS // These are pure string functions used by both Sema and Codegen to identify
-//RS // compiler-known ("core") modules. They live here so that neither Sema nor
-//RS // Codegen need to depend on Loader (which does file I/O and belongs in the
-//RS // driver layer).
-//RS 
-//RS /// Single canonical source of truth for all known Core modules (c45).
-//RS ///
-//RS /// `is_known_core_module` and `core_modules_list` both derive from this slice.
-//RS /// `core_module_items` in Sema/CheckerCoreLib.rs has per-module item data and
-//RS /// cannot collapse here, but a drift-guard test (tests/corelib.rs) asserts its
-//RS /// key set equals this slice.
-//RS pub use crate::CoreModuleExports::CORE_MODULE_NAMES as KNOWN_CORE_MODULES;
-//RS 
-//RS pub fn is_known_core_module(name: &str) -> bool {
-//RS     if KNOWN_CORE_MODULES.contains(&name) {
-//RS         return true;
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::{is_known_core_module, KNOWN_CORE_MODULES};
-//RS 
-//RS     #[test]
-//RS     fn core_module_keys_reject_internal_jet_prefix() {
-//RS         assert!(KNOWN_CORE_MODULES
-//RS             .iter()
-//RS             .all(|name| !name.starts_with("jet.")));
-//RS         for ring in [
-//RS             "log", "crypto", "http", "regex", "reactive", "archive", "game", "db", "plugin", "time",
-//RS             "web.router", "web.query", "web.forms", "web.table", "web.virtual", "web.store",
-//RS         ] {
-//RS             assert!(is_known_core_module(&format!("core.{ring}")));
-//RS             assert!(!is_known_core_module(&format!("jet.{ring}")));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn core_modules_list() -> String {
-//RS     KNOWN_CORE_MODULES.join(", ")
-//RS }
-//RS 
-//RS /// The canonical Core home for an old first-party ring spelling.
-//RS pub fn canonical_ring_module(name: &str) -> String {
-//RS     match name {
-//RS         "raylib" => "core.game.raylib".to_string(),
-//RS         _ => format!("core.{name}"),
-//RS     }
-//RS }
-//RS 
-//RS /// E2-M9: ring module names that resolve as compiler-known modules.
-//RS pub fn is_ring_module(name: &str) -> bool {
-//RS     matches!(
-//RS         name,
-//RS         "log" | "crypto" | "http" | "regex" | "reactive" | "archive" | "raylib" | "db" | "time"
-//RS             // D-DEP-WASM1=A (c81): `core.plugin` — the
-//RS             // wasmtime-backed plugin loader (`Plugin.load`/`.call*`).
-//RS             | "plugin"
-//RS     )
-//RS }
-//RS 
-//RS /// The env var that names the active realized toolchain object directory
-//RS /// (D-JPK-TOOLCHAIN1 / #179). Tests set it to a fixture; #179's realizer points
-//RS /// it at the hangar object. The object carries prebuilt ring artifacts under
-//RS /// `<dir>/ring/<name>` (D-JPK-RINGSHIP1=C).
-//RS pub const TOOLCHAIN_OBJECT_ENV: &str = "JET_TOOLCHAIN_FIXTURE";
-//RS 
-//RS /// D-JPK-TOOLCHAIN1=A (#179): re-exec guard marker. Before `jet` execs a
-//RS /// version-pinned toolchain, it sets this env var to the pinned version. The
-//RS /// child, seeing its own version match the marker, runs natively and never
-//RS /// re-realizes or re-execs — this breaks the exec loop and lets the pinned
-//RS /// toolchain run the program directly.
-//RS pub const TOOLCHAIN_EXEC_MARKER_ENV: &str = "JET_TOOLCHAIN_EXEC";
-//RS 
-//RS /// D-JPK-RINGSHIP1=C: is this ring lib present as a realized hangar object for
-//RS /// the active toolchain? True when the active toolchain object carries a
-//RS /// prebuilt artifact for `name` on this platform; false otherwise (the loader
-//RS /// then falls back to the compiler-embedded template — rung-0 magic preserved).
-//RS pub fn is_ring_module_staged(name: &str) -> bool {
-//RS     staged_ring_artifact(name).is_some()
-//RS }
-//RS 
-//RS /// The prebuilt ring artifact path for `name` in the active toolchain object, or
-//RS /// `None` when there is no active object or it carries no artifact for `name`.
-//RS pub fn staged_ring_artifact(name: &str) -> Option<std::path::PathBuf> {
-//RS     if !is_ring_module(name) {
-//RS         return None;
-//RS     }
-//RS     let dir = std::env::var_os(TOOLCHAIN_OBJECT_ENV)?;
-//RS     let artifact = std::path::Path::new(&dir).join("ring").join(name);
-//RS     artifact.exists().then_some(artifact)
-//RS }
-//RS 
-//RS pub fn is_legacy_std_import(name: &str) -> bool {
-//RS     name == "std" || name.starts_with("std.") || name == "jet.std" || name.starts_with("jet.std.")
-//RS }
-//RS 
-//RS /// D-ALLOC1/D-ALLOC-C: allocator opaque types → jet_mem Rust types.
-//RS pub fn alloc_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "Arena" => Some("jet_mem::JetArena"),
-//RS         "Bump" => Some("jet_mem::JetBump"),
-//RS         "Pool" => Some("jet_mem::JetPool"),
-//RS         "Fixed" => Some("jet_mem::JetFixed"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ARGS1: ArgsSpec/ParsedArgs → prelude Rust types.
-//RS pub fn args_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "ArgsSpec" => Some("JetArgsSpec"),
-//RS         "ParsedArgs" => Some("JetParsedArgs"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-ANY-JAI1 (c7jaiany §6): `reflect.of(x)`'s handle types are top-level
-//RS /// prelude structs, same shape as `args_handle_rust_type` above.
-//RS pub fn reflect_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "Value" => Some("JetReflectValue"),
-//RS         "Field" => Some("JetReflectField"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// D-SHIFT1 (c7shift): `binary.Reader`/`text.Cursor` handle types are
-//RS /// top-level prelude structs, same shape as `reflect_handle_rust_type`
-//RS /// above — including the caller's `!type_names.contains(name)` collision
-//RS /// guard, since "Reader"/"Cursor" are plausible user type names.
-//RS pub fn binary_text_handle_rust_type(name: &str) -> Option<&'static str> {
-//RS     match name {
-//RS         "Reader" => Some("JetReader"),
-//RS         "Cursor" => Some("JetCursor"),
-//RS         TYPE_BITS => Some("JetBitSet"),
-//RS         TYPE_BYTES => Some("JetByteBuffer"),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// True when a crate spec string needs an explicit version (i.e. it's not
-//RS /// "std" and doesn't already contain `@`).
-//RS pub fn crate_spec_needs_version(spec: &str) -> bool {
-//RS     spec != "std" && spec.split_once('@').is_none()
-//RS }
-//RS 
-//RS /// D-EFFBUDGET1 (ratified 2026-07-01): the `effects { allow: […], deny: […] }`
-//RS /// block in `pkg.jet` that turns on whole-dependency-graph effect enforcement.
-//RS /// Manifest keys only — no language grammar (§0.4 DO-NOT).
-//RS pub const MANIFEST_BLOCK_EFFECTS: &str = "effects"; // D-EFFBUDGET1
-//RS /// D-EFFBUDGET1: the `allow:` field inside `effects { … }` — the closed list of
-//RS /// effect names the whole dependency graph may use.
-//RS pub const EFFECTS_FIELD_ALLOW: &str = "allow"; // D-EFFBUDGET1
-//RS /// D-EFFBUDGET1: the `deny:` field inside `effects { … }` — effect names the
-//RS /// dependency graph must never use.
-//RS pub const EFFECTS_FIELD_DENY: &str = "deny"; // D-EFFBUDGET1
-//RS /// D-EFFBUDGET1: the `grants { "dep": [Effect] }` block — an audited
-//RS /// per-dependency escape from the `authority.holds` budget, recorded in the lockfile.
-//RS pub const MANIFEST_BLOCK_GRANTS: &str = "grants"; // D-EFFBUDGET1
-//RS /// D-POLICY-WORD1=A: package floors and memory governance live under the
-//RS /// `policy: { … }` block in `package.jet`. Manifest keys only, no language
-//RS /// grammar.
-//RS pub const MANIFEST_BLOCK_POLICY: &str = "policy"; // D-POLICY-WORD1
-//RS /// D-MEM-GUARANTEE1=A: package-only dependency containment policy. These
-//RS /// fields intentionally do not enter the source `PolicyKey` registry.
-//RS pub const POLICY_FIELD_CONTAIN: &str = "contain";
-//RS pub const POLICY_FIELD_HARDEN: &str = "harden";
-//RS /// D-TEAMPOLICY1=A: one package policy namespace for team ceilings. These
-//RS /// fields are package-only and therefore never become source policy keys.
-//RS pub const POLICY_FIELD_EFFECTS: &str = "effects";
-//RS pub const POLICY_FIELD_UNSAFE: &str = "unsafe";
-//RS pub const POLICY_FIELD_EXPERT: &str = "expert";
-//RS pub const POLICY_FIELD_DEPS: &str = "deps";
-//RS /// D-GRADE-POLICY1=A: the package claims floor (`.Unchecked` through
-//RS /// `.Proved`) is a package-only policy field.
-//RS pub const POLICY_FIELD_CLAIMS: &str = "claims";
-//RS /// D-JPK-POLICYSURFACE1=D: package license allow-list policy.
-//RS pub const POLICY_FIELD_LICENSES: &str = "licenses";
-//RS /// D-JPK-POLICYSURFACE1=D: package-pattern to source-authority mapping.
-//RS pub const POLICY_FIELD_SOURCES: &str = "sources";
-//RS /// D-JPK-POLICYSURFACE1=D: reviewed, expiring package policy exceptions.
-//RS pub const POLICY_FIELD_EXCEPTIONS: &str = "exceptions";
-//RS /// D-JPK-POLICYSURFACE1=D: typed exception record in `policy.exceptions`.
-//RS pub const POLICY_EXCEPTION_TYPE: &str = "PolicyException";
-//RS pub const POLICY_EXCEPTION_FIELD_ID: &str = "id";
-//RS pub const POLICY_EXCEPTION_FIELD_SCOPE: &str = "scope";
-//RS pub const POLICY_EXCEPTION_FIELD_REASON: &str = "reason";
-//RS pub const POLICY_EXCEPTION_FIELD_EXPIRES: &str = "expires";
-//RS /// D-AUTHORITY-MANIFEST1=A / D-BOUND-PROV1=A: source-reviewed trust and
-//RS /// provider authority live under the one `authority: { … }` block.
-//RS pub const MANIFEST_BLOCK_AUTHORITY: &str = "authority"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_FIELD_HOLDS: &str = "holds"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_HOLDS_FIELD_ALLOW: &str = "allow"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_HOLDS_FIELD_DENY: &str = "deny"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_FIELD_GRANTS: &str = "grants"; // D-AUTHORITY-MANIFEST1
-//RS /// D-PLUGIN-AUTHORITY1: a guest package declares the capabilities it may
-//RS /// request; hosts provide the tightened authority separately.
-//RS pub const AUTHORITY_FIELD_NEEDS: &str = "needs";
-//RS pub const AUTHORITY_FIELD_TRUST: &str = "trust"; // D-BOUND-PROV1
-//RS pub const AUTHORITY_FIELD_PROVIDERS: &str = "providers"; // D-AUTHORITY-MANIFEST1
-//RS pub const PROVIDER_FIELD_REGISTRY: &str = "registry";
-//RS pub const PROVIDER_FIELD_ALLOW: &str = "allow";
-//RS pub const PROVIDER_FIELD_DENY: &str = "deny";
-//RS pub const AUTHORITY_TRUST_FIELD_DEFAULT: &str = "default"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_TRUST_FIELD_CI: &str = "ci"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_TRUST_FIELD_PROMPT: &str = "prompt"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_TRUST_FIELD_SERVICES: &str = "services"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_TRUST_FIELD_REQUIRE: &str = "require"; // D-BOUND-PROV1
-//RS pub const AUTHORITY_TRUST_REQUIRE_NONE: &str = "none"; // D-BOUND-PROV1
-//RS pub const AUTHORITY_TRUST_REQUIRE_LOGGED: &str = "logged"; // D-BOUND-PROV1
-//RS pub const AUTHORITY_TRUST_REQUIRE_ATTESTED: &str = "attested"; // D-BOUND-PROV1
-//RS pub const AUTHORITY_TRUST_DECISION_PROMPT: &str = "prompt"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_TRUST_DECISION_DENY: &str = "deny"; // D-AUTHORITY-MANIFEST1
-//RS pub const AUTHORITY_TRUST_DECISION_ALLOW: &str = "allow"; // D-AUTHORITY-MANIFEST1
-//RS /// D-LINTPOLICY1=A (the override law, card #505): the `policy: { lints: { … } }`
-//RS /// sub-block. Warnings never fail a build by default (I1 memory/type safety is
-//RS /// never in scope here); a team opts into a wall by naming stable lints here.
-//RS /// Manifest keys only, no language grammar.
-//RS pub const POLICY_FIELD_LINTS: &str = "lints"; // D-LINTPOLICY1
-//RS /// D-LINTPOLICY1: the `deny:` field inside `policy.lints { … }` — stable lint
-//RS /// names (e.g. `float_money`) that fail the build when they fire, instead of
-//RS /// warning.
-//RS pub const LINTS_FIELD_DENY: &str = "deny"; // D-LINTPOLICY1
-//RS 
-//RS /// Levenshtein edit distance between two strings (used for "did you mean?" suggestions).
-//RS pub fn edit_distance(a: &str, b: &str) -> usize {
-//RS     let a: Vec<char> = a.chars().collect();
-//RS     let b: Vec<char> = b.chars().collect();
-//RS     let mut prev: Vec<usize> = (0..=b.len()).collect();
-//RS     for i in 1..=a.len() {
-//RS         let mut cur = vec![i];
-//RS         for j in 1..=b.len() {
-//RS             let cost = if a[i - 1] == b[j - 1] { 0 } else { 1 };
-//RS             cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost));
-//RS         }
-//RS         prev = cur;
-//RS     }
-//RS     prev[b.len()]
-//RS }
-//RS use super::core_surface::{
-//RS     CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE, LIT_NULL, RETIRED_TYPE_ERROR, TYPE_DATETIME,
-//RS     TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_NEVER, TYPE_PATH, TYPE_REGEX, TYPE_URL,
-//RS };
-//RS use super::effects_surface::KW_STATE_DECL;
-//RS use super::math_layout::{FOREIGN_MATCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON, TYPE_RESULT};
-//RS use super::package_files::{JET_KEYWORD_LIST, JET_TYPE_LIST};
-//RS use super::{canonical_name_case, NameCase};
-//RS 
-//RS /// D-NAME-SIGIL1=A: every compiler-visible generated symbol uses one reserved
-//RS /// machine prefix. Keep this helper below the syntax surface so sema, engines,
-//RS /// tools, and generated Rust share one naming law.
-//RS pub const GENERATED_NAME_PREFIX: &str = "__jet_";
-//RS 
-//RS pub fn generated_name(name: &str) -> String {
-//RS     if name.starts_with(GENERATED_NAME_PREFIX) {
-//RS         name.to_string()
-//RS     } else {
-//RS         format!("{GENERATED_NAME_PREFIX}{name}")
-//RS     }
-//RS }
-//RS 
-//RS /// Encode one path identity as a readable, injective Rust identifier suffix.
-//RS ///
-//RS /// Alphanumeric bytes stay literal. `_` starts every escape and therefore is
-//RS /// escaped itself; the common path punctuation has a short mnemonic escape and
-//RS /// all other bytes use a fixed-width hexadecimal escape. This keeps canonical
-//RS /// identities such as `package::item` and absolute paths distinct without
-//RS /// emitting `/`, `:`, `\`, or `-` into Rust source.
-//RS fn encode_generated_path(name: &str) -> String {
-//RS     const HEX: &[u8; 16] = b"0123456789abcdef";
-//RS     let mut encoded = String::with_capacity(name.len());
-//RS     for byte in name.bytes() {
-//RS         if byte.is_ascii_alphanumeric() {
-//RS             encoded.push(byte as char);
-//RS             continue;
-//RS         }
-//RS         encoded.push('_');
-//RS         match byte {
-//RS             b'_' => encoded.push('u'),
-//RS             b'.' => encoded.push('d'),
-//RS             b':' => encoded.push('c'),
-//RS             b'/' => encoded.push('s'),
-//RS             b'\\' => encoded.push('b'),
-//RS             b'-' => encoded.push('h'),
-//RS             byte => {
-//RS                 encoded.push('x');
-//RS                 encoded.push(HEX[(byte >> 4) as usize] as char);
-//RS                 encoded.push(HEX[(byte & 0x0f) as usize] as char);
-//RS             }
-//RS         }
-//RS     }
-//RS     encoded
-//RS }
-//RS 
-//RS /// Decode a generated path suffix for composition by `member_name`.
-//RS ///
-//RS /// The decoder is intentionally crate-visible: generated names are an
-//RS /// internal representation, while callers still operate on source identities.
-//RS pub(crate) fn decode_generated_path_suffix(suffix: &str) -> Option<String> {
-//RS     fn hex_value(byte: u8) -> Option<u8> {
-//RS         match byte {
-//RS             b'0'..=b'9' => Some(byte - b'0'),
-//RS             b'a'..=b'f' => Some(byte - b'a' + 10),
-//RS             b'A'..=b'F' => Some(byte - b'A' + 10),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS 
-//RS     let bytes = suffix.as_bytes();
-//RS     let mut decoded = Vec::with_capacity(bytes.len());
-//RS     let mut index = 0;
-//RS     while index < bytes.len() {
-//RS         if bytes[index].is_ascii_alphanumeric() {
-//RS             decoded.push(bytes[index]);
-//RS             index += 1;
-//RS             continue;
-//RS         }
-//RS         if bytes[index] != b'_' || index + 1 >= bytes.len() {
-//RS             return None;
-//RS         }
-//RS         match bytes[index + 1] {
-//RS             b'u' => decoded.push(b'_'),
-//RS             b'd' => decoded.push(b'.'),
-//RS             b'c' => decoded.push(b':'),
-//RS             b's' => decoded.push(b'/'),
-//RS             b'b' => decoded.push(b'\\'),
-//RS             b'h' => decoded.push(b'-'),
-//RS             b'x' if index + 3 < bytes.len() => {
-//RS                 let high = hex_value(bytes[index + 2])?;
-//RS                 let low = hex_value(bytes[index + 3])?;
-//RS                 decoded.push(high * 16 + low);
-//RS                 index += 2;
-//RS             }
-//RS             _ => return None,
-//RS         }
-//RS         index += 2;
-//RS     }
-//RS     String::from_utf8(decoded).ok()
-//RS }
-//RS 
-//RS pub fn generated_path(name: &str) -> String {
-//RS     format!("{GENERATED_NAME_PREFIX}{}", encode_generated_path(name))
-//RS }
-//RS 
-//RS pub fn generated_suffix(name: &str) -> &str {
-//RS     name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(name)
-//RS }
-//RS 
-//RS /// Sanitize a generated Rust crate name from a source-file stem.
-//RS pub fn sanitize_crate_name(raw: &str) -> String {
-//RS     let mut name: String = raw
-//RS         .chars()
-//RS         .map(|ch| {
-//RS             if ch.is_ascii_alphanumeric() || ch == '_' {
-//RS                 ch
-//RS             } else {
-//RS                 '_'
-//RS             }
-//RS         })
-//RS         .collect();
-//RS     if name.is_empty() {
-//RS         name.push_str("out");
-//RS     }
-//RS     if name.as_bytes().first().is_some_and(u8::is_ascii_digit) {
-//RS         name.insert(0, '_');
-//RS     }
-//RS     name
-//RS }
-//RS 
-//RS /// D-SHAPE-INTERNAL1 / D-SHAPE-DUNDER2: the one prefix classification used by
-//RS /// the lexer, sema, publishing, and tools. Bare `_` remains the pattern/binding
-//RS /// spelling; only longer names participate in the public-name contract.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum IdentifierClass {
-//RS     Ordinary,
-//RS     SoftPublic,
-//RS     Reserved,
-//RS }
-//RS 
-//RS pub fn classify_identifier(name: &str) -> IdentifierClass {
-//RS     if name.starts_with("__") {
-//RS         IdentifierClass::Reserved
-//RS     } else if name.len() > 1 && name.starts_with('_') {
-//RS         IdentifierClass::SoftPublic
-//RS     } else {
-//RS         IdentifierClass::Ordinary
-//RS     }
-//RS }
-//RS 
-//RS /// The complete reserved-name policy for generated, user-visible source.
-//RS ///
-//RS /// `JET_KEYWORD_LIST` is the canonical current surface. Contextual `state`
-//RS /// remains legal in ordinary declaration positions, while the additional
-//RS /// spellings below are lexer keywords, literals, or foreign teaching words
-//RS /// that must not be emitted. Generated source must obey the lexer and its
-//RS /// teaching redirects, not the smaller completion list. Type names also share
-//RS /// the canonical built-in/Core tables.
-//RS pub fn is_reserved_generated_name(name: &str) -> bool {
-//RS     (JET_KEYWORD_LIST.contains(&name) && name != KW_STATE_DECL)
-//RS         || matches!(
-//RS             name,
-//RS             KW_MUTATE | KW_MOVE | KW_COPY | KW_CONST | FOREIGN_MATCH | LIT_NULL
-//RS         )
-//RS         || JET_TYPE_LIST.contains(&name)
-//RS         || crate::Collections::is_reserved_type(name)
-//RS         || crate::CoreModuleExports::is_core_type_name(name)
-//RS         || matches!(
-//RS             name,
-//RS             TYPE_DATA
-//RS                 | TYPE_JSON
-//RS                 | TYPE_REGEX
-//RS                 | TYPE_URL
-//RS                 | TYPE_PATH
-//RS                 | TYPE_DATETIME
-//RS                 | CLOCK_TYPE
-//RS                 | TYPE_INSTANT
-//RS                 | TYPE_FRACTION
-//RS                 | TYPE_RESULT
-//RS                 | TYPE_ERR
-//RS                 | TYPE_NEVER
-//RS                 | RETIRED_TYPE_ERROR
-//RS         )
-//RS }
-//RS 
-//RS /// Turn an external name into a legal, canonical Jet identifier and repair
-//RS /// every lexer/core-reserved result. All binders call this helper so their
-//RS /// generated fields and types cannot drift apart in their name policy.
-//RS pub fn sanitize_generated_name(raw: &str, case: NameCase, fallback: &str) -> String {
-//RS     // Clark-expanded names use `{uri}local` notation. The opening delimiter
-//RS     // is namespace syntax, not part of the generated source identifier.
-//RS     let raw = raw.trim_start_matches(['@', '$']);
-//RS     let raw = raw.strip_prefix('{').unwrap_or(raw);
-//RS     let mut normalized = String::new();
-//RS     let mut previous_lower_or_digit = false;
-//RS     for ch in raw.chars() {
-//RS         if ch == '_' {
-//RS             if !normalized.ends_with('_') {
-//RS                 normalized.push('_');
-//RS             }
-//RS             previous_lower_or_digit = false;
-//RS         } else if ch.is_alphanumeric() {
-//RS             if matches!(case, NameCase::Snake | NameCase::Screaming)
-//RS                 && ch.is_uppercase()
-//RS                 && previous_lower_or_digit
-//RS                 && !normalized.ends_with('_')
-//RS             {
-//RS                 normalized.push('_');
-//RS             }
-//RS             normalized.extend(
-//RS                 ch.to_lowercase()
-//RS                     .take(if matches!(case, NameCase::Snake | NameCase::Screaming) {
-//RS                         1
-//RS                     } else {
-//RS                         0
-//RS                     }),
-//RS             );
-//RS             if case == NameCase::Pascal {
-//RS                 normalized.push(ch);
-//RS             }
-//RS             previous_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit();
-//RS         } else if normalized.is_empty() {
-//RS             // Do not turn leading wire punctuation into a source-level
-//RS             // leading underscore. Preserve an explicit leading `_` above.
-//RS             previous_lower_or_digit = false;
-//RS         } else if !normalized.ends_with('_') {
-//RS             normalized.push('_');
-//RS             previous_lower_or_digit = false;
-//RS         }
-//RS     }
-//RS     while normalized.ends_with('_') {
-//RS         normalized.pop();
-//RS     }
-//RS     if normalized.is_empty() {
-//RS         normalized = fallback.to_string();
-//RS     }
-//RS     let mut result = canonical_name_case(&normalized, case);
-//RS     while result.ends_with('_') {
-//RS         result.pop();
-//RS     }
-//RS     if result.is_empty() {
-//RS         result = canonical_name_case(fallback, case);
-//RS     }
-//RS 
-//RS     // A preserved soft-public `_` is legal only before an alphabetic name.
-//RS     // Repair `_1name` and other non-identifier starts before the general
-//RS     // leading-character repair below.
-//RS     let body = result.strip_prefix('_').unwrap_or(&result);
-//RS     if body.chars().next().is_some_and(|ch| !ch.is_alphabetic()) {
-//RS         result = body.to_string();
-//RS     }
-//RS     if result.is_empty() {
-//RS         result = canonical_name_case(fallback, case);
-//RS     }
-//RS     let first = result.strip_prefix('_').unwrap_or(&result).chars().next();
-//RS     if first.is_some_and(|ch| !ch.is_alphabetic()) {
-//RS         let prefix = match case {
-//RS             NameCase::Pascal => "Type",
-//RS             NameCase::Snake => "field_",
-//RS             NameCase::Screaming => "FIELD_",
-//RS         };
-//RS         result.insert_str(0, prefix);
-//RS     }
-//RS     let suffix = match case {
-//RS         NameCase::Pascal => "Type",
-//RS         NameCase::Snake => "_field",
-//RS         NameCase::Screaming => "_FIELD",
-//RS     };
-//RS     while result == "_" || result.starts_with("__") || is_reserved_generated_name(&result) {
-//RS         result.push_str(suffix);
-//RS     }
-//RS     result
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod generated_name_tests {
-//RS     use super::{
-//RS         generated_name, generated_path, generated_suffix, is_reserved_generated_name,
-//RS         sanitize_crate_name, GENERATED_NAME_PREFIX,
-//RS     };
-//RS     use crate::Syntax::{classify_identifier, IdentifierClass};
-//RS 
-//RS     #[test]
-//RS     fn generated_names_have_one_machine_prefix() {
-//RS         assert_eq!(generated_name("run"), "__jet_run");
-//RS         assert_eq!(generated_name("__jet_run"), "__jet_run");
-//RS         assert_eq!(generated_path("grades.curve"), "__jet_grades_dcurve");
-//RS         assert_eq!(
-//RS             generated_path("__jet_grades__curve"),
-//RS             "__jet__u_ujet_ugrades_u_ucurve"
-//RS         );
-//RS         assert_eq!(
-//RS             generated_path("__jet_grades.curve"),
-//RS             "__jet__u_ujet_ugrades_dcurve"
-//RS         );
-//RS         assert_eq!(generated_suffix("__jet_run"), "run");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn generated_paths_are_injective_across_identity_separators() {
-//RS         let identities = ["a::b", "a/b", r"a\b", "a_b", "a.b", "a-b", "a:x"];
-//RS         let symbols: Vec<String> = identities.iter().map(|name| generated_path(name)).collect();
-//RS         for (index, symbol) in symbols.iter().enumerate() {
-//RS             assert!(symbol.starts_with(GENERATED_NAME_PREFIX));
-//RS             assert!(symbol[GENERATED_NAME_PREFIX.len()..]
-//RS                 .bytes()
-//RS                 .all(|byte| byte.is_ascii_alphanumeric() || byte == b'_'));
-//RS             assert!(symbols[index + 1..].iter().all(|other| other != symbol));
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn crate_names_are_rust_safe() {
-//RS         assert_eq!(
-//RS             sanitize_crate_name("panic_lexical_task.group"),
-//RS             "panic_lexical_task_group"
-//RS         );
-//RS         assert_eq!(sanitize_crate_name("3d-demo"), "_3d_demo");
-//RS         assert_eq!(sanitize_crate_name(""), "out");
-//RS     }
-//RS     #[test]
-//RS     fn canonical_core_names_are_reserved_for_generated_names() {
-//RS         for name in [
-//RS             "Decimal",
-//RS             "Duration",
-//RS             "Date",
-//RS             "LocalDate",
-//RS             "LocalTime",
-//RS             "EncodingError",
-//RS         ] {
-//RS             assert!(
-//RS                 is_reserved_generated_name(name),
-//RS                 "unreserved canonical Core name `{name}`"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn underscore_ladder_has_one_source_classification() {
-//RS         assert_eq!(classify_identifier("_"), IdentifierClass::Ordinary);
-//RS         assert_eq!(classify_identifier("_name"), IdentifierClass::SoftPublic);
-//RS         assert_eq!(classify_identifier("__name"), IdentifierClass::Reserved);
-//RS         assert_eq!(classify_identifier("__name__"), IdentifierClass::Reserved);
-//RS         assert_eq!(classify_identifier("name_"), IdentifierClass::Ordinary);
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2138 crates/jet-foundation/src/Syntax/predicates.rs:1-650
+use jet_foundation.[Policy, Generics, Collections, CoreModuleExports]
+use jet_foundation.Syntax.CoreSurface.[CLOCK_TYPE, KW_CONST, KW_COPY, KW_MOVE, KW_MUTATE, LIT_NULL, RETIRED_TYPE_ERROR, TYPE_DATETIME, TYPE_ERR, TYPE_FRACTION, TYPE_INSTANT, TYPE_NEVER, TYPE_PATH, TYPE_REGEX, TYPE_URL]
+use jet_foundation.Syntax.EffectsSurface.[KW_STATE_DECL]
+use jet_foundation.Syntax.MathLayout.[FOREIGN_MATCH, TYPE_BITS, TYPE_BYTES, TYPE_DATA, TYPE_JSON, TYPE_RESULT, MARKER_CODABLE]
+use jet_foundation.Syntax.Spellings.[GENERATED_NAME_PREFIX, JET_KEYWORD_NAMES, JET_TYPE_NAMES]
+use jet_foundation.Syntax.NameCase.[canonical_name_case, NameCase]
+use core.files.runtime.kernel_path_components.[OSPath]
+use std.[env, path] // GATE #4494: retained native environment/path/filesystem primitives.
 
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:3
+pub fn is_applied_rule(name: String) -> Bool Never! {
+    if Policy.applied_rule(name) == .Val(row) -> return row.status == Policy.RuleStatus.Active
+    false
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:11
+pub STRUCTURAL_AUTO_DERIVE_TRAITS :: prep { [String]{Generics.PRINTABLE, Generics.EQUATABLE, Generics.DEBUG, Generics.COMPARABLE, Generics.ENCODE, Generics.DECODE} }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:24
+pub fn is_signed_auto_derive(name: String) -> Bool Never! { STRUCTURAL_AUTO_DERIVE_TRAITS.contains(name) || name == MARKER_CODABLE }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:33
+pub UNIT_SUFFIX_EXPONENT_RESERVED :: prep { "e" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:37
+pub UNIT_SUFFIX_IMAGINARY :: prep { "i" }
+
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:74
+pub KNOWN_CORE_MODULES :: prep { CoreModuleExports.CORE_MODULE_NAMES }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:76
+pub fn is_known_core_module(name: String) -> Bool Never! { KNOWN_CORE_MODULES.contains(name) }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:102
+pub fn core_modules_list() -> String Never! { KNOWN_CORE_MODULES.join(", ") }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:107
+pub fn canonical_ring_module(name: String) -> String Never! {
+    if name == "raylib" -> "core.game.raylib" else -> "core.{name}"
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:115
+pub fn is_ring_module(name: String) -> Bool Never! {
+    if name == { "log" -> true, "crypto" -> true, "http" -> true, "regex" -> true, "reactive" -> true, "archive" -> true, "raylib" -> true, "db" -> true, "time" -> true, "plugin" -> true, else -> false }
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:129
+pub TOOLCHAIN_OBJECT_ENV :: prep { "JET_TOOLCHAIN_FIXTURE" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:136
+pub TOOLCHAIN_EXEC_MARKER_ENV :: prep { "JET_TOOLCHAIN_EXEC" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:142
+pub fn is_ring_module_staged(name: String) -> Bool Never! { staged_ring_artifact(name) != None }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:148
+pub fn staged_ring_artifact(name: String) -> OSPath? Never! {
+    if !is_ring_module(name) -> return None
+    dir :: env.var_os(TOOLCHAIN_OBJECT_ENV) ?? return None // GATE #4494
+    artifact :: path.Path.new(dir).join("ring").join(name) // GATE #4494
+    if artifact.exists() -> Val(artifact) else -> None // GATE #4494
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:157
+pub fn is_legacy_std_import(name: String) -> Bool Never! { name == "std" || name.starts_with("std.") || name == "jet.std" || name.starts_with("jet.std.") }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:162
+pub fn alloc_handle_rust_type(name: String) -> String? Never! {
+    if name == { "Arena" -> Val("jet_mem::JetArena"), "Bump" -> Val("jet_mem::JetBump"), "Pool" -> Val("jet_mem::JetPool"), "Fixed" -> Val("jet_mem::JetFixed"), else -> None }
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:173
+pub fn args_handle_rust_type(name: String) -> String? Never! { if name == { "ArgsSpec" -> Val("JetArgsSpec"), "ParsedArgs" -> Val("JetParsedArgs"), else -> None } }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:183
+pub fn reflect_handle_rust_type(name: String) -> String? Never! { if name == { "Value" -> Val("JetReflectValue"), "Field" -> Val("JetReflectField"), else -> None } }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:195
+pub fn binary_text_handle_rust_type(name: String) -> String? Never! {
+    if name == { "Reader" -> Val("JetReader"), "Cursor" -> Val("JetCursor"), TYPE_BITS -> Val("JetBitSet"), TYPE_BYTES -> Val("JetByteBuffer"), else -> None }
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:207
+pub fn crate_spec_needs_version(spec: String) -> Bool Never! { spec != "std" && !spec.contains("@") }
+
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:214
+pub MANIFEST_BLOCK_EFFECTS :: prep { "effects" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:217
+pub EFFECTS_FIELD_ALLOW :: prep { "allow" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:220
+pub EFFECTS_FIELD_DENY :: prep { "deny" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:223
+pub MANIFEST_BLOCK_GRANTS :: prep { "grants" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:227
+pub MANIFEST_BLOCK_POLICY :: prep { "policy" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:230
+pub POLICY_FIELD_CONTAIN :: prep { "contain" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:231
+pub POLICY_FIELD_HARDEN :: prep { "harden" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:234
+pub POLICY_FIELD_EFFECTS :: prep { "effects" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:235
+pub POLICY_FIELD_UNSAFE :: prep { "unsafe" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:236
+pub POLICY_FIELD_EXPERT :: prep { "expert" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:237
+pub POLICY_FIELD_DEPS :: prep { "deps" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:240
+pub POLICY_FIELD_CLAIMS :: prep { "claims" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:242
+pub POLICY_FIELD_LICENSES :: prep { "licenses" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:244
+pub POLICY_FIELD_SOURCES :: prep { "sources" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:246
+pub POLICY_FIELD_EXCEPTIONS :: prep { "exceptions" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:248
+pub POLICY_EXCEPTION_TYPE :: prep { "PolicyException" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:249
+pub POLICY_EXCEPTION_FIELD_ID :: prep { "id" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:250
+pub POLICY_EXCEPTION_FIELD_SCOPE :: prep { "scope" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:251
+pub POLICY_EXCEPTION_FIELD_REASON :: prep { "reason" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:252
+pub POLICY_EXCEPTION_FIELD_EXPIRES :: prep { "expires" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:255
+pub MANIFEST_BLOCK_AUTHORITY :: prep { "authority" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:256
+pub AUTHORITY_FIELD_HOLDS :: prep { "holds" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:257
+pub AUTHORITY_HOLDS_FIELD_ALLOW :: prep { "allow" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:258
+pub AUTHORITY_HOLDS_FIELD_DENY :: prep { "deny" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:259
+pub AUTHORITY_FIELD_GRANTS :: prep { "grants" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:262
+pub AUTHORITY_FIELD_NEEDS :: prep { "needs" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:263
+pub AUTHORITY_FIELD_TRUST :: prep { "trust" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:264
+pub AUTHORITY_FIELD_PROVIDERS :: prep { "providers" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:265
+pub PROVIDER_FIELD_REGISTRY :: prep { "registry" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:266
+pub PROVIDER_FIELD_ALLOW :: prep { "allow" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:267
+pub PROVIDER_FIELD_DENY :: prep { "deny" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:268
+pub AUTHORITY_TRUST_FIELD_DEFAULT :: prep { "default" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:269
+pub AUTHORITY_TRUST_FIELD_CI :: prep { "ci" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:270
+pub AUTHORITY_TRUST_FIELD_PROMPT :: prep { "prompt" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:271
+pub AUTHORITY_TRUST_FIELD_SERVICES :: prep { "services" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:272
+pub AUTHORITY_TRUST_FIELD_REQUIRE :: prep { "require" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:273
+pub AUTHORITY_TRUST_REQUIRE_NONE :: prep { "none" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:274
+pub AUTHORITY_TRUST_REQUIRE_LOGGED :: prep { "logged" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:275
+pub AUTHORITY_TRUST_REQUIRE_ATTESTED :: prep { "attested" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:276
+pub AUTHORITY_TRUST_DECISION_PROMPT :: prep { "prompt" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:277
+pub AUTHORITY_TRUST_DECISION_DENY :: prep { "deny" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:278
+pub AUTHORITY_TRUST_DECISION_ALLOW :: prep { "allow" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:283
+pub POLICY_FIELD_LINTS :: prep { "lints" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:287
+pub LINTS_FIELD_DENY :: prep { "deny" }
+
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:290
+pub fn edit_distance(a: String, b: String) -> Int Never! {
+    a_chars :: a.chars().collect()
+    b_chars :: b.chars().collect()
+    prev := [Int]{}
+    loop j in 0..=b_chars.len() -> &prev.push(j)
+    cur := [Int].with_capacity(b_chars.len() + 1)
+    loop i in 1..=a_chars.len() {
+        &cur.clear()
+        &cur.push(i)
+        loop j in 1..=b_chars.len() {
+            cost :: if a_chars[i - 1] == b_chars[j - 1] -> 0 else -> 1
+            &cur.push((prev[j] + 1).min(cur[j - 1] + 1).min(prev[j - 1] + cost))
+        }
+        &prev.swap(&cur)
+    }
+    prev[b_chars.len()]
+}
+
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:316
+// GENERATED_NAME_PREFIX is canonically owned by Spellings.jet.
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:318
+pub fn generated_name(name: String) -> String Never! { if name.starts_with(GENERATED_NAME_PREFIX) -> name else -> "{GENERATED_NAME_PREFIX}{name}" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:333
+fn encode_generated_path(name: String) -> String Never! {
+    hex :: "0123456789abcdef".bytes()
+    encoded := [U8].with_capacity(name.len())
+    loop byte in name.bytes() {
+        if byte.is_ascii_alphanumeric() { &encoded.push(byte); continue }
+        &encoded.push(95)
+        if byte == {
+            95 -> &encoded.push(117)
+            46 -> &encoded.push(100)
+            58 -> &encoded.push(99)
+            47 -> &encoded.push(115)
+            92 -> &encoded.push(98)
+            45 -> &encoded.push(104)
+            else -> {
+                &encoded.push(120)
+                &encoded.push(hex[Int.from_u8(byte >> 4)])
+                &encoded.push(hex[Int.from_u8(byte & 15)])
+            }
+        }
+    }
+    String.from_utf8(encoded).unwrap()
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:364
+fn hex_value(byte: U8) -> U8? Never! {
+    if byte >= 48 && byte <= 57 -> return Val(byte - 48)
+    if byte >= 97 && byte <= 102 -> return Val(byte - 97 + 10)
+    if byte >= 65 && byte <= 70 -> return Val(byte - 65 + 10)
+    None
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:363
+pub fn decode_generated_path_suffix(suffix: String) -> String? Never! {
+    bytes :: suffix.bytes()
+    decoded := [U8].with_capacity(bytes.len())
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index].is_ascii_alphanumeric() { &decoded.push(bytes[index]); index += 1; continue }
+        if bytes[index] != 95 || index + 1 >= bytes.len() -> return None
+        if bytes[index + 1] == {
+            117 -> &decoded.push(95)
+            100 -> &decoded.push(46)
+            99 -> &decoded.push(58)
+            115 -> &decoded.push(47)
+            98 -> &decoded.push(92)
+            104 -> &decoded.push(45)
+            120 -> {
+                if index + 3 >= bytes.len() -> return None
+                high :: hex_value(bytes[index + 2]) ?? return None
+                low :: hex_value(bytes[index + 3]) ?? return None
+                &decoded.push(high * 16 + low)
+                index += 2
+            }
+            else -> return None
+        }
+        index += 2
+    }
+    if String.from_utf8(decoded) == { .Ok(text) -> Val(text), .Err(_) -> None }
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:405
+pub fn generated_path(name: String) -> String Never! { "{GENERATED_NAME_PREFIX}{encode_generated_path(name)}" }
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:409
+pub fn generated_suffix(name: String) -> String Never! {
+    if name.starts_with(GENERATED_NAME_PREFIX) {
+        suffix := name.after(GENERATED_NAME_PREFIX) // #4303
+        return suffix
+    }
+    name
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:414
+pub fn sanitize_crate_name(raw: String) -> String Never! {
+    bytes := [U8]{}
+    loop ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '_' -> &bytes.push(ch.as_u8()) else -> &bytes.push(95)
+    }
+    if bytes.is_empty() -> return "out"
+    if bytes[0].is_ascii_digit() -> &bytes.insert(0, 95)
+    String.from_utf8(bytes).unwrap()
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:437
+// IdentifierClass and classify_identifier are canonically owned by Spellings.jet.
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:462
+pub fn is_reserved_generated_name(name: String) -> Bool Never! {
+    (JET_KEYWORD_NAMES.contains(name) && name != KW_STATE_DECL)
+        || name == KW_MUTATE || name == KW_MOVE || name == KW_COPY || name == KW_CONST || name == FOREIGN_MATCH || name == LIT_NULL
+        || JET_TYPE_NAMES.contains(name) || Collections.is_reserved_type(name) || CoreModuleExports.is_core_type_name(name)
+        || name == TYPE_DATA || name == TYPE_JSON || name == TYPE_REGEX || name == TYPE_URL || name == TYPE_PATH || name == TYPE_DATETIME || name == CLOCK_TYPE || name == TYPE_INSTANT || name == TYPE_FRACTION || name == TYPE_RESULT || name == TYPE_ERR || name == TYPE_NEVER || name == RETIRED_TYPE_ERROR
+}
+// Rust: crates/jet-foundation/src/Syntax/predicates.rs:492
+pub fn sanitize_generated_name(raw: String, case: NameCase, fallback: String) -> String Never! {
+    trimmed := raw.trim_start_matches(['@', '$']) // #4303
+    raw_body := if trimmed.starts_with("{") -> trimmed.after("{") else -> trimmed // #4303
+    normalized := ""
+    previous_lower_or_digit := false
+    loop ch in raw_body.chars() {
+        if ch == '_' {
+            if !normalized.ends_with("_") -> &normalized.push('_')
+            previous_lower_or_digit = false
+        } else if ch.is_alphanumeric() {
+            folding :: case == NameCase.Snake || case == NameCase.Screaming
+            if folding && ch.is_uppercase() && previous_lower_or_digit && !normalized.ends_with("_") -> &normalized.push('_')
+            if folding {
+                loop lower in ch.to_lowercase().take(1) -> &normalized.push(lower)
+            }
+            if case == NameCase.Pascal -> &normalized.push(ch)
+            previous_lower_or_digit = ch.is_lowercase() || ch.is_ascii_digit()
+        } else if normalized.is_empty() -> previous_lower_or_digit = false
+        else if !normalized.ends_with("_") { &normalized.push('_'); previous_lower_or_digit = false }
+    }
+    loop normalized.ends_with("_") -> _ :: &normalized.pop()
+    if normalized.is_empty() -> normalized = fallback
+    result := canonical_name_case(normalized, case)
+    loop result.ends_with("_") -> _ :: &result.pop()
+    if result.is_empty() -> result = canonical_name_case(fallback, case)
+    body := if result.starts_with("_") -> result.after("_") else -> result // #4303
+    if body.chars().next() == .Val(ch) {
+        if !ch.is_alphabetic() -> result = body
+    }
+    if result.is_empty() -> result = canonical_name_case(fallback, case)
+    start := if result.starts_with("_") -> result.after("_") else -> result // #4303
+    if start.chars().next() == .Val(ch) {
+        if !ch.is_alphabetic() {
+            prefix :: if case == { .Pascal -> "Type", .Snake -> "field_", .Screaming -> "FIELD_" }
+            result = "{prefix}{result}"
+        }
+    }
+    suffix :: if case == { .Pascal -> "Type", .Snake -> "_field", .Screaming -> "_FIELD" }
+    loop result == "_" || result.starts_with("__") || is_reserved_generated_name(result) -> &result.push_str(suffix)
+    result
+}

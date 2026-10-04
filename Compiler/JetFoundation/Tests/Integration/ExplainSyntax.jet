@@ -1,0 +1,18 @@
+use std.fs
+use std.env
+// Rust: tests/explain_syntax.rs:6
+fn jet() -> OSPath { OSPath(env.var("CARGO_BIN_EXE_jet").unwrap()) }
+// Rust: tests/explain_syntax.rs:10
+fn cli_dir() -> OSPath { OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("tests/cli") }
+// Rust: tests/explain_syntax.rs:14
+fn check_snapshot(name: String, actual: String) -> {
+    path :: cli_dir().join(name)
+    // GATE #4494: environment and real snapshot file I/O.
+    if env.var("UPDATE_EXPECT").is_ok() {
+        fs.create_dir_all(cli_dir()).unwrap()
+        fs.write(&path, actual).unwrap()
+        return
+    }
+    expected :: fs.read_to_string(&path).unwrap_or_else((_) -> panic("missing snapshot {}; run UPDATE_EXPECT=1 cargo test", path.display()))
+    assert_eq(actual, expected, "snapshot mismatch for {}", name)
+}

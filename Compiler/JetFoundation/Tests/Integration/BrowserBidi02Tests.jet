@@ -1,0 +1,855 @@
+use std.net.TcpListener
+use std.thread
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.BrowserBidi.[accept_websocket, read_text_frame, write_text_frame, field, hostile_listener, HostileReply]
+use jet_foundation.Tests.Integration.BrowserBidi02.run_artifacts
+// GATE #4494: native TCP listeners and test-peer threads.
+// Rust: tests/browser_bidi.rs:1819
+#Test("native_bidi_network_response_event_exposes_status_without_payload_leak") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=RESPONSE_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..12 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            if method == {
+                "session.status" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"ready\":true,\"message\":\"ready\"}}}}")
+                "session.new" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"sessionId\":\"mock-session\",\"capabilities\":{{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}}}}}")
+                "session.subscribe" -> {
+                    write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{}}}}")
+                    write_text_frame(&stream, "{{\"type\":\"event\",\"method\":\"network.responseCompleted\",\"params\":{{\"isBlocked\":false,\"request\":{{\"request\":\"req-2\",\"method\":\"POST\",\"url\":\"https://api.example/SECRET_PATH\"}},\"response\":{{\"status\":201,\"headers\":[{{\"name\":\"set-cookie\",\"value\":\"session=SECRET\"}}]}}}}}}")
+                }
+                "session.end" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{}}}}")
+                other -> panic("unexpected BiDi method {other}: {request}")
+            }
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    session.subscribe("network.responseCompleted") ?? panic("subscribe")
+    event :: &session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.request_method())
+    print(event.status_code())
+    print(event.is_blocked())
+    print(event.url_hash().contains("SECRET") == false)
+    trace :: session.trace()
+    print(trace.redacted())
+    print(trace.summary().contains("SECRET") == false)
+    print("response:ok")
+    session.close() ?? panic("close")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_network_response", "browser_bidi_network_response", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.contains("network.responseCompleted\n"), "{stdout}")
+    assert(stdout.contains("POST\n"), "{stdout}")
+    assert(stdout.contains("201\n"), "{stdout}")
+    assert(stdout.contains("response:ok\n"), "{stdout}")
+    assert(!stdout.contains("SECRET"), "{stdout}")
+    assert(!stderr.contains("SECRET"), "{stderr}")
+    methods :: server.join().unwrap()
+    assert_eq(methods.last(), Val("session.end"))
+}
+// Rust: tests/browser_bidi.rs:2010
+#Test("native_bidi_artifacts_storage_files_screenshots_and_pdf") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=ARTIFACT_SECRET"
+    server :: thread.spawn(fn() { run_artifacts(^listener) })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    session.allow_downloads("/tmp/jet-downloads") ?? panic("allow_downloads")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+    page.set_cookie("session", "cookie-SECRET", "example.test") ?? panic("set_cookie")
+    cookie :: page.cookie("session") ?? panic("cookie")
+    print(cookie == "cookie-SECRET")
+    page.clear_cookies() ?? panic("clear_cookies")
+    page.storage_set("local", "token", "stored-SECRET") ?? panic("storage_set")
+    stored :: page.storage_get("local", "token") ?? panic("storage_get")
+    print(stored == "stored-SECRET")
+    page.storage_clear("local") ?? panic("storage_clear")
+    page.storage_set("session", "draft", "x") ?? panic("session set")
+    page.storage_clear("session") ?? panic("session clear")
+    upload :: page.get_by_css("input[type=file]")
+    upload.set_files("/tmp/upload-SECRET.txt") ?? panic("set_files")
+    png :: page.screenshot() ?? panic("screenshot")
+    print(png.len() > 0)
+    pdf :: page.pdf() ?? panic("pdf")
+    print(pdf.len() > 0)
+    session.subscribe("browsingContext.downloadWillBegin") ?? panic("subscribe")
+    event :: &session.next_event(timeout) ?? panic("next_event")
+    print(event.kind())
+    print(event.download_id())
+    hash :: event.suggested_filename_hash()
+    print(hash.len() == 16)
+    print(hash.contains("SECRET") == false)
+    print(event.url_hash().contains("SECRET") == false)
+    trace :: session.trace()
+    print(trace.redacted())
+    print(trace.summary().contains("SECRET") == false)
+    print("artifacts:ok")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_artifacts", "browser_bidi_artifacts", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.contains("true\n"), "{stdout}")
+    assert(stdout.contains("browsingContext.downloadWillBegin\n"), "{stdout}")
+    assert(stdout.contains("dl-1\n"), "{stdout}")
+    assert(stdout.contains("artifacts:ok\n"), "{stdout}")
+    assert(!stdout.contains("ARTIFACT_SECRET"), "{stdout}")
+    assert(!stdout.contains("SECRET_REPORT"), "{stdout}")
+    assert(!stderr.contains("ARTIFACT_SECRET"), "{stderr}")
+    assert(!stderr.contains("SECRET_REPORT"), "{stderr}")
+    methods :: server.join().unwrap()
+    for expected in ["browser.setDownloadBehavior", "storage.setCookie", "storage.getCookies", "storage.deleteCookies", "script.callFunction", "input.setFiles", "browsingContext.captureScreenshot", "browsingContext.print", "session.subscribe"] {
+        assert(methods.iter().any(fn(m) { m == expected }), "missing {expected}: {methods:?}")
+    }
+    assert_eq(methods.last(), Val("session.end"))
+}
+// Rust: tests/browser_bidi.rs:2107
+#Test("native_bidi_artifacts_reject_hostile_inputs_without_wire") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=HOSTILE_ARTIFACT_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..16 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"mock-session\",\"capabilities\":{{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}}}"
+                "browser.createUserContext" -> "{{\"userContext\":\"user-1\"}}"
+                "browsingContext.create" -> "{{\"context\":\"page-1\"}}"
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{{}}"
+                other -> panic("unexpected BiDi method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    loop attempt in [1] {
+        session.allow_downloads("") ?? next
+        print("unexpected empty folder")
+    }
+    loop attempt in [1] {
+        page.set_cookie("", "v", "example.test") ?? next
+        print("unexpected empty cookie")
+    }
+    loop attempt in [1] {
+        value :: page.cookie("") ?? next
+        print("unexpected empty cookie name {value}")
+    }
+    loop attempt in [1] {
+        value :: page.storage_get("memory", "k") ?? next
+        print("unexpected storage kind {value}")
+    }
+    loop attempt in [1] {
+        page.storage_set("local", "", "v") ?? next
+        print("unexpected empty key")
+    }
+    loop attempt in [1] {
+        page.get_by_css("input").set_files("") ?? next
+        print("unexpected empty path")
+    }
+    print("caught")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_artifacts_hostile", "browser_bidi_artifacts_hostile", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "caught\n")
+    assert(!stdout.contains("SECRET"), "{stdout}")
+    assert(!stderr.contains("SECRET"), "{stderr}")
+    methods :: server.join().unwrap()
+    assert(!methods.iter().any(fn(m) { m.starts_with("storage.") || m.starts_with("input.") || m == "browser.setDownloadBehavior" || m == "browsingContext.captureScreenshot" || m == "browsingContext.print" || m == "script.callFunction" }), "invalid client calls must not hit the wire: {methods:?}")
+}
+// Rust: tests/browser_bidi.rs:2208
+#Test("native_bidi_closed_page_rejects_artifacts") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=CLOSED_ARTIFACT_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..12 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"mock-session\",\"capabilities\":{{\"browserName\":\"mock\",\"browserVersion\":\"1\"}}}}"
+                "browser.createUserContext" -> "{{\"userContext\":\"user-1\"}}"
+                "browsingContext.create" -> "{{\"context\":\"page-1\"}}"
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{{}}"
+                other -> panic("unexpected BiDi method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(200) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.close() ?? panic("page close")
+    loop attempt in [1] {
+        page.screenshot() ?? next
+        print("unexpected screenshot")
+    }
+    loop attempt in [1] {
+        page.pdf() ?? next
+        print("unexpected pdf")
+    }
+    loop attempt in [1] {
+        page.clear_cookies() ?? next
+        print("unexpected cookies")
+    }
+    print("caught")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_artifacts_closed", "browser_bidi_artifacts_closed", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "caught\n")
+    assert(!stdout.contains("SECRET"), "{stdout}")
+    assert(!stderr.contains("SECRET"), "{stderr}")
+    methods :: server.join().unwrap()
+    assert(!methods.iter().any(fn(m) { m == "browsingContext.captureScreenshot" || m == "browsingContext.print" || m.starts_with("storage.") }), "closed page must not call artifact commands: {methods:?}")
+}
+// Rust: tests/browser_bidi.rs:2295
+// D-BROWSER-AUTO1=A (#1192): checked expert CDP success and gates.
+#Test("native_bidi_checked_expert_cdp_supplement_success_and_gates") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=CDP_SUCCESS_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..8 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> {
+                    assert(request.contains("\"capabilities\":{{\"alwaysMatch\":{{}}}}"), "session.new must not request CDP up front: {request}")
+                    "{{\"sessionId\":\"cdp-ok\",\"capabilities\":{{\"browserName\":\"mock\",\"goog:cdp\":true}}}}"
+                }
+                "goog:cdp.sendCommand" -> {
+                    assert(request.contains("\"method\":\"Network.setCacheDisabled\""), "CDP wrap must carry Domain.command: {request}")
+                    assert(request.contains("\"params\":{{\"cacheDisabled\":true}}"), "CDP wrap must carry params object: {request}")
+                    assert(!request.contains("CDP_SUCCESS_SECRET"), "endpoint secret must not enter CDP params: {request}")
+                    "{{\"result\":{{\"cacheDisabled\":true}}}}"
+                }
+                "session.end" -> "{{}}"
+                other -> panic("unexpected CDP success method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    abilities :: session.abilities()
+    print("abilities:{abilities.bidi()}:{abilities.cdp()}")
+    bidi :: session.protocol("bidi") ?? panic("bidi")
+    smuggle :: bidi.send("goog:cdp.sendCommand", "{{\"method\":\"Network.enable\",\"params\":{{}}}}") ?? "blocked-smuggle"
+    print(smuggle)
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    bad_shape :: cdp.send("session.status", "{{}}") ?? "blocked-shape"
+    print(bad_shape)
+    empty :: cdp.send("", "{{}}") ?? "blocked-empty"
+    print(empty)
+    colon :: cdp.send("goog:cdp.sendCommand", "{{}}") ?? "blocked-colon"
+    print(colon)
+    ok :: cdp.send("Network.setCacheDisabled", "{{\"cacheDisabled\":true}}") ?? panic("cdp send")
+    print("cdp:{ok}")
+    trace :: session.trace()
+    redacted :: trace.redacted()
+    no_method :: trace.summary().contains("Network") == false
+    no_secret :: trace.summary().contains("CDP_SUCCESS_SECRET") == false
+    print("trace:{redacted}:{no_method}:{no_secret}")
+    session.close() ?? panic("close")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_cdp_checked", "browser_bidi_cdp_checked", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "abilities:true:true\nblocked-smuggle\nblocked-shape\nblocked-empty\nblocked-colon\ncdp:{{\"result\":{{\"cacheDisabled\":true}}}}\ntrace:true:true:true\n")
+    assert(!stdout.contains("CDP_SUCCESS_SECRET"), "{stdout}")
+    assert(!stderr.contains("CDP_SUCCESS_SECRET"), "{stderr}")
+    assert_eq(server.join().unwrap(), ["session.status", "session.new", "goog:cdp.sendCommand", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:2406
+#Test("native_bidi_checked_expert_cdp_rejects_missing_capability_and_hostile_wire") {
+    (no_cdp, no_cdp_server) :: hostile_listener(HostileReply.NoCdp)
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    hostile_endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=CDP_HOSTILE_SECRET"
+    hostile_server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..4 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            if method == {
+                "session.status" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"ready\":true,\"message\":\"ready\"}}}}")
+                "session.new" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"sessionId\":\"cdp-hostile\",\"capabilities\":{{\"goog:cdp\":true}}}}}}")
+                "goog:cdp.sendCommand" -> write_text_frame(&stream, "{{\"type\":\"error\",\"id\":{id},\"error\":\"unknown error\",\"message\":\"CDP_HOSTILE_SECRET wire leak\",\"stacktrace\":\"SECRET STACK\"}}")
+                "session.end" -> {
+                    write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{}}}}")
+                    break
+                }
+                other -> panic("unexpected hostile CDP method {other}: {request}")
+            }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn missing_cdp(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    print("abilities:{session.abilities().cdp()}")
+    cdp :: session.protocol("cdp") ?? return "caught-capability"
+    return "unexpected-open"
+}
+fn hostile_cdp(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    cdp :: session.protocol("cdp") ?? return "unexpected-protocol"
+    cdp.send("Runtime.evaluate", "{{\"expression\":\"1\"}}") ?? return "caught-wire"
+    return "unexpected-success"
+}
+fn run() {
+    print(missing_cdp("__NO_CDP__"))
+    print(hostile_cdp("__HOSTILE__"))
+}
+""".replace("__NO_CDP__", &no_cdp).replace("__HOSTILE__", &hostile_endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_cdp_hostile", "browser_bidi_cdp_hostile", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "abilities:false\ncaught-capability\ncaught-wire\n")
+    assert(!stdout.contains("CDP_HOSTILE_SECRET"), "{stdout}")
+    assert(!stderr.contains("CDP_HOSTILE_SECRET"), "{stderr}")
+    assert(!stdout.contains("SECRET STACK"), "{stdout}")
+    assert(!stderr.contains("SECRET STACK"), "{stderr}")
+    no_cdp_server.join().unwrap()
+    assert_eq(hostile_server.join().unwrap(), ["session.status", "session.new", "goog:cdp.sendCommand", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:2507
+#Test("native_bidi_checked_expert_cdp_integrates_with_page_lifecycle") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..10 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"cdp-life\",\"capabilities\":{{\"goog:cdp\":true}}}}"
+                "browser.createUserContext" -> "{{\"userContext\":\"user-1\"}}"
+                "browsingContext.create" -> "{{\"context\":\"page-1\"}}"
+                "goog:cdp.sendCommand" -> {
+                    assert(request.contains("\"method\":\"Page.enable\""), "page-scoped expert CDP must wrap Page.enable: {request}")
+                    "{{}}"
+                }
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{{}}"
+                other -> panic("unexpected CDP lifecycle method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    print(cdp.send("Page.enable", "{{}}") ?? panic("send"))
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_cdp_lifecycle", "browser_bidi_cdp_lifecycle", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "{{}}\n")
+    assert_eq(server.join().unwrap(), ["session.status", "session.new", "browser.createUserContext", "browsingContext.create", "goog:cdp.sendCommand", "browsingContext.close", "browser.removeUserContext", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:2587
+// D-BROWSER-AUTO1=A (#1193): privacy defaults, isolated contexts, redacted receipt and cleanup.
+#Test("native_bidi_privacy_isolation_receipt_and_cleanup_success") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=PRIVACY_SUCCESS_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        contexts := 0 as U32
+        for _ in 0..20 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"privacy-ok\",\"capabilities\":{{\"browserName\":\"mock\"}}}}"
+                "browser.createUserContext" -> {
+                    contexts += 1
+                    if contexts == 1 { "{{\"userContext\":\"user-1\"}}" } else { "{{\"userContext\":\"user-2\"}}" }
+                }
+                "browsingContext.create" -> {
+                    if request.contains("\"userContext\":\"user-1\"") { "{{\"context\":\"page-1\"}}" } else { "{{\"context\":\"page-2\"}}" }
+                }
+                "storage.setCookie" -> {
+                    assert(request.contains("\"value\":\"SECRET_COOKIE\""), "setCookie carries caller value (not traced): {request}")
+                    assert(!request.contains("PRIVACY_SUCCESS_SECRET"), "endpoint secret must not enter cookie params: {request}")
+                    "{{}}"
+                }
+                "storage.getCookies" -> {
+                    if request.contains("\"context\":\"page-1\"") {
+                        "{{\"cookies\":[{{\"name\":\"session\",\"value\":{{\"type\":\"string\",\"value\":\"SECRET_COOKIE\"}},\"domain\":\"example.test\",\"path\":\"/\"}}]}}"
+                    } else { "{{\"cookies\":[]}}" }
+                }
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{{}}"
+                other -> panic("unexpected privacy success method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    privacy :: session.privacy()
+    print("privacy:{privacy.isolated_profiles()}:{privacy.redact_receipts()}:{privacy.shared_profiles()}")
+    left :: session.context() ?? panic("left")
+    right :: session.context() ?? panic("right")
+    print("isolated:{left.isolated()}:{right.isolated()}")
+    left_hash :: left.user_hash()
+    right_hash :: right.user_hash()
+    distinct :: left_hash != right_hash
+    print("hashes:{distinct}:{left_hash.len()}:{right_hash.len()}")
+    page_left :: left.page() ?? panic("page left")
+    page_right :: right.page() ?? panic("page right")
+    page_left.set_cookie("session", "SECRET_COOKIE", "https://example.test") ?? panic("set")
+    left_cookie :: page_left.cookie("session") ?? panic("left cookie")
+    right_absent :: page_right.cookie("session") ?? "absent"
+    print("cookies:{left_cookie == "SECRET_COOKIE"}:{right_absent == "absent"}")
+    page_left.close() ?? panic("close left page")
+    page_right.close() ?? panic("close right page")
+    left.close() ?? panic("close left")
+    right.close() ?? panic("close right")
+    session.close() ?? panic("close session")
+    receipt :: session.receipt()
+    redacted :: receipt.redacted()
+    no_secret :: receipt.summary().contains("PRIVACY_SUCCESS_SECRET") == false
+    no_cookie :: receipt.summary().contains("SECRET_COOKIE") == false
+    no_endpoint :: receipt.summary().contains("ws://") == false
+    print("receipt:{redacted}:{receipt.isolated()}:{receipt.cleaned()}:{no_secret}:{no_cookie}:{no_endpoint}")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_privacy_success", "browser_bidi_privacy_success", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "privacy:true:true:false\nisolated:true:true\nhashes:true:16:16\ncookies:true:true\nreceipt:true:true:true:true:true:true\n")
+    assert(!stdout.contains("PRIVACY_SUCCESS_SECRET"), "{stdout}")
+    assert(!stderr.contains("PRIVACY_SUCCESS_SECRET"), "{stderr}")
+    assert_eq(server.join().unwrap(), ["session.status", "session.new", "browser.createUserContext", "browser.createUserContext", "browsingContext.create", "browsingContext.create", "storage.setCookie", "storage.getCookies", "storage.getCookies", "browsingContext.close", "browsingContext.close", "browser.removeUserContext", "browser.removeUserContext", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:2732
+// D-BROWSER-AUTO1=A (#1193): hostile wire and closed-session receipts stay redacted.
+#Test("native_bidi_privacy_receipt_hostile_and_closed_paths") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    hostile_endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=PRIVACY_HOSTILE_SECRET"
+    hostile_server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..6 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            if method == {
+                "session.status" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"ready\":true,\"message\":\"ready\"}}}}")
+                "session.new" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"sessionId\":\"privacy-hostile\",\"capabilities\":{{}}}}}}")
+                "browser.createUserContext" -> write_text_frame(&stream, "{{\"type\":\"error\",\"id\":{id},\"error\":\"unknown error\",\"message\":\"PRIVACY_HOSTILE_SECRET page dump\",\"stacktrace\":\"SECRET STACK\"}}")
+                "session.end" -> {
+                    write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{}}}}")
+                    break
+                }
+                other -> panic("unexpected privacy hostile method {other}: {request}")
+            }
+        }
+        methods
+    })
+    closed :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    closed_endpoint :: "ws://{closed.local_addr().unwrap()}/session?token=PRIVACY_CLOSED_SECRET"
+    closed_server :: thread.spawn(fn() {
+        (stream, _) := closed.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..5 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"privacy-closed\",\"capabilities\":{{}}}}"
+                "session.end" -> "{{}}"
+                other -> panic("unexpected privacy closed method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn hostile(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.context() ?? return "caught-context"
+    return "unexpected-success"
+}
+fn closed_receipt(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.close() ?? return "unexpected-close"
+    loop attempt in [1] {
+        session.context() ?? next
+        return "unexpected-open"
+    }
+    receipt :: session.receipt()
+    privacy :: session.privacy()
+    ok :: receipt.redacted() && receipt.cleaned() && privacy.redact_receipts()
+    leak :: receipt.summary().contains("PRIVACY_CLOSED_SECRET")
+    if ok && leak == false { return "cleaned" }
+    return "bad-receipt"
+}
+fn run() {
+    print(hostile("__HOSTILE__"))
+    print(closed_receipt("__CLOSED__"))
+}
+""".replace("__HOSTILE__", &hostile_endpoint).replace("__CLOSED__", &closed_endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_privacy_hostile", "browser_bidi_privacy_hostile", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "caught-context\ncleaned\n")
+    assert(!stdout.contains("PRIVACY_HOSTILE_SECRET"), "{stdout}")
+    assert(!stderr.contains("PRIVACY_HOSTILE_SECRET"), "{stderr}")
+    assert(!stdout.contains("PRIVACY_CLOSED_SECRET"), "{stdout}")
+    assert(!stderr.contains("PRIVACY_CLOSED_SECRET"), "{stderr}")
+    assert(!stdout.contains("SECRET STACK"), "{stdout}")
+    assert(!stderr.contains("SECRET STACK"), "{stderr}")
+    assert_eq(hostile_server.join().unwrap(), ["session.status", "session.new", "browser.createUserContext", "session.end"])
+    assert_eq(closed_server.join().unwrap(), ["session.status", "session.new", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:2879
+// D-BROWSER-AUTO1=A (#1193): lifecycle leaves a cleaned redacted receipt.
+#Test("native_bidi_privacy_receipt_integrates_with_lifecycle") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..10 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"privacy-life\",\"capabilities\":{{}}}}"
+                "browser.createUserContext" -> "{{\"userContext\":\"user-life\"}}"
+                "browsingContext.create" -> "{{\"context\":\"page-life\"}}"
+                "browsingContext.navigate" -> "{{}}"
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{{}}"
+                other -> panic("unexpected privacy lifecycle method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    context :: session.context() ?? panic("context")
+    page :: context.page() ?? panic("page")
+    page.goto("https://example.test/app") ?? panic("goto")
+    print("hash:{context.user_hash().len()}")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+    receipt :: session.receipt()
+    print("done:{receipt.cleaned()}:{receipt.redacted()}:{receipt.isolated()}")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_privacy_lifecycle", "browser_bidi_privacy_lifecycle", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "hash:16\ndone:true:true:true\n")
+    assert_eq(server.join().unwrap(), ["session.status", "session.new", "browser.createUserContext", "browsingContext.create", "browsingContext.navigate", "browsingContext.close", "browser.removeUserContext", "session.end"])
+}
+// Rust: tests/browser_bidi.rs:2956
+// D-BROWSER-AUTO1=A (#1194): production-path closeout surface matrix.
+#Test("native_bidi_browser_surface_matrix_success") {
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    endpoint :: "ws://{listener.local_addr().unwrap()}/session?token=MATRIX_SUCCESS_SECRET"
+    server :: thread.spawn(fn() {
+        (stream, _) := listener.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        creates := 0 as U32
+        for _ in 0..24 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> {
+                    assert(!request.contains("MATRIX_SUCCESS_SECRET"), "endpoint secret must not enter session.new: {request}")
+                    "{{\"sessionId\":\"matrix\",\"capabilities\":{{\"goog:cdp\":true,\"browserName\":\"mock\"}}}}"
+                }
+                "browser.createUserContext" -> "{{\"userContext\":\"user-matrix\"}}"
+                "browsingContext.create" -> {
+                    creates += 1
+                    assert(request.contains("\"type\":\"tab\""), "page/tab create must request type=tab: {request}")
+                    if creates == 1 { "{{\"context\":\"page-1\"}}" } else { "{{\"context\":\"tab-2\"}}" }
+                }
+                "browsingContext.navigate" -> "{{}}"
+                "browsingContext.locateNodes" -> "{{\"nodes\":[{{\"sharedId\":\"node-save\",\"type\":\"node\"}}]}}"
+                "input.performActions" -> "{{}}"
+                "storage.setCookie" -> {
+                    assert(request.contains("\"value\":\"agent-token\""), "setCookie must carry caller value: {request}")
+                    assert(!request.contains("MATRIX_SUCCESS_SECRET"), "endpoint secret must not enter cookie params: {request}")
+                    "{{}}"
+                }
+                "goog:cdp.sendCommand" -> {
+                    assert(request.contains("\"method\":\"Page.enable\""), "checked CDP must wrap Page.enable: {request}")
+                    "{{}}"
+                }
+                "browsingContext.close" | "browser.removeUserContext" | "session.end" -> "{{}}"
+                other -> panic("unexpected matrix method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn run() {
+    profile :: browser.profile("bidi-2025.5") ?? panic("profile")
+    timeout :: browser.timeout(500) ?? panic("timeout")
+    session :: browser.connect_profile("__ENDPOINT__", profile, timeout) ?? panic("connect")
+    privacy :: session.privacy()
+    abilities :: session.abilities()
+    print("privacy:{privacy.isolated_profiles()}:{privacy.shared_profiles()}:{privacy.redact_receipts()}")
+    print("abilities:{abilities.bidi()}:{abilities.cdp()}:{abilities.profile()}")
+    context :: session.context() ?? panic("context")
+    print("isolated:{context.isolated()}")
+    page :: context.page() ?? panic("page")
+    tab :: context.tab() ?? panic("tab")
+    page.goto("https://example.test/agent") ?? panic("goto")
+    save :: page.get_by_role("button", "Save")
+    save.wait(timeout) ?? panic("wait")
+    save.click() ?? panic("click")
+    page.set_cookie("session", "agent-token", "example.test") ?? panic("cookie")
+    cdp :: session.protocol("cdp") ?? panic("cdp")
+    print(cdp.send("Page.enable", "{{}}") ?? panic("cdp send"))
+    tab.close() ?? panic("tab close")
+    page.close() ?? panic("page close")
+    context.close() ?? panic("context close")
+    session.close() ?? panic("session close")
+    receipt :: session.receipt()
+    leak :: receipt.summary().contains("MATRIX_SUCCESS_SECRET")
+    print("receipt:{receipt.cleaned()}:{receipt.redacted()}:{receipt.isolated()}:{leak}")
+}
+""".replace("__ENDPOINT__", &endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_matrix", "browser_bidi_matrix", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "privacy:true:false:true\nabilities:true:true:bidi-2025.5\nisolated:true\n{{}}\nreceipt:true:true:true:false\n")
+    assert(!stdout.contains("MATRIX_SUCCESS_SECRET"), "{stdout}")
+    assert(!stderr.contains("MATRIX_SUCCESS_SECRET"), "{stderr}")
+    methods :: server.join().unwrap()
+    assert(methods.iter().any(fn(m) { m == "browsingContext.locateNodes" }), "matrix must exercise locators: {methods:?}")
+    assert(methods.iter().any(fn(m) { m == "input.performActions" }), "matrix must exercise actions: {methods:?}")
+    assert(methods.iter().any(fn(m) { m == "storage.setCookie" }), "matrix must exercise artifacts: {methods:?}")
+    assert(methods.iter().any(fn(m) { m == "goog:cdp.sendCommand" }), "matrix must exercise checked CDP: {methods:?}")
+    assert_eq(methods.last(), Val("session.end"))
+    assert_eq(methods.iter().filter(fn(m) { m == "browsingContext.create" }).count(), 2, "page + tab creates: {methods:?}")
+}
+// Rust: tests/browser_bidi.rs:3111
+// D-BROWSER-AUTO1=A (#1194): hostile matrix fails closed without leaks.
+#Test("native_bidi_browser_surface_hostile_matrix") {
+    (no_cdp, no_cdp_server) :: hostile_listener(HostileReply.NoCdp)
+    wire :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    wire_endpoint :: "ws://{wire.local_addr().unwrap()}/session?token=MATRIX_HOSTILE_SECRET"
+    wire_server :: thread.spawn(fn() {
+        (stream, _) := wire.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..6 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            if method == {
+                "session.status" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"ready\":true,\"message\":\"ready\"}}}}")
+                "session.new" -> write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{\"sessionId\":\"hostile\",\"capabilities\":{{\"goog:cdp\":true}}}}}}")
+                "browser.createUserContext" -> write_text_frame(&stream, "{{\"type\":\"error\",\"id\":{id},\"error\":\"unknown error\",\"message\":\"MATRIX_HOSTILE_SECRET page dump\",\"stacktrace\":\"SECRET STACK\"}}")
+                "session.end" -> {
+                    write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{{}}}}")
+                    break
+                }
+                other -> panic("unexpected hostile-matrix method {other}: {request}")
+            }
+        }
+        methods
+    })
+    closed :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    closed_endpoint :: "ws://{closed.local_addr().unwrap()}/session?token=MATRIX_CLOSED_SECRET"
+    closed_server :: thread.spawn(fn() {
+        (stream, _) := closed.accept().unwrap()
+        accept_websocket(&stream)
+        methods := [String]{}
+        for _ in 0..5 {
+            request :: read_text_frame(&stream)
+            id :: field(&request, "id")
+            method :: field(&request, "method")
+            methods.push(method.clone())
+            result :: if method == {
+                "session.status" -> "{{\"ready\":true,\"message\":\"ready\"}}"
+                "session.new" -> "{{\"sessionId\":\"closed-matrix\",\"capabilities\":{{}}}}"
+                "session.end" -> "{{}}"
+                other -> panic("unexpected closed-matrix method {other}: {request}")
+            }
+            write_text_frame(&stream, "{{\"type\":\"success\",\"id\":{id},\"result\":{result}}}")
+            if method == "session.end" { break }
+        }
+        methods
+    })
+    source :: """
+use core.web.browser as browser
+fn bad_profile() -> String {
+    browser.profile("not-a-profile") ?? return "caught-profile"
+    return "unexpected-profile"
+}
+fn missing_cdp(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.protocol("cdp") ?? return "caught-cdp"
+    return "unexpected-cdp"
+}
+fn wire_error(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.context() ?? return "caught-wire"
+    return "unexpected-wire"
+}
+fn closed_ops(endpoint: String) -> String {
+    profile :: browser.profile("bidi-2025.5") ?? return "unexpected-profile"
+    timeout :: browser.timeout(250) ?? return "unexpected-timeout"
+    session :: browser.connect_profile(endpoint, profile, timeout) ?? return "unexpected-connect"
+    session.close() ?? return "unexpected-close"
+    loop attempt in [1] {
+        session.context() ?? next
+        return "unexpected-open"
+    }
+    receipt :: session.receipt()
+    if receipt.cleaned() && receipt.redacted() { return "caught-closed" }
+    return "bad-receipt"
+}
+fn run() {
+    print(bad_profile())
+    print(missing_cdp("__NO_CDP__"))
+    print(wire_error("__WIRE__"))
+    print(closed_ops("__CLOSED__"))
+}
+""".replace("__NO_CDP__", &no_cdp).replace("__WIRE__", &wire_endpoint).replace("__CLOSED__", &closed_endpoint)
+    (code, stdout, stderr) :: common.build_and_run("jet_browser_bidi_hostile_matrix", "browser_bidi_hostile_matrix", &source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "caught-profile\ncaught-cdp\ncaught-wire\ncaught-closed\n")
+    for secret in ["MATRIX_HOSTILE_SECRET", "MATRIX_CLOSED_SECRET", "SECRET STACK"] {
+        assert(!stdout.contains(secret), "{secret} leaked in stdout:\n{stdout}")
+        assert(!stderr.contains(secret), "{secret} leaked in stderr:\n{stderr}")
+    }
+    no_cdp_server.join().unwrap()
+    assert_eq(wire_server.join().unwrap(), ["session.status", "session.new", "browser.createUserContext", "session.end"])
+    assert_eq(closed_server.join().unwrap(), ["session.status", "session.new", "session.end"])
+}

@@ -1,0 +1,139 @@
+use std.env as env
+use std.fs as fs
+use std.io as io
+use std.process as process
+use std.process.[Command]
+use std.thread as thread
+use std.time.[Duration]
+use core.sys.target.[selected_os, selected_family]
+
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:8
+fn main() -> {
+    args := env.args()
+    _program :: args.next()
+    if args.next() == {
+        "terminal" -> terminal()
+        "tree" -> tree(args.next().expect("tree needs a pid file"))
+        "descendant" -> descendant(args.next().expect("descendant needs a pid file"))
+        "output" -> output(args.next().unwrap_or("large"))
+        "cpu" -> cpu()
+        "memory" -> memory()
+        "files" -> files()
+        _ -> process.exit(2)
+    }
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:23
+fn output(size: String) -> {
+    bytes :: if size == "small" { b"ok\n" } else { b"0123456789abcdef0123456789abcdef\n" }
+    // GATE #4494: actual process stdout.
+    io.stdout().write_all(bytes).expect("write process output")
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:32
+fn cpu() -> {
+    // GATE #4494: native CPU spin hint; deliberately never terminates.
+    loop { std.hint.spin_loop() }
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:38
+fn memory() -> {
+    blocks := [[U8]]{}
+    loop {
+        block := [U8].repeat(0, 256 * 1024)
+        block[0] = 1
+        blocks.push(^block)
+        thread.sleep(Duration.from_millis(1))
+    }
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:48
+fn files() -> {
+    handles := [fs.File]{}
+    loop {
+        // GATE #4483: selected target device name; #4494 native retained file descriptors.
+        if fs.File.open(if selected_os() == "windows" { "NUL" } else { "/dev/null" }) == {
+            .Ok(handle) -> handles.push(^handle)
+            .Err(_) -> thread.sleep(Duration.from_millis(1))
+        }
+    }
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:58
+fn terminal() -> {
+    if !io.stdin().is_terminal() || !io.stdout().is_terminal() { process.exit(41) }
+    stdout := io.stdout().lock()
+    stdout.write_all(b"ready\n").expect("write terminal readiness")
+    stdout.flush().expect("flush terminal readiness")
+    input := ""
+    io.stdin().read_line(&input).expect("read terminal input")
+    line := input.trim_end_matches(['\r', '\n']) // #4303
+    stdout.write_all("input:{line}\n".as_bytes()).expect("write terminal input")
+    stdout.write_all(b"\x1b[31mcontrol\x1b[0m\n").expect("write terminal control bytes")
+    (rows, cols) :: terminal_size().expect("read terminal size")
+    stdout.write_all("size:{rows}x{cols}\n".as_bytes()).expect("write terminal size")
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:80
+fn tree(pid_file: String) -> {
+    executable :: env.current_exe().expect("find process fixture")
+    _ :: Command.new(executable).args(["descendant", pid_file]).spawn().expect("spawn descendant")
+    loop { thread.sleep(Duration.from_secs(1)) }
+}
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:91
+fn descendant(pid_file: String) -> {
+    fs.write(pid_file, process.id().to_string()).expect("write descendant pid")
+    loop { thread.sleep(Duration.from_secs(1)) }
+}
+
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:104
+#Repr(C)
+struct WinSize { rows: U16, cols: U16, xpixel: U16, ypixel: U16 }
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:112
+TIOCGWINSZ_LINUX: U64 :: 0x5413
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:114
+TIOCGWINSZ_OTHER_UNIX: U64 :: 0x4008_7468
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:117
+// GATE #4494: native Unix variadic ioctl boundary, ABI pointer to initialized WinSize.
+#FFI(c)
+fn ioctl(fd: I32, request: U64, arg: *U8) -> I32
+
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:146
+#Repr(C)
+struct Coord { x: I16, y: I16 }
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:151
+#Repr(C)
+struct SmallRect { left: I16, top: I16, right: I16, bottom: I16 }
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:158
+#Repr(C)
+struct ConsoleScreenBufferInfo { size: Coord, cursor: Coord, attributes: U16, window: SmallRect, maximum: Coord }
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:167
+STD_OUTPUT_HANDLE: U32 :: (-11 as I32) as U32
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:169
+// GATE #4494: Windows system calling convention and real console API.
+#FFI(system)
+fn GetConsoleScreenBufferInfo(handle: *U8, info: *ConsoleScreenBufferInfo) -> I32
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:173
+#FFI(system)
+fn GetStdHandle(handle: U32) -> *U8
+
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:99
+// Rust: tests/fixtures/process_sessions/session_fixture.rs:143
+fn terminal_size() -> (U16, U16) io.Error! {
+    // GATE #4483: compile/link the applicable native declarations for selected target.
+    if selected_family() == "unix" {
+        stdout :: io.stdout()
+        size := WinSize { rows: 0, cols: 0, xpixel: 0, ypixel: 0 }
+        request :: if selected_os() == "linux" { TIOCGWINSZ_LINUX } else { TIOCGWINSZ_OTHER_UNIX }
+        // GATE #4494: stdout stays open; ioctl writes one kernel-sized initialized winsize.
+        result :: #Unsafe("stdout retained; initialized WinSize buffer matches native ioctl layout") {
+            ioctl(stdout.as_raw_fd(), request, (&size as *WinSize).cast::<U8>())
+        }
+        if result != 0 { return .Err(io.Error.last_os_error()) }
+        return .Ok((size.rows, size.cols))
+    } else {
+        // The other reference cfg arm is Windows; target publication limits this fixture to Unix/Windows.
+        // GATE #4494: owned stdout handle, initialized native screen-buffer record.
+        handle :: #Unsafe("process owns standard output handle") { GetStdHandle(STD_OUTPUT_HANDLE) }
+        info := ConsoleScreenBufferInfo { size: Coord { x: 0, y: 0 }, cursor: Coord { x: 0, y: 0 }, attributes: 0, window: SmallRect { left: 0, top: 0, right: 0, bottom: 0 }, maximum: Coord { x: 0, y: 0 } }
+        result :: #Unsafe("Windows fills one initialized screen-buffer record") { GetConsoleScreenBufferInfo(handle, &info) }
+        if result == 0 { return .Err(io.Error.last_os_error()) }
+        cols :: (info.window.right as I32 - info.window.left as I32 + 1).try_into::<U16>().map_err((_) -> io.Error.new(io.ErrorKind.Other, "invalid console width"))?
+        rows :: (info.window.bottom as I32 - info.window.top as I32 + 1).try_into::<U16>().map_err((_) -> io.Error.new(io.ErrorKind.Other, "invalid console height"))?
+        return .Ok((rows, cols))
+    }
+}

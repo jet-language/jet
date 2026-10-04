@@ -1,0 +1,45 @@
+// Production core.compute CPU-oracle fixture.
+// Rust: tests/compute_parity.rs:13
+const SOURCE: String = """
+use core.compute as compute
+fn run() -> {
+    a :: compute.from_list([1.0, 2.0, 3.0]) ?? panic("a")
+    b :: compute.from_list([4.0, 5.0, 6.0]) ?? panic("b")
+    sum :: compute.add(a, b) ?? panic("sum")
+    print("sum:{compute.to_list(sum)}")
+    matrix :: compute.full([2, 2], 2.0) ?? panic("matrix")
+    identity :: compute.eye(2) ?? panic("eye")
+    product :: compute.matmul(matrix, identity) ?? panic("matmul")
+    print("product:{compute.to_list(product)}")
+    tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+    compute.set(&tensor, [1], 9.0) ?? panic("set")
+    print("edited:{compute.to_list(tensor)}")
+    wire :: compute.serialize(product) ?? panic("wire")
+    round :: compute.deserialize(wire) ?? panic("round")
+    print("round:{compute.to_list(round)}")
+    compute.deserialize("shape=2;data=1") ? value -> { print("corrupt:accepted") } ! error -> { print("corrupt:rejected") }
+    compute.deserialize("shape=02;data=1.0,1.0") ? value -> { print("axis:accepted") } ! error -> { print("axis:rejected") }
+    compute.deserialize("shape=1;data=1.0;data=1.0") ? value -> { print("field:accepted") } ! error -> { print("field:rejected") }
+    compute.deserialize("shape=1;data=1.0;profile=F64Strict+Reproducible;checksum=0000000000000000") ? value -> { print("checksum:accepted") } ! error -> { print("checksum:rejected") }
+    mse_left :: compute.full([2], 1.0) ?? panic("mse_left")
+    mse_right :: compute.full([3], 1.0) ?? panic("mse_right")
+    compute.mse_loss(mse_left, mse_right) ? value -> { print("mse_shape:accepted") } ! error -> { print("mse_shape:rejected") }
+    f32_seed :: compute.matrix(1, 1, 1.0) ?? panic("f32_seed")
+    f32_tensor :: compute.matmul_f32_tile(f32_seed, f32_seed) ?? panic("f32_tensor")
+    f64_target :: compute.full([1], 1.0) ?? panic("f64_target")
+    compute.mse_loss(f32_tensor, f64_target) ? value -> { print("mse_profile:accepted") } ! error -> { print("mse_profile:rejected") }
+    compute.sgd_step(mse_left, mse_left, -1.0) ? value -> { print("negative_lr:accepted") } ! error -> { print("negative_lr:rejected") }
+    compute.kernel_bounds_ok([2, 3], [2, 0]) ? value -> { print("bounds:accepted") } ! error -> { print("bounds:rejected") }
+    empty :: compute.full([0, 3], 1.0) ?? panic("empty")
+    print("empty:{compute.shape(empty)}:{compute.to_list(empty)}")
+    empty_other :: compute.full([1, 3], 2.0) ?? panic("empty_other")
+    compute.add(empty, empty_other) ? value -> { print("empty_broadcast:{compute.shape(value)}:{compute.to_list(value)}") } ! error -> { print("empty_broadcast:rejected") }
+    left_shape :: compute.full([2, 2], 1.0) ?? panic("left_shape")
+    right_shape :: compute.full([3], 1.0) ?? panic("right_shape")
+    compute.add(left_shape, right_shape) ? value -> { print("broadcast:accepted") } ! error -> { print("broadcast:rejected") }
+    compute.full([9223372036854775807, 2], 1.0) ? value -> { print("overflow:accepted") } ! error -> { print("overflow:rejected") }
+    compute.get(tensor, [4]) ? value -> { print("tensor_bounds:accepted") } ! error -> { print("tensor_bounds:rejected") }
+}
+"""
+// Rust: tests/compute_parity.rs:79,93
+const EXPECTED: String = "sum:[5.0, 7.0, 9.0]\nproduct:[2.0, 2.0, 2.0, 2.0]\nedited:[1.0, 9.0, 3.0, 4.0]\nround:[2.0, 2.0, 2.0, 2.0]\ncorrupt:rejected\naxis:rejected\nfield:rejected\nchecksum:rejected\nmse_shape:rejected\nmse_profile:rejected\nnegative_lr:rejected\nbounds:rejected\nempty:[0, 3]:[]\nempty_broadcast:[0, 3]:[]\nbroadcast:rejected\noverflow:rejected\ntensor_bounds:rejected\n"

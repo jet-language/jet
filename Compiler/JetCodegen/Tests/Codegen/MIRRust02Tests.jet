@@ -1,0 +1,121 @@
+use jet_codegen.Codegen.MIRRust02.[unwrap_value_slots, core_native_probe_name, is_canonical_core_native_type, is_source_owned_core_web_query_enum, native_core_query_enum_trait_impl, native_core_query_enum_variant_name, native_net_error_detail_field, is_net_tls_client_bridge_call]
+use jet_codegen.Codegen as codegen
+use jet_foundation.MIR.MirSymbol
+use jet_foundation.Syntax.GENERATED_NAME_PREFIX
+
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:2532
+#Test("read_only_block_slots_become_plain_lets") {
+    out := [
+        "    let mut __jet_v_1: Option<String> = None;\n",
+        "  let mut __jet_v_2: Option<bool> = Some(f());\n",
+        "  if (__jet_v_2.as_ref().expect(\"MIR value\")).clone() {\n",
+        "  let mut __jet_v_5: Option<bool> = Some(!(__jet_v_2.as_ref().expect(\"MIR value\")).clone());\n",
+        "  m((__jet_v_5.as_ref().expect(\"MIR value\")).clone());\n",
+        "   let mut __jet_v_3: Option<String> = Some(g());\n",
+        "   h(__jet_v_3.as_ref().expect(\"MIR value\"), (__jet_v_3.as_ref().expect(\"MIR value\")).clone());\n",
+        "   let mut __jet_v_4: Option<String> = Some(g());\n",
+        "   k(__jet_v_4.take().expect(\"MIR value\"));\n",
+        "   __jet_v_1 = Some(g());\n", "  }\n"
+    ].concat()
+    unwrap_value_slots(&out, 0)
+    expected :: [
+        "    let mut __jet_v_1: Option<String> = None;\n",
+        "  let __jet_v_2: bool = f();\n", "  if __jet_v_2 {\n",
+        "  let __jet_v_5: bool = !__jet_v_2;\n", "  m(__jet_v_5);\n",
+        "   let __jet_v_3: String = g();\n", "   h((&__jet_v_3), __jet_v_3.clone());\n",
+        "   let mut __jet_v_4: Option<String> = Some(g());\n",
+        "   k(__jet_v_4.take().expect(\"MIR value\"));\n",
+        "   __jet_v_1 = Some(g());\n", "  }\n"
+    ].concat()
+    assert_eq(out, expected)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3098
+#Test("imported_core_native_names_project_without_matching_user_qualified_names") {
+    compute_error :: "<corelib>/Core/compute::Core/compute/compute.jet::ComputeError"
+    vjp_run :: "<corelib>/Core/compute::Core/compute/compute.jet::VJPRun"
+    query_mode :: "<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode"
+    mutation_status :: "<corelib>/Core/web::Core/web/query.jet::WebMutationStatus"
+    query_status :: "<corelib>/Core/web::Core/web/query.jet::WebQueryStatus"
+    for source_type in [compute_error, vjp_run,
+        "<corelib>/Core/compute::Core/compute/compute.jet::ComputeDevice",
+        "<corelib>/Core/compute::Core/compute/compute.jet::Tensor",
+        "<corelib>/Core/compute::Core/compute/compute.jet::ComputeStream",
+        "<corelib>/Core/compute::Core/compute/compute.jet::SparseTensor"] {
+        assert_eq(core_native_probe_name(source_type), source_type)
+        assert(!is_canonical_core_native_type(source_type))
+    }
+    for source_record in ["<corelib>/Core/web::Core/web/query.jet::WebQuery",
+        "<corelib>/Core/web::Core/web/query.jet::WebQueryState",
+        "<corelib>/Core/web::Core/web/query.jet::WebMutationState"] {
+        assert_eq(core_native_probe_name(source_record), source_record)
+        assert(!is_canonical_core_native_type(source_record))
+    }
+    assert_eq(codegen.root_prelude_rust_type_name("WebQuery"), Some("JetWebQuery"))
+    assert_eq(codegen.root_prelude_rust_type_name("WebQueryState"), Some("JetWebQueryState"))
+    assert_eq(codegen.root_prelude_rust_type_name("WebMutationState"), Some("JetWebMutationState"))
+    assert_eq(codegen.compute_handle_rust_type("ComputeError"), Some("JetComputeError"))
+    assert_eq(codegen.compute_handle_rust_type("VJPRun"), Some("JetComputeVjpRun"))
+    assert_eq(codegen.compute_handle_rust_type("Tensor"), Some("JetTensor"))
+    assert_eq(codegen.root_prelude_rust_type_name(core_native_probe_name(query_mode)), Some("JetWebQueryNetworkMode"))
+    assert_eq(codegen.root_prelude_rust_type_name(core_native_probe_name(mutation_status)), Some("JetWebMutationStatus"))
+    assert_eq(codegen.root_prelude_rust_type_name(core_native_probe_name(query_status)), Some("JetWebQueryStatus"))
+    assert(is_canonical_core_native_type(query_mode))
+    assert(is_canonical_core_native_type(mutation_status))
+    assert(is_canonical_core_native_type(query_status))
+    assert(!is_canonical_core_native_type("<corelib>/Core/web::Core/web/query.jet::WebQueryError"))
+    source_owned_policy :: "<corelib>/Core/sync::Core/sync/policy.jet::RowPolicy"
+    assert_eq(core_native_probe_name(source_owned_policy), source_owned_policy)
+    assert(!is_canonical_core_native_type(source_owned_policy))
+    for source_record in ["<corelib>/Core/net::Core/net/net.jet::SocketAddr",
+        "<corelib>/Core/net::Core/net/net.jet::UDPPacket",
+        "<corelib>/Core/net::Core/net/net.jet::UnixListener",
+        "<corelib>/Core/net::Core/net/net.jet::UnixStream",
+        "<corelib>/Core/net/tls::Core/net/tls.jet::TLSCertificate",
+        "<corelib>/Core/net/tls::Core/net/tls.jet::TLSPeerIdentity"] {
+        assert_eq(core_native_probe_name(source_record), source_record)
+        assert(!is_canonical_core_native_type(source_record))
+    }
+    user_name :: "app::ComputeError"
+    assert_eq(core_native_probe_name(user_name), user_name)
+    assert(!is_canonical_core_native_type(user_name))
+    assert_eq(codegen.compute_handle_rust_type(core_native_probe_name(user_name)), None)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3190
+#Test("native_query_enum_traits_keep_native_carriers_and_source_variant_names") {
+    cases :: [
+        ("<corelib>/Core/web::Core/web/query.jet::WebQueryNetworkMode", "JetWebQueryNetworkMode", ["Online", "Always", "OfflineFirst"]),
+        ("<corelib>/Core/web::Core/web/query.jet::WebMutationStatus", "JetWebMutationStatus", ["Idle", "Pending", "Success", "Error", "Settled"]),
+        ("<corelib>/Core/web::Core/web/query.jet::WebQueryStatus", "JetWebQueryStatus", ["Pending", "Fresh", "Stale", "Fetching", "Error", "Offline"])
+    ]
+    for (source_type, native_type, variants) in cases {
+        assert(is_source_owned_core_web_query_enum(source_type))
+        for (rust_trait, value_method) in [("JetShow", "jet_show"), ("JetDebug", "jet_debug")] {
+            actual :: native_core_query_enum_trait_impl(native_type, rust_trait, value_method, variants.iter())
+            expected := "impl {rust_trait} for {native_type} {{\n    fn {value_method}(&self) -> String {{\n        match self {{\n"
+            for variant in variants { expected.push_str(&"            Self::{variant} => jet_debug_variant(\"{variant}\", None),\n") }
+            expected.push_str("        }\n    }\n}\n\n")
+            assert_eq(actual, expected)
+        }
+    }
+    assert_eq(native_core_query_enum_variant_name(&"{GENERATED_NAME_PREFIX}OfflineFirst"), "OfflineFirst")
+    assert(!is_source_owned_core_web_query_enum("<corelib>/Core/web::Core/web/query.jet::WebQueryError"))
+    assert(!is_source_owned_core_web_query_enum("app::Core/web/query.jet::WebQueryStatus"))
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3250
+#Test("net_error_detail_fields_adapt_only_the_native_carrier") {
+    native_type :: "JetNetErrorDetail"
+    option :: native_net_error_detail_field(native_type, "address", "checked", fn(_) { String.new() })
+    assert_eq(option.as_deref(), Some("(checked).ok()"))
+    name :: native_net_error_detail_field(native_type, "name", "checked", fn(_) { String.new() })
+    assert_eq(name.as_deref(), Some("(checked).ok()"))
+    optional_int :: native_net_error_detail_field(native_type, "os_code", "checked", fn(value) { "native_i64({value})" })
+    assert_eq(optional_int.as_deref(), Some("(checked).ok().map(|value| native_i64(value))"))
+    assert_eq(native_net_error_detail_field(native_type, "message", "checked", fn(_) { String.new() }), None)
+    assert_eq(native_net_error_detail_field("app::NetErrorDetail", "address", "checked", fn(_) { String.new() }), None)
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:3282
+#Test("net_tls_client_bridge_matches_prelude_and_runtime_symbols") {
+    assert(is_net_tls_client_bridge_call(&MirSymbol.Prelude("jet_net_tls_client")))
+    assert(is_net_tls_client_bridge_call(&MirSymbol.Runtime("jet_net_tls_client")))
+    assert(!is_net_tls_client_bridge_call(&MirSymbol.Runtime("jet_net_tls_server")))
+}

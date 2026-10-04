@@ -1,0 +1,237 @@
+use jet_foundation.Tests.Integration.Observe.build_and_run_debug
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet.compile
+
+// Rust: tests/observe.rs:18
+#Test("structured_log_json_fields") {
+    if !common.have_rustc() { return }
+    src :: "\nuse core.log as log\nfn run() {{\n    log.set_level(\"debug\")\n    log.info(\"hello world\")\n    log.warn(\"disk low\")\n    log.error(\"connection lost\")\n    log.debug(\"trace detail\")\n}}\n"
+    (code, _stdout, stderr) :: build_and_run_debug("log_json", src)
+    assert_eq(code, 0, "program should exit cleanly; stderr:\n{stderr}")
+    lines :: stderr.lines().collect()
+    assert_eq(lines.len(), 4, "expected 4 log lines, got:\n{stderr}")
+    for line in &lines {
+        assert(line.starts_with('{') && line.ends_with('}'), "log line is not a JSON object: {line}")
+        assert(line.contains("\"level\""), "missing 'level' field: {line}")
+        assert(line.contains("\"body\""), "missing 'body' field: {line}")
+        assert(line.contains("\"ts\":"), "missing 'ts' field: {line}")
+    }
+    assert(lines[0].contains("\"level\":\"info\"") && lines[0].contains("\"body\":\"hello world\""), "info line wrong: {lines[0]}")
+    assert(lines[1].contains("\"level\":\"warn\"") && lines[1].contains("\"body\":\"disk low\""), "warn line wrong: {lines[1]}")
+    assert(lines[2].contains("\"level\":\"error\"") && lines[2].contains("\"body\":\"connection lost\""), "error line wrong: {lines[2]}")
+    assert(lines[3].contains("\"level\":\"debug\"") && lines[3].contains("\"body\":\"trace detail\""), "debug line wrong: {lines[3]}")
+}
+// Rust: tests/observe.rs:81
+#Test("structured_log_level_filter") {
+    if !common.have_rustc() { return }
+    src :: "\nuse core.log as log\nfn run() {{\n    log.info(\"visible\")\n    log.debug(\"hidden\")\n}}\n"
+    (_code, _stdout, stderr) :: build_and_run_debug("log_filter", src)
+    lines :: stderr.lines().filter(|l| -> !l.is_empty()).collect()
+    assert_eq(lines.len(), 1, "expected only 1 log line at info level, got:\n{stderr}")
+    assert(lines[0].contains("\"level\":\"info\""), "wrong level: {lines[0]}")
+}
+// Rust: tests/observe.rs:111
+#Test("structured_log_trace_id") {
+    if !common.have_rustc() { return }
+    src :: "\nuse core.log as log\nfn run() {{\n    log.set_trace_id(\"req-abc-123\")\n    log.info(\"with trace\")\n}}\n"
+    for (tier, (code, _stdout, stderr)) in [
+        ("native", build_and_run_debug("log_trace_id", src)),
+        ("default", tir_support.jit_run("log_trace_id", src)),
+        ("interpret", tir_support.interpreter_run("log_trace_id", src))
+    ] {
+        assert_eq(code, 0, "{tier} failed:\n{stderr}")
+        lines :: stderr.lines().filter(|l| -> l.starts_with('{')).collect()
+        assert_eq(lines.len(), 1, "{tier} stderr:\n{stderr}")
+        assert(lines[0].contains("\"trace_id\":\"req-abc-123\""), "{tier} trace_id missing from log line: {lines[0]}")
+    }
+}
+// Rust: tests/observe.rs:141
+#Test("structured_log_fields_and_span_context") {
+    if !common.have_rustc() { return }
+    src :: "\nuse core.log as log\nfn run() {{\n    log.setup(\"json\")\n    log.set_trace_id(\"req-1\")\n    span :: log.span(\"request\")\n    log.enter(span)\n    log.info_fields(\"served\", [\n        log.field(\"route\", \"/health\"),\n        log.int(\"status\", 200),\n        log.bool(\"cache\", true),\n        log.counter(\"requests\", 1),\n    ])\n    log.close(span)\n}}\n"
+    (_code, _stdout, stderr) :: build_and_run_debug("log_structured_fields", src)
+    lines :: stderr.lines().filter(|l| -> l.starts_with('{')).collect()
+    assert_eq(lines.len(), 1, "stderr:\n{stderr}")
+    line :: lines[0]
+    assert(line.contains("\"trace_id\":\"req-1\""), "trace missing: {line}")
+    assert(line.contains("\"route\":\"/health\""), "field missing: {line}")
+    assert(line.contains("\"status\":200"), "int field missing: {line}")
+    assert(line.contains("\"cache\":true"), "bool field missing: {line}")
+    assert(line.contains("\"metric.counter.requests\":1"), "counter missing: {line}")
+    assert(line.contains("\"spans\":[\"request\"]"), "span missing: {line}")
+}
+// Rust: tests/observe.rs:191
+#Test("structured_log_json_escape") {
+    if !common.have_rustc() { return }
+    src :: "\nuse core.log as log\nfn run() {{\n    log.info(\"say \\\"hello\\\"\")\n}}\n"
+    (_code, _stdout, stderr) :: build_and_run_debug("log_escape", src)
+    line :: stderr.lines().find(|l| -> l.starts_with('{')).expect("no log line")
+    assert(line.contains("\\\"hello\\\""), "quotes not escaped in: {line}")
+}
+// Rust: tests/observe.rs:219
+#Test("rich_panic_shows_jet_location") {
+    if !common.have_rustc() { return }
+    src :: "\nfn check(n: Int) {{\n    assert(n > 0, \"must be positive\")\n}}\nfn run() {{\n    check(0)\n}}\n"
+    for (tier, (code, _stdout, stderr)) in [
+        ("native", build_and_run_debug("rich_panic", src)),
+        ("default", tir_support.jit_run("rich_panic", src)),
+        ("interpret", tir_support.interpreter_run("rich_panic", src))
+    ] {
+        assert_eq(code, 70, "{tier}: expected exit 70; stderr:\n{stderr}")
+        assert(stderr.contains("Stop [E3001]: `panic: must be positive`\n"), "wrong panic header: {stderr}")
+        assert(stderr.contains("in check"), "function name missing: {stderr}")
+        assert(stderr.contains("assert(n > 0"), "source line missing: {stderr}")
+        assert(stderr.contains('^'), "caret missing: {stderr}")
+        assert(!stderr.contains("thread 'main' panicked") && !stderr.contains("panicked at"), "raw Rust panic banner leaked: {stderr}")
+    }
+}
+// Rust: tests/observe.rs:264
+#Test("safe_locals_shown_in_dev_mode") {
+    if !common.have_rustc() { return }
+    src :: "\nfn capture(count: Int, active: Bool, name: String) {{\n    assert(count > 10, \"not enough\")\n}}\nfn run() {{\n    capture(3, true, \"test\")\n}}\n"
+    (code, _stdout, stderr) :: build_and_run_debug("safe_locals", src)
+    assert_eq(code, 70, "expected exit 70")
+    assert(stderr.contains("Stop [E3001]"), "missing E3001 stop: {stderr}")
+    assert(stderr.contains("count = 3"), "count not in locals: {stderr}")
+    assert(stderr.contains("active = true"), "active not in locals: {stderr}")
+    assert(!stderr.contains("name = "), "String local leaked into panic report: {stderr}")
+}
+// Rust: tests/observe.rs:306
+#Test("panic_context_uses_only_lexically_live_locals") {
+    if !common.have_rustc() { return }
+    cases: [(String, String, [String])] :: [
+        ("if_branch", "if live > 0 {{ branch_only :: 7; print(branch_only) }}", ["branch_only"]),
+        ("region", "#Region(inner) {{ region_only :: 7; print(region_only) }}", ["region_only"]),
+        ("counted_loop", "loop i in 0..<1 {{ counted_only :: 7; print(counted_only) }}", ["i", "counted_only"]),
+        ("unsafe", "#Unsafe(\"scope audit\") {{ unsafe_only :: 7; print(unsafe_only) }}", ["unsafe_only"]),
+        ("impure", "#Impure(\"scope audit\") {{ impure_only :: 7; print(impure_only) }}", ["impure_only"]),
+        ("shield", "#Shield {{ shield_only :: 7; print(shield_only) }}", ["shield_only"]),
+        ("authority", "#FX(IO) {{ authority_only :: 7; print(authority_only) }}", ["authority_only"]),
+        ("grant", "#FX(authority: IO) {{ grant_only :: 7; print(grant_only) }}", ["grant_only"]),
+        // #Nondeterministic is legal only inside #Pure, not this print/panic template.
+        ("transact", "#Transact {{ transact_only :: 7; print(transact_only) }}", ["transact_only"]),
+        ("context", "#Context(logger: 0) {{ context_only :: 7; print(context_only) }}", ["context_only"]),
+        ("task.group", "task.group g {{ task_group_only :: 7; print(task_group_only) }}", ["task_group_only"])
+    ]
+    for (name, scoped_stmt, dead_names) in cases {
+        src :: "\nfn missing() -> (Int?) {{ None }}\nfn capture(live: Int) {{\n    {scoped_stmt}\n    _value :: missing() ?? panic(\"missing value\")\n}}\nfn run() {{\n    capture(3)\n}}\n"
+        test_name :: "panic_lexical_{name}"
+        (code, _stdout, stderr) :: build_and_run_debug(&test_name, &src)
+        assert_eq(code, 70, "{name}: expected Jet panic, not a rustc ICE: {stderr}")
+        assert(stderr.contains("Stop [E3001]: `panic: missing value`\n"), "{name}: missing exact Jet panic report: {stderr}")
+        assert(stderr.contains("live = 3"), "{name}: live local missing: {stderr}")
+        for dead in dead_names { assert(!stderr.contains("{dead} ="), "{name}: out-of-scope local `{dead}` leaked: {stderr}") }
+        assert(!stderr.contains("rustc") && !stderr.contains("internal compiler error"), "{name}: backend diagnostic escaped I2 handling: {stderr}")
+    }
+}
+// Rust: tests/observe.rs:417
+#Test("unsafe_block_locals_not_leaked") {
+    // Safe environment includes copy scalars, never raw pointers or strings.
+    if !common.have_rustc() { return }
+    src :: "\nfn capture(secret: String, count: Int) {{\n    assert(count > 5, \"failed\")\n}}\nfn run() {{\n    capture(\"password123\", 1)\n}}\n"
+    (_code, _stdout, stderr) :: build_and_run_debug("no_leak", src)
+    assert(!stderr.contains("password"), "secret string leaked into panic: {stderr}")
+    assert(stderr.contains("count = 1"), "scalar should appear: {stderr}")
+}
+// Rust: tests/observe.rs:455
+#Test("source_map_marker_in_generated_rust") {
+    src :: "\nfn run() {{\n    print(\"hello\")\n}}\n"
+    out :: compile(src).expect("compile failed")
+    preview := out.rust[..out.rust.len().min(500)] // #4303
+    assert(out.rust.contains("jet:source-map source=input.jet"), "source-map marker missing from generated Rust:\n{preview}")
+}
+// Rust: tests/observe.rs:471
+#Test("error_return_trace_frames") {
+    if !common.have_rustc() { return }
+    src :: "\nenum ParseError {{\n    Empty\n    BadDigit(String)\n}}\nfn parse_age(raw: String) -[]> Int ParseError! {{\n    if raw == \"\" {{\n        return Err(ParseError.Empty)\n    }}\n    return Ok(42)\n}}\nfn load(raw: String) -[]> Int ParseError! {{\n    n :: parse_age(raw)?(\"loading age\")\n    return Ok((n * 2))\n}}\nfn double(raw: String) -[]> Int ParseError! {{\n    n :: load(raw)?(\"doubling age\")\n    return Ok((n * 2))\n}}\nfn run() -> ParseError! {{\n    n :: double(\"\")\n    print(n)\n}}\n"
+    (code, stdout, stderr) :: build_and_run_debug("error_trace", src)
+    assert_eq(code, 1, "escaping failure must exit 1: {stderr}")
+    assert(stdout.is_empty(), "nothing printed before the failure: {stdout}")
+    (root, trail) :: stderr.split_once(" Trail [E3002] (").unwrap_or_else(|| -> panic("report must carry a trail block: {stderr}"))
+    assert(!root.trim().is_empty(), "the root failure must lead the report: {stderr}")
+    assert(trail.starts_with("3 hops via ?, origin first):\n"), "three propagation sites, none repeated: {stderr}")
+    hops :: trail.lines().skip(1).collect()
+    assert_eq(hops.len(), 3, "one hop per propagation site: {stderr}")
+    assert(hops[0].starts_with("  1. load (") && hops[0].ends_with(") — loading age"), "innermost hop must be load with its note: {stderr}")
+    assert(hops[1].starts_with("  2. double (") && hops[1].ends_with(") — doubling age"), "second hop must be double with its note: {stderr}")
+    assert(hops[2].starts_with("  3. run (") && hops[2].ends_with(")"), "outermost hop must be run with no note: {stderr}")
+}
+// Rust: tests/observe.rs:542
+#Test("try_note_interpolation_is_lazy_on_success") {
+    if !common.have_rustc() { return }
+    src :: "\nfn present() -> String {{ Ok(\"ok\") }}\nfn note_value() -[IO]> String {{\n    print(\"evaluated\")\n    return \"unexpected\"\n}}\nfn wrapped() -[IO]> String {{\n    value :: present()?(\"never {{note_value()}}\")\n    return Ok(value)\n}}\nfn run() {{\n    if wrapped() == {{\n        .Ok(value) -> {{ print(value) }}\n        .Err(_) -> {{ print(\"failed\") }}\n    }}\n}}\n"
+    (code, stdout, stderr) :: build_and_run_debug("try_note_lazy", src)
+    assert_eq(code, 0, "successful propagation should exit 0: {stderr}")
+    assert_eq(stdout.trim(), "ok", "success note was evaluated: {stdout}")
+}
+// Rust: tests/observe.rs:571
+#Test("fallback_handles_locally_and_context_preserves_the_structured_cause") {
+    if !common.have_rustc() { return }
+    src :: "\nfn fail() -> String {{ Err(\"outer\", code: \"E_OUTER\", cause: Err(\"root\")) }}\nfn pass_through() -[]> {{\n    _ :: fail()?(\"loading\")\n}}\nfn run() {{\n    recovered :: fail() ?? \"fallback\"\n    print(recovered)\n    _ :: pass_through()\n}}\n"
+    (code, stdout, stderr) :: build_and_run_debug("fallback_context_cause", src)
+    assert_eq(code, 1, "the second failure must escape: {stderr}")
+    assert_eq(stdout.trim(), "fallback", "the first failure was not handled locally")
+    assert(stderr.starts_with("Error [E_OUTER]: outer\n  cause: root\n"), "the structured error and nested cause must survive propagation: {stderr}")
+    assert(stderr.contains("Trail [E3002] (2 hops via ?, origin first):\n"), "only the explicit context and outer propagation should be traced: {stderr}")
+    assert(stderr.contains("  1. pass_through (") && stderr.contains(") — loading\n") && stderr.contains("  2. run ("), "the context must be one source-linked hop: {stderr}")
+    assert_eq(stderr.matches(" — loading\n").count(), 1, "the context note must be evaluated exactly once: {stderr}")
+}
+// Rust: tests/observe.rs:616
+#Test("default_report_keeps_conversion_identity_at_the_aot_edge") {
+    if !common.have_rustc() { return }
+    // #4409: preserve InvalidInput, IOContext and conversion identity.
+    src :: "\nimpl IOError -> Err {{\n    return Err(\"store unavailable\", code: \"E_STORE\", cause: Err(\"disk offline\"))\n}}\n\nfn read_store() -> Int IOError! {{\n    return Err(IOError.InvalidInput(IOContext{{\n        operation: .Read,\n        resource: None,\n        os_code: None,\n        cause: Val(\"disk offline\"),\n    }}))\n}}\n\nfn get_user() -> Int {{\n    value :: read_store()?(\"loading store\")\n    return Ok(value)\n}}\n\nfn run() {{\n    value :: get_user()\n    print(value)\n}}\n"
+    generated :: compile(src).expect("the converted default report must compile")
+    assert(generated.rust.contains("jet_entry_error_exit_jet("), "the default Err must reach the edge as JetErr, not Display text")
+    (code, stdout, stderr) :: build_and_run_debug("default_report_conversion", src)
+    assert_eq(code, 1, "the converted failure must escape: {stderr}")
+    assert(stdout.is_empty(), "the failure must not print to stdout: {stdout}")
+    assert(stderr.starts_with("Error [E_STORE]: store unavailable (type: IOError)\n  cause: disk offline\n"), "the default report must keep code, message, typed identity, and cause: {stderr}")
+    assert(stderr.contains("): loading store\n"), "the default report must keep the source-linked context frame: {stderr}")
+    assert(stderr.contains("  conversion: IOError -> Err\n"), "the default report must keep conversion history: {stderr}")
+    assert(stderr.contains("Trail [E3002] (2 hops via ?, origin first):") && stderr.contains("  1. get_user (") && stderr.contains("  2. run ("), "the default report must keep the source journey: {stderr}")
+}
+// Rust: tests/observe.rs:675
+#Test("contextual_try_preserves_identity_cause_and_prior_context") {
+    if !common.have_rustc() { return }
+    src :: "\nimpl IOError -> Err {{\n    return Err(\"store unavailable\", code: \"E_STORE\", cause: Err(\"disk offline\"))\n}}\n\nfn read_store() -> String IOError! {{\n    return Err(IOError.InvalidInput(IOContext{{\n        operation: .Read,\n        resource: None,\n        os_code: None,\n        cause: Val(\"disk offline\"),\n    }}))\n}}\n\nfn load_store() -> String {{\n    value :: read_store()?(\"loading store\")\n    return value\n}}\n\nfn open_store() -> String {{\n    value :: load_store()?(\"opening store\")\n    return value\n}}\n\nfn run() {{\n    _ :: open_store()?(\"running store\")\n}}\n"
+    (code, stdout, stderr) :: build_and_run_debug("contextual_try_preserves_error", src)
+    assert_eq(code, 1, "the contextual failure must escape: {stderr}")
+    assert(stdout.is_empty(), "the failure must not print stdout: {stdout}")
+    assert(stderr.starts_with("Error [E_STORE]: store unavailable (type: IOError)\n  cause: disk offline\n"), "typed identity and cause were not preserved: {stderr}")
+    inner :: stderr.find("context (").expect("inner context frame")
+    middle_view := stderr[inner + 1..] // #4303
+    middle :: middle_view.find("context (").map(|offset| -> inner + 1 + offset).expect("middle context frame")
+    outer_view := stderr[middle + 1..] // #4303
+    outer :: outer_view.find("context (").map(|offset| -> middle + 1 + offset).expect("outer context frame")
+    inner_view := stderr[inner..] // #4303
+    middle_context := stderr[middle..] // #4303
+    outer_context := stderr[outer..] // #4303
+    assert(inner_view.contains(": loading store") && middle_context.contains(": opening store") && outer_context.contains(": running store"), "context frames were not preserved in source order: {stderr}")
+    assert(stderr.contains("conversion: IOError -> Err\n"), "conversion identity was lost: {stderr}")
+}
+// Rust: tests/observe.rs:738
+#Test("uncaught_err_prints_propagation_chain") {
+    if !common.have_rustc() { return }
+    src :: "\nfn read_raw() -> String {{ Err(\"file not found\") }}\nfn parse_config() -[]> String {{\n    raw :: read_raw()?(\"reading raw config\")\n    return Ok(raw)\n}}\nfn load_config() -[]> String {{\n    cfg :: parse_config()?(\"loading config\")\n    return Ok(cfg)\n}}\nfn run() {{\n    _ :: load_config()\n}}\n"
+    (code, _stdout, stderr) :: build_and_run_debug("error_trace_uncaught", src)
+    assert_eq(code, 1, "uncaught Err must exit 1: {stderr}")
+    assert(stderr.starts_with("Error: file not found\n"), "the root failure must be the first line: {stderr}")
+    assert(stderr.contains(" Trail [E3002] (3 hops via ?, origin first):\n"), "missing the trail header: {stderr}")
+    assert(stderr.contains("  1. parse_config (") && stderr.contains(") — reading raw config\n"), "missing parse_config hop with its note: {stderr}")
+    assert(stderr.contains("  2. load_config (") && stderr.contains(") — loading config\n"), "missing load_config hop with its note: {stderr}")
+    assert(stderr.contains("  3. run ("), "missing the entry hop: {stderr}")
+}
+// Rust: tests/observe.rs:785
+#Test("propagation_trace_collapses_repeated_frames") {
+    if !common.have_rustc() { return }
+    src :: "\nfn dive(n: Int) -[]> Int {{\n    if n <= 0 {{\n        return Err(\"bottom\")\n    }}\n    v :: dive((n - 1))\n    return Ok(v)\n}}\nfn run() {{\n    v :: dive(4)\n    print(v)\n}}\n"
+    (code, stdout, stderr) :: build_and_run_debug("error_trace_collapse", src)
+    assert_eq(code, 1, "an escaping failure must exit 1: {stderr}")
+    assert(stdout.is_empty(), "the failure precedes the print: {stdout}")
+    dive_hops :: stderr.lines().filter(|line| -> line.contains(". dive (")).collect()
+    assert_eq(dive_hops.len(), 1, "repeated dive hops must collapse to one line:\n{stderr}")
+    assert(dive_hops[0].ends_with(" ×4"), "the collapsed hop must count its repeats:\n{stderr}")
+    assert(stderr.contains(" Trail [E3002] (5 hops via ?, origin first):\n"), "the header counts every hop, collapsed or not:\n{stderr}")
+}

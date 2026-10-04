@@ -1,1101 +1,243 @@
-// PORT-PENDING 2116 crates-jet-foundation-src-devtoolscontrol: crates/jet-foundation/src/DevtoolsControl.rs:1-1097
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Host-only control protocol for the resident devtools session.
-//RS //!
-//RS //! Observation facts stay in [`crate::Devtools`].  These values are never
-//RS //! embedded in a generated runtime: they carry only a checked identity and
-//RS //! bounded limits across the host command boundary.
-//RS 
-//RS use std::collections::{BTreeMap, VecDeque};
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS 
-//RS const MAX_COMMANDS: usize = crate::Devtools::JET_DEVTOOLS_MAX_EVENTS;
-//RS pub const JET_DEVTOOLS_MAX_COMMANDS: usize = MAX_COMMANDS;
-//RS pub const JET_DEVTOOLS_MAX_COMMAND_ROWS: usize = 256;
-//RS 
-//RS fn validate_text(value: &str, field: &str) -> Result<(), String> {
-//RS     if value.is_empty() {
-//RS         return Err(format!("jet.devtools.v1 {field} must not be empty"));
-//RS     }
-//RS     if value.len() > crate::Devtools::JET_DEVTOOLS_MAX_TEXT_BYTES {
-//RS         return Err(format!(
-//RS             "jet.devtools.v1 {field} exceeds the Prelude text limit"
-//RS         ));
-//RS     }
-//RS     if value.chars().any(char::is_control) {
-//RS         return Err(format!(
-//RS             "jet.devtools.v1 {field} contains a control character"
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn render_text(value: &str) -> String {
-//RS     let mut escaped = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '"' => escaped.push_str("\\\""),
-//RS             '\\' => escaped.push_str("\\\\"),
-//RS             '\u{08}' => escaped.push_str("\\b"),
-//RS             '\u{0c}' => escaped.push_str("\\f"),
-//RS             '\n' => escaped.push_str("\\n"),
-//RS             '\r' => escaped.push_str("\\r"),
-//RS             '\t' => escaped.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
-//RS             }
-//RS             character => escaped.push(character),
-//RS         }
-//RS     }
-//RS     format!("\"{escaped}\"")
-//RS }
-//RS 
-//RS /// One internal database EXPLAIN request crossing the resident devtools
-//RS /// session. SQL text, bindings, credentials, and authority facts stay in the
-//RS /// owning runtime; this DTO carries only the checked identity and limits.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsDatabaseExplainRequest {
-//RS     pub session_id: String,
-//RS     pub request_id: String,
-//RS     pub statement_identity: String,
-//RS     pub timeout_ms: u64,
-//RS     pub max_rows: u64,
-//RS }
-//RS 
-//RS impl JetDevtoolsDatabaseExplainRequest {
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         request_id: impl Into<String>,
-//RS         statement_identity: impl Into<String>,
-//RS         timeout_ms: u64,
-//RS         max_rows: u64,
-//RS     ) -> Result<Self, String> {
-//RS         let request = Self {
-//RS             session_id: session_id.into(),
-//RS             request_id: request_id.into(),
-//RS             statement_identity: statement_identity.into(),
-//RS             timeout_ms,
-//RS             max_rows,
-//RS         };
-//RS         request.validate()?;
-//RS         Ok(request)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         validate_text(&self.session_id, "session_id")?;
-//RS         validate_text(&self.request_id, "request_id")?;
-//RS         validate_text(&self.statement_identity, "statement_identity")?;
-//RS         if self.timeout_ms == 0 || self.timeout_ms > 30_000 {
-//RS             return Err("jet.devtools.v1 EXPLAIN timeout is outside its limit".to_string());
-//RS         }
-//RS         if self.max_rows == 0 || self.max_rows > JET_DEVTOOLS_MAX_COMMAND_ROWS as u64 {
-//RS             return Err("jet.devtools.v1 EXPLAIN row limit is outside its limit".to_string());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"session_id\":{},\"request_id\":{},\"statement_identity\":{},\"timeout_ms\":{},\"max_rows\":{}}}",
-//RS             render_text(&self.session_id),
-//RS             render_text(&self.request_id),
-//RS             render_text(&self.statement_identity),
-//RS             self.timeout_ms,
-//RS             self.max_rows,
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// One redacted structural EXPLAIN row. The driver may add detail, but never
-//RS /// sends SQL literals, parameter values, or credentials through this record.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsDbPlanRow {
-//RS     pub id: String,
-//RS     pub parent: Option<String>,
-//RS     pub detail: String,
-//RS }
-//RS 
-//RS impl JetDevtoolsDbPlanRow {
-//RS     pub fn new(
-//RS         id: impl Into<String>,
-//RS         parent: Option<String>,
-//RS         detail: impl Into<String>,
-//RS     ) -> Result<Self, String> {
-//RS         let row = Self {
-//RS             id: id.into(),
-//RS             parent,
-//RS             detail: detail.into(),
-//RS         };
-//RS         row.validate()?;
-//RS         Ok(row)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         validate_text(&self.id, "plan row id")?;
-//RS         if let Some(parent) = &self.parent {
-//RS             validate_text(parent, "plan row parent")?;
-//RS         }
-//RS         validate_text(&self.detail, "plan row detail")?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"id\":{},\"parent\":{},\"detail\":{}}}",
-//RS             render_text(&self.id),
-//RS             self.parent
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             render_text(&self.detail),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// The typed result returned by a database handler. Detailed authority and
-//RS /// driver state stay out of this transport projection; errors are bounded and
-//RS /// redacted strings.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsDatabaseExplainResult {
-//RS     pub session_id: String,
-//RS     pub request_id: String,
-//RS     pub statement_identity: String,
-//RS     pub status: String,
-//RS     pub elapsed_ns: u64,
-//RS     pub truncated: bool,
-//RS     pub row_count: u64,
-//RS     pub plan_rows: Vec<JetDevtoolsDbPlanRow>,
-//RS     pub error_code: Option<String>,
-//RS     pub error_message: Option<String>,
-//RS }
-//RS 
-//RS impl JetDevtoolsDatabaseExplainResult {
-//RS     #[allow(clippy::too_many_arguments)]
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         request_id: impl Into<String>,
-//RS         statement_identity: impl Into<String>,
-//RS         status: impl Into<String>,
-//RS         elapsed_ns: u64,
-//RS         truncated: bool,
-//RS         row_count: u64,
-//RS         plan_rows: Vec<JetDevtoolsDbPlanRow>,
-//RS         error_code: Option<String>,
-//RS         error_message: Option<String>,
-//RS     ) -> Result<Self, String> {
-//RS         if plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS {
-//RS             return Err("jet.devtools.v1 EXPLAIN result has too many plan rows".to_string());
-//RS         }
-//RS         let result = Self {
-//RS             session_id: session_id.into(),
-//RS             request_id: request_id.into(),
-//RS             statement_identity: statement_identity.into(),
-//RS             status: status.into(),
-//RS             elapsed_ns,
-//RS             truncated,
-//RS             row_count,
-//RS             plan_rows,
-//RS             error_code,
-//RS             error_message,
-//RS         };
-//RS         result.validate()?;
-//RS         Ok(result)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         validate_text(&self.session_id, "session_id")?;
-//RS         validate_text(&self.request_id, "request_id")?;
-//RS         validate_text(&self.statement_identity, "statement_identity")?;
-//RS         validate_text(&self.status, "status")?;
-//RS         if self.plan_rows.len() > JET_DEVTOOLS_MAX_COMMAND_ROWS {
-//RS             return Err("jet.devtools.v1 EXPLAIN result has too many plan rows".to_string());
-//RS         }
-//RS         for row in &self.plan_rows {
-//RS             row.validate()?;
-//RS         }
-//RS         if let Some(code) = &self.error_code {
-//RS             validate_text(code, "error code")?;
-//RS         }
-//RS         if let Some(message) = &self.error_message {
-//RS             validate_text(message, "error message")?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         let rows = self
-//RS             .plan_rows
-//RS             .iter()
-//RS             .map(JetDevtoolsDbPlanRow::render_json)
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         format!(
-//RS             "{{\"session_id\":{},\"request_id\":{},\"statement_identity\":{},\"status\":{},\"elapsed_ns\":{},\"truncated\":{},\"row_count\":{},\"plan_rows\":[{}],\"error_code\":{},\"error_message\":{}}}",
-//RS             render_text(&self.session_id),
-//RS             render_text(&self.request_id),
-//RS             render_text(&self.statement_identity),
-//RS             render_text(&self.status),
-//RS             self.elapsed_ns,
-//RS             self.truncated,
-//RS             self.row_count,
-//RS             rows,
-//RS             self.error_code
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.error_message
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Game controls are the only interactive commands that cross the resident
-//RS /// `jet.devtools.v1` boundary.  The operation is closed so a host cannot
-//RS /// smuggle an arbitrary evaluator or an unrecognised state transition into a
-//RS /// live game.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetDevtoolsGameControlKind {
-//RS     Play,
-//RS     Simulate,
-//RS     Pause,
-//RS     Step,
-//RS     Resume,
-//RS     FrameAdvance,
-//RS     Edit,
-//RS     Eject,
-//RS     Keep,
-//RS     Discard,
-//RS     SelectCategory,
-//RS     SelectWorld,
-//RS     EditWorld,
-//RS     EvaluateWorld,
-//RS }
-//RS 
-//RS impl JetDevtoolsGameControlKind {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::Play => "play",
-//RS             Self::Simulate => "simulate",
-//RS             Self::Pause => "pause",
-//RS             Self::Step => "step",
-//RS             Self::Resume => "resume",
-//RS             Self::FrameAdvance => "frame_advance",
-//RS             Self::Edit => "edit",
-//RS             Self::Eject => "eject",
-//RS             Self::Keep => "keep",
-//RS             Self::Discard => "discard",
-//RS             Self::SelectCategory => "select_category",
-//RS             Self::SelectWorld => "select_world",
-//RS             Self::EditWorld => "edit_world",
-//RS             Self::EvaluateWorld => "evaluate_world",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_str(value: &str) -> Result<Self, String> {
-//RS         match value {
-//RS             "play" => Ok(Self::Play),
-//RS             "simulate" => Ok(Self::Simulate),
-//RS             "pause" => Ok(Self::Pause),
-//RS             "step" => Ok(Self::Step),
-//RS             "resume" => Ok(Self::Resume),
-//RS             "frame_advance" => Ok(Self::FrameAdvance),
-//RS             "edit" => Ok(Self::Edit),
-//RS             "eject" => Ok(Self::Eject),
-//RS             "keep" => Ok(Self::Keep),
-//RS             "discard" => Ok(Self::Discard),
-//RS             "select_category" => Ok(Self::SelectCategory),
-//RS             "select_world" => Ok(Self::SelectWorld),
-//RS             "edit_world" => Ok(Self::EditWorld),
-//RS             "evaluate_world" => Ok(Self::EvaluateWorld),
-//RS             _ => Err(format!(
-//RS                 "jet.devtools.v1 game control operation `{value}` is unsupported"
-//RS             )),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn render_optional_u64(value: Option<u64>) -> String {
-//RS     value
-//RS         .map(|value| value.to_string())
-//RS         .unwrap_or_else(|| "null".to_string())
-//RS }
-//RS 
-//RS /// One checked game control request.  Optional fields are used only by the
-//RS /// operation that owns them; validation rejects missing provenance before the
-//RS /// request enters either the resident queue or the generated runtime.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsGameControlRequest {
-//RS     pub session_id: String,
-//RS     pub request_id: String,
-//RS     pub kind: JetDevtoolsGameControlKind,
-//RS     pub source_id: Option<String>,
-//RS     pub revision: Option<String>,
-//RS     pub world_id: Option<String>,
-//RS     pub actor_id: Option<String>,
-//RS     pub component_id: Option<String>,
-//RS     pub authored_instance_id: Option<String>,
-//RS     pub source_span_start: Option<u64>,
-//RS     pub source_span_end: Option<u64>,
-//RS     pub field: Option<String>,
-//RS     pub value: Option<String>,
-//RS     pub category: Option<String>,
-//RS     pub expression: Option<String>,
-//RS     pub required_authority: Option<String>,
-//RS     pub frame_id: Option<u64>,
-//RS     pub budget: Option<u64>,
-//RS }
-//RS 
-//RS fn required_game_control_field<'a>(
-//RS     value: Option<&'a String>,
-//RS     kind: JetDevtoolsGameControlKind,
-//RS     field: &str,
-//RS ) -> Result<&'a String, String> {
-//RS     value
-//RS         .filter(|value| !value.is_empty())
-//RS         .ok_or_else(|| format!("game control `{}` requires {field}", kind.as_str()))
-//RS }
-//RS impl JetDevtoolsGameControlRequest {
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         request_id: impl Into<String>,
-//RS         operation: JetDevtoolsGameControlKind,
-//RS     ) -> Result<Self, String> {
-//RS         let request = Self {
-//RS             session_id: session_id.into(),
-//RS             request_id: request_id.into(),
-//RS             kind: operation,
-//RS             source_id: None,
-//RS             revision: None,
-//RS             world_id: None,
-//RS             actor_id: None,
-//RS             component_id: None,
-//RS             authored_instance_id: None,
-//RS             source_span_start: None,
-//RS             source_span_end: None,
-//RS             field: None,
-//RS             value: None,
-//RS             category: None,
-//RS             expression: None,
-//RS             required_authority: None,
-//RS             frame_id: None,
-//RS             budget: None,
-//RS         };
-//RS         request.validate()?;
-//RS         Ok(request)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         validate_text(&self.session_id, "game control session_id")?;
-//RS         validate_text(&self.request_id, "game control request_id")?;
-//RS         let optional_text = [
-//RS             ("source_id", self.source_id.as_deref()),
-//RS             ("revision", self.revision.as_deref()),
-//RS             ("world_id", self.world_id.as_deref()),
-//RS             ("actor_id", self.actor_id.as_deref()),
-//RS             ("component_id", self.component_id.as_deref()),
-//RS             ("authored_instance_id", self.authored_instance_id.as_deref()),
-//RS             ("field", self.field.as_deref()),
-//RS             ("value", self.value.as_deref()),
-//RS             ("category", self.category.as_deref()),
-//RS             ("expression", self.expression.as_deref()),
-//RS             ("required_authority", self.required_authority.as_deref()),
-//RS         ];
-//RS         for (field, value) in optional_text {
-//RS             if let Some(value) = value {
-//RS                 validate_text(value, &format!("game control {field}"))?;
-//RS             }
-//RS         }
-//RS         match self.kind {
-//RS             JetDevtoolsGameControlKind::Play | JetDevtoolsGameControlKind::Simulate => {
-//RS                 required_game_control_field(self.source_id.as_ref(), self.kind, "source_id")?;
-//RS                 required_game_control_field(self.revision.as_ref(), self.kind, "revision")?;
-//RS             }
-//RS             JetDevtoolsGameControlKind::Eject => {
-//RS                 required_game_control_field(self.source_id.as_ref(), self.kind, "source_id")?;
-//RS                 required_game_control_field(self.revision.as_ref(), self.kind, "revision")?;
-//RS                 required_game_control_field(self.world_id.as_ref(), self.kind, "world_id")?;
-//RS                 required_game_control_field(self.actor_id.as_ref(), self.kind, "actor_id")?;
-//RS             }
-//RS             JetDevtoolsGameControlKind::Keep | JetDevtoolsGameControlKind::EditWorld => {
-//RS                 required_game_control_field(self.source_id.as_ref(), self.kind, "source_id")?;
-//RS                 required_game_control_field(self.revision.as_ref(), self.kind, "revision")?;
-//RS                 required_game_control_field(
-//RS                     self.authored_instance_id.as_ref(),
-//RS                     self.kind,
-//RS                     "authored_instance_id",
-//RS                 )?;
-//RS                 required_game_control_field(self.field.as_ref(), self.kind, "field")?;
-//RS                 required_game_control_field(self.value.as_ref(), self.kind, "value")?;
-//RS                 if self.source_span_start.is_none() || self.source_span_end.is_none() {
-//RS                     return Err(format!(
-//RS                         "game control `{}` requires source_span_start and source_span_end",
-//RS                         self.kind.as_str()
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             JetDevtoolsGameControlKind::SelectCategory => {
-//RS                 required_game_control_field(self.category.as_ref(), self.kind, "category")?;
-//RS             }
-//RS             JetDevtoolsGameControlKind::SelectWorld => {
-//RS                 required_game_control_field(self.world_id.as_ref(), self.kind, "world_id")?;
-//RS                 if self.component_id.is_some() && self.actor_id.is_none() {
-//RS                     return Err("select_world component_id requires actor_id".to_string());
-//RS                 }
-//RS                 if self.field.is_some() && self.component_id.is_none() {
-//RS                     return Err("select_world field requires component_id".to_string());
-//RS                 }
-//RS             }
-//RS             JetDevtoolsGameControlKind::EvaluateWorld => {
-//RS                 required_game_control_field(self.world_id.as_ref(), self.kind, "world_id")?;
-//RS                 required_game_control_field(self.actor_id.as_ref(), self.kind, "actor_id")?;
-//RS                 required_game_control_field(
-//RS                     self.component_id.as_ref(),
-//RS                     self.kind,
-//RS                     "component_id",
-//RS                 )?;
-//RS                 required_game_control_field(
-//RS                     self.expression.as_ref(),
-//RS                     self.kind,
-//RS                     "expression",
-//RS                 )?;
-//RS                 required_game_control_field(
-//RS                     self.required_authority.as_ref(),
-//RS                     self.kind,
-//RS                     "required_authority",
-//RS                 )?;
-//RS                 if self.frame_id.is_none() {
-//RS                     return Err("evaluate_world requires frame_id".to_string());
-//RS                 }
-//RS                 if self.budget.is_none_or(|budget| budget == 0) {
-//RS                     return Err("evaluate_world requires a positive budget".to_string());
-//RS                 }
-//RS             }
-//RS             JetDevtoolsGameControlKind::Pause
-//RS             | JetDevtoolsGameControlKind::Step
-//RS             | JetDevtoolsGameControlKind::Resume
-//RS             | JetDevtoolsGameControlKind::FrameAdvance
-//RS             | JetDevtoolsGameControlKind::Edit
-//RS             | JetDevtoolsGameControlKind::Discard => {}
-//RS         }
-//RS         match (self.source_span_start, self.source_span_end) {
-//RS             (Some(start), Some(end)) if start < end => {}
-//RS             (Some(_), Some(_)) => {
-//RS                 return Err("game control source span must end after it starts".to_string())
-//RS             }
-//RS             (None, None) => {}
-//RS             _ => return Err("game control source span must include both bounds".to_string()),
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"session_id\":{},\"request_id\":{},\"kind\":{},\
-//RS \"source_id\":{},\"revision\":{},\"world_id\":{},\"actor_id\":{},\
-//RS \"component_id\":{},\"authored_instance_id\":{},\"source_span_start\":{},\
-//RS \"source_span_end\":{},\"field\":{},\"value\":{},\"category\":{},\
-//RS \"expression\":{},\"required_authority\":{},\"frame_id\":{},\"budget\":{}}}",
-//RS             render_text(&self.session_id),
-//RS             render_text(&self.request_id),
-//RS             render_text(self.kind.as_str()),
-//RS             self.source_id
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.revision
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.world_id
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.actor_id
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.component_id
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.authored_instance_id
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             render_optional_u64(self.source_span_start),
-//RS             render_optional_u64(self.source_span_end),
-//RS             self.field
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.value
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.category
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.expression
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             self.required_authority
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS             render_optional_u64(self.frame_id),
-//RS             render_optional_u64(self.budget),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// A checked browser-origin request to rebuild the current project through the
-//RS /// resident dev loop.  The source revision is admission-bound; the driver
-//RS /// must not reinterpret this as an arbitrary evaluator or a file-mtime hint.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsProjectRebuildRequest {
-//RS     pub session_id: String,
-//RS     pub request_id: String,
-//RS     pub expected_revision: String,
-//RS }
-//RS 
-//RS impl JetDevtoolsProjectRebuildRequest {
-//RS     pub fn new(
-//RS         session_id: impl Into<String>,
-//RS         request_id: impl Into<String>,
-//RS         expected_revision: impl Into<String>,
-//RS     ) -> Result<Self, String> {
-//RS         let request = Self {
-//RS             session_id: session_id.into(),
-//RS             request_id: request_id.into(),
-//RS             expected_revision: expected_revision.into(),
-//RS         };
-//RS         request.validate()?;
-//RS         Ok(request)
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         validate_text(&self.session_id, "project rebuild session_id")?;
-//RS         validate_text(&self.request_id, "project rebuild request_id")?;
-//RS         validate_text(&self.expected_revision, "project rebuild expected_revision")?;
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"session_id\":{},\"request_id\":{},\"expected_revision\":{}}}",
-//RS             render_text(&self.session_id),
-//RS             render_text(&self.request_id),
-//RS             render_text(&self.expected_revision),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS /// Closed internal command vocabulary. New command kinds require a protocol
-//RS /// decision; hosts do not register arbitrary handlers through this type.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum JetDevtoolsCommand {
-//RS     DatabaseExplain(JetDevtoolsDatabaseExplainRequest),
-//RS     GameControl(JetDevtoolsGameControlRequest),
-//RS     ProjectRebuild(JetDevtoolsProjectRebuildRequest),
-//RS }
-//RS 
-//RS impl JetDevtoolsCommand {
-//RS     pub fn session_id(&self) -> &str {
-//RS         match self {
-//RS             Self::DatabaseExplain(request) => &request.session_id,
-//RS             Self::GameControl(request) => &request.session_id,
-//RS             Self::ProjectRebuild(request) => &request.session_id,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         match self {
-//RS             Self::DatabaseExplain(request) => request.validate(),
-//RS             Self::GameControl(request) => request.validate(),
-//RS             Self::ProjectRebuild(request) => request.validate(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         match self {
-//RS             Self::DatabaseExplain(request) => request.render_json(),
-//RS             Self::GameControl(request) => request.render_json(),
-//RS             Self::ProjectRebuild(request) => request.render_json(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub const fn kind(&self) -> &'static str {
-//RS         match self {
-//RS             Self::DatabaseExplain(_) => "DatabaseExplain",
-//RS             Self::GameControl(_) => "GameControl",
-//RS             Self::ProjectRebuild(_) => "ProjectRebuild",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn request_id(&self) -> &str {
-//RS         match self {
-//RS             Self::DatabaseExplain(request) => &request.request_id,
-//RS             Self::GameControl(request) => &request.request_id,
-//RS             Self::ProjectRebuild(request) => &request.request_id,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A bounded admission/dispatch receipt for one host command.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsCommandReceipt {
-//RS     pub sequence: u64,
-//RS     pub session_id: String,
-//RS     pub request_id: String,
-//RS     pub kind: String,
-//RS     pub status: String,
-//RS     pub error: Option<String>,
-//RS }
-//RS 
-//RS impl JetDevtoolsCommandReceipt {
-//RS     fn queued(command: &JetDevtoolsCommand) -> Self {
-//RS         Self {
-//RS             sequence: NEXT_COMMAND_RECEIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-//RS             session_id: command.session_id().to_string(),
-//RS             request_id: command.request_id().to_string(),
-//RS             kind: command.kind().to_string(),
-//RS             status: "queued".to_string(),
-//RS             error: None,
-//RS         }
-//RS     }
-//RS     pub fn for_command(
-//RS         command: &JetDevtoolsCommand,
-//RS         status: impl Into<String>,
-//RS         error: Option<String>,
-//RS     ) -> Self {
-//RS         Self {
-//RS             sequence: NEXT_COMMAND_RECEIPT_SEQUENCE.fetch_add(1, Ordering::Relaxed),
-//RS             session_id: command.session_id().to_string(),
-//RS             request_id: command.request_id().to_string(),
-//RS             kind: command.kind().to_string(),
-//RS             status: status.into(),
-//RS             error,
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         validate_text(&self.session_id, "command receipt session_id")?;
-//RS         validate_text(&self.request_id, "command receipt request_id")?;
-//RS         validate_text(&self.kind, "command receipt kind")?;
-//RS         validate_text(&self.status, "command receipt status")?;
-//RS         if let Some(error) = self.error.as_deref() {
-//RS             validate_text(error, "command receipt error")?;
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn render_json(&self) -> String {
-//RS         format!(
-//RS             "{{\"sequence\":{},\"session_id\":{},\"request_id\":{},\"kind\":{},\
-//RS \"status\":{},\"error\":{}}}",
-//RS             self.sequence,
-//RS             render_text(&self.session_id),
-//RS             render_text(&self.request_id),
-//RS             render_text(&self.kind),
-//RS             render_text(&self.status),
-//RS             self.error
-//RS                 .as_deref()
-//RS                 .map(render_text)
-//RS                 .unwrap_or_else(|| "null".to_string()),
-//RS         )
-//RS     }
-//RS }
-//RS 
-//RS static NEXT_COMMAND_RECEIPT_SEQUENCE: AtomicU64 = AtomicU64::new(1);
-//RS static JET_DEVTOOLS_COMMAND_RECEIPTS: std::sync::LazyLock<
-//RS     std::sync::Mutex<BTreeMap<String, VecDeque<JetDevtoolsCommandReceipt>>>,
-//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeMap::new()));
-//RS 
-//RS fn command_receipt_cleanup(
-//RS     receipts: &mut BTreeMap<String, VecDeque<JetDevtoolsCommandReceipt>>,
-//RS     session_id: &str,
-//RS ) {
-//RS     if receipts
-//RS         .get(session_id)
-//RS         .is_some_and(std::collections::VecDeque::is_empty)
-//RS     {
-//RS         receipts.remove(session_id);
-//RS     }
-//RS }
-//RS 
-//RS /// Update the queued receipt for one request without adding a second stream row.
-//RS pub fn jet_devtools_update_command_receipt(
-//RS     session_id: &str,
-//RS     request_id: &str,
-//RS     status: impl Into<String>,
-//RS     error: Option<String>,
-//RS ) -> Result<(), String> {
-//RS     validate_text(session_id, "command receipt session_id")?;
-//RS     validate_text(request_id, "command receipt request_id")?;
-//RS     let status = status.into();
-//RS     validate_text(&status, "command receipt status")?;
-//RS     if let Some(error) = error.as_deref() {
-//RS         validate_text(error, "command receipt error")?;
-//RS     }
-//RS     let mut receipts = JET_DEVTOOLS_COMMAND_RECEIPTS
-//RS         .lock()
-//RS         .map_err(|_| "jet.devtools.v1 command receipt queue is poisoned".to_string())?;
-//RS     let receipt = receipts
-//RS         .get_mut(session_id)
-//RS         .and_then(|queue| queue.iter_mut().rev().find(|receipt| {
-//RS             receipt.request_id == request_id
-//RS         }))
-//RS         .ok_or_else(|| "jet.devtools.v1 command receipt was not retained".to_string())?;
-//RS     receipt.status = status;
-//RS     receipt.error = error;
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Append one bounded receipt to the session stream.
-//RS pub fn jet_devtools_record_command_receipt(
-//RS     receipt: JetDevtoolsCommandReceipt,
-//RS ) -> Result<(), String> {
-//RS     receipt.validate()?;
-//RS     let session_id = receipt.session_id.clone();
-//RS     let mut receipts = JET_DEVTOOLS_COMMAND_RECEIPTS
-//RS         .lock()
-//RS         .map_err(|_| "jet.devtools.v1 command receipt queue is poisoned".to_string())?;
-//RS     let queue = receipts.entry(session_id).or_insert_with(VecDeque::new);
-//RS     if queue.len() >= JET_DEVTOOLS_MAX_COMMANDS {
-//RS         return Err("jet.devtools.v1 command receipt queue is full".to_string());
-//RS     }
-//RS     queue.push_back(receipt);
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Remove the oldest receipt for one exact session.
-//RS pub fn jet_devtools_poll_command_receipt(
-//RS     session_id: &str,
-//RS ) -> Option<JetDevtoolsCommandReceipt> {
-//RS     let mut receipts = JET_DEVTOOLS_COMMAND_RECEIPTS.lock().ok()?;
-//RS     let receipt = receipts.get_mut(session_id)?.pop_front();
-//RS     command_receipt_cleanup(&mut receipts, session_id);
-//RS     receipt
-//RS }
-//RS 
-//RS pub fn jet_devtools_command_receipt_count(session_id: &str) -> usize {
-//RS     JET_DEVTOOLS_COMMAND_RECEIPTS
-//RS         .lock()
-//RS         .ok()
-//RS         .and_then(|receipts| receipts.get(session_id).map(VecDeque::len))
-//RS         .unwrap_or(0)
-//RS }
-//RS /// Return a non-destructive snapshot of the retained command receipts for one
-//RS /// exact session.  Browser projections use this to report terminal outcomes
-//RS /// without stealing the canonical receipt stream.
-//RS pub fn jet_devtools_command_receipts(
-//RS     session_id: &str,
-//RS ) -> Vec<JetDevtoolsCommandReceipt> {
-//RS     JET_DEVTOOLS_COMMAND_RECEIPTS
-//RS         .lock()
-//RS         .ok()
-//RS         .and_then(|receipts| {
-//RS             receipts
-//RS                 .get(session_id)
-//RS                 .map(|queue| queue.iter().cloned().collect::<Vec<_>>())
-//RS         })
-//RS         .unwrap_or_default()
-//RS }
-//RS 
-//RS pub fn jet_devtools_clear_command_receipts(session_id: &str) {
-//RS     if let Ok(mut receipts) = JET_DEVTOOLS_COMMAND_RECEIPTS.lock() {
-//RS         receipts.remove(session_id);
-//RS     }
-//RS }
-//RS /// One bounded command FIFO per session. Database and game controls share this
-//RS /// storage so polling one command family cannot silently consume another.
-//RS static JET_DEVTOOLS_COMMAND_QUEUES: std::sync::LazyLock<
-//RS     std::sync::Mutex<BTreeMap<String, VecDeque<JetDevtoolsCommand>>>,
-//RS > = std::sync::LazyLock::new(|| std::sync::Mutex::new(BTreeMap::new()));
-//RS 
-//RS fn command_queue_cleanup(
-//RS     queues: &mut BTreeMap<String, VecDeque<JetDevtoolsCommand>>,
-//RS     session_id: &str,
-//RS ) {
-//RS     if queues
-//RS         .get(session_id)
-//RS         .is_some_and(std::collections::VecDeque::is_empty)
-//RS     {
-//RS         queues.remove(session_id);
-//RS     }
-//RS }
-//RS 
-//RS /// Admit one checked host command into the canonical per-session FIFO.
-//RS pub fn jet_devtools_enqueue_command(command: JetDevtoolsCommand) -> Result<(), String> {
-//RS     command.validate()?;
-//RS     let session_id = command.session_id().to_string();
-//RS     let receipt = JetDevtoolsCommandReceipt::queued(&command);
-//RS     let mut receipts = JET_DEVTOOLS_COMMAND_RECEIPTS
-//RS         .lock()
-//RS         .map_err(|_| "jet.devtools.v1 command receipt queue is poisoned".to_string())?;
-//RS     if receipts
-//RS         .get(&session_id)
-//RS         .is_some_and(|queue| queue.len() >= JET_DEVTOOLS_MAX_COMMANDS)
-//RS     {
-//RS         return Err("jet.devtools.v1 command receipt queue is full".to_string());
-//RS     }
-//RS     let mut queues = JET_DEVTOOLS_COMMAND_QUEUES
-//RS         .lock()
-//RS         .map_err(|_| "jet.devtools.v1 command queue is poisoned".to_string())?;
-//RS     let queue = queues.entry(session_id.clone()).or_insert_with(VecDeque::new);
-//RS     if queue.len() >= JET_DEVTOOLS_MAX_COMMANDS {
-//RS         return Err("jet.devtools.v1 command queue is full".to_string());
-//RS     }
-//RS     queue.push_back(command);
-//RS     receipts
-//RS         .entry(session_id)
-//RS         .or_insert_with(VecDeque::new)
-//RS         .push_back(receipt);
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Requeue one command at the head after a runtime destination is unavailable.
-//RS pub fn jet_devtools_requeue_command_front(command: JetDevtoolsCommand) -> Result<(), String> {
-//RS     command.validate()?;
-//RS     let session_id = command.session_id().to_string();
-//RS     let mut queues = JET_DEVTOOLS_COMMAND_QUEUES
-//RS         .lock()
-//RS         .map_err(|_| "jet.devtools.v1 command queue is poisoned".to_string())?;
-//RS     let queue = queues.entry(session_id).or_insert_with(VecDeque::new);
-//RS     if queue.len() >= JET_DEVTOOLS_MAX_COMMANDS {
-//RS         return Err("jet.devtools.v1 command queue is full".to_string());
-//RS     }
-//RS     queue.push_front(command);
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Remove the next command without changing its family or payload.
-//RS pub fn jet_devtools_poll_command(session_id: &str) -> Option<JetDevtoolsCommand> {
-//RS     let mut queues = JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()?;
-//RS     let command = queues.get_mut(session_id)?.pop_front();
-//RS     command_queue_cleanup(&mut queues, session_id);
-//RS     command
-//RS }
-//RS 
-//RS /// Return the number of commands waiting for one exact session.
-//RS pub fn jet_devtools_command_count(session_id: &str) -> usize {
-//RS     JET_DEVTOOLS_COMMAND_QUEUES
-//RS         .lock()
-//RS         .ok()
-//RS         .and_then(|queues| queues.get(session_id).map(VecDeque::len))
-//RS         .unwrap_or(0)
-//RS }
-//RS 
-//RS /// Poll only a database command while preserving every intervening game
-//RS /// command in the same FIFO.
-//RS pub fn jet_devtools_poll_database_explain(
-//RS     session_id: &str,
-//RS ) -> Option<JetDevtoolsDatabaseExplainRequest> {
-//RS     let mut queues = JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()?;
-//RS     let queue = queues.get_mut(session_id)?;
-//RS     let index = queue
-//RS         .iter()
-//RS         .position(|command| matches!(command, JetDevtoolsCommand::DatabaseExplain(_)))?;
-//RS     let command = queue.remove(index)?;
-//RS     command_queue_cleanup(&mut queues, session_id);
-//RS     match command {
-//RS         JetDevtoolsCommand::DatabaseExplain(request) => Some(request),
-//RS         JetDevtoolsCommand::GameControl(_) | JetDevtoolsCommand::ProjectRebuild(_) => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Poll only a game command while preserving database commands in the same
-//RS /// FIFO. The general dispatcher should normally use `poll_command`.
-//RS pub fn jet_devtools_poll_game_control(
-//RS     session_id: &str,
-//RS ) -> Option<JetDevtoolsGameControlRequest> {
-//RS     let mut queues = JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()?;
-//RS     let queue = queues.get_mut(session_id)?;
-//RS     let index = queue
-//RS         .iter()
-//RS         .position(|command| matches!(command, JetDevtoolsCommand::GameControl(_)))?;
-//RS     let command = queue.remove(index)?;
-//RS     command_queue_cleanup(&mut queues, session_id);
-//RS     match command {
-//RS         JetDevtoolsCommand::GameControl(request) => Some(request),
-//RS         JetDevtoolsCommand::DatabaseExplain(_) | JetDevtoolsCommand::ProjectRebuild(_) => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Drop all queued commands for one session at teardown.
-//RS pub fn jet_devtools_clear_commands(session_id: &str) {
-//RS     if let Ok(mut queues) = JET_DEVTOOLS_COMMAND_QUEUES.lock() {
-//RS         queues.remove(session_id);
-//RS     }
-//RS     jet_devtools_clear_command_receipts(session_id);
-//RS }
-//RS 
-//RS /// Compatibility name retained for generated game adapters. It now feeds the
-//RS /// shared command FIFO instead of a second game-only queue.
-//RS pub fn jet_devtools_enqueue_game_control(
-//RS     request: JetDevtoolsGameControlRequest,
-//RS ) -> Result<(), String> {
-//RS     jet_devtools_enqueue_command(JetDevtoolsCommand::GameControl(request))
-//RS }
-//RS 
-//RS /// Direction is part of the canonical command envelope. Runtime-to-host
-//RS /// traffic is event-only and therefore cannot be placed in this envelope.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub enum JetDevtoolsCommandDirection {
-//RS     HostToRuntime,
-//RS     RuntimeToHost,
-//RS }
-//RS 
-//RS impl JetDevtoolsCommandDirection {
-//RS     pub const fn as_str(self) -> &'static str {
-//RS         match self {
-//RS             Self::HostToRuntime => "host_to_runtime",
-//RS             Self::RuntimeToHost => "runtime_to_host",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A bounded host-to-runtime command envelope. It is deliberately separate
-//RS /// from the event-only `JetDevtoolsEnvelope` mirrored into generated Prelude.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct JetDevtoolsCommandEnvelope {
-//RS     pub protocol: String,
-//RS     pub session_id: String,
-//RS     pub started_at_ms: u64,
-//RS     pub direction: JetDevtoolsCommandDirection,
-//RS     commands: VecDeque<JetDevtoolsCommand>,
-//RS }
-//RS 
-//RS impl JetDevtoolsCommandEnvelope {
-//RS     pub fn new(session_id: impl Into<String>, started_at_ms: u64) -> Self {
-//RS         Self {
-//RS             protocol: crate::Devtools::JET_DEVTOOLS_PROTOCOL.to_string(),
-//RS             session_id: session_id.into(),
-//RS             started_at_ms,
-//RS             direction: JetDevtoolsCommandDirection::HostToRuntime,
-//RS             commands: VecDeque::new(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         if self.protocol != crate::Devtools::JET_DEVTOOLS_PROTOCOL {
-//RS             return Err("jet.devtools.v1 command envelope protocol mismatch".to_string());
-//RS         }
-//RS         validate_text(&self.session_id, "session_id")?;
-//RS         if self.direction != JetDevtoolsCommandDirection::HostToRuntime {
-//RS             return Err("jet.devtools.v1 command envelope direction must be host_to_runtime".to_string());
-//RS         }
-//RS         if self.commands.len() > JET_DEVTOOLS_MAX_COMMANDS {
-//RS             return Err("jet.devtools.v1 command queue is full".to_string());
-//RS         }
-//RS         for command in &self.commands {
-//RS             command.validate()?;
-//RS             if command.session_id() != self.session_id {
-//RS                 return Err("jet.devtools.v1 command session identity mismatch".to_string());
-//RS             }
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     pub fn enqueue_command(&mut self, command: JetDevtoolsCommand) -> Result<(), String> {
-//RS         command.validate()?;
-//RS         if command.session_id() != self.session_id {
-//RS             return Err("jet.devtools.v1 command session identity mismatch".to_string());
-//RS         }
-//RS         if self.commands.len() >= JET_DEVTOOLS_MAX_COMMANDS {
-//RS             return Err("jet.devtools.v1 command queue is full".to_string());
-//RS         }
-//RS         self.direction = JetDevtoolsCommandDirection::HostToRuntime;
-//RS         self.commands.push_back(command);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     /// Put a temporarily unavailable command back at the head of the queue.
-//RS     /// Dispatchers use this to preserve FIFO order when the runtime callback
-//RS     /// is not installed yet.
-//RS     pub fn requeue_command_front(&mut self, command: JetDevtoolsCommand) -> Result<(), String> {
-//RS         command.validate()?;
-//RS         if command.session_id() != self.session_id {
-//RS             return Err("jet.devtools.v1 command session identity mismatch".to_string());
-//RS         }
-//RS         if self.commands.len() >= JET_DEVTOOLS_MAX_COMMANDS {
-//RS             return Err("jet.devtools.v1 command queue is full".to_string());
-//RS         }
-//RS         self.direction = JetDevtoolsCommandDirection::HostToRuntime;
-//RS         self.commands.push_front(command);
-//RS         Ok(())
-//RS     }
-//RS 
-//RS 
-//RS     pub fn poll_command(&mut self) -> Option<JetDevtoolsCommand> {
-//RS         self.commands.pop_front()
-//RS     }
-//RS 
-//RS     pub fn commands(&self) -> impl Iterator<Item = &JetDevtoolsCommand> {
-//RS         self.commands.iter()
-//RS     }
-//RS 
-//RS     pub fn command_count(&self) -> usize {
-//RS         self.commands.len()
-//RS     }
-//RS 
-//RS     pub fn serialize(&self) -> Result<String, String> {
-//RS         self.validate()?;
-//RS         let commands = self
-//RS             .commands
-//RS             .iter()
-//RS             .map(|command| {
-//RS                 format!(
-//RS                     "{{\"kind\":{},\"payload\":{}}}",
-//RS                     render_text(command.kind()),
-//RS                     command.render_json()
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         let out = format!(
-//RS             "{{\"protocol\":{},\"session_id\":{},\"started_at_ms\":{},\"direction\":{},\"commands\":[{}]}}",
-//RS             render_text(&self.protocol),
-//RS             render_text(&self.session_id),
-//RS             self.started_at_ms,
-//RS             render_text(self.direction.as_str()),
-//RS             commands,
-//RS         );
-//RS         if out.len() > crate::Devtools::JET_DEVTOOLS_MAX_ENVELOPE_BYTES {
-//RS             return Err("jet.devtools.v1 command envelope exceeds the Prelude byte limit".to_string());
-//RS         }
-//RS         Ok(out)
-//RS     }
-//RS }
-//RS /// A decoded transport has one direction and one payload kind. Mixed event
-//RS /// and command envelopes are rejected by the host decoder before Session sees
-//RS /// them.
-//RS #[derive(Clone, Debug)]
-//RS pub enum JetDevtoolsDecodedEnvelope {
-//RS     Events(crate::Devtools::JetDevtoolsEnvelope),
-//RS     Commands(JetDevtoolsCommandEnvelope),
-//RS }
-//RS 
-//RS impl JetDevtoolsDecodedEnvelope {
-//RS     pub fn validate(&self) -> Result<(), String> {
-//RS         match self {
-//RS             Self::Events(envelope) => envelope.serialize().map(|_| ()),
-//RS             Self::Commands(envelope) => envelope.validate(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn session_id(&self) -> &str {
-//RS         match self {
-//RS             Self::Events(envelope) => &envelope.session_id,
-//RS             Self::Commands(envelope) => &envelope.session_id,
-//RS         }
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2116 crates/jet-foundation/src/DevtoolsControl.rs:1-1097
+// Host-only control protocol; observation facts stay in Devtools.
+// DTOs carry checked identities and bounded limits, never runtime authority.
 
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:10
+// MAX_COMMANDS derives from the canonical observation-event bound.
+use Compiler.JetFoundation.Source.Devtools.Observation.[JET_DEVTOOLS_MAX_EVENTS]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:11
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:12
+use Compiler.JetFoundation.Source.Devtools.Control.[JET_DEVTOOLS_MAX_COMMANDS, JET_DEVTOOLS_MAX_COMMAND_ROWS]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:14
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:31
+// Canonical host validation and quotation preserve the command wire law.
+use Compiler.JetFoundation.Source.Devtools.Native.[jet_devtools_validate_command_text, jet_devtools_relay_json_string]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:55
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:64
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:82
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:95
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsDatabaseExplainRequest, jet_devtools_database_explain_request_new, jet_devtools_database_explain_request_validate, jet_devtools_database_explain_request_render_json]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:110
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:117
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:131
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:140
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsDbPlanRow, jet_devtools_db_plan_row_new, jet_devtools_db_plan_row_validate, jet_devtools_db_plan_row_render_json]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:157
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:172
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:203
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:223
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsDatabaseExplainResult, jet_devtools_database_explain_result_new, jet_devtools_database_explain_result_validate, jet_devtools_database_explain_result_render_json]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:257
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:275
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:294
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsGameControlKind, jet_devtools_game_control_kind_wire, jet_devtools_game_control_kind_from_str]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:317
+use Compiler.JetFoundation.Source.Devtools.Control.[jet_devtools_control_optional_u64]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:327
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:348
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:358
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:387
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:491
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsGameControlRequest, jet_devtools_required_game_control_field, jet_devtools_game_control_request_new, jet_devtools_game_control_request_validate, jet_devtools_game_control_request_render_json]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:557
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:564
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:578
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:585
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsProjectRebuildRequest, jet_devtools_project_rebuild_request_new, jet_devtools_project_rebuild_request_validate, jet_devtools_project_rebuild_request_render_json]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:598
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:605
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:613
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:621
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:629
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:637
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsCommand, jet_devtools_command_session_id, jet_devtools_command_validate, jet_devtools_command_render_json, jet_devtools_command_kind, jet_devtools_command_request_id]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:648
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsCommandReceipt]
+
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:658
+fn command_receipt_queued(command: &JetDevtoolsCommand) -> JetDevtoolsCommandReceipt {
+    JetDevtoolsCommandReceipt {
+        sequence: NEXT_COMMAND_RECEIPT_SEQUENCE.fetch_add(U64{1}, Ordering.Relaxed),
+        session_id: jet_devtools_command_session_id(command).to_string(),
+        request_id: jet_devtools_command_request_id(command).to_string(),
+        kind: jet_devtools_command_kind(command).to_string(),
+        status: "queued", error: None
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:668
+pub fn jet_devtools_command_receipt_for_command(command: &JetDevtoolsCommand, status: String, error: String?) -> JetDevtoolsCommandReceipt {
+    JetDevtoolsCommandReceipt {
+        sequence: NEXT_COMMAND_RECEIPT_SEQUENCE.fetch_add(U64{1}, Ordering.Relaxed),
+        session_id: jet_devtools_command_session_id(command).to_string(),
+        request_id: jet_devtools_command_request_id(command).to_string(),
+        kind: jet_devtools_command_kind(command).to_string(),
+        status: ^status, error: ^error
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:684
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:695
+use Compiler.JetFoundation.Source.Devtools.Control.[jet_devtools_command_receipt_validate, jet_devtools_command_receipt_render_json]
+
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:712
+// GATE #4494: process-wide atomics, lazy initialization and mutex ownership.
+use std.sync.atomic.[AtomicU64, Ordering]
+use std.sync.[LazyLock, Mutex]
+use std.collections.[VecDeque]
+static NEXT_COMMAND_RECEIPT_SEQUENCE: AtomicU64 = AtomicU64.new(U64{1})
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:713
+static JET_DEVTOOLS_COMMAND_RECEIPTS: LazyLock<Mutex<[String: VecDeque<JetDevtoolsCommandReceipt>]>> = LazyLock.new(|| Mutex.new([:]))
+
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:717
+fn command_receipt_cleanup(receipts: &[String: VecDeque<JetDevtoolsCommandReceipt>], session_id: String) -> Unit {
+    if receipts.get(session_id).is_some_and(|queue| queue.is_empty()) {
+        _ :: receipts.remove(session_id)
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:730
+pub fn jet_devtools_update_command_receipt(session_id: String, request_id: String, status: String, error: String?) -> Unit Err! {
+    jet_devtools_validate_command_text(session_id, "command receipt session_id")?
+    jet_devtools_validate_command_text(request_id, "command receipt request_id")?
+    jet_devtools_validate_command_text(status, "command receipt status")?
+    if error is Some(text) { jet_devtools_validate_command_text(text, "command receipt error")? }
+    mut receipts := JET_DEVTOOLS_COMMAND_RECEIPTS.lock()
+        .map_err(|_| "jet.devtools.v1 command receipt queue is poisoned")?
+    receipt := receipts.get_mut(session_id)
+        .and_then(|queue| queue.iter_mut().rev().find(|receipt| receipt.request_id == request_id))
+        .ok_or("jet.devtools.v1 command receipt was not retained")?
+    receipt.status = ^status
+    receipt.error = ^error
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:758
+pub fn jet_devtools_record_command_receipt(receipt: JetDevtoolsCommandReceipt) -> Unit Err! {
+    jet_devtools_command_receipt_validate(receipt)?
+    session_id := receipt.session_id.clone()
+    mut receipts := JET_DEVTOOLS_COMMAND_RECEIPTS.lock()
+        .map_err(|_| "jet.devtools.v1 command receipt queue is poisoned")?
+    queue := receipts.entry(session_id).or_insert_with(|| VecDeque.new())
+    if queue.len() >= JET_DEVTOOLS_MAX_COMMANDS {
+        return Err("jet.devtools.v1 command receipt queue is full")
+    }
+    queue.push_back(^receipt)
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:775
+pub fn jet_devtools_poll_command_receipt(session_id: String) -> JetDevtoolsCommandReceipt? {
+    mut receipts := JET_DEVTOOLS_COMMAND_RECEIPTS.lock().ok()?
+    receipt := receipts.get_mut(session_id)?.pop_front()
+    command_receipt_cleanup(&receipts, session_id)
+    receipt
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:784
+pub fn jet_devtools_command_receipt_count(session_id: String) -> Int {
+    JET_DEVTOOLS_COMMAND_RECEIPTS.lock().ok()
+        .and_then(|receipts| receipts.get(session_id).map(|queue| queue.len())).unwrap_or(0)
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:794
+pub fn jet_devtools_command_receipts(session_id: String) -> [JetDevtoolsCommandReceipt] {
+    JET_DEVTOOLS_COMMAND_RECEIPTS.lock().ok()
+        .and_then(|receipts| receipts.get(session_id).map(|queue| queue.iter().cloned().collect()))
+        .unwrap_or_default()
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:808
+pub fn jet_devtools_clear_command_receipts(session_id: String) -> Unit {
+    if JET_DEVTOOLS_COMMAND_RECEIPTS.lock() is Ok(receipts) {
+        _ :: receipts.remove(session_id)
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:815
+// GATE #4494: one process FIFO per session shared by every command family.
+static JET_DEVTOOLS_COMMAND_QUEUES: LazyLock<Mutex<[String: VecDeque<JetDevtoolsCommand>]>> = LazyLock.new(|| Mutex.new([:]))
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:819
+fn command_queue_cleanup(queues: &[String: VecDeque<JetDevtoolsCommand>], session_id: String) -> Unit {
+    if queues.get(session_id).is_some_and(|queue| queue.is_empty()) {
+        _ :: queues.remove(session_id)
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:832
+pub fn jet_devtools_enqueue_command(command: JetDevtoolsCommand) -> Unit Err! {
+    jet_devtools_command_validate(command)?
+    session_id := jet_devtools_command_session_id(command).to_string()
+    receipt := command_receipt_queued(command)
+    // Keep receipt admission and command admission atomic; lock order matches Rust.
+    mut receipts := JET_DEVTOOLS_COMMAND_RECEIPTS.lock()
+        .map_err(|_| "jet.devtools.v1 command receipt queue is poisoned")?
+    if receipts.get(session_id).is_some_and(|queue| queue.len() >= JET_DEVTOOLS_MAX_COMMANDS) {
+        return Err("jet.devtools.v1 command receipt queue is full")
+    }
+    mut queues := JET_DEVTOOLS_COMMAND_QUEUES.lock()
+        .map_err(|_| "jet.devtools.v1 command queue is poisoned")?
+    queue := queues.entry(session_id.clone()).or_insert_with(|| VecDeque.new())
+    if queue.len() >= JET_DEVTOOLS_MAX_COMMANDS { return Err("jet.devtools.v1 command queue is full") }
+    queue.push_back(^command)
+    receipts.entry(session_id).or_insert_with(|| VecDeque.new()).push_back(^receipt)
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:861
+pub fn jet_devtools_requeue_command_front(command: JetDevtoolsCommand) -> Unit Err! {
+    jet_devtools_command_validate(command)?
+    session_id := jet_devtools_command_session_id(command).to_string()
+    mut queues := JET_DEVTOOLS_COMMAND_QUEUES.lock()
+        .map_err(|_| "jet.devtools.v1 command queue is poisoned")?
+    queue := queues.entry(session_id).or_insert_with(|| VecDeque.new())
+    if queue.len() >= JET_DEVTOOLS_MAX_COMMANDS { return Err("jet.devtools.v1 command queue is full") }
+    queue.push_front(^command)
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:876
+pub fn jet_devtools_poll_command(session_id: String) -> JetDevtoolsCommand? {
+    mut queues := JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()?
+    command := queues.get_mut(session_id)?.pop_front()
+    command_queue_cleanup(&queues, session_id)
+    command
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:884
+pub fn jet_devtools_command_count(session_id: String) -> Int {
+    JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()
+        .and_then(|queues| queues.get(session_id).map(|queue| queue.len())).unwrap_or(0)
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:894
+pub fn jet_devtools_poll_database_explain(session_id: String) -> JetDevtoolsDatabaseExplainRequest? {
+    mut queues := JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()?
+    queue := queues.get_mut(session_id)?
+    index := queue.iter().position(|command| command is JetDevtoolsCommand.DatabaseExplain(_))?
+    command := queue.remove(index)?
+    command_queue_cleanup(&queues, session_id)
+    match command {
+        JetDevtoolsCommand.DatabaseExplain(request) -> Some(^request)
+        JetDevtoolsCommand.GameControl(_), JetDevtoolsCommand.ProjectRebuild(_) -> None
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:912
+pub fn jet_devtools_poll_game_control(session_id: String) -> JetDevtoolsGameControlRequest? {
+    mut queues := JET_DEVTOOLS_COMMAND_QUEUES.lock().ok()?
+    queue := queues.get_mut(session_id)?
+    index := queue.iter().position(|command| command is JetDevtoolsCommand.GameControl(_))?
+    command := queue.remove(index)?
+    command_queue_cleanup(&queues, session_id)
+    match command {
+        JetDevtoolsCommand.GameControl(request) -> Some(^request)
+        JetDevtoolsCommand.DatabaseExplain(_), JetDevtoolsCommand.ProjectRebuild(_) -> None
+    }
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:929
+pub fn jet_devtools_clear_commands(session_id: String) -> Unit {
+    if JET_DEVTOOLS_COMMAND_QUEUES.lock() is Ok(queues) { _ :: queues.remove(session_id) }
+    jet_devtools_clear_command_receipts(session_id)
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:938
+pub fn jet_devtools_enqueue_game_control(request: JetDevtoolsGameControlRequest) -> Unit Err! {
+    jet_devtools_enqueue_command(JetDevtoolsCommand.GameControl(^request))
+}
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:947
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:953
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsCommandDirection, jet_devtools_command_direction_wire]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:964
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:973
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:983
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1003
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1019
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1033
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1037
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1041
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1045
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsCommandEnvelope, jet_devtools_command_envelope_new, jet_devtools_command_envelope_validate, jet_devtools_command_envelope_enqueue_command, jet_devtools_command_envelope_requeue_command_front, jet_devtools_command_envelope_poll_command, jet_devtools_command_envelope_commands, jet_devtools_command_envelope_command_count, jet_devtools_command_envelope_serialize]
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1077
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1083
+// Rust: crates/jet-foundation/src/DevtoolsControl.rs:1090
+use Compiler.JetFoundation.Source.Devtools.Control.[JetDevtoolsDecodedEnvelope, jet_devtools_decoded_envelope_validate, jet_devtools_decoded_envelope_session_id]

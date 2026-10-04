@@ -1,0 +1,298 @@
+use WsLaw.[actual_includes, collect_rs]
+use ZipFamily.[SOURCE, EXPECTED, STRICT_MISMATCH_SOURCE]
+use Common as common
+use TirSupport.[build_and_run, build_and_run_full, have_rustc, interpreter_run, jit_run]
+use jet_interpreter.[dev_iteration, RunOutcome]
+use jet_codegen.LiveQuery.[jet_app_ws_register, jet_app_ws_unregister, jet_app_live_query, jet_app_live_with, jet_app_live_bind_sink, jet_app_live_get, jet_app_live_show, jet_app_invalidate, JetLiveRerun]
+use jet_codegen.WsClient.[jet_ws_accept_key, jet_ws_parse_url, jet_ws_connect, JetWsError]
+use jet_codegen.Ws.[jet_ws_upgrade, jet_ws_recv, jet_ws_message_text, jet_ws_send_text, jet_ws_close, jet_ws_message_is_text, jet_ws_message_is_close]
+use jet_codegen.HTTPServer.[jet_http_mux_new, jet_http_srv_response, jet_http_server_handle_stream, JetHTTPServerOptions]
+use jet_codegen.Deadline.jet_ctx_push_deadline
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.thread as thread
+use std.sync.[Arc, Mutex, Barrier]
+use std.sync.atomic.[AtomicUSize, AtomicBool, Ordering]
+use std.net.[TcpListener, TcpStream]
+use std.io.[Write, ErrorKind]
+use std.time.[Instant, Duration]
+
+// Rust: tests/ws_law.rs:406
+#Test("live_query_rerun_publishes_and_reconnect_replays_latest") {
+    // GATE #4494: real canonical live-query transport, synchronization and callback ABI.
+    footprint :: "law_live_{process.id()}.rows"
+    frames :: Arc.new(Mutex.new([String]{}))
+    frame_sink :: frames.clone()
+    transport_id :: jet_app_ws_register(Arc.new((frame) -> frame_sink.lock().unwrap().push(frame)))
+    assert_ne(transport_id, 0, "live transport registration must succeed")
+    reruns :: Arc.new(AtomicUSize.new(0))
+    rerun_count :: reruns.clone()
+    query :: jet_app_live_query(footprint.clone(), "v1", () -> {
+        call :: rerun_count.fetch_add(1, Ordering.SeqCst) + 1
+        Ok("v{call + 1}")
+    })
+    assert(query.lifecycle.error.is_empty(), "query registration failed: {query.lifecycle.error:Debug}")
+    delivered :: Arc.new(Mutex.new([String]{}))
+    delivered_sink :: delivered.clone()
+    bound :: jet_app_live_bind_sink(query, Arc.new((value) -> delivered_sink.lock().unwrap().push(value)))
+    assert(bound.lifecycle.error.is_empty(), "sink binding failed: {bound.lifecycle.error:Debug}")
+    assert_eq(jet_app_live_get(bound), "v1")
+    assert_eq(jet_app_invalidate(footprint.clone()), 1)
+    assert_eq(reruns.load(Ordering.SeqCst), 1)
+    assert_eq(jet_app_live_get(bound), "v2")
+    assert(jet_app_live_show(bound).contains("generation=2"))
+    assert_eq(delivered.lock().unwrap().deref(), ["v2"])
+    topic_prefix :: "live:{bound.id}:"
+    published :: frames.lock().unwrap().iter().filter((frame) -> frame.starts_with(topic_prefix)).cloned().collect()
+    assert_eq(published.len(), 2, "initial and rerun events must publish")
+    assert(published[0].ends_with(":{footprint}:v1"))
+    assert(published[1].ends_with(":{footprint}:v2"))
+    replayed :: Arc.new(Mutex.new([String]{}))
+    replay_sink :: replayed.clone()
+    reconnect_id :: jet_app_ws_register(Arc.new((frame) -> replay_sink.lock().unwrap().push(frame)))
+    assert_ne(reconnect_id, 0, "reconnect registration must succeed")
+    assert_eq(replayed.lock().unwrap().iter().filter((frame) -> frame.starts_with(topic_prefix)).cloned().collect(), ["live:{bound.id}:2:{footprint}:v2"])
+    jet_app_ws_unregister(reconnect_id)
+    jet_app_ws_unregister(transport_id)
+}
+// Rust: tests/ws_law.rs:480
+#Test("live_query_commit_delivers_to_sink_bound_during_rerun") {
+    footprint :: "law_live_sink_{process.id()}.rows"
+    rerun_started :: Arc.new(Barrier.new(2))
+    rerun_release :: Arc.new(Barrier.new(2))
+    started :: rerun_started.clone()
+    release :: rerun_release.clone()
+    rerun: JetLiveRerun :: Arc.new(() -> {
+        started.wait()
+        release.wait()
+        Ok("v2")
+    })
+    query :: jet_app_live_with(footprint.clone(), "v1", Val(rerun), None)
+    old_values :: Arc.new(Mutex.new([String]{}))
+    old_values_sink :: old_values.clone()
+    old_bound :: jet_app_live_bind_sink(query, Arc.new((value) -> old_values_sink.lock().unwrap().push(value)))
+    assert(old_bound.lifecycle.error.is_empty(), "initial sink binding failed: {old_bound.lifecycle.error:Debug}")
+    invalidation_footprint :: footprint.clone()
+    invalidator :: thread.spawn(() -> jet_app_invalidate(invalidation_footprint))
+    rerun_started.wait()
+    new_values :: Arc.new(Mutex.new([String]{}))
+    new_values_sink :: new_values.clone()
+    new_bound :: jet_app_live_bind_sink(old_bound, Arc.new((value) -> new_values_sink.lock().unwrap().push(value)))
+    assert(new_bound.lifecycle.error.is_empty(), "canonical sink rebinding failed: {new_bound.lifecycle.error:Debug}")
+    rerun_release.wait()
+    assert_eq(invalidator.join().unwrap(), 1)
+    assert_eq(old_values.lock().unwrap().deref(), [String]{})
+    assert_eq(new_values.lock().unwrap().deref(), ["v2"])
+    assert_eq(jet_app_live_get(new_bound), "v2")
+}
+// Rust: tests/ws_law.rs:529
+#Test("direct_ws_consumers_include_client_core_first") {
+    hostile :: """
+// include!("ignored/line/Ws.rs");
+/* include!("ignored/block/Ws.rs"); */
+const NORMAL: &str = "include!(\"ignored/normal/Ws.rs\");";
+const RAW: &str = r#"include!("ignored/raw/Ws.rs");"#;
+include!("kept/WsClient.rs");
+include!("kept/Ws.rs");
+"""
+    assert_eq(actual_includes(hostile), [(6, "kept/WsClient.rs"), (7, "kept/Ws.rs")])
+    root :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR"))
+    files := [OSPath]{}
+    collect_rs(root.join("crates"), &files)
+    collect_rs(root.join("tests"), &files)
+    consumers := [OSPath]{}
+    loop path in files {
+        text :: fs.read_to_string(path).unwrap()
+        includes :: actual_includes(text)
+        loop (index, (_, target)) in includes.iter().enumerate() {
+            if !target.ends_with("/Ws.rs") { next }
+            (_, client_target) :: index.checked_sub(1).and_then((previous) -> includes.get(previous)) ?? panic("{path.display()} omits WsClient.rs")
+            assert(client_target.ends_with("/WsClient.rs"), "{path.display()} must include WsClient.rs immediately before Ws.rs")
+            consumers.push(path.strip_prefix(root).unwrap().to_path_buf())
+        }
+    }
+    &consumers.sort()
+    assert_eq(consumers, [OSPath.from("crates/jet-jit/src/net_http_rt.rs"), OSPath.from("tests/http_server_lifecycle.rs"), OSPath.from("tests/ws_law.rs")])
+}
+// Rust: tests/ws_law.rs:860
+#Test("accept_key_matches_rfc6455_example") {
+    assert_eq(jet_ws_accept_key("dGhlIHNhbXBsZSBub25jZQ=="), "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=")
+}
+// Rust: tests/ws_law.rs:869
+#Test("hostile_url_controls_are_rejected_before_handshake_serialization") {
+    assert_eq(jet_ws_parse_url("ws://127.0.0.1/path\r\nInjected: yes").expect_err("reject path controls"), JetWsError.InvalidURL)
+    assert_eq(jet_ws_parse_url("ws://127.0.0.1\r\nInjected: yes/path").expect_err("reject authority controls"), JetWsError.InvalidURL)
+}
+// Rust: tests/ws_law.rs:881
+#Test("public_aot_ws_connect_rejects_url_controls_before_connecting") {
+    // GATE #4494 real sockets, nonblocking accept, clock and observer thread.
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    listener.set_nonblocking(true).unwrap()
+    addr :: listener.local_addr().unwrap()
+    observer :: thread.spawn(() -> {
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            result :: listener.accept()
+            if result.is_ok() { return true }
+            error :: result.unwrap_err()
+            if error.kind() == ErrorKind.WouldBlock {
+                if Instant.now() >= deadline { return false }
+                thread.yield_now()
+            } else { return false }
+        }
+    })
+    source :: """
+use core.net.ws as ws
+fn run() -> {
+    if ws.connect("ws://ADDRESS/live\nInjected: yes") == {
+        .Ok(_) -> print("accepted")
+        .Err(error) -> {
+            if error == .InvalidURL -> print("rejected")
+            else -> print("wrong error")
+        }
+        else -> print("unexpected")
+    }
+}
+""".replace("ADDRESS", addr.to_string())
+    (code, stdout, stderr) :: common.build_and_run("jet_ws_law", "aot_hostile_url", source)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "rejected\n")
+    assert(!observer.join().unwrap(), "hostile public ws.connect reached the socket")
+}
+// Rust: tests/ws_law.rs:926
+#Test("client_and_server_echo_text_over_live_sockets") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        mux :: jet_http_mux_new()
+        mux.add("GET", "/live", (req) -> {
+            sock :: jet_ws_upgrade(req).expect("upgrade")
+            message :: jet_ws_recv(sock).expect("recv")
+            text :: jet_ws_message_text(message).expect("text")
+            jet_ws_send_text(sock, "echo:{text}").expect("send")
+            jet_ws_close(sock, 1000, "").expect("close")
+            Ok(jet_http_srv_response(500, "unused"))
+        })
+        jet_http_server_handle_stream(&stream, mux, JetHTTPServerOptions.safe(), AtomicBool.new(false), None, None)
+    })
+    url :: "ws://{addr}/live"
+    client :: jet_ws_connect(url).expect("connect")
+    jet_ws_send_text(client, "ping").expect("client send")
+    reply :: loop {
+        message :: jet_ws_recv(client).expect("client recv")
+        if jet_ws_message_is_text(message) && jet_ws_message_text(message).unwrap() == "echo:ping" { break message }
+    }
+    assert_eq(jet_ws_message_text(reply).unwrap(), "echo:ping")
+    closed :: jet_ws_recv(client).expect("client close")
+    assert(jet_ws_message_is_close(closed))
+    server.join().unwrap()
+}
+// Rust: tests/ws_law.rs:967
+#Test("oversized_client_frame_is_rejected") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        mux :: jet_http_mux_new()
+        mux.add("GET", "/live", (req) -> {
+            sock := jet_ws_upgrade(req).expect("upgrade")
+            sock.max_message = 8
+            err :: jet_ws_recv(sock).expect_err("must reject")
+            assert(err == .MessageTooLarge(limit: 8))
+            Ok(jet_http_srv_response(500, "unused"))
+        })
+        jet_http_server_handle_stream(&stream, mux, JetHTTPServerOptions.safe(), AtomicBool.new(false), None, None)
+    })
+    client :: jet_ws_connect("ws://{addr}/live").expect("connect")
+    _ :: jet_ws_send_text(client, "0123456789")
+    server.join().unwrap()
+}
+// Rust: tests/ws_law.rs:997
+#Test("ambient_deadline_cancels_recv") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        mux :: jet_http_mux_new()
+        mux.add("GET", "/live", (req) -> {
+            sock :: jet_ws_upgrade(req).expect("upgrade")
+            // The Rust fixture injected its test-only remaining-ms hook; install
+            // the actual already-expired canonical ambient deadline instead.
+            {
+                deadline_guard :: jet_ctx_push_deadline(0)
+                err :: jet_ws_recv(sock).expect_err("cancelled")
+                assert_eq(err, JetWsError.Cancelled)
+            }
+            Ok(jet_http_srv_response(500, "unused"))
+        })
+        jet_http_server_handle_stream(&stream, mux, JetHTTPServerOptions.safe(), AtomicBool.new(false), None, None)
+    })
+    client :: jet_ws_connect("ws://{addr}/live").expect("connect")
+    server.join().unwrap()
+}
+// Rust: tests/ws_law.rs:1027
+#Test("hostile_handshake_missing_version_fails_closed") {
+    listener :: TcpListener.bind("127.0.0.1:0").unwrap()
+    addr :: listener.local_addr().unwrap()
+    server :: thread.spawn(() -> {
+        (stream, _) := listener.accept().unwrap()
+        mux :: jet_http_mux_new()
+        mux.add("GET", "/live", (req) -> {
+            result :: jet_ws_upgrade(req)
+            if result.is_ok() { panic("expected invalid handshake") }
+            assert_eq(result.unwrap_err(), JetWsError.InvalidHandshake)
+            Ok(jet_http_srv_response(400, "bad"))
+        })
+        jet_http_server_handle_stream(&stream, mux, JetHTTPServerOptions.safe(), AtomicBool.new(false), None, None)
+    })
+    stream := TcpStream.connect(addr).unwrap()
+    stream.write_all("GET /live HTTP/1.1\r\nHost: local\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n".as_bytes()).unwrap()
+    drop(^stream)
+    server.join().unwrap()
+}
+
+// Rust: tests/zip_family.rs:57
+#Test("strict_zip_mismatch_reports_e0128_across_tiers") {
+    results := [("default JIT", jit_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE)), ("forced interpreter", interpreter_run("zip_strict_mismatch", STRICT_MISMATCH_SOURCE))]
+    if have_rustc() {
+        results.push(("AOT", build_and_run_full("zip_strict_mismatch", "zip_strict_mismatch", STRICT_MISMATCH_SOURCE)))
+    }
+    baseline: (String, (I32, String, String))? := None
+    loop (tier, (code, stdout, stderr)) in results {
+        assert_eq(code, 70, "{tier} must exit with the registered runtime stop: {stderr}")
+        lower :: stderr.to_ascii_lowercase()
+        loop needle in ["stop [e0128]", "inputs have different lengths under `strict` policy", "strict `zip` requires every input to end on the same row", "zip_short", "truncate", "zip_pad", "pad", "neither changes strictness automatically", "loop row in left.zip(right)"] {
+            assert(lower.contains(needle), "{tier} missing {needle:Debug}: {stderr}")
+        }
+        assert(!stderr.contains("E3001"), "{tier} regressed to E3001: {stderr}")
+        assert(!stderr.contains("<core.collections>:0"), "{tier} lost the user zip location: {stderr}")
+        if baseline == Val((baseline_tier, expected)) {
+            assert_eq((code, stdout.clone(), stderr.clone()), expected, "{tier} diverged from {baseline_tier}")
+        } else { baseline = Val((tier, (code, stdout, stderr))) }
+    }
+}
+// Rust: tests/zip_family.rs:111
+#Test("zip_family_matches_aot_default_and_forced_interpreter") {
+    if !have_rustc() { return }
+    (code, aot_stdout) :: build_and_run("zip_family", SOURCE)
+    assert_eq(code, 0)
+    assert_eq(aot_stdout, EXPECTED)
+    dir :: env.temp_dir().join("jet_zip_family_{process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("main.jet")
+    fs.write(path, SOURCE).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    loop (tier, force_interpreter) in [("default tier", false), ("forced interpreter", true)] {
+        outcome :: dev_iteration(shown, false, force_interpreter)
+        if outcome == {
+            .Ran(stdout: stdout, stderr: stderr, exit_code: exit_code) -> {
+                assert_eq(exit_code, 0, "{tier} exit")
+                assert_eq(stderr, "", "{tier} stderr")
+                assert_eq(stdout, EXPECTED, "{tier} output")
+            }
+            .Problems(diagnostics) -> panic("{tier} rejected zip family: {diagnostics:Debug}")
+        }
+    }
+}

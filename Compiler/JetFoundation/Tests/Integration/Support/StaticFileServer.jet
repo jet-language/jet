@@ -1,0 +1,114 @@
+// Disk-backed HTTP fixture: every success comes from a regular publication file.
+use std.[fs, thread]
+use std.net.[TcpListener, TcpStream]
+use std.path.Component
+use std.sync.Arc
+use std.sync.atomic.[AtomicBool, Ordering]
+use std.time.Duration
+use std.io.ErrorKind
+
+// Rust: tests/support/static_file_server.rs:17
+pub struct StaticFileServer {
+    pub endpoint: String
+    stop: Arc<AtomicBool>
+    join: thread.JoinHandle<Unit>?
+}
+impl StaticFileServer {
+    // Rust: tests/support/static_file_server.rs:24
+    pub fn start(root: &OSPath) -> Self {
+        // GATE #4494: real filesystem, loopback socket, thread and atomic stop flag.
+        fs.create_dir_all(root).expect("static publication root")
+        metadata :: fs.symlink_metadata(root).expect("static publication metadata")
+        assert(metadata.is_dir(), "static publication root is not a directory")
+        assert(!metadata.file_type().is_symlink(), "static publication root must not be a symlink")
+        listener :: TcpListener.bind(("127.0.0.1", 0)).expect("bind static file server")
+        listener.set_nonblocking(true).expect("set static file server nonblocking")
+        address :: listener.local_addr().expect("static file server address")
+        endpoint :: "http://127.0.0.1:{address.port()}"
+        owned_root :: root.to_path_buf()
+        stop :: Arc.new(AtomicBool.new(false))
+        thread_stop :: Arc.clone(&stop)
+        thread_root :: owned_root.clone()
+        join :: thread.spawn(fn() {
+            while !thread_stop.load(Ordering.Relaxed) {
+                match listener.accept() {
+                    Ok((stream, _)) -> { serve_request(stream, &thread_root) }
+                    Err(error) if error.kind() == ErrorKind.WouldBlock -> { thread.sleep(Duration.from_millis(1)) }
+                    Err(_) -> { break }
+                }
+            }
+        })
+        Self { endpoint: endpoint, stop: stop, join: Some(join) }
+    }
+}
+impl StaticFileServer.Drop {
+    // Rust: tests/support/static_file_server.rs:62
+    fn drop(&self) -> {
+        self.stop.store(true, Ordering.Relaxed)
+        _ :: self.endpoint.strip_prefix("http://").and_then(fn(address) { TcpStream.connect(address).ok() })
+        if Some(join) :: self.join.take() { join.join().expect("static file server thread") }
+    }
+}
+// Rust: tests/support/static_file_server.rs:74
+fn serve_request(stream: TcpStream, root: &OSPath) -> {
+    request := [UInt8; 16384].filled(0)
+    count :: stream.read(&request).unwrap_or_default()
+    parsed :: String.from_utf8(&request[..count]).ok().and_then(fn(request) { request.lines().next() }).and_then(fn(line) {
+        fields := line.split_whitespace()
+        Some((fields.next()?, fields.next()?))
+    })
+    if None :: parsed {
+        respond(&stream, "400 Bad Request", "text/plain", &[])
+        return
+    }
+    (method, target) :: parsed.unwrap()
+    if method != "GET" {
+        respond(&stream, "405 Method Not Allowed", "text/plain", &[])
+        return
+    }
+    path :: target.split_once('?').map_or(target, fn((path, _)) { path })
+    without_fragment :: path.split_once('#').map_or(path, fn((path, _)) { path })
+    file_option :: safe_file_path(root, without_fragment)
+    if None :: file_option {
+        respond(&stream, "400 Bad Request", "text/plain", &[])
+        return
+    }
+    file :: file_option.unwrap()
+    body :: match fs.symlink_metadata(&file) {
+        Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_file() -> None
+        Ok(_) -> fs.read(&file).ok()
+        Err(_) -> None
+    }
+    match body {
+        Some(body) -> { respond(&stream, "200 OK", content_type(&file), &body) }
+        None -> { respond(&stream, "404 Not Found", "text/plain", &[]) }
+    }
+}
+// Rust: tests/support/static_file_server.rs:109
+fn safe_file_path(root: &OSPath, target: String) -> OSPath? {
+    path := root.to_path_buf()
+    for raw in target.strip_prefix('/')?.split('/') {
+        if raw.is_empty() || raw.contains('\\') { return None }
+        component :: OSPath.from(raw).components().next()?
+        if !match component { Component.Normal(_) -> true; _ -> false } { return None }
+        path.push(raw)
+        metadata :: fs.symlink_metadata(&path).ok()?
+        if metadata.file_type().is_symlink() { return None }
+    }
+    if path != root { Some(path) } else { None }
+}
+// Rust: tests/support/static_file_server.rs:128
+fn content_type(path: &OSPath) -> String {
+    match path.extension().and_then(fn(value) { value.to_str() }) {
+        Some("json") -> "application/json"
+        Some("zst") -> "application/zstd"
+        Some("nar") -> "application/octet-stream"
+        _ -> "text/plain"
+    }
+}
+// Rust: tests/support/static_file_server.rs:137
+fn respond(stream: &TcpStream, status: String, content_type: String, body: &[UInt8]) -> {
+    header :: "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {body.len()}\r\nConnection: close\r\n\r\n"
+    _ :: stream.write_all(header.as_bytes())
+    _ :: stream.write_all(body)
+}

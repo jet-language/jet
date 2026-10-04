@@ -1,0 +1,1276 @@
+use UnitFamily.[FAMILY, codes_of, check_codes_of, parse_family, resolved_axis]
+use TirSupport as tiers
+use common
+use std.[fs, env, process, panic]
+use std.process.Command
+use jet.[compile, compile_with_path, compile_web, compile_web_with_path, check_with_path, Lexer, Parser]
+use jet.Loader.load_entry
+use jet.Sema.[check_bundle, CompileMode]
+use jet.AST.[Item, UnitDimensionDecl, UnitScaleProvenance]
+use jet.Diagnostics.Span
+use jet.Publish.[ApiItem, diff_public_api]
+use jet.Publish.ApiFreeze.snapshot_from_items
+use jet_foundation.[jet_unit_conversion_rounded, UnitRoundingMode, UNIT_ROUNDING_UNREPRESENTABLE]
+// GATE #4494: native filesystem, CLI, unwind and Wasm toolchain providers.
+// Retiring resident-JIT state assertions are retained-tier behavioral comparisons.
+
+// Rust: tests/unit_family.rs:52
+#Test("open_base_and_derived_dimension_claims_parse") {
+    base := parse_family("#UnitFamily(Mass, dimension, base: kilogram) { kilogram }")
+    assert(base.dimension is .Some(.Base(_)))
+    derived := parse_family("#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }")
+    assert(derived.dimension is .Some(.Derived(_)))
+}
+// Rust: tests/unit_family.rs:72
+#Test("omitted_base_defaults_to_first_member") {
+    dimensioned := parse_family("#UnitFamily(Length, dimension) { meter foot }")
+    assert_eq(dimensioned.base.as_ref().map(base -> base.0.as_str()), Some("meter"))
+    converted := parse_family("#UnitFamily(Length) { meter millimeter(scale: 1/1000) }")
+    assert_eq(converted.base.as_ref().map(base -> base.0.as_str()), Some("meter"))
+    codes := codes_of("#UnitFamily(Length) { meter millimeter(scale: 1/1000) }\nfn run() -> {\n    m :: Millimeter.from_float(Float{1000.0})\n    print(\"{(m.raw())}\")\n}\n")
+    assert(codes.is_empty(), "expected clean compile, got {codes:?}")
+}
+// Rust: tests/unit_family.rs:95
+#Test("omitted_base_without_dimension_or_conversion_stays_none") {
+    family := parse_family("#UnitFamily(Currency) { usd eur }")
+    assert(family.base.is_none())
+}
+// Rust: tests/unit_family.rs:101
+#Test("imaginary_literal_uses_unit_path_and_keeps_bare_i_ordinary") {
+    source := """
+#UnitFamily(ImaginaryShadow) { i }
+fn run() -> {
+    i :: 9
+    shadowed :: 4i
+    print(i)
+    print(shadowed.raw())
+}
+"""
+    tiers.assert_tiers_agree("imaginary_unit_shadow", source, "9\n4.0\n")
+}
+// Rust: tests/unit_family.rs:116
+#Test("imaginary_arithmetic_abs_and_display_keep_all_hosted_tiers_equal") {
+    source := """
+use core.math.[abs]
+fn run() -> {
+    z :: 3 + 4i
+    print(z * z)
+    print(abs(z))
+    i :: 9
+    print(i)
+}
+"""
+    tiers.assert_tiers_agree("imaginary_literal_tiers", source, "-7 + 24i\n5.0\n9\n")
+}
+// Rust: tests/unit_family.rs:132
+#Test("derived_dimension_requires_one_scale_one_anchor") {
+    src := "#UnitFamily(Energy, dimension: Force * Length) { joule }"
+    (tokens, diagnostics) := Lexer.lex(src)
+    assert(diagnostics.is_empty(), "lex diagnostics: {diagnostics:?}")
+    diagnostics := Parser.parse(tokens).expect_err("a derived dimension needs `base:`")
+    assert_eq(diagnostics.iter().map(d -> d.code.as_str()).collect(), ["E0003"])
+    assert_eq(diagnostics[0].fix, "Add `base: member_name` and keep that member's scale at 1 with offset 0")
+}
+// Rust: tests/unit_family.rs:151
+#Test("scale_provenance_parses_without_erasing_source_truth") {
+    angle := parse_family("#UnitFamily(Angle, dimension, base: radian) { radian degree(scale: pi / 180) }")
+    assert(angle.members[1].scale_provenance is .SymbolicPi(_))
+    mass := parse_family("""
+#UnitFamily(Mass, dimension, base: kilogram) {
+    kilogram
+    dalton(scale: measured(1.66053906892e-27, uncertainty: 0.00000000052e-27, source: "BIPM-2026/CODATA-2022"))
+}
+""")
+    assert(mass.members[1].scale_provenance is .Measured(_))
+}
+// Rust: tests/unit_family.rs:173
+#Test("symbolic_and_measured_standard_scales_keep_one_explicit_boundary") {
+    symbolic := "fn accept(value: Radian) -> {}\nfn run() -> { accept(1degree) }\n"
+    assert(codes_of(symbolic).is_empty(), "symbolic pi conversions should use the ordinary conversion path")
+    measured := """
+fn run() -> {
+    mass :: Kilogram.from_dalton_rounded(1dalton, .NearestEven, digits: 30) ?? panic("rounded measured conversion")
+    print(mass.value())
+    print(mass.uncertainty())
+}
+"""
+    assert(codes_of(measured).is_empty(), "a rounded measured-scale conversion must return a measured value")
+}
+// Rust: tests/unit_family.rs:197
+#Test("measure_rules_cover_fixed_lengths_and_matrix_shapes") {
+    lengths := """
+fn join(left: [Int#2], right: [Int#3]) -> [Int#5] { return left.concat(right) }
+fn run() -> {}
+"""
+    length_codes := codes_of(lengths)
+    assert(length_codes.is_empty(), "fixed-list join must add the two length measures, got {length_codes:?}")
+    matrices := """
+fn compose(left: Matrix<3, 4>, right: Matrix<4, 2>) -> Matrix<3, 2> ComputeError! { return left * right }
+fn run() -> {}
+"""
+    matrix_codes := codes_of(matrices)
+    assert(matrix_codes.is_empty(), "matrix multiplication must match inner measures and compose outer measures, got {matrix_codes:?}")
+}
+// Rust: tests/unit_family.rs:230
+#Test("poundforce_uses_the_exact_defined_ratio_across_execution_tiers") {
+    src := """
+fn run() -> {
+    force :: Newton.from_poundforce(10000000000000poundforce) ?? panic("defined force conversion")
+    print(force.raw())
+}
+"""
+    assert(fs.read_to_string("crates/jet-codegen/src/Prelude/Units.jet").unwrap().contains("poundforce(scale: 44482216152605/10000000000000)"), "the standard unit declaration lost the exact defined pound-force ratio")
+    _ :: compile(src).expect("standard force conversion should compile")
+    (code, stdout, stderr) := tiers.build_and_run_full("jet_unit_family", "standard_force_ratio", src)
+    assert_eq((code, stdout.as_str()), (0, "44482216152605.0\n"), "{stderr}")
+    dir := common.unique_tmp("standard_force_ratio_tiers")
+    fs.create_dir_all(dir).unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, src).unwrap()
+    bundle := load_entry(entry.to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    tiers.assert_tiers_agree("standard_force_ratio_tiers", src, "44482216152605.0\n")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/unit_family.rs:282
+#Test("user_dimensions_compose_and_named_derived_units_share_the_structure") {
+    src := """
+#UnitFamily(Mass, dimension, base: kilogram) { kilogram }
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
+fn accept(force: Newton) -> { print("{force.raw()}") }
+fn keep<Q: Quantity<Force, .Linear>>(value: ^Q) -> Q { return value }
+fn run() -> {
+    momentum :: 4kilogram * 3meter
+    acceleration_step :: momentum / 2s
+    force :: acceleration_step / 2s
+    named :: 1newton
+    keep(^named)
+    keep(^force)
+    accept(force)
+}
+"""
+    (code, stdout) := tiers.build_and_run("open_dimensions", src)
+    assert_eq((code, stdout.as_str()), (0, "3.0\n"))
+}
+// Rust: tests/unit_family.rs:305
+#Test("user_dimensions_keep_interpreter_and_resident_jit_parity") {
+    src := """
+#UnitFamily(Mass, dimension, base: kilogram) { kilogram }
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Force, dimension: Mass * Length / Time / Time, base: newton) { newton }
+fn accept(force: Newton) -> { print("{force.raw()}") }
+fn preserve<Q: Quantity<Force, .Linear>>(value: ^Q) -> Q { return value }
+fn run() -> {
+    momentum :: 4kilogram * 3meter
+    acceleration_step :: momentum / 2s
+    force :: acceleration_step / 2s
+    preserve(^force)
+    accept(force)
+}
+"""
+    dir := common.unique_tmp("open_dimension_tiers")
+    fs.create_dir_all(dir).unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, src).unwrap()
+    bundle := load_entry(entry.to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    tiers.assert_tiers_agree("open_dimension_tiers", src, "3.0\n")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/unit_family.rs:345
+#Test("scaled_and_affine_metadata_is_exact_and_normalized") {
+    family := parse_family("#UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(scale: 2/2, offset: 54630/200) }")
+    assert_eq(family.base.as_ref().map(base -> base.0.as_str()), Some("kelvin"))
+    celsius := family.members.iter().find(member -> member.name == "celsius").unwrap()
+    assert_eq(celsius.scale.to_string(), "1")
+    assert_eq(celsius.offset.to_string(), "5463/20")
+}
+// Rust: tests/unit_family.rs:366
+#Test("unit_metadata_uses_arbitrary_precision_signed_ratios") {
+    family := parse_family("#UnitFamily(Temperature, dimension, base: kelvin) { kelvin huge(scale: -123_456_789_012_345_678_901_234_567_890/-10, offset: -0xA/-0b100) }")
+    huge := family.members.iter().find(member -> member.name == "huge").unwrap()
+    assert_eq(huge.scale.to_string(), "12345678901234567890123456789")
+    assert_eq(huge.offset.to_string(), "5/2")
+}
+// Rust: tests/unit_family.rs:382
+#Test("zero_ratio_denominator_points_at_the_denominator") {
+    src := "#UnitFamily(Length, dimension, base: meter) { meter broken(scale: 1/0) }"
+    (tokens, lex) := Lexer.lex(src)
+    assert(lex.is_empty(), "lex diagnostics: {lex:?}")
+    diagnostics := Parser.parse(tokens).unwrap_err()
+    diagnostic := diagnostics.iter().find(d -> d.what.contains("denominator is zero")).expect("zero-denominator diagnostic")
+    zero := src.rfind('0').unwrap()
+    assert_eq(diagnostic.span, Some(Span.new(zero, zero + 1)))
+}
+// Rust: tests/unit_family.rs:399
+#Test("affine_family_mints_point_and_delta_types_only") {
+    family := parse_family("#UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }")
+    names := family.distinct_defs().into_iter().map(def -> def.name).collect()
+    assert_eq(names, ["KelvinPoint", "KelvinDelta", "CelsiusPoint", "CelsiusDelta"])
+}
+// Rust: tests/unit_family.rs:418
+#Test("scaled_family_metadata_is_public_api_identity") {
+    src := "pub #UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 2/2000) }\npub fn length() -> Millimeter { return Millimeter.from_float(1.0) }\n"
+    (tokens, diagnostics) := Lexer.lex(src)
+    assert(diagnostics.is_empty())
+    program := Parser.parse(tokens).expect("scaled family should parse")
+    snapshot := snapshot_from_items(program.items, "geometry", "1.0.0")
+    assert_eq(snapshot.funcs[0].signature, "fn length() -> Millimeter {package=geometry; family=Length; base=Meter; dimension=geometry%3A%3ALength:1; scale=1/1000; provenance=Rational; offset=0}")
+}
+// Rust: tests/unit_family.rs:437
+#Test("affine_point_and_delta_have_distinct_public_identities") {
+    src := """
+pub #UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }
+pub fn target() -> CelsiusPoint { return CelsiusPoint.from_float(20.0) }
+pub fn tolerance() -> CelsiusDelta { return CelsiusDelta.from_float(2.0) }
+"""
+    (tokens, diagnostics) := Lexer.lex(src)
+    assert(diagnostics.is_empty())
+    program := Parser.parse(tokens).expect("affine family should parse")
+    snapshot := snapshot_from_items(program.items, "climate", "1.0.0")
+    assert(snapshot.funcs.iter().any(func -> func.signature == "fn target() -> CelsiusPoint {package=climate; family=Temperature; base=Kelvin; dimension=climate%3A%3ATemperature:1; scale=1; provenance=Rational; offset=5463/20}"))
+    assert(snapshot.funcs.iter().any(func -> func.signature == "fn tolerance() -> CelsiusDelta {package=climate; family=Temperature; base=Kelvin; dimension=climate%3A%3ATemperature:1; scale=1; provenance=Rational; offset=0}"))
+}
+// Rust: tests/unit_family.rs:457
+#Test("affine_point_delta_algebra_and_conversion_compile") {
+    src := """
+#UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }
+fn run() -> {
+    freezing :: CelsiusPoint.from_float(Float{0.0})
+    step :: CelsiusDelta.from_float(Float{5.0})
+    warmer :: freezing + step
+    drift :: warmer - freezing
+    total :: drift + step
+    absolute :: KelvinPoint.from_celsius_point_rounded(warmer, .NearestEven, digits: 0) ?? panic("rounded point conversion")
+    relative :: KelvinDelta.from_celsius_delta(total) ?? panic("exact delta conversion")
+    print("{(absolute.raw())} {(relative.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "Point/Delta model must be one complete algebra: {codes:?}")
+}
+// Rust: tests/unit_family.rs:482
+#Test("exact_same_dimension_conversion_covers_arithmetic_arguments_and_bindings") {
+    src := """
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+fn takes_millimeter(value: Millimeter) -> { print("{(value.raw())}") }
+fn run() -> {
+    coarse :: 3meter
+    fine :: 42millimeter
+    total :: coarse + fine
+    takes_millimeter(3meter)
+    binding :: Millimeter{ 4meter }
+    print("{(total.raw())} {(binding.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "exact implicit conversions must share one path: {codes:?}")
+}
+// Rust: tests/unit_family.rs:506
+#Test("exact_concrete_coercion_uses_the_value_not_only_the_scale_denominator") {
+    src := """
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+fn takes_meter(value: Meter) -> { print("{(value.raw())}") }
+fn run() -> { takes_meter(3000millimeter) }
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "3000 millimeters is exactly 3 meters: {codes:?}")
+    generated := compile(src).expect("implicit exact conversion should compile").rust
+    assert(generated.contains("Meter(match jet_unit_conversion_exact("), "implicit conversion must lower through the shared TIR UnitConvert path")
+    family := "#UnitFamily(Length, dimension, base: meter) { meter double(scale: 2) }\nfn takes_meter(value: Meter) -> { print(value.raw()) }\n"
+    loop value in ["0.25", "1.7976931348623157e308"] {
+        src := family + "\nfn relay(value: Double) -> { takes_meter(value) }\nfn run() -> { relay(Double.from_float(Float{" + value + "})) }\n"
+        assert_eq(check_codes_of(src), ["E0127"], "unknown scale-2 value {value} must be rejected before runtime")
+    }
+    direct_negative := family + "\nfn run() -> { takes_meter(Double.from_float(Float{-1.0})) }\n"
+    assert(check_codes_of(direct_negative).is_empty(), "direct negative literal has an exact scale-2 conversion")
+    bound_negative := family + "\nfn run() -> { value :: Double.from_float(Float{-2.0})\n takes_meter(value) }\n"
+    assert(check_codes_of(bound_negative).is_empty(), "immutable negative literal binding preserves its exact value")
+    inexact_negative := family + "\nfn run() -> { takes_meter(Double.from_float(Float{-0.25})) }\n"
+    assert_eq(check_codes_of(inexact_negative), ["E0127"], "negative literal proof must still reject an inexact conversion")
+    identity := """
+#UnitFamily(Length, dimension, base: meter) { meter alias(scale: 1) }
+fn takes_meter(value: Meter) -> { print(value.raw()) }
+fn relay(value: Alias) -> { takes_meter(value) }
+fn run() -> { relay(Alias.from_float(Float{0.25})) }
+"""
+    assert(check_codes_of(identity).is_empty(), "identity conversion is exact over the complete Float domain")
+}
+// Rust: tests/unit_family.rs:584
+#Test("exactness_uses_rational_math_beyond_f64_integer_precision") {
+    family := "#UnitFamily(Length, dimension, base: meter) { meter almost(scale: 9007199254740993/9007199254740992) }\n"
+    implicit := family + "\nfn takes_meter(value: Meter) -> { print(value.raw()) }\nfn run() -> { takes_meter(1almost) }\n"
+    assert_eq(codes_of(implicit), ["E0127"])
+    unrepresentable_implicit := family + "\nfn takes_meter(value: Meter) -> { print(value.raw()) }\nfn run() -> { takes_meter(Almost.from_float(Float{9007199254740992.0})) }\n"
+    assert_eq(codes_of(unrepresentable_implicit), ["E0127"])
+    if tiers.have_rustc() {
+        explicit := family + "\nfn run() -> {\n    value :: Meter.from_almost(1almost) ?? Meter.from_float(Float{-1.0})\n    print(value.raw())\n}\n"
+        (code, stdout) := tiers.build_and_run("quantity_exact_rational_edge", explicit)
+        assert_eq(code, 0)
+        assert_eq(stdout, "-1.0\n")
+        rounding := """
+#UnitFamily(Length, dimension, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+    half(scale: 1/2)
+    above_half(scale: 9007199254740993/18014398509481984)
+    three_halves(scale: 3/2)
+}
+#UnitFamily(Temperature, dimension, base: kelvin) {
+    kelvin
+    tie_offset(scale: 1, offset: 1/2)
+    above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
+    below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
+}
+fn run() -> {
+    exact :: Meter.from_almost(Almost.from_float(Float{9007199254740992.0})) ?? Meter.from_float(Float{-1.0})
+    tie :: Meter.from_half_rounded(Half.from_float(Float{1.0}), .NearestEven, digits: 0) ?? panic("tie")
+    above :: Meter.from_above_half_rounded(AboveHalf.from_float(Float{1.0}), .NearestEven, digits: 0) ?? panic("above")
+    negative :: Meter.from_three_halves_rounded(ThreeHalves.from_float(Float{-1.0}), .NearestEven, digits: 0) ?? panic("negative")
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(TieOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine tie")
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(AboveOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine above")
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(BelowOffsetPoint.from_float(Float{0.0}), .NearestEven, digits: 0) ?? panic("affine below")
+    print("{(exact.raw())} {(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
+}
+"""
+        (code, stdout) := tiers.build_and_run("quantity_exact_rational_rounding_edges", rounding)
+        assert_eq(code, 0)
+        assert_eq(stdout, "-1.0 0.0 1.0 -2.0 0.0 1.0 -1.0\n")
+        overflow := """
+#UnitFamily(Length, dimension, base: meter) { meter double(scale: 2) }
+fn run() -> {
+    source :: Double.from_float(Float{1.7976931348623157e308})
+    value :: Meter.from_double_rounded(source, .NearestEven, digits: 0) ?? Meter.from_float(Float{-1.0})
+    print(value.raw())
+}
+"""
+        (code, stdout, stderr) := tiers.build_and_run_full("quantity_unit_conversion", "rounded_overflow", overflow)
+        assert_eq(code, 0)
+        assert_eq(stdout, "-1.0\n")
+        assert(stderr.is_empty(), "unexpected stderr: {stderr}")
+    }
+    assert_eq(jet_unit_conversion_rounded(F64.MAX, "2", "1", "0", "1", UnitRoundingMode.NearestEven, 0), Err(UNIT_ROUNDING_UNREPRESENTABLE))
+    assert_eq(jet_unit_conversion_rounded(F64.INFINITY, "1", "1", "0", "1", UnitRoundingMode.NearestEven, 0), Err(UNIT_ROUNDING_UNREPRESENTABLE))
+}
+// Rust: tests/unit_family.rs:684
+#Test("rounded_conversion_honors_mode_digits_affinity_and_fallibility") {
+    if !tiers.have_rustc() { return }
+    src := """
+#UnitFamily(Length, dimension, base: meter) {
+    meter
+    half(scale: 1/2)
+    eighth(scale: 1/8)
+    near_quarter(scale: 249/1000)
+    near_three_quarters(scale: 751/1000)
+    double(scale: 2)
+}
+#UnitFamily(Temperature, dimension, base: kelvin) { kelvin shifted(scale: 1, offset: 249/1000) }
+fn run() -> {
+    positive :: Half.from_float(Float{5.0})
+    negative :: Half.from_float(Float{-5.0})
+    positive_odd_tie :: Half.from_float(Float{7.0})
+    negative_odd_tie :: Half.from_float(Float{-7.0})
+    toward_zero_positive :: Meter.from_half_rounded(positive, .TowardZero, digits: 0) ?? panic("toward zero positive")
+    floor_positive :: Meter.from_half_rounded(positive, .Floor, digits: 0) ?? panic("floor positive")
+    ceiling_positive :: Meter.from_half_rounded(positive, .Ceiling, digits: 0) ?? panic("ceiling positive")
+    nearest_positive :: Meter.from_half_rounded(positive, .NearestEven, digits: 0) ?? panic("nearest positive")
+    toward_zero_negative :: Meter.from_half_rounded(negative, .TowardZero, digits: 0) ?? panic("toward zero negative")
+    floor_negative :: Meter.from_half_rounded(negative, .Floor, digits: 0) ?? panic("floor negative")
+    ceiling_negative :: Meter.from_half_rounded(negative, .Ceiling, digits: 0) ?? panic("ceiling negative")
+    nearest_negative :: Meter.from_half_rounded(negative, .NearestEven, digits: 0) ?? panic("nearest negative")
+    nearest_positive_odd :: Meter.from_half_rounded(positive_odd_tie, .NearestEven, digits: 0) ?? panic("nearest positive odd")
+    nearest_negative_odd :: Meter.from_half_rounded(negative_odd_tie, .NearestEven, digits: 0) ?? panic("nearest negative odd")
+    nearest_quarter :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2) ?? panic("nearest quarter")
+    nearest_three_quarters :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2) ?? panic("nearest three quarters")
+    unrepresentable_decimal :: Meter.from_eighth_rounded(1eighth, .NearestEven, digits: 2) ?? Meter.from_float(Float{-2.0})
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2) ?? panic("point")
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2) ?? panic("delta")
+    overflow :: Meter.from_double_rounded(Double.from_float(Float{1.7976931348623157e308}), .NearestEven, digits: 0) ?? Meter.from_float(Float{-1.0})
+    print("{(toward_zero_positive.raw())} {(floor_positive.raw())} {(ceiling_positive.raw())} {(nearest_positive.raw())} {(toward_zero_negative.raw())} {(floor_negative.raw())} {(ceiling_negative.raw())} {(nearest_negative.raw())} {(nearest_positive_odd.raw())} {(nearest_negative_odd.raw())} {(nearest_quarter.raw())} {(nearest_three_quarters.raw())} {(unrepresentable_decimal.raw())} {(point.raw())} {(delta.raw())} {(overflow.raw())}")
+}
+"""
+    (code, stdout) := tiers.build_and_run("quantity_rounded_contract", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2.0 2.0 3.0 2.0 -2.0 -3.0 -2.0 -2.0 4.0 -4.0 0.25 0.75 -2.0 0.25 0.0 -1.0\n")
+    // Keep exact original line layout for the error trail's line-5 witness.
+    negative_digits := "\n#UnitFamily(Length, dimension, base: meter) { meter half(scale: 1/2) }\nfn run() -> {\n    digits :: -1\n    Meter.from_half_rounded(1half, .NearestEven, digits: digits)\n}\n"
+    (code, stdout, stderr) := tiers.build_and_run_full("quantity_unit_conversion", "rounded_negative_digits", negative_digits)
+    assert_eq(code, 1)
+    assert(stdout.is_empty())
+    assert(stderr.starts_with("Error: rounded unit conversion needs nonnegative digits\n") && stderr.contains(" Trail [E3002] (1 hop via ?, origin first):") && stderr.contains(" 1. run (") && stderr.contains("rounded_negative_digits.jet:5)"), "unexpected stderr: {stderr}")
+}
+// Rust: tests/unit_family.rs:756
+#Test("rounded_conversion_rejects_float_precision_loss_and_bounds_huge_digits") {
+    loop scale in ["9007199254740993", "-9007199254740993"] {
+        assert_eq(jet_unit_conversion_rounded(1.0, scale, "1", "0", "1", UnitRoundingMode.NearestEven, 0), Err(UNIT_ROUNDING_UNREPRESENTABLE), "rounded conversion must not add Float precision loss")
+    }
+    loop mode in [UnitRoundingMode.TowardZero, UnitRoundingMode.Floor, UnitRoundingMode.Ceiling, UnitRoundingMode.NearestEven] {
+        loop value in [0.5, -0.5, F64.from_bits(1), -F64.from_bits(1), F64.MAX] {
+            assert_eq(jet_unit_conversion_rounded(value, "1", "1", "0", "1", mode, I64.MAX), Ok(value), "huge decimal precision must preserve exact finite Float {value:?} in {mode:?}")
+        }
+        assert_eq(jet_unit_conversion_rounded(1.0, "1", "3", "0", "1", mode, I64.MAX), Err(UNIT_ROUNDING_UNREPRESENTABLE), "huge precision must reject a rounded rational Float cannot represent")
+    }
+    assert_eq(jet_unit_conversion_rounded(F64.from_bits(1), "1", "1", "0", "1", UnitRoundingMode.NearestEven, 1074), Ok(F64.from_bits(1)), "the bounded path must retain the smallest subnormal")
+    denominator := "1{\"0\".repeat(2001)}"
+    just_above_one := "1{\"0\".repeat(2000)}1"
+    halfway_above_one := "1{\"0\".repeat(2000)}5"
+    just_below_negative_one := "-{just_above_one}"
+    halfway_below_negative_one := "-{halfway_above_one}"
+    loop (scale, toward_zero, floor, ceiling, nearest) in [
+        (just_above_one, Ok(1.0), Ok(1.0), Err(UNIT_ROUNDING_UNREPRESENTABLE), Ok(1.0)),
+        (just_below_negative_one, Ok(-1.0), Err(UNIT_ROUNDING_UNREPRESENTABLE), Ok(-1.0), Ok(-1.0)),
+        (halfway_above_one, Ok(1.0), Ok(1.0), Err(UNIT_ROUNDING_UNREPRESENTABLE), Ok(1.0)),
+        (halfway_below_negative_one, Ok(-1.0), Err(UNIT_ROUNDING_UNREPRESENTABLE), Ok(-1.0), Ok(-1.0))
+    ] {
+        loop (mode, expected) in [(UnitRoundingMode.TowardZero, toward_zero), (UnitRoundingMode.Floor, floor), (UnitRoundingMode.Ceiling, ceiling), (UnitRoundingMode.NearestEven, nearest)] {
+            assert_eq(jet_unit_conversion_rounded(1.0, scale, denominator, "0", "1", mode, 2000), expected, "huge precision must compare the exact rational to its Float neighbor")
+        }
+    }
+}
+// Rust: tests/unit_family.rs:863
+#Test("quantity_generic_bound_preserves_concrete_unit_and_kind") {
+    src := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn run() -> {
+    source :: 3meter
+    value :: keep(^source)
+    print("{(value.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "Quantity bounds must accept a determined concrete unit: {codes:?}")
+}
+// Rust: tests/unit_family.rs:881
+#Test("quantity_generic_bound_rejects_wrong_dimension_and_kind") {
+    wrong_dimension := """
+#UnitFamily(Length, dimension) { meter }
+fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+fn run() -> {
+    source :: 3s
+    keep(^source)
+}
+"""
+    assert_eq(codes_of(wrong_dimension), ["E0905"])
+    wrong_kind := """
+#UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(offset: 27315/100) }
+fn keep<Q: Quantity<Temperature, .Delta>>(value: ^Q) -> Q { return value }
+fn run() -> {
+    source :: CelsiusPoint.from_float(Float{3.0})
+    keep(^source)
+}
+"""
+    assert_eq(codes_of(wrong_kind), ["E0905"])
+    undetermined := "fn choose<Q: Quantity<Length, .Linear>>() -> {}\nfn run() -> { choose() }\n"
+    assert_eq(codes_of(undetermined), ["E0904"])
+}
+// Rust: tests/unit_family.rs:910
+#Test("imported_quantity_generic_preserves_concrete_type") {
+    if !tiers.have_rustc() { return }
+    units := """
+pub #UnitFamily(Length, dimension) { meter }
+pub fn sample() -> Meter { return 2meter }
+pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }
+pub fn raw_meter(value: Meter) -> Float { return value.raw() }
+"""
+    main := """
+use "units" as units
+fn run() -> {
+    source :: units.sample()
+    same :: units.keep(^source)
+    print(units.raw_meter(same))
+}
+"""
+    (code, stdout) := tiers.build_and_run_multi("quantity_generic_import", "main.jet", [("units.jet", units), ("main.jet", main)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "2.0\n")
+}
+// Rust: tests/unit_family.rs:938
+#Test("imported_explicit_quantity_argument_checks_its_bound") {
+    dir := env.temp_dir().join("jet_quantity_imported_explicit_bound_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("units.jet"), "pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }\n").unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, """
+use "units" as units
+fn run() -> {
+    source :: 1s
+    bad :: units.keep<Duration>(^source)
+    print(bad.raw())
+}
+""").unwrap()
+    bundle := load_entry(entry.to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    _ :: fs.remove_dir_all(dir)
+    assert(diagnostics.iter().any(d -> d.code == "E0905"), "explicit imported type arguments must satisfy Quantity bounds: {diagnostics:?}")
+}
+// Rust: tests/unit_family.rs:975
+#Test("quantity_bounds_accept_open_dimensions_but_reject_unknown_kinds") {
+    open := "fn keep<Q: Quantity<Banana, .Linear>>(value: ^Q) -> Q { return value }"
+    (tokens, lex) := Lexer.lex(open)
+    assert(lex.is_empty(), "lex diagnostics: {lex:?}")
+    assert(Parser.parse(tokens).is_ok(), "open dimension names must not come from a compiler table")
+    bad_kind := "fn keep<Q: Quantity<Length, .Mystery>>(value: ^Q) -> Q { return value }"
+    (tokens, lex) := Lexer.lex(bad_kind)
+    assert(lex.is_empty(), "lex diagnostics: {lex:?}")
+    assert(Parser.parse(tokens).is_err())
+}
+// Rust: tests/unit_family.rs:991
+#Test("quantity_generic_bounds_are_frozen_into_public_api_identity") {
+    parse := src -> {
+        (tokens, diagnostics) := Lexer.lex(src)
+        assert(diagnostics.is_empty())
+        Parser.parse(tokens).expect("public Quantity generic should parse")
+    }
+    length := parse("pub fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) -> Q { return value }")
+    time := parse("pub fn keep<Q: Quantity<Time, .Linear>>(value: ^Q) -> Q { return value }")
+    length := snapshot_from_items(length.items, "units", "1.0.0")
+    time := snapshot_from_items(time.items, "units", "1.0.0")
+    assert_eq(length.funcs[0].signature, "fn keep<Q: Quantity<Length, .Linear>>(value: ^Q) Q")
+    assert_ne(length.funcs[0].signature, time.funcs[0].signature)
+    old := [ApiItem{kind: "fn", name: "keep", signature: length.funcs[0].signature.clone()}]
+    new := [ApiItem{kind: "fn", name: "keep", signature: time.funcs[0].signature.clone()}]
+    assert_eq(diff_public_api(old, new).len(), 1)
+}
+// Rust: tests/unit_family.rs:1020
+#Test("explicit_units_policy_requires_destination_owned_conversion") {
+    implicit := """
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+#Policy(explicit_units)
+fn run() -> {
+    total :: 1meter + 1millimeter
+    print("{(total.raw())}")
+}
+"""
+    assert_eq(codes_of(implicit), ["E0127"])
+    explicit := """
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+#Policy(explicit_units)
+fn run() -> {
+    converted :: Meter.from_millimeter(1000millimeter) ?? panic("exact conversion")
+    total :: 1meter + converted
+    print("{(total.raw())}")
+}
+"""
+    assert(codes_of(explicit).is_empty())
+    module_scoped := """
+#Policy(explicit_units)
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+fn run() -> {
+    total :: 1meter + 1millimeter
+    print(total.raw())
+}
+"""
+    assert_eq(codes_of(module_scoped), ["E0127"])
+    block_scoped := """
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+fn run() -> {
+    #Policy(explicit_units) {
+        total :: 1meter + 1millimeter
+        print(total.raw())
+    }
+}
+"""
+    assert_eq(codes_of(block_scoped), ["E0127"])
+}
+// Rust: tests/unit_family.rs:1071
+#Test("implicit_unit_conversion_rejects_rounding_and_overflow_boundaries") {
+    rounding := """
+#UnitFamily(Length, dimension, base: meter) { meter thirdish(scale: 2/3) }
+fn run() -> {
+    value :: 1meter + 1thirdish
+    print("{(value.raw())}")
+}
+"""
+    assert_eq(codes_of(rounding), ["E0127"])
+    giant_scale := "9".repeat(400)
+    overflow := "#UnitFamily(Length, dimension, base: meter) { meter giant(scale: {giant_scale}) }\nfn run() -> {\n    value :: 1giant + 1meter\n    print(\"{(value.raw())}\")\n}"
+    assert_eq(codes_of(overflow), ["E0127"])
+    explicit_overflow := "#UnitFamily(Length, dimension, base: meter) { meter giant(scale: {giant_scale}) }\nfn run() -> {\n    value :: Meter.from_giant(1giant)\n    print(\"{(value.raw())}\")\n}"
+    assert_eq(codes_of(explicit_overflow), ["E0127"])
+}
+// Rust: tests/unit_family.rs:1098
+#Test("explicit_unit_conversion_is_fallible_and_rounded_spelling_is_real") {
+    if !tiers.have_rustc() { return }
+    src := """
+#UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) thirdish(scale: 2/3) }
+fn run() -> {
+    exact :: Meter.from_millimeter(3000millimeter) ?? panic("exact conversion failed")
+    inexact :: Meter.from_thirdish(1thirdish) ?? Meter.from_float(Float{-1.0})
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0) ?? panic("rounded conversion failed")
+    print("{(exact.raw())} {(inexact.raw())} {(rounded.raw())}")
+}
+"""
+    generated := compile(src).expect("explicit unit conversions should compile").rust
+    assert(!generated.contains("fn __jet_from_millimeter") && !generated.contains("fn __jet_from_thirdish"), "unit conversion behavior belongs to TIR, not generated destination methods")
+    (code, stdout) := tiers.build_and_run("quantity_explicit_exact_rounded", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3.0 -1.0 1.0\n")
+    unchecked := """
+#UnitFamily(Length, dimension, base: meter) { meter thirdish(scale: 2/3) }
+fn unchecked() -> Never! {
+    converted :: Meter.from_thirdish(1thirdish)
+    print(converted.raw())
+}
+fn run() -> { unchecked() }
+"""
+    assert(!codes_of(unchecked).is_empty(), "an exact conversion result must be handled before use")
+}
+// Rust: tests/unit_family.rs:1145
+#Test("physical_unit_codable_round_trips_as_its_concrete_type") {
+    if !tiers.have_rustc() { return }
+    src := """
+use core.encoding.json as json
+#UnitFamily(Length, dimension) { meter }
+fn run() -> {
+    value :: 3meter
+    wire :: json.to_string(value)
+    back :: json.decode<Meter>(wire) ?? panic("decode")
+    print(wire)
+    print(back.raw())
+}
+"""
+    (code, stdout) := tiers.build_and_run("quantity_codable", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3.0\n3.0\n")
+}
+// Rust: tests/unit_family.rs:1168
+#Test("same_unit_arithmetic_compiles") {
+    src := FAMILY + """
+fn add(a: Usd, b: Usd) -> Usd { return a + b }
+fn run() -> {
+    t :: add(Usd.from_float(1.0), Usd.from_float(2.0))
+    print("{(t.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "expected clean compile, got {codes:?}")
+}
+// Rust: tests/unit_family.rs:1180
+#Test("cross_unit_mix_is_e0127") {
+    src := FAMILY + """
+fn run() -> {
+    bad :: Usd.from_float(1.0) + Eur.from_float(2.0)
+    print("{(bad.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.contains("E0127"), "expected E0127 for cross-unit mixing, got {codes:?}")
+}
+// Rust: tests/unit_family.rs:1195
+#Test("bare_float_does_not_coerce_into_unit") {
+    src := FAMILY + """
+fn take(p: Usd) -> { print("{(p.raw())}") }
+fn run() -> { take(9.99) }
+"""
+    assert(!codes_of(src).is_empty(), "passing a bare Float where Usd is expected must be rejected, got clean")
+}
+// Rust: tests/unit_family.rs:1209
+#Test("multi_word_member_pascal_cases") {
+    src := """
+#UnitFamily(Speed) { m_per_s }
+fn run() -> {
+    v :: MPerS.from_float(3.0)
+    print("{(v.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "expected clean compile, got {codes:?}")
+}
+// Rust: tests/unit_family.rs:1224
+#Test("family_erases_in_codegen") {
+    src := FAMILY + """
+fn run() -> {
+    t :: Usd.from_float(1.0)
+    print("{(t.raw())}")
+}
+"""
+    out := compile(src).expect("should compile")
+    assert(!common.strip_vetted_prelude_modules(out.rust).contains("unsafe"), "I1: no unsafe in generated code")
+    if out.rust.find("UnitFamily") is .Some(position) {
+        start := position.saturating_sub(160)
+        loop !out.rust.is_char_boundary(start) { start -= 1 }
+        end := (position + 160).min(out.rust.len())
+        loop !out.rust.is_char_boundary(end) { end += 1 }
+        panic("the family marker must erase, found UnitFamily in output:\n…{out.rust[start..end]}…")
+    }
+    assert(out.rust.contains("struct __jet_Usd"), "Usd should lower to a distinct newtype")
+    assert(out.rust.contains("struct __jet_Eur"), "Eur should lower to a distinct newtype")
+    assert(out.rust.contains("#[repr(transparent)]"), "members erase to a transparent newtype over the base")
+}
+// Rust: tests/unit_family.rs:1265
+#Test("physical_dimensions_derive_before_codegen_and_erase_at_runtime") {
+    src := """
+#UnitFamily(Length, dimension) { meter }
+fn run() -> {
+    distance :: 12meter
+    elapsed :: 3s
+    speed :: distance / elapsed
+    area :: distance * distance
+    recovered :: speed * elapsed
+    print("ok")
+}
+"""
+    out := compile(src).expect("dimensionally valid program should compile")
+    assert(out.rust.contains("__jet_Meter"))
+    assert(out.rust.contains(".0 /"), "unit division must erase to base arithmetic")
+    assert(out.rust.contains(".0 *"), "unit multiplication must erase to base arithmetic")
+    assert(!out.rust.contains("Quantity<"), "dimension facts must not reach emitted Rust")
+}
+// Rust: tests/unit_family.rs:1295
+#Test("canonical_time_plane_reaches_all_native_execution_tiers") {
+    src := """
+use core.time as time
+fn now() -> Instant { return time.instant() }
+fn run() -> {
+    wait :: 500ms
+    origin :: now()
+    point :: now() + 5min
+    delta :: point - origin
+    speed :: 12meter / 2s
+    print(wait.in(.Milliseconds) ?? panic("wait"))
+    print(delta.in(.Minutes) ?? panic("delta"))
+    print(speed)
+}
+"""
+    tiers.assert_tiers_agree("canonical_time_plane", src, "500\n5\n6 meter/ns\n")
+}
+// Rust: tests/unit_family.rs:1318
+#Test("canonical_time_week_uses_one_family_scale_and_ordering") {
+    src := """
+fn run() -> {
+    week :: 1week
+    print(week == 7d)
+    print(2week + 12h)
+    print(week > 6d)
+    print(week < 8d)
+    print("{1week}")
+}
+"""
+    tiers.assert_tiers_agree("canonical_time_week", src, "true\n1252800000000000ns\ntrue\ntrue\n604800000000000ns\n")
+}
+// Rust: tests/unit_family.rs:1337
+#Test("canonical_time_timeout_and_sleep_spellings_compile") {
+    src := """
+use core.time.[sleep]
+fn run() -> {
+    #FX(authority: Time) {
+        wait :: 500ms
+        task.timeout(wait)
+        sleep(500ms)
+    }
+}
+"""
+    _ :: compile(src).expect("canonical task timeout and direct sleep should compile")
+}
+// Rust: tests/unit_family.rs:1353
+#Test("quantities_display_units_styles_and_explicit_overrides") {
+    defaults := """
+#UnitFamily(Length, dimension, base: meter) { meter px(scale: 1) }
+#UnitFamily(Currency) { usd }
+fn run() -> {
+    distance :: 12meter
+    elapsed :: 3s
+    speed :: distance / elapsed
+    pixels :: 766px
+    price :: 5usd
+    print(distance)
+    print("{speed}")
+    print(pixels)
+    print(price)
+    print("{distance:Unit(name)}")
+    print("{distance:Unit(bare)}")
+    print(distance.raw())
+}
+"""
+    (code, stdout) := tiers.build_and_run("quantity_display_defaults", defaults)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n")
+    tiers.assert_tiers_agree("quantity_display_tiers", defaults, "12 meter\n4 meter/ns\n766 px\n5 usd\n12 Meter\n12\n12.0\n")
+    explicit := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+impl Meter.Display {
+    fn display(self) -> String { "custom length" }
+}
+fn run() -> {
+    distance :: 12meter
+    print(distance)
+    print("{distance}")
+    print("{distance:Unit(bare)}")
+}
+"""
+    (code, stdout) := tiers.build_and_run("quantity_display_override", explicit)
+    assert_eq(code, 0)
+    assert_eq(stdout, "custom length\ncustom length\n12\n")
+    dir := common.unique_tmp("quantity_display_override_parity")
+    fs.create_dir_all(dir).unwrap()
+    path := dir.join("main.jet")
+    fs.write(path, explicit).unwrap()
+    bundle := load_entry(path.to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    tiers.assert_tiers_agree("quantity_display_override_parity", explicit, "custom length\ncustom length\n12\n")
+    web_src := """
+#Target(Web)
+#UnitFamily(Length, dimension, base: meter) { meter }
+impl Meter.Display {
+    fn display(self) -> String { "custom length" }
+}
+fn show(distance: Meter) -> {
+    print(distance)
+    print("{distance}")
+}
+fn run() -> {}
+"""
+    web := compile_web_with_path(web_src, "quantity_display_override_web.jet").expect("custom unit Display must compile through the web backend").web.expect("web compilation must produce artifacts")
+    wasm_dir := common.unique_tmp("quantity_display_override_web_wasm")
+    fs.create_dir_all(wasm_dir).unwrap()
+    wasm_rust := wasm_dir.join("app_wasm.rs")
+    wasm_bin := wasm_dir.join("app.wasm")
+    fs.write(wasm_rust, web.wasm_rust).unwrap()
+    rustc := Command.new("rustc").args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O"]).arg(wasm_rust).arg("-o").arg(wasm_bin).output().expect("run rustc for custom unit Display web output")
+    assert(rustc.status.success(), "rustc rejected custom unit Display web output:\n{String.from_utf8_lossy(rustc.stderr)}")
+    assert(wasm_bin.is_file(), "web build did not produce a Wasm artifact")
+}
+// Rust: tests/unit_family.rs:1494
+#Test("dimensional_quantities_example_stays_in_native_jit") {
+    path := "Examples/features/types/dimensional_quantities.jet"
+    bundle := load_entry(path).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    golden := fs.read_to_string("Examples/features/expected/types/dimensional_quantities.out").expect("dimensional quantities golden")
+    // O0/O1/O2 actual native execution replaces retiring resident/deopt counters.
+    loop tier in ["O0", "O1", "O2"] {
+        output := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["run", "--tier", tier, path]).env("NO_COLOR", "1").output().expect("execute dimensional quantities native tier")
+        assert_eq(output.status.code().unwrap_or(-1), 0)
+        assert_eq(String.from_utf8_lossy(output.stdout), golden)
+        assert(output.stderr.is_empty())
+    }
+}
+// Rust: tests/unit_family.rs:1551
+#Test("imported_public_units_keep_display_metadata_across_tiers") {
+    units := """
+pub #UnitFamily(Length, dimension, base: meter) { meter }
+impl Meter.Display {
+    fn display(self) -> String { "defined in units" }
+}
+pub fn distance() -> Meter { return 12meter }
+"""
+    main := """
+use "measurements" as units
+struct Nested { values: [[units.Meter]] }
+fn run() -> {
+    distance :: units.distance()
+    print(distance)
+    print("{distance}")
+    print("{distance:Unit(name)}")
+    print("{distance:Unit(bare)}")
+}
+"""
+    expected := "defined in units\ndefined in units\n12 Meter\n12\n"
+    files := [("measurements.jet", units), ("main.jet", main)]
+    if tiers.have_rustc() {
+        (code, stdout) := tiers.build_and_run_multi("imported_unit_display", "main.jet", files)
+        assert_eq(code, 0)
+        assert_eq(stdout, expected)
+    }
+    dir := common.unique_tmp("imported_unit_display_tiers")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("measurements.jet"), units).unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, main).unwrap()
+    bundle := load_entry(entry.to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    (code, stdout, stderr) := tiers.run_default_multi("imported_unit_display", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected)
+    (code, stdout, stderr) := tiers.run_interpret_multi("imported_unit_display", "main.jet", files)
+    assert_eq(code, 0, "{stderr}")
+    assert_eq(stdout, expected)
+    web_units := """
+pub #UnitFamily(Length, dimension, base: meter) { meter }
+impl Meter.Display {
+    fn display(self) -> String { "defined in units" }
+}
+"""
+    web_main := """
+#Target(Web)
+use "web_units" as units
+fn show(distance: units.Meter) -> {
+    print(distance)
+    print("{distance}")
+}
+fn run() -> {}
+"""
+    fs.write(dir.join("web_units.jet"), web_units).unwrap()
+    web_entry := dir.join("web.jet")
+    fs.write(web_entry, web_main).unwrap()
+    web := compile_web(web_entry.to_str().unwrap()).expect("imported unit display must compile for web").web.expect("web compilation must produce artifacts")
+    assert(web.wasm_rust.contains("defined in units"), "web output must retain the defining module's Display implementation")
+    wasm_rust := dir.join("imported_unit_app_wasm.rs")
+    wasm_bin := dir.join("imported_unit_app.wasm")
+    fs.write(wasm_rust, web.wasm_rust).unwrap()
+    rustc := Command.new("rustc").args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O"]).arg(wasm_rust).arg("-o").arg(wasm_bin).output().expect("run rustc for imported unit Display web output")
+    assert(rustc.status.success(), "rustc rejected imported unit Display web output:\n{String.from_utf8_lossy(rustc.stderr)}")
+    assert(wasm_bin.is_file(), "web build did not produce a Wasm artifact")
+}
+// Rust: tests/unit_family.rs:1670
+#Test("physical_dimension_mismatch_is_rejected_in_sema") {
+    src := "#UnitFamily(Length, dimension) { meter }\nfn run() -> { bad :: 1meter + 1s }\n"
+    codes := codes_of(src)
+    assert_eq(codes, ["E0359"], "expected one dimension mismatch, got {codes:?}")
+}
+// Rust: tests/unit_family.rs:1684
+#Test("physical_value_cannot_compare_with_scalar") {
+    src := "#UnitFamily(Length, dimension) { meter }\nfn run() -> { bad :: 1meter < 1.0 }\n"
+    assert_eq(codes_of(src), ["E0359"])
+}
+// Rust: tests/unit_family.rs:1693
+#Test("dimension_exponent_limit_is_a_sema_error_not_a_panic") {
+    src := "#UnitFamily(Length, dimension) { meter }\nfn run() -> {\n    q0 :: 1meter\n"
+    loop exponent in 1..=31 {
+        previous := exponent - 1
+        src.push_str("    q{exponent} :: q{previous} * q{previous}\n")
+    }
+    src.push_str("}\n")
+    result := panic.catch_unwind(() -> compile(src))
+    diagnostics := result.expect("checked dimension overflow must not panic").expect_err("2^31 Length exponent must be rejected in sema")
+    assert(diagnostics.iter().any(d -> d.code == "E0359"))
+}
+// Rust: tests/unit_family.rs:1714
+#Test("imported_same_leaf_units_keep_distinct_dimensions") {
+    length := """
+#UnitFamily(Length, dimension) { unit }
+pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+"""
+    time := """
+#UnitFamily(Clock, dimension) { unit }
+pub fn sample() -> [[String: [Unit]]] { return [["values": [1unit]]] }
+pub fn first(groups: [[String: [Unit]]]) -> Unit { return ~groups[0]["values"][0] }
+"""
+    good := """
+use "length" as length
+use "time" as time
+fn run() -> {
+    distance :: length.first(length.sample()) + length.first(length.sample())
+    elapsed :: time.first(time.sample()) + time.first(time.sample())
+    print("ok")
+}
+"""
+    if tiers.have_rustc() {
+        (code, stdout) := tiers.build_and_run_multi("quantity_composite_same_leaf", "main.jet", [("length.jet", length), ("time.jet", time), ("main.jet", good)])
+        assert_eq(code, 0)
+        assert_eq(stdout, "ok\n")
+    }
+    dir := env.temp_dir().join("jet_quantity_collision_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("length.jet"), length).unwrap()
+    fs.write(dir.join("time.jet"), time).unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, """
+use "length" as length
+use "time" as time
+fn run() -> { bad :: length.first(length.sample()) + time.first(time.sample()) }
+""").unwrap()
+    src := fs.read_to_string(entry).unwrap()
+    result := compile_with_path(src, entry.to_str().unwrap())
+    _ :: fs.remove_dir_all(dir)
+    codes := result.unwrap_err().into_iter().map(d -> d.code.to_string()).collect()
+    assert_eq(codes, ["E0359"])
+}
+// Rust: tests/unit_family.rs:1775
+#Test("same_named_unit_families_from_different_packages_do_not_convert") {
+    dir := env.temp_dir().join("jet_quantity_package_identity_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    unit := """
+pub #UnitFamily(Length, dimension, base: meter) { meter millimeter(scale: 1/1000) }
+pub fn sample() -> Meter { return 1meter }
+"""
+    fs.write(dir.join("left.jet"), unit).unwrap()
+    fs.write(dir.join("right.jet"), unit).unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, """
+use "left" as left
+use "right" as right
+fn run() -> {
+    bad :: left.sample() + right.sample()
+    print(bad.raw())
+}
+""").unwrap()
+    bundle := load_entry(entry.to_str().unwrap()).unwrap()
+    loop module in &bundle.modules {
+        if module.alias == "left" || module.alias == "right" {
+            module.path = dir.parent().unwrap().join("foreign-{module.alias}/module.jet")
+        }
+    }
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    _ :: fs.remove_dir_all(dir)
+    assert(diagnostics.iter().any(d -> d.code == "E0109" || d.code == "E0127" || d.code == "E0359"), "package-owned families must not unify: {diagnostics:?}")
+}
+// Rust: tests/unit_family.rs:1821
+#Test("currency_keeps_nominal_arithmetic_behavior") {
+    src := FAMILY + """
+fn run() -> {
+    total :: 2usd * 3usd
+    print("{(total.raw())}")
+}
+"""
+    codes := codes_of(src)
+    assert(codes.is_empty(), "Currency is outside physical dimension math: {codes:?}")
+}
+// Rust: tests/unit_family.rs:1834
+#Test("physical_dimensions_cross_file_boundaries_canonically") {
+    dir := env.temp_dir().join("jet_quantity_packages_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("units.jet"), """
+#UnitFamily(Length, dimension) { meter }
+pub fn distance() -> Meter { return 12meter }
+pub fn elapsed() -> Duration { return 3s }
+""").unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, """
+use "units" as units
+fn run() -> {
+    speed :: units.distance() / units.elapsed()
+    recovered :: speed * units.elapsed()
+    print("ok")
+}
+""").unwrap()
+    src := fs.read_to_string(entry).unwrap()
+    result := compile_with_path(src, entry.to_str().unwrap())
+    _ :: fs.remove_dir_all(dir)
+    out := result.expect("imported physical units should share canonical dimensions")
+    assert(!out.rust.contains("Quantity<"))
+}
+// Rust: tests/unit_family.rs:1868
+#Test("local_same_named_family_does_not_inherit_standard_dimension") {
+    src := """
+#UnitFamily(Length, base: meter) { meter }
+fn run() -> {
+    squared :: 2meter * 3meter
+    print(squared.raw())
+}
+"""
+    dir := common.unique_tmp("unit_nominal_opt_in")
+    fs.create_dir_all(dir).unwrap()
+    entry := dir.join("main.jet")
+    fs.write(entry, src).unwrap()
+    bundle := load_entry(entry.to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert_eq(diagnostics.iter().map(d -> d.code.as_str()).collect(), ["E0127"], "nominal unit×unit arithmetic must stay rejected: {diagnostics:?}")
+    local := bundle.modules[0].items.iter().find_map(item -> {
+        if item is .UnitFamily(family) {
+            if family.family == "Length" { return Some(family) }
+        }
+        None
+    }).unwrap()
+    assert(local.resolved_dimension.is_none(), "a local same-named family must remain nominal without `dimension`")
+}
+// Rust: tests/unit_family.rs:1907
+#Test("standard_units_share_canonical_owner_across_dependency_boundary") {
+    root := common.unique_tmp("standard_unit_dependency")
+    app := root.join("app")
+    dep := root.join("dep")
+    fs.create_dir_all(app).unwrap()
+    fs.create_dir_all(dep).unwrap()
+    fs.write(app.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\n").unwrap()
+    fs.write(app.join("main.jet"), "use dep\npub fn local() -> Meter { return 1meter }\nfn accept(value: Meter) -> { print(value.raw()) }\nfn run() -> { accept(dep.distance()) }\n").unwrap()
+    fs.write(dep.join("package.jet"), "name: \"dep\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dep.join("dep.jet"), "pub fn distance() -> Meter { return 2meter }\n").unwrap()
+    bundle := load_entry(app.join("main.jet").to_str().unwrap()).unwrap()
+    diagnostics := check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "ordinary Prelude units have one owner across packages: {diagnostics:?}")
+    loop module in bundle.modules {
+        snapshot := snapshot_from_items(module.items, module.alias, "0.1.0")
+        loop function in snapshot.funcs {
+            if function.name == "local" || function.name == "distance" {
+                assert(function.signature.contains("package=core.units; family=Length"), "checked standard-unit API identity must use its semantic owner: {function.signature}")
+            }
+        }
+    }
+}
+// Rust: tests/unit_family.rs:1957
+#Test("qualified_imported_dimensions_resolve_by_alias_and_unqualified_collisions_fail") {
+    root := common.unique_tmp("qualified_dimensions")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("stock.jet"), "pub #UnitFamily(Inventory, dimension, base: item) { item }\n").unwrap()
+    fs.write(root.join("other.jet"), "pub #UnitFamily(Inventory, dimension, base: widget) { widget }\n").unwrap()
+    qualified := root.join("qualified.jet")
+    fs.write(qualified, "use \"stock\" as dep\n#UnitFamily(Rate, dimension: dep.Inventory / Time, base: item_per_second) { item_per_second }\nfn run() -> {}\n").unwrap()
+    qualified_diagnostics := check_with_path(qualified.to_string_lossy())
+    assert(qualified_diagnostics.is_empty(), "qualified dimensions must resolve through the written alias: {qualified_diagnostics:?}")
+    ambiguous := root.join("ambiguous.jet")
+    fs.write(ambiguous, "use \"stock\" as stock\nuse \"other\" as other\n#UnitFamily(Rate, dimension: Inventory / Time, base: item_per_second) { item_per_second }\nfn run() -> {}\n").unwrap()
+    diagnostics := check_with_path(ambiguous.to_string_lossy())
+    assert_eq(diagnostics.iter().map(d -> d.code.as_str()).collect(), ["E0905"], "an unqualified collision must not depend on import order: {diagnostics:?}")
+    assert(diagnostics[0].what.contains("ambiguous"), "the collision needs a specific ambiguity diagnostic: {diagnostics:?}")
+}
+// Rust: tests/unit_family.rs:2004
+#Test("custom_axis_identity_ignores_checkout_root_and_separates_packages") {
+    scratch := common.unique_tmp("stable_unit_axis")
+    first := resolved_axis(scratch.join("checkout-a"), "warehouse")
+    second := resolved_axis(scratch.join("checkout-b"), "warehouse")
+    distinct := resolved_axis(scratch.join("checkout-c"), "ledger")
+    assert_eq(first.0, second.0, "checkout roots are not semantic identity")
+    assert_eq(first.1, second.1, "API identity must ignore checkout roots")
+    assert_ne(first.0, distinct.0, "distinct package metadata must not collide")
+    assert_ne(first.1, distinct.1, "distinct package APIs must not collide")
+    assert(!first.0.identity().contains(scratch.to_string_lossy()), "serialized dimension identity must not expose a checkout path")
+}
+// Rust: tests/unit_family.rs:2068
+#Test("linear_units_and_affine_deltas_scale_without_losing_family") {
+    src := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(MeasureTag, base: tick) { tick }
+#UnitFamily(Temperature, dimension, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+fn run() -> {
+    length :: 3meter
+    quantity :: 2
+    right_int_binding :: length * quantity
+    left_int_binding :: quantity * length
+    float_quantity :: Float.from_int(quantity)
+    right_float_binding :: length * float_quantity
+    left_float_binding :: float_quantity * length
+    signed_quantity :: I32{2}
+    narrow_signed_quantity :: I8{2}
+    unsigned_quantity :: U8{2}
+    float32_quantity :: F32{2.0}
+    right_i32_binding :: length * signed_quantity
+    right_i8_binding :: length * narrow_signed_quantity
+    left_u8_binding :: unsigned_quantity * length
+    right_f32_binding :: length / float32_quantity
+    right_int :: length * 2
+    left_int :: 2 * length
+    quotient :: length / 2
+    right_decimal :: length * 1.5
+    left_decimal :: 1.5 * length
+    negative :: length * -2
+    zero :: length * 0
+    overflow :: length * 1.0e308
+    zero_division :: length / 0
+    tick_value :: 4tick
+    tick_scaled :: tick_value * 2
+    delta :: CelsiusDelta.from_float(Float{5.0})
+    delta_right :: delta * 2
+    delta_left :: 2 * delta
+    delta_quotient :: delta / 2
+    print("{(right_int_binding.raw())} {(left_int_binding.raw())}")
+    print("{(right_float_binding.raw())} {(left_float_binding.raw())}")
+    print("{(right_i32_binding.raw())} {(right_i8_binding.raw())} {(left_u8_binding.raw())} {(right_f32_binding.raw())}")
+    print("{(right_int.raw())} {(left_int.raw())} {(quotient.raw())}")
+    print("{(right_decimal.raw())} {(left_decimal.raw())} {(negative.raw())}")
+    print("{(zero.raw())} {(overflow.raw())} {(zero_division.raw())}")
+    print("{(delta_right.raw())} {(delta_left.raw())} {(delta_quotient.raw())}")
+    print("{(tick_scaled.raw())}")
+}
+"""
+    tiers.assert_tiers_agree("linear_unit_scalar_scaling", src, "6.0 6.0\n6.0 6.0\n6.0 6.0 6.0 1.5\n6.0 6.0 1.5\n4.5 4.5 -6.0\n0.0 inf inf\n10.0 10.0 2.5\n8.0\n")
+}
+// Rust: tests/unit_family.rs:2126
+#Test("scalar_unit_boundaries_and_nominal_currency_stay_rejected") {
+    affine := """
+#UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }
+fn run() -> {
+    point :: CelsiusPoint.from_float(Float{20.0})
+    bad :: point * 2
+}
+"""
+    assert_eq(codes_of(affine), ["E0109"])
+    affine_product := """
+#UnitFamily(Temperature, dimension, base: kelvin) { kelvin celsius(scale: 1, offset: 27315/100) }
+fn run() -> {
+    point :: CelsiusPoint.from_float(Float{20.0})
+    bad :: point * point
+}
+"""
+    assert_eq(codes_of(affine_product), ["E0127"])
+    inverse := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+fn run() -> {
+    bad :: 2 / 1meter
+    bad_float :: 2.0 / 1meter
+}
+"""
+    assert_eq(codes_of(inverse), ["E0109", "E0109"])
+    unsupported := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+fn run() -> { bad :: 1meter * true }
+"""
+    assert_eq(codes_of(unsupported), ["E0109"])
+    decimal := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+fn run() -> {
+    scale :: 1.5
+    bad :: 1meter * scale
+}
+"""
+    assert_eq(codes_of(decimal), ["E0109"])
+    incompatible := """
+#UnitFamily(Length, dimension, base: meter) { meter }
+#UnitFamily(Mass, dimension, base: gram) { gram }
+fn run() -> { bad :: 1meter + 1gram }
+"""
+    assert_eq(codes_of(incompatible), ["E0359"])
+    currency := """
+#UnitFamily(Currency) { usd eur }
+fn run() -> {
+    price :: Usd.from_float(Float{2.0})
+    bad :: price * 2
+}
+"""
+    assert_eq(codes_of(currency), ["E0127"])
+    nominal_units := """
+#UnitFamily(Currency) { usd eur }
+fn run() -> {
+    left :: Usd.from_float(Float{2.0})
+    right :: Eur.from_float(Float{3.0})
+    bad :: left * right
+}
+"""
+    assert_eq(codes_of(nominal_units), ["E0127"])
+}
+// Rust: tests/unit_family.rs:2207
+#Test("unit_scalar_rewrap_lint_requires_the_direct_policy_free_identity") {
+    src := """
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+}
+#UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    celsius(scale: 1, offset: 27315/100)
+}
+fn external_scale(value: Float) -> Float { calibrate(value) }
+fn calibrate(value: Float) -> Float { value * 2 }
+fn run() -> {
+    value :: Meter.from_float(Float{4.0})
+    print(Meter.from_float(value.raw() * 2).raw())
+    print(Meter.from_float(value.raw() * calibrate(2.0)).raw())
+    print(Meter.from_float(value.raw() * external_scale(2.0)).raw())
+    print(Meter.from_float(value.raw() * Float.from_float(calibrate(2.0))).raw())
+    print(Meter.from_float(value.raw() * Float.from_float(external_scale(2.0))).raw())
+    rounded :: Meter.from_half_rounded(1half, .NearestEven, digits: 0) ?? Meter.from_float(Float{0.0})
+    print(rounded.raw())
+    point :: CelsiusPoint.from_float(Float{20.0})
+    print(CelsiusPoint.from_float(point.raw() * 2).raw())
+    #Arithmetic(.Wrapping) {
+        print(Meter.from_float(value.raw() * 2).raw())
+    }
+}
+"""
+    output := compile(src).expect("lint identity fixture should compile")
+    unit_lints := output.lints.iter().filter(lint -> lint.code == "L0519").collect()
+    assert_eq(unit_lints.len(), 1, "only the direct policy-free identity should warn: {output.lints:?}")
+}

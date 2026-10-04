@@ -1,0 +1,61 @@
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Source.CompilerStack.[run_on_compiler_stack]
+use core.fs as fs
+use jet
+
+// Rust: tests/send_fn_mir_lowering.rs:19
+APP_PACKAGE :: """
+name: "send_fn_mir_lowering"
+version: "0.1.0"
+authority: { holds: { allow: [IO, Env, Net] } }
+"""
+// Rust: tests/send_fn_mir_lowering.rs:28
+APP_HANDLERS :: """
+use core.web as web
+#Target(Web)
+fn home() -> WebPage { web.page("Home", "hello") }
+fn detail(id: Int) -> WebPage { web.page("Detail", "item {id}") }
+fn save() -> String { "saved" }
+fn run() -> App {
+    return web.app()
+        .route("/", home)
+        .page("/about", home)
+        .route("/items/:id", detail)
+        .action("save", save)
+        .form("order", save)
+        .pending(home)
+        .csr()
+}
+"""
+// Rust: tests/send_fn_mir_lowering.rs:52
+NAMED_INTERRUPT_CALLBACK :: """
+use core.sys as os
+fn named_callback() { print("named") }
+fn run() {
+    os.on_interrupt(named_callback)
+    print("ready")
+}
+"""
+// Rust: tests/send_fn_mir_lowering.rs:65
+fn checked_bundle(name: String, source: String) -> jet.AST.ProgramBundle {
+    dir :: common.unique_tmp("jet_send_fn_mir_{name}")
+    fs.create_dir_all(&dir).unwrap()
+    fs.write(dir.join("package.jet"), APP_PACKAGE).unwrap()
+    entry :: dir.join("main.jet")
+    fs.write(&entry, source).unwrap()
+    bundle := jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter((diagnostic) -> diagnostic.severity == jet.Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "{name}: {errors:?}")
+    _ :: fs.remove_dir_all(dir)
+    ^bundle
+}
+// Rust: tests/send_fn_mir_lowering.rs:81
+fn assert_lowers_on_every_tier(name: String, source: String) -> {
+    run_on_compiler_stack(() -> {
+        bundle :: checked_bundle(name, source)
+        (cranelift, _) :: common.lower_cranelift_bundle(&bundle).unwrap_or_else((error) -> panic("{name}: Cranelift MIR lowering failed: {error}"))
+        cranelift.validate().unwrap_or_else((error) -> panic("{name}: Cranelift MIR does not validate: {error}"))
+        (interpreter, _) :: common.lower_interpreter_bundle(&bundle).unwrap_or_else((error) -> panic("{name}: interpreter MIR lowering failed: {error}"))
+        interpreter.validate().unwrap_or_else((error) -> panic("{name}: interpreter MIR does not validate: {error}"))
+    })
+}

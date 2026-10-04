@@ -1,0 +1,71 @@
+use Compiler.JetFoundation.Tests.Integration.SemaSoundnessParts.Support.*
+use Compiler.JetFoundation.Tests.Integration.SemaSoundnessParts.Metadata.[selector_routes_exactly_one_fixture_category]
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.Common.[build_and_run]
+use Foundation.[TEXT_NUL]
+use core.fs as fs
+// Differential partition constants are supplied by the including original lane (eight partitions).
+
+// Rust: tests/sema_soundness_parts/differential.rs:4
+#Test("executable_corpus_matches_aot_and_default_dev") {
+    // FEATURE_CLAIM: claim.native-language / accepted-native-semantics
+    filter :: case_filter()
+    all :: selected_cases("differential", filter)
+    selected :: if filter.is_some() { ^all } else {
+        all.into_iter().enumerate().filter(((index, _)) -> index % DIFFERENTIAL_PARTITIONS == DIFFERENTIAL_PARTITION).map(((_, path)) -> ^path).collect()
+    }
+    require_lane_selection("differential", filter, selected.len())
+    require_rustc()
+    failures :: run_all_collecting_failures(^selected, (path) -> {
+        replay(path, "executable_corpus_matches_aot_and_default_dev")
+        src :: fs.read_to_string(path).unwrap()
+        name :: path.file_stem().unwrap().to_string_lossy()
+        expected :: fs.read_to_string(path.with_extension("out")).unwrap_or_else((e) -> panic("{relative(path)} needs .out: {e}"))
+        aot :: build_and_run("jet_sema_sound_diff", name, src)
+        dev :: if default_dev_with_deadline(path) == {
+            .Ok(result) -> ^result
+            .Err(error) -> { return .Err(Err("{relative(path)}: {error.message}")) }
+        }
+        if aot != dev { return .Err(Err("{relative(path)}: AOT/default-dev divergence: {aot:?} vs {dev:?}")) }
+        want :: (0, expected, "")
+        if aot != want { return .Err(Err("{relative(path)}: output drift: got {aot:?}, want {want:?}")) }
+        .Ok(())
+    })
+    assert(failures.is_empty(), "{failures.len()} differential-corpus failure(s), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{failures.join("\n")}")
+}
+// Rust: tests/sema_soundness_parts/invalid.rs:2
+#Test("exact_invalid_corpus_rejects_in_jet") {
+    // FEATURE_CLAIM: claim.native-language / invalid-front-end-boundary
+    filter :: case_filter()
+    selected :: selected_cases("invalid", filter)
+    require_lane_selection("invalid", filter, selected.len())
+    failures := [String]{}
+    loop path in selected {
+        replay(path, "exact_invalid_corpus_rejects_in_jet")
+        expected :: expected_code(path)
+        fixture :: fs.read_to_string(path).unwrap()
+        src :: fixture.replace("__NUL__", TEXT_NUL)
+        materialized :: common.unique_tmp("jet_sema_sound_invalid").with_extension("jet")
+        fs.write(materialized, src).unwrap()
+        if jet.compile_with_path(src, materialized.to_string_lossy()) == {
+            .Ok(_) -> failures.push("{relative(path)}: sema accepted known-invalid fixture (expected {expected})")
+            .Err(diags) -> {
+                if !diags.iter().any((d) -> d.code == expected) {
+                    failures.push("{relative(path)}: expected {expected}, got {diags.iter().map((d) -> d.code).collect():?}")
+                }
+            }
+        }
+    }
+    assert(failures.is_empty(), "{failures.len()} invalid-corpus mismatch(es), each replayable via SEMA_SOUNDNESS_CASE=<path>:\n{failures.join("\n")}")
+}
+// Rust: tests/sema_soundness_parts/metadata.rs:2
+#Test("selector_routes_exactly_one_fixture_category") {
+    selector_routes_exactly_one_fixture_category()
+}
+// Rust: tests/sema_soundness_parts/metadata.rs:30
+#Test("full_corpus_meets_minimum_case_count") {
+    // FEATURE_CLAIM: claim.native-language / corpus-size-floor
+    if case_filter().is_some() { selector_routes_exactly_one_fixture_category() }
+    total :: ["valid", "invalid", "differential"].iter().map((kind) -> cases(kind).len()).sum::<USize>()
+    assert(total >= 250, "sema soundness corpus has {total} fixed cases across valid+invalid+differential; crit #2 requires at least 250")
+}

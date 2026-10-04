@@ -1,0 +1,546 @@
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use Compiler.JetFoundation.Tests.Integration.ReceiverPlaceMarks.[semi_before]
+use Compiler.JetFoundation.Tests.Integration.RedundantFinalReturn as final_return
+use Compiler.JetFoundation.Tests.Integration.RefutableTestBind as test_bind
+use Compiler.JetFoundation.Tests.Integration.Regex.[run_regex, have_toolchain]
+use Compiler.JetFoundation.Tests.Integration.RegistryNamePolicy as registry_policy
+use Compiler.JetFoundation.Tests.Integration.Report as report
+use jet
+use jet.Lexer.[TokKind]
+use core.fs as fs
+use core.sys.target
+use std.env
+use std.process.Command
+
+// Rust: tests/reader_region_tiers.rs:10
+#Test("reader_hot_loop_one_million_reads_matches_all_tiers") {
+    expected :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/parsing/reader_hot_loop.out")).unwrap()
+    tir_support.assert_example_cli_tiers_agree("parsing/reader_hot_loop", expected)
+}
+// Rust: tests/reader_region_tiers.rs:16
+#Test("reader_region_short_input_keeps_the_fallible_fallback") {
+    source :: """
+fn run() {
+    reader :: Reader.over([U8]{7})
+    loop _ in 0..<2 {
+        value :: reader.read_u16_le() ?? 99
+        print(value)
+    }
+}
+"""
+    tir_support.assert_tiers_agree("reader_region_short", source, "99\n99\n")
+}
+// Rust: tests/reader_region_tiers.rs:29
+#Test("bounded_fixed_width_to_int_keeps_the_native_carrier") {
+    source :: """
+fn run() {
+    values :: [U8]{ 7 }
+    loop value in values {
+        widened :: Int.from_u8(value)
+        print(widened)
+    }
+}
+"""
+    tir_support.assert_tiers_agree("bounded_int_cast", source, "7\n")
+}
+// Rust: tests/reader_region_tiers.rs:43
+#Test("reader_u32_to_int_modulo_uses_bounded_native_rail") {
+    source :: """
+fn run() {
+    reader :: Reader.over([U8]{9, 0, 0, 0})
+    value :: Int.from_u32(reader.read_u32_le() ?? 0)
+    print(value % 7)
+}
+"""
+    tir_support.assert_tiers_agree("reader_u32_int_modulo", source, "2\n")
+}
+// Rust: tests/reader_region_tiers.rs:55
+#Test("reader_over_moves_an_owned_bytes_last_use") {
+    src :: """
+fn run() {
+    bytes :: [U8]{7, 9}
+    reader :: Reader.over(bytes)
+    print(reader.remaining())
+}
+"""
+    tir_support.assert_tiers_agree("reader_over_owned_last_use", src, "2\n")
+}
+// Rust: tests/reader_region_tiers.rs:67
+#Test("reader_over_reuses_the_borrowing_clone_when_bytes_are_live") {
+    src :: """
+fn run() {
+    bytes :: [U8]{7, 9}
+    reader :: Reader.over(bytes)
+    print(bytes.len())
+    print(reader.remaining())
+}
+"""
+    tir_support.assert_tiers_agree("reader_over_reused_bytes", src, "2\n2\n")
+}
+// Rust: tests/reader_region_tiers.rs:80
+#Test("reader_over_rejects_a_live_view_alias") {
+    src :: """
+fn run() {
+    bytes := [U8]{7, 9}
+    alias :: bytes[0..1]
+    reader :: Reader.over(bytes)
+    print(alias.len())
+    print(reader.remaining())
+}
+"""
+    tir_support.assert_tiers_agree("reader_over_live_alias", src, "2\n2\n")
+}
+// Rust: tests/reader_region_tiers.rs:94
+#Test("reader_over_rejects_a_later_capture") {
+    src :: """
+fn run() {
+    bytes :: [U8]{7, 9}
+    reader :: Reader.over(bytes)
+    _keep :: () -> bytes.len()
+    print(reader.remaining())
+}
+"""
+    tir_support.assert_tiers_agree("reader_over_later_capture", src, "2\n")
+}
+// Rust: tests/reader_region_tiers.rs:107
+#Test("reader_fixed_frame_and_byte_checksum_keep_one_native_shape") {
+    source :: """
+fn run() {
+    payload :: [U8]{7, 1, 0x34, 0x12, 1, 0, 0, 0}
+    checksum := U64{0}
+    loop byte in payload -> checksum += U64.from_u8(byte)
+    reader :: Reader.over(payload)
+    frame :: reader.take_pattern([U8]{"{channel:U8}{flags:U8}{sample:U16le}{tick:U32le}"}) ?? panic("short frame")
+    print(checksum)
+    print(frame.channel)
+    print(frame.flags)
+    print(frame.sample)
+    print(frame.tick)
+    print(reader.remaining())
+}
+"""
+    tir_support.assert_tiers_agree("reader_fixed_frame_checksum", source, "79\n7\n1\n4660\n1\n0\n")
+}
+// Rust: tests/receiver_place_marks.rs:18
+#Test("line_start_place_marks_begin_statements") {
+    assert(semi_before("x\n&buf.push(1)\n", TokKind.Amp))
+    assert(semi_before("x\n^buf.seal()\n", TokKind.Caret))
+    assert(semi_before("x\n&self.items.push(1)\n", TokKind.Amp))
+}
+// Rust: tests/receiver_place_marks.rs:25
+#Test("spaced_operators_continue_the_previous_line") {
+    assert(!semi_before("x\n& mask\n", TokKind.Amp))
+    assert(!semi_before("x\n^ 2\n", TokKind.Caret))
+    assert(!semi_before("x\n&(mask)\n", TokKind.Amp))
+}
+// Rust: tests/receiver_place_marks.rs:32
+#Test("formatter_spaces_continued_operators_and_keeps_place_marks") {
+    source :: "fn run() {\n    total := 6\n    mask := total\n        & 3\n    power := total\n        ^ 2\n    buf := [1]\n    &buf.push(2)\n    print(\"{mask} {power} {buf}\")\n}\n"
+    formatted :: jet.format_source(source).expect("receiver marks format")
+    assert(formatted.contains("mask := total & 3"), "{formatted}")
+    assert(formatted.contains("power := total ^ 2"), "{formatted}")
+    assert(formatted.contains("    &buf.push(2)\n"), "{formatted}")
+    assert_eq(jet.format_source(&formatted).expect("formatted source is stable"), formatted)
+}
+// Rust: tests/redundant_final_return.rs:11
+#Test("final_return_fix_removes_keyword") {
+    output :: tir_support.compile_source("redundant_final_return.jet", final_return.SOURCE).expect("final return fixture must compile")
+    lint :: output.lints.iter().find((diagnostic) -> diagnostic.code == "L0530").expect("a final explicit return must be linted")
+    assert_eq(lint.applicability, .Val(jet.Diagnostics.FixApplicability.Safe))
+    assert_eq(lint.safety, .Val(jet.Diagnostics.FixSafety.Formatting))
+    edits :: lint.all_edits()
+    assert_eq(edits.len(), 1, "the fix removes the redundant keyword")
+    fixed :: jet.FixEngine.apply_edits(final_return.SOURCE, &edits).expect("the final-return edit must apply without overlap")
+    assert(!fixed.contains("return 42"), "final return survived: {fixed}")
+    assert(fixed.contains("    42\n"), "implicit tail was not formed: {fixed}")
+    formatted :: jet.format_source(&fixed).expect("fixed source must format")
+    assert(formatted.contains("42"), "formatted tail lost its value: {formatted}")
+    fixed_output :: tir_support.compile_source("redundant_final_return_fixed.jet", &formatted).expect("fixed final-return fixture must compile")
+    assert(!fixed_output.lints.iter().any((diagnostic) -> diagnostic.code == "L0530"))
+    tir_support.assert_tiers_agree("redundant_final_return", final_return.SOURCE, final_return.EXPECTED_STDOUT)
+    tir_support.assert_tiers_agree("redundant_final_return_fixed", &formatted, final_return.EXPECTED_STDOUT)
+}
+// Rust: tests/refutable_test_bind.rs:21
+#Test("parser_accepts_subject_first_test_bind_and_rejects_pattern_left_route") {
+    (tokens, lex_diags) :: jet.Lexer.lex(test_bind.VALID)
+    assert(lex_diags.is_empty(), "valid test-bind lexed with diagnostics: {lex_diags:?}")
+    _ :: jet.Parser.parse(&tokens).expect("subject-first test-bind should parse")
+    (old_tokens, old_diags) :: jet.Lexer.lex("fn run() { .Ok(age) :: parse_age() ?? return }\n")
+    assert(old_diags.is_empty(), "retired spelling lexed with diagnostics: {old_diags:?}")
+    assert(jet.Parser.parse(&old_tokens).is_err(), "retired pattern-left refutable bind must not gain a parser path")
+}
+// Rust: tests/refutable_test_bind.rs:41
+#Test("sema_accepts_diverging_test_bind_and_keeps_the_name_afterward") {
+    output :: jet.compile(test_bind.VALID).expect("diverging test-bind should compile")
+    assert(output.rust.contains("age"), "generated program lost the bound name")
+}
+// Rust: tests/refutable_test_bind.rs:50
+#Test("sema_rejects_a_non_diverging_test_bind_route") {
+    source :: """
+fn parse_age() -> Int String! { return .Ok(42) }
+fn run() {
+    parse_age() == .Ok(age) ?? 0
+}
+"""
+    diagnostics :: jet.check_for_eval(source, "refutable_test_bind.jet")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0405"), "non-diverging test-bind route must use registered E0405: {diagnostics:?}")
+}
+// Rust: tests/refutable_test_bind.rs:67
+#Test("a_test_without_a_route_does_not_bind_pattern_names") {
+    source :: """
+fn parse_age() -> Int String! { return .Ok(42) }
+fn run() {
+    matched :: parse_age() == .Ok(age)
+    print(age)
+}
+"""
+    diagnostics :: jet.check_for_eval(source, "refutable_test_bind_no_route.jet")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0107"), "a pattern test without `??` must not bind `age`: {diagnostics:?}")
+}
+// Rust: tests/refutable_test_bind.rs:85
+#Test("optional_shape_test_does_not_make_ambient_err_available") {
+    source :: """
+fn maybe() -> Int? { return null }
+fn run() {
+    maybe() == .Val(value) ?? panic(err)
+}
+"""
+    diagnostics :: jet.check_for_eval(source, "refutable_test_bind_optional.jet")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0408"), "optional shape miss must reject ambient err with E0408: {diagnostics:?}")
+}
+// Rust: tests/refutable_test_bind.rs:102
+#Test("user_enum_capture_and_miss_route_match_all_tiers") {
+    source :: """
+enum Choice {
+    First(Int)
+    Second
+}
+fn select(choice: Choice) -> Int {
+    choice == .First(value) ?? return 0
+    return value
+}
+fn run() {
+    print(select(Choice.First(7)))
+    print(select(Choice.Second))
+}
+"""
+    tir_support.assert_tiers_agree("refutable-user-enum", source, "7\n0\n")
+}
+// Rust: tests/refutable_test_bind.rs:123
+#Test("example_matches_aot_default_jit_and_interpreter") {
+    tir_support.assert_example_cli_tiers_agree("patterns/refutable_test_bind", test_bind.EXAMPLE_OUTPUT)
+}
+
+// Rust: tests/regex.rs:81
+#Test("match_groups_find_replace_split") {
+    if !have_toolchain() {
+        eprintln("note: cargo/rustc not found; skipping core.regex integration test")
+        return
+    }
+    src :: """
+use core.regex as re
+fn run() {
+    text :: "2024-06-21 build ok"
+    print(re.is_match(pattern: {"\\d{{4}}"}, text: text))
+    m :: re.match({"(\\d{{4}})-(\\d{{2}})-(\\d{{2}})"}, text)
+    if m == Val(mat) {
+        print(mat.group(0) ?? "x")
+        print(mat.group(1) ?? "x")
+        print(mat.group(2) ?? "x")
+        print(mat.group(3) ?? "x")
+        print(mat.group(9) ?? "none")
+    }
+    none_match :: re.match({"zzz"}, text)
+    if none_match == None { print("no-match") }
+    first :: re.find({"\\d+"}, text)
+    print(first ?? "none")
+    nums :: re.find_all({"\\d+"}, text)
+    print(nums.len())
+    print(re.replace({"\\d"}, "#", text))
+    print(re.replace_first({"\\d"}, "#", "1-2"))
+    parts :: re.split({"-"}, "a-b-c")
+    print(parts.len())
+}
+"""
+    out :: run_regex(src)
+    lines :: out.lines().collect()
+    assert_eq(lines[0], "true", "is_match")
+    assert_eq(lines[1], "2024-06-21", "group(0) whole match")
+    assert_eq(lines[2], "2024", "group(1)")
+    assert_eq(lines[3], "06", "group(2)")
+    assert_eq(lines[4], "21", "group(3)")
+    assert_eq(lines[5], "none", "out-of-range group is none")
+    assert_eq(lines[6], "no-match", "non-matching pattern yields None")
+    assert_eq(lines[7], "2024", "find first match")
+    assert_eq(lines[8], "3", "find_all count (2024, 06, 21)")
+    assert_eq(lines[9], "####-##-## build ok", "replace all digits")
+    assert_eq(lines[10], "#-2", "first-mode digit")
+    assert_eq(lines[11], "3", "split into 3 parts")
+}
+// Rust: tests/regex.rs:145
+#Test("bad_pattern_is_a_recoverable_error_not_a_crash") {
+    if !have_toolchain() {
+        eprintln("note: cargo/rustc not found; skipping core.regex error test")
+        return
+    }
+    src :: """
+use core.regex as re
+fn run() {
+    pattern :: "(unclosed"
+    compiled :: re.compile(pattern) ?? {
+        print("caught")
+        return
+    }
+    print("unexpected-ok")
+}
+"""
+    out :: run_regex(src)
+    trimmed := out.trim() // #4303
+    assert_eq(trimmed, "caught", "bad pattern surfaces as Err")
+}
+// Rust: tests/regex.rs:168
+#Test("inferred_and_explicit_regex_literals_are_direct_values") {
+    if !have_toolchain() {
+        eprintln("note: cargo/rustc not found; skipping typed Regex literal test")
+        return
+    }
+    src :: """
+use core.regex as re
+fn run() {
+    print(re.find({"\\d+"}, "id=42") ?? "none")
+    print(re.find(pattern: {"[a-z]+"}, text: "123jet") ?? "none")
+    digits :: Regex{"\d+"}
+    print(digits.is_match("room 7"))
+    runtime_pattern :: "\\w+"
+    runtime :: re.compile(runtime_pattern) ?? panic("runtime pattern")
+    print("runtime-result")
+}
+"""
+    assert_eq(run_regex(src), "42\njet\ntrue\nruntime-result\n", "typed patterns are direct; runtime compilation stays fallible")
+}
+// Rust: tests/regex.rs:194
+#Test("compiled_regex_flags_spans_names_limit_and_callback") {
+    if !have_toolchain() {
+        eprintln("note: cargo/rustc not found; skipping core.regex API test")
+        return
+    }
+    src :: """
+use core.regex as re
+fn run() {
+    flags :: re.flags(true, true, false)
+    rx :: re.compile_with("^(?<word>[a-z]+)", flags) ?? panic("bad pattern")
+    text :: "Ada\nlovelace"
+    matches :: rx.matches(text)
+    print(matches.len())
+    first :: rx.match(text)
+    if first == Val(mat) {
+        print(mat.name("word") ?? "none")
+        print(mat.start())
+        print(mat.end())
+        print(mat.group_start(1) ?? -1)
+        print(mat.group_end(1) ?? -1)
+    }
+    sep :: re.compile(",\\s*") ?? panic("bad sep")
+    pieces :: sep.split_limit("a, b, c", 2)
+    print(pieces.len())
+    print(pieces[1])
+    word :: re.compile("\\w+") ?? panic("bad word")
+    print(word.replace_all_with("a b", (m: Match) -> "hit"))
+}
+"""
+    out :: run_regex(src)
+    lines :: out.lines().collect()
+    assert_eq(lines[0], "2", "multiline + case-insensitive flags")
+    assert_eq(lines[1], "Ada", "named group")
+    assert_eq(lines[2], "0", "match start")
+    assert_eq(lines[3], "3", "match end")
+    assert_eq(lines[4], "0", "group start")
+    assert_eq(lines[5], "3", "group end")
+    assert_eq(lines[6], "2", "split limit len")
+    assert_eq(lines[7], "b, c", "split limit remainder")
+    assert_eq(lines[8], "hit hit", "callback replacement")
+}
+// Rust: tests/regex.rs:240
+#Test("regex_value_fidelity_is_shared_by_all_tiers") {
+    src :: """
+use core.regex as re
+fn run() {
+    rx :: Regex{"a"}
+    print(&rx.replace("a-a", "x"))
+    print(rx.replace_first("a-a", "x"))
+    print(Regex{""}.replace("abc", "x"))
+    zero_width :: Regex{""}.split("abc")
+    print(zero_width.len())
+    print(zero_width[1])
+    print(zero_width[2])
+    print(zero_width[3])
+    limited_zero_width :: Regex{""}.split_limit("abc", 3)
+    print(limited_zero_width.len())
+    print(limited_zero_width[2])
+    unicode_text :: "aé"
+    unicode_zero_width :: Regex{""}.split(unicode_text)
+    print(unicode_zero_width.len())
+    print(unicode_zero_width[1])
+    print(unicode_zero_width[2])
+    print(unicode_zero_width[3] == "")
+    m :: Regex{"(é)"}.match(unicode_text)
+    if m == Val(mat) {
+        print(mat.start())
+        print(mat.end())
+        print(mat.group_start(1) ?? -1)
+        print(mat.group_end(1) ?? -1)
+    }
+    ascii_parts :: re.split(Regex{"[\t-\r ]+"}, "a\tb\nc d")
+    print(ascii_parts.len())
+    print(Regex{"(a+)+$"}.is_match("aaaaaaaaaaaaaaaaaaaaX"))
+}
+"""
+    tir_support.assert_tiers_agree("regex_value_fidelity", src, "x-x\nx-a\nxaxbxcx\n5\na\nb\nc\n3\nbc\n4\na\né\ntrue\n1\n2\n1\n2\n3\nfalse\n")
+}
+// Rust: tests/regex.rs:286
+#Test("repeated_regex_queries_keep_exact_matches") {
+    src :: """
+fn run() {
+    rx :: Regex{"(?<word>[A-Za-z]+)-\d+"}
+    print(rx.is_match("Jet-2026"))
+    print(rx.is_match("Jet"))
+    print(rx.find("prefix Rust-2025 suffix") ?? "none")
+    print(rx.find("no match") ?? "none")
+    print(rx.find_all("Jet-1 Rust-2").len())
+}
+"""
+    expected :: "true\nfalse\nRust-2025\nnone\n2\n"
+    if have_toolchain() { assert_eq(run_regex(src), expected, "AOT regex queries returned unexpected matches") }
+    tir_support.assert_tiers_agree("repeated_regex_queries", src, expected)
+}
+// Rust: tests/regex.rs:308
+#Test("anchored_required_literal_prefilter_preserves_controls") {
+    src :: """
+use core.regex as re
+fn run() {
+    anchored :: Regex{"^(?:needle)"}
+    print(anchored.is_match("needle suffix"))
+    print(anchored.is_match("prefix needle"))
+    print(anchored.find("prefix needle") ?? "none")
+    multiline :: re.compile_with("^(?:needle)", re.flags(false, true, false)) ?? panic("bad pattern")
+    print(multiline.is_match("prefix\nneedle suffix"))
+    print(multiline.is_match("prefix\nxneedle suffix"))
+    unanchored :: Regex{"(?:needle)"}
+    print(unanchored.is_match("prefix needle"))
+    print(unanchored.is_match("prefix absent"))
+}
+"""
+    expected :: "true\nfalse\nnone\ntrue\nfalse\ntrue\nfalse\n"
+    if have_toolchain() { assert_eq(run_regex(src), expected, "AOT anchored regex queries returned unexpected matches") }
+    tir_support.assert_tiers_agree("anchored_required_literal_prefilter", src, expected)
+}
+// Rust: tests/regex.rs:338
+#Test("anchored_api_log_prefilters_preserve_semantics") {
+    src :: """
+fn run() {
+    rx :: Regex{"^([0-9.]+) - - \[[^]]+\] \"GET /api/[^ ]+ HTTP/1\.1\" 5[0-9][0-9] "}
+    print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 500 42"))
+    print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /static/file/1 HTTP/1.1\" 500 42"))
+    print(rx.is_match("192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 200 42"))
+    print(rx.is_match("prefix 192.0.2.1 - - [01/Jan/2026:00:00:00 +0000] \"GET /api/v1/resource/1 HTTP/1.1\" 500 42"))
+}
+"""
+    expected :: "true\nfalse\nfalse\nfalse\n"
+    if have_toolchain() { assert_eq(run_regex(src), expected, "anchored required literals must only reject impossible lines") }
+    tir_support.assert_tiers_agree("anchored_api_log_prefilters", src, expected)
+}
+// Rust: tests/regex.rs:359
+#Test("typed_head_raw_escapes_agree_across_tiers") {
+    src :: """
+fn run() {
+    digits :: Regex{"\d+"}
+    print(digits.is_match("7"))
+    slash_n :: Regex{"a\nb"}
+    print(slash_n.is_match("7"))
+    braces :: Regex{"x{{2}}"}
+    print(braces.is_match("xx"))
+}
+"""
+    expected :: "true\nfalse\ntrue\n"
+    (jit_code, jit_out, jit_err) :: tir_support.jit_run("typed_head_raw_escapes", src)
+    assert_eq(jit_code, 0, "jet run failed:\n{jit_err}")
+    assert_eq(jit_out, expected, "jet run disagreed:\n{jit_err}")
+    (interpreter_code, interpreter_out, interpreter_err) :: tir_support.interpreter_run("typed_head_raw_escapes", src)
+    assert_eq(interpreter_code, jit_code, "interpreter exit disagreed:\n{interpreter_err}")
+    assert_eq(interpreter_out, jit_out, "interpreter stdout disagreed:\n{interpreter_err}")
+    assert_eq(interpreter_err, jit_err, "interpreter stderr disagreed")
+}
+
+// Rust: tests/registry_name_policy.rs:95
+#Test("hostile_lookalike_publish_is_rejected_with_teaching_error") {
+    root :: registry_policy.scratch("publish")
+    registry :: root.join("registry.git")
+    project :: root.join("project")
+    cache :: root.join("registry-cache")
+    store :: root.join("store")
+    keys :: root.join("keys")
+    registry_policy.seed_existing_name(&registry)
+    registry_policy.init_project(&project)
+    url :: "file://{registry.to_str().unwrap()}"
+    output :: Command.new(env.jet_bin()).args(["registry", "publish", "--no-sign", "--quiet"]).current_dir(&project).env("JET_REGISTRY_URL", &url).env("JET_REGISTRY_CACHE_DIR", &cache).env("JET_PACKAGE_STORE_DIR", &store).env("JET_KEYS_DIR", &keys).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success(), "hostile name must not publish")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    snapshot :: fs.read_to_string(env.manifest_dir().join("tests/cli/registry_name_policy.txt")).unwrap()
+    assert_eq(stderr, snapshot, "publish diagnostic changed")
+    assert(!stderr.contains("registry source artifact"))
+    assert(!stderr.contains("index entry"))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/report.rs:25
+#Test("compile_cascade_json_snapshot_keeps_roots_and_pruned_sites") {
+    source :: fs.read_to_string(env.manifest_dir().join("tests/ui/e2392_root_cascade.jet")).unwrap()
+    diagnostics :: jet.check_with_path("tests/ui/e2392_root_cascade.jet")
+    assert(!diagnostics.is_empty(), "cascade fixture must be rejected")
+    actual :: jet.render_all_json(&jet.Diagnostics.ReportPath.from_process("<e2392_root_cascade.jet>"), source, &diagnostics)
+    assert_eq(actual, fs.read_to_string(env.manifest_dir().join("tests/ui/e2392_root_cascade.json")).unwrap(), "JSON must retain one report per failure domain after pruning repeated sites")
+}
+// Rust: tests/report.rs:42
+#Test("compile_linked_cascade_json_snapshot_keeps_cause_chain") {
+    source :: fs.read_to_string(env.manifest_dir().join("tests/ui/e2392_linked_cascade.jet")).unwrap()
+    diagnostics :: jet.check_with_path("tests/ui/e2392_linked_cascade.jet")
+    assert(!diagnostics.is_empty(), "linked cascade fixture must be rejected")
+    actual :: jet.render_all_json(&jet.Diagnostics.ReportPath.from_process("<e2392_linked_cascade.jet>"), source, &diagnostics)
+    assert_eq(actual, fs.read_to_string(env.manifest_dir().join("tests/ui/e2392_linked_cascade.json")).unwrap(), "JSON must preserve the root-first cause chain")
+}
+// Rust: tests/report.rs:59
+#Test("zero_telemetry_policy_docs_and_source_audit") {
+    manifest :: env.manifest_dir()
+    policy :: fs.read_to_string(manifest.join("Docs/spec/reference/network-policy.md")).unwrap()
+    assert(policy.contains("D-TELEMETRY1=A"))
+    assert(policy.contains("Jet sends no telemetry"))
+    assert(policy.contains("Inventory of toolchain network paths"))
+    assert(!policy.contains("future send operation"))
+    forbidden_endpoints :: ["reports.jet-lang.dev", "telemetry.jet-lang.dev", "/v1/telemetry", "sentry.io", "crashlytics", "segment.io", "gotelemetry"]
+    roots :: [manifest.join("Source"), manifest.join("crates/jet-cli"), manifest.join("crates/jetpack/src")]
+    for root in roots {
+        for entry in report.walkdir(&root) {
+            path :: entry.as_path()
+            if path.extension().and_then((ext) -> ext.to_str()) != .Val("rs") { continue }
+            text :: fs.read_to_string(path).unwrap()
+            for needle in forbidden_endpoints {
+                assert(!text.contains(needle), "{path.display()} must not name telemetry endpoint `{needle}`")
+            }
+        }
+    }
+}
+// Rust: tests/report.rs:148
+#Test("ordinary_build_opens_no_network_connection") {
+    if target.selected_os() != "linux" { return }
+    build_root :: report.scratch("build-network")
+    fs.write(build_root.join("main.jet"), "fn run() { print(\"offline\") }\n").unwrap()
+    (build, calls) :: report.traced_network_calls(&build_root, "build", ["build", "main.jet"])
+    assert(build.status.success(), "build failed:\nstdout: {String.from_utf8_lossy(&build.stdout)}\nstderr: {String.from_utf8_lossy(&build.stderr)}")
+    // rustc's local AF_UNIX exec-status socket pair cannot address a host.
+    spawn_sockets :: calls.iter().filter((line) -> line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,") && line.ends_with("= 0")).count()
+    spawn_replies :: calls.iter().filter((line) -> line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0")).count()
+    // sendfile between local fds is process I/O, also classified as network by strace.
+    unexpected :: calls.iter().filter((line) -> !(line.contains("socketpair(AF_UNIX, SOCK_SEQPACKET|SOCK_CLOEXEC, 0,") && line.ends_with("= 0")) && !(line.contains("recvfrom(") && line.ends_with("\", 8, 0, NULL, NULL) = 0")) && !line.contains("sendfile(")).collect()
+    assert(unexpected.is_empty(), "ordinary build made an unexpected network syscall:\n{unexpected.iter().map((line) -> line.as_str()).collect().join("\n")}")
+    assert_eq(spawn_sockets, spawn_replies, "rustc's local exec-status socket/reply must stay paired")
+    _ :: fs.remove_dir_all(build_root)
+}

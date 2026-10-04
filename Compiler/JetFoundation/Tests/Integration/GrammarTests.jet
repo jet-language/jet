@@ -1,0 +1,230 @@
+use std.fs
+use jet.[Syntax, Lexer, Parser, AST, Diagnostics]
+use jet_foundation.Tests.Integration.Grammar.[GENERATED_START, GENERATED_END, generated_section, generated_section_matches, section_has_token, extract_anonymous_node_types, extract_zed_query_string_literals, zed_generated_class, is_word_token, extract_grammar_keyword_words, extract_foreign_words_from_syntax]
+// GATE #4494: read the actual checked-in editor grammars, without rewriting them.
+// Rust: tests/grammar.rs:46
+#Test("editor_grammars_have_generated_sections") {
+    for path in ["Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar", "Tools/editors/tree-sitter/grammar.js", "Tools/editors/zed/languages/jet/highlights.scm"] {
+        section :: generated_section(path)
+        assert(section.contains(GENERATED_START), path)
+        assert(section.contains(GENERATED_END), path)
+    }
+}
+// Rust: tests/grammar.rs:60
+#Test("tree_sitter_map_type_grammar_keeps_colon_adjacent") {
+    grammar :: fs.read_to_string("Tools/editors/tree-sitter/grammar.js").unwrap()
+    assert(grammar.contains("seq(\"[\", $._type, \":\", $._type, \"]\")"), "tree-sitter map types must use the canonical adjacent colon")
+    assert(!grammar.contains("seq(\"[\", $._type, \": \", $._type, \"]\")"), "tree-sitter grammar must not encode retired map type spacing")
+}
+// Rust: tests/grammar.rs:73
+#Test("tree_sitter_result_handler_grammar_keeps_the_canonical_shape") {
+    grammar :: fs.read_to_string("Tools/editors/tree-sitter/grammar.js").unwrap()
+    start :: grammar.find("result_handler_expr:").expect("result handler rule")
+    rule :: grammar[start..grammar[start..].find("paren_expr:").unwrap() + start]
+    assert(rule.contains("field(\"ok\", $.identifier)") && rule.contains("field(\"error\", $.identifier)") && rule.contains("field(\"success\"") && rule.contains("field(\"failure\""))
+    assert(!rule.contains("\":>\""), "retired arrow leaked into Result handler grammar")
+    assert(!rule.contains("\"=>\""), "retired arrow leaked into Result handler grammar")
+}
+// Rust: tests/grammar.rs:96
+#Test("editor_grammars_match_generated_sections") {
+    cases :: [("Tools/editors/vscode/syntaxes/jet.tmLanguage.json", Syntax.render_vscode_generated_highlights()), ("Tools/editors/jet.tmGrammar", Syntax.render_vscode_generated_highlights()), ("Tools/editors/tree-sitter/grammar.js", Syntax.render_tree_sitter_generated_highlights()), ("Tools/editors/zed/languages/jet/highlights.scm", Syntax.render_zed_generated_highlights())]
+    for (path, expected) in cases { assert_eq(generated_section(path), expected.trim_end(), "{path} generated section drifted; run `jet self devtools grammars`") }
+}
+// Rust: tests/grammar.rs:126
+#Test("seeded_tree_sitter_drift_fails_the_generated_section_guard") {
+    path :: "Tools/editors/tree-sitter/grammar.js"
+    source :: fs.read_to_string(path).unwrap()
+    seeded :: source.replacen(GENERATED_END, "// seeded generated-grammar drift\nEND GENERATED JET SYNTAX HIGHLIGHTS", 1)
+    assert(!generated_section_matches(seeded, path, Syntax.render_tree_sitter_generated_highlights()), "the seeded generated-tree-sitter drift must fail the same guard")
+}
+// Rust: tests/grammar.rs:145
+#Test("vscode_strings_do_not_relex_interpolations") {
+    for path in ["Tools/editors/vscode/syntaxes/jet.tmLanguage.json", "Tools/editors/jet.tmGrammar"] {
+        grammar :: fs.read_to_string(path).unwrap()
+        assert(!grammar.contains("\"include\": \"$self\""), "{path} must not re-lex string interpolations as Jet source")
+        assert(grammar.contains("\"include\": \"#string-interpolation\""), "{path} must consume {{interpolation}} as string scope")
+        assert(!grammar.contains("constant.character.escape.jet"), "{path} must not paint in-string escapes a second color")
+    }
+}
+// Rust: tests/grammar.rs:167
+#Test("classic_textmate_grammar_matches_vscode_source") {
+    assert_eq(fs.read_to_string("Tools/editors/jet.tmGrammar").unwrap(), fs.read_to_string("Tools/editors/vscode/syntaxes/jet.tmLanguage.json").unwrap(), "Tools/editors/jet.tmGrammar must mirror the canonical VS Code TextMate grammar")
+}
+// Rust: tests/grammar.rs:176
+#Test("every_highlight_token_is_in_each_generated_section") {
+    sections :: [("Tools/editors/vscode/syntaxes/jet.tmLanguage.json", generated_section("Tools/editors/vscode/syntaxes/jet.tmLanguage.json")), ("Tools/editors/tree-sitter/grammar.js", generated_section("Tools/editors/tree-sitter/grammar.js"))]
+    for token in Syntax.highlighted_tokens_sorted() {
+        if ["{{", "}}", "[", "]", "(", ")"].contains(token.text) { continue }
+        for (path, section) in sections { assert(section_has_token(section, token.text), "{path} generated section missing `{token.text}` ({token.class:Debug})") }
+    }
+}
+// Rust: tests/grammar.rs:204
+#Test("zed_generated_query_covers_anonymous_highlight_words") {
+    anonymous :: extract_anonymous_node_types("Tools/editors/tree-sitter/src/node-types.json")
+    section :: generated_section("Tools/editors/zed/languages/jet/highlights.scm")
+    actual :: extract_zed_query_string_literals(section).into_iter().collect::<Set<String>>()
+    expected :: Syntax.highlighted_tokens_sorted().into_iter().filter((token) -> zed_generated_class(token.class)).filter((token) -> is_word_token(token.text)).filter((token) -> anonymous.contains(token.text)).map((token) -> token.text.to_string()).collect::<Set<String>>()
+    assert_eq(actual, expected, "Zed generated query drifted from anonymous grammar literals")
+}
+// Rust: tests/grammar.rs:225
+#Test("syntax_keyword_list_tokens_are_classified_for_highlighting") {
+    for keyword in Syntax.JET_KEYWORD_LIST { assert(Syntax.highlighted_tokens_sorted().iter().any((token) -> token.text == keyword), "JET_KEYWORD_LIST token `{keyword}` has no highlight class") }
+}
+// Rust: tests/grammar.rs:237
+#Test("zed_highlight_query_mentions_only_grammar_literals") {
+    anonymous :: extract_anonymous_node_types("Tools/editors/tree-sitter/src/node-types.json")
+    query :: fs.read_to_string("Tools/editors/zed/languages/jet/highlights.scm").expect("read zed highlights query")
+    bad := [String]{}
+    for token in extract_zed_query_string_literals(query) { if !anonymous.contains(&token) { bad.push(token) } }
+    bad.sort()
+    bad.dedup()
+    assert(bad.is_empty(), "Zed rejects query strings that are not anonymous grammar literals: {bad:Debug}")
+}
+// Rust: tests/grammar.rs:465
+#Test("grammar_covers_jet_keyword_list") {
+    grammar_path :: "Tools/editors/vscode/syntaxes/jet.tmLanguage.json"
+    grammar_text :: fs.read_to_string(grammar_path).expect("Tools/editors/vscode/syntaxes/jet.tmLanguage.json")
+    grammar_words :: extract_grammar_keyword_words(grammar_text)
+    jet_keywords :: Syntax.JET_KEYWORD_LIST.iter().cloned().collect::<Set<String>>()
+    missing := jet_keywords.iter().filter((kw) -> !grammar_words.contains(kw.to_string())).cloned().collect::<[String]>()
+    missing.sort()
+    assert(missing.is_empty(), "Grammar file `{grammar_path}` is missing keyword(s) from JET_KEYWORD_LIST: {missing:Debug}\nAdd them to the appropriate \\b(...)\\b pattern in the keywords section.")
+}
+// Rust: tests/grammar.rs:493
+#Test("grammar_excludes_foreign_words") {
+    grammar_path :: "Tools/editors/vscode/syntaxes/jet.tmLanguage.json"
+    grammar_text :: fs.read_to_string(grammar_path).expect("Tools/editors/vscode/syntaxes/jet.tmLanguage.json")
+    syntax_text :: fs.read_to_string("crates/jet-foundation/src/Syntax.rs").expect("crates/jet-foundation/src/Syntax.rs")
+    grammar_words :: extract_grammar_keyword_words(grammar_text)
+    foreign_words :: extract_foreign_words_from_syntax(syntax_text)
+    jet_keywords :: Syntax.JET_KEYWORD_LIST.iter().cloned().collect::<Set<String>>()
+    intruders := foreign_words.iter().filter((word) -> grammar_words.contains(word) && !jet_keywords.contains(word.as_str())).cloned().collect::<[String]>()
+    intruders.sort()
+    assert(intruders.is_empty(), "Grammar file `{grammar_path}` contains FOREIGN_* teaching-error word(s) in its keyword patterns: {intruders:Debug}\nThese words must NOT be highlighted as keywords — remove them from the match pattern.")
+}
+// Rust: tests/grammar.rs:529
+#Test("enum_is_keyword") {
+    (toks, diags) :: Lexer.lex("enum x {{ A; }}")
+    assert(diags.is_empty(), "{diags:Debug}")
+    assert(match toks[0].kind { Lexer.TokKind.KwEnum -> true, _ -> false }, "{toks[0].kind:Debug}")
+}
+// Rust: tests/grammar.rs:544
+#Test("s6r_terminator_insertion_and_suppression") {
+    count_semis :: (src: String) -> {
+        (toks, diags) :: Lexer.lex(src)
+        assert(diags.is_empty(), "lex diags for {src:Debug}: {diags:Debug}")
+        toks.iter().filter((t) -> match t.kind { Lexer.TokKind.Semi -> true, _ -> false }).count()
+    }
+    assert_eq(count_semis("fn run() {{\n    x :: 1\n    y :: 2\n}}\n"), 2)
+    assert_eq(count_semis("fn run() {{\n    a()\n        .b()\n}}\n"), 1)
+    assert_eq(count_semis("fn run() {{\n    x :: a\n        && b\n}}\n"), 1)
+    assert_eq(count_semis("fn run() {{\n    x :: a\n        + b\n}}\n"), 1)
+    assert_eq(count_semis("fn run() {{\n    f(\n        a\n    )\n}}\n"), 1)
+    assert_eq(count_semis("fn run() {{\n    if s == {{\n        .Circle(r) -> print(r)\n        .Empty -> print(0)\n    }}\n}}\n"), 3)
+}
+// Rust: tests/grammar.rs:585
+#Test("parse_braceless_leading_dot_dispatch_arms") {
+    src :: "\nenum Shape {{\n    Circle(Float)\n    Empty\n}}\nfn area(s: Shape) -> Float {{\n    if s == {{\n        .Circle(r) -> return r\n        .Empty -> return 0.0\n    }}\n}}\nfn run() {{}}\n"
+    (toks, lex_diags) :: Lexer.lex(src)
+    assert(lex_diags.is_empty(), "lex diagnostics: {lex_diags:Debug}")
+    prog :: Parser.parse(&toks).expect("parse")
+    func :: match &prog.items[1] { AST.Item.Func(func) -> func, _ -> panic("expected area function") }
+    (arms, else_body) :: match &func.body[0] { AST.Stmt.Switch{arms, else_body, ..} -> (arms, else_body), _ -> panic("expected switch") }
+    assert_eq(arms.len(), 2)
+    assert(else_body.is_none())
+    assert(match &arms[0].body[..] { [AST.Stmt.Return(..)] -> true, _ -> false })
+    assert(match &arms[1].body[..] { [AST.Stmt.Return(..)] -> true, _ -> false })
+}
+// Rust: tests/grammar.rs:620
+#Test("dot_zero_in_statement_lexes_as_dot_then_int") {
+    (toks, diags) :: Lexer.lex("fn run() {{ x :: p.0 }}")
+    assert(diags.is_empty(), "{diags:Debug}")
+    dot :: toks.iter().position((t) -> match t.kind { Lexer.TokKind.Dot -> true, _ -> false }).expect("dot")
+    assert(match toks[dot + 1].kind { Lexer.TokKind.Int(0, _) -> true, _ -> false }, "{toks[dot + 1].kind:Debug}")
+}
+// Rust: tests/grammar.rs:639
+#Test("parse_option_fn") {
+    src :: "\nfn find_even(limit: Int) -> Int? {{\n    loop i in 1..limit {{\n        if i % 2 == 0 {{\n            return Val(i)\n        }}\n    }}\n    return None\n}}\nfn run() {{}}\n"
+    (toks, _) :: Lexer.lex(src)
+    prog :: Parser.parse(&toks).expect("parse")
+    assert_eq(prog.items.len(), 2)
+}
+// Rust: tests/grammar.rs:657
+#Test("parse_value_tail_stays_an_expression_statement") {
+    src :: "\nfn label() -> String {{\n    \"label\"\n}}\nfn run() {{}}\n"
+    (tokens, diagnostics) :: Lexer.lex(src)
+    assert(diagnostics.is_empty(), "lex diagnostics: {diagnostics:Debug}")
+    program :: Parser.parse(&tokens).expect("value tail parses")
+    function :: match &program.items[0] { AST.Item.Func(function) -> function, _ -> panic("expected label function") }
+    assert(match function.body.last() { Some(AST.Stmt.Expr(AST.Expr.Str(..))) -> true, _ -> false })
+}
+// Rust: tests/grammar.rs:677
+#Test("parse_pipe_switch_arms_as_subject_tests") {
+    src :: "\nfn run() {{\n    fruit :: \"orange\"\n    if fruit == {{\n        apple -> {{ print(\"Apple Juice\") }}\n        orange | mango -> {{ print(\"Orange Juice\") }}\n        tangerine | yuzu -> {{ print(\"Citrus Juice\") }}\n        else -> {{ print(\"Water\") }}\n    }}\n    print(\"done\")\n}}\n"
+    (toks, lex_diags) :: Lexer.lex(src)
+    assert(lex_diags.is_empty(), "lex diagnostics: {lex_diags:Debug}")
+    prog :: Parser.parse(&toks).expect("parse")
+    func :: match &prog.items[0] { AST.Item.Func(func) -> func, _ -> panic("expected function") }
+    (subject, arms, else_body) :: match &func.body[1] { AST.Stmt.Switch{subject, arms, else_body, ..} -> (subject, arms, else_body), _ -> panic("expected switch") }
+    assert(match subject { AST.Expr.Ident(name, _) -> name == "fruit", _ -> false })
+    assert_eq(arms.len(), 3)
+    assert(else_body.is_some())
+    assert(match &arms[0].cond { AST.Expr.Binary(AST.BinOp.Eq, _, _, _) -> true, _ -> false })
+    assert(match &arms[1].cond { AST.Expr.Binary(AST.BinOp.Or, _, _, _) -> true, _ -> false })
+}
+// Rust: tests/grammar.rs:722
+#Test("parse_subjectless_guard_tables_reuse_if_dispatch") {
+    src :: "\nfn run() {{\n    ready :: false\n    stale :: true\n    if {{\n        ready -> print(\"ready\")\n        stale -> print(\"stale\")\n    }}\n    label :: if {{\n        ready -> \"ready\"\n        stale -> \"stale\"\n        else -> \"waiting\"\n    }}\n    if ready {{ print(label) }}\n}}\n"
+    (toks, lex_diags) :: Lexer.lex(src)
+    assert(lex_diags.is_empty(), "lex diagnostics: {lex_diags:Debug}")
+    program :: Parser.parse(&toks).expect("subjectless guards should parse")
+    run :: match &program.items[0] { AST.Item.Func(run) -> run, _ -> panic("expected function") }
+    (subject, arms, else_body, span) :: match &run.body[2] { AST.Stmt.Switch{subject, arms, else_body, span} -> (subject, arms, else_body, span), _ -> panic("braced statement guards must reuse dispatch AST") }
+    assert(match subject { AST.Expr.Bool(true, s) -> s == span, _ -> false })
+    assert_eq(arms.len(), 2)
+    assert(else_body.is_none(), "statement guard fallback is optional")
+    label :: match &run.body[3] { AST.Stmt.Val(label) -> label, _ -> panic("expected value guard binding") }
+    assert(match label.init { AST.Expr.If{..} -> true, _ -> false })
+    assert(match run.body[4] { AST.Stmt.Switch{..} -> true, _ -> false })
+}
+// Rust: tests/grammar.rs:765
+#Test("dispatch_atom_boolean_groups_are_required_and_machine_fixable") {
+    invalid :: "\nfn run() {{\n    n :: 48\n    ready :: true\n    if n < {{\n        48 | 45 && ready -> print(\"hit\")\n        else -> print(\"miss\")\n    }}\n}}\n"
+    (tokens, lex_diags) :: Lexer.lex(invalid)
+    assert(lex_diags.is_empty(), "lex diagnostics: {lex_diags:Debug}")
+    (_, diagnostics) :: Parser.parse_for_check_with_source(&tokens, invalid).expect("the new teaching diagnostic should recover the arm table")
+    diagnostic :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E0386").expect("unparenthesized distributed group diagnostic")
+    edit :: diagnostic.edit.as_ref().expect("machine-applicable grouping edit")
+    assert_eq(invalid[edit.span.start..edit.span.end], "48 | 45")
+    assert_eq(edit.new_text, "(48 | 45)")
+    assert_eq(diagnostic.applicability, Some(Diagnostics.FixApplicability.Safe))
+    assert_eq(diagnostic.safety, Some(Diagnostics.FixSafety.Formatting))
+    legal :: invalid.replace("48 | 45", "(48 | 45)")
+    (fixed_tokens, fixed_lex_diags) :: Lexer.lex(&legal)
+    assert(fixed_lex_diags.is_empty(), "fixed lex diagnostics: {fixed_lex_diags:Debug}")
+    assert(Parser.parse(&fixed_tokens).is_ok(), "fixed arm head should parse")
+    untouched :: "\nfn run() {{\n    value :: 1\n    if value == {{\n        301 | 302 -> print(\"atom\")\n        value >= 500 -> print(\"predicate\")\n        .Err(e) && e.fatal -> print(\"guard\")\n        else -> print(\"other\")\n    }}\n}}\n"
+    (untouched_tokens, untouched_lex_diags) :: Lexer.lex(untouched)
+    assert(untouched_lex_diags.is_empty(), "untouched lex diagnostics: {untouched_lex_diags:Debug}")
+    (_, untouched_diagnostics) :: Parser.parse_for_check_with_source(&untouched_tokens, untouched).expect("untouched arm forms should parse")
+    assert(untouched_diagnostics.iter().all((diagnostic) -> diagnostic.code != "E0386"), "pure atoms, predicates, and pattern guards are unchanged: {untouched_diagnostics:Debug}")
+}
+// Rust: tests/grammar.rs:834
+#Test("parse_bracket_collection_types_and_semicolon_list_items") {
+    src :: "\npub fn shell() -> [JSON] {{\n    return [\n        JSON.Null;\n    ];\n}}\n\nfn use_collections(items: [String], counts: [String:Int]) {{}}\n"
+    (toks, lex_diags) :: Lexer.lex(src)
+    assert(lex_diags.is_empty(), "lex diagnostics: {lex_diags:Debug}")
+    prog :: Parser.parse(&toks).expect("parse")
+    shell :: match &prog.items[0] { AST.Item.Func(shell) -> shell, _ -> panic("expected shell function") }
+    assert(match shell.return_type { Some(AST.Type.List(_)) -> true, _ -> false })
+    use_collections :: match &prog.items[1] { AST.Item.Func(use_collections) -> use_collections, _ -> panic("expected use_collections function") }
+    assert(match use_collections.params[0].ty { AST.Type.List(_) -> true, _ -> false })
+    assert(match use_collections.params[1].ty { AST.Type.Map{..} -> true, _ -> false })
+}
+// Rust: tests/grammar.rs:865
+#Test("parse_numeric_field_emits_e0049") {
+    src :: "fn run() {{ x :: p.0 }}"
+    (toks, _) :: Lexer.lex(src)
+    (_prog, diags) :: Parser.parse_for_check(&toks).expect("recoverable parse")
+    assert(diags.iter().any((d) -> d.code == "E0049"), "expected E0049 for `.0` access, got: {diags:Debug}")
+}

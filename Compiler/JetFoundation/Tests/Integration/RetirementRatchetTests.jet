@@ -1,0 +1,134 @@
+use jet_foundation.Tests.Integration.RetirementRatchet.[CEILINGS, FAILURE_RETIREMENT_CEILING, is_skipped_dir, contains_word, tally, failure_syntax_hits, failure_surface_files, relative_path, failure_surface_allowlisted, failure_source_fragments, all_files, authority_retired_words_in_line, is_authority_history, is_authority_diagnostic_fixture, is_authority_diagnostic_producer, is_unrelated_authority_word]
+use jet.Syntax.[RETIREMENTS, Retirement, RetirementKind, law_violations, rename_target]
+use std.[fs, env]
+
+// Rust: tests/retirement_ratchet.rs:897
+#Test("retirement_walk_skips_outputs_and_nested_worktrees_but_keeps_live_source_visible") {
+    assert(is_skipped_dir(OSPath.new("build")))
+    assert(is_skipped_dir(OSPath.new(".claude/worktrees/worker/examples")))
+    assert(is_skipped_dir(OSPath.new(".agent-worktrees/worker/examples")))
+    assert(!is_skipped_dir(OSPath.new("Examples")))
+    live_type :: "De" + "que"
+    live_source :: "let queue: {live_type}<Int> = {live_type}.new()"
+    assert(contains_word(live_source, live_type))
+}
+
+// Rust: tests/retirement_ratchet.rs:1556
+#Test("the_retirement_table_obeys_its_own_law") {
+    assert(law_violations().is_empty(), "{law_violations():#?}")
+}
+
+// Rust: tests/retirement_ratchet.rs:1561
+#Test("every_retirement_carries_a_ratchet") {
+    ceilings :: CEILINGS.iter().copied().collect::<[String:Int]>()
+    assert_eq(ceilings.len(), CEILINGS.len(), "two ceilings claim the same retirement id")
+    rows :: RETIREMENTS.iter().map(|row| -> (row.id, row)).collect::<[String:&Retirement]>()
+    row_keys := rows.keys().collect()
+    row_keys.sort()
+    missing :: row_keys.iter().filter(|id| -> !ceilings.contains_key(id)).copied().collect()
+    assert(missing.is_empty(), "these retirements ship no adoption ratchet: {missing:?}")
+    ceiling_keys := ceilings.keys().collect()
+    ceiling_keys.sort()
+    orphaned :: ceiling_keys.iter().filter(|id| -> !rows.contains_key(id)).copied().collect()
+    assert(orphaned.is_empty(), "these ratchets name no retirement: {orphaned:?}")
+}
+
+// Rust: tests/retirement_ratchet.rs:1590
+#Test("adoption_ratchets_toward_zero") {
+    ceilings :: CEILINGS.iter().copied().collect::<[String:Int]>()
+    report := String.new()
+    failures := []
+    for row in RETIREMENTS {
+        ceiling :: ceilings[row.id]
+        (retired, canonical) :: tally(row)
+        total :: retired + canonical
+        adoption :: if total == 0 { 100.0 } else { (canonical as F64) * 100.0 / (total as F64) }
+        answer :: match row.kind { .Rename -> "fmt/fix rewrites"; .Semantic -> "refused" }
+        report.push_str("  {row.id:<18} {adoption:>5.1}% on `{row.canonical}`  ({canonical} canonical, {retired} retired, ceiling {ceiling}, {answer}, {row.decision})\n")
+        if retired > ceiling {
+            failures.push("{row.id}: `{row.retired}` is written in {retired} files, above the ceiling of {ceiling}. A retired form may not gain new files.")
+        } else if retired < ceiling {
+            failures.push("{row.id}: `{row.retired}` is down to {retired} files. Lower the ceiling from {ceiling} to {retired} in tests/retirement_ratchet.rs so the ratchet holds the gain.")
+        }
+    }
+    print("adoption per canonical form:\n{report}")
+    assert(failures.is_empty(), "{failures.join(\"\n\")}\n{report}")
+}
+
+// Rust: tests/retirement_ratchet.rs:1630
+#Test("a_finished_retirement_stays_finished") {
+    ceilings :: CEILINGS.iter().copied().collect::<[String:Int]>()
+    for row in RETIREMENTS {
+        if ceilings[row.id] == 0 {
+            (retired, _) :: tally(row)
+            assert_eq(retired, 0, "`{row.retired}` came back in {retired} files")
+        }
+    }
+}
+
+// Rust: tests/retirement_ratchet.rs:1641
+#Test("failure_syntax_detector_accepts_current_forms_only") {
+    current :: "fn maybe() -> Int? {{ None }}\nfn typed() -> Int IOError! {{ 1 }}\nfn union() -> Int (DbError | TimeoutError)! {{ 1 }}\nfn unit() -> IOError! {{}}\nstruct Holder {{ value: !IOError }}\nfn context() -> Int IOError! {{ read()?(\"loading\") }}\nfn handled() -> Int IOError! {{ value ? ok -> ok ! failure -> 0 }}\nif !ready -> print(\"ready\")\n"
+    assert(failure_syntax_hits(current).is_empty(), "current failure syntax was misclassified: {failure_syntax_hits(current):?}")
+    retired :: [
+        "fn suffix() Int Error" + "!\n",
+        "fn infix_bang() Int " + "!" + " Error -> 1\n",
+        "fn infix_question() Int " + "?" + " Error -> 1\n",
+        "fn suffix_option() Int" + "? -> None\n",
+        "fn bare() " + "!" + " {{}}\n",
+        "alias bare :: " + "!\n",
+        "fn propagated() Int Error! -> read()" + "?\n",
+        "fn literal_propagation() Bool -> " + "true" + "?\n",
+        "fn string_propagation() String -> " + "\"value\"" + "?\n",
+        "fn null_propagation() Null -> " + "null" + "?\n"
+    ]
+    for source in retired { assert(!failure_syntax_hits(source).is_empty(), "retired failure syntax was missed: {source:?}") }
+}
+
+// Rust: tests/retirement_ratchet.rs:1679
+#Test("failure_surface_has_no_active_retired_spelling") {
+    offenders := []
+    for path in failure_surface_files() {
+        relative :: relative_path(&path)
+        if failure_surface_allowlisted(relative) { continue }
+        text :: fs.read_to_string(&path).ok() ?? { continue }
+        for fragment in failure_source_fragments(&path, &text) {
+            for (line, spelling) in failure_syntax_hits(&fragment.source) {
+                offenders.push("{relative}:{fragment.first_line + line.saturating_sub(1)}: {spelling}")
+            }
+        }
+    }
+    assert_eq(offenders.len(), FAILURE_RETIREMENT_CEILING, "retired failure syntax escaped the diagnostic/history allowlist:\n{offenders.join(\"\n\")}")
+}
+
+// Rust: tests/retirement_ratchet.rs:1707
+#Test("retired_authority_vocabulary_stays_in_fixtures_history_or_unrelated_english") {
+    offenders := []
+    for path in all_files() {
+        relative :: relative_path(&path)
+        if relative.starts_with("Tools/tower/") { continue }
+        text :: fs.read_to_string(&path).ok() ?? { continue }
+        for (line_number, line) in text.lines().enumerate() {
+            hits :: authority_retired_words_in_line(line)
+            if hits.is_empty() || is_authority_history(relative) || is_authority_diagnostic_fixture(relative) || is_authority_diagnostic_producer(relative, line) || is_unrelated_authority_word(relative, line) { continue }
+            offenders.push("{relative}:{line_number + 1}: {hits.join(\", \")}")
+        }
+    }
+    assert(offenders.is_empty(), "retired authority vocabulary escaped its fixture/history boundary:\n{offenders.join(\"\n\")}")
+}
+
+// Rust: tests/retirement_ratchet.rs:1742
+#Test("retired_time_doors_map_to_the_one_clock_door") {
+    assert_eq(rename_target("jet" + ".time" + ".now"), Some("core.time.now"))
+    assert_eq(rename_target("jet" + ".time" + ".format"), Some("DateTime.format_rfc3339()"))
+}
+
+// Rust: tests/retirement_ratchet.rs:1759
+// D-ONCE: this ratchet and RefSpec.Source.is_builtin share REF_SOURCE_PROVIDERS.
+#Test("ref_provider_set_has_one_definition_site") {
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    ref_spec :: fs.read_to_string(root.join("crates/jet-pkg-model/src/RefSpec.rs")).expect("RefSpec.rs is readable")
+    is_builtin_body :: ref_spec.split("pub fn is_builtin(name: &str) -> bool {{").nth(1).and_then(|tail| -> tail.split_once('}').map(|(body, _)| -> body)).expect("RefSpec::Source::is_builtin body")
+    assert(!is_builtin_body.contains("REF_SOURCE_") || is_builtin_body.contains("REF_SOURCE_PROVIDERS"), "RefSpec::Source::is_builtin must read Syntax::REF_SOURCE_PROVIDERS, not hand-copy individual REF_SOURCE_* constants into a second list:\n{is_builtin_body}")
+    assert(is_builtin_body.contains("REF_SOURCE_PROVIDERS"), "RefSpec::Source::is_builtin must call Syntax::REF_SOURCE_PROVIDERS.contains(..):\n{is_builtin_body}")
+}

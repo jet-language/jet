@@ -1,808 +1,334 @@
-// PORT-PENDING 1158 tests-support-case-law: tests/support/case_law.rs:1-804
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Shared enforcement for the ratified UI case law.
-//RS 
-//RS #[derive(Clone, Copy)]
-//RS pub(crate) enum CaseLawKind {
-//RS     Sentence,
-//RS     Title,
-//RS     Excluded,
-//RS }
-//RS 
-//RS pub(crate) struct CaseLawSource {
-//RS     pub(crate) name: String,
-//RS     pub(crate) value: String,
-//RS     pub(crate) kind: CaseLawKind,
-//RS }
-//RS 
-//RS /// D-CASE-CHROME1=C / D-CASE-PROSE1=A: collect the strings from the live
-//RS /// producers. Renderers are not alternate homes: the CLI registry feeds both
-//RS /// help surfaces, diagnostic rows feed explain and reports, and the REPL
-//RS /// render helpers feed status, prompt, and interactive chrome.
-//RS pub(crate) fn assert_user_facing_case_law() {
-//RS     let sources = user_facing_case_sources();
-//RS     let violations = case_law_violations(&sources);
-//RS     assert!(
-//RS         violations.is_empty(),
-//RS         "ratified UI case-law violations (D-CASE-CHROME1/D-CASE-PROSE1):\n{}",
-//RS         violations.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS pub(crate) fn case_law_violations(sources: &[CaseLawSource]) -> Vec<String> {
-//RS     sources
-//RS         .iter()
-//RS         .filter_map(|source| {
-//RS             let violation = match source.kind {
-//RS                 CaseLawKind::Sentence => sentence_case_violation(&source.value),
-//RS                 CaseLawKind::Title => title_case_violation(&source.value),
-//RS                 CaseLawKind::Excluded => None,
-//RS             }?;
-//RS             Some(format!("{}: {violation}", source.name))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS pub(crate) fn user_facing_case_sources() -> Vec<CaseLawSource> {
-//RS     let mut sources = Vec::new();
-//RS     // Every user-facing surface reduces to text, so take `&str` directly.
-//RS     // `&dyn Display` cannot accept a `&str`: `str` is unsized, so the
-//RS     // unsizing coercion to a trait object does not apply.
-//RS     let mut add = |name: String, value: &str, kind: CaseLawKind| {
-//RS         sources.push(CaseLawSource {
-//RS             name,
-//RS             value: value.to_string(),
-//RS             kind,
-//RS         });
-//RS     };
-//RS 
-//RS     // Diagnostics.jet is the one diagnostic home. The typed registry is the
-//RS     // generated projection consumed by all report/help renderers.
-//RS     for (line_index, raw) in jet_foundation::Registry::DIAGNOSTIC_SOURCE
-//RS         .lines()
-//RS         .enumerate()
-//RS     {
-//RS         let line = raw.trim();
-//RS         if line.is_empty() || line.starts_with("//") {
-//RS             continue;
-//RS         }
-//RS         let fields: Vec<&str> = line.split('\t').collect();
-//RS         if fields.first().copied() != Some("diagnostic") {
-//RS             continue;
-//RS         }
-//RS         for (field, index) in [("meaning", 6), ("What", 7), ("Why", 8), ("Fix", 9)] {
-//RS             if let Some(value) = fields.get(index) {
-//RS                 add(
-//RS                     format!("Diagnostics.jet:{} {} {}", line_index + 1, fields[1], field),
-//RS                     *value,
-//RS                     CaseLawKind::Sentence,
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // CLI registry is the source for `jet help`, `jet ?`, man, and
-//RS     // completions. Check each projection's user-readable fields, not its
-//RS     // generated formatting.
-//RS     for command in jet::CLI::COMMANDS {
-//RS         add(
-//RS             format!("CLI command {} summary", command.name),
-//RS             command.summary,
-//RS             CaseLawKind::Sentence,
-//RS         );
-//RS         for action in command.actions {
-//RS             add(
-//RS                 format!("CLI {} {} summary", command.name, action.name),
-//RS                 jet::CLI::action_help_summary(command.name, action),
-//RS                 CaseLawKind::Sentence,
-//RS             );
-//RS         }
-//RS     }
-//RS     for group in jet::CLI::command_groups() {
-//RS         add(
-//RS             format!("CLI {} group label", group.name),
-//RS             &jet::CLI::command_group_label(group.name),
-//RS             CaseLawKind::Title,
-//RS         );
-//RS     }
-//RS     for flag in jet::CLI::FLAGS.iter() {
-//RS         add(
-//RS             format!("CLI {} help", flag.long),
-//RS             flag.help,
-//RS             CaseLawKind::Sentence,
-//RS         );
-//RS     }
-//RS     for (line_index, line) in jet::CLI::usage_page("1.0.0", jet::CLI::HelpOrder::Frequency)
-//RS         .lines()
-//RS         .enumerate()
-//RS     {
-//RS         let line = line.trim();
-//RS         if line_index == 0 {
-//RS             add(
-//RS                 "CLI usage greeting".to_string(),
-//RS                 line,
-//RS                 CaseLawKind::Sentence,
-//RS             );
-//RS         } else if line == "Usage:" || line == "Flags:" {
-//RS             add(
-//RS                 format!("CLI usage header {line}"),
-//RS                 line.trim_end_matches(':'),
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         } else if let Some(label) = line.strip_suffix(" Commands:") {
-//RS             add(
-//RS                 format!("CLI usage group header {label}"),
-//RS                 label,
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     // Hybrid help owns a second presentation surface over the same registry.
-//RS     // Its index is the source read by both the static and interactive views.
-//RS     for category in jet::Help::CATEGORIES {
-//RS         add(
-//RS             format!("help category {category}"),
-//RS             *category,
-//RS             CaseLawKind::Title,
-//RS         );
-//RS     }
-//RS     for entry in jet::Help::build_index() {
-//RS         add(
-//RS             format!("help {} summary", entry.symbol.name),
-//RS             &entry.symbol.summary,
-//RS             CaseLawKind::Sentence,
-//RS         );
-//RS         for (flag, help) in entry.flags {
-//RS             add(
-//RS                 format!("help {flag} description"),
-//RS                 help,
-//RS                 CaseLawKind::Sentence,
-//RS             );
-//RS         }
-//RS     }
-//RS     // REPL help/status/prompt/interactive text comes from its public render
-//RS     // seam. Split dynamic identifiers and key names before checking prose.
-//RS     let repl_help = jet::REPL::run_transcript(&[":help"], None);
-//RS     for (line_index, line) in repl_help.lines().enumerate() {
-//RS         let line = line.trim();
-//RS         if line.is_empty() {
-//RS             continue;
-//RS         }
-//RS         if line_index == 0 || line == "Interactive terminal only" {
-//RS             add(
-//RS                 format!("REPL help heading {line}"),
-//RS                 line,
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         } else if let Some(tip) = line.strip_prefix("Tip: ") {
-//RS             add(format!("REPL help tip {tip}"), tip, CaseLawKind::Sentence);
-//RS         } else if let Some((_, description)) = line.split_once("  ") {
-//RS             add(
-//RS                 format!("REPL help line {line_index}"),
-//RS                 description.trim(),
-//RS                 CaseLawKind::Sentence,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     let banner = jet::REPL::Render::render_banner("1.0.0", false);
-//RS     if let Some(text) = banner.strip_prefix("Jet 1.0.0 — ") {
-//RS         add(
-//RS             "REPL banner description".to_string(),
-//RS             text.split_once("  (").map_or(text, |(text, _)| text),
-//RS             CaseLawKind::Sentence,
-//RS         );
-//RS     }
-//RS     for (mode, hint) in [
-//RS         ("raw", jet::REPL::Render::render_discovery_hint(true, false)),
-//RS         (
-//RS             "cooked",
-//RS             jet::REPL::Render::render_discovery_hint(false, false),
-//RS         ),
-//RS     ] {
-//RS         for part in hint.strip_prefix("Try: ").unwrap_or(&hint).split(" · ") {
-//RS             if part.to_ascii_lowercase().starts_with("interactive keys") {
-//RS                 add(
-//RS                     format!("REPL {mode} discovery status {part}"),
-//RS                     part,
-//RS                     CaseLawKind::Title,
-//RS                 );
-//RS                 continue;
-//RS             }
-//RS             let text = part
-//RS                 .split_once(' ')
-//RS                 .map_or(part, |(_, description)| description);
-//RS             add(
-//RS                 format!("REPL {mode} discovery hint {text}"),
-//RS                 text,
-//RS                 // D-CASE-CHROME1=C: a one- or two-word hint in the key bar
-//RS                 // is a label, not a description, so it takes Title Case.
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         }
-//RS     }
-//RS     let prompt = jet::REPL::Render::render_prompt(1, false);
-//RS     add(
-//RS         "REPL prompt".to_string(),
-//RS         prompt.trim(),
-//RS         CaseLawKind::Excluded,
-//RS     );
-//RS     // The fold marker and pin rail are composed lines: `⋯ 42 rows folded ·
-//RS     // [Row] · unfold ⏎`. What these extract are mid-line fragments and the
-//RS     // literal command names a user types (`unfold`, `unpin`), not standalone
-//RS     // chrome. The case law governs whole lines and labels, so capitalising a
-//RS     // fragment would read as `⋯ 42 Rows folded`, and capitalising a command
-//RS     // name would misreport what the user must type.
-//RS     let fold = jet::REPL::Render::render_fold_marker(42, "Row", false);
-//RS     add(
-//RS         "REPL fold status".to_string(),
-//RS         fold.strip_prefix("⋯ 42 ")
-//RS             .and_then(|text| text.split(" · ").next())
-//RS             .unwrap_or_default(),
-//RS         CaseLawKind::Excluded,
-//RS     );
-//RS     add(
-//RS         "REPL fold action".to_string(),
-//RS         fold.split(" · ")
-//RS             .nth(2)
-//RS             .unwrap_or_default()
-//RS             .split(' ')
-//RS             .next()
-//RS             .unwrap_or_default(),
-//RS         CaseLawKind::Excluded,
-//RS     );
-//RS     let pin = jet::REPL::Render::render_pin_rail("total: Int :: 15", 3, 62, false);
-//RS     if let Some(hint) = pin
-//RS         .lines()
-//RS         .next()
-//RS         .and_then(|line| line.split("turn 3").nth(1))
-//RS     {
-//RS         add("REPL pin status".to_string(), "turn", CaseLawKind::Excluded);
-//RS         add(
-//RS             "REPL pin action".to_string(),
-//RS             hint.split('·')
-//RS                 .nth(1)
-//RS                 .unwrap_or_default()
-//RS                 .trim()
-//RS                 .split(' ')
-//RS                 .next()
-//RS                 .unwrap_or_default(),
-//RS             CaseLawKind::Excluded,
-//RS         );
-//RS     }
-//RS     // The `:turns` listing prints a machine-readable status token, and the
-//RS     // same spelling feeds the notebook kernel JSON and the wire protocol
-//RS     // (`ReplTurnStatus::Ok => "ok"`). It is parseable state, not chrome, so
-//RS     // the case law leaves it alone rather than break every consumer.
-//RS     for line in jet::REPL::run_transcript(&["1 + 2", ":turns"], None).lines() {
-//RS         if line.starts_with('#') {
-//RS             if let Some(status) = line
-//RS                 .split_once(' ')
-//RS                 .and_then(|(_, rest)| rest.split_once("  ").map(|(status, _)| status))
-//RS             {
-//RS                 add(
-//RS                     format!("REPL status {status}"),
-//RS                     status,
-//RS                     CaseLawKind::Excluded,
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     let empty_turns = jet::REPL::run_transcript(&[":turns"], None);
-//RS     if let Some(status) = empty_turns.lines().find(|line| !line.trim().is_empty()) {
-//RS         add(
-//RS             "REPL empty-turn status".to_string(),
-//RS             status.trim(),
-//RS             CaseLawKind::Sentence,
-//RS         );
-//RS     }
-//RS     collect_help_render_sources(&mut sources);
-//RS 
-//RS     sources
-//RS }
-//RS 
-//RS /// Check the labels owned by the hybrid help renderer from its emitted frames.
-//RS /// The command index above checks the dynamic summaries and flags. These
-//RS /// calls cover the renderer's own chrome without copying its literals into a
-//RS /// second test-only table, so a changed label remains tied to its producer.
-//RS fn collect_help_render_sources(sources: &mut Vec<CaseLawSource>) {
-//RS     let index = jet::Help::build_index();
-//RS 
-//RS     let categorized =
-//RS         jet::Help::Render::render_categorized(&index, 0, true, Some("run"), 72, false, None);
-//RS     let categorized_lines: Vec<&str> = categorized.lines().collect();
-//RS     let title = frame_title(categorized_lines.first().copied().unwrap_or_default())
-//RS         .and_then(|title| title.strip_prefix("jet ? — ").or(Some(title)))
-//RS         .expect("categorized help must have a frame title");
-//RS     push_source(
-//RS         sources,
-//RS         "help categorized frame title",
-//RS         title,
-//RS         CaseLawKind::Title,
-//RS     );
-//RS     let hint = panel_line(
-//RS         categorized_lines
-//RS             .get(1)
-//RS             .copied()
-//RS             .expect("categorized help must have a search hint"),
-//RS     )
-//RS     .expect("categorized help search hint must be a panel row");
-//RS     push_source(
-//RS         sources,
-//RS         "help categorized search hint",
-//RS         hint,
-//RS         CaseLawKind::Sentence,
-//RS     );
-//RS     for line in &categorized_lines {
-//RS         let Some(line) = panel_line(line) else {
-//RS             continue;
-//RS         };
-//RS         if let Some(category) = line.strip_prefix("▾ ").or_else(|| line.strip_prefix("▸ ")) {
-//RS             push_source(
-//RS                 sources,
-//RS                 format!("help categorized category {category}"),
-//RS                 category,
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     // The error-code category has a static explanatory row that is not
-//RS     // present in the initial expanded category.
-//RS     let error_category = jet::Help::CATEGORIES
-//RS         .iter()
-//RS         .position(|category| *category == "Error Codes")
-//RS         .expect("hybrid help must retain its error-code category");
-//RS     let error_view =
-//RS         jet::Help::Render::render_categorized(&index, error_category, true, None, 72, false, None);
-//RS     let error_tip = error_view
-//RS         .lines()
-//RS         .filter_map(panel_line)
-//RS         .find(|line| !line.starts_with("▾ ") && !line.starts_with("▸ "))
-//RS         .expect("expanded error-code help must have its explanatory row");
-//RS     push_source(
-//RS         sources,
-//RS         "help error-code tip",
-//RS         error_tip,
-//RS         CaseLawKind::Sentence,
-//RS     );
-//RS 
-//RS     let hits = jet::Help::search(&index, "run");
-//RS     let results = jet::Help::Render::render_result_list(&hits, "run", 72, false, None, None);
-//RS     let result_lines: Vec<&str> = results.lines().collect();
-//RS     let title = frame_title(result_lines.first().copied().unwrap_or_default())
-//RS         .expect("help results must have a frame title");
-//RS     push_source(
-//RS         sources,
-//RS         "help result frame title",
-//RS         title,
-//RS         CaseLawKind::Title,
-//RS     );
-//RS     let footer = result_lines
-//RS         .iter()
-//RS         .rev()
-//RS         .copied()
-//RS         .filter_map(|line| panel_line(line))
-//RS         .next()
-//RS         .expect("help results must have a footer");
-//RS     push_source(sources, "help result footer", footer, CaseLawKind::Sentence);
-//RS     if let Some(example) = hits.first().and_then(|hit| match hit {
-//RS         jet::Help::Hit::Command { entry, .. } => entry.symbol.examples.first(),
-//RS         jet::Help::Hit::Code(_) => None,
-//RS     }) {
-//RS         let example_line = result_lines
-//RS             .iter()
-//RS             .filter_map(|line| panel_line(line))
-//RS             .find(|line| line.ends_with(example.as_str()))
-//RS             .expect("help result with an example must render its example row");
-//RS         let label = example_line
-//RS             .strip_suffix(example.as_str())
-//RS             .map(str::trim)
-//RS             .filter(|label| !label.is_empty())
-//RS             .expect("help example row must have a label");
-//RS         push_source(
-//RS             sources,
-//RS             "help result example label",
-//RS             label,
-//RS             CaseLawKind::Title,
-//RS         );
-//RS     }
-//RS 
-//RS     let detail_entry = index
-//RS         .iter()
-//RS         .find(|entry| entry.symbol.name == "run")
-//RS         .expect("hybrid help must contain the run command");
-//RS     let detail = jet::Help::Render::render_detail(detail_entry, 72, false);
-//RS     let detail_lines: Vec<&str> = detail.lines().collect();
-//RS     let title = frame_title(detail_lines.first().copied().unwrap_or_default())
-//RS         .expect("help detail must have a frame title");
-//RS     let collapse = title
-//RS         .rsplit_once("⇥ ")
-//RS         .map(|(_, label)| label)
-//RS         .expect("help detail frame title must have a collapse label");
-//RS     push_source(
-//RS         sources,
-//RS         "help detail collapse label",
-//RS         collapse,
-//RS         CaseLawKind::Title,
-//RS     );
-//RS     if let Some(line) = detail_lines.get(1).and_then(|line| panel_line(line)) {
-//RS         let label = line
-//RS             .split_once("   ")
-//RS             .map(|(label, _)| label.trim())
-//RS             .filter(|label| !label.is_empty())
-//RS             .expect("help detail usage row must have a label");
-//RS         push_source(
-//RS             sources,
-//RS             "help detail usage label",
-//RS             label,
-//RS             CaseLawKind::Title,
-//RS         );
-//RS     }
-//RS     for line in &detail_lines {
-//RS         let Some(line) = panel_line(line) else {
-//RS             continue;
-//RS         };
-//RS         if let Some((label, rest)) = line.split_once("   ") {
-//RS             let label = label.trim();
-//RS             let is_flag_row = line.contains("(none)")
-//RS                 || detail_entry
-//RS                     .flags
-//RS                     .iter()
-//RS                     .any(|(flag, _)| rest.trim_start().starts_with(flag));
-//RS             if is_flag_row && !label.is_empty() {
-//RS                 push_source(
-//RS                     sources,
-//RS                     "help detail flags label",
-//RS                     label,
-//RS                     CaseLawKind::Title,
-//RS                 );
-//RS             }
-//RS         }
-//RS         if let Some(example) = detail_entry.symbol.examples.first() {
-//RS             if line.ends_with(example.as_str()) {
-//RS                 let label = line
-//RS                     .strip_suffix(example.as_str())
-//RS                     .map(str::trim)
-//RS                     .filter(|label| !label.is_empty())
-//RS                     .expect("help detail example row must have a label");
-//RS                 push_source(
-//RS                     sources,
-//RS                     "help detail example label",
-//RS                     label,
-//RS                     CaseLawKind::Title,
-//RS                 );
-//RS             }
-//RS         }
-//RS         let see_also = detail_entry.see_also.join(" · ");
-//RS         if !see_also.is_empty() && line.ends_with(&see_also) {
-//RS             let label = line
-//RS                 .strip_suffix(&see_also)
-//RS                 .map(str::trim)
-//RS                 .filter(|label| !label.is_empty())
-//RS                 .expect("help detail see-also row must have a label");
-//RS             push_source(
-//RS                 sources,
-//RS                 "help detail see-also label",
-//RS                 label,
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         }
-//RS     }
-//RS     let footer = detail_lines
-//RS         .iter()
-//RS         .rev()
-//RS         .copied()
-//RS         .filter_map(|line| panel_line(line))
-//RS         .next()
-//RS         .expect("help detail must have a footer");
-//RS     push_source(sources, "help detail footer", footer, CaseLawKind::Sentence);
-//RS 
-//RS     let reference =
-//RS         jet::Help::Render::render_reference(&index, 0, Some(detail_entry), 80, 12, false, "run");
-//RS     let reference_lines: Vec<&str> = reference.lines().collect();
-//RS     let header = reference_lines.first().copied().unwrap_or_default().trim();
-//RS     let reference_label = header
-//RS         .strip_prefix("jet ? ")
-//RS         .and_then(|header| header.split_once(" · Search:").map(|(label, _)| label))
-//RS         .expect("help reference must have a reference title");
-//RS     push_source(
-//RS         sources,
-//RS         "help reference title",
-//RS         reference_label,
-//RS         CaseLawKind::Title,
-//RS     );
-//RS     let search_label = header
-//RS         .split_once(" · ")
-//RS         .and_then(|(_, search)| search.split_once(':').map(|(label, _)| label))
-//RS         .map(str::trim)
-//RS         .filter(|label| !label.is_empty())
-//RS         .expect("help reference must have a search label");
-//RS     push_source(
-//RS         sources,
-//RS         "help reference search label",
-//RS         search_label,
-//RS         CaseLawKind::Title,
-//RS     );
-//RS     let footer = reference_lines
-//RS         .last()
-//RS         .copied()
-//RS         .map(str::trim)
-//RS         .filter(|line| !line.is_empty())
-//RS         .expect("help reference must have a footer");
-//RS     push_source(
-//RS         sources,
-//RS         "help reference footer",
-//RS         footer,
-//RS         CaseLawKind::Sentence,
-//RS     );
-//RS 
-//RS     let empty_reference = jet::Help::Render::render_reference(&index, 0, None, 80, 12, false, "");
-//RS     let empty_body = empty_reference
-//RS         .lines()
-//RS         .nth(1)
-//RS         .expect("empty help reference must have a body row");
-//RS     let empty_message = empty_body
-//RS         .split('│')
-//RS         .nth(2)
-//RS         .map(str::trim)
-//RS         .filter(|line| !line.is_empty())
-//RS         .expect("empty help reference must have its empty-state message");
-//RS     push_source(
-//RS         sources,
-//RS         "help reference empty state",
-//RS         empty_message,
-//RS         CaseLawKind::Sentence,
-//RS     );
-//RS 
-//RS     // `jet ? <query>` has one non-interactive message outside the framed
-//RS     // renderer. It is still a help source and must not escape the check.
-//RS     let no_match = jet::Help::run_query("zzzznonsense", false);
-//RS     let no_match = no_match
-//RS         .lines()
-//RS         .next()
-//RS         .map(str::trim)
-//RS         .filter(|line| !line.is_empty())
-//RS         .expect("help no-match query must have a message");
-//RS     push_source(
-//RS         sources,
-//RS         "help no-match message",
-//RS         no_match,
-//RS         CaseLawKind::Sentence,
-//RS     );
-//RS 
-//RS     // The symbol lookup branch is the other non-interactive help path. Its
-//RS     // signature, summary, example, and provenance are data already checked
-//RS     // above; the labels are renderer-owned chrome.
-//RS     let symbol_help = jet::Help::run_query("List.len", false);
-//RS     for line in symbol_help.lines().skip(2) {
-//RS         if let Some((label, _)) = line.split_once(": ") {
-//RS             push_source(
-//RS                 sources,
-//RS                 "help symbol lookup label",
-//RS                 label,
-//RS                 CaseLawKind::Title,
-//RS             );
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn push_source(
-//RS     sources: &mut Vec<CaseLawSource>,
-//RS     name: impl Into<String>,
-//RS     value: &str,
-//RS     kind: CaseLawKind,
-//RS ) {
-//RS     sources.push(CaseLawSource {
-//RS         name: name.into(),
-//RS         value: value.to_string(),
-//RS         kind,
-//RS     });
-//RS }
-//RS 
-//RS fn panel_line(line: &str) -> Option<&str> {
-//RS     line.strip_prefix('│')
-//RS         .and_then(|line| line.strip_suffix('│'))
-//RS         .map(str::trim)
-//RS }
-//RS 
-//RS fn frame_title(line: &str) -> Option<&str> {
-//RS     line.strip_prefix("┌─ ")
-//RS         .and_then(|line| line.rsplit_once(" ─").map(|(title, _)| title))
-//RS }
-//RS 
-//RS /// D-CASE-PROSE1=A governs the FIRST thing on the line and nothing after it.
-//RS /// A line opening with a quoted fragment, a `{placeholder}`, a flag, or an
-//RS /// identifier keeps that fragment's own case and is never force-capitalised —
-//RS /// the ratified sample reads ``\`--offline\` forbids network access``, with
-//RS /// `forbids` staying lowercase. So this deliberately does NOT reuse
-//RS /// `first_diagnostic_prose_token`, which skips code-ish tokens and walks on:
-//RS /// that would capitalise a word in the middle of the sentence.
-//RS pub(crate) fn sentence_case_violation(value: &str) -> Option<String> {
-//RS     let mut offset = 0;
-//RS     let ch = loop {
-//RS         let ch = value[offset..].chars().next()?;
-//RS         if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
-//RS             offset += ch.len_utf8();
-//RS             continue;
-//RS         }
-//RS         break ch;
-//RS     };
-//RS     // Opens with code or a substitution: the line keeps whatever case it has.
-//RS     if matches!(ch, '`' | '"' | '\'' | '{') {
-//RS         return None;
-//RS     }
-//RS     let rest = &value[offset..];
-//RS     let end = rest
-//RS         .find(|c: char| {
-//RS             c.is_whitespace() || matches!(c, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
-//RS         })
-//RS         .unwrap_or(rest.len());
-//RS     let token = &rest[..end];
-//RS     if token.is_empty() || diagnostic_token_keeps_case(token) {
-//RS         return None;
-//RS     }
-//RS     token
-//RS         .chars()
-//RS         .next()
-//RS         .is_some_and(|c| c.is_ascii_lowercase())
-//RS         .then(|| {
-//RS             format!("sentence prose starts with lowercase `{token}` at byte {offset} in {value:?}")
-//RS         })
-//RS }
-//RS 
-//RS pub(crate) fn title_case_violation(value: &str) -> Option<String> {
-//RS     // `<id>` is a metavariable telling the user what to substitute, not a
-//RS     // label, so it keeps the spelling the user must type.
-//RS     if value.starts_with('<') && value.ends_with('>') {
-//RS         return None;
-//RS     }
-//RS     let words: Vec<&str> = value
-//RS         .split(|ch: char| !ch.is_ascii_alphanumeric())
-//RS         .filter(|word| !word.is_empty())
-//RS         .collect();
-//RS     for (index, word) in words.iter().enumerate() {
-//RS         let lower = word.to_ascii_lowercase();
-//RS         let minor = title_case_minor_word(&lower);
-//RS         let is_first_or_last = index == 0 || index + 1 == words.len();
-//RS         if minor && !is_first_or_last {
-//RS             if *word != lower {
-//RS                 return Some(format!(
-//RS                     "minor word `{word}` must stay lowercase in {value:?}"
-//RS                 ));
-//RS             }
-//RS         } else if word
-//RS             .chars()
-//RS             .next()
-//RS             .is_some_and(|character| character.is_ascii_lowercase())
-//RS         {
-//RS             return Some(format!("word `{word}` must start uppercase in {value:?}"));
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS /// D-CASE-CHROME1=C: the ratified law has one closed list of minor words.
-//RS /// Keep it here, beside the title-case checker, so every label uses the same
-//RS /// per-word rule instead of growing a call-site-specific exception list.
-//RS pub(crate) const TITLE_CASE_MINOR_WORDS: &[&str] = &[
-//RS     "a", "an", "the", "and", "but", "or", "nor", "for", "as", "at", "by", "in", "of", "on", "to",
-//RS     "via",
-//RS ];
-//RS 
-//RS fn title_case_minor_word(word: &str) -> bool {
-//RS     TITLE_CASE_MINOR_WORDS.contains(&word)
-//RS }
-//RS 
-//RS // This module is included by more than one test binary and each uses a
-//RS // different subset; `diagnostics_format` calls this one, `diagnostic_snapshots`
-//RS // does not.
-//RS #[allow(dead_code)]
-//RS pub(crate) fn first_diagnostic_prose_token(input: &str) -> Option<(usize, usize)> {
-//RS     let mut offset = 0;
-//RS     while offset < input.len() {
-//RS         let rest = &input[offset..];
-//RS         let ch = rest.chars().next()?;
-//RS         if ch.is_whitespace() || matches!(ch, '*' | '~' | '_') {
-//RS             offset += ch.len_utf8();
-//RS             continue;
-//RS         }
-//RS         if matches!(ch, '`' | '"' | '\'') {
-//RS             let after = &rest[ch.len_utf8()..];
-//RS             if let Some(close) = after.find(ch) {
-//RS                 offset += ch.len_utf8() + close + ch.len_utf8();
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         if ch == '{' {
-//RS             if let Some(close) = rest.find('}') {
-//RS                 offset += close + 1;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         let start = offset;
-//RS         let mut end = 0;
-//RS         while end < rest.len() {
-//RS             let value = rest[end..]
-//RS                 .chars()
-//RS                 .next()
-//RS                 .expect("diagnostic token index is on a character boundary");
-//RS             if end > 0
-//RS                 && (value.is_whitespace()
-//RS                     || matches!(value, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!'))
-//RS             {
-//RS                 break;
-//RS             }
-//RS             if value == '.' {
-//RS                 let next = rest[end + value.len_utf8()..].chars().next();
-//RS                 if next.is_none_or(|next| {
-//RS                     next.is_whitespace()
-//RS                         || matches!(next, ',' | ';' | ':' | '(' | ')' | '[' | ']' | '!')
-//RS                 }) && end > 0
-//RS                 {
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             end += value.len_utf8();
-//RS         }
-//RS         let end = offset + end;
-//RS         let token = &input[start..end];
-//RS         if token.is_empty() {
-//RS             offset += ch.len_utf8();
-//RS             continue;
-//RS         }
-//RS         offset = end;
-//RS         if diagnostic_token_keeps_case(token) {
-//RS             continue;
-//RS         }
-//RS         return Some((start, end));
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS pub(crate) fn diagnostic_token_keeps_case(token: &str) -> bool {
-//RS     if jet_foundation::Syntax::JET_KEYWORD_LIST.contains(&token)
-//RS         || jet_foundation::Syntax::JET_TYPE_LIST.contains(&token)
-//RS         || jet_foundation::CoreModuleExports::is_core_type_name(token)
-//RS         || jet_foundation::Collections::is_reserved_type(token)
-//RS         || matches!(token.chars().next(), Some('-' | '#' | '@'))
-//RS         || token == "C"
-//RS         || matches!(
-//RS             token,
-//RS             // Proper nouns, then the binary names a user actually types. A
-//RS             // Fix line may BE a command (`jetpack env -- jet build`), and
-//RS             // capitalising its first word would misstate the command.
-//RS             "App"
-//RS                 | "Hangar"
-//RS                 | "Jet"
-//RS                 | "Jetpack"
-//RS                 | "Nix"
-//RS                 | "Runtime"
-//RS                 | "Store"
-//RS                 | "jet"
-//RS                 | "jetpack"
-//RS                 | "cargo"
-//RS                 | "nix"
-//RS                 | "git"
-//RS                 | "rustc"
-//RS         )
-//RS     {
-//RS         return true;
-//RS     }
-//RS     let has_digit = token.chars().any(|ch| ch.is_ascii_digit());
-//RS     let has_structural_case = token
-//RS         .chars()
-//RS         .any(|ch| matches!(ch, '_' | '/' | '\\' | '@' | '#' | '.'));
-//RS     let all_code = token
-//RS         .chars()
-//RS         .all(|ch| ch.is_ascii_uppercase() || ch.is_ascii_digit() || matches!(ch, '-' | '_'));
-//RS     let camel_case = token
-//RS         .chars()
-//RS         .next()
-//RS         .is_some_and(|ch| ch.is_ascii_uppercase())
-//RS         && token.chars().skip(1).any(|ch| ch.is_ascii_uppercase());
-//RS     has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
-//RS }
-// END-PORT-PENDING 1158 tests/support/case_law.rs:1-804
+// Shared enforcement for the ratified UI case law.
+use jet.[CLI, Help, REPL]
+use jet_foundation.[Registry, Syntax, CoreModuleExports, Collections]
 
+// Rust: tests/support/case_law.rs:3
+pub enum CaseLawKind { Sentence, Title, Excluded }
+// Rust: tests/support/case_law.rs:10
+pub struct CaseLawSource { name: String, value: String, kind: CaseLawKind }
+
+// Rust: tests/support/case_law.rs:20
+// D-CASE-CHROME1=C / D-CASE-PROSE1=A: collect strings from live producers.
+pub fn assert_user_facing_case_law() -> {
+    sources :: user_facing_case_sources()
+    violations :: case_law_violations(&sources)
+    assert(violations.is_empty(), "ratified UI case-law violations (D-CASE-CHROME1/D-CASE-PROSE1):\n{violations.join("\n")}")
+}
+// Rust: tests/support/case_law.rs:30
+pub fn case_law_violations(sources: &[CaseLawSource]) -> [String] {
+    sources.iter().filter_map(fn(source) {
+        violation :: source.kind == {
+            .Sentence -> sentence_case_violation(source.value)
+            .Title -> title_case_violation(source.value)
+            .Excluded -> None
+        }
+        violation.map(fn(text) { "{source.name}: {text}" })
+    }).collect()
+}
+// Rust: tests/support/case_law.rs:44
+pub fn user_facing_case_sources() -> [CaseLawSource] {
+    sources := [CaseLawSource]{}
+    add :: (name: String, value: String, kind: CaseLawKind) -> push_source(&sources, name, value, kind)
+    // Diagnostics.jet is the one diagnostic home; all renderers use its projection.
+    loop (line_index, raw) in Registry.DIAGNOSTIC_SOURCE.lines().enumerate() {
+        line := raw.trim() // #4303
+        if line.is_empty() || line.starts_with("//") -> next
+        fields :: line.split('\t').collect()
+        if fields.first() != Val("diagnostic") -> next
+        loop (field, index) in [("meaning", 6), ("What", 7), ("Why", 8), ("Fix", 9)] {
+            if fields.get(index) == Val(value) {
+                add("Diagnostics.jet:{line_index + 1} {fields[1]} {field}", value, .Sentence)
+            }
+        }
+    }
+    loop command in CLI.COMMANDS {
+        add("CLI command {command.name} summary", command.summary, .Sentence)
+        loop action in command.actions {
+            add("CLI {command.name} {action.name} summary", CLI.action_help_summary(command.name, action), .Sentence)
+        }
+    }
+    loop group in CLI.command_groups() {
+        add("CLI {group.name} group label", CLI.command_group_label(group.name), .Title)
+    }
+    loop flag in CLI.FLAGS.iter() { add("CLI {flag.long} help", flag.help, .Sentence) }
+    loop (line_index, raw) in CLI.usage_page("1.0.0", CLI.HelpOrder.Frequency).lines().enumerate() {
+        line := raw.trim() // #4303
+        if line_index == 0 { add("CLI usage greeting", line, .Sentence) }
+        else if line == "Usage:" || line == "Flags:" {
+            add("CLI usage header {line}", line.trim_end_matches(':'), .Title)
+        } else if line.strip_suffix(" Commands:") == Val(label) {
+            add("CLI usage group header {label}", label, .Title)
+        }
+    }
+    loop category in Help.CATEGORIES { add("help category {category}", category, .Title) }
+    loop entry in Help.build_index() {
+        add("help {entry.symbol.name} summary", entry.symbol.summary, .Sentence)
+        loop (flag, help) in entry.flags { add("help {flag} description", help, .Sentence) }
+    }
+    repl_help :: REPL.run_transcript([":help"], None)
+    loop (line_index, raw) in repl_help.lines().enumerate() {
+        line := raw.trim() // #4303
+        if line.is_empty() -> next
+        if line_index == 0 || line == "Interactive terminal only" {
+            add("REPL help heading {line}", line, .Title)
+        } else if line.strip_prefix("Tip: ") == Val(tip) {
+            add("REPL help tip {tip}", tip, .Sentence)
+        } else if line.split_once("  ") == Val((_, description)) {
+            add("REPL help line {line_index}", description.trim(), .Sentence)
+        }
+    }
+    banner :: REPL.Render.render_banner("1.0.0", false)
+    if banner.strip_prefix("Jet 1.0.0 — ") == Val(text) {
+        add("REPL banner description", text.split_once("  (").map_or(text, fn((text, _)) { text }), .Sentence)
+    }
+    loop (mode, hint) in [("raw", REPL.Render.render_discovery_hint(true, false)), ("cooked", REPL.Render.render_discovery_hint(false, false))] {
+        loop part in hint.strip_prefix("Try: ").unwrap_or(hint).split(" · ") {
+            if part.to_ascii_lowercase().starts_with("interactive keys") {
+                add("REPL {mode} discovery status {part}", part, .Title)
+                next
+            }
+            text :: part.split_once(' ').map_or(part, fn((_, description)) { description })
+            // One- or two-word hints in the key bar are labels, not descriptions.
+            add("REPL {mode} discovery hint {text}", text, .Title)
+        }
+    }
+    prompt :: REPL.Render.render_prompt(1, false)
+    add("REPL prompt", prompt.trim(), .Excluded)
+    // Mid-line fragments and literal command names keep their spelling.
+    fold :: REPL.Render.render_fold_marker(42, "Row", false)
+    add("REPL fold status", fold.strip_prefix("⋯ 42 ").and_then(fn(text) { text.split(" · ").next() }).unwrap_or_default(), .Excluded)
+    add("REPL fold action", fold.split(" · ").nth(2).unwrap_or_default().split(' ').next().unwrap_or_default(), .Excluded)
+    pin :: REPL.Render.render_pin_rail("total: Int :: 15", 3, 62, false)
+    if pin.lines().next().and_then(fn(line) { line.split("turn 3").nth(1) }) == Val(hint) {
+        add("REPL pin status", "turn", .Excluded)
+        add("REPL pin action", hint.split('·').nth(1).unwrap_or_default().trim().split(' ').next().unwrap_or_default(), .Excluded)
+    }
+    // The machine-readable status also feeds the notebook JSON and wire protocol.
+    loop line in REPL.run_transcript(["1 + 2", ":turns"], None).lines() {
+        if line.starts_with('#') {
+            if line.split_once(' ').and_then(fn((_, rest)) { rest.split_once("  ").map(fn((status, _)) { status }) }) == Val(status) {
+                add("REPL status {status}", status, .Excluded)
+            }
+        }
+    }
+    empty_turns :: REPL.run_transcript([":turns"], None)
+    if empty_turns.lines().find(fn(line) { !line.trim().is_empty() }) == Val(status) {
+        add("REPL empty-turn status", status.trim(), .Sentence)
+    }
+    collect_help_render_sources(&sources)
+    sources
+}
+
+// Rust: tests/support/case_law.rs:307
+// Check chrome from emitted frames, not a duplicated test-only literal table.
+fn collect_help_render_sources(sources: &[CaseLawSource]) -> {
+    index :: Help.build_index()
+    categorized :: Help.Render.render_categorized(&index, 0, true, Val("run"), 72, false, None)
+    categorized_lines :: categorized.lines().collect()
+    title :: frame_title(categorized_lines.first().unwrap_or_default())
+        .and_then(fn(title) { title.strip_prefix("jet ? — ").or(Val(title)) })
+        .expect("categorized help must have a frame title")
+    push_source(sources, "help categorized frame title", title, .Title)
+    hint :: panel_line(categorized_lines.get(1).expect("categorized help must have a search hint"))
+        .expect("categorized help search hint must be a panel row")
+    push_source(sources, "help categorized search hint", hint, .Sentence)
+    loop raw in categorized_lines {
+        line :: panel_line(raw) ?? next
+        if line.strip_prefix("▾ ").or_else(fn() { line.strip_prefix("▸ ") }) == Val(category) {
+            push_source(sources, "help categorized category {category}", category, .Title)
+        }
+    }
+    error_category :: Help.CATEGORIES.iter().position(fn(category) { category == "Error Codes" })
+        .expect("hybrid help must retain its error-code category")
+    error_view :: Help.Render.render_categorized(&index, error_category, true, None, 72, false, None)
+    error_tip :: error_view.lines().filter_map(panel_line).find(fn(line) { !line.starts_with("▾ ") && !line.starts_with("▸ ") })
+        .expect("expanded error-code help must have its explanatory row")
+    push_source(sources, "help error-code tip", error_tip, .Sentence)
+    hits :: Help.search(&index, "run")
+    results :: Help.Render.render_result_list(&hits, "run", 72, false, None, None)
+    result_lines :: results.lines().collect()
+    title :: frame_title(result_lines.first().unwrap_or_default()).expect("help results must have a frame title")
+    push_source(sources, "help result frame title", title, .Title)
+    footer :: result_lines.iter().rev().filter_map(panel_line).next().expect("help results must have a footer")
+    push_source(sources, "help result footer", footer, .Sentence)
+    if hits.first().and_then(fn(hit) {
+        hit == { .Command(entry: entry, ..) -> entry.symbol.examples.first(); .Code(_) -> None }
+    }) == Val(example) {
+        example_line :: result_lines.iter().filter_map(panel_line).find(fn(line) { line.ends_with(example) })
+            .expect("help result with an example must render its example row")
+        label :: example_line.strip_suffix(example).map(fn(text) { text.trim() }).filter(fn(label) { !label.is_empty() })
+            .expect("help example row must have a label")
+        push_source(sources, "help result example label", label, .Title)
+    }
+    detail_entry :: index.iter().find(fn(entry) { entry.symbol.name == "run" }).expect("hybrid help must contain the run command")
+    detail :: Help.Render.render_detail(detail_entry, 72, false)
+    detail_lines :: detail.lines().collect()
+    title :: frame_title(detail_lines.first().unwrap_or_default()).expect("help detail must have a frame title")
+    collapse :: title.rsplit_once("⇥ ").map(fn((_, label)) { label }).expect("help detail frame title must have a collapse label")
+    push_source(sources, "help detail collapse label", collapse, .Title)
+    if detail_lines.get(1).and_then(panel_line) == Val(line) {
+        label :: line.split_once("   ").map(fn((label, _)) { label.trim() }).filter(fn(label) { !label.is_empty() })
+            .expect("help detail usage row must have a label")
+        push_source(sources, "help detail usage label", label, .Title)
+    }
+    // Join once, preserving the Rust output while avoiding per-row allocation.
+    see_also :: detail_entry.see_also.join(" · ")
+    loop raw in detail_lines {
+        line :: panel_line(raw) ?? next
+        if line.split_once("   ") == Val((label, rest)) {
+            label := label.trim() // #4303
+            is_flag_row :: line.contains("(none)") || detail_entry.flags.iter().any(fn((flag, _)) { rest.trim_start().starts_with(flag) })
+            if is_flag_row && !label.is_empty() { push_source(sources, "help detail flags label", label, .Title) }
+        }
+        if detail_entry.symbol.examples.first() == Val(example) {
+            if line.ends_with(example) {
+                label :: line.strip_suffix(example).map(fn(text) { text.trim() }).filter(fn(label) { !label.is_empty() })
+                    .expect("help detail example row must have a label")
+                push_source(sources, "help detail example label", label, .Title)
+            }
+        }
+        if !see_also.is_empty() && line.ends_with(see_also) {
+            label :: line.strip_suffix(see_also).map(fn(text) { text.trim() }).filter(fn(label) { !label.is_empty() })
+                .expect("help detail see-also row must have a label")
+            push_source(sources, "help detail see-also label", label, .Title)
+        }
+    }
+    footer :: detail_lines.iter().rev().filter_map(panel_line).next().expect("help detail must have a footer")
+    push_source(sources, "help detail footer", footer, .Sentence)
+    reference :: Help.Render.render_reference(&index, 0, Val(detail_entry), 80, 12, false, "run")
+    reference_lines :: reference.lines().collect()
+    header := reference_lines.first().unwrap_or_default().trim() // #4303
+    reference_label :: header.strip_prefix("jet ? ").and_then(fn(header) { header.split_once(" · Search:").map(fn((label, _)) { label }) })
+        .expect("help reference must have a reference title")
+    push_source(sources, "help reference title", reference_label, .Title)
+    search_label :: header.split_once(" · ").and_then(fn((_, search)) { search.split_once(':').map(fn((label, _)) { label }) })
+        .map(fn(text) { text.trim() }).filter(fn(label) { !label.is_empty() }).expect("help reference must have a search label")
+    push_source(sources, "help reference search label", search_label, .Title)
+    footer :: reference_lines.last().map(fn(text) { text.trim() }).filter(fn(line) { !line.is_empty() }).expect("help reference must have a footer")
+    push_source(sources, "help reference footer", footer, .Sentence)
+    empty_reference :: Help.Render.render_reference(&index, 0, None, 80, 12, false, "")
+    empty_body :: empty_reference.lines().nth(1).expect("empty help reference must have a body row")
+    empty_message :: empty_body.split('│').nth(2).map(fn(text) { text.trim() }).filter(fn(line) { !line.is_empty() })
+        .expect("empty help reference must have its empty-state message")
+    push_source(sources, "help reference empty state", empty_message, .Sentence)
+    no_match_output :: Help.run_query("zzzznonsense", false)
+    no_match :: no_match_output.lines().next().map(fn(text) { text.trim() }).filter(fn(line) { !line.is_empty() })
+        .expect("help no-match query must have a message")
+    push_source(sources, "help no-match message", no_match, .Sentence)
+    symbol_help :: Help.run_query("List.len", false)
+    loop line in symbol_help.lines().skip(2) {
+        if line.split_once(": ") == Val((label, _)) { push_source(sources, "help symbol lookup label", label, .Title) }
+    }
+}
+
+// Rust: tests/support/case_law.rs:589
+fn push_source(sources: &[CaseLawSource], name: String, value: String, kind: CaseLawKind) -> {
+    sources.push(CaseLawSource(name: name, value: value.to_string(), kind: kind))
+}
+// Rust: tests/support/case_law.rs:602
+fn panel_line(line: String) -> String? {
+    line.strip_prefix('│').and_then(fn(line) { line.strip_suffix('│') }).map(fn(text) { text.trim() })
+}
+// Rust: tests/support/case_law.rs:608
+fn frame_title(line: String) -> String? {
+    line.strip_prefix("┌─ ").and_then(fn(line) { line.rsplit_once(" ─").map(fn((title, _)) { title }) })
+}
+
+// Rust: tests/support/case_law.rs:620
+// Only the FIRST token is governed: quoted fragments and identifiers retain case.
+pub fn sentence_case_violation(value: String) -> String? {
+    offset := 0
+    ch := value.chars().next() ?? return None
+    loop {
+        ch = value[offset..].chars().next() ?? return None
+        if ch.is_whitespace() || ch == '*' || ch == '~' || ch == '_' {
+            offset += ch.len_utf8()
+            next
+        }
+        break
+    }
+    if ch == '`' || ch == '"' || ch == '\'' || ch == '{' -> return None
+    rest := value[offset..] // #4303: byte-indexed UTF-8 view
+    end :: rest.find(fn(c) { c.is_whitespace() || [',', ';', ':', '(', ')', '[', ']', '!'].contains(c) }).unwrap_or(rest.len())
+    token := rest[..end] // #4303
+    if token.is_empty() || diagnostic_token_keeps_case(token) -> return None
+    if token.chars().next().is_some_and(fn(c) { c.is_ascii_lowercase() }) {
+        return Val("sentence prose starts with lowercase `{token}` at byte {offset} in {value:?}")
+    }
+    None
+}
+// Rust: tests/support/case_law.rs:653
+pub fn title_case_violation(value: String) -> String? {
+    // A metavariable keeps the spelling the user must type.
+    if value.starts_with('<') && value.ends_with('>') -> return None
+    words :: value.split(fn(ch) { !ch.is_ascii_alphanumeric() }).filter(fn(word) { !word.is_empty() }).collect()
+    loop (index, word) in words.iter().enumerate() {
+        lower :: word.to_ascii_lowercase()
+        minor :: title_case_minor_word(lower)
+        is_first_or_last :: index == 0 || index + 1 == words.len()
+        if minor && !is_first_or_last {
+            if word != lower -> return Val("minor word `{word}` must stay lowercase in {value:?}")
+        } else if word.chars().next().is_some_and(fn(character) { character.is_ascii_lowercase() }) {
+            return Val("word `{word}` must start uppercase in {value:?}")
+        }
+    }
+    None
+}
+// Rust: tests/support/case_law.rs:687
+pub TITLE_CASE_MINOR_WORDS :: [String]{"a", "an", "the", "and", "but", "or", "nor", "for", "as", "at", "by", "in", "of", "on", "to", "via"}
+// Rust: tests/support/case_law.rs:692
+fn title_case_minor_word(word: String) -> Bool { TITLE_CASE_MINOR_WORDS.contains(word) }
+
+// Rust: tests/support/case_law.rs:700
+pub fn first_diagnostic_prose_token(input: String) -> (USize, USize)? {
+    offset := 0
+    loop offset < input.len() {
+        rest := input[offset..] // #4303
+        ch :: rest.chars().next() ?? return None
+        if ch.is_whitespace() || ch == '*' || ch == '~' || ch == '_' {
+            offset += ch.len_utf8()
+            next
+        }
+        if ch == '`' || ch == '"' || ch == '\'' {
+            after := rest[ch.len_utf8()..] // #4303
+            if after.find(ch) == Val(close) {
+                offset += ch.len_utf8() + close + ch.len_utf8()
+                next
+            }
+        }
+        if ch == '{' {
+            if rest.find('}') == Val(close) { offset += close + 1; next }
+        }
+        start :: offset
+        end := 0
+        loop end < rest.len() {
+            value :: rest[end..].chars().next().expect("diagnostic token index is on a character boundary")
+            if end > 0 && (value.is_whitespace() || [',', ';', ':', '(', ')', '[', ']', '!'].contains(value)) -> break
+            if value == '.' {
+                next_char :: rest[end + value.len_utf8()..].chars().next()
+                if next_char.is_none_or(fn(next_char) { next_char.is_whitespace() || [',', ';', ':', '(', ')', '[', ']', '!'].contains(next_char) }) && end > 0 -> break
+            }
+            end += value.len_utf8()
+        }
+        token_end :: offset + end
+        token := input[start..token_end] // #4303
+        if token.is_empty() { offset += ch.len_utf8(); next }
+        offset = token_end
+        if diagnostic_token_keeps_case(token) -> next
+        return Val((start, token_end))
+    }
+    None
+}
+// Rust: tests/support/case_law.rs:762
+pub fn diagnostic_token_keeps_case(token: String) -> Bool {
+    if Syntax.JET_KEYWORD_LIST.contains(token) || Syntax.JET_TYPE_LIST.contains(token)
+        || CoreModuleExports.is_core_type_name(token) || Collections.is_reserved_type(token)
+        || token.chars().next().is_some_and(fn(ch) { ch == '-' || ch == '#' || ch == '@' })
+        || token == "C"
+        || ["App", "Hangar", "Jet", "Jetpack", "Nix", "Runtime", "Store", "jet", "jetpack", "cargo", "nix", "git", "rustc"].contains(token) -> return true
+    has_digit :: token.chars().any(fn(ch) { ch.is_ascii_digit() })
+    has_structural_case :: token.chars().any(fn(ch) { ['_', '/', '\\', '@', '#', '.'].contains(ch) })
+    all_code :: token.chars().all(fn(ch) { ch.is_ascii_uppercase() || ch.is_ascii_digit() || ch == '-' || ch == '_' })
+    camel_case :: token.chars().next().is_some_and(fn(ch) { ch.is_ascii_uppercase() }) && token.chars().skip(1).any(fn(ch) { ch.is_ascii_uppercase() })
+    has_digit || has_structural_case || all_code || camel_case || token.starts_with("C-")
+}

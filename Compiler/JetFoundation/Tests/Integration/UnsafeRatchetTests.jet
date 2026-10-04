@@ -1,0 +1,423 @@
+use Compiler.JetFoundation.Tests.Integration.UnsafeRatchet.[apply_type, named_type, view_of, lower_checked, emitted_kernel_call, OWNED_WINDOW_SOURCE, EMPTY_STRING_AND_LIST_SOURCE, LIST_STRING_SOURCE, repo_root, jet_bin, run_jet, free_port, request, spawn_server_with_program, spawn_server, response_body, web_graph_facts_json]
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.Common.[Scratch]
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.MemSentry.[jet_sentry_check, jet_sentry_reset, jet_sentry_scope]
+use jet_foundation.MIR.[canonical_operation_identity, canonical_operation_payload, mir_program_digest, mir_view_copy_element_type, mir_view_copy_kind, optimize_mir_program, MirCopyFact, MirOperation, MirOptimizationPolicy, MirTagMarker, MirType, MirTypeKind, MirViewCopyKind, MirValueId]
+use jet.[Formatter, Lexer, Parser, Syntax, AST]
+use jet
+use core.fs as fs
+use std.env
+use std.process.[Command, id]
+use std.time.Duration
+use std.sync.mpsc
+use std.thread
+
+// Rust: tests/unsafe_sentries.rs:4
+#Test("dev_sentry_faults_feed_the_shared_memory_ledger_without_engine_policy") {
+    // GATE #4494: environment and sentry memory substrate.
+    root :: env.temp_dir().join("jet_sentry_ledger_{id()}")
+    ledger :: root.join("ledger.jsonl")
+    fs.create_dir_all(&root).unwrap()
+    env.set_var("JET_MEMORY_LEDGER", &ledger)
+    jet_sentry_reset()
+    gate :: jet_sentry_scope(true, "unsafe.jet", 12, "reads raw storage")
+    fault :: jet_sentry_check(1, 8, 1, "read", "live allocation").unwrap()
+    assert_eq(fault.code, "R0801")
+    assert_eq(fault.file, "unsafe.jet")
+    drop(^gate)
+    jet_sentry_reset()
+    env.remove_var("JET_MEMORY_LEDGER")
+    witness :: fs.read_to_string(&ledger).unwrap()
+    assert(witness.contains("\"schema\":\"jet.memory.ledger\""))
+    assert(witness.contains("\"kind\":\"sentry\""))
+    assert(witness.contains("\"code\":\"R0801\""))
+    assert(witness.contains("\"source\":\"unsafe.jet\""))
+    assert(witness.contains("\"provenance\":\"source #Unsafe gate\""))
+    assert(witness.contains("derive the pointer from live storage inside this gate"))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/user_policies.rs:6
+#Test("user_policy_declaration_and_custom_chain_parse_together") {
+    source :: """
+pub policy audit(topic: String) {
+    wrap(call) { return call() }
+}
+
+#Policy(audit("users.load"))
+fn load_user() -> Int { 7 }
+"""
+    (tokens, lexer_diagnostics) :: Lexer.lex(source)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    program :: Parser.parse(&tokens).expect("user policy source should parse")
+    declaration :: program.user_policy_declarations.first().expect("the package policy declaration")
+    assert(declaration.is_pub)
+    assert_eq(declaration.name, "audit")
+    assert_eq(declaration.params.len(), 1)
+    assert_eq(declaration.params[0].name, "topic")
+    if program.items[0] == {
+        .Func(function) -> {
+            marker :: function.markers.iter().find((marker) -> marker.name == Syntax.MARKER_POLICY).expect("the callable policy marker")
+            assert(if marker.args[0].as_expr() == {
+                Val(AST.Expr.Call(call)) -> call.name == "audit"
+                else -> false
+            })
+        }
+        else -> panic("expected the policy-decorated function")
+    }
+    formatted :: Formatter.format_source(source).expect("user policy source should format")
+    assert(formatted.contains("pub policy audit(topic: String)"))
+    assert(formatted.contains("wrap(call)"))
+}
+
+// Rust: tests/user_policies.rs:47
+#Test("user_policy_apply_keeps_a_callable_binding") {
+    dir :: common.unique_tmp("jet_user_policy_apply")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(&file, """pub policy audit(topic: String) {
+    wrap(call) { return "{topic}:{call()}" }
+}
+
+fn load_user() -> String { "ok" }
+
+fn run() -> {
+    selected :: apply(audit("users.load"), load_user)
+    print(selected())
+}
+""").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    if jet.Interpreter.dev_iteration(file.to_str().unwrap(), false, true) == {
+        .Ran(exit_code, stdout, stderr) -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stdout, "users.load:ok\n")
+            assert_eq(stderr, "")
+        }
+        .Problems(diagnostics) -> panic("interpreter rejected the user policy apply source: {diagnostics:#?}")
+    }
+}
+
+// Rust: tests/vault_key_wrap.rs:4
+#Test("actual_vault_key_wrap_bridge_fixture_compiles_and_runs") {
+    // GATE #4494: actual external reference fixture process, not a production Rust bridge.
+    root :: env.current_dir().unwrap()
+    dir :: env.temp_dir().join("jet-vault-key-wrap-proof-{id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    jet_codegen :: root.join("crates/jet-codegen")
+    fs.write(dir.join("Cargo.toml"), "[package]\nname = \"jet-vault-key-wrap-proof\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n\n[dependencies]\naes-gcm = \"0.10\"\nage = \"0.10\"\nargon2 = {{ version = \"=0.5.3\", default-features = false, features = [\"alloc\", \"password-hash\"] }}\nblake3 = \"1\"\nchacha20poly1305 = \"0.10\"\ned25519-dalek = \"2\"\nhkdf = \"0.12\"\nsha2 = \"0.10\"\nsubtle = \"2\"\nx25519-dalek = \"2\"\njet-codegen = {{ path = \"{jet_codegen.display()}\" }}\n").unwrap()
+    fixture :: root.join("tests/fixtures/vault_key_wrap_runtime.rs")
+    fs.write(dir.join("src/lib.rs"), "include!({fixture:?});\n").unwrap()
+    output :: Command.new("cargo").args(["test", "--offline", "--quiet", "--manifest-path"]).arg(dir.join("Cargo.toml")).args(["--", "--test-threads=1"]).env("CARGO_TARGET_DIR", dir.join("target")).output().unwrap()
+    _ :: fs.remove_dir_all(&dir)
+    assert(output.status.success(), "vault key-wrap proof failed:\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+}
+
+// Rust: tests/vault_keys.rs:4
+#Test("actual_typed_vault_bridge_fixture_compiles_and_runs") {
+    // GATE #4494: actual external reference fixture process.
+    root :: env.current_dir().unwrap()
+    dir :: env.temp_dir().join("jet-vault-key-proof-{id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("Cargo.toml"), """[package]
+name = "jet-vault-key-proof"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[dependencies]
+aes-gcm = "0.10"
+age = "0.10"
+argon2 = "0.5"
+blake3 = "1"
+chacha20poly1305 = "0.10"
+ed25519-dalek = "2"
+hkdf = "0.12"
+sha2 = "0.10"
+subtle = "2"
+x25519-dalek = "2"
+""").unwrap()
+    fixture :: root.join("tests/fixtures/vault_key_runtime.rs")
+    fs.write(dir.join("src/lib.rs"), "include!({fixture:?});\n").unwrap()
+    output :: Command.new("cargo").args(["test", "--offline", "--quiet", "--manifest-path"]).arg(dir.join("Cargo.toml")).env("CARGO_TARGET_DIR", dir.join("target")).output().unwrap()
+    _ :: fs.remove_dir_all(&dir)
+    assert(output.status.success(), "vault runtime proof failed:\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+}
+
+// Rust: tests/view_copy_semantics.rs:66
+#Test("canonical_view_copy_kind_preserves_string_and_nested_shapes") {
+    string_view :: view_of(named_type("str"))
+    owned_string_view :: view_of(MirType.from_kind(MirTypeKind.String))
+    nested_view :: view_of(MirType.from_kind(MirTypeKind.List(MirType.from_kind(MirTypeKind.String))))
+    tagged_nested_view :: MirType.from_kind(MirTypeKind.Tagged(marker: MirTagMarker.User("ReadAlias"), inner: nested_view.clone()))
+    assert_eq(mir_view_copy_kind(&string_view), Val(MirViewCopyKind.String))
+    assert_eq(mir_view_copy_kind(&owned_string_view), Val(MirViewCopyKind.List))
+    assert_eq(mir_view_copy_kind(&nested_view), Val(MirViewCopyKind.List))
+    assert_eq(mir_view_copy_kind(&tagged_nested_view), Val(MirViewCopyKind.List))
+    assert(mir_view_copy_element_type(&nested_view).expect("nested view element").is_list())
+    string_target :: MirType.from_kind(MirTypeKind.String)
+    list_target :: MirType.from_kind(MirTypeKind.List(MirType.from_kind(MirTypeKind.List(MirType.from_kind(MirTypeKind.String)))))
+    canonical_string_target :: named_type("String")
+    canonical_list_target :: apply_type("List", [MirType.from_kind(MirTypeKind.String)])
+    tagged_canonical_string :: MirType.from_kind(MirTypeKind.Tagged(marker: MirTagMarker.User("OwnedAlias"), inner: canonical_string_target.clone()))
+    fake_string_view :: apply_type("foo.View", [named_type("str")])
+    fake_list_view :: apply_type("foo.ViewMut", [MirType.from_kind(MirTypeKind.Int)])
+    malformed_view_placeholder :: apply_type("View<>", [named_type("str")])
+    fake_string_target :: named_type("foo.String")
+    fake_list_target :: apply_type("foo.List", [MirType.from_kind(MirTypeKind.String)])
+    malformed_list_placeholder :: apply_type("List<>", [MirType.from_kind(MirTypeKind.String)])
+    assert_eq(mir_view_copy_kind(&fake_string_view), None)
+    assert_eq(mir_view_copy_kind(&fake_list_view), None)
+    assert_eq(mir_view_copy_kind(&malformed_view_placeholder), None)
+    assert(!MirViewCopyKind.String.target_matches(&fake_string_target))
+    assert(!MirViewCopyKind.List.target_matches(&fake_list_target))
+    assert(!MirViewCopyKind.List.target_matches(&malformed_list_placeholder))
+    assert(MirViewCopyKind.String.target_matches(&canonical_string_target))
+    assert(MirViewCopyKind.String.target_matches(&tagged_canonical_string))
+    assert(MirViewCopyKind.List.target_matches(&canonical_list_target))
+    assert(MirViewCopyKind.String.target_matches(&string_target))
+    assert(!MirViewCopyKind.String.target_matches(&list_target))
+    assert(MirViewCopyKind.List.target_matches(&list_target))
+}
+
+// Rust: tests/view_copy_semantics.rs:129
+#Test("copy_fact_changes_canonical_payload_and_identity") {
+    ordinary :: MirOperation.Copy(value: MirValueId(7), fact: MirCopyFact.Materialize)
+    materialized :: MirOperation.Copy(value: MirValueId(7), fact: MirCopyFact.ViewMaterialize)
+    ordinary_payload :: canonical_operation_payload(&ordinary)
+    materialized_payload :: canonical_operation_payload(&materialized)
+    assert_ne(ordinary_payload, materialized_payload)
+    assert(ordinary_payload.contains("\"copy_fact\":\"materialize\""))
+    assert(materialized_payload.contains("\"copy_fact\":\"view_materialize\""))
+    assert_ne(canonical_operation_identity(&ordinary), canonical_operation_identity(&materialized))
+}
+
+// Rust: tests/view_copy_semantics.rs:149
+#Test("optimization_and_digest_preserve_materialization_marker") {
+    mir :: lower_checked(OWNED_WINDOW_SOURCE)
+    optimized :: optimize_mir_program(^mir, &MirOptimizationPolicy.conservative()).expect("MIR optimization preserves the checked operation schema")
+    assert(optimized.functions.iter().any((function) -> function.blocks.iter().any((block) -> block.instructions.iter().any((instruction) -> if instruction.operation == {
+        .Copy(_, MirCopyFact.ViewMaterialize) -> true
+        else -> false
+    }))))
+    flipped := optimized.clone()
+    changed := false
+    loop function in &flipped.functions {
+        loop block in &function.blocks {
+            loop instruction in &block.instructions {
+                if instruction.operation == .Copy(value, MirCopyFact.ViewMaterialize) {
+                    instruction.operation = MirOperation.Copy(value: value, fact: MirCopyFact.Materialize)
+                    changed = true
+                }
+            }
+        }
+    }
+    assert(changed, "fixture must contain a materializing Copy")
+    assert_ne(mir_program_digest(&optimized), mir_program_digest(&flipped))
+}
+
+// Rust: tests/view_copy_semantics.rs:188
+#Test("checked_source_windows_lower_to_marked_mir") {
+    mir :: lower_checked(EMPTY_STRING_AND_LIST_SOURCE)
+    marked :: mir.functions.iter().flat_map((function) -> function.blocks.iter()).flat_map((block) -> block.instructions.iter()).filter((instruction) -> if instruction.operation == {
+        .Copy(_, MirCopyFact.ViewMaterialize) -> true
+        else -> false
+    }).count()
+    assert(marked >= 4, "the checked fixture's four windows must lower to marked Copy operations: {marked}")
+}
+
+// Rust: tests/view_copy_semantics.rs:212
+#Test("evaluator_view_materialization_helpers_use_checked_jet_route") {
+    source :: fs.read_to_string(env.manifest_dir().join("Compiler/JetEval/Source/Evaluator.jet")).unwrap()
+    loop helper in ["jet_eval_materialize_string_window", "jet_eval_materialize_list_window", "jet_eval_materialize_bytes_window"] {
+        assert(source.contains("fn {helper}("), "Source/Evaluator.jet must define {helper}")
+    }
+    assert(source.contains("window :: value.after(\"\")\n    ~window"), "String evaluator materialization must lower through checked Jet `~`")
+    assert_eq(source.matches("window :: value[0..<value.len()]\n    ~window").count(), 2, "List and Bytes evaluator materialization must use checked full windows")
+}
+
+// Rust: tests/view_copy_semantics.rs:298
+#Test("empty_unicode_and_bytes_windows_agree_across_native_tiers") {
+    assert(tir_support.have_rustc(), "view-copy native-tier acceptance requires AOT rustc proof")
+    tir_support.assert_tiers_agree("view_copy_empty_unicode_bytes", EMPTY_STRING_AND_LIST_SOURCE, "0\ntrue\n0\n6\n")
+}
+// Rust: tests/view_copy_semantics.rs:311
+#Test("empty_unicode_and_bytes_windows_agree_on_awaited_web") {
+    tir_support.assert_awaited_web_tier("view_copy_empty_unicode_bytes_web", EMPTY_STRING_AND_LIST_SOURCE, "0\ntrue\n0\n6\n")
+}
+// Rust: tests/view_copy_semantics.rs:320
+#Test("owned_window_escape_and_nested_mutation_agree_across_native_tiers") {
+    assert(tir_support.have_rustc(), "view-copy native-tier acceptance requires AOT rustc proof")
+    tir_support.assert_tiers_agree("view_copy_owned_window", OWNED_WINDOW_SOURCE, "8\n9\n6\n7\n")
+}
+// Rust: tests/view_copy_semantics.rs:329
+#Test("owned_window_escape_and_nested_mutation_agree_on_awaited_web") {
+    tir_support.assert_awaited_web_tier("view_copy_owned_window_web", OWNED_WINDOW_SOURCE, "8\n9\n6\n7\n")
+}
+// Rust: tests/view_copy_semantics.rs:338
+#Test("string_view_materialization_uses_string_kernel_and_list_view_uses_list_kernel") {
+    string_source :: """
+fn run() -> {
+    text := "  x  "
+    view :: text.trim()
+    print(~view)
+}
+"""
+    string_compiled :: jet.compile(string_source).expect("String View materializes")
+    assert(emitted_kernel_call(&string_compiled.rust, "jet_string_view_copy"), "String view lowering must emit a call-site use of jet_string_view_copy")
+    assert(!emitted_kernel_call(&string_compiled.rust, "jet_view_copy"), "String view lowering must not call the List kernel")
+    list_compiled :: jet.compile(LIST_STRING_SOURCE).expect("View<String> materializes")
+    assert(emitted_kernel_call(&list_compiled.rust, "jet_view_copy"), "List<String> view lowering must emit a call-site use of jet_view_copy")
+    assert(!emitted_kernel_call(&list_compiled.rust, "jet_string_view_copy"), "List<String> view lowering must not call the String kernel")
+}
+// Rust: tests/view_copy_semantics.rs:367
+#Test("list_string_view_materialization_runs_across_native_tiers") {
+    assert(tir_support.have_rustc(), "List<String> view acceptance requires AOT rustc proof")
+    tir_support.assert_tiers_agree("view_copy_list_string_runtime", LIST_STRING_SOURCE, "source\ncopy\n")
+}
+// Rust: tests/view_copy_semantics.rs:380
+#Test("list_string_view_materialization_runs_on_awaited_web") {
+    tir_support.assert_awaited_web_tier("view_copy_list_string_runtime_web", LIST_STRING_SOURCE, "source\ncopy\n")
+}
+
+// Rust: tests/web_app.rs:139
+#Test("app_graph_facts_json") {
+    stdout :: web_graph_facts_json()
+    compact :: stdout.chars().filter((character) -> !character.is_whitespace()).collect()
+    assert(compact.contains("\"shared_tir\":true"), "{stdout}")
+    assert(compact.contains("\"path\":\"/\""), "{stdout}")
+    assert(compact.contains("csp-default"), "{stdout}")
+    assert(compact.contains("hydration"), "{stdout}")
+    assert(compact.contains("\"prefix\":\"/api\""), "{stdout}")
+}
+// Rust: tests/web_app.rs:151
+#Test("web_app_expand_facts_web") {
+    (code, stdout, stderr) :: run_jet(&["inspect", "expand", "--facts", "web", "Examples/features/web/web_app.jet"])
+    assert_eq(code, 0, "stderr={stderr}\nstdout={stdout}")
+    assert(stdout.contains("web application graph") || stdout.contains("shared TIR"), "{stdout}")
+}
+// Rust: tests/web_app.rs:167
+#Test("web_app_routes_from_exhaustive") {
+    scratch :: Scratch.new("webapp-routes")
+    tmp :: &scratch.path
+    fs.create_dir_all(tmp.join("routes/orders")).unwrap()
+    fs.write(tmp.join("app.jet"), """
+use core.web as web
+
+fn run() -> App {
+    return web.app().routes(from: "routes")
+}
+""").unwrap()
+    fs.write(tmp.join("routes/index.jet"), "fn page() -> {}\n").unwrap()
+    fs.write(tmp.join("routes/orders/[id].jet"), "fn page() -> {}\n").unwrap()
+    fs.write(tmp.join("routes/_helper.jet"), "fn helper() -> {}\n").unwrap()
+    (code, stdout, stderr) :: run_jet(&["explain", "--web-graph", "--json", tmp.join("app.jet").to_str().unwrap()])
+    assert_eq(code, 0, "stderr={stderr}\nstdout={stdout}")
+    compact :: stdout.chars().filter((character) -> !character.is_whitespace()).collect()
+    assert(compact.contains("\"path\":\"/\""), "{stdout}")
+    assert(compact.contains("/orders/:id"), "{stdout}")
+    assert(!compact.contains("_helper"), "{stdout}")
+}
+// Rust: tests/web_app.rs:201
+#Test("web_app_run_serves_pages_actions_and_assets") {
+    port :: free_port()
+    server := spawn_server(&["run", "Examples/features/web/web_app.jet"], port)
+    page :: request(port, "GET", "/", Val(&server))
+    assert(page.starts_with("HTTP/1.1 200"), "{page}")
+    assert(page.contains("<title>Home</title>"), "{page}")
+    assert(page.contains("hello from csr"), "{page}")
+    assert(!page.contains("jet-dev-server-functions"), "{page}")
+    expected :: fs.read_to_string(repo_root().join("Examples/features/expected/web/web_app.harness.out")).unwrap()
+    (expected_page, expected_facts) :: expected.split_once("\n\n--- facts_json ---\n").expect("web app golden sections")
+    assert_eq(response_body(&page), expected_page)
+    assert_eq(web_graph_facts_json(), expected_facts)
+    action :: request(port, "POST", "/actions/save", Val(&server))
+    assert(action.starts_with("HTTP/1.1 200"), "{action}")
+    assert(action.contains("content-type: application/json"), "{action}")
+    assert(action.contains("content-security-policy: default-src 'self'"), "{action}")
+    assert_eq(response_body(&action), "\"saved\"")
+    assert(!action.contains("server function input is missing"), "{action}")
+    asset :: request(port, "GET", "/assets/app.css", Val(&server))
+    assert(asset.starts_with("HTTP/1.1 200"), "{asset}")
+    assert(asset.contains("font-family"), "{asset}")
+}
+// Rust: tests/web_app.rs:230
+#Test("typed_app_args_serve_in_default_and_aot_modes") {
+    port :: free_port()
+    server := spawn_server(&["run", "Examples/features/web/app_typed_args.jet", "--", "--port=9000"], port)
+    response :: request(port, "GET", "/", Val(&server))
+    assert(response.starts_with("HTTP/1.1 404"), "default typed App: {response}")
+    drop(^server)
+    (code, stdout, stderr) :: run_jet(&["build", "Examples/features/web/app_typed_args.jet"])
+    assert_eq(code, 0, "stderr={stderr}\nstdout={stdout}")
+    aot_port :: free_port()
+    aot_server := spawn_server_with_program(&repo_root().join(".jet/build/app_typed_args"), &["--port=9000"], aot_port)
+    aot_response :: request(aot_port, "GET", "/", Val(&aot_server))
+    assert(aot_response.starts_with("HTTP/1.1 404"), "AOT typed App: {aot_response}")
+}
+// Rust: tests/web_app.rs:264
+#Test("typed_app_args_report_invalid_port_with_shared_fix") {
+    loop args in [
+        ["run", "Examples/features/web/app_typed_args.jet", "--", "--port=nine"],
+        ["run", "--interpret", "Examples/features/web/app_typed_args.jet", "--", "--port=nine"],
+        ["run", "--release", "Examples/features/web/app_typed_args.jet", "--", "--port=nine"]
+    ] {
+        (code, stdout, stderr) :: run_jet(args)
+        assert_eq(code, 2, "args={args:?}\nstdout={stdout}\nstderr={stderr}")
+        assert(stdout.is_empty(), "args={args:?}\nstdout={stdout}")
+        assert(stderr.contains("`--port` expects an Int, got `nine`"), "args={args:?}\nstderr={stderr}")
+        assert(stderr.contains("fix: pass a whole number to `--port`"), "args={args:?}\nstderr={stderr}")
+    }
+}
+// Rust: tests/web_app.rs:302
+#Test("web_app_dev_forced_interpreter_serves_callbacks") {
+    port :: free_port()
+    server := spawn_server(&["dev", "Examples/features/web/web_app.jet", "--interpret", "--port={port}"], port)
+    page :: request(port, "GET", "/", Val(&server))
+    assert(page.starts_with("HTTP/1.1 200"), "{page}")
+    assert(page.contains("<title>Home</title>"), "{page}")
+    assert(page.contains("jet-dev-server-functions"), "{page}")
+    assert(page.contains("hello from csr"), "{page}")
+    action :: request(port, "POST", "/actions/save", Val(&server))
+    assert(action.starts_with("HTTP/1.1 200"), "{action}")
+    assert_eq(response_body(&action), "\"saved\"")
+}
+// Rust: tests/web_app.rs:326
+#Test("web_app_dev_auto_serves_with_reload_without_dev_function") {
+    scratch :: Scratch.new("webapp-reload")
+    tmp :: &scratch.path
+    source :: fs.read_to_string(repo_root().join("Examples/features/web/web_app.jet")).unwrap()
+    app :: tmp.join("app.jet")
+    fs.write(&app, source).unwrap()
+    fs.copy(repo_root().join("Examples/features/web/package.jet"), tmp.join("package.jet")).unwrap()
+    port :: free_port()
+    server := spawn_server(&["dev", app.to_str().unwrap(), "--port={port}"], port)
+    page :: request(port, "GET", "/", Val(&server))
+    assert(page.starts_with("HTTP/1.1 200"), "{page}")
+    assert(page.contains("EventSource(\"/__jet/reload\")"), "{page}")
+    // GATE #4494: actual thread and timed native channel observation.
+    (sent, received) :: mpsc.channel()
+    _ :: thread.spawn(() -> {
+        sent.send(request(port, "GET", "/__jet/reload", None)).unwrap()
+    })
+    assert(received.recv_timeout(Duration.from_millis(250)).is_err(), "reload endpoint fired without a source change")
+    changed := fs.OpenOptions.new().append(true).open(&app).unwrap()
+    changed.write_all("\n".as_bytes()).unwrap()
+    reload :: received.recv_timeout(Duration.from_secs(10)).unwrap()
+    assert(reload.starts_with("HTTP/1.1 200"), "{reload}")
+    assert(reload.contains("text/event-stream"), "{reload}")
+    assert(reload.contains("data: reload"), "{reload}")
+}
+// Rust: tests/web_app.rs:362
+#Test("app_hello_graph") {
+    (code, stdout, stderr) :: run_jet(&["explain", "--web-graph", "--json", "Examples/features/web/app_hello.jet"])
+    assert_eq(code, 0, "stderr={stderr}\nstdout={stdout}")
+    compact :: stdout.chars().filter((character) -> !character.is_whitespace()).collect()
+    assert(compact.contains("\"handler\":\"home\""), "{stdout}")
+    assert(compact.contains("csp"), "{stdout}")
+}

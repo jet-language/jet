@@ -1,0 +1,21 @@
+use jet_foundation.Tests.Integration.Common as common
+use std.fs
+use std.env.temp_dir
+use std.process.[Command, Stdio, id]
+// Rust: tests/tir_io_and_ownership.rs:17
+pub fn build_and_run_stdin(name: String, src: String, stdin: String) -> (Int, String) {
+    dir :: temp_dir().join("jet_tir_test_{id()}")
+    _ :: fs.create_dir_all(&dir).unwrap()
+    jet_path :: dir.join("{name}.jet")
+    _ :: fs.write(&jet_path, src).unwrap()
+    bin :: dir.join(name)
+    // GATE #4494: retained native artifact lowering and child stdin descriptors.
+    _ :: common.compile_entry_native(&jet_path, &bin, "O2").unwrap_or_else(|diags| -> {
+        shown :: jet_path.to_string_lossy().into_owned()
+        panic("front end rejected:\n{jet.render_diagnostics(&shown, src, &diags)}")
+    })
+    child := Command.new(&bin).stdin(Stdio.piped()).stdout(Stdio.piped()).spawn().unwrap()
+    _ :: child.stdin.take().unwrap().write_all(stdin.as_bytes()).unwrap()
+    run :: child.wait_with_output().unwrap()
+    (run.status.code().unwrap_or(0), String.from_utf8_lossy(&run.stdout).into_owned())
+}

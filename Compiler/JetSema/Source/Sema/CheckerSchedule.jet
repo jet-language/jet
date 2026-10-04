@@ -1,448 +1,219 @@
-// PORT-PENDING 2149 crates-jet-sema-src-sema-checkerschedule: crates/jet-sema/src/Sema/CheckerSchedule.rs:1-444
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! D-SCHEDULE1 (ratified 2026-07-11, card #505): checked `#Every(…)`
-//RS //! schedule arguments, plus D-JPK-TASKRUN1 reserved-name law on `#Job fn`.
-//RS //!
-//RS //! The parser only records the raw shape it saw (`EveryArg` — a duration
-//RS //! literal or a quoted string) and, at parse time, whether `#Every(…)` is
-//RS //! paired with `#Job` on the same function (E0925, pushed directly by
-//RS //! `jet-parser` — a placement question, not a value question). This module
-//RS //! owns the one thing left for schedules: is the VALUE a real schedule?
-//RS //! This module resolves the raw marker through the registered unit-plane
-//RS //! facts and writes one checked `EverySchedule` projection onto the marker.
-//RS //! Runtime consumers read that projection; they never parse source suffixes.
-//RS //!
-//RS //! D-JOB-NAMES1=A also lives here: a `#Job fn` must not take a reserved name,
-//RS //! `run`/`dev`/`build`/`test`/`help`/`version` (E0928).
-//RS //!
-//RS //! I3: this module only decides; codegen never reads `Func::every` at all —
-//RS //! a `#Job`/`#Every` function generates as an ordinary fn.
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Syntax;
-//RS use crate::AST::{
-//RS     EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule,
-//RS     ProgramBundle,
-//RS };
-//RS use std::collections::{HashMap, HashSet};
-//RS 
-//RS fn resolve_every_arg(
-//RS     arg: &EveryArg,
-//RS     registry: &super::TypeRegistry,
-//RS ) -> Result<EverySchedule, EveryScheduleError> {
-//RS     match arg {
-//RS         EveryArg::Duration {
-//RS             int, float, suffix, ..
-//RS         } => {
-//RS             let Some(unit) = registry.unit_literal("Time", suffix) else {
-//RS                 return Err(EveryScheduleError::UnknownDurationUnit);
-//RS             };
-//RS             if int.iter().any(|value| *value <= 0)
-//RS                 || float
-//RS                     .iter()
-//RS                     .any(|value| !value.is_finite() || *value <= 0.0)
-//RS             {
-//RS                 return Err(EveryScheduleError::NonPositiveDuration);
-//RS             }
-//RS             let nanos = if let Some(value) = int {
-//RS                 let value = *value;
-//RS                 let scale = unit
-//RS                     .scale
-//RS                     .num
-//RS                     .to_string()
-//RS                     .parse::<i64>()
-//RS                     .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
-//RS                 let numerator = value
-//RS                     .checked_mul(scale)
-//RS                     .ok_or(EveryScheduleError::DurationOutOfRange)?;
-//RS                 let denominator = unit
-//RS                     .scale
-//RS                     .den
-//RS                     .to_string()
-//RS                     .parse::<i64>()
-//RS                     .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
-//RS                 numerator
-//RS                     .checked_div(denominator)
-//RS                     .ok_or(EveryScheduleError::DurationOutOfRange)?
-//RS             } else {
-//RS                 let value = float.as_ref().copied().unwrap_or(0.0);
-//RS                 let scale_num = unit
-//RS                     .scale
-//RS                     .num
-//RS                     .to_string()
-//RS                     .parse::<f64>()
-//RS                     .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
-//RS                 let scale_den = unit
-//RS                     .scale
-//RS                     .den
-//RS                     .to_string()
-//RS                     .parse::<f64>()
-//RS                     .map_err(|_| EveryScheduleError::DurationOutOfRange)?;
-//RS                 let nanoseconds = value * scale_num / scale_den;
-//RS                 if !nanoseconds.is_finite()
-//RS                     || nanoseconds < i64::MIN as f64
-//RS                     || nanoseconds >= 9_223_372_036_854_775_808.0
-//RS                 {
-//RS                     return Err(EveryScheduleError::DurationOutOfRange);
-//RS                 }
-//RS                 nanoseconds.trunc() as i64
-//RS             };
-//RS             if nanos == 0 {
-//RS                 return Err(EveryScheduleError::NonPositiveDuration);
-//RS             }
-//RS             if nanos < 0 {
-//RS                 return Err(EveryScheduleError::NonPositiveDuration);
-//RS             }
-//RS             Ok(EverySchedule::Duration { nanos })
-//RS         }
-//RS         EveryArg::WallClock { text, .. } => {
-//RS             let bytes = text.as_bytes();
-//RS             let digits_ok = bytes.len() == 5
-//RS                 && bytes[2] == b':'
-//RS                 && bytes[0].is_ascii_digit()
-//RS                 && bytes[1].is_ascii_digit()
-//RS                 && bytes[3].is_ascii_digit()
-//RS                 && bytes[4].is_ascii_digit();
-//RS             if !digits_ok {
-//RS                 return Err(EveryScheduleError::BadWallClockFormat);
-//RS             }
-//RS             let hour: u32 = text[0..2].parse().unwrap_or(99);
-//RS             let minute: u32 = text[3..5].parse().unwrap_or(99);
-//RS             if hour > 23 {
-//RS                 return Err(EveryScheduleError::HourOutOfRange);
-//RS             }
-//RS             if minute > 59 {
-//RS                 return Err(EveryScheduleError::MinuteOutOfRange);
-//RS             }
-//RS             Ok(EverySchedule::WallClockTime {
-//RS                 hour: hour as u8,
-//RS                 minute: minute as u8,
-//RS             })
-//RS         }
-//RS         EveryArg::Expression(_) => Err(EveryScheduleError::DynamicValue),
-//RS     }
-//RS }
-//RS 
-//RS /// E0926: `#Every(…)`'s value isn't a real schedule — a bad duration unit,
-//RS /// a non-positive/out-of-range duration, or a malformed/out-of-range `"HH:MM"`.
-//RS fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnostic {
-//RS     let (what, why, fix) = match reason {
-//RS         EveryScheduleError::UnknownDurationUnit => (
-//RS             "this duration's unit isn't a recognized schedule cadence",
-//RS             "a schedule's repeat interval uses the canonical Time family — \
-//RS              `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.",
-//RS             "use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`).",
-//RS         ),
-//RS         EveryScheduleError::NonPositiveDuration => (
-//RS             "a schedule interval must be a positive duration",
-//RS             "`#Every(0ms)` or a negative duration never becomes due — it isn't a real cadence.",
-//RS             "write a duration greater than zero, e.g. `#Every(5min)`.",
-//RS         ),
-//RS         EveryScheduleError::DurationOutOfRange => (
-//RS             "this schedule duration is outside the supported range",
-//RS             "schedule intervals use the same fixed i64 nanosecond carrier as Duration.",
-//RS             "write a smaller positive duration, e.g. `#Every(5min)`.",
-//RS         ),
-//RS         EveryScheduleError::BadWallClockFormat => (
-//RS             "this daily schedule isn't a plain `\"HH:MM\"` time",
-//RS             "a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, \
-//RS              no seconds, no timezone.",
-//RS             "write a fixed daily time like `#Every(\"03:00\")`.",
-//RS         ),
-//RS         EveryScheduleError::HourOutOfRange => (
-//RS             "this daily schedule's hour is out of range",
-//RS             "24h wall-clock hours run `00`..=`23`.",
-//RS             "write an hour between `00` and `23`, e.g. `#Every(\"03:00\")`.",
-//RS         ),
-//RS         EveryScheduleError::MinuteOutOfRange => (
-//RS             "this daily schedule's minute is out of range",
-//RS             "wall-clock minutes run `00`..=`59`.",
-//RS             "write a minute between `00` and `59`, e.g. `#Every(\"03:00\")`.",
-//RS         ),
-//RS         EveryScheduleError::DynamicValue => (
-//RS             "a job schedule must be known at compile time",
-//RS             "the marker argument has the right type, but job discovery needs one fixed cadence.",
-//RS             "write a duration or wall-clock literal, e.g. `#Every(5min)` or `#Every(\"03:00\")`.",
-//RS         ),
-//RS     };
-//RS     Diagnostic::error(
-//RS         "E0926",
-//RS         what.to_string(),
-//RS         why.to_string(),
-//RS         fix.to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0928: `#Job fn` took a reserved name (D-JOB-NAMES1=A).
-//RS fn e0928_reserved_job_name(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0928",
-//RS         format!("`{name}` is reserved by Jet's command line"),
-//RS         "`run`, `dev`, `build`, and `test` name Jet's lifecycle entries, and a built program \
-//RS          answers `help` and `version` itself"
-//RS             .to_string(),
-//RS         format!("rename the job, e.g. `#Job fn {name}_all()`"),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS fn e0928_job_collision(name: &str, scope: JobScope, span: Span) -> Diagnostic {
-//RS     let scope = match scope {
-//RS         JobScope::Dev => "Dev",
-//RS         JobScope::Ship => "Ship",
-//RS         JobScope::Internal => "Internal",
-//RS     };
-//RS     Diagnostic::error(
-//RS         "E0928",
-//RS         format!("job `{name}` is declared more than once in scope .{scope}"),
-//RS         format!("`jet jobs {name}` must select exactly one function"),
-//RS         "rename one of the jobs, or give the declarations different scopes".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// D-JOB-NAMES1=A: reject `#Job fn run|dev|build|test|help|version`. Called
-//RS /// alongside the `#Every` value check during registration.
-//RS pub(crate) fn check_job_marker(f: &Func) -> Vec<Diagnostic> {
-//RS     if !f.is_job {
-//RS         return Vec::new();
-//RS     }
-//RS     if Syntax::JOB_RESERVED_NAMES.contains(&f.name.as_str()) {
-//RS         let span = f.job_span.unwrap_or(f.name_span);
-//RS         return vec![e0928_reserved_job_name(&f.name, span)];
-//RS     }
-//RS     Vec::new()
-//RS }
-//RS 
-//RS /// D-JOB-SUBCMD1=C: names may repeat across scopes, but not within one.
-//RS pub(crate) fn check_job_collisions(modules: &[LoadedModule]) -> Vec<Diagnostic> {
-//RS     let mut seen: Vec<(String, JobScope)> = Vec::new();
-//RS     let mut diags = Vec::new();
-//RS     for module in modules {
-//RS         for item in &module.items {
-//RS             let Item::Func(function) = item else { continue };
-//RS             if !function.is_job {
-//RS                 continue;
-//RS             }
-//RS             let scope = function
-//RS                 .job_metadata
-//RS                 .as_ref()
-//RS                 .map(|metadata| metadata.scope)
-//RS                 .unwrap_or_default();
-//RS             if !seen
-//RS                 .iter()
-//RS                 .any(|(name, previous)| name == &function.name && *previous == scope)
-//RS             {
-//RS                 seen.push((function.name.clone(), scope));
-//RS             } else {
-//RS                 diags.push(e0928_job_collision(
-//RS                     &function.name,
-//RS                     scope,
-//RS                     function.name_span,
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     diags
-//RS }
-//RS 
-//RS fn job_graph_error(
-//RS     code: &str,
-//RS     what: String,
-//RS     why: &str,
-//RS     fix: &str,
-//RS     span: Span,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         code,
-//RS         what,
-//RS         why.to_string(),
-//RS         fix.to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// D-DX-JOBGRAPH1=A: validate the checked job graph before any execution tier
-//RS /// can admit a job. Names are resolved in one deterministic package namespace;
-//RS /// package metadata is also checked against the package authority projection.
-//RS pub(crate) fn check_job_graph(bundle: &ProgramBundle) -> Vec<Diagnostic> {
-//RS     let mut jobs = Vec::new();
-//RS     let mut by_name: HashMap<String, Vec<usize>> = HashMap::new();
-//RS     for module in &bundle.modules {
-//RS         for item in &module.items {
-//RS             let Item::Func(function) = item else { continue };
-//RS             if !function.is_job {
-//RS                 continue;
-//RS             }
-//RS             let index = jobs.len();
-//RS             by_name
-//RS                 .entry(function.name.clone())
-//RS                 .or_default()
-//RS                 .push(index);
-//RS             jobs.push((
-//RS                 function.name.clone(),
-//RS                 function
-//RS                     .job_metadata
-//RS                     .as_ref()
-//RS                     .map(|metadata| metadata.after.clone())
-//RS                     .unwrap_or_default(),
-//RS                 function
-//RS                     .job_metadata
-//RS                     .as_ref()
-//RS                     .map(|metadata| metadata.packages.clone())
-//RS                     .unwrap_or_default(),
-//RS                 function.job_span.unwrap_or(function.name_span),
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     let mut diagnostics = Vec::new();
-//RS     let mut reported = HashSet::new();
-//RS     for (name, after, packages, span) in &jobs {
-//RS         for dependency in after {
-//RS             if dependency == name {
-//RS                 if reported.insert(("self", name.clone(), dependency.clone())) {
-//RS                     diagnostics.push(job_graph_error(
-//RS                         "E1331",
-//RS                         format!("job `{name}` depends on itself"),
-//RS                         "a job graph must be acyclic so every prerequisite has a finite completion point",
-//RS                         "remove the self-reference from `after`",
-//RS                         *span,
-//RS                     ));
-//RS                 }
-//RS                 continue;
-//RS             }
-//RS             match by_name.get(dependency) {
-//RS                 None => {
-//RS                     if reported.insert(("unknown", name.clone(), dependency.clone())) {
-//RS                         diagnostics.push(job_graph_error(
-//RS                             "E1331",
-//RS                             format!("job `{name}` depends on unknown job `{dependency}`"),
-//RS                             "every `after` name is resolved against the checked #Job declarations before effects",
-//RS                             "declare the prerequisite with `#Job`, or correct the name",
-//RS                             *span,
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 Some(candidates) if candidates.len() > 1 => {
-//RS                     if reported.insert(("ambiguous", name.clone(), dependency.clone())) {
-//RS                         diagnostics.push(job_graph_error(
-//RS                             "E1331",
-//RS                             format!("job `{name}` has an ambiguous prerequisite `{dependency}`"),
-//RS                             "the graph uses one source identity per job name and cannot choose between scopes",
-//RS                             "rename one declaration or make the prerequisite name unique",
-//RS                             *span,
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 Some(_) => {}
-//RS             }
-//RS         }
-//RS         for package in packages {
-//RS             let declared = bundle.package_guarantees.dependency_names.contains(package)
-//RS                 || bundle.dep_roots.contains_key(package);
-//RS             let allowed = bundle
-//RS                 .package_guarantees
-//RS                 .deps
-//RS                 .as_ref()
-//RS                 .is_none_or(|allowlist| allowlist.iter().any(|value| value == package));
-//RS             if !declared || !allowed {
-//RS                 diagnostics.push(job_graph_error(
-//RS                     "E1332",
-//RS                     format!("job `{name}` names unauthorized package `{package}`"),
-//RS                     "job package capabilities must be declared by the checked package authority",
-//RS                     "declare the dependency in package.jet authority, or remove it from `packages`",
-//RS                     *span,
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut state = vec![0u8; jobs.len()];
-//RS     let mut stack = Vec::new();
-//RS     fn visit(
-//RS         index: usize,
-//RS         jobs: &[(String, Vec<String>, Vec<String>, Span)],
-//RS         by_name: &HashMap<String, Vec<usize>>,
-//RS         state: &mut [u8],
-//RS         stack: &mut Vec<usize>,
-//RS         diagnostics: &mut Vec<Diagnostic>,
-//RS     ) {
-//RS         if state[index] == 2 {
-//RS             return;
-//RS         }
-//RS         if state[index] == 1 {
-//RS             let cycle_start = stack.iter().position(|candidate| *candidate == index).unwrap_or(0);
-//RS             let cycle = stack[cycle_start..]
-//RS                 .iter()
-//RS                 .map(|candidate| jobs[*candidate].0.as_str())
-//RS                 .chain(std::iter::once(jobs[index].0.as_str()))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(" -> ");
-//RS             diagnostics.push(job_graph_error(
-//RS                 "E1331",
-//RS                 format!("job graph contains a cycle: {cycle}"),
-//RS                 "a prerequisite graph must reach a completed root before scheduling can start",
-//RS                 "remove one `after` edge from the cycle",
-//RS                 jobs[index].3,
-//RS             ));
-//RS             return;
-//RS         }
-//RS         state[index] = 1;
-//RS         stack.push(index);
-//RS         for dependency in &jobs[index].1 {
-//RS             let Some(candidates) = by_name.get(dependency) else { continue };
-//RS             if candidates.len() == 1 {
-//RS                 visit(candidates[0], jobs, by_name, state, stack, diagnostics);
-//RS             }
-//RS         }
-//RS         stack.pop();
-//RS         state[index] = 2;
-//RS     }
-//RS     for index in 0..jobs.len() {
-//RS         visit(index, &jobs, &by_name, &mut state, &mut stack, &mut diagnostics);
-//RS     }
-//RS     diagnostics
-//RS }
-//RS 
-//RS /// D-SCHEDULE1: validate `f`'s `#Every(…)` argument, if it has one. Called
-//RS /// once per function during registration (mirrors `check_inline_always_fn`'s
-//RS /// call sites in `Registration.rs`/`Bundle.rs`) — E0925 placement is already
-//RS /// handled by the parser, so this is the value check alone. Also runs the
-//RS /// D-JPK-TASKRUN1 reserved-name check for `#Job`.
-//RS pub(crate) fn check_every_marker(f: &mut Func, registry: &super::TypeRegistry) -> Vec<Diagnostic> {
-//RS     let mut diags = check_job_marker(f);
-//RS     let Some(every) = &mut f.every else {
-//RS         return diags;
-//RS     };
-//RS     match resolve_every_arg(&every.arg, registry) {
-//RS         Ok(schedule) => {
-//RS             every.resolved = Some(schedule);
-//RS             diags
-//RS         }
-//RS         Err(reason) => {
-//RS             every.resolved = None;
-//RS             let span = match &every.arg {
-//RS                 crate::AST::EveryArg::Duration { suffix_span, .. } => *suffix_span,
-//RS                 crate::AST::EveryArg::WallClock { text_span, .. } => *text_span,
-//RS                 crate::AST::EveryArg::Expression(expression) => expression.span(),
-//RS             };
-//RS             diags.push(e0926_bad_schedule_value(reason, span));
-//RS             diags
-//RS         }
-//RS     }
-//RS }
-//RS /// Project the sema-checked bundle into the shared named-job registry.
-//RS ///
-//RS /// `Func::every.resolved` is populated by `check_every_marker` before this
-//RS /// projection is consumed. The registry only carries the stable presentation
-//RS /// shape; runtime schedule consumers continue reading the checked AST fact.
-//RS pub fn checked_job_registry(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS ) -> jet_foundation::CLISchema::JobRegistry {
-//RS     jet_foundation::CLISchema::JobRegistry::from_bundle(bundle)
-//RS }
-//RS 
-// END-PORT-PENDING 2149 crates/jet-sema/src/Sema/CheckerSchedule.rs:1-444
+// D-SCHEDULE1: resolve raw #Every arguments through registered Time facts.
+// Runtime consumers read the checked projection, never source suffixes.
+// D-JOB-NAMES1 and D-DX-JOBGRAPH1 validate job names and prerequisites.
+use jet_foundation.[Diagnostic, Span, EveryArg, EverySchedule, EveryScheduleError, Func, Item, JobScope, LoadedModule, ProgramBundle]
+use jet_foundation.Syntax
+use jet_foundation.CLISchema.JobRegistry
+use jet_sema.TypeRegistry
 
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:27
+fn resolve_every_arg(arg: EveryArg, registry: TypeRegistry) -> EverySchedule EveryScheduleError! {
+    if arg == {
+        .Duration(int: int, float: float, suffix: suffix, ..) -> {
+            unit :: registry.unit_literal("Time", suffix) ?? throw EveryScheduleError.UnknownDurationUnit
+            if int.is_some_and(fn(value) { value <= 0 }) || float.is_some_and(fn(value) { !value.is_finite() || value <= 0.0 }) -> throw EveryScheduleError.NonPositiveDuration
+            nanos :: if int == .Val(value) {
+                scale :: try { I64.parse(unit.scale.num.to_string())! } catch _ { throw EveryScheduleError.DurationOutOfRange }
+                numerator :: I64{value}.checked_mul(scale) ?? throw EveryScheduleError.DurationOutOfRange
+                denominator :: try { I64.parse(unit.scale.den.to_string())! } catch _ { throw EveryScheduleError.DurationOutOfRange }
+                numerator.checked_div(denominator) ?? throw EveryScheduleError.DurationOutOfRange
+            } else {
+                value :: float ?? 0.0
+                scale_num :: try { Float.parse(unit.scale.num.to_string())! } catch _ { throw EveryScheduleError.DurationOutOfRange }
+                scale_den :: try { Float.parse(unit.scale.den.to_string())! } catch _ { throw EveryScheduleError.DurationOutOfRange }
+                nanoseconds :: value * scale_num / scale_den
+                if !nanoseconds.is_finite() || nanoseconds < -9_223_372_036_854_775_808.0 || nanoseconds >= 9_223_372_036_854_775_808.0 -> throw EveryScheduleError.DurationOutOfRange
+                I64{nanoseconds.trunc()}
+            }
+            if nanos == 0 -> throw EveryScheduleError.NonPositiveDuration
+            if nanos < 0 -> throw EveryScheduleError.NonPositiveDuration
+            EverySchedule.Duration{nanos: Int{nanos}}
+        }
+        .WallClock(text: text, ..) -> {
+            bytes :: text.as_bytes()
+            digits_ok :: bytes.len() == 5 && bytes[2] == U8{58} && bytes[0].is_ascii_digit() && bytes[1].is_ascii_digit() && bytes[3].is_ascii_digit() && bytes[4].is_ascii_digit()
+            if !digits_ok -> throw EveryScheduleError.BadWallClockFormat
+            hour :: Int{bytes[0] - U8{48}} * 10 + Int{bytes[1] - U8{48}}
+            minute :: Int{bytes[3] - U8{48}} * 10 + Int{bytes[4] - U8{48}}
+            if hour > 23 -> throw EveryScheduleError.HourOutOfRange
+            if minute > 59 -> throw EveryScheduleError.MinuteOutOfRange
+            EverySchedule.WallClockTime{hour: hour, minute: minute}
+        }
+        .Expression(_) -> throw EveryScheduleError.DynamicValue
+    }
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:126
+fn e0926_bad_schedule_value(reason: EveryScheduleError, span: Span) -> Diagnostic {
+    (what, why, fix) :: if reason == {
+        .UnknownDurationUnit -> (
+            "this duration's unit isn't a recognized schedule cadence",
+            "a schedule's repeat interval uses the canonical Time family — `ns`/`us`/`ms`/`s`/`min`/`h`/`d` — not an arbitrary `#UnitFamily` member.",
+            "use a canonical Time unit such as `min`, `h`, or `d` (e.g. `#Every(2h)`).")
+        .NonPositiveDuration -> (
+            "a schedule interval must be a positive duration",
+            "`#Every(0ms)` or a negative duration never becomes due — it isn't a real cadence.",
+            "write a duration greater than zero, e.g. `#Every(5min)`.")
+        .DurationOutOfRange -> (
+            "this schedule duration is outside the supported range",
+            "schedule intervals use the same fixed i64 nanosecond carrier as Duration.",
+            "write a smaller positive duration, e.g. `#Every(5min)`.")
+        .BadWallClockFormat -> (
+            "this daily schedule isn't a plain `\"HH:MM\"` time",
+            "a wall-clock trigger is exactly two digits, a colon, and two digits — 24h time, no seconds, no timezone.",
+            "write a fixed daily time like `#Every(\"03:00\")`.")
+        .HourOutOfRange -> (
+            "this daily schedule's hour is out of range",
+            "24h wall-clock hours run `00`..=`23`.",
+            "write an hour between `00` and `23`, e.g. `#Every(\"03:00\")`.")
+        .MinuteOutOfRange -> (
+            "this daily schedule's minute is out of range",
+            "wall-clock minutes run `00`..=`59`.",
+            "write a minute between `00` and `59`, e.g. `#Every(\"03:00\")`.")
+        .DynamicValue -> (
+            "a job schedule must be known at compile time",
+            "the marker argument has the right type, but job discovery needs one fixed cadence.",
+            "write a duration or wall-clock literal, e.g. `#Every(5min)` or `#Every(\"03:00\")`.")
+    }
+    Diagnostic.error("E0926", what, why, fix, Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:176
+fn e0928_reserved_job_name(name: String, span: Span) -> Diagnostic {
+    Diagnostic.error("E0928", "`{name}` is reserved by Jet's command line", "`run`, `dev`, `build`, and `test` name Jet's lifecycle entries, and a built program answers `help` and `version` itself", "rename the job, e.g. `#Job fn {name}_all()`", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:188
+fn e0928_job_collision(name: String, scope: JobScope, span: Span) -> Diagnostic {
+    scope_name :: if scope == { .Dev -> "Dev"; .Ship -> "Ship"; .Internal -> "Internal" }
+    Diagnostic.error("E0928", "job `{name}` is declared more than once in scope .{scope_name}", "`jet jobs {name}` must select exactly one function", "rename one of the jobs, or give the declarations different scopes", Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:205
+pub fn check_job_marker(f: Func) -> [Diagnostic] {
+    if !f.is_job -> return []
+    if Syntax.JOB_RESERVED_NAMES.contains(f.name) -> return [e0928_reserved_job_name(f.name, f.job_span ?? f.name_span)]
+    []
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:217
+pub fn check_job_collisions(modules: [LoadedModule]) -> [Diagnostic] {
+    seen := [(String, JobScope):Bool]{:}
+    diags := [Diagnostic]{}
+    loop module in modules {
+        loop item in module.items {
+            if item != .Func(function) -> continue
+            if !function.is_job -> continue
+            scope :: function.job_metadata.map(fn(metadata) { metadata.scope }) ?? JobScope.Dev
+            key :: (function.name, scope)
+            if !seen.contains_key(key) { seen[key] = true }
+            else { &diags.push(e0928_job_collision(function.name, scope, function.name_span)) }
+        }
+    }
+    ^diags
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:248
+fn job_graph_error(code: String, what: String, why: String, fix: String, span: Span) -> Diagnostic {
+    Diagnostic.error(code, what, why, fix, Val(span))
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:267
+pub fn check_job_graph(bundle: ProgramBundle) -> [Diagnostic] {
+    jobs := [(String, [String], [String], Span)]{}
+    by_name := [String:[Int]]{:}
+    loop module in bundle.modules {
+        loop item in module.items {
+            if item != .Func(function) -> continue
+            if !function.is_job -> continue
+            index :: jobs.len()
+            &by_name.entry(function.name).or_default().push(index)
+            &jobs.push((function.name, function.job_metadata.map(fn(metadata) { metadata.after }) ?? [], function.job_metadata.map(fn(metadata) { metadata.packages }) ?? [], function.job_span ?? function.name_span))
+        }
+    }
+    diagnostics := [Diagnostic]{}
+    reported := [(String, String, String):Bool]{:}
+    loop (name, after, packages, span) in jobs {
+        loop dependency in after {
+            if dependency == name {
+                key :: ("self", name, dependency)
+                if !reported.contains_key(key) {
+                    reported[key] = true
+                    &diagnostics.push(job_graph_error("E1331", "job `{name}` depends on itself", "a job graph must be acyclic so every prerequisite has a finite completion point", "remove the self-reference from `after`", span))
+                }
+                continue
+            }
+            if by_name.get(dependency) == {
+                .None -> {
+                    key :: ("unknown", name, dependency)
+                    if !reported.contains_key(key) {
+                        reported[key] = true
+                        &diagnostics.push(job_graph_error("E1331", "job `{name}` depends on unknown job `{dependency}`", "every `after` name is resolved against the checked #Job declarations before effects", "declare the prerequisite with `#Job`, or correct the name", span))
+                    }
+                }
+                .Val(candidates) && candidates.len() > 1 -> {
+                    key :: ("ambiguous", name, dependency)
+                    if !reported.contains_key(key) {
+                        reported[key] = true
+                        &diagnostics.push(job_graph_error("E1331", "job `{name}` has an ambiguous prerequisite `{dependency}`", "the graph uses one source identity per job name and cannot choose between scopes", "rename one declaration or make the prerequisite name unique", span))
+                    }
+                }
+                _ -> {}
+            }
+        }
+        loop package in packages {
+            declared :: bundle.package_guarantees.dependency_names.contains(package) || bundle.dep_roots.contains_key(package)
+            allowed :: bundle.package_guarantees.deps.is_none_or(fn(allowlist) { allowlist.iter().any(fn(value) { value == package }) })
+            if !declared || !allowed -> &diagnostics.push(job_graph_error("E1332", "job `{name}` names unauthorized package `{package}`", "job package capabilities must be declared by the checked package authority", "declare the dependency in package.jet authority, or remove it from `packages`", span))
+        }
+    }
+    state := [U8].repeat(U8{0}, jobs.len())
+    stack := [Int]{}
+    // Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:362
+    fn visit(index: Int, jobs: [(String, [String], [String], Span)], by_name: [String:[Int]], state: &[U8], stack: &[Int], diagnostics: &[Diagnostic]) -> {
+        if state[index] == U8{2} -> return
+        if state[index] == U8{1} {
+            cycle_start :: stack.iter().position(fn(candidate) { candidate == index }) ?? 0
+            cycle_names := [String]{}
+            loop candidate in stack[cycle_start..] -> &cycle_names.push(jobs[candidate].0)
+            &cycle_names.push(jobs[index].0)
+            cycle :: cycle_names.join(" -> ")
+            &diagnostics.push(job_graph_error("E1331", "job graph contains a cycle: {cycle}", "a prerequisite graph must reach a completed root before scheduling can start", "remove one `after` edge from the cycle", jobs[index].3))
+            return
+        }
+        state[index] = U8{1}
+        &stack.push(index)
+        loop dependency in jobs[index].1 {
+            candidates :: by_name.get(dependency) ?? continue
+            if candidates.len() == 1 -> visit(candidates[0], jobs, by_name, &state, &stack, &diagnostics)
+        }
+        _ :: &stack.pop()
+        state[index] = U8{2}
+    }
+    loop index in 0..jobs.len() -> visit(index, jobs, by_name, &state, &stack, &diagnostics)
+    ^diagnostics
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:412
+pub fn check_every_marker(f: &Func, registry: TypeRegistry) -> [Diagnostic] {
+    diags := check_job_marker(f)
+    if f.every != .Val(every) -> return ^diags
+    try {
+        schedule :: resolve_every_arg(every.arg, registry)!
+        every.resolved = Val(schedule)
+    } catch reason {
+        every.resolved = None
+        span :: if every.arg == {
+            .Duration(suffix_span: span, ..) -> span
+            .WallClock(text_span: span, ..) -> span
+            .Expression(expression) -> expression.span()
+        }
+        &diags.push(e0926_bad_schedule_value(reason, span))
+    }
+    ^diags
+}
+
+// Rust: crates/jet-sema/src/Sema/CheckerSchedule.rs:439
+pub fn checked_job_registry(bundle: ProgramBundle) -> JobRegistry {
+    JobRegistry.from_bundle(bundle)
+}

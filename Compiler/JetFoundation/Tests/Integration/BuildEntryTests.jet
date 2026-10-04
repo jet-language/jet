@@ -1,0 +1,822 @@
+use jet_foundation.Tests.Integration.BuildEntry.*
+use jet_foundation.Tests.Integration.Common.[Scratch]
+use jet_comptime.Comptime.Build.[ActionOutcome, ActionCacheStatus, BuildExecutionEvent, CacheHitReason]
+use jet_driver.Driver.[compile_bundle_path_build, compile_bundle_path_build_with_front_end, prepare_build_front_end, compile_programmable_build_opts, FrontEndInputs, BuildRun]
+use jet_driver.Policy.[GateSet, PolicyKey]
+use jet_driver.SHA256.[sha256_hex]
+use jet_driver.ExitCodes.[ICE]
+use std.fs
+use std.env
+use std.process.[Command, Output] // GATE #4494: actual native process execution.
+use std.time.[Instant] // GATE #4494: monotonic native clock.
+
+// Rust: tests/build_entry.rs:159
+#Test("root_fn_build_executes_graph_materializes_and_frontend_checks_generated_source") {
+    root :: project("vertical")
+    fs.create_dir_all(root.join("build")).unwrap()
+    fs.write(root.join("build/legacy-output"), "preserve").unwrap()
+    fs.create_dir_all(root.join(".jet-build")).unwrap()
+    fs.write(root.join(".jet-build/legacy-output"), "preserve").unwrap()
+    fs.create_dir_all(root.join("src/.jet")).unwrap()
+    fs.write(root.join("src/.jet/legacy-output"), "preserve").unwrap()
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    b.generate("generated_message") {
+        fn generated_message() -> String { return "built" }
+    }
+    #Impure("write declared build output") {
+        stamp :: b.action(
+            "stamp", [], [".jet/generated/app/stamp.txt"],
+            ["sh", "-c", "printf stamped > .jet/generated/app/stamp.txt"], ["Exec", "FS"]
+        )
+        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/generated_message.jet"], [stamp])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() -> { print("ok") }
+""")
+    first :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    build :: first.build.expect("root fn build should run")
+    assert_eq(build.plan.targets()[0].name, "app")
+    assert_eq(build.plan.actions()[0].name, "stamp")
+    assert_eq(build.execution.metrics.actions_total, 1)
+    assert(match build.execution.events.last() {
+        Some(BuildExecutionEvent.Finished{outcome: ActionOutcome.Succeeded{exit_code: 0}, ..}) -> true,
+        Some(BuildExecutionEvent.Finished{outcome: ActionOutcome.RestoredFromCache, ..}) -> true,
+        _ -> false
+    })
+    assert_eq(fs.read_to_string(root.join(".jet/generated/app/stamp.txt")).unwrap(), "stamped")
+    assert_eq(fs.read_to_string(root.join("build/legacy-output")).unwrap(), "preserve")
+    assert_eq(fs.read_to_string(root.join(".jet-build/legacy-output")).unwrap(), "preserve")
+    assert_eq(fs.read_to_string(root.join("src/.jet/legacy-output")).unwrap(), "preserve")
+    assert_eq(fs.read_dir(root.join("build")).unwrap().count(), 1, "build/ must not receive compiler-owned history debris")
+    assert_eq(fs.read_dir(root.join(".jet-build")).unwrap().count(), 1, ".jet-build/ must remain an untouched legacy namespace")
+    assert_eq(fs.read_dir(root.join("src/.jet")).unwrap().count(), 1, "per-input .jet/ must remain an untouched legacy namespace")
+    generated :: &build.generated[0]
+    assert_eq(generated.name, "generated_message")
+    assert(generated.path.exists())
+    assert(generated.digest.as_str().starts_with("sha256:"))
+    lock :: fs.read_to_string(root.join(".jet/lock")).unwrap()
+    assert(lock.contains(".jet/generated/main/generated_message.jet"))
+    assert(lock.contains(generated.digest.as_str()))
+    assert(first.compile.rust.contains("fn main"))
+    assert(first.compile.rust.contains("generated_message"))
+    second :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    warm :: second.build.unwrap()
+    assert(warm.execution.events.iter().any(fn(event) -> match event {
+        BuildExecutionEvent.Finished{outcome: ActionOutcome.RestoredFromCache, ..} -> true,
+        _ -> false
+    }))
+    stamp :: warm.plan.actions().iter().find(fn(action) -> action.name == "stamp").expect("stamp action remains in the build plan")
+    rebuilt :: warm.plan.why_rebuilt(warm.plan.action_handle(stamp.id).unwrap(), ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched)).unwrap()
+    assert_eq(rebuilt.status, ActionCacheStatus.Hit(CacheHitReason.LocalActionRecordMatched))
+    assert_eq(rebuilt.reason, "local action record matched")
+    explain :: Command.new(env.bin_exe("jet")).args(["inspect", "explain-build", "stamp", entry.to_str().unwrap(), "--json"]).output().expect("jet inspect explain-build")
+    assert(explain.status.success(), "explain-build failed: {String.from_utf8_lossy(&explain.stderr)}")
+    assert(String.from_utf8_lossy(&explain.stdout).contains("\"label\":\"stamp\""), "explain-build action query must expose the action label: {String.from_utf8_lossy(&explain.stdout)}")
+}
+
+// Rust: tests/build_entry.rs:299
+#Test("package_manifest_build_entry_uses_the_same_pipeline_as_a_file_entry") {
+    root :: project("package-entry")
+    write(&root.join("package.jet"), """
+name: "package-entry"
+version: "0.1.0"
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("package_message") {
+        fn package_message() -> String { "package" }
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/package-entry/package_message.jet"], [])
+    return b.plan(app)
+}
+""")
+    entry :: root.join("main.jet")
+    write(&entry, "fn run() -> { print(package_message()) }\n")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    build :: output.build.expect("package.jet fn build should be selected")
+    assert_eq(build.plan.targets()[0].name, "app")
+    assert_eq(build.generated.len(), 1)
+    assert(output.compile.rust.contains("package_message"))
+}
+
+// Rust: tests/build_entry.rs:329
+#Test("multi_dependency_build_restores_semantic_noop_compiler_artifact") {
+    (root, dep_b_source) :: multi_dependency_fixture("package-artifact-restore")
+    entry :: root.join("main.jet")
+    first :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    first_build :: first.build.expect("first dependency build should run")
+    compiler_actions :: first_build.plan.actions().iter().filter(fn(action) -> action.is_compiler_owned()).collect()
+    assert_eq(compiler_actions.len(), 3, "root plus two dependencies")
+    assert_eq(first_build.execution.metrics.cache_restored_actions, 0)
+    assert_eq(first_build.execution.events.iter().filter(fn(event) -> match event {
+        BuildExecutionEvent.Finished{action, outcome: ActionOutcome.Succeeded{..}} -> first_build.plan.action_handle(action).and_then(fn(handle) -> first_build.plan.action(handle)).is_some_and(fn(a) -> a.is_compiler_owned()),
+        _ -> false
+    }).count(), 3)
+    // A comment-only edit is not package source meaning; all artifacts remain cacheable.
+    write(&dep_b_source, "// semantic no-op\npub fn value() -> Int { return 2 }\n")
+    second :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    second_build :: second.build.expect("warm dependency build should run")
+    assert_eq(second_build.execution.metrics.cache_restored_actions, 3)
+    assert_eq(second_build.execution.events.iter().filter(fn(event) -> match event {
+        BuildExecutionEvent.Finished{action, outcome: ActionOutcome.RestoredFromCache} -> second_build.plan.action_handle(action).and_then(fn(handle) -> second_build.plan.action(handle)).is_some_and(fn(a) -> a.is_compiler_owned()),
+        _ -> false
+    }).count(), 3)
+    assert(!second_build.execution.events.iter().any(fn(event) -> match event {
+        BuildExecutionEvent.Finished{action, outcome: ActionOutcome.Succeeded{..}} -> second_build.plan.action_handle(action).and_then(fn(handle) -> second_build.plan.action(handle)).is_some_and(fn(a) -> a.is_compiler_owned()),
+        _ -> false
+    }))
+    loop action in second_build.plan.actions().iter().filter(fn(action) -> action.is_compiler_owned()) {
+        assert(root.join(action.outputs[0].as_str()).is_file())
+    }
+}
+
+// Rust: tests/build_entry.rs:400
+#Test("enum_dependency_change_invalidates_compiler_package_chain") {
+    root :: project("enum-package-invalidation")
+    fixture_marker :: root.file_name().expect("fixture root has a name").to_string_lossy().replace('-', "_")
+    producer :: root.join("deps/producer")
+    consumer :: root.join("deps/consumer")
+    fs.create_dir_all(&producer).unwrap()
+    fs.create_dir_all(&consumer).unwrap()
+    write(&root.join("package.jet"), "name: \"enum-package-invalidation\"\nversion: \"0.1.0\"\ndeps: { producer: ./deps/producer, consumer: ./deps/consumer }\n")
+    write(&producer.join("package.jet"), "name: \"producer\"\nversion: \"0.1.0\"\n")
+    write(&consumer.join("package.jet"), "name: \"consumer\"\nversion: \"0.1.0\"\n")
+    producer_source :: producer.join("producer.jet")
+    producer_fixture :: """
+#Layout(c, tag: U8)
+pub enum Packet {
+    Ping(value: Int) = 3
+}
+pub fn make() -> Packet { return Packet.Ping{value: 7} }
+pub fn seed__MARKER__() -> Int { return 0 }
+""".replace("__MARKER__", fixture_marker)
+    write(&producer_source, producer_fixture)
+    write(&consumer.join("consumer.jet"), """
+use producer
+pub fn inspect(value: producer.Packet) -> Int { return 7 }
+""")
+    entry :: root.join("main.jet")
+    write(&entry, """
+use producer
+use consumer
+fn build(b: BuildContext) -> BuildPlan {
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() -> { print(consumer.inspect(producer.make())) }
+""")
+    // Rust: tests/build_entry.rs:468
+    source_identity :: fn(build: &BuildRun, package: String) -> build.plan.actions().iter().find(fn(action) -> action.name == "compile-package:{package}").and_then(fn(action) -> action.labels.get("compiler.source-digest")).cloned().unwrap_or_else(fn() -> panic("missing compiler source identity for {package}"))
+    first :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    first_build :: first.build.as_ref().expect("cold enum dependency build should expose execution")
+    assert_eq(first_build.plan.actions().iter().filter(fn(action) -> action.is_compiler_owned()).count(), 3, "root, producer, and consumer compiler actions should be planned")
+    assert_eq(first_build.execution.metrics.cache_restored_actions, 0)
+    first_producer_source :: source_identity(first_build, "producer")
+    first_consumer_source :: source_identity(first_build, "consumer")
+    first_rust :: &first.compile.rust
+    assert(first_rust.contains("Packet"))
+    changed_fixture :: """
+#Layout(c, tag: U8)
+pub enum Packet {
+    Ping(value: Int, extra: Int) = 9
+    Pong(value: Int) = 11
+}
+pub fn make() -> Packet { return Packet.Ping{value: 7, extra: 1} }
+pub fn seed__MARKER__() -> Int { return 0 }
+""".replace("__MARKER__", fixture_marker)
+    write(&producer_source, changed_fixture)
+    second :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    second_build :: second.build.as_ref().expect("incremental enum dependency build should expose execution")
+    assert_eq(second_build.execution.metrics.cache_restored_actions, 0, "producer enum changes must invalidate producer and every dependent compiler action")
+    loop action in second_build.plan.actions().iter().filter(fn(action) -> action.is_compiler_owned()) {
+        assert(second_build.execution.events.iter().any(fn(event) -> match event {
+            BuildExecutionEvent.Finished{action: finished, outcome: ActionOutcome.Succeeded{..}} -> finished == action.id,
+            _ -> false
+        }), "{action.name} must rebuild successfully after the producer enum changes")
+        assert(!second_build.execution.events.iter().any(fn(event) -> match event {
+            BuildExecutionEvent.Finished{action: finished, outcome: ActionOutcome.RestoredFromCache} -> finished == action.id,
+            _ -> false
+        }), "{action.name} must not be restored from stale cache state")
+    }
+    second_producer_source :: source_identity(second_build, "producer")
+    second_consumer_source :: source_identity(second_build, "consumer")
+    assert_ne(first_producer_source, second_producer_source, "producer case/code/payload changes must change its source identity")
+    assert_eq(first_consumer_source, second_consumer_source, "consumer source identity stays stable while its dependency changes")
+    assert_ne(first_rust, second.compile.rust, "compiled output must reflect the changed enum shape")
+    assert(second.compile.rust.contains("Pong"), "compiled output must contain the added producer enum case")
+    changed_source :: fs.read_to_string(&producer_source).expect("read changed producer source")
+    compatible_source :: "{changed_source}\n// compatible source-only edit: enum codes must remain stable\n"
+    write(&producer_source, compatible_source)
+    third :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    // Rust: tests/build_entry.rs:580
+    enum_fragments :: fn(rust: String) -> rust.lines().filter(fn(line) -> line.contains("Ping") || line.contains("Pong")).map(fn(line) -> line.to_string()).collect()
+    assert_eq(enum_fragments(second.compile.rust), enum_fragments(third.compile.rust), "a compatible source-only edit must preserve generated enum codes")
+    eprintln("enum invalidation: producer_source={first_producer_source} -> {second_producer_source}, consumer_source={first_consumer_source} -> {second_consumer_source}, cold_restored={first_build.execution.metrics.cache_restored_actions}, incremental_restored={second_build.execution.metrics.cache_restored_actions}, output_changed=true")
+}
+
+// Rust: tests/build_entry.rs:603
+#Test("warm_dependency_cache_still_runs_frontend_diagnostics") {
+    (root, dep_b_source) :: multi_dependency_fixture("malformed-dependent-warm-cache")
+    entry :: root.join("main.jet")
+    _ :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    artifact :: root.join(".jet/package-artifacts/dep_b.sealed")
+    assert(artifact.is_file(), "first build must seal dep_b")
+    fs.remove_file(&artifact).unwrap()
+    write(&dep_b_source, "pub fn value() -> Int { return 2\n")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err()
+    assert(!errors.is_empty())
+    assert(errors.iter().all(fn(diagnostic) -> diagnostic.code != "ICE"))
+    assert(errors.iter().any(fn(diagnostic) -> diagnostic.code.starts_with('E')))
+    assert(!artifact.exists(), "front-end diagnostics must stop before cache restore or compiler codegen")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/build_entry.rs:626
+#Test("compiler_self_speed_reports_clean_and_incremental_medians") {
+    (root, dep_b_source) :: multi_dependency_fixture("compiler-self-speed")
+    entry :: root.join("main.jet")
+    clean := [U128]{}
+    loop sample in 0..3 {
+        write(&dep_b_source, "// clean sample {sample}\npub fn value() -> Int {{ return 2 }}\n")
+        _ :: fs.remove_dir_all(root.join(".jet/package-artifacts"))
+        start :: Instant.now()
+        output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+        build :: output.build.expect("clean build should expose execution")
+        assert_eq(build.execution.metrics.cache_restored_actions, 0)
+        clean.push(start.elapsed().as_micros())
+    }
+    incremental := [U128]{}
+    loop _ in 0..3 {
+        start :: Instant.now()
+        output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+        build :: output.build.expect("incremental build should expose execution")
+        assert_eq(build.execution.metrics.cache_restored_actions, 3)
+        incremental.push(start.elapsed().as_micros())
+    }
+    clean_median :: median_micros(&clean)
+    incremental_median :: median_micros(&incremental)
+    eprintln("compiler self-speed: clean_median_us={clean_median} incremental_median_us={incremental_median} clean_restored_actions=0 incremental_restored_actions=3 samples=3")
+    assert(clean_median > 0)
+    assert(incremental_median > 0)
+    assert(incremental_median <= clean_median, "incremental median exceeded clean median: clean={clean_median}us incremental={incremental_median}us")
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/build_entry.rs:668
+#Test("compiler_speed_explain_build_reports_release_nodes") {
+    root :: project("compiler-speed-explain-build")
+    entry :: root.join("main.jet")
+    write(&entry, "fn run() -> { print(\"timing\") }\n")
+    output :: Command.new(env.bin_exe("jet")).args(["build", "--release", "main.jet"]).current_dir(&root).env("JET_STORE_DIR", root.join("store")).env("NO_COLOR", "1").output().expect("run optimized compiler-speed build")
+    assert(output.status.success(), "release build failed: {String.from_utf8_lossy(&output.stdout)}\n{String.from_utf8_lossy(&output.stderr)}")
+    explanation :: Command.new(env.bin_exe("jet")).args(["inspect", "explain-build", "main.jet", "--json"]).current_dir(&root).env("JET_STORE_DIR", root.join("store")).env("NO_COLOR", "1").output().expect("read release build explanation")
+    assert(explanation.status.success(), "explain-build failed: {String.from_utf8_lossy(&explanation.stdout)}\n{String.from_utf8_lossy(&explanation.stderr)}")
+    report :: String.from_utf8_lossy(&explanation.stdout)
+    assert(report.contains("\"schema\":\"jet.explain-build/v1\""))
+    assert(report.contains("\"program\":\"main.jet\""))
+    assert(report.contains("\"nodes\":["))
+    assert(root.join(".jet/build/main").is_file())
+    fs.remove_dir_all(root).unwrap()
+}
+
+// Rust: tests/build_entry.rs:709
+#Test("release_build_and_default_run_preserve_typed_empty_list_type") {
+    scratch :: Scratch.new("typed-empty-list-release")
+    write(&scratch.join("main.jet"), """
+fn run() -> {
+    rows := [String]{}
+    print(rows.len())
+}
+""")
+    build :: Command.new(env.bin_exe("jet")).args(["build", "--profile=release", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1").output().expect("run typed empty-list release build")
+    assert(build.status.success(), "release build failed:\nstdout: {String.from_utf8_lossy(&build.stdout)}\nstderr: {String.from_utf8_lossy(&build.stderr)}")
+    aot :: Command.new(scratch.join(".jet/build/main")).current_dir(&scratch.path).output().expect("run typed empty-list AOT binary")
+    assert(aot.status.success(), "AOT binary failed:\nstdout: {String.from_utf8_lossy(&aot.stdout)}\nstderr: {String.from_utf8_lossy(&aot.stderr)}")
+    aot_text := String.from_utf8_lossy(&aot.stdout).trim() // #4303
+    assert_eq(aot_text, "0")
+    interpreted :: Command.new(env.bin_exe("jet")).args(["run", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1").output().expect("run typed empty-list default run")
+    assert(interpreted.status.success(), "default run failed:\nstdout: {String.from_utf8_lossy(&interpreted.stdout)}\nstderr: {String.from_utf8_lossy(&interpreted.stderr)}")
+    interpreted_text := String.from_utf8_lossy(&interpreted.stdout).trim() // #4303
+    assert_eq(interpreted_text, "0")
+}
+
+// Rust: tests/build_entry.rs:768
+#Test("two_builds_from_two_paths_are_byte_identical") {
+    left :: Scratch.new("determinism-left")
+    right :: Scratch.new("determinism-right")
+    copy_determinism_fixture(&left)
+    copy_determinism_fixture(&right)
+    // Rust: tests/build_entry.rs:774
+    build :: fn(scratch: &Scratch) -> Command.new(env.bin_exe("jet")).args(["build", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1").output().expect("run determinism build")
+    loop (name, output) in [("left", build(&left)), ("right", build(&right))] {
+        assert(output.status.success(), "{name} determinism build failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    }
+    left_binary :: fs.read(left.join(".jet/build/main")).unwrap()
+    right_binary :: fs.read(right.join(".jet/build/main")).unwrap()
+    assert_eq(sha256_hex(&left_binary), sha256_hex(&right_binary), "native binary SHA-256 changed with checkout path")
+    assert_eq(left_binary, right_binary, "native binary changed with checkout path")
+    left_log :: normalized_build_log(&left.path, &left.join("store"), "main.jet")
+    right_log :: normalized_build_log(&right.path, &right.join("store"), "main.jet")
+    assert(!left_log.is_empty(), "build must publish its store log")
+    assert_eq(left_log, right_log, "build store logs differ beyond checkout paths")
+}
+
+// Rust: tests/build_entry.rs:815
+// #3953: deleted dev executable restores the exact cached image and runs.
+#Test("dev_build_restores_a_deleted_executable_from_its_cached_image") {
+    scratch :: Scratch.new("dev-image-restore")
+    write(&scratch.join("main.jet"), "fn run() -> { print(\"image-restore\") }\n")
+    // Rust: tests/build_entry.rs:821
+    build :: fn() -> {
+        output :: Command.new(env.bin_exe("jet")).args(["build", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1").output().expect("run jet build")
+        assert(output.status.success(), "build failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    }
+    executable :: scratch.join(".jet/build/main")
+    build()
+    built :: fs.read(&executable).expect("read built executable")
+    fs.remove_file(&executable).expect("delete built executable")
+    build()
+    assert_eq(fs.read(&executable).expect("read restored executable"), built, "the restored executable differs from the built one")
+    run :: Command.new(&executable).output().expect("run restored executable")
+    assert(run.status.success(), "restored executable failed: {run.debug()}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "image-restore\n")
+}
+
+// Rust: tests/build_entry.rs:858
+// #3953: stored compiled functions produce the same executable; twice and double share IR.
+#Test("dev_build_from_stored_functions_is_byte_identical") {
+    scratch :: Scratch.new("dev-function-cache")
+    write(&scratch.join("main.jet"), "fn twice(x: Int) -> Int { x * 2 }\nfn double(x: Int) -> Int { x * 2 }\nfn run() -> { print(twice(3) + double(4)) }\n")
+    store :: scratch.join("store")
+    // Rust: tests/build_entry.rs:865
+    build :: fn() -> {
+        output :: Command.new(env.bin_exe("jet")).args(["build", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", &store).env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1").output().expect("run jet build")
+        assert(output.status.success(), "build failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    }
+    executable :: scratch.join(".jet/build/main")
+    build()
+    compiled :: fs.read(&executable).expect("read built executable")
+    // Drop executable and all blobs, including cached image; action records remain.
+    fs.remove_file(&executable).expect("delete built executable")
+    fs.remove_dir_all(store.join("cas")).expect("delete store blobs")
+    build()
+    assert_eq(fs.read(&executable).expect("read rebuilt executable"), compiled, "the executable built from stored functions differs")
+    run :: Command.new(&executable).output().expect("run rebuilt executable")
+    assert(run.status.success(), "rebuilt executable failed: {run.debug()}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "14\n")
+}
+
+// Rust: tests/build_entry.rs:903
+// #2517: typed warning replay and up-to-date receipt skip every Check.
+#Test("no_change_build_replays_diagnostics_and_skips_every_check") {
+    scratch :: Scratch.new("no-change-receipt")
+    write(&scratch.join("main.jet"), "fn helper_one() -> Int { 1 }\nfn helper_two() -> Int { 2 }\nfn run() -> { print(\"receipt\") }\n")
+    // Rust: tests/build_entry.rs:909
+    build :: fn(store: String, json: Bool) -> {
+        command := Command.new(env.bin_exe("jet"))
+        command.args(["build", "main.jet"]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join(store)).env("JET_RUN_CACHE_DIR", scratch.join("run-cache")).env("NO_COLOR", "1")
+        if json { command.arg("--json") }
+        output :: command.output().expect("run jet build")
+        assert(output.status.success(), "build failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+        output
+    }
+    // Rust: tests/build_entry.rs:929
+    warnings :: fn(output: &Output) -> String.from_utf8_lossy(&output.stderr).lines().filter(fn(line) -> line.starts_with("Warning [") || line.trim_start().starts_with("-->")).map(fn(line) -> line.to_string()).collect()
+    // Rust: tests/build_entry.rs:936
+    checks :: fn(store: String) -> normalized_build_log(&scratch.path, &scratch.join(store), "main.jet").into_iter().filter(fn(row) -> row.0 == "check").map(fn(row) -> (row.2, row.3)).collect()
+    fresh :: build("store", false)
+    fresh_warnings :: warnings(&fresh)
+    assert_eq(fresh_warnings.iter().filter(fn(line) -> line.starts_with("Warning [L0104]")).count(), 2, "{String.from_utf8_lossy(&fresh.stderr)}")
+    assert(!String.from_utf8_lossy(&fresh.stderr).contains("up to date: "))
+    executed :: checks("store")
+    assert(!executed.is_empty() && executed.iter().all(fn(row) -> row.1 != "reused"), "the first build checks every module: {executed.debug()}")
+    replayed :: build("store", false)
+    assert_eq(warnings(&replayed), fresh_warnings)
+    assert_eq(replayed.stdout, fresh.stdout)
+    assert(String.from_utf8_lossy(&replayed.stderr).contains("up to date: "), "{String.from_utf8_lossy(&replayed.stderr)}")
+    reused :: checks("store")
+    assert_eq(reused.len(), executed.len())
+    assert(reused.iter().all(fn(row) -> row.1 == "reused"), "an unchanged build executes no Check: {reused.debug()}")
+    // Typed records re-render JSON, rather than replay captured bytes.
+    fresh_json :: build("store-json", true)
+    replayed_json :: build("store", true)
+    assert_eq(String.from_utf8_lossy(&replayed_json.stdout), String.from_utf8_lossy(&fresh_json.stdout))
+    assert(checks("store").iter().all(fn(row) -> row.1 == "reused"))
+}
+
+// Rust: tests/build_entry.rs:995
+// #2517 criteria 2/6: recorded checks declare every audited check-time read.
+#Test("check_inputs_are_all_declared") {
+    scratch :: Scratch.new("check-inputs-declared")
+    fs.create_dir_all(scratch.join("assets/inputs/nested")).unwrap()
+    write(&scratch.join("assets/motd.txt"), "hello\n")
+    fs.write(scratch.join("assets/logo.bin"), [U8]{0x89, 80, 78, 71, 0, 7}).unwrap()
+    write(&scratch.join("assets/inputs/alpha.txt"), "alpha\n")
+    write(&scratch.join("assets/inputs/nested/beta.txt"), "beta\n")
+    corpus :: [
+        ("plain.jet", "fn run() -> { print(\"plain\") }\n"),
+        ("embed.jet", "MOTD :: prep { embed_file(\"assets/motd.txt\") }\nfn run() -> { print(MOTD) }\n"),
+        ("bytes.jet", "LOGO :: prep { embed_bytes(\"assets/logo.bin\") }\nSIZE :: prep { byte_count(LOGO) }\nfn byte_count(bytes: [U8]) -> Int { bytes.len() }\nfn run() -> { print(\"{SIZE}\") }\n"),
+        ("find.jet", "PATHS :: prep { find(\"assets/inputs/**/*.txt\") }\nfn run() -> { print(PATHS.join(\"|\")) }\n")
+    ]
+    loop (name, source) in corpus { write(&scratch.join(name), source) }
+    // Rust: tests/build_entry.rs:1020
+    check :: fn(program: String, audit: Bool, inject: OSPath?) -> {
+        command := Command.new(env.bin_exe("jet"))
+        command.args(["check", program]).current_dir(&scratch.path).env("JET_STORE_DIR", scratch.join("store")).env("NO_COLOR", "1").env_remove("JET_CHECK_READS_AUDIT").env_remove("JET_CHECK_READS_INJECT")
+        if audit { command.env("JET_CHECK_READS_AUDIT", "1") }
+        if inject == Some(path) { command.env("JET_CHECK_READS_INJECT", path) }
+        command.output().expect("run jet check")
+    }
+    // Rust: tests/build_entry.rs:1037
+    succeeded :: fn(output: &Output) -> {
+        assert(output.status.success(), "check failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    }
+    // Rust: tests/build_entry.rs:1045
+    checks :: fn(program: String) -> normalized_build_log(&scratch.path, &scratch.join("store"), program).into_iter().filter(fn(row) -> row.0 == "check").map(fn(row) -> row.3).collect()
+    loop (program, _) in corpus {
+        succeeded(&check(program, false, None))
+        fresh :: checks(program)
+        assert(!fresh.is_empty() && fresh.iter().all(fn(why) -> why != "reused"), "{program}: {fresh.debug()}")
+        // Re-check against the verified record's declared reads and digests.
+        succeeded(&check(program, true, None))
+        succeeded(&check(program, false, None))
+        replayed :: checks(program)
+        assert(replayed.iter().all(fn(why) -> why == "reused"), "{program}: {replayed.debug()}")
+    }
+    injected :: scratch.join("undeclared.txt")
+    write(&injected, "not an input of embed.jet\n")
+    audit :: check("embed.jet", true, Some(injected))
+    assert_eq(audit.status.code(), Some(ICE))
+    stderr :: String.from_utf8_lossy(&audit.stderr)
+    assert(stderr.contains("check read audit") && stderr.contains("undeclared.txt"), "{stderr}")
+    write(&scratch.join("assets/motd.txt"), "changed\n")
+    succeeded(&check("embed.jet", false, None))
+    rechecked :: checks("embed.jet")
+    assert(rechecked.iter().all(fn(why) -> why != "reused"), "a changed embedded input must not replay: {rechecked.debug()}")
+    succeeded(&check("embed.jet", false, None))
+    replayed :: checks("embed.jet")
+    assert(replayed.iter().all(fn(why) -> why == "reused"), "{replayed.debug()}")
+}
+
+// Rust: tests/build_entry.rs:1094
+// #2517 S1: private-body early cutoff preserves importer; interface edits redden it.
+#Test("explain_build_reports_package_reuse_reasons") {
+    root :: project("explain-package-reasons")
+    dep :: root.join("deps/dep_b")
+    fs.create_dir_all(&dep).unwrap()
+    write(&root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep_b: ./deps/dep_b }\n")
+    write(&dep.join("package.jet"), "name: \"dep_b\"\nversion: \"0.1.0\"\n")
+    dep_source :: dep.join("dep_b.jet")
+    write(&dep_source, "pub fn value() -> Int { return 2 }\n")
+    write(&root.join("main.jet"), "use dep_b\n\nfn run() -> { print(dep_b.value()) }\n")
+    store :: root.join("store")
+    // Rust: tests/build_entry.rs:1107
+    check :: fn() -> {
+        output :: Command.new(env.bin_exe("jet")).args(["check", "main.jet"]).current_dir(&root).env("JET_STORE_DIR", &store).env("NO_COLOR", "1").output().expect("run jet check")
+        assert(output.status.success(), "check failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+        normalized_build_log(&root, &store, "main.jet").into_iter().filter(fn(row) -> row.0 == "package").map(fn(row) -> (row.2, row.3)).collect()
+    }
+    // Rust: tests/build_entry.rs:1127
+    reason :: fn(rows: &[(String, String)], needle: String) -> rows.iter().find(fn(row) -> row.0.contains(needle)).map(fn(row) -> row.1).unwrap_or_else(fn() -> panic("no package row for {needle}: {rows.debug()}"))
+    first :: check()
+    assert(first.len() >= 2, "{first.debug()}")
+    assert(first.iter().all(fn(row) -> row.1 == "first-run"), "{first.debug()}")
+    write(&dep_source, "pub fn value() -> Int { return 3 }\n")
+    body :: check()
+    assert_eq(reason(&body, "dep_b"), "red:source+cutoff", "{body.debug()}")
+    assert(body.iter().filter(fn(row) -> !row.0.contains("dep_b")).all(fn(row) -> row.1 == "green:key"), "{body.debug()}")
+    write(&dep_source, "pub fn value() -> Int { return 3 }\npub fn unused() -> Int { return 4 }\n")
+    interface :: check()
+    assert_eq(reason(&interface, "dep_b"), "red:source", "{interface.debug()}")
+    (_, importer) :: interface.iter().find(fn(row) -> row.0.contains("main.jet") || row.0 == "pkg:.").unwrap_or_else(fn() -> panic("no importer row: {interface.debug()}"))
+    assert(importer.starts_with("red:dependency:"), "{interface.debug()}")
+    explain :: Command.new(env.bin_exe("jet")).args(["inspect", "explain-build", "main.jet"]).current_dir(&root).env("JET_STORE_DIR", &store).env("NO_COLOR", "1").output().expect("jet inspect explain-build")
+    assert(explain.status.success(), "{String.from_utf8_lossy(&explain.stderr)}")
+    text :: String.from_utf8_lossy(&explain.stdout)
+    assert(text.lines().any(fn(line) -> line.starts_with("package\t") && line.contains("red:dependency:")), "{text}")
+}
+
+// Rust: tests/build_entry.rs:1182
+// #2517 S2: sealed dependency reuse preserves root effect diagnostics after body edits.
+#Test("body_edit_in_root_reuses_dependency_package_record") {
+    root :: project("sealed-dependency")
+    dep :: root.join("deps/util")
+    fs.create_dir_all(&dep).unwrap()
+    write(&root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { util: ./deps/util }\n")
+    write(&dep.join("package.jet"), "name: \"util\"\nversion: \"0.1.0\"\n")
+    write(&dep.join("util.jet"), "pub fn shout(text: String) -> String {\n    print(text)\n    return \"{text}!\"\n}\n\npub fn twice(n: Int) -> Int { return helper(n) + helper(n) }\n\nfn helper(n: Int) -> Int { return n * 2 }\n")
+    lib :: root.join("lib.jet")
+    // Rust: tests/build_entry.rs:1196
+    source :: fn(extra: String) -> "use util\n\npub fn quiet(text: String) -[]> String {{\n    return util.shout(text)\n}}\n\npub fn sum(n: Int) -> Int {{ return util.twice(n) + {extra} }}\n"
+    // Rust: tests/build_entry.rs:1201
+    check :: fn(store: &OSPath) -> {
+        output :: Command.new(env.bin_exe("jet")).args(["check", "lib.jet"]).current_dir(&root).env("JET_STORE_DIR", store).env("NO_COLOR", "1").output().expect("run jet check")
+        rows :: normalized_build_log(&root, store, "lib.jet").into_iter().filter(fn(row) -> row.0 == "package").map(fn(row) -> (row.2, row.3)).collect()
+        (String.from_utf8_lossy(&output.stderr).into_owned(), rows)
+    }
+    // Rust: tests/build_entry.rs:1216
+    reason :: fn(rows: &[(String, String)], needle: String) -> rows.iter().find(fn(row) -> row.0.contains(needle)).map(fn(row) -> row.1).unwrap_or_else(fn() -> panic("no package row for {needle}: {rows.debug()}"))
+    store :: root.join("store")
+    write(&lib, source("1"))
+    (cold, first) :: check(&store)
+    assert(cold.contains("E3401"), "{cold}")
+    assert(reason(&first, "util").starts_with("checked+published"), "{first.debug()}")
+    write(&lib, source("2"))
+    (warm, second) :: check(&store)
+    assert(reason(&second, "util").starts_with("reused"), "{second.debug()}")
+    (fresh, _) :: check(&root.join("fresh-store"))
+    assert_eq(warm, fresh, "a sealed dependency must not change the root's diagnostics")
+}
+
+// Rust: tests/build_entry.rs:1241
+// #2517 S3R: a single edited body checks once; all other stored item bodies replay.
+#Test("body_edit_rechecks_only_the_edited_item") {
+    root :: project("item-reuse")
+    write(&root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n")
+    lib :: root.join("lib.jet")
+    write(&lib, "use shapes\n\npub fn total(n: Int) -> Int {\n    shapes.area(n) + shapes.edge(n)\n}\n\nfn unused_helper(n: Int) -> Int {\n    n\n}\n")
+    shapes :: root.join("shapes.jet")
+    // Rust: tests/build_entry.rs:1250
+    source :: fn(factor: String) -> "pub fn area(n: Int) -> Int {{\n    n * n{factor}\n}}\n\npub fn edge(n: Int) -> Int {{\n    helper(n) + 4\n}}\n\nfn helper(n: Int) -> Int {{\n    n - 1\n}}\n\npub fn perimeter(n: Int) -> Int {{\n    doubled :: n + n\n    doubled + doubled\n}}\n"
+    // Rust: tests/build_entry.rs:1255
+    check :: fn(store: &OSPath) -> {
+        output :: Command.new(env.bin_exe("jet")).args(["check", "lib.jet"]).current_dir(&root).env("JET_STORE_DIR", store).env("NO_COLOR", "1").output().expect("run jet check")
+        rows :: normalized_build_log(&root, store, "lib.jet").into_iter().filter(fn(row) -> row.0 == "package").map(fn(row) -> (row.2, row.3)).collect()
+        (String.from_utf8_lossy(&output.stderr).into_owned(), rows)
+    }
+    // Rust: tests/build_entry.rs:1271
+    items :: fn(rows: &[(String, String)], module: String) -> rows.iter().find(fn(row) -> row.0.ends_with(module)).and_then(fn(row) -> row.1.split_once("items: ").map(fn(parts) -> parts.1.to_string())).unwrap_or_else(fn() -> panic("no item row for {module}: {rows.debug()}"))
+    store :: root.join("store")
+    write(&shapes, source(""))
+    (_, first) :: check(&store)
+    assert(items(&first, "shapes.jet").starts_with("0 reused, 4 checked"), "{first.debug()}")
+    assert(items(&first, "lib.jet").starts_with("0 reused, 2 checked"), "{first.debug()}")
+    write(&shapes, source(" * 3"))
+    (warm, second) :: check(&store)
+    assert(items(&second, "shapes.jet").starts_with("3 reused, 1 checked [fn:area]"), "{second.debug()}")
+    assert(items(&second, "lib.jet").starts_with("2 reused, 0 checked"), "{second.debug()}")
+    (fresh, _) :: check(&root.join("fresh-store"))
+    assert(warm.contains("L0104"), "{warm}")
+    assert_eq(warm, fresh, "reused items must not change the diagnostics")
+}
+
+// Rust: tests/build_entry.rs:1302
+// #2517: function-body edits invalidate constants and their transitive consumers.
+#Test("body_edit_reevaluates_the_constants_that_read_it") {
+    root :: project("comptime-reuse")
+    write(&root.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n")
+    lib :: root.join("lib.jet")
+    // Rust: tests/build_entry.rs:1306
+    source :: fn(size: String) -> "pub fn size() -> Int {{\n    {size}\n}}\n\npub fn check_size(n: Int) -> Bool {{\n    assert((n == 4), \"size must stay 4\")\n    true\n}}\n\npub SIZE :: prep {{ size() }}\n\npub OK :: prep {{ check_size(SIZE) }}\n"
+    // Rust: tests/build_entry.rs:1311
+    check :: fn(store: &OSPath) -> {
+        output :: Command.new(env.bin_exe("jet")).args(["check", "lib.jet"]).current_dir(&root).env("JET_STORE_DIR", store).env("NO_COLOR", "1").output().expect("run jet check")
+        String.from_utf8_lossy(&output.stderr).into_owned()
+    }
+    store :: root.join("store")
+    write(&lib, source("4"))
+    first :: check(&store)
+    assert(!first.contains("size must stay 4"), "{first}")
+    assert_eq(check(&store), first)
+    write(&lib, source("5"))
+    warm :: check(&store)
+    assert(warm.contains("size must stay 4"), "{warm}")
+    fresh :: check(&root.join("fresh-store"))
+    assert_eq(warm, fresh, "a stored constant must not outlive its inputs")
+}
+
+// Rust: tests/build_entry.rs:1338
+#Test("package_and_file_build_entries_are_rejected_as_one_unit") {
+    root :: project("package-entry-conflict")
+    write(&root.join("package.jet"), "name: \"package-entry-conflict\"\nversion: \"0.1.0\"\nfn build(b: BuildContext) -> BuildPlan { return b.plan() }\n")
+    entry :: root.join("main.jet")
+    write(&entry, "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\nfn run() -> {}\n")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) -> diagnostic.code == "E3520"))
+}
+
+// Rust: tests/build_entry.rs:1355
+#Test("package_build_entry_is_discovered_from_one_unimported_source_file") {
+    root :: project("package-source-entry")
+    write(&root.join("package.jet"), "name: \"package-source-entry\"\nversion: \"0.1.0\"\n")
+    write(&root.join("run.jet"), "fn run() -> {}\n")
+    fs.create_dir_all(root.join("tools")).unwrap()
+    write(&root.join("tools/build.jet"), "fn build(b: BuildContext) -> BuildPlan {\n    target :: b.add_library(\"discovered\", [\"run.jet\"], [])\n    return b.plan(target)\n}\n")
+    output :: compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts()).expect("an unimported package source may own fn build")
+    assert_eq(output.build.unwrap().plan.targets()[0].name, "discovered")
+}
+
+// Rust: tests/build_entry.rs:1374
+#Test("prepared_front_end_mismatch_fails_closed_after_source_and_policy_swap") {
+    root :: project("prepared-front-end-toctou")
+    entry :: root.join("run.jet")
+    write(&root.join("package.jet"), "name: \"prepared-front-end-toctou\"\nversion: \"0.1.0\"\n")
+    write(&entry, "fn run() -> {}\n")
+    options :: opts()
+    inputs :: FrontEndInputs.for_build(entry.to_str().unwrap(), &options)
+    prepared :: prepare_build_front_end(inputs).expect("prepare trusted front end")
+    write(&entry, "fn run() -> { this is hostile replacement source }\n")
+    changed := ^options
+    changed.profile = "debug"
+    errors :: compile_bundle_path_build_with_front_end(entry.to_str().unwrap(), changed, Some(prepared)).expect_err("a prepared input mismatch must not reload and continue")
+    assert_eq(errors.first().map(fn(diagnostic) -> diagnostic.code.as_str()), Some("E2105"))
+    assert(errors.first().is_some_and(fn(diagnostic) -> diagnostic.what.contains("prepared build front end does not match")), "mismatch must explain the fail-closed action")
+}
+
+// Rust: tests/build_entry.rs:1404
+#Test("imported_build_function_is_not_a_package_entry") {
+    root :: project("imported-build-entry")
+    write(&root.join("package.jet"), "name: \"imported-build-entry\"\nversion: \"0.1.0\"\n")
+    write(&root.join("run.jet"), "use \"./tools/build\" as build_tool\nfn run() -> {}\n")
+    fs.create_dir_all(root.join("tools")).unwrap()
+    write(&root.join("tools/build.jet"), "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n")
+    output :: compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts()).expect("an imported fn build is not a package build authority")
+    assert(output.build.is_none())
+}
+
+// Rust: tests/build_entry.rs:1426
+#Test("package_build_entry_duplicates_name_both_source_locations") {
+    root :: project("package-source-conflict")
+    write(&root.join("package.jet"), "name: \"package-source-conflict\"\nversion: \"0.1.0\"\n")
+    write(&root.join("run.jet"), "fn run() -> {}\n")
+    write(&root.join("a.jet"), "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n")
+    write(&root.join("b.jet"), "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n")
+    errors :: compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts()).expect_err("two package build entries must be rejected")
+    diagnostic :: errors.iter().find(fn(diagnostic) -> diagnostic.code == "E3520").expect("duplicate build entries use the registered conflict diagnostic")
+    assert(diagnostic.what.contains("a.jet:1"), "{diagnostic.what}")
+    assert(diagnostic.what.contains("b.jet:1"), "{diagnostic.what}")
+}
+
+// Rust: tests/build_entry.rs:1453
+#Test("package_build_discovery_stops_at_nested_package_boundary") {
+    root :: project("package-boundary")
+    write(&root.join("package.jet"), "name: \"package-boundary\"\nversion: \"0.1.0\"\n")
+    write(&root.join("run.jet"), "fn run() -> {}\n")
+    fs.create_dir_all(root.join("tools")).unwrap()
+    write(&root.join("tools/build.jet"), "fn build(b: BuildContext) -> BuildPlan {\n    target :: b.add_library(\"root\", [\"run.jet\"], [])\n    return b.plan(target)\n}\n")
+    fs.create_dir_all(root.join("packages/nested/tools")).unwrap()
+    write(&root.join("packages/nested/package.jet"), "name: \"nested\"\nversion: \"0.1.0\"\n")
+    write(&root.join("packages/nested/run.jet"), "fn run() -> {}\n")
+    write(&root.join("packages/nested/tools/build.jet"), "fn build(b: BuildContext) -> BuildPlan {\n    target :: b.add_library(\"nested\", [\"run.jet\"], [])\n    return b.plan(target)\n}\n")
+    output :: compile_bundle_path_build(root.join("run.jet").to_str().unwrap(), opts()).expect("nested package build entries are not part of the root package")
+    assert_eq(output.build.unwrap().plan.targets()[0].name, "root")
+}
+
+// Rust: tests/build_entry.rs:1482
+#Test("file_local_duplicate_build_entries_name_both_sites") {
+    root :: project("file-entry-conflict")
+    entry :: root.join("main.jet")
+    write(&entry, "fn build(b: BuildContext) -> BuildPlan { return b.plan() }\n\nfn build(b: BuildContext) -> BuildPlan { return b.plan() }\nfn run() -> {}\n")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err()
+    diagnostic :: errors.iter().find(fn(diagnostic) -> diagnostic.code == "E3520").expect("duplicate file-local build entries use the conflict diagnostic")
+    assert(diagnostic.what.contains("main.jet:1"), "{diagnostic.what}")
+    assert(diagnostic.what.contains("main.jet:3"), "{diagnostic.what}")
+}
+
+// Rust: tests/build_entry.rs:1508
+#Test("workspace_build_uses_batteries_for_missing_member_and_root_entries") {
+    root :: project("workspace-entry-fallback")
+    packages :: root.join("packages")
+    fs.create_dir_all(packages.join("a/tools")).unwrap()
+    fs.create_dir_all(packages.join("b")).unwrap()
+    write(&root.join("workspace.jet"), "module workspace { members: [\"./packages/a\", \"./packages/b\"] }\nfn run() -> { print(\"workspace\") }\n")
+    write(&packages.join("a/package.jet"), "name: \"a\"\nversion: \"0.1.0\"\n")
+    write(&packages.join("a/run.jet"), "fn run() -> {}\n")
+    write(&packages.join("a/tools/build.jet"), """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("a_generated") {
+        fn a_generated() -> String { "a" }
+    }
+    target :: b.add_library("a", ["run.jet", ".jet/generated/a/a_generated.jet"], [])
+    return b.plan(target)
+}
+""")
+    write(&packages.join("b/package.jet"), "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\n")
+    write(&packages.join("b/run.jet"), "fn run() -> {}\n")
+    output :: compile_programmable_build_opts(root.join("workspace.jet").to_str().unwrap(), &[], false, GateSet.allow(PolicyKey.Impure), false, false, false, None).expect("workspace build should fall back to batteries for missing fn build")
+    assert(packages.join("a/.jet/generated/a/a_generated.jet").is_file())
+    assert(output.rust.contains("workspace"))
+}
+
+// Rust: tests/build_entry.rs:1557
+#Test("production_build_bridge_imports_only_the_canonical_legacy_project_file") {
+    root :: project("legacy-import")
+    entry :: root.join("main.jet")
+    write(&root.join("Cargo.toml"), "[package]\nname = \"legacy-import\"\n")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("invoke one explicitly imported legacy project file") {
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
+        imported :: b.legacy(
+            "cargo", "cargo", ["Cargo.toml"], ["target/debug/legacy-import"],
+            ["cargo", "build", "--bin", "legacy-import"], ["Exec", "FS"],
+            tc, [], identity, "generic", [], [], [], [], [], "cached", "Cargo.toml"
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() -> {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), ci_opts()).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) -> diagnostic.what.contains("legacy build wrappers are disabled in CI")), "{errors.debug()}")
+}
+
+// Rust: tests/build_entry.rs:1609
+#Test("production_legacy_import_uses_project_contents_for_the_typed_action") {
+    root :: project("legacy-content")
+    entry :: root.join("main.jet")
+    write(&root.join("Cargo.toml"), "[package]\nname = \"legacy-content\"\nversion = \"1.2.3\"\n\n[[bin]]\nname = \"cli\"\n")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("inspect the canonical Cargo import") {
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
+        imported :: b.legacy(
+            "cargo", "cargo-import", ["Cargo.toml"], ["target/debug/cli"],
+            ["cargo", "build", "--bin", "cli"], ["Exec", "FS"],
+            tc, [], identity, "generic", [], [], [], [], [], "cached", "Cargo.toml"
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() -> {}
+""")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), inspect_opts()).unwrap()
+    build :: output.build.expect("legacy import should produce a build plan")
+    action :: build.plan.actions().iter().find(fn(action) -> action.name == "cargo-import").expect("imported action")
+    assert_eq(action.argv, ["cargo", "build", "--bin", "cli"])
+    assert_eq(action.inputs.iter().map(fn(path) -> path.as_str()).collect(), ["Cargo.toml"])
+    assert_eq(action.outputs.iter().map(fn(path) -> path.as_str()).collect(), ["target/debug/cli"])
+    assert_eq(action.labels.get("legacy.version").map(fn(value) -> value.as_str()), Some("1.2.3"))
+    assert_eq(action.labels.get("legacy.target").map(fn(value) -> value.as_str()), None)
+}
+
+// Rust: tests/build_entry.rs:1686
+#Test("production_legacy_import_rejects_unsupported_project_constructs") {
+    root :: project("legacy-unsupported")
+    entry :: root.join("main.jet")
+    write(&root.join("CMakeLists.txt"), "add_custom_command(OUTPUT generated COMMAND sh -c \"touch generated\")\n")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("reject unsupported CMake import") {
+        tc :: b.toolchain("native", "x86_64-linux")
+        identity :: b.signing("builder", "ci")
+        imported :: b.legacy(
+            "cmake", "cmake-import", ["CMakeLists.txt"], ["build/app"],
+            ["cmake", "--build", "build"], ["Exec", "FS"],
+            tc, [], identity, "generic", [], [], [], [], [], "cached", "CMakeLists.txt"
+        )
+        app :: b.add_executable("app", ["main.jet"], [imported])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() -> {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), inspect_opts()).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) -> diagnostic.what.contains("unsupported construct") && diagnostic.what.contains("add_custom_command")), "{errors.debug()}")
+}
+
+// Rust: tests/build_entry.rs:1739
+#Test("workspace_build_runs_members_in_dependency_order_then_its_own_plan") {
+    root :: project("workspace-entry")
+    packages :: root.join("packages")
+    fs.create_dir_all(packages.join("a")).unwrap()
+    fs.create_dir_all(packages.join("b")).unwrap()
+    write(&root.join("workspace.jet"), """
+module workspace {
+    members: ["./packages/a", "./packages/b"]
+}
+fn build(b: BuildContext) -> BuildPlan {
+    app :: b.add_executable("workspace", ["workspace.jet"], [])
+    return b.plan(app)
+}
+fn run() -> {}
+""")
+    write(&packages.join("a").join("package.jet"), """
+name: "a"
+version: "0.1.0"
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("a_generated") {
+        fn a_generated() -> String { "a" }
+    }
+    target :: b.add_library("a", ["run.jet", ".jet/generated/a/a_generated.jet"], [])
+    return b.plan(target)
+}
+""")
+    write(&packages.join("a").join("run.jet"), "fn run() -> {}\n")
+    write(&packages.join("b").join("package.jet"), "name: \"b\"\nversion: \"0.1.0\"\ndeps: { a: ../a }\n")
+    write(&packages.join("b").join("run.jet"), "fn build(b: BuildContext) -> BuildPlan {\n    b.generate(\"b_generated\") {\n        fn b_generated() -> String { \"b\" }\n    }\n    target :: b.add_library(\"b\", [\"run.jet\", \".jet/generated/b/b_generated.jet\"], [])\n    return b.plan(target)\n}\nfn run() -> {}\n")
+    output :: compile_programmable_build_opts(root.join("workspace.jet").to_str().unwrap(), &[], false, GateSet.allow(PolicyKey.Impure), false, false, false, None).expect("workspace and member build entries should share the Driver pipeline")
+    assert(root.join("packages/a/.jet/generated/a/a_generated.jet").is_file())
+    assert(root.join("packages/b/.jet/generated/b/b_generated.jet").is_file())
+    assert(output.rust.contains("workspace"))
+}

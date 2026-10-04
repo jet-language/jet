@@ -1,0 +1,286 @@
+use std.[fs, env]
+use std.process.Command
+use jet
+use jet.AST.[Item, Type, Measure, MeasureRule]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.MathDisplayParity.*
+// GATE #4494: real native/Web CLI execution and scratch IO.
+// Rust: tests/math_display_parity.rs:49
+#Test("builtin_math_family_has_named_field_parity_on_both_lenses") {
+    dir :: common.unique_tmp("jet_math_display_parity")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("family.jet")
+    fs.write(&file, SOURCE).unwrap()
+    run :: run_lens(&file, false)
+    build :: run_lens(&file, true)
+    assert(run.status.success(), "jet run failed:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert(build.status.success(), "jet run --release failed:\n{String.from_utf8_lossy(&build.stderr)}")
+    assert_eq(run.stdout, build.stdout, "builtin math family diverged between run and build lenses")
+    assert_eq(String.from_utf8(run.stdout).unwrap(), EXPECTED)
+    fs.remove_dir_all(dir).unwrap()
+}
+// Rust: tests/math_display_parity.rs:77
+#Test("user_display_reads_owned_receiver_on_every_native_tier") {
+    tir_support.assert_tiers_agree("display_read_receiver", include_str("Examples/features/traits/display_read_receiver.jet"), include_str("Examples/features/expected/traits/display_read_receiver.out"))
+}
+// Rust: tests/math_display_parity.rs:86
+#Test("user_display_rejects_consuming_and_edit_receivers_in_sema") {
+    for receiver in ["^self", "&self"] {
+        for inline in [false, true] {
+            method :: "fn display({receiver}) -> String {{ \"label\" }}"
+            source :: if inline { "struct Label {{\n    text: String\n    impl Display {{ {method} }}\n}}\nfn run() {{}}\n" } else { "struct Label {{ text: String }}\nimpl Label.Display {{ {method} }}\nfn run() {{}}\n" }
+            diagnostics :: match tir_support.compile_source("display_bad_receiver", &source) {
+                Ok(_) -> panic("Display accepted receiver {receiver} (inline={inline})")
+                Err(diagnostics) -> diagnostics
+            }
+            mismatch :: diagnostics.iter().find(fn(diagnostic) -> diagnostic.code == "E0907").unwrap_or_else(fn() -> panic("expected Display contract error: {diagnostics:#?}"))
+            assert_eq(mismatch.what, "`display` doesn't match the `Display` contract")
+            assert(mismatch.fix.contains("`fn display(self) -> String`"), "{mismatch:#?}")
+        }
+    }
+}
+// Rust: tests/math_display_parity.rs:110
+#Test("measured_values_propagate_first_order_uncertainty") {
+    source :: "\nuse core.math as math\n\nfn run() {\n    gravity :: measurement(9.8, uncertainty: 0.1)\n    time :: measurement(2.0, uncertainty: 0.05)\n    squared_time :: time * time\n    height :: measurement(0.5, uncertainty: 0.0) * gravity * squared_time\n    print(height)\n    print(math.sqrt(gravity))\n}\n"
+    tir_support.assert_tiers_agree("measurement_first_order_uncertainty", source, "19.6 ± 0.7212489168102787\n3.1304951684997055 ± 0.015971914124998498\n")
+}
+// Rust: tests/math_display_parity.rs:131
+#Test("measured_unit_scale_produces_measured_conversion") {
+    source :: "\nfn run() {\n    mass :: Kilogram.from_dalton_rounded(6.022140762e26dalton, .NearestEven, digits: 0) ?? panic(\"measured conversion\")\n    print(mass)\n}\n"
+    tir_support.assert_tiers_agree("measurement_unit_conversion", source, "1.0 ± 3.1315131919070317e-10\n")
+}
+// Rust: tests/math_display_parity.rs:146
+#Test("exact_default_numbers_match_all_tiers") {
+    source :: "\nfn run() {\n    third :: 1 / 3\n    print(third)\n    print(third * 3 == 1)\n    print(0.1 + 0.2 == 0.3)\n    fast :: Float{19.99}\n    print(fast)\n}\n"
+    tir_support.assert_tiers_agree("exact_default_numbers", source, "1/3\ntrue\ntrue\n19.99\n")
+}
+// Rust: tests/measure_symbolic_specialization.rs:36
+#Test("parser_preserves_the_generic_additive_measure_rule") {
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(GENERIC_JOIN_SOURCE)
+    assert(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}")
+    program :: jet.Parser.parse(&tokens).expect("generic join must parse")
+    function :: match &program.items[0] { Item.Func(function) -> function; _ -> panic("expected generic join function") }
+    left_len :: match &function.params[0].ty { Type.FixedList { len, .. } -> len; _ -> panic("expected fixed left list") }
+    assert(match left_len { Measure.Symbol { kind, name } -> kind == "length" && name == "N"; _ -> false })
+    return_len :: match function.return_type.as_ref().unwrap() { Type.FixedList { len, .. } -> len; _ -> panic("expected fixed return list") }
+    assert(match return_len { Measure.Combined { kind, rule: MeasureRule.Add, .. } -> kind == "length"; _ -> false })
+}
+// Rust: tests/measure_symbolic_specialization.rs:64
+#Test("sema_type_checks_generic_join_with_symbolic_additive_length") {
+    scratch :: common.Scratch.new("measure-generic-join-sema")
+    entry :: scratch.join("app.jet")
+    fs.write(&entry, GENERIC_JOIN_SOURCE).unwrap()
+    bundle := jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter(fn(diagnostic) -> diagnostic.severity == jet.Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "generic join rejected: {errors:?}")
+}
+// Rust: tests/measure_symbolic_specialization.rs:86
+#Test("aot_jit_and_interpreter_agree_on_additive_fixed_list_length") { tir_support.assert_tiers_agree("measure_fixed_join", FIXED_JOIN_SOURCE, "5\n5\n") }
+// Rust: tests/measure_symbolic_specialization.rs:91
+#Test("comptime_resolves_a_declared_measure_binding") {
+    source :: "\nCAPACITY :: prep { 3 }\n\nstruct Buffer {\n    values: [Int#capacity]\n}\n\nfn run() {\n    values :: [Int#3]{1, 2, 3}\n    print(values.len())\n}\n"
+    compiled :: jet.compile(source).expect("comptime measure must compile")
+    assert(compiled.rust.contains("[i64; 3]"))
+}
+// Rust: tests/measure_symbolic_specialization.rs:109
+#Test("repl_accepts_fixed_list_measure_use") {
+    transcript :: jet.REPL.run_transcript(["print([Int#3]{1, 2, 3}.len())"], None)
+    assert(transcript.contains("3"), "REPL rejected fixed-list measure use:\n{transcript}")
+}
+// Rust: tests/measure_symbolic_specialization.rs:118
+#Test("web_target_accepts_fixed_list_measure_use") {
+    scratch :: common.Scratch.new("measure-web")
+    entry :: scratch.join("app.jet")
+    fs.write(&entry, FIXED_JOIN_SOURCE).unwrap()
+    out :: Command.new(env.var_os("CARGO_BIN_EXE_jet").unwrap()).args(["check", entry.to_str().unwrap(), "--target", "web"]).env("NO_COLOR", "1").output().expect("spawn jet")
+    assert(out.status.success(), "web check failed:\nstdout={String.from_utf8_lossy(&out.stdout)}\nstderr={String.from_utf8_lossy(&out.stderr)}")
+}
+// Rust: tests/measure_symbolic_specialization.rs:136
+#Test("symbolic_fixed_length_resolves_at_module_specialization") {
+    source :: "\nmodule buffer<T>(capacity: Int) {\n    pub struct Data {\n        items: [T#capacity]\n    }\n}\n\nmodule three :: buffer<Int>(3)\n\nfn run() {}\n"
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(source)
+    assert(lexer_diagnostics.is_empty(), "lex: {lexer_diagnostics:?}")
+    program :: jet.Parser.parse(&tokens).expect("generic module must parse")
+    template :: match &program.items[0] { Item.GenericModule(template) -> template; _ -> panic("expected generic module template") }
+    data :: match &template.body[0] { Item.Struct(data) -> data; _ -> panic("expected fixed-list struct") }
+    len :: match &data.fields[0].ty { Type.FixedList { len, .. } -> len; _ -> panic("expected fixed-list field") }
+    assert(match len { Measure.Symbol { kind, name } -> kind == "length" && name == "capacity"; _ -> false })
+    assert_eq(len.symbol_name(), Some("capacity"))
+    assert_ne(len.literal_value(), Some(0))
+    compiled :: jet.compile(source).expect("specialized fixed length must compile")
+    assert(compiled.rust.contains("[i64; 3]"))
+}
+// Rust: tests/measure_symbolic_specialization.rs:173
+#Test("computed_fixed_length_is_rejected_at_the_measure_boundary") {
+    source :: "struct Bad { values: [Int#missing] }\nfn run() {}\n"
+    diagnostics :: jet.compile(source).expect_err("unknown measure must be rejected")
+    assert(diagnostics.iter().any(fn(diagnostic) -> diagnostic.code == "E0963" && diagnostic.what.contains("fixed-size list length") && diagnostic.why.contains("declared constant or module value parameter")))
+}
+// Rust: tests/measurement_sqrt_zero.rs:7
+#Test("exact_zero_sqrt_keeps_zero_uncertainty") {
+    tir_support.assert_tiers_agree("measurement_sqrt_zero", "\nuse core.math as math\n\nfn run() {\n    zero :: measurement(0.0, uncertainty: 0.0)\n    print(math.sqrt(zero))\n}\n", "0.0 ± 0.0\n")
+}
+// Rust: tests/measurement_tiers.rs:48
+#Test("measurement_parser_accepts_the_canonical_constructor") {
+    (tokens, diagnostics) :: jet.Lexer.lex(MEASUREMENT_SOURCE)
+    assert(diagnostics.is_empty(), "lexer rejected measurement: {diagnostics:?}")
+    assert(jet.Parser.parse(&tokens).is_ok(), "parser rejected the canonical measurement constructor")
+}
+// Rust: tests/measurement_tiers.rs:61
+#Test("measurement_sema_accepts_the_knowledge_grade") {
+    result :: jet.compile(MEASUREMENT_SOURCE)
+    assert(result.is_ok(), "sema rejected measured values: {result:#?}")
+}
+// Rust: tests/measurement_tiers.rs:67
+#Test("measurement_tir_keeps_the_carrier_and_operation") {
+    compiled :: jet.compile(MEASUREMENT_SOURCE).expect("measurement source must reach TIR")
+    assert(compiled.rust.contains("JetMeasurement"))
+    assert(compiled.rust.contains("jet_std::JetMeasurement::new") || compiled.rust.contains(".add("), "TIR lost the measured carrier operation:\n{compiled.rust}")
+}
+// Rust: tests/measurement_tiers.rs:78
+#Test("measurement_aot_matches_the_known_result") {
+    if !tir_support.have_rustc() { return }
+    (code, stdout, stderr) :: tir_support.build_and_run_full("measurement_tier_aot", "measurement_tier_aot", MEASUREMENT_SOURCE)
+    assert_eq(code, 0, "AOT failed: {stderr}")
+    assert_eq(stdout, MEASUREMENT_EXPECTED)
+}
+// Rust: tests/measurement_tiers.rs:89
+#Test("measurement_default_jit_matches_the_known_result") {
+    (code, stdout, stderr) :: tir_support.jit_run("measurement_tier_jit", MEASUREMENT_SOURCE)
+    assert_eq(code, 0, "default JIT failed: {stderr}")
+    assert_eq(stdout, MEASUREMENT_EXPECTED)
+}
+// Rust: tests/measurement_tiers.rs:96
+#Test("measurement_interpreter_matches_the_known_result") {
+    (code, stdout, stderr) :: tir_support.interpreter_run("measurement_tier_interpreter", MEASUREMENT_SOURCE)
+    assert_eq(code, 0, "interpreter failed: {stderr}")
+    assert_eq(stdout, MEASUREMENT_EXPECTED)
+}
+// Rust: tests/measurement_tiers.rs:104
+#Test("measurement_comptime_matches_the_known_result") {
+    if !tir_support.have_rustc() { return }
+    source :: "\nFOLDED :: prep { measurement(12.0, uncertainty: 0.1) + measurement(3.0, uncertainty: 0.2) }\n\nfn run() {\n    print(FOLDED)\n}\n"
+    (code, stdout, stderr) :: tir_support.build_and_run_full("measurement_tier_comptime", "measurement_tier_comptime", source)
+    assert_eq(code, 0, "comptime-backed AOT failed: {stderr}")
+    assert_eq(stdout, MEASUREMENT_EXPECTED)
+}
+// Rust: tests/measurement_tiers.rs:125
+#Test("measurement_repl_matches_the_known_result") {
+    transcript :: jet.REPL.run_transcript(["measurement(12.0, uncertainty: 0.1)", "measurement(12.0, uncertainty: 0.1) + measurement(3.0, uncertainty: 0.2)"], None)
+    assert(!transcript.contains("error ["), "REPL rejected measurement: {transcript}")
+    expected := MEASUREMENT_EXPECTED.trim_end() // #4303
+    assert(transcript.contains(expected), "REPL disagreed with the execution tiers: {transcript}")
+}
+// Rust: tests/measurement_tiers.rs:144
+#Test("measurement_web_js_and_wasm_use_the_same_kernel") {
+    output :: jet.compile_web_with_path(&web_source(), "tests/fixtures/measurement_tiers_web.jet").unwrap_or_else(fn(diagnostics) -> panic("web measurement rejected: {diagnostics:#?}"))
+    web :: output.web.expect("web target must produce artifacts")
+    assert(web.js_app.contains("jet_measurement_kernel_add"))
+    assert(web.js_app.contains("jet_measurement_show"))
+    assert(web.wasm_rust.contains("jet_measurement_kernel_add"))
+    assert(web.wasm_rust.contains("JetMeasurement"))
+    if !have_tool("rustc") || !have_tool("node") || !have_wasm_target() { eprintln("note: skipping measured-value web execution (need rustc, wasm32 target, and node)"); return }
+    scratch :: common.Scratch.new("measurement-web")
+    fs.write(scratch.join("app.js"), &web.js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap()
+    fs.write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap()
+    wasm :: Command.new("rustc").current_dir(&scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("spawn web rustc")
+    assert(wasm.status.success(), "rustc rejected measured-value web output: {String.from_utf8_lossy(&wasm.stderr)}")
+    js :: Command.new("node").current_dir(&scratch.path).arg("app.js").output().expect("spawn web JS app")
+    assert(js.status.success(), "node rejected measured-value web output: stdout={String.from_utf8_lossy(&js.stdout)} stderr={String.from_utf8_lossy(&js.stderr)}")
+    assert_eq(String.from_utf8_lossy(&js.stdout), MEASUREMENT_EXPECTED)
+    fs.write(scratch.join("wasm_harness.mjs"), "\nconst { instantiateWasm, takeWasmError } = await import(\"./jet_dom_runtime.js\");\nconst instance = await instantiateWasm(\"./app.wasm\");\ninstance.exports.jet_export_run();\nif (takeWasmError(instance.exports)?.tag !== \"Ok\") throw new Error(\"unexpected Wasm outcome\");\n").unwrap()
+    wasm_run :: Command.new("node").current_dir(&scratch.path).arg("wasm_harness.mjs").output().expect("spawn web Wasm harness")
+    assert(wasm_run.status.success(), "node rejected measured-value Wasm output: stdout={String.from_utf8_lossy(&wasm_run.stdout)} stderr={String.from_utf8_lossy(&wasm_run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&wasm_run.stdout), MEASUREMENT_EXPECTED)
+}
+// Rust: tests/mir_constant_identity.rs:304
+#Test("aliased_single_member_import_uses_the_grouped_member_resolution") {
+    scratch :: common.Scratch.new("mir_constant_identity_member_import")
+    tir_support.write_test_package(&scratch.path, tir_support.TIR_TEST_PACKAGE)
+    fs.write(scratch.path.join("main.jet"), "use alpha.value as dotted\nuse alpha.[value as grouped]\nmodule alpha\nfn run() { print(dotted()); print(grouped()) }\n").unwrap()
+    fs.write(scratch.path.join("alpha.jet"), "pub fn value() -> Int { 31 }\n").unwrap()
+    diagnostics :: jet.run_compiler_work(fn() -> {
+        entry :: scratch.path.join("main.jet")
+        bundle := jet.Loader.load_entry(entry.to_str().unwrap()).expect("both member spellings should load their declared module")
+        jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    })
+    assert(diagnostics.iter().all(fn(diagnostic) -> diagnostic.severity != jet.Diagnostics.Severity.Error), "member imports must resolve to public functions: {diagnostics:#?}")
+    fs.write(scratch.path.join("alpha.jet"), "fn value() -> Int { 31 }\n").unwrap()
+    private_diagnostics :: jet.run_compiler_work(fn() -> {
+        entry :: scratch.path.join("main.jet")
+        bundle := jet.Loader.load_entry(entry.to_str().unwrap()).expect("a private member still belongs to a valid module")
+        jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    })
+    assert(private_diagnostics.iter().any(fn(diagnostic) -> diagnostic.code == "E0609"), "private member import must be rejected: {private_diagnostics:#?}")
+    fs.write(scratch.path.join("alpha.jet"), "pub fn value() -> Int { 31 }\n").unwrap()
+    fs.write(scratch.path.join("main.jet"), "use renamed.[value as grouped]\nuse renamed.value as dotted\nuse \"alpha\" as renamed\nfn run() { print(dotted()); print(grouped()) }\n").unwrap()
+    aliased_diagnostics :: jet.run_compiler_work(fn() -> {
+        entry :: scratch.path.join("main.jet")
+        bundle := jet.Loader.load_entry(entry.to_str().unwrap()).expect("a named file import should bind a member-import prefix")
+        jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    })
+    assert(aliased_diagnostics.iter().all(fn(diagnostic) -> diagnostic.severity != jet.Diagnostics.Severity.Error), "aliased file imports must share member resolution: {aliased_diagnostics:#?}")
+}
+// Rust: tests/mir_constant_identity.rs:369
+#Test("aliased_dotted_module_import_retains_module_precedence_and_ambiguity") {
+    scratch :: common.Scratch.new("mir_constant_identity_module_import")
+    tir_support.write_test_package(&scratch.path, tir_support.TIR_TEST_PACKAGE)
+    fs.write(scratch.path.join("main.jet"), "use alpha.value as selected\nuse alpha.tools.value as deep\nmodule alpha\nfn run() { print(selected.answer()); print(deep.answer()) }\n").unwrap()
+    fs.write(scratch.path.join("alpha.jet"), "pub fn value() -> Int { 31 }\n").unwrap()
+    fs.write(scratch.path.join("alpha.value.jet"), "pub fn answer() -> Int { 42 }\n").unwrap()
+    fs.write(scratch.path.join("alpha.tools.value.jet"), "pub fn answer() -> Int { 43 }\n").unwrap()
+    entry :: scratch.path.join("main.jet")
+    bundle := jet.Loader.load_entry(entry.to_str().unwrap()).expect("a real dotted module must take precedence over a same-named member")
+    imported :: &bundle.modules[bundle.entry].imports[0]
+    assert(match &imported.kind { jet.AST.ImportKind.Module(path, _) -> path == "alpha.value"; _ -> false }, "a real module path must retain its namespace: {imported:?}")
+    deep_import :: &bundle.modules[bundle.entry].imports[1]
+    assert(match &deep_import.kind { jet.AST.ImportKind.Module(path, _) -> path == "alpha.tools.value"; _ -> false }, "a deep module path must retain its namespace: {deep_import:?}")
+    diagnostics :: jet.run_compiler_work(fn() -> jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run))
+    assert(diagnostics.iter().all(fn(diagnostic) -> diagnostic.severity != jet.Diagnostics.Severity.Error), "a real dotted module must resolve: {diagnostics:#?}")
+    fs.create_dir_all(scratch.path.join("other")).unwrap()
+    fs.write(scratch.path.join("other/alpha.value.jet"), "pub fn answer() -> Int { 7 }\n").unwrap()
+    errors :: jet.Loader.load_entry(entry.to_str().unwrap()).expect_err("ambiguous real modules must not turn into member imports")
+    assert(errors.iter().any(fn(diagnostic) -> diagnostic.code == "E0606"), "ambiguous dotted modules must retain E0606: {errors:#?}")
+}
+// Rust: tests/mir_constant_identity.rs:425
+#Test("checked_private_constant_identity_survives_cross_module_calls_imports_and_shadows") {
+    assert_fixture_constants_reach_mir_globals()
+    assert_private_module_constant_is_rejected()
+    (aot_code, aot_stdout, aot_stderr) :: tir_support.build_release_and_run_multi("mir_constant_identity_aot", "main.jet", FILES)
+    assert_eq(aot_code, 0, "AOT fixture failed: {aot_stderr}")
+    assert_eq(aot_stdout, MIR_EXPECTED)
+    assert(aot_stderr.is_empty(), "valid AOT program wrote to stderr: {aot_stderr}")
+    (native_code, native_stdout, trace) :: tir_support.run_default_multi("mir_constant_identity_jit", "main.jet", FILES)
+    assert_eq(native_code, 0, "default JIT fixture failed: {trace}")
+    assert_eq(native_stdout, MIR_EXPECTED)
+    assert(trace.lines().any(fn(line) -> {
+        fields := line.split_whitespace()
+        fields.next() == Some(".::main.jet::run") && fields.next() == Some("tier1") && fields.next() == Some("native")
+    }), "default run did not execute the entry natively: {trace}")
+    assert(!trace.contains("tier0 interp") && !trace.contains("deopt"), "default run fell back from native execution: {trace}")
+    (jit_code, jit_stdout, jit_stderr) :: run_without_tier_trace("mir_constant_identity_jit_stderr", [])
+    assert_eq(jit_code, 0, "default JIT fixture failed: {jit_stderr}")
+    assert_eq(jit_stdout, MIR_EXPECTED)
+    assert(jit_stderr.is_empty(), "valid JIT program wrote to stderr: {jit_stderr}")
+    (interp_code, interp_stdout, interp_stderr) :: run_without_tier_trace("mir_constant_identity_interpreter", ["--interpret"])
+    assert_eq(interp_code, 0, "interpreter fixture failed: {interp_stderr}")
+    assert_eq(interp_stdout, MIR_EXPECTED)
+    assert(interp_stderr.is_empty(), "valid interpreter program wrote to stderr: {interp_stderr}")
+    assert_web_output("mir_constant_identity_web")
+}
+// Rust: tests/mir_constant_identity.rs:510
+#Test("immutable_bindings_over_pure_work_fold_to_literals") {
+    scratch :: common.Scratch.new("mir_pure_fold")
+    fs.write(scratch.path.join("main.jet"), PURE_FOLD_SOURCE).unwrap()
+    run_cli :: fn(args: &[String]) -> {
+        output :: Command.new(env.var_os("CARGO_BIN_EXE_jet").unwrap()).args(args).arg("main.jet").current_dir(&scratch.path).env("NO_COLOR", "1").env("JET_STORE_DIR", scratch.path.join("cache")).env("JETPACK_ROOT", scratch.path.join("jetpack")).output().expect("jet should launch")
+        assert(output.status.success(), "jet {args:?} failed: {String.from_utf8_lossy(&output.stderr)}")
+        String.from_utf8_lossy(&output.stdout).into_owned()
+    }
+    rust :: run_cli(["emit", "--rust"])
+    for literal in ["JetInt::from_i64(144)", "\"hello jet\".to_string()", "JetInt::from_i64(15)", "JetInt::from_i64(14)"] { assert(rust.contains(literal), "a pure immutable binding did not fold to `{literal}`") }
+    assert(!rust.contains("jet_list_reduce(__jet_v_"), "the pure reduce over a literal list still runs at run time")
+    for mode in [["run"], ["run", "--interpret"]] { assert_eq(run_cli(mode), "noisy\n144 hello jet 15 14 5\n", "jet {mode:?}") }
+}

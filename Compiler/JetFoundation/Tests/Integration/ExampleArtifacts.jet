@@ -1,0 +1,32 @@
+// Rust: tests/example_artifacts.rs:1
+// Keep generated build output out of Examples/.
+use std.fs
+// Rust: tests/example_artifacts.rs:8
+fn artifact_paths(path: &OSPath, found: &[OSPath]) -> {
+    // GATE #4494: actual directory entries and permissions.
+    entries :: fs.read_dir(path).unwrap_or_else((error) -> panic("cannot read examples directory {}: {error}", path.display()))
+    for entry_result in entries {
+        entry :: entry_result.unwrap()
+        child :: entry.path()
+        file_type :: entry.file_type().unwrap()
+        if file_type.is_dir() {
+            if entry.file_name().to_str() == Some("build") { found.push(^child) }
+            else { artifact_paths(&child, found) }
+            continue
+        }
+        if child.extension().and_then((extension) -> extension.to_str()) == Some("rs") || is_executable(&child) {
+            found.push(^child)
+        }
+    }
+}
+// Rust: tests/example_artifacts.rs:33
+// Rust: tests/example_artifacts.rs:42
+fn is_executable(path: &OSPath) -> Bool {
+    // GATE #4483: selected family determines the permission/extension branch.
+    if core.sys.target.selected_family() == "unix" {
+        // GATE #4494: native metadata permission mode.
+        return fs.metadata(path).map((metadata) -> metadata.permissions().mode() & 0o111 != 0).unwrap_or(false)
+    }
+    extension :: path.extension().and_then((value) -> value.to_str())
+    extension == Some("exe") || extension == Some("dll") || extension == Some("com")
+}

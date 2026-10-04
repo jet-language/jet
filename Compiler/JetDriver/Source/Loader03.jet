@@ -1,1804 +1,758 @@
-// PORT-PENDING 2041 crates-jet-driver-src-loader-slice-3601: crates/jet-driver/src/Loader.rs:3601-5400
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         "{}-{}-{}",
-//RS         dep_name, package.version, fingerprint
-//RS     )))
-//RS }
-//RS 
-//RS fn safe_store_component(value: &str) -> bool {
-//RS     !value.is_empty()
-//RS         && value != "."
-//RS         && value != ".."
-//RS         && !value.contains(['/', '\\', ':'])
-//RS         && !value.chars().any(char::is_control)
-//RS         && matches!(
-//RS             Path::new(value).components().next(),
-//RS             Some(std::path::Component::Normal(_))
-//RS         )
-//RS         && Path::new(value).components().nth(1).is_none()
-//RS }
-//RS 
-//RS fn locked_dependency_diagnostic(dep_name: &str, detail: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1204",
-//RS         format!("locked dependency `{dep_name}` failed source verification"),
-//RS         detail.to_string(),
-//RS         "run `jet fetch` to recreate the lock from the verified dependency source".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn record_locked_source_identity(
-//RS     resolved_sources: &mut HashMap<String, String>,
-//RS     dep_name: &str,
-//RS     identity: String,
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     if let Some(previous) = resolved_sources.get(dep_name) {
-//RS         if previous != &identity {
-//RS             return Err(vec![locked_dependency_diagnostic(
-//RS                 dep_name,
-//RS                 "the same dependency name resolves to multiple locked source identities",
-//RS             )]);
-//RS         }
-//RS     } else {
-//RS         resolved_sources.insert(dep_name.to_string(), identity);
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn path_dependency_escape_diagnostic(
-//RS     dep_name: &str,
-//RS     path: &str,
-//RS     package_root: &Path,
-//RS ) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1206",
-//RS         format!("path dependency `{dep_name}` escapes its parent package"),
-//RS         format!(
-//RS             "the path `{path}` resolves outside the declaring package directory `{}`",
-//RS             package_root.display()
-//RS         ),
-//RS         "use a relative path below the declaring package directory".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Name the package/module authority from the canonical `run.jet` entry when
-//RS /// one exists. A retired `main.jet` never becomes the authority fallback.
-//RS pub fn authority_name_for_entry(entry: &Path) -> Result<String, Diagnostic> {
-//RS     let parent = entry.parent().unwrap_or_else(|| Path::new("."));
-//RS     let resolver = AuthorityResolver::open(parent).map_err(|error| error.diagnostic())?;
-//RS     let authority = match resolver.checked_file(Path::new(Syntax::DEFAULT_ENTRY_FILE)) {
-//RS         Ok(run) => {
-//RS             resolver
-//RS                 .revalidate_file(&run)
-//RS                 .map_err(|error| error.diagnostic())?;
-//RS             run.path
-//RS         }
-//RS         Err(error) if error.is_missing() => entry.to_path_buf(),
-//RS         Err(error) => return Err(error.diagnostic()),
-//RS     };
-//RS     let legacy_stem = Syntax::LEGACY_ENTRY_FILE
-//RS         .strip_suffix(".jet")
-//RS         .unwrap_or(Syntax::LEGACY_ENTRY_FILE);
-//RS     Ok(authority
-//RS         .file_stem()
-//RS         .and_then(|name| name.to_str())
-//RS         .filter(|name| !name.is_empty() && *name != legacy_stem)
-//RS         .unwrap_or("app")
-//RS         .to_string())
-//RS }
-//RS 
-//RS /// Walk upward from `start` to find the nearest workspace declaration and
-//RS /// preserve malformed or ambiguous declaration diagnostics.
-//RS ///
-//RS /// Workspace roots are independent project boundaries. In particular, a
-//RS /// workspace nested below a package root must own file and module imports
-//RS /// inside that workspace instead of inheriting the package's wider tree.
-//RS fn find_workspace_root_with_error(
-//RS     start: &Path,
-//RS ) -> Result<Option<PathBuf>, (PathBuf, AuthorityError)> {
-//RS     let mut dir = AuthorityResolver::authority_walk_root(start)
-//RS         .map_err(|error| (start.to_path_buf(), error))?;
-//RS     loop {
-//RS         let resolver = AuthorityResolver::open_for_authority_walk(&dir)
-//RS             .map_err(|error| (dir.clone(), error))?;
-//RS         if let Some(resolver) = resolver {
-//RS             match resolver.resolve_workspace_source() {
-//RS                 Ok(Some(_)) => return Ok(Some(dir)),
-//RS                 Ok(None) => {}
-//RS                 Err(error) => return Err((dir.clone(), error)),
-//RS             }
-//RS         }
-//RS         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
-//RS             return Ok(None);
-//RS         };
-//RS         dir = parent;
-//RS     }
-//RS }
-//RS 
-//RS pub fn find_workspace_root_checked(start: &Path) -> Result<Option<PathBuf>, Diagnostic> {
-//RS     find_workspace_root_with_error(start)
-//RS         .map_err(|(_, error)| error.workspace_diagnostic())
-//RS }
-//RS 
-//RS /// D-JPK-FILENAME2=B (A2): walk upward the same way [`find_manifest_root`]
-//RS /// does, but look for a *retired* manifest filename instead of a Package root.
-//RS /// Stops (returns `None`) the moment a directory has `pkg.jet` — nothing
-//RS /// stale to report once the real manifest is found. Used to upgrade a plain
-//RS /// "no pkg.jet found" message into the E1226 teaching diagnostic when the
-//RS /// user's project still carries an old filename.
-//RS pub fn find_stale_manifest_name(start: &Path) -> Option<(PathBuf, &'static str)> {
-//RS     let mut dir = AuthorityResolver::authority_walk_root(start).ok()?;
-//RS     loop {
-//RS         let resolver = AuthorityResolver::open_for_authority_walk(&dir).ok()?;
-//RS         let Some(resolver) = resolver else {
-//RS             let parent = AuthorityResolver::authority_walk_parent(&dir)?;
-//RS             dir = parent;
-//RS             continue;
-//RS         };
-//RS         match resolver.checked_manifest(Path::new(".")) {
-//RS             Ok(_) => return None,
-//RS             Err(error) if error.is_missing() => {}
-//RS             Err(jet_pkg_model::Authority::AuthorityError::RetiredManifest(_)) => {
-//RS                 return Some((dir, Syntax::PAYLOAD_FILE));
-//RS             }
-//RS             Err(_) => return None,
-//RS         }
-//RS         for name in Syntax::STALE_MANIFEST_NAMES {
-//RS             match resolver.checked_file(Path::new(name)) {
-//RS                 Ok(file) => {
-//RS                     resolver.revalidate_file(&file).ok()?;
-//RS                     return Some((dir, name));
-//RS                 }
-//RS                 Err(error) if error.is_missing() => {}
-//RS                 Err(_) => return None,
-//RS             }
-//RS         }
-//RS         match resolver.resolve_workspace_source() {
-//RS             Ok(Some(_)) => return None,
-//RS             Ok(None) => {}
-//RS             Err(_) => return None,
-//RS         }
-//RS         let Some(parent) = AuthorityResolver::authority_walk_parent(&dir) else {
-//RS             return None;
-//RS         };
-//RS         dir = parent;
-//RS     }
-//RS }
-//RS 
-//RS /// Build the shared E1226 diagnostic for a retired manifest filename.
-//RS pub fn stale_manifest_name_diagnostic(start: &Path) -> Option<(PathBuf, Diagnostic)> {
-//RS     let (dir, stale) = find_stale_manifest_name(start)?;
-//RS     let path = dir.join(stale);
-//RS     Some((
-//RS         path.clone(),
-//RS         Diagnostic::error(
-//RS             "E1226",
-//RS             format!(
-//RS                 "`{stale}` is not the package manifest name — Jet reads `{}`",
-//RS                 Syntax::PACKAGE_FILE
-//RS             ),
-//RS             "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read".to_string(),
-//RS             format!(
-//RS                 "rename `{}` to `{}`",
-//RS                 path.display(),
-//RS                 dir.join(Syntax::PACKAGE_FILE).display()
-//RS             ),
-//RS             None,
-//RS         ),
-//RS     ))
-//RS }
-//RS 
-//RS /// Render the E1226 `old-manifest-filename` teaching diagnostic for `dir`
-//RS /// carrying the retired manifest name `stale` — or `None` when `start`
-//RS /// carries no retired name (the caller keeps its own "no pkg.jet found"
-//RS /// message in that case).
-//RS pub fn stale_manifest_name_message(start: &Path) -> Option<String> {
-//RS     let (_, diagnostic) = stale_manifest_name_diagnostic(start)?;
-//RS     Some(diagnostic.render("", ""))
-//RS }
-//RS 
-//RS /// Dry-resolve path dependencies to catch version conflicts (E1201).
-//RS /// Does not fetch, store, or link anything — only loads manifests.
-//RS fn dry_resolve_path_deps(mf: &Manifest::Manifest, project_root: &Path) -> Result<(), Diagnostic> {
-//RS     // pkg_name → (version, blame_chain)
-//RS     let mut seen: std::collections::HashMap<String, (String, Vec<String>)> =
-//RS         std::collections::HashMap::new();
-//RS     let root_name = mf.package.name.clone();
-//RS     // D-MOD-CYCLE1=A: sibling packages (Compiler/JetLexer -> ../JetFoundation)
-//RS     // share dependencies. A transitive path may leave its declaring package
-//RS     // only to reach a directory the root package itself names as a path
-//RS     // dependency, or a directory beside one the root names outside its own
-//RS     // tree (`Compiler/JetSema -> ../JetParser -> ../JetLexer`): the root has
-//RS     // already opened that sibling directory, so nothing beyond the root's own
-//RS     // declarations is ever reached.
-//RS     let canonical_root = std::fs::canonicalize(project_root).ok();
-//RS     let mut root_reach = RootPathReach::default();
-//RS     for spec in mf.dependencies.values() {
-//RS         let Manifest::DepSpec::Path { path } = spec else {
-//RS             continue;
-//RS         };
-//RS         if Path::new(path).is_absolute() {
-//RS             continue;
-//RS         }
-//RS         let Ok(resolved) = std::fs::canonicalize(project_root.join(path)) else {
-//RS             continue;
-//RS         };
-//RS         let outside_root = canonical_root
-//RS             .as_ref()
-//RS             .is_some_and(|root| !resolved.starts_with(root));
-//RS         if outside_root {
-//RS             if let Some(parent) = resolved.parent() {
-//RS                 root_reach.sibling_dirs.push(parent.to_path_buf());
-//RS             }
-//RS         }
-//RS         root_reach.declared.push(resolved);
-//RS     }
-//RS     dry_resolve_recursive(mf, project_root, &[root_name], &mut seen, false, &root_reach)
-//RS }
-//RS 
-//RS /// The directories a root package's own path dependencies open to its
-//RS /// transitive path dependencies (D-MOD-CYCLE1=A sibling packages).
-//RS #[derive(Default)]
-//RS struct RootPathReach {
-//RS     /// Every relative path dependency the root declares, canonicalized.
-//RS     declared: Vec<PathBuf>,
-//RS     /// The parent directory of each declared dependency outside the root.
-//RS     sibling_dirs: Vec<PathBuf>,
-//RS }
-//RS 
-//RS impl RootPathReach {
-//RS     fn contains(&self, resolved: &Path) -> bool {
-//RS         self.declared.iter().any(|declared| declared == resolved)
-//RS             || self.sibling_dirs.iter().any(|dir| resolved.starts_with(dir))
-//RS     }
-//RS }
-//RS 
-//RS fn dry_resolve_recursive(
-//RS     mf: &Manifest::Manifest,
-//RS     pkg_dir: &Path,
-//RS     chain: &[String],
-//RS     seen: &mut std::collections::HashMap<String, (String, Vec<String>)>,
-//RS     enforce_path_boundary: bool,
-//RS     root_reach: &RootPathReach,
-//RS ) -> Result<(), Diagnostic> {
-//RS     for (dep_alias, spec) in &mf.dependencies {
-//RS         let Manifest::DepSpec::Path { path } = spec else {
-//RS             continue; // only path deps are resolved dry; git deps need fetch
-//RS         };
-//RS         let dep_path = normalize_path(&pkg_dir.join(path));
-//RS         let declared_by_root = !Path::new(path).is_absolute()
-//RS             && std::fs::canonicalize(&dep_path)
-//RS                 .is_ok_and(|resolved| root_reach.contains(&resolved));
-//RS         let enforce_path_boundary = enforce_path_boundary && !declared_by_root;
-//RS         if enforce_path_boundary
-//RS             && (Path::new(path).is_absolute() || !dep_path.starts_with(pkg_dir))
-//RS         {
-//RS             return Err(path_dependency_escape_diagnostic(dep_alias, path, pkg_dir));
-//RS         }
-//RS         if enforce_path_boundary {
-//RS             let parent = std::fs::canonicalize(pkg_dir).map_err(|error| {
-//RS                 locked_dependency_diagnostic(
-//RS                     dep_alias,
-//RS                     &format!("could not resolve the declaring package root: {error}"),
-//RS                 )
-//RS             })?;
-//RS             if let Ok(resolved) = std::fs::canonicalize(&dep_path) {
-//RS                 if !resolved.starts_with(parent) {
-//RS                     return Err(path_dependency_escape_diagnostic(dep_alias, path, pkg_dir));
-//RS                 }
-//RS             }
-//RS         }
-//RS         // Load the dep's canonical package source to get its identity/version.
-//RS         let dep_facts = match package_facts_for_root(&dep_path) {
-//RS             Ok(Some(facts)) => facts,
-//RS             Ok(None) => continue, // missing package source is caught later
-//RS             Err(mut diagnostics) => {
-//RS                 return Err(diagnostics.pop().unwrap_or_else(|| {
-//RS                     Diagnostic::error(
-//RS                         "E1206",
-//RS                         format!("package dependency `{dep_alias}` is invalid"),
-//RS                         "the dependency package facts could not be loaded".to_string(),
-//RS                         "restore the dependency package source and retry".to_string(),
-//RS                         None,
-//RS                     )
-//RS                 }))
-//RS             }
-//RS         };
-//RS         let dep_mf = crate::Package::to_manifest(&dep_facts, "")?;
-//RS         let dep_pkg_name = dep_mf.package.name.clone();
-//RS         let dep_version = dep_mf.package.version.clone();
-//RS 
-//RS         let mut child_chain: Vec<String> = chain.to_vec();
-//RS         child_chain.push(dep_alias.clone());
-//RS 
-//RS         if let Some((prev_ver, prev_chain)) = seen.get(&dep_pkg_name).cloned() {
-//RS             if prev_ver != dep_version {
-//RS                 return Err(crate::Lock::e1201(
-//RS                     &dep_pkg_name,
-//RS                     &prev_ver,
-//RS                     &prev_chain,
-//RS                     &dep_version,
-//RS                     &child_chain,
-//RS                 ));
-//RS             }
-//RS         } else {
-//RS             seen.insert(dep_pkg_name.clone(), (dep_version, child_chain.clone()));
-//RS             // Recurse into transitive deps.
-//RS             dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true, root_reach)?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS #[derive(Clone)]
-//RS struct DependencyDir {
-//RS     manifest_root: PathBuf,
-//RS     source_root: PathBuf,
-//RS     authority: AuthorityResolver,
-//RS     boundary_policy: Option<ImportBoundaryPolicy>,
-//RS     auto_derive_default: Option<bool>,
-//RS     /// True when the root manifest declares this package. A transitive
-//RS     /// dependency is visible only to the packages whose manifests declare it.
-//RS     direct: bool,
-//RS     /// The package names this dependency's own manifest declares.
-//RS     deps: HashSet<String>,
-//RS }
-//RS 
-//RS fn dependency_authority_for_path<'a>(
-//RS     path: &Path,
-//RS     dependencies: &'a HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &'a PkgResolution,
-//RS ) -> Option<&'a AuthorityResolver> {
-//RS     dependencies
-//RS         .values()
-//RS         .map(|dependency| &dependency.authority)
-//RS         .chain(pkg_resolution.realized_authorities.values())
-//RS         .filter(|authority| path.starts_with(authority.root()))
-//RS         .max_by_key(|authority| authority.root().components().count())
-//RS }
-//RS 
-//RS /// Whether `use name` from `importing` names a dependency package. A file of
-//RS /// a dependency package sees the packages its own manifest declares; every
-//RS /// other file sees the root manifest's dependencies.
-//RS fn dependency_visible_from(
-//RS     importing: &Path,
-//RS     name: &str,
-//RS     dependencies: &HashMap<String, DependencyDir>,
-//RS ) -> bool {
-//RS     let owner = dependencies
-//RS         .values()
-//RS         .filter(|dependency| {
-//RS             importing.starts_with(&dependency.source_root)
-//RS                 || importing.starts_with(&dependency.manifest_root)
-//RS         })
-//RS         .max_by_key(|dependency| dependency.manifest_root.components().count());
-//RS     match owner {
-//RS         Some(owner) => owner.deps.contains(name) && dependencies.contains_key(name),
-//RS         None => dependencies.get(name).is_some_and(|dependency| dependency.direct),
-//RS     }
-//RS }
-//RS 
-//RS fn dependency_dir_from_resolver(
-//RS     resolver: AuthorityResolver,
-//RS ) -> Result<DependencyDir, Vec<Diagnostic>> {
-//RS     // A canonical root package owns its source files. Only select `.jet/`
-//RS     // when that directory is itself a canonical package root; the managed
-//RS     // lock directory beside `package.jet` is not a source tree.
-//RS     let src_root = match resolver.checked_manifest(Path::new(".")) {
-//RS         Ok(_) => resolver.root().to_path_buf(),
-//RS         Err(error) if error.is_missing() => {
-//RS             let directory = match resolver.checked_directory(Path::new(".jet")) {
-//RS                 Ok(directory) => directory,
-//RS                 Err(error) if error.is_missing() => {
-//RS                     let root = resolver.root().to_path_buf();
-//RS                     return dependency_dir_with_source_root(resolver, root);
-//RS                 }
-//RS                 Err(error) => return Err(vec![error.diagnostic()]),
-//RS             };
-//RS             let nested = AuthorityResolver::from_checked_directory(&directory);
-//RS             match nested.checked_manifest(Path::new(".")) {
-//RS                 Ok(_) => directory.path,
-//RS                 Err(error) if error.is_missing() => resolver.root().to_path_buf(),
-//RS                 Err(error) => return Err(vec![error.diagnostic()]),
-//RS             }
-//RS         }
-//RS         Err(error) => return Err(vec![error.diagnostic()]),
-//RS     };
-//RS     dependency_dir_with_source_root(resolver, src_root)
-//RS }
-//RS 
-//RS fn dependency_dir_with_source_root(
-//RS     resolver: AuthorityResolver,
-//RS     src_root: PathBuf,
-//RS ) -> Result<DependencyDir, Vec<Diagnostic>> {
-//RS     let authority = if src_root == resolver.root() {
-//RS         resolver.clone()
-//RS     } else {
-//RS         let relative = src_root.strip_prefix(resolver.root()).map_err(|_| {
-//RS             vec![Diagnostic::error(
-//RS                 "E1334",
-//RS                 "dependency source root is outside its checked package root".to_string(),
-//RS                 format!("`{}` is not below `{}`", src_root.display(), resolver.root().display()),
-//RS                 "repair the dependency's package layout and retry".to_string(),
-//RS                 None,
-//RS             )]
-//RS         })?;
-//RS         let directory = resolver
-//RS             .checked_directory(relative)
-//RS             .map_err(|error| vec![error.diagnostic()])?;
-//RS         AuthorityResolver::from_checked_directory(&directory)
-//RS     };
-//RS     let (boundary_policy, auto_derive_default, deps) =
-//RS         dependency_manifest_policy(&authority, &src_root)?;
-//RS     Ok(DependencyDir {
-//RS         manifest_root: resolver.root().to_path_buf(),
-//RS         source_root: src_root,
-//RS         authority,
-//RS         boundary_policy,
-//RS         auto_derive_default,
-//RS         direct: false,
-//RS         deps,
-//RS     })
-//RS }
-//RS 
-//RS fn dependency_manifest_policy(
-//RS     resolver: &AuthorityResolver,
-//RS     source_root: &Path,
-//RS ) -> Result<(Option<ImportBoundaryPolicy>, Option<bool>, HashSet<String>), Vec<Diagnostic>> {
-//RS     let Some(facts) = package_facts_from_resolver(resolver)? else {
-//RS         return Ok((None, None, HashSet::new()));
-//RS     };
-//RS     let manifest = crate::Package::to_manifest(&facts, "")
-//RS         .map_err(|diagnostic| vec![diagnostic])?;
-//RS     let auto_derive_default = !jet_foundation::LintPolicy::is_denied(
-//RS         manifest.policy.lints_deny.as_deref().unwrap_or_default(),
-//RS         jet_foundation::LintPolicy::auto_derive_lint().code,
-//RS     );
-//RS     Ok((
-//RS         Some(ImportBoundaryPolicy::from_manifest(&manifest, source_root)),
-//RS         Some(auto_derive_default),
-//RS         manifest.dependencies.keys().cloned().collect(),
-//RS     ))
-//RS }
-//RS 
-//RS 
-//RS /// Collect each dependency's owning manifest root and source root, then the
-//RS /// packages those dependencies declare in turn. A dependency package's own
-//RS /// `use dep` resolves against its manifest (`dependency_visible_from`), so
-//RS /// checking a package loads its whole dependency closure.
-//RS fn collect_dep_dirs(
-//RS     mf: &Manifest::Manifest,
-//RS     project_root: &Path,
-//RS ) -> Result<HashMap<String, DependencyDir>, Vec<Diagnostic>> {
-//RS     let mut dirs = collect_declared_dep_dirs(mf, project_root)?;
-//RS     for dependency in dirs.values_mut() {
-//RS         dependency.direct = true;
-//RS     }
-//RS     let mut pending: Vec<DependencyDir> = dirs.values().cloned().collect();
-//RS     let mut expanded: HashSet<PathBuf> = HashSet::new();
-//RS     while let Some(dependency) = pending.pop() {
-//RS         if dependency.deps.is_empty() || !expanded.insert(dependency.manifest_root.clone()) {
-//RS             continue;
-//RS         }
-//RS         let Some(facts) = package_facts_from_resolver(&dependency.authority)? else {
-//RS             continue;
-//RS         };
-//RS         let manifest = crate::Package::to_manifest(&facts, "")
-//RS             .map_err(|diagnostic| vec![diagnostic])?;
-//RS         for (name, nested) in collect_declared_dep_dirs(&manifest, &dependency.manifest_root)? {
-//RS             if !dirs.contains_key(&name) {
-//RS                 pending.push(nested.clone());
-//RS                 dirs.insert(name, nested);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(dirs)
-//RS }
-//RS 
-//RS /// Collect the dependencies one manifest declares, resolved from its root.
-//RS fn collect_declared_dep_dirs(
-//RS     mf: &Manifest::Manifest,
-//RS     project_root: &Path,
-//RS ) -> Result<HashMap<String, DependencyDir>, Vec<Diagnostic>> {
-//RS     let mut dirs = HashMap::new();
-//RS     let lock = crate::Lock::load(project_root);
-//RS     for (dep_name, spec) in &mf.dependencies {
-//RS         match spec {
-//RS             Manifest::DepSpec::Path { path } => {
-//RS                 let abs = normalize_path(&project_root.join(path));
-//RS                 let (source, store_authority, expected_hash) = if let Some(lock) = lock.as_ref() {
-//RS                     match lock.packages.iter().find(|package| {
-//RS                         package.name == *dep_name
-//RS                             && matches!(&package.source, crate::Lock::LockSource::Path(_))
-//RS                     }) {
-//RS                         Some(package) => (
-//RS                             locked_store_source_path(dep_name, package)
-//RS                                 .map_err(|diagnostic| vec![diagnostic])?,
-//RS                             true,
-//RS                             locked_store_content_hash(package).map(str::to_string),
-//RS                         ),
-//RS                         // A generated lock that has no record for this
-//RS                         // dependency is unrelated to source resolution (for
-//RS                         // example, a toolchain-only lock).
-//RS                         None => (abs.clone(), false, None),
-//RS                     }
-//RS                 } else {
-//RS                     (abs, false, None)
-//RS                 };
-//RS                 if store_authority {
-//RS                     verify_locked_source_tree(
-//RS                         dep_name,
-//RS                         &source,
-//RS                         expected_hash.as_deref().unwrap_or(""),
-//RS                     )?;
-//RS                 }
-//RS                 let resolver = match if store_authority {
-//RS                     AuthorityResolver::open_store(&source)
-//RS                 } else {
-//RS                     AuthorityResolver::open(&source)
-//RS                 } {
-//RS                     Ok(resolver) => resolver,
-//RS                     Err(error) if error.is_missing() => continue,
-//RS                     Err(error) => return Err(vec![error.diagnostic()]),
-//RS                 };
-//RS                 dirs.insert(
-//RS                     dep_name.clone(),
-//RS                     dependency_dir_from_resolver(resolver)?,
-//RS                 );
-//RS             }
-//RS             Manifest::DepSpec::Git { .. } => {
-//RS                 // Git deps are consumed from the same immutable store entry
-//RS                 // as path deps. The project link is an output, never an
-//RS                 // authority input.
-//RS                 let (source, store_authority, expected_hash) = if let Some(lock) = lock.as_ref() {
-//RS                     let package = lock
-//RS                         .packages
-//RS                         .iter()
-//RS                         .find(|package| {
-//RS                             package.name == *dep_name
-//RS                                 && matches!(&package.source, crate::Lock::LockSource::Git { .. })
-//RS                         })
-//RS                         .ok_or_else(|| {
-//RS                             crate::Lock::e1202(
-//RS                                 &project_root
-//RS                                     .join(Syntax::UNIFIED_LOCK_FILE)
-//RS                                     .display()
-//RS                                     .to_string(),
-//RS                             )
-//RS                         })
-//RS                         .map_err(|diagnostic| vec![diagnostic])?;
-//RS                     (
-//RS                         locked_store_source_path(dep_name, package)
-//RS                             .map_err(|diagnostic| vec![diagnostic])?,
-//RS                         true,
-//RS                         locked_store_content_hash(package).map(str::to_string),
-//RS                     )
-//RS                 } else {
-//RS                     (
-//RS                         project_root.join(".jet").join("build").join("deps").join(dep_name),
-//RS                         false,
-//RS                         None,
-//RS                     )
-//RS                 };
-//RS                 if store_authority {
-//RS                     verify_locked_source_tree(
-//RS                         dep_name,
-//RS                         &source,
-//RS                         expected_hash.as_deref().unwrap_or(""),
-//RS                     )?;
-//RS                 }
-//RS                 let resolver = match if store_authority {
-//RS                     AuthorityResolver::open_store(&source)
-//RS                 } else {
-//RS                     AuthorityResolver::open(&source)
-//RS                 } {
-//RS                     Err(error) if error.is_missing() => continue,
-//RS                     Err(error) => return Err(vec![error.diagnostic()]),
-//RS                     Ok(resolver) => resolver,
-//RS                 };
-//RS                 dirs.insert(
-//RS                     dep_name.clone(),
-//RS                     dependency_dir_from_resolver(resolver)?,
-//RS                 );
-//RS             }
-//RS             Manifest::DepSpec::Registry(_) => {
-//RS                 // Registry source trees are materialized by `jet fetch` before
-//RS                 // loading. Keep unresolved manifests out of module search
-//RS                 // instead of inventing a path or silently using a stale one.
-//RS             }
-//RS             Manifest::DepSpec::Foreign { .. } => {
-//RS                 // Foreign package bindings are projected into the shared
-//RS                 // `.jet/bindings/<language>/` namespace by Jetpack. They are
-//RS                 // not Jet module roots and must not participate in `use pkg`.
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(dirs)
-//RS }
-//RS 
-//RS /// Rebuild a project's dependency source dirs (M12.1) and U17 package
-//RS /// resolution from its `package.jet`, for callers that only have the project
-//RS /// root (e.g. `resolve_import_target`, run after the bundle is loaded). Returns
-//RS /// empty maps when there is no manifest (R9 single-file mode); malformed
-//RS /// authority is returned to the import caller.
-//RS fn project_resolution(
-//RS     project_root: &Path,
-//RS ) -> Result<(HashMap<String, DependencyDir>, PkgResolution), Vec<Diagnostic>> {
-//RS     let Some(facts) = package_facts_for_root(project_root)? else {
-//RS         return Ok((HashMap::new(), PkgResolution::default()));
-//RS     };
-//RS     let manifest = crate::Package::to_manifest(&facts, "")
-//RS         .map_err(|diagnostic| vec![diagnostic])?;
-//RS     let dep_dirs = collect_dep_dirs(&manifest, project_root)?;
-//RS     let resolution =
-//RS         collect_pkg_resolution(&facts).map_err(|diagnostic| vec![diagnostic])?;
-//RS     Ok((dep_dirs, resolution))
-//RS }
-//RS 
-//RS fn project_resolution_for_bundle(
-//RS     bundle: &ProgramBundle,
-//RS ) -> Result<(HashMap<String, DependencyDir>, PkgResolution), Vec<Diagnostic>> {
-//RS     let Some(facts) = package_facts_for_bundle(bundle)? else {
-//RS         return project_resolution(&bundle.project_root);
-//RS     };
-//RS     let manifest = crate::Package::to_manifest(&facts, "")
-//RS         .map_err(|diagnostic| vec![diagnostic])?;
-//RS     let dep_dirs = collect_dep_dirs(&manifest, &bundle.project_root)?;
-//RS     let resolution =
-//RS         collect_pkg_resolution(&facts).map_err(|diagnostic| vec![diagnostic])?;
-//RS     Ok((dep_dirs, resolution))
-//RS }
-//RS 
-//RS 
-//RS fn auto_derive_default_for_file(
-//RS     path: &Path,
-//RS     project_root: &Path,
-//RS     project_lints_deny: &[String],
-//RS     dependency_roots: &HashMap<String, DependencyDir>,
-//RS ) -> Result<bool, Diagnostic> {
-//RS     let dependency = dependency_roots
-//RS         .values()
-//RS         .filter(|dependency| path.starts_with(&dependency.source_root))
-//RS         .max_by_key(|dependency| dependency.source_root.components().count());
-//RS     if let Some(dependency) = dependency {
-//RS         return dependency.auto_derive_default.ok_or_else(|| {
-//RS                 Diagnostic::error(
-//RS                     "E1334",
-//RS                     format!(
-//RS                         "package manifest `{}` is missing",
-//RS                         dependency.manifest_root.display()
-//RS                     ),
-//RS                     "a dependency source root must have one checked package manifest".to_string(),
-//RS                     "restore `package.jet` in the dependency root".to_string(),
-//RS                     None,
-//RS                 )
-//RS             });
-//RS     }
-//RS     if path.starts_with(project_root) {
-//RS         Ok(!jet_foundation::LintPolicy::is_denied(
-//RS             project_lints_deny,
-//RS             jet_foundation::LintPolicy::auto_derive_lint().code,
-//RS         ))
-//RS     } else {
-//RS         Ok(true)
-//RS     }
-//RS }
-//RS 
-//RS fn apply_auto_derive_default(items: &mut [Item], default: bool) {
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Struct(def) => def.auto_derive_default = default,
-//RS             Item::Enum(def) => def.auto_derive_default = default,
-//RS             Item::CodeModule(module) => {
-//RS                 if let Some(body) = &mut module.body {
-//RS                     apply_auto_derive_default(body, default);
-//RS                 }
-//RS             }
-//RS             Item::GenericModule(module) => apply_auto_derive_default(&mut module.body, default),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Load one module and its imports. D5: every error raised while reading an
-//RS /// imported (non-entry) file carries that file's origin, so it renders
-//RS /// against the imported file instead of at a byte offset inside the entry.
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn load_file(
-//RS     path: &Path,
-//RS     display: &str,
-//RS     project_root: &Path,
-//RS     pkg_dep_dirs: &HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &PkgResolution,
-//RS     package_policy: &[crate::Policy::PolicyDeclaration],
-//RS     package_lints_deny: &[String],
-//RS     modules: &mut Vec<LoadedModule>,
-//RS     path_to_idx: &mut HashMap<PathBuf, usize>,
-//RS     stack: &mut Vec<PathBuf>,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS     parse_teaching: &mut Vec<Diagnostic>,
-//RS     project_parts: &crate::ProjectParts::ProjectPartsReport,
-//RS     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
-//RS     dependencies: &mut Vec<PathBuf>,
-//RS     prepared_frontend: Option<&mut PreparedFrontend>,
-//RS ) -> Result<(), LoaderError> {
-//RS     let is_entry = path_to_idx.is_empty();
-//RS     load_file_located(
-//RS         path,
-//RS         display,
-//RS         project_root,
-//RS         pkg_dep_dirs,
-//RS         pkg_resolution,
-//RS         package_policy,
-//RS         package_lints_deny,
-//RS         modules,
-//RS         path_to_idx,
-//RS         stack,
-//RS         overlays,
-//RS         for_check,
-//RS         parse_teaching,
-//RS         project_parts,
-//RS         project_part_failures,
-//RS         dependencies,
-//RS         prepared_frontend,
-//RS     )
-//RS     .map_err(|error| {
-//RS         if is_entry {
-//RS             error
-//RS         } else {
-//RS             error.with_module_origin(display, path)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS #[allow(clippy::too_many_arguments)]
-//RS fn load_file_located(
-//RS     path: &Path,
-//RS     display: &str,
-//RS     project_root: &Path,
-//RS     pkg_dep_dirs: &HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &PkgResolution,
-//RS     package_policy: &[crate::Policy::PolicyDeclaration],
-//RS     package_lints_deny: &[String],
-//RS     modules: &mut Vec<LoadedModule>,
-//RS     path_to_idx: &mut HashMap<PathBuf, usize>,
-//RS     stack: &mut Vec<PathBuf>,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS     parse_teaching: &mut Vec<Diagnostic>,
-//RS     project_parts: &crate::ProjectParts::ProjectPartsReport,
-//RS     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
-//RS     dependencies: &mut Vec<PathBuf>,
-//RS     mut prepared_frontend: Option<&mut PreparedFrontend>,
-//RS ) -> Result<(), LoaderError> {
-//RS     let norm = normalize_path(path);
-//RS     if !dependencies.contains(&norm) {
-//RS         dependencies.push(norm.clone());
-//RS     }
-//RS     if stack.contains(&norm) {
-//RS         let cycle: Vec<String> = stack
-//RS             .iter()
-//RS             .chain(std::iter::once(&norm))
-//RS             .map(|p| relative_display(project_root, p))
-//RS             .collect();
-//RS         let cycle_file = stack
-//RS             .last()
-//RS             .map(|path| relative_display(project_root, path))
-//RS             .unwrap_or_else(|| display.to_string());
-//RS         return Err(LoaderError::at(
-//RS             &cycle_file,
-//RS             "",
-//RS             vec![Diagnostic::error(
-//RS                 "E0604",
-//RS                 "these files import each other in a circle".to_string(),
-//RS                 "Jet loads every imported file before compiling, so imports can't loop".to_string(),
-//RS                 format!("break the cycle: {}", cycle.join(" → ")),
-//RS                 None,
-//RS             )],
-//RS         ));
-//RS     }
-//RS     if path_to_idx.contains_key(&norm) {
-//RS         return Ok(());
-//RS     }
-//RS 
-//RS     let overlay_source = overlays
-//RS         .iter()
-//RS         .rev()
-//RS         .find(|(candidate, _)| normalize_path(candidate) == norm)
-//RS         .map(|(_, text)| (*text).to_string());
-//RS     let checked_authority = if overlay_source.is_none() {
-//RS         Some(
-//RS             dependency_authority_for_path(path, pkg_dep_dirs, pkg_resolution)
-//RS                 .map_or_else(
-//RS                     || checked_source_file(path, display),
-//RS                     |authority| checked_source_file_with_resolver(path, display, authority),
-//RS                 )?,
-//RS         )
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let source = overlay_source
-//RS         .or_else(|| {
-//RS             checked_authority
-//RS                 .as_ref()
-//RS                 .map(|(_, _, source)| source.clone())
-//RS         })
-//RS         .expect("one source reader must provide the module text");
-//RS 
-//RS     let prepared = prepared_frontend
-//RS         .as_deref_mut()
-//RS         .and_then(|cache| cache.remove(&norm))
-//RS         .filter(|entry| entry.source == source)
-//RS         .map(|entry| entry.module);
-//RS     let (mut prog, teaching) = match prepared {
-//RS         Some(PreparedFrontendModule::Parsed(program, teaching)) => (program, teaching),
-//RS         Some(PreparedFrontendModule::LexFailed(diagnostics)) => {
-//RS             return Err(LoaderError::at(display, &source, diagnostics));
-//RS         }
-//RS         Some(PreparedFrontendModule::ParseFailed(diagnostics)) => {
-//RS             return Err(LoaderError::at(display, &source, diagnostics));
-//RS         }
-//RS         None => {
-//RS             let source_for_parse =
-//RS                 crate::Package::mask_inline_package_source(&source)
-//RS                     .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?
-//RS                     .0;
-//RS             let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
-//RS             if !lex_diags.is_empty() {
-//RS                 return Err(LoaderError::at(display, &source, lex_diags));
-//RS             }
-//RS             match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-//RS                 Ok(parsed) => parsed,
-//RS                 Err(diagnostics) => return Err(LoaderError::at(display, &source, diagnostics)),
-//RS             }
-//RS         }
-//RS     };
-//RS     // Parser teaching spans are local to this file. An imported file's lint
-//RS     // carries that file's origin (the same identity sema attaches), so it
-//RS     // renders against the imported file instead of at a byte offset inside
-//RS     // the entry document. The entry (the first file loaded) keeps the
-//RS     // caller's own file context. Errors get the same origin in `load_file`.
-//RS     let is_entry = path_to_idx.is_empty();
-//RS     if is_entry || teaching.is_empty() {
-//RS         parse_teaching.extend(teaching);
-//RS     } else {
-//RS         let origin = std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
-//RS             display,
-//RS             path.to_string_lossy().into_owned(),
-//RS             source.clone(),
-//RS         ));
-//RS         parse_teaching.extend(
-//RS             teaching
-//RS                 .into_iter()
-//RS                 .map(|diagnostic| diagnostic.with_origin(origin.clone())),
-//RS         );
-//RS     }
-//RS     let auto_derive_default =
-//RS         auto_derive_default_for_file(&norm, project_root, package_lints_deny, pkg_dep_dirs)
-//RS             .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;
-//RS     apply_auto_derive_default(&mut prog.items, auto_derive_default);
-//RS 
-//RS     let alias = default_module_alias(path);
-//RS     stack.push(norm.clone());
-//RS     let module_idx = modules.len();
-//RS     path_to_idx.insert(norm.clone(), module_idx);
-//RS 
-//RS     let mut imports = std::mem::take(&mut prog.imports);
-//RS     // D-MOD-CYCLE1=A: `use dep.[names]` names members of a dependency
-//RS     // package directly; it binds the package itself, as `use dep` would.
-//RS     let mut package_bindings: Vec<ImportDecl> = Vec::new();
-//RS     for imp in &imports {
-//RS         let ImportKind::Unqualified {
-//RS             module_alias,
-//RS             module_alias_span,
-//RS             ..
-//RS         } = &imp.kind
-//RS         else {
-//RS             continue;
-//RS         };
-//RS         let bound = imports.iter().chain(package_bindings.iter()).any(|other| {
-//RS             matches!(other.kind, ImportKind::File(..) | ImportKind::Module(..))
-//RS                 && other.import_alias() == *module_alias
-//RS         });
-//RS         if bound || !dependency_visible_from(&norm, module_alias, pkg_dep_dirs) {
-//RS             continue;
-//RS         }
-//RS         let span = Span::new(module_alias_span.start, module_alias_span.start);
-//RS         package_bindings.push(ImportDecl {
-//RS             kind: ImportKind::Module(module_alias.clone(), span),
-//RS             alias: module_alias.clone(),
-//RS             alias_span: span,
-//RS             span,
-//RS             item_spans: Vec::new(),
-//RS             local_spans: Vec::new(),
-//RS             is_pub: false,
-//RS             is_package_pub: false,
-//RS             inline_version: None,
-//RS         });
-//RS     }
-//RS     imports.splice(0..0, package_bindings);
-//RS     // Sema binds module/file aliases before checking any member imports,
-//RS     // regardless of source order. Classify ambiguous dotted imports against
-//RS     // that same set, without treating an import as its own prefix binding.
-//RS     let mut member_module_aliases: HashMap<String, usize> = HashMap::new();
-//RS     for item in &prog.items {
-//RS         if let Item::CodeModule(module) = item {
-//RS             *member_module_aliases.entry(module.name.clone()).or_default() += 1;
-//RS         }
-//RS     }
-//RS     for imp in &imports {
-//RS         if matches!(imp.kind, ImportKind::File(..) | ImportKind::Module(..)) {
-//RS             *member_module_aliases.entry(imp.import_alias()).or_default() += 1;
-//RS         }
-//RS     }
-//RS     for declaration in &mut prog.policy_declarations {
-//RS         declaration.source = display.to_string();
-//RS     }
-//RS     let mut effective_declarations = package_policy.to_vec();
-//RS     effective_declarations.extend(prog.policy_declarations.clone());
-//RS     for key in crate::Policy::POLICY_RULES.iter().map(|rule| rule.key) {
-//RS         let module_chain = effective_declarations
-//RS             .iter()
-//RS             .filter(|d| {
-//RS                 matches!(
-//RS                     d.scope,
-//RS                     crate::Policy::PolicyScope::Organization
-//RS                         | crate::Policy::PolicyScope::Package
-//RS                         | crate::Policy::PolicyScope::Module
-//RS                 )
-//RS             })
-//RS             .cloned()
-//RS             .collect::<Vec<_>>();
-//RS         if let Err(error) = crate::Policy::resolve(key, module_chain) {
-//RS             return Err(LoaderError::at(
-//RS                 display,
-//RS                 &source,
-//RS                 vec![policy_ladder_diagnostic(key, error)],
-//RS             ));
-//RS         }
-//RS         let targets = effective_declarations
-//RS             .iter()
-//RS             .filter(|d| {
-//RS                 matches!(
-//RS                     d.scope,
-//RS                     crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block
-//RS                 ) && d.key == key
-//RS             })
-//RS             .filter_map(|d| d.target)
-//RS             .collect::<Vec<_>>();
-//RS         for target in targets {
-//RS             let chain = effective_declarations
-//RS                 .iter()
-//RS                 .filter(|d| {
-//RS                     matches!(
-//RS                         d.scope,
-//RS                         crate::Policy::PolicyScope::Organization
-//RS                             | crate::Policy::PolicyScope::Package
-//RS                             | crate::Policy::PolicyScope::Module
-//RS                     ) || (matches!(
-//RS                         d.scope,
-//RS                         crate::Policy::PolicyScope::Function | crate::Policy::PolicyScope::Block
-//RS                     ) && d.target == Some(target))
-//RS                 })
-//RS                 .cloned()
-//RS                 .collect::<Vec<_>>();
-//RS             if let Err(error) = crate::Policy::resolve(key, chain) {
-//RS                 return Err(LoaderError::at(
-//RS                     display,
-//RS                     &source,
-//RS                     vec![policy_ladder_diagnostic(key, error)],
-//RS                 ));
-//RS             }
-//RS         }
-//RS     }
-//RS     modules.push(LoadedModule {
-//RS         path: path.to_path_buf(),
-//RS         display: display.to_string(),
-//RS         source: source.clone(),
-//RS         alias,
-//RS         imports: imports.clone(),
-//RS         items: prog.items,
-//RS         script_body: prog.script_body,
-//RS         block_spans: prog.block_spans,
-//RS         web_target_ceiling: prog.web_target_ceiling,
-//RS         pub_file: prog.pub_file,
-//RS         no_prelude: prog.no_prelude,
-//RS         default_target: prog.default_target,
-//RS         html_path: prog.html_path.clone(),
-//RS         policy_declarations: effective_declarations,
-//RS         user_policy_declarations: std::mem::take(&mut prog.user_policy_declarations),
-//RS         rule_facts: std::mem::take(&mut prog.rule_facts),
-//RS     });
-//RS 
-//RS     for (import_idx, imp) in imports.iter_mut().enumerate() {
-//RS         let is_foreign = is_foreign_namespace_import(imp)
-//RS             .map_err(|diagnostic| LoaderError::at(display, &source, vec![diagnostic]))?;
-//RS         // S59: C `use` forms use the reserved `c.` root legitimately.
-//RS         if is_foreign {
-//RS             continue;
-//RS         }
-//RS         // D-MOD3: `use alias.Item` / `use alias.[A,B]` forms don't load new files;
-//RS         // sema resolves them against already-loaded modules (E0609–E0611).
-//RS         if matches!(imp.kind, ImportKind::Unqualified { .. }) {
-//RS             continue;
-//RS         }
-//RS         if let Err(d) = check_reserved_import(imp) {
-//RS             stack.pop();
-//RS             return Err(LoaderError::at(display, &source, vec![d]));
-//RS         }
-//RS         if core_module_path(imp).is_some() || crate::AST::target_profile_path(imp).is_some() {
-//RS             continue;
-//RS         }
-//RS 
-//RS         // D-MOD-CYCLE1=A: the files of one package share one namespace. Only
-//RS         // loose files import other files by relative path; C headers are a
-//RS         // foreign binding, not a Jet file import. A `..` path that leaves the
-//RS         // package keeps its more specific E0602 from `resolve_file_import`.
-//RS         if let ImportKind::File(path_str, path_span) = &imp.kind {
-//RS             if !path_str.ends_with(".h") && !path_str.contains("..") && !is_loose_file(path) {
-//RS                 stack.pop();
-//RS                 return Err(LoaderError::at(
-//RS                     display,
-//RS                     &source,
-//RS                     vec![Diagnostic::from_row("E0623", &[("path", path_str)], Some(*path_span))],
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let target = match resolve_import(
-//RS             imp,
-//RS             path,
-//RS             project_root,
-//RS             pkg_dep_dirs,
-//RS             pkg_resolution,
-//RS             project_parts,
-//RS             project_part_failures,
-//RS         ) {
-//RS             Ok(p) => p,
-//RS             Err(d) if d.code == "E0603" => {
-//RS                 // An aliased `use alpha.value as local` parses as a dotted
-//RS                 // module path. A real module with that full path wins; only
-//RS                 // when no such module exists and `alpha` is declared here as
-//RS                 // a module can this denote the same member import as
-//RS                 // `use alpha.[value as local]`. Keep the member in the
-//RS                 // existing Unqualified shape for all checked consumers.
-//RS                 if let ImportKind::Module(name, name_span) = &imp.kind {
-//RS                     if let Some((prefix, member)) = name.split_once('.') {
-//RS                         let other_bindings = member_module_aliases
-//RS                             .get(prefix)
-//RS                             .copied()
-//RS                             .unwrap_or_default()
-//RS                             > usize::from(imp.alias == prefix);
-//RS                         if other_bindings {
-//RS                             let prefix_span =
-//RS                                 Span::new(name_span.start, name_span.start + prefix.len());
-//RS                             let member_span = Span::new(prefix_span.end + 1, name_span.end);
-//RS                             let local_span = if imp.alias_span.start == imp.span.start {
-//RS                                 Span::new(name_span.end - imp.alias.len(), name_span.end)
-//RS                             } else {
-//RS                                 imp.alias_span
-//RS                             };
-//RS                             imp.kind = ImportKind::Unqualified {
-//RS                                 module_alias: prefix.to_string(),
-//RS                                 module_alias_span: prefix_span,
-//RS                                 items: vec![(member.to_string(), Some(imp.alias.clone()))],
-//RS                                 items_span: member_span,
-//RS                                 span: imp.span,
-//RS                             };
-//RS                             imp.item_spans = vec![member_span];
-//RS                             imp.local_spans = vec![local_span];
-//RS                             modules[module_idx].imports[import_idx] = imp.clone();
-//RS                             continue;
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 stack.pop();
-//RS                 return Err(LoaderError::at(display, &source, vec![d]));
-//RS             }
-//RS             Err(d) => {
-//RS                 stack.pop();
-//RS                 return Err(LoaderError::at(display, &source, vec![d]));
-//RS             }
-//RS         };
-//RS         let child_display = relative_display(project_root, &target);
-//RS         if let Err(diags) = load_file(
-//RS             &target,
-//RS             &child_display,
-//RS             project_root,
-//RS             pkg_dep_dirs,
-//RS             pkg_resolution,
-//RS             package_policy,
-//RS             package_lints_deny,
-//RS             modules,
-//RS             path_to_idx,
-//RS             stack,
-//RS             overlays,
-//RS             for_check,
-//RS             parse_teaching,
-//RS             project_parts,
-//RS             project_part_failures,
-//RS             dependencies,
-//RS             prepared_frontend.as_deref_mut(),
-//RS         ) {
-//RS             stack.pop();
-//RS             return Err(diags);
-//RS         }
-//RS     }
-//RS 
-//RS     // D-MOD1: resolve `module name;` file declarations — search adjacent to the
-//RS     // current file, then load and register as synthetic imports.
-//RS     // Collect the metadata we need before borrowing `modules` mutably below.
-//RS     #[derive(Clone)]
-//RS     struct CmMeta {
-//RS         name: String,
-//RS         name_span: crate::Diagnostics::Span,
-//RS         span: crate::Diagnostics::Span,
-//RS         is_pub: bool,
-//RS         is_package_pub: bool,
-//RS     }
-//RS     let code_module_decls: Vec<CmMeta> = modules[module_idx]
-//RS         .items
-//RS         .iter()
-//RS         .filter_map(|item| {
-//RS             if let Item::CodeModule(cm) = item {
-//RS                 if cm.body.is_none() {
-//RS                     return Some(CmMeta {
-//RS                         name: cm.name.clone(),
-//RS                         name_span: cm.name_span,
-//RS                         span: cm.span,
-//RS                         is_pub: cm.is_pub,
-//RS                         is_package_pub: cm.is_package_pub,
-//RS                     });
-//RS                 }
-//RS             }
-//RS             None
-//RS         })
-//RS         .collect();
-//RS 
-//RS     for cm in code_module_decls {
-//RS         let target = match resolve_code_module_file(
-//RS             &cm.name,
-//RS             cm.name_span,
-//RS             path,
-//RS             pkg_dep_dirs,
-//RS             pkg_resolution,
-//RS             dependencies,
-//RS         ) {
-//RS             Ok(p) => p,
-//RS             Err(d) => {
-//RS                 stack.pop();
-//RS                 return Err(LoaderError::at(display, &source, vec![d]));
-//RS             }
-//RS         };
-//RS         let child_display = relative_display(project_root, &target);
-//RS         if let Err(diags) = load_file(
-//RS             &target,
-//RS             &child_display,
-//RS             project_root,
-//RS             pkg_dep_dirs,
-//RS             pkg_resolution,
-//RS             package_policy,
-//RS             package_lints_deny,
-//RS             modules,
-//RS             path_to_idx,
-//RS             stack,
-//RS             overlays,
-//RS             for_check,
-//RS             parse_teaching,
-//RS             project_parts,
-//RS             project_part_failures,
-//RS             dependencies,
-//RS             prepared_frontend.as_deref_mut(),
-//RS         ) {
-//RS             stack.pop();
-//RS             return Err(diags);
-//RS         }
-//RS         // Add a synthetic import so sema can resolve `module_name.func()`.
-//RS         // Use the path relative to the importing file (without extension) so
-//RS         // that resolve_file_import can find it — for a directory module
-//RS         // "text", target is ".../text/module.jet" and we need "text/module".
-//RS         let importing_dir = path.parent().unwrap_or(Path::new("."));
-//RS         let rel_path = target
-//RS             .strip_prefix(importing_dir)
-//RS             .map(|p| p.with_extension(""))
-//RS             .map(|p| p.to_string_lossy().replace('\\', "/"))
-//RS             .unwrap_or_else(|_| cm.name.clone());
-//RS         let synthetic = ImportDecl {
-//RS             kind: ImportKind::File(rel_path, cm.name_span),
-//RS             alias: cm.name.clone(),
-//RS             alias_span: cm.name_span,
-//RS             span: cm.span,
-//RS             item_spans: Vec::new(),
-//RS             local_spans: Vec::new(),
-//RS             is_pub: cm.is_pub,
-//RS             is_package_pub: cm.is_package_pub,
-//RS             inline_version: None,
-//RS         };
-//RS         modules[module_idx].imports.push(synthetic);
-//RS     }
-//RS 
-//RS     if let Some((resolver, checked, _)) = checked_authority.as_ref() {
-//RS         resolver
-//RS             .revalidate_file(checked)
-//RS             .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?;
-//RS     }
-//RS     stack.pop();
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn policy_ladder_diagnostic(
-//RS     key: crate::Policy::PolicyKey,
-//RS     error: crate::Policy::PolicyError,
-//RS ) -> Diagnostic {
-//RS     let span = match error {
-//RS         crate::Policy::PolicyError::ProhibitedScope { span, .. }
-//RS         | crate::Policy::PolicyError::Widening { span, .. } => span,
-//RS         crate::Policy::PolicyError::Conflict { second, .. } => second,
-//RS     };
-//RS     Diagnostic::error(
-//RS         "E0355",
-//RS         format!("invalid effective `{}` policy", key.name()),
-//RS         "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint".to_string(),
-//RS         "remove the conflict or tighten the inner declaration".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// D-MOD1: find the file for `module name;` — look in the same directory as
-//RS /// `importing` for `{name}.jet` then `{name}/module.jet`.
-//RS fn resolve_code_module_file(
-//RS     name: &str,
-//RS     name_span: Span,
-//RS     importing: &Path,
-//RS     pkg_dep_dirs: &HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &PkgResolution,
-//RS     dependencies: &mut Vec<PathBuf>,
-//RS ) -> Result<PathBuf, Diagnostic> {
-//RS     let dir = importing.parent().unwrap_or(Path::new("."));
-//RS     let direct = normalize_path(&dir.join(format!("{}.{}", name, Syntax::FILE_EXT)));
-//RS     let module_jet = normalize_path(&dir.join(name).join(format!("module.{}", Syntax::FILE_EXT)));
-//RS     for candidate in [&direct, &module_jet] {
-//RS         if !dependencies.contains(candidate) {
-//RS             dependencies.push(candidate.clone());
-//RS         }
-//RS     }
-//RS     let (resolver, relative_dir) = if let Some(authority) =
-//RS         dependency_authority_for_path(importing, pkg_dep_dirs, pkg_resolution)
-//RS     {
-//RS         let relative_dir = dir
-//RS             .strip_prefix(authority.root())
-//RS             .map_err(|_| {
-//RS                 jet_pkg_model::Authority::AuthorityError::Escapes(dir.to_path_buf()).diagnostic()
-//RS             })?
-//RS             .to_path_buf();
-//RS         (authority.clone(), relative_dir)
-//RS     } else {
-//RS         (
-//RS             AuthorityResolver::open(dir).map_err(|error| error.diagnostic())?,
-//RS             PathBuf::new(),
-//RS         )
-//RS     };
-//RS     for relative in [
-//RS         relative_dir.join(format!("{name}.{}", Syntax::FILE_EXT)),
-//RS         relative_dir.join(name).join(format!("module.{}", Syntax::FILE_EXT)),
-//RS     ] {
-//RS         match resolver.checked_file(&relative) {
-//RS             Ok(file) => {
-//RS                 resolver
-//RS                     .revalidate_file(&file)
-//RS                     .map_err(|error| error.diagnostic())?;
-//RS                 return Ok(file.path);
-//RS             }
-//RS             Err(error) if error.is_missing() => {}
-//RS             Err(error) => return Err(error.diagnostic()),
-//RS         }
-//RS     }
-//RS     // E0607: neither search path found
-//RS     Err(Diagnostic::error(
-//RS         "E0607",
-//RS         format!("module `{}` not found", name),
-//RS         format!("looked for `{name}.jet` and `{name}/module.jet` next to this file"),
-//RS         format!("create `{}.{}` next to this file", name, Syntax::FILE_EXT),
-//RS         Some(name_span),
-//RS     ))
-//RS }
-//RS 
-//RS fn resolve_import(
-//RS     imp: &ImportDecl,
-//RS     importing: &Path,
-//RS     project_root: &Path,
-//RS     pkg_dep_dirs: &HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &PkgResolution,
-//RS     project_parts: &crate::ProjectParts::ProjectPartsReport,
-//RS     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
-//RS ) -> Result<PathBuf, Diagnostic> {
-//RS     match &imp.kind {
-//RS         ImportKind::File(path_str, span) => {
-//RS             resolve_file_import(
-//RS                 importing,
-//RS                 path_str,
-//RS                 project_root,
-//RS                 pkg_dep_dirs,
-//RS                 pkg_resolution,
-//RS                 *span,
-//RS             )
-//RS         }
-//RS         ImportKind::Module(name, span) => resolve_module_import(
-//RS             name,
-//RS             importing,
-//RS             project_root,
-//RS             pkg_dep_dirs,
-//RS             pkg_resolution,
-//RS             *span,
-//RS             project_parts,
-//RS             project_part_failures,
-//RS         ),
-//RS         ImportKind::Unqualified { .. } => {
-//RS             // Unqualified imports don't map to a new file — the module is
-//RS             // already imported. Resolution is handled by sema (E0609–E0611).
-//RS             Err(Diagnostic::error(
-//RS                 "E0003",
-//RS                 "unqualified import cannot be resolved as a file".to_string(),
-//RS                 "use alias.Item imports are resolved by sema against an already-loaded module"
-//RS                     .to_string(),
-//RS                 "ensure the module is imported first: `use module_name as alias;`".to_string(),
-//RS                 Some(imp.span),
-//RS             ))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // ── Pure module-name helpers ──────────────────────────────────────────────────
-//RS // Canonical implementations live in Syntax (strings-only) and AST (uses
-//RS // ImportDecl). These forwarding fns keep existing call-sites working while
-//RS // the workspace split proceeds.
-//RS 
-//RS pub fn core_module_path(imp: &ImportDecl) -> Option<String> {
-//RS     imp.core_module_path()
-//RS }
-//RS 
-//RS /// True when `source` spells `name` as a whole identifier. A comment or string
-//RS /// that mentions it only schedules one more Core source, never a wrong one.
-//RS fn source_names_identifier(source: &str, name: &str) -> bool {
-//RS     let is_ident = |byte: u8| byte == b'_' || byte.is_ascii_alphanumeric();
-//RS     let bytes = source.as_bytes();
-//RS     source.match_indices(name).any(|(start, _)| {
-//RS         let end = start + name.len();
-//RS         (start == 0 || !is_ident(bytes[start - 1]))
-//RS             && bytes.get(end).map_or(true, |byte| !is_ident(*byte))
-//RS     })
-//RS }
-//RS 
-//RS /// Resolve Core source package imports, including selective `use core.x.[T]`
-//RS /// imports that `ImportDecl::core_module_path` intentionally leaves unqualified.
-//RS fn core_source_import_module(imp: &ImportDecl) -> Option<String> {
-//RS     core_module_path(imp).or_else(|| {
-//RS         let ImportKind::Unqualified { module_alias, .. } = &imp.kind else {
-//RS             return None;
-//RS         };
-//RS         (module_alias == Syntax::CORE_SHORT
-//RS             || module_alias == Syntax::CORE_CANONICAL
-//RS             || module_alias == "app"
-//RS             || module_alias.starts_with("core."))
-//RS         .then(|| module_alias.clone())
-//RS     })
-//RS }
-//RS 
-//RS pub use crate::Syntax::{
-//RS     core_modules_list, is_known_core_module, is_legacy_std_import, is_ring_module,
-//RS     is_ring_module_staged, KNOWN_CORE_MODULES,
-//RS };
-//RS 
-//RS /// D-JPK-RINGSHIP1=C: where a ring module's implementation comes from.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub enum RingResolution {
-//RS     /// A prebuilt artifact staged from the active toolchain object (the hangar).
-//RS     Staged(PathBuf),
-//RS     /// The compiler-embedded bridge template (`FFI.rs` / `CoreLib.rs`) — the
-//RS     /// zero-config fallback that preserves rung-0 magic.
-//RS     Embedded,
-//RS }
-//RS 
-//RS /// Resolve where a ring module (`http`, `regex`, …) is realized from. Prefers the
-//RS /// staged hangar artifact when the active toolchain object carries one for this
-//RS /// platform; otherwise the compiler-embedded template. One resolution path, two
-//RS /// sources, no user-visible difference (D-JPK-RINGSHIP1=C). Ring version =
-//RS /// toolchain version by construction: the artifact only exists in a toolchain
-//RS /// object, so a staged ring can never skew from the compiler that ships it.
-//RS pub fn resolve_ring_module(name: &str) -> RingResolution {
-//RS     match crate::Syntax::staged_ring_artifact(name) {
-//RS         Some(artifact) => RingResolution::Staged(artifact),
-//RS         None => RingResolution::Embedded,
-//RS     }
-//RS }
-//RS 
-//RS /// E1241 — a ring library is listed in `deps: { core.<ring> }` expecting a
-//RS /// staged hangar object, but the active toolchain object carries no prebuilt
-//RS /// artifact for this platform. Under D-JPK-RINGSHIP1=C the loader falls back to
-//RS /// the embedded template (this diagnostic is the informational form); under
-//RS /// RINGSHIP1=B, where ring libs are independently versioned source packages, it
-//RS /// is a hard error.
-//RS pub fn e1241_ring_platform_miss(ring: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E1241",
-//RS         format!("the staged `core.{ring}` artifact is missing for this platform"),
-//RS         "the active toolchain object carries prebuilt ring artifacts, but none for \
-//RS          `core.{ring}` on this platform."
-//RS             .replace("{ring}", ring),
-//RS         "the build falls back to the compiler-embedded `core.{ring}`; to ship the staged \
-//RS          artifact, realize a toolchain object built for this platform (`jet update jet`)."
-//RS             .replace("{ring}", ring),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn check_reserved_import(imp: &ImportDecl) -> Result<(), Diagnostic> {
-//RS     if crate::AST::target_profile_path(imp).is_some() {
-//RS         return Ok(());
-//RS     }
-//RS     if let Some(module) = core_module_path(imp) {
-//RS         if !is_known_core_module(&module) {
-//RS             let span = match &imp.kind {
-//RS                 ImportKind::Module(_, span) => *span,
-//RS                 ImportKind::File(_, _) | ImportKind::Unqualified { .. } => imp.span,
-//RS             };
-//RS             if let Some(diagnostic) = Syntax::retired_core_module_diagnostic(&module, span) {
-//RS                 return Err(diagnostic);
-//RS             }
-//RS             return Err(Diagnostic::error(
-//RS                 "E1001",
-//RS                 format!("there is no core module `{}`", module),
-//RS                 "`core` is compiler-known in M10, and only the frozen core modules exist"
-//RS                     .to_string(),
-//RS                 format!("use one of: {}", core_modules_list()),
-//RS                 Some(span),
-//RS             ));
-//RS         }
-//RS         return Ok(());
-//RS     }
-//RS 
-//RS     let alias = import_alias(imp);
-//RS     if Syntax::FIRST_PARTY_RESERVED.contains(&alias.as_str()) {
-//RS         return Err(Diagnostic::error(
-//RS             "E1002",
-//RS             format!("`{}` is reserved for first-party or foreign packages", alias),
-//RS             "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules"
-//RS                 .to_string(),
-//RS             format!(
-//RS                 "rename the module or use it with `{} other_name`",
-//RS                 Syntax::KW_AS
-//RS             ),
-//RS             Some(imp.alias_span),
-//RS         ));
-//RS     }
-//RS     if let ImportKind::Module(name, span) = &imp.kind {
-//RS         if let Some(ring) = name.strip_prefix("jet.") {
-//RS             if is_ring_module(ring) {
-//RS                 return Err(Diagnostic::error(
-//RS                     "E0341",
-//RS                     format!("`use jet.{ring}` is the old first-party library spelling"),
-//RS                     "first-party libraries moved to the `core.*` namespace (D-CORENS1)".to_string(),
-//RS                     format!(
-//RS                         "write `use {}` instead",
-//RS                         Syntax::canonical_ring_module(ring)
-//RS                     ),
-//RS                     Some(*span),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let root = name.split('.').next().unwrap_or(name);
-//RS         if Syntax::FIRST_PARTY_RESERVED.contains(&root) {
-//RS             return Err(Diagnostic::error(
-//RS                 "E1002",
-//RS                 format!("`{}` is reserved for first-party or foreign packages", root),
-//RS                 "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules"
-//RS                     .to_string(),
-//RS                 "choose a different module name".to_string(),
-//RS                 Some(*span),
-//RS             ));
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn resolve_file_import(
-//RS     importing: &Path,
-//RS     path_str: &str,
-//RS     project_root: &Path,
-//RS     pkg_dep_dirs: &HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &PkgResolution,
-//RS     span: Span,
-//RS ) -> Result<PathBuf, Diagnostic> {
-//RS     // Owner ruling 2026-09-30: a file outside every package is an early
-//RS     // multi-file prototype, so its quoted imports resolve relative to the
-//RS     // importing file, `..` included. Inside a package the package rules hold
-//RS     // and `..` stays E0602.
-//RS     let loose = is_loose_file(importing);
-//RS     if path_str.contains("..") && !loose {
-//RS         return Err(e0602(span));
-//RS     }
-//RS     let base = importing.parent().unwrap_or(Path::new("."));
-//RS     // A loose `..` walks real folders, so anchor it at an absolute base
-//RS     // before `normalize_path` folds the parent segments.
-//RS     let mut resolved = if loose {
-//RS         let folder = if base.as_os_str().is_empty() { Path::new(".") } else { base };
-//RS         std::path::absolute(folder).unwrap_or_else(|_| folder.to_path_buf())
-//RS     } else {
-//RS         base.to_path_buf()
-//RS     };
-//RS     for part in path_str.split('/') {
-//RS         if part.is_empty() || part == "." {
-//RS             continue;
-//RS         }
-//RS         resolved.push(part);
-//RS     }
-//RS     resolved.set_extension(Syntax::FILE_EXT);
-//RS     let resolved = normalize_path(&resolved);
-//RS     let resolver = if loose {
-//RS         let folder = resolved
-//RS             .parent()
-//RS             .filter(|parent| !parent.as_os_str().is_empty())
-//RS             .unwrap_or(Path::new("."));
-//RS         AuthorityResolver::open(folder).map_err(|error| error.diagnostic())?
-//RS     } else {
-//RS         dependency_authority_for_path(importing, pkg_dep_dirs, pkg_resolution)
-//RS             .cloned()
-//RS             .map(Ok)
-//RS             .unwrap_or_else(|| {
-//RS                 AuthorityResolver::open(project_root).map_err(|error| error.diagnostic())
-//RS             })?
-//RS     };
-//RS     let relative = resolved.strip_prefix(resolver.root()).map_err(|_| {
-//RS         jet_pkg_model::Authority::AuthorityError::Escapes(resolved.clone()).diagnostic()
-//RS     })?;
-//RS     let checked = resolver.checked_file(relative).map_err(|error| {
-//RS         Diagnostic::error(
-//RS             "E0603",
-//RS             format!("can't find the file `{}`", path_str),
-//RS             "a file import path must point at an existing `.jet` file next to this file's tree"
-//RS                 .to_string(),
-//RS             format!(
-//RS                 "create `{}.{}`, or fix the path in `{} \"{}\"` ({error})",
-//RS                 path_str,
-//RS                 Syntax::FILE_EXT,
-//RS                 Syntax::KW_USE,
-//RS                 path_str
-//RS             ),
-//RS             Some(span),
-//RS         )
-//RS     })?;
-//RS     resolver.revalidate_file(&checked).map_err(|error| {
-//RS         Diagnostic::error(
-//RS             "E0603",
-//RS             format!("can't find the file `{}`", path_str),
-//RS             "a file import path must point at an existing `.jet` file next to this file's tree"
-//RS                 .to_string(),
-//RS             format!(
-//RS                 "restore the checked file and fix the path in `{} \"{}\"` ({error})",
-//RS                 Syntax::KW_USE,
-//RS                 path_str
-//RS             ),
-//RS             Some(span),
-//RS         )
-//RS     })?;
-//RS     Ok(checked.path)
-//RS }
-//RS 
-//RS /// A loose file belongs to no package: it has no leading `package { }` header
-//RS /// of its own (a one-file package) and no `package.jet` above it. Only loose
-//RS /// files may import each other by relative path.
-//RS fn is_loose_file(importing: &Path) -> bool {
-//RS     let has_header = jet_foundation::CheckReads::read_to_string(importing)
-//RS         .map(|source| !matches!(crate::Package::extract_inline_package(&source), Ok(None)))
-//RS         .unwrap_or(false);
-//RS     if has_header {
-//RS         return false;
-//RS     }
-//RS     let folder = importing
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .unwrap_or(Path::new("."));
-//RS     matches!(find_manifest_root_checked(folder), Ok(None))
-//RS }
-//RS 
-//RS /// The world-writable folder between `path` and the nearest package manifest
-//RS /// above it, with that package root. The authority walk stops at such a
-//RS /// folder, so a file below it belongs to no package unless its root lists it.
-//RS #[cfg(unix)]
-//RS fn shared_folder_below_package(path: &Path) -> Option<(PathBuf, PathBuf)> {
-//RS     use std::os::unix::fs::PermissionsExt;
-//RS     let mut shared: Option<&Path> = None;
-//RS     for folder in path.ancestors().skip(1) {
-//RS         if folder.as_os_str().is_empty() {
-//RS             continue;
-//RS         }
-//RS         if let Some(below) = shared {
-//RS             if folder.join(Syntax::PACKAGE_FILE).is_file() {
-//RS                 return Some((below.to_path_buf(), folder.to_path_buf()));
-//RS             }
-//RS         } else if fs::symlink_metadata(folder)
-//RS             .is_ok_and(|metadata| metadata.permissions().mode() & 0o002 != 0)
-//RS         {
-//RS             shared = Some(folder);
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS #[cfg(not(unix))]
-//RS fn shared_folder_below_package(_path: &Path) -> Option<(PathBuf, PathBuf)> {
-//RS     None
-//RS }
-//RS 
-//RS /// D-MOD-CYCLE1=A: the root of the package whose namespace `path` belongs to.
-//RS /// A file under a `package.jet` (and not a one-file package with its own
-//RS /// `package { }` header) is a member of that package. Loose files, one-file
-//RS /// packages, embedded Core sources, and synthetic modules have no namespace.
-//RS fn namespace_root(path: &Path, cache: &mut HashMap<PathBuf, Option<PathBuf>>) -> Option<PathBuf> {
-//RS     if path.starts_with(crate::Diagnostics::CORE_SOURCE_ROOT) || !path.is_file() {
-//RS         return None;
-//RS     }
-//RS     let has_header = jet_foundation::CheckReads::read_to_string(path)
-//RS         .map(|source| !matches!(crate::Package::extract_inline_package(&source), Ok(None)))
-//RS         .unwrap_or(false);
-//RS     if has_header {
-//RS         return None;
-//RS     }
-//RS     let folder = path
-//RS         .parent()
-//RS         .filter(|parent| !parent.as_os_str().is_empty())
-//RS         .unwrap_or(Path::new("."));
-//RS     cache
-//RS         .entry(folder.to_path_buf())
-//RS         .or_insert_with(|| {
-//RS             find_manifest_root_checked(folder)
-//RS                 .ok()
-//RS                 .flatten()
-//RS                 .map(|root| normalize_path(&root))
-//RS         })
-//RS         .clone()
-//RS }
-//RS 
-//RS /// D-MOD-CYCLE1=A: every `.jet` source of the package rooted at `root`,
-//RS /// excluding its manifest and the files of nested packages, in path order.
-//RS fn package_member_files(root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
-//RS     let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
-//RS     let files = resolver
-//RS         .discover_source_files()
-//RS         .map_err(|error| error.diagnostic())?;
-//RS     Ok(files
-//RS         .into_iter()
-//RS         .filter(|file| {
-//RS             let name = file.relative.file_name().and_then(|name| name.to_str());
-//RS             name != Some(Syntax::PACKAGE_FILE)
-//RS                 && name != Some(Syntax::PAYLOAD_FILE)
-//RS                 && name != Some(Syntax::WORKSPACE_FILE)
-//RS         })
-//RS         .map(|file| normalize_path(&file.path))
-//RS         .collect())
-//RS }
-//RS 
-//RS /// D-MOD-CYCLE1=A: the top-level names one package file contributes to its
-//RS /// package namespace, with their declaring spans.
-//RS fn namespace_item_names(items: &[Item]) -> Vec<(String, Span)> {
-//RS     let mut names = Vec::new();
-//RS     for item in items {
-//RS         match item {
-//RS             Item::Func(function) => names.push((function.name.clone(), function.name_span)),
-//RS             Item::Struct(definition) => names.push((definition.name.clone(), definition.name_span)),
-//RS             Item::Enum(definition) => names.push((definition.name.clone(), definition.name_span)),
-//RS             Item::Distinct(definition) => {
-//RS                 names.push((definition.name.clone(), definition.name_span))
-//RS             }
-//RS             Item::TypeAlias(definition) => {
-//RS                 names.push((definition.name.clone(), definition.name_span))
-//RS             }
-//RS             Item::UnitFamily(family) => {
-//RS                 for definition in family.distinct_defs() {
-//RS                     names.push((definition.name.clone(), definition.name_span));
-//RS                 }
-//RS             }
-//RS             Item::Trait(definition) => names.push((definition.name.clone(), definition.name_span)),
-//RS             Item::Tag(definition) => names.push((definition.name.clone(), definition.name_span)),
-//RS             Item::Const(definition) => names.push((definition.name.clone(), definition.name_span)),
-//RS             Item::ProtocolDecl(protocol) => names.push((protocol.name.clone(), protocol.name_span)),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     names
-//RS }
-//RS 
-//RS /// A namespace diagnostic at a member file. The entry renders against its own
-//RS /// source already; any other member carries its origin so the span renders
-//RS /// against the file that declares it.
-//RS fn member_error(
-//RS     modules: &[LoadedModule],
-//RS     module_idx: usize,
-//RS     entry_idx: usize,
-//RS     diagnostic: Diagnostic,
-//RS ) -> LoaderError {
-//RS     let module = &modules[module_idx];
-//RS     let error = LoaderError::at(&module.display, &module.source, vec![diagnostic]);
-//RS     if module_idx == entry_idx {
-//RS         error
-//RS     } else {
-//RS         error.with_module_origin(&module.display, &module.path)
-//RS     }
-//RS }
-//RS 
-//RS /// D-MOD-CYCLE1=A: make every package one namespace. Each member file is
-//RS /// recorded under its package root, a name declared in two member files is
-//RS /// E0624, and each member receives compiler-owned bindings for its siblings'
-//RS /// top-level names. Those bindings use the ordinary file-module and member
-//RS /// import path, so sema, lowering, and every tier resolve a sibling name
-//RS /// exactly like an imported one. They carry zero-width spans: they are not
-//RS /// written source, so they never render, and liveness never reports them.
-//RS fn bind_package_namespaces(
-//RS     modules: &mut [LoadedModule],
-//RS     entry_idx: usize,
-//RS     namespace_roots: &mut HashMap<PathBuf, Option<PathBuf>>,
-//RS     name_ledger: &mut crate::AST::NameLedger,
-//RS ) -> Result<(), LoaderError> {
-//RS     let mut groups: Vec<(PathBuf, Vec<usize>)> = Vec::new();
-//RS     for module_idx in 0..modules.len() {
-//RS         let Some(root) = namespace_root(&modules[module_idx].path, namespace_roots) else {
-//RS             continue;
-//RS         };
-//RS         match groups.iter_mut().find(|(group_root, _)| *group_root == root) {
-//RS             Some((_, members)) => members.push(module_idx),
-//RS             None => groups.push((root, vec![module_idx])),
-//RS         }
-//RS     }
-//RS     for (root, members) in &groups {
-//RS         let root_key = root.to_string_lossy().into_owned();
-//RS         for &member in members {
-//RS             name_ledger.set_module_namespace(member, root_key.clone());
-//RS         }
-//RS         // One `fn run` per package, unless the manifest names each entry
-//RS         // (owner ruling B, like Cargo `[[bin]]`): `.Executable{ entry:
-//RS         // tool.run }` lets `tool.jet` keep its own `fn run`. A named entry's
-//RS         // `run` is never shared with its siblings, so it can't collide. A
-//RS         // package-root command home (`@run.jet`, D-ROLEFILE1) is an entry the
-//RS         // command resolver selects the same way, so its command function
-//RS         // stays its own too.
-//RS         let facts = package_facts_for_root(root).ok().flatten();
-//RS         let named_entry_files: HashSet<String> = facts
-//RS             .iter()
-//RS             .flat_map(|facts| facts.outputs.values())
-//RS             .filter(|output| output.kind == crate::Package::PackageOutputKind::Executable)
-//RS             .filter_map(|output| output.entry.as_deref()?.strip_suffix(".run").map(str::to_string))
-//RS             .collect();
-//RS         let names = members
-//RS             .iter()
-//RS             .map(|&member| {
-//RS                 let path = &modules[member].path;
-//RS                 let named_entry = named_entry_files.contains(&modules[member].alias);
-//RS                 let role_command = path
-//RS                     .file_name()
-//RS                     .and_then(|name| name.to_str())
-//RS                     .filter(|name| Syntax::COMMAND_ROLE_FILES.contains(name))
-//RS                     .filter(|_| path.parent().is_some_and(|parent| normalize_path(parent) == *root))
-//RS                     .and_then(|name| name.strip_prefix('@')?.strip_suffix(".jet"));
-//RS                 namespace_item_names(&modules[member].items)
-//RS                     .into_iter()
-//RS                     .filter(|(name, _)| {
-//RS                         !(named_entry && name == "run") && role_command != Some(name.as_str())
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let mut owners: HashMap<&str, usize> = HashMap::new();
-//RS         for (position, member_names) in names.iter().enumerate() {
-//RS             for (name, span) in member_names {
-//RS                 match owners.get(name.as_str()) {
-//RS                     Some(&first) if first != position => {
-//RS                         let package = root
-//RS                             .file_name()
-//RS                             .map(|name| name.to_string_lossy().into_owned())
-//RS                             .unwrap_or_else(|| root_key.clone());
-//RS                         let other = modules[members[first]].display.clone();
-//RS                         return Err(member_error(
-// END-PORT-PENDING 2041 crates/jet-driver/src/Loader.rs:3601-5400
+use jet_foundation.Diagnostics.[Diagnostic, DiagnosticOrigin, Span, CORE_SOURCE_ROOT]
+use jet_foundation.Names.normalize_path
+use jet_foundation.CheckReads
+use jet_foundation.LintPolicy
+use jet_pkg_model.Authority.[AuthorityResolver, AuthorityError]
+use jet_driver.AST.*
+use jet_driver.[Lexer, Parser, Manifest, Syntax, Package, Lock, Policy]
+use jet_driver.Loader.[PkgResolution, LoaderError, PreparedFrontend, PreparedFrontendModule, ImportBoundaryPolicy, package_facts_for_root, package_facts_for_bundle, package_facts_from_resolver, collect_pkg_resolution, locked_store_content_hash, verify_locked_source_tree, checked_source_file, checked_source_file_with_resolver, relative_display, default_module_alias, is_foreign_namespace_import, import_alias, e0602, find_manifest_root_checked]
+use jet_driver.Loader04.resolve_module_import
+use jet_driver.ProjectParts.[ProjectPartsReport, ProjectPartScanFailure]
+use jet_driver.Policy.[PolicyDeclaration, PolicyKey, PolicyError]
+use std.fs
+use std.path.[Component, absolute]
+use std.sync.Arc
+use std.collections.Set
+// GATE #4494: native FS canonicalize/metadata and retained checked authority descriptors.
+// GATE #4499: native OSPath map/set identity and span keys remain exact.
 
+// Rust: crates/jet-driver/src/Loader.rs:3578
+// Complete the immutable store-path item split at the packet boundary.
+pub fn locked_store_source_path(dep_name: &String, package: &Lock.LockedPackage) -> OSPath Diagnostic! {
+    fingerprint :: package.fingerprint.strip_prefix("sha256-").unwrap_or(&package.fingerprint)
+    if !safe_store_component(dep_name) || !safe_store_component(&package.version) || !safe_store_component(fingerprint) { return Err(locked_dependency_diagnostic(dep_name, "the lock has no safe immutable store fingerprint")) }
+    env :: CheckReads.env_var
+    root :: env("JET_PACKAGE_STORE_DIR").or_else(fn() { env("HOME").map(fn(home) { "{home}/.jet/store" }) }).or_else(fn() { env("USERPROFILE").map(fn(home) { "{home}/.jet/store" }) }).unwrap_or_else(fn() { ".jet/store" })
+    Ok(OSPath.from(root).join("{dep_name}-{package.version}-{fingerprint}"))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3606
+pub fn safe_store_component(value: &String) -> Bool {
+    normal :: if OSPath.new(value).components().next() == { .Some(.Normal(_)) -> true; _ -> false }
+    !value.is_empty() && value != "." && value != ".." && !value.contains(['/', '\\', ':']) && !value.chars().any(fn(ch) { ch.is_control() }) && normal && OSPath.new(value).components().nth(1).is_none()
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3619
+pub fn locked_dependency_diagnostic(dep_name: &String, detail: &String) -> Diagnostic {
+    Diagnostic.error("E1204", "locked dependency `{dep_name}` failed source verification", detail.to_string(), "run `jet fetch` to recreate the lock from the verified dependency source", None)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3629
+pub fn record_locked_source_identity(resolved_sources: &[String:String], dep_name: &String, identity: String) -> Unit [Diagnostic]! {
+    if resolved_sources.get(dep_name) == {
+        .Some(previous) -> if previous != &identity { return Err([locked_dependency_diagnostic(dep_name, "the same dependency name resolves to multiple locked source identities")]) }
+        .None -> { _ :: resolved_sources.insert(dep_name.to_string(), identity) }
+    }
+    Ok(())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3647
+pub fn path_dependency_escape_diagnostic(dep_name: &String, path: &String, package_root: &OSPath) -> Diagnostic {
+    Diagnostic.error("E1206", "path dependency `{dep_name}` escapes its parent package", "the path `{path}` resolves outside the declaring package directory `{package_root.display()}`", "use a relative path below the declaring package directory", None)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3664
+// Canonical run.jet names the authority; retired main.jet never becomes fallback.
+pub fn authority_name_for_entry(entry: &OSPath) -> String Diagnostic! {
+    parent :: entry.parent().unwrap_or_else(fn() { OSPath.new(".") })
+    resolver :: AuthorityResolver.open(parent).map_err(fn(error) { error.diagnostic() })?
+    authority :: if resolver.checked_file(OSPath.new(Syntax.DEFAULT_ENTRY_FILE)) == {
+        .Ok(run) -> { resolver.revalidate_file(&run).map_err(fn(error) { error.diagnostic() })?; run.path }
+        .Err(error) if error.is_missing() -> entry.to_path_buf()
+        .Err(error) -> return Err(error.diagnostic())
+    }
+    legacy_stem :: Syntax.LEGACY_ENTRY_FILE.strip_suffix(".jet").unwrap_or(Syntax.LEGACY_ENTRY_FILE)
+    Ok(authority.file_stem().and_then(fn(name) { name.to_str() }).filter(fn(name) { !name.is_empty() && name != legacy_stem }).unwrap_or("app").to_string())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3690
+// Nearest workspace is an independent authority boundary, including malformed declarations.
+pub fn find_workspace_root_with_error(start: &OSPath) -> OSPath? (OSPath, AuthorityError)! {
+    dir := AuthorityResolver.authority_walk_root(start).map_err(fn(error) { (start.to_path_buf(), error) })?
+    loop {
+        resolver :: AuthorityResolver.open_for_authority_walk(&dir).map_err(fn(error) { (dir.clone(), error) })?
+        if resolver == {
+            .Some(resolver) -> if resolver.resolve_workspace_source() == {
+                .Ok(.Some(_)) -> return Ok(Some(dir))
+                .Ok(.None) -> {}
+                .Err(error) -> return Err((dir.clone(), error))
+            }
+            .None -> {}
+        }
+        parent :: AuthorityResolver.authority_walk_parent(&dir)
+        if parent.is_none() { return Ok(None) }
+        dir = parent.unwrap()
+    }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3718
+pub fn find_workspace_root_checked(start: &OSPath) -> OSPath? Diagnostic! { find_workspace_root_with_error(start).map_err(fn((_, error)) { error.workspace_diagnostic() }) }
+
+// Rust: crates/jet-driver/src/Loader.rs:3723
+// A real package or workspace stops stale-name discovery.
+pub fn find_stale_manifest_name(start: &OSPath) -> (OSPath, String)? {
+    dir := AuthorityResolver.authority_walk_root(start).ok()?
+    loop {
+        resolver_opt :: AuthorityResolver.open_for_authority_walk(&dir).ok()?
+        if resolver_opt.is_none() { dir = AuthorityResolver.authority_walk_parent(&dir)?; continue }
+        resolver :: resolver_opt.unwrap()
+        if resolver.checked_manifest(OSPath.new(".")) == {
+            .Ok(_) -> return None
+            .Err(error) if error.is_missing() -> {}
+            .Err(.RetiredManifest(_)) -> return Some((dir, Syntax.PAYLOAD_FILE))
+            .Err(_) -> return None
+        }
+        for name in Syntax.STALE_MANIFEST_NAMES {
+            if resolver.checked_file(OSPath.new(name)) == {
+                .Ok(file) -> { resolver.revalidate_file(&file).ok()?; return Some((dir, name)) }
+                .Err(error) if error.is_missing() -> {}
+                .Err(_) -> return None
+            }
+        }
+        if resolver.resolve_workspace_source() == { .Ok(.Some(_)) -> return None; .Ok(.None) -> {}; .Err(_) -> return None }
+        dir = AuthorityResolver.authority_walk_parent(&dir)?
+    }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3768
+pub fn stale_manifest_name_diagnostic(start: &OSPath) -> (OSPath, Diagnostic)? {
+    (dir, stale) :: find_stale_manifest_name(start)?
+    path :: dir.join(stale)
+    Some((path.clone(), Diagnostic.error("E1226", "`{stale}` is not the package manifest name — Jet reads `{Syntax.PACKAGE_FILE}`", "the Package root filename is frozen to one spelling (D-ECO-FILEROOT1) so tooling, docs, and every worked example never have to guess which file to read", "rename `{path.display()}` to `{dir.join(Syntax.PACKAGE_FILE).display()}`", None)))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3791
+pub fn stale_manifest_name_message(start: &OSPath) -> String? { (_, diagnostic) :: stale_manifest_name_diagnostic(start)?; Some(diagnostic.render("", "")) }
+
+// Rust: crates/jet-driver/src/Loader.rs:3800
+// Dry resolution reads manifests only: no fetch/store/link side effects.
+pub fn dry_resolve_path_deps(mf: &Manifest.Manifest, project_root: &OSPath) -> Unit Diagnostic! {
+    seen := [String:(String, [String])].new()
+    root_name :: mf.package.name.clone()
+    canonical_root :: fs.canonicalize(project_root).ok()
+    root_reach := RootPathReach { declared: [], sibling_dirs: [] }
+    for spec in mf.dependencies.values() {
+        if spec == {
+            .Path { path } -> {
+                if OSPath.new(path).is_absolute() { continue }
+                resolved_opt :: fs.canonicalize(project_root.join(path)).ok()
+                if resolved_opt.is_none() { continue }
+                resolved :: resolved_opt.unwrap()
+                outside_root :: canonical_root.as_ref().is_some_and(fn(root) { !resolved.starts_with(root) })
+                if outside_root {
+                    if resolved.parent() == { .Some(parent) -> root_reach.sibling_dirs.push(parent.to_path_buf()); .None -> {} }
+                }
+                root_reach.declared.push(resolved)
+            }
+            _ -> continue
+        }
+    }
+    dry_resolve_recursive(mf, project_root, &[root_name], &seen, false, &root_reach)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3839
+struct RootPathReach { declared: [OSPath], sibling_dirs: [OSPath] }
+extend RootPathReach {
+    // Rust: crates/jet-driver/src/Loader.rs:3850
+    fn contains(self: &RootPathReach, resolved: &OSPath) -> Bool { self.declared.iter().any(fn(declared) { declared == resolved }) || self.sibling_dirs.iter().any(fn(dir) { resolved.starts_with(dir) }) }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3856
+fn dry_resolve_recursive(mf: &Manifest.Manifest, pkg_dir: &OSPath, chain: &[String], seen: &[String:(String, [String])], enforce_path_boundary: Bool, root_reach: &RootPathReach) -> Unit Diagnostic! {
+    for (dep_alias, spec) in &mf.dependencies {
+        path_opt :: if spec == { .Path { path } -> Some(path); _ -> None }
+        if path_opt.is_none() { continue }
+        path :: path_opt.unwrap()
+        dep_path :: normalize_path(&pkg_dir.join(path))
+        declared_by_root :: !OSPath.new(path).is_absolute() && fs.canonicalize(&dep_path).is_ok_and(fn(resolved) { root_reach.contains(&resolved) })
+        enforce_path_boundary :: enforce_path_boundary && !declared_by_root
+        if enforce_path_boundary && (OSPath.new(path).is_absolute() || !dep_path.starts_with(pkg_dir)) { return Err(path_dependency_escape_diagnostic(dep_alias, path, pkg_dir)) }
+        if enforce_path_boundary {
+            parent :: fs.canonicalize(pkg_dir).map_err(fn(error) { locked_dependency_diagnostic(dep_alias, &"could not resolve the declaring package root: {error}") })?
+            if fs.canonicalize(&dep_path) == { .Ok(resolved) -> if !resolved.starts_with(parent) { return Err(path_dependency_escape_diagnostic(dep_alias, path, pkg_dir)) }; .Err(_) -> {} }
+        }
+        dep_facts :: if package_facts_for_root(&dep_path) == {
+            .Ok(.Some(facts)) -> facts
+            .Ok(.None) -> continue
+            .Err(diagnostics) -> {
+                diagnostics := diagnostics
+                return Err(diagnostics.pop().unwrap_or_else(fn() { Diagnostic.error("E1206", "package dependency `{dep_alias}` is invalid", "the dependency package facts could not be loaded", "restore the dependency package source and retry", None) }))
+            }
+        }
+        dep_mf :: Package.to_manifest(&dep_facts, "")?
+        dep_pkg_name :: dep_mf.package.name.clone()
+        dep_version :: dep_mf.package.version.clone()
+        child_chain := chain.to_vec()
+        child_chain.push(dep_alias.clone())
+        if seen.get(&dep_pkg_name).cloned() == {
+            .Some((prev_ver, prev_chain)) -> if prev_ver != dep_version { return Err(Lock.e1201(&dep_pkg_name, &prev_ver, &prev_chain, &dep_version, &child_chain)) }
+            .None -> {
+                _ :: seen.insert(dep_pkg_name.clone(), (dep_version, child_chain.clone()))
+                dry_resolve_recursive(&dep_mf, &dep_path, &child_chain, seen, true, root_reach)?
+            }
+        }
+    }
+    Ok(())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3933
+pub struct DependencyDir { pub manifest_root: OSPath, pub source_root: OSPath, pub authority: AuthorityResolver, pub boundary_policy: ImportBoundaryPolicy?, pub auto_derive_default: Bool?, pub direct: Bool, pub deps: Set[String] }
+
+// Rust: crates/jet-driver/src/Loader.rs:3947
+fn dependency_authority_for_path(path: &OSPath, dependencies: &[String:DependencyDir], pkg_resolution: &PkgResolution) -> AuthorityResolver? {
+    dependencies.values().map(fn(dependency) { &dependency.authority }).chain(pkg_resolution.realized_authorities.values()).filter(fn(authority) { path.starts_with(authority.root()) }).max_by_key(fn(authority) { authority.root().components().count() })
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3960
+fn dependency_visible_from(importing: &OSPath, name: &String, dependencies: &[String:DependencyDir]) -> Bool {
+    owner :: dependencies.values().filter(fn(dependency) { importing.starts_with(&dependency.source_root) || importing.starts_with(&dependency.manifest_root) }).max_by_key(fn(dependency) { dependency.manifest_root.components().count() })
+    if owner == { .Some(owner) -> owner.deps.contains(name) && dependencies.contains_key(name); .None -> dependencies.get(name).is_some_and(fn(dependency) { dependency.direct }) }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:3981
+fn dependency_dir_from_resolver(resolver: AuthorityResolver) -> DependencyDir [Diagnostic]! {
+    src_root :: if resolver.checked_manifest(OSPath.new(".")) == {
+        .Ok(_) -> resolver.root().to_path_buf()
+        .Err(error) if error.is_missing() -> {
+            directory :: if resolver.checked_directory(OSPath.new(".jet")) == {
+                .Ok(directory) -> directory
+                .Err(error) if error.is_missing() -> { root :: resolver.root().to_path_buf(); return dependency_dir_with_source_root(resolver, root) }
+                .Err(error) -> return Err([error.diagnostic()])
+            }
+            nested :: AuthorityResolver.from_checked_directory(&directory)
+            if nested.checked_manifest(OSPath.new(".")) == { .Ok(_) -> directory.path; .Err(error) if error.is_missing() -> resolver.root().to_path_buf(); .Err(error) -> return Err([error.diagnostic()]) }
+        }
+        .Err(error) -> return Err([error.diagnostic()])
+    }
+    dependency_dir_with_source_root(resolver, src_root)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4010
+fn dependency_dir_with_source_root(resolver: AuthorityResolver, src_root: OSPath) -> DependencyDir [Diagnostic]! {
+    authority :: if src_root == resolver.root() { resolver.clone() } else {
+        relative :: src_root.strip_prefix(resolver.root()).map_err(fn(_) { [Diagnostic.error("E1334", "dependency source root is outside its checked package root", "`{src_root.display()}` is not below `{resolver.root().display()}`", "repair the dependency's package layout and retry", None)] })?
+        directory :: resolver.checked_directory(relative).map_err(fn(error) { [error.diagnostic()] })?
+        AuthorityResolver.from_checked_directory(&directory)
+    }
+    (boundary_policy, auto_derive_default, deps) :: dependency_manifest_policy(&authority, &src_root)?
+    Ok(DependencyDir { manifest_root: resolver.root().to_path_buf(), source_root: src_root, authority, boundary_policy, auto_derive_default, direct: false, deps })
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4044
+fn dependency_manifest_policy(resolver: &AuthorityResolver, source_root: &OSPath) -> (ImportBoundaryPolicy?, Bool?, Set[String]) [Diagnostic]! {
+    facts_opt :: package_facts_from_resolver(resolver)?
+    if facts_opt.is_none() { return Ok((None, None, [String].new().into_set())) }
+    facts :: facts_opt.unwrap()
+    manifest :: Package.to_manifest(&facts, "").map_err(fn(diagnostic) { [diagnostic] })?
+    auto_derive_default :: !LintPolicy.is_denied(manifest.policy.lints_deny.as_deref().unwrap_or_default(), LintPolicy.auto_derive_lint().code)
+    Ok((Some(ImportBoundaryPolicy.from_manifest(&manifest, source_root)), Some(auto_derive_default), manifest.dependencies.keys().cloned().collect()))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4065
+pub fn collect_dep_dirs(mf: &Manifest.Manifest, project_root: &OSPath) -> [String:DependencyDir] [Diagnostic]! {
+    dirs := collect_declared_dep_dirs(mf, project_root)?
+    for dependency in dirs.values_mut() { dependency.direct = true }
+    pending := dirs.values().cloned().collect()
+    expanded := [OSPath].new().into_set()
+    while !pending.is_empty() {
+        dependency :: pending.pop().unwrap()
+        if dependency.deps.is_empty() || !expanded.insert(dependency.manifest_root.clone()) { continue }
+        facts_opt :: package_facts_from_resolver(&dependency.authority)?
+        if facts_opt.is_none() { continue }
+        manifest :: Package.to_manifest(&facts_opt.unwrap(), "").map_err(fn(diagnostic) { [diagnostic] })?
+        for (name, nested) in collect_declared_dep_dirs(&manifest, &dependency.manifest_root)? {
+            if !dirs.contains_key(&name) { pending.push(nested.clone()); _ :: dirs.insert(name, nested) }
+        }
+    }
+    Ok(dirs)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4098
+fn collect_declared_dep_dirs(mf: &Manifest.Manifest, project_root: &OSPath) -> [String:DependencyDir] [Diagnostic]! {
+    dirs := [String:DependencyDir].new()
+    lock :: Lock.load(project_root)
+    for (dep_name, spec) in &mf.dependencies {
+        if spec == {
+            .Path { path } -> {
+                abs :: normalize_path(&project_root.join(path))
+                (source, store_authority, expected_hash) :: if lock.as_ref() == {
+                    .Some(lock) -> if lock.packages.iter().find(fn(package) { package.name == dep_name && if package.source == { .Path(_) -> true; _ -> false } }) == {
+                        .Some(package) -> (locked_store_source_path(dep_name, package).map_err(fn(diagnostic) { [diagnostic] })?, true, locked_store_content_hash(package).map(fn(hash) { hash.to_string() }))
+                        .None -> (abs.clone(), false, None)
+                    }
+                    .None -> (abs, false, None)
+                }
+                if store_authority { verify_locked_source_tree(dep_name, &source, expected_hash.as_deref().unwrap_or(""))? }
+                resolver_result :: if store_authority { AuthorityResolver.open_store(&source) } else { AuthorityResolver.open(&source) }
+                resolver :: if resolver_result == { .Ok(resolver) -> resolver; .Err(error) if error.is_missing() -> continue; .Err(error) -> return Err([error.diagnostic()]) }
+                _ :: dirs.insert(dep_name.clone(), dependency_dir_from_resolver(resolver)?)
+            }
+            .Git { .. } -> {
+                (source, store_authority, expected_hash) :: if lock.as_ref() == {
+                    .Some(lock) -> {
+                        package :: lock.packages.iter().find(fn(package) { package.name == dep_name && if package.source == { .Git { .. } -> true; _ -> false } }).ok_or_else(fn() { Lock.e1202(&project_root.join(Syntax.UNIFIED_LOCK_FILE).display().to_string()) }).map_err(fn(diagnostic) { [diagnostic] })?
+                        (locked_store_source_path(dep_name, package).map_err(fn(diagnostic) { [diagnostic] })?, true, locked_store_content_hash(package).map(fn(hash) { hash.to_string() }))
+                    }
+                    .None -> (project_root.join(".jet").join("build").join("deps").join(dep_name), false, None)
+                }
+                if store_authority { verify_locked_source_tree(dep_name, &source, expected_hash.as_deref().unwrap_or(""))? }
+                resolver_result :: if store_authority { AuthorityResolver.open_store(&source) } else { AuthorityResolver.open(&source) }
+                resolver :: if resolver_result == { .Err(error) if error.is_missing() -> continue; .Err(error) -> return Err([error.diagnostic()]); .Ok(resolver) -> resolver }
+                _ :: dirs.insert(dep_name.clone(), dependency_dir_from_resolver(resolver)?)
+            }
+            // Registry sources require fetch; foreign bindings aren't Jet module roots.
+            .Registry(_) | .Foreign { .. } -> {}
+        }
+    }
+    Ok(dirs)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4219
+fn project_resolution(project_root: &OSPath) -> ([String:DependencyDir], PkgResolution) [Diagnostic]! {
+    facts_opt :: package_facts_for_root(project_root)?
+    if facts_opt.is_none() { return Ok(([String:DependencyDir].new(), PkgResolution.default())) }
+    facts :: facts_opt.unwrap()
+    manifest :: Package.to_manifest(&facts, "").map_err(fn(diagnostic) { [diagnostic] })?
+    dep_dirs :: collect_dep_dirs(&manifest, project_root)?
+    resolution :: collect_pkg_resolution(&facts).map_err(fn(diagnostic) { [diagnostic] })?
+    Ok((dep_dirs, resolution))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4238
+fn project_resolution_for_bundle(bundle: &ProgramBundle) -> ([String:DependencyDir], PkgResolution) [Diagnostic]! {
+    facts_opt :: package_facts_for_bundle(bundle)?
+    if facts_opt.is_none() { return project_resolution(&bundle.project_root) }
+    facts :: facts_opt.unwrap()
+    manifest :: Package.to_manifest(&facts, "").map_err(fn(diagnostic) { [diagnostic] })?
+    dep_dirs :: collect_dep_dirs(&manifest, &bundle.project_root)?
+    resolution :: collect_pkg_resolution(&facts).map_err(fn(diagnostic) { [diagnostic] })?
+    Ok((dep_dirs, resolution))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4253
+fn auto_derive_default_for_file(path: &OSPath, project_root: &OSPath, project_lints_deny: &[String], dependency_roots: &[String:DependencyDir]) -> Bool Diagnostic! {
+    dependency :: dependency_roots.values().filter(fn(dependency) { path.starts_with(&dependency.source_root) }).max_by_key(fn(dependency) { dependency.source_root.components().count() })
+    if dependency == {
+        .Some(dependency) -> return dependency.auto_derive_default.ok_or_else(fn() { Diagnostic.error("E1334", "package manifest `{dependency.manifest_root.display()}` is missing", "a dependency source root must have one checked package manifest", "restore `package.jet` in the dependency root", None) })
+        .None -> {}
+    }
+    if path.starts_with(project_root) { Ok(!LintPolicy.is_denied(project_lints_deny, LintPolicy.auto_derive_lint().code)) } else { Ok(true) }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4287
+fn apply_auto_derive_default(items: &[Item], default: Bool) -> {
+    for item in items {
+        if item == {
+            .Struct(def) -> def.auto_derive_default = default
+            .Enum(def) -> def.auto_derive_default = default
+            .CodeModule(module) -> if module.body.as_mut() == { .Some(body) -> apply_auto_derive_default(body, default); .None -> {} }
+            .GenericModule(module) -> apply_auto_derive_default(&module.body, default)
+            _ -> {}
+        }
+    }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4303
+pub fn load_file(path: &OSPath, display: &String, project_root: &OSPath, pkg_dep_dirs: &[String:DependencyDir], pkg_resolution: &PkgResolution, package_policy: &[PolicyDeclaration], package_lints_deny: &[String], modules: &[LoadedModule], path_to_idx: &[OSPath:USize], stack: &[OSPath], overlays: &[(OSPath, String)], for_check: Bool, parse_teaching: &[Diagnostic], project_parts: &ProjectPartsReport, project_part_failures: &[ProjectPartScanFailure], dependencies: &[OSPath], prepared_frontend: PreparedFrontend?) -> Unit LoaderError! {
+    is_entry :: path_to_idx.is_empty()
+    load_file_located(path, display, project_root, pkg_dep_dirs, pkg_resolution, package_policy, package_lints_deny, modules, path_to_idx, stack, overlays, for_check, parse_teaching, project_parts, project_part_failures, dependencies, prepared_frontend).map_err(fn(error) { if is_entry { error } else { error.with_module_origin(display, path) } })
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4355
+fn load_file_located(path: &OSPath, display: &String, project_root: &OSPath, pkg_dep_dirs: &[String:DependencyDir], pkg_resolution: &PkgResolution, package_policy: &[PolicyDeclaration], package_lints_deny: &[String], modules: &[LoadedModule], path_to_idx: &[OSPath:USize], stack: &[OSPath], overlays: &[(OSPath, String)], for_check: Bool, parse_teaching: &[Diagnostic], project_parts: &ProjectPartsReport, project_part_failures: &[ProjectPartScanFailure], dependencies: &[OSPath], prepared_frontend: PreparedFrontend?) -> Unit LoaderError! {
+    prepared_frontend := prepared_frontend
+    norm :: normalize_path(path)
+    if !dependencies.contains(&norm) { dependencies.push(norm.clone()) }
+    if stack.contains(&norm) {
+        cycle :: stack.iter().chain(std.iter.once(&norm)).map(fn(p) { relative_display(project_root, p) }).collect()
+        cycle_file :: stack.last().map(fn(path) { relative_display(project_root, path) }).unwrap_or_else(fn() { display.to_string() })
+        return Err(LoaderError.at(&cycle_file, "", [Diagnostic.error("E0604", "these files import each other in a circle", "Jet loads every imported file before compiling, so imports can't loop", "break the cycle: {cycle.join(" → ")}", None)]))
+    }
+    if path_to_idx.contains_key(&norm) { return Ok(()) }
+    overlay_source :: overlays.iter().rev().find(fn((candidate, _)) { normalize_path(candidate) == norm }).map(fn((_, text)) { text.to_string() })
+    checked_authority :: if overlay_source.is_none() {
+        Some(dependency_authority_for_path(path, pkg_dep_dirs, pkg_resolution).map_or_else(fn() { checked_source_file(path, display) }, fn(authority) { checked_source_file_with_resolver(path, display, authority) })?)
+    } else { None }
+    source :: overlay_source.or_else(fn() { checked_authority.as_ref().map(fn((_, _, source)) { source.clone() }) }).expect("one source reader must provide the module text")
+    prepared :: prepared_frontend.as_deref_mut().and_then(fn(cache) { cache.remove(&norm) }).filter(fn(entry) { entry.source == source }).map(fn(entry) { entry.module })
+    (prog, teaching) := if prepared == {
+        .Some(.Parsed(program, teaching)) -> (program, teaching)
+        .Some(.LexFailed(diagnostics)) | .Some(.ParseFailed(diagnostics)) -> return Err(LoaderError.at(display, &source, diagnostics))
+        .None -> {
+            source_for_parse :: Package.mask_inline_package_source(&source).map_err(fn(error) { LoaderError.at(display, &source, [error.diagnostic()]) })?.0
+            (tokens, lex_diags) :: Lexer.lex(&source_for_parse)
+            if !lex_diags.is_empty() { return Err(LoaderError.at(display, &source, lex_diags)) }
+            Parser.parse_for_check_with_source(&tokens, &source_for_parse).map_err(fn(diagnostics) { LoaderError.at(display, &source, diagnostics) })?
+        }
+    }
+    is_entry :: path_to_idx.is_empty()
+    if is_entry || teaching.is_empty() { parse_teaching.extend(teaching) } else {
+        origin :: Arc.new(DiagnosticOrigin.new(display, path.to_string_lossy().into_owned(), source.clone()))
+        parse_teaching.extend(teaching.into_iter().map(fn(diagnostic) { diagnostic.with_origin(origin.clone()) }))
+    }
+    auto_derive_default :: auto_derive_default_for_file(&norm, project_root, package_lints_deny, pkg_dep_dirs).map_err(fn(diagnostic) { LoaderError.at(display, &source, [diagnostic]) })?
+    apply_auto_derive_default(&prog.items, auto_derive_default)
+    alias :: default_module_alias(path)
+    stack.push(norm.clone())
+    module_idx :: modules.len()
+    _ :: path_to_idx.insert(norm.clone(), module_idx)
+    imports := std.mem.take(&prog.imports)
+    package_bindings := [ImportDecl].new()
+    for imp in &imports {
+        if imp.kind == {
+            .Unqualified { module_alias, module_alias_span, .. } -> {
+                bound :: imports.iter().chain(package_bindings.iter()).any(fn(other) { binding_kind :: if other.kind == { .File(..) | .Module(..) -> true; _ -> false }; binding_kind && other.import_alias() == module_alias })
+                if bound || !dependency_visible_from(&norm, module_alias, pkg_dep_dirs) { continue }
+                span :: Span.new(module_alias_span.start, module_alias_span.start)
+                package_bindings.push(ImportDecl { kind: .Module(module_alias.clone(), span), alias: module_alias.clone(), alias_span: span, span, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: None })
+            }
+            _ -> continue
+        }
+    }
+    imports.splice(0..0, package_bindings)
+    member_module_aliases := [String:USize].new()
+    for item in &prog.items {
+        if item == { .CodeModule(module) -> member_module_aliases[module.name.clone()] = member_module_aliases.get(&module.name).copied().unwrap_or(0) + 1; _ -> {} }
+    }
+    for imp in &imports {
+        if imp.kind == {
+            .File(..) | .Module(..) -> { name :: imp.import_alias(); member_module_aliases[name.clone()] = member_module_aliases.get(&name).copied().unwrap_or(0) + 1 }
+            _ -> {}
+        }
+    }
+    for declaration in &prog.policy_declarations { declaration.source = display.to_string() }
+    effective_declarations := package_policy.to_vec()
+    effective_declarations.extend(prog.policy_declarations.clone())
+    for key in Policy.POLICY_RULES.iter().map(fn(rule) { rule.key }) {
+        module_chain :: effective_declarations.iter().filter(fn(d) { if d.scope == { .Organization | .Package | .Module -> true; _ -> false } }).cloned().collect()
+        Policy.resolve(key, module_chain).map_err(fn(error) { LoaderError.at(display, &source, [policy_ladder_diagnostic(key, error)]) })?
+        targets :: effective_declarations.iter().filter(fn(d) { scoped :: if d.scope == { .Function | .Block -> true; _ -> false }; scoped && d.key == key }).filter_map(fn(d) { d.target }).collect()
+        for target in targets {
+            chain :: effective_declarations.iter().filter(fn(d) { if d.scope == { .Organization | .Package | .Module -> true; .Function | .Block -> d.target == Some(target) } }).cloned().collect()
+            Policy.resolve(key, chain).map_err(fn(error) { LoaderError.at(display, &source, [policy_ladder_diagnostic(key, error)]) })?
+        }
+    }
+    modules.push(LoadedModule { path: path.to_path_buf(), display: display.to_string(), source: source.clone(), alias, imports: imports.clone(), items: prog.items, script_body: prog.script_body, block_spans: prog.block_spans, web_target_ceiling: prog.web_target_ceiling, pub_file: prog.pub_file, no_prelude: prog.no_prelude, default_target: prog.default_target, html_path: prog.html_path.clone(), policy_declarations: effective_declarations, user_policy_declarations: std.mem.take(&prog.user_policy_declarations), rule_facts: std.mem.take(&prog.rule_facts) })
+    for (import_idx, imp) in imports.iter_mut().enumerate() {
+        is_foreign :: is_foreign_namespace_import(imp).map_err(fn(diagnostic) { LoaderError.at(display, &source, [diagnostic]) })?
+        if is_foreign { continue }
+        if imp.kind == { .Unqualified { .. } -> continue; _ -> {} }
+        if check_reserved_import(imp) == { .Err(d) -> { _ :: stack.pop(); return Err(LoaderError.at(display, &source, [d])) }; .Ok(_) -> {} }
+        if core_module_path(imp).is_some() || jet_driver.AST.target_profile_path(imp).is_some() { continue }
+        if imp.kind == {
+            .File(path_str, path_span) -> if !path_str.ends_with(".h") && !path_str.contains("..") && !is_loose_file(path) { _ :: stack.pop(); return Err(LoaderError.at(display, &source, [Diagnostic.from_row("E0623", &[("path", path_str)], Some(path_span))])) }
+            _ -> {}
+        }
+        target :: if resolve_import(imp, path, project_root, pkg_dep_dirs, pkg_resolution, project_parts, project_part_failures) == {
+            .Ok(p) -> p
+            .Err(d) if d.code == "E0603" -> {
+                if imp.kind == {
+                    .Module(name, name_span) -> {
+                        if name.split_once('.') == {
+                            .Some((prefix, member)) -> {
+                                own_binding :: if imp.alias == prefix { 1 } else { 0 }
+                                other_bindings :: member_module_aliases.get(prefix).copied().unwrap_or_default() > own_binding
+                                if other_bindings {
+                                    prefix_span :: Span.new(name_span.start, name_span.start + prefix.len())
+                                    member_span :: Span.new(prefix_span.end + 1, name_span.end)
+                                    local_span :: if imp.alias_span.start == imp.span.start { Span.new(name_span.end - imp.alias.len(), name_span.end) } else { imp.alias_span }
+                                    imp.kind = .Unqualified { module_alias: prefix.to_string(), module_alias_span: prefix_span, items: [(member.to_string(), Some(imp.alias.clone()))], items_span: member_span, span: imp.span }
+                                    imp.item_spans = [member_span]; imp.local_spans = [local_span]
+                                    modules[module_idx].imports[import_idx] = imp.clone()
+                                    continue
+                                }
+                            }
+                            .None -> {}
+                        }
+                    }
+                    _ -> {}
+                }
+                _ :: stack.pop()
+                return Err(LoaderError.at(display, &source, [d]))
+            }
+            .Err(d) -> { _ :: stack.pop(); return Err(LoaderError.at(display, &source, [d])) }
+        }
+        child_display :: relative_display(project_root, &target)
+        if load_file(&target, &child_display, project_root, pkg_dep_dirs, pkg_resolution, package_policy, package_lints_deny, modules, path_to_idx, stack, overlays, for_check, parse_teaching, project_parts, project_part_failures, dependencies, prepared_frontend.as_deref_mut()) == { .Err(diags) -> { _ :: stack.pop(); return Err(diags) }; .Ok(_) -> {} }
+    }
+    // Resolve body-less code module declarations adjacent to this file.
+    // Rust: crates/jet-driver/src/Loader.rs:4731
+    struct CmMeta { name: String, name_span: Span, span: Span, is_pub: Bool, is_package_pub: Bool }
+    code_module_decls :: modules[module_idx].items.iter().filter_map(fn(item) {
+        if item == {
+            .CodeModule(cm) if cm.body.is_none() -> Some(CmMeta { name: cm.name.clone(), name_span: cm.name_span, span: cm.span, is_pub: cm.is_pub, is_package_pub: cm.is_package_pub })
+            _ -> None
+        }
+    }).collect()
+    for cm in code_module_decls {
+        target :: if resolve_code_module_file(&cm.name, cm.name_span, path, pkg_dep_dirs, pkg_resolution, dependencies) == { .Ok(p) -> p; .Err(d) -> { _ :: stack.pop(); return Err(LoaderError.at(display, &source, [d])) } }
+        child_display :: relative_display(project_root, &target)
+        if load_file(&target, &child_display, project_root, pkg_dep_dirs, pkg_resolution, package_policy, package_lints_deny, modules, path_to_idx, stack, overlays, for_check, parse_teaching, project_parts, project_part_failures, dependencies, prepared_frontend.as_deref_mut()) == { .Err(diags) -> { _ :: stack.pop(); return Err(diags) }; .Ok(_) -> {} }
+        importing_dir :: path.parent().unwrap_or(OSPath.new("."))
+        rel_path :: target.strip_prefix(importing_dir).map(fn(p) { p.with_extension("") }).map(fn(p) { p.to_string_lossy().replace('\\', "/") }).unwrap_or_else(fn(_) { cm.name.clone() })
+        synthetic :: ImportDecl { kind: .File(rel_path, cm.name_span), alias: cm.name.clone(), alias_span: cm.name_span, span: cm.span, item_spans: [], local_spans: [], is_pub: cm.is_pub, is_package_pub: cm.is_package_pub, inline_version: None }
+        modules[module_idx].imports.push(synthetic)
+    }
+    if checked_authority.as_ref() == {
+        .Some((resolver, checked, _)) -> resolver.revalidate_file(checked).map_err(fn(error) { LoaderError.at(display, &source, [error.diagnostic()]) })?
+        .None -> {}
+    }
+    _ :: stack.pop()
+    Ok(())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4829
+fn policy_ladder_diagnostic(key: PolicyKey, error: PolicyError) -> Diagnostic {
+    span :: if error == { .ProhibitedScope { span, .. } | .Widening { span, .. } -> span; .Conflict { second, .. } -> second }
+    Diagnostic.error("E0355", "invalid effective `{key.name()}` policy", "package, module, function, and block declarations share one ladder; inner declarations may not conflict with or widen an outer safety constraint", "remove the conflict or tighten the inner declaration", Some(span))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4847
+fn resolve_code_module_file(name: &String, name_span: Span, importing: &OSPath, pkg_dep_dirs: &[String:DependencyDir], pkg_resolution: &PkgResolution, dependencies: &[OSPath]) -> OSPath Diagnostic! {
+    dir :: importing.parent().unwrap_or(OSPath.new("."))
+    direct :: normalize_path(&dir.join("{name}.{Syntax.FILE_EXT}"))
+    module_jet :: normalize_path(&dir.join(name).join("module.{Syntax.FILE_EXT}"))
+    for candidate in [&direct, &module_jet] { if !dependencies.contains(candidate) { dependencies.push(candidate.clone()) } }
+    authority_opt :: dependency_authority_for_path(importing, pkg_dep_dirs, pkg_resolution)
+    (resolver, relative_dir) :: if authority_opt.is_some() {
+        authority :: authority_opt.unwrap()
+        relative_dir :: dir.strip_prefix(authority.root()).map_err(fn(_) { AuthorityError.Escapes(dir.to_path_buf()).diagnostic() })?.to_path_buf()
+        (authority.clone(), relative_dir)
+    } else { (AuthorityResolver.open(dir).map_err(fn(error) { error.diagnostic() })?, OSPath.new()) }
+    for relative in [relative_dir.join("{name}.{Syntax.FILE_EXT}"), relative_dir.join(name).join("module.{Syntax.FILE_EXT}")] {
+        if resolver.checked_file(&relative) == { .Ok(file) -> { resolver.revalidate_file(&file).map_err(fn(error) { error.diagnostic() })?; return Ok(file.path) }; .Err(error) if error.is_missing() -> {}; .Err(error) -> return Err(error.diagnostic()) }
+    }
+    Err(Diagnostic.error("E0607", "module `{name}` not found", "looked for `{name}.jet` and `{name}/module.jet` next to this file", "create `{name}.{Syntax.FILE_EXT}` next to this file", Some(name_span)))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4906
+pub fn resolve_import(imp: &ImportDecl, importing: &OSPath, project_root: &OSPath, pkg_dep_dirs: &[String:DependencyDir], pkg_resolution: &PkgResolution, project_parts: &ProjectPartsReport, project_part_failures: &[ProjectPartScanFailure]) -> OSPath Diagnostic! {
+    if imp.kind == {
+        .File(path_str, span) -> resolve_file_import(importing, path_str, project_root, pkg_dep_dirs, pkg_resolution, span)
+        .Module(name, span) -> resolve_module_import(name, importing, project_root, pkg_dep_dirs, pkg_resolution, span, project_parts, project_part_failures)
+        .Unqualified { .. } -> Err(Diagnostic.error("E0003", "unqualified import cannot be resolved as a file", "use alias.Item imports are resolved by sema against an already-loaded module", "ensure the module is imported first: `use module_name as alias;`", Some(imp.span)))
+    }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4956
+pub fn core_module_path(imp: &ImportDecl) -> String? { imp.core_module_path() }
+
+// Rust: crates/jet-driver/src/Loader.rs:4960
+pub fn source_names_identifier(source: &String, name: &String) -> Bool {
+    is_ident :: fn(byte: U8) { byte == b'_' || byte.is_ascii_alphanumeric() }
+    bytes :: source.as_bytes()
+    source.match_indices(name).any(fn((start, _)) { end :: start + name.len(); (start == 0 || !is_ident(bytes[start - 1])) && bytes.get(end).map_or(true, fn(byte) { !is_ident(byte) }) })
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4972
+pub fn core_source_import_module(imp: &ImportDecl) -> String? {
+    core_module_path(imp).or_else(fn() {
+        if imp.kind == {
+            .Unqualified { module_alias, .. } -> if module_alias == Syntax.CORE_SHORT || module_alias == Syntax.CORE_CANONICAL || module_alias == "app" || module_alias.starts_with("core.") { Some(module_alias.clone()) } else { None }
+            _ -> None
+        }
+    })
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:4987
+pub use jet_driver.Syntax.[core_modules_list, is_known_core_module, is_legacy_std_import, is_ring_module, is_ring_module_staged, KNOWN_CORE_MODULES]
+
+// Rust: crates/jet-driver/src/Loader.rs:4992
+pub enum RingResolution { Staged(OSPath), Embedded }
+
+// Rust: crates/jet-driver/src/Loader.rs:5002
+pub fn resolve_ring_module(name: &String) -> RingResolution { if Syntax.staged_ring_artifact(name) == { .Some(artifact) -> .Staged(artifact); .None -> .Embedded } }
+
+// Rust: crates/jet-driver/src/Loader.rs:5015
+pub fn e1241_ring_platform_miss(ring: &String) -> Diagnostic {
+    Diagnostic.error("E1241", "the staged `core.{ring}` artifact is missing for this platform", "the active toolchain object carries prebuilt ring artifacts, but none for `core.{ring}` on this platform.", "the build falls back to the compiler-embedded `core.{ring}`; to ship the staged artifact, realize a toolchain object built for this platform (`jet update jet`).", None)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5035
+fn check_reserved_import(imp: &ImportDecl) -> Unit Diagnostic! {
+    if jet_driver.AST.target_profile_path(imp).is_some() { return Ok(()) }
+    module_opt :: core_module_path(imp)
+    if module_opt.is_some() {
+        module :: module_opt.unwrap()
+        if !is_known_core_module(&module) {
+            span :: if imp.kind == { .Module(_, span) -> span; .File(_, _) | .Unqualified { .. } -> imp.span }
+            if Syntax.retired_core_module_diagnostic(&module, span) == { .Some(diagnostic) -> return Err(diagnostic); .None -> {} }
+            return Err(Diagnostic.error("E1001", "there is no core module `{module}`", "`core` is compiler-known in M10, and only the frozen core modules exist", "use one of: {core_modules_list()}", Some(span)))
+        }
+        return Ok(())
+    }
+    alias :: import_alias(imp)
+    if Syntax.FIRST_PARTY_RESERVED.contains(&alias.as_str()) { return Err(Diagnostic.error("E1002", "`{alias}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "rename the module or use it with `{Syntax.KW_AS} other_name`", Some(imp.alias_span))) }
+    if imp.kind == {
+        .Module(name, span) -> {
+            if name.strip_prefix("jet.") == {
+                .Some(ring) -> if is_ring_module(ring) { return Err(Diagnostic.error("E0341", "`use jet.{ring}` is the old first-party library spelling", "first-party libraries moved to the `core.*` namespace (D-CORENS1)", "write `use {Syntax.canonical_ring_module(ring)}` instead", Some(span))) }
+                .None -> {}
+            }
+            root :: name.split('.').next().unwrap_or(name)
+            if Syntax.FIRST_PARTY_RESERVED.contains(&root) { return Err(Diagnostic.error("E1002", "`{root}` is reserved for first-party or foreign packages", "`core`, `jet`, first-party ring names, and foreign-language roots can't be used for local modules", "choose a different module name", Some(span))) }
+        }
+        _ -> {}
+    }
+    Ok(())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5104
+fn resolve_file_import(importing: &OSPath, path_str: &String, project_root: &OSPath, pkg_dep_dirs: &[String:DependencyDir], pkg_resolution: &PkgResolution, span: Span) -> OSPath Diagnostic! {
+    loose :: is_loose_file(importing)
+    if path_str.contains("..") && !loose { return Err(e0602(span)) }
+    base :: importing.parent().unwrap_or(OSPath.new("."))
+    resolved := if loose { folder :: if base.as_os_str().is_empty() { OSPath.new(".") } else { base }; absolute(folder).unwrap_or_else(fn(_) { folder.to_path_buf() }) } else { base.to_path_buf() }
+    for part in path_str.split('/') { if part.is_empty() || part == "." { continue }; resolved.push(part) }
+    _ :: resolved.set_extension(Syntax.FILE_EXT)
+    resolved :: normalize_path(&resolved)
+    resolver :: if loose {
+        folder :: resolved.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }).unwrap_or(OSPath.new("."))
+        AuthorityResolver.open(folder).map_err(fn(error) { error.diagnostic() })?
+    } else {
+        dependency_authority_for_path(importing, pkg_dep_dirs, pkg_resolution).cloned().map(fn(authority) { Ok(authority) }).unwrap_or_else(fn() { AuthorityResolver.open(project_root).map_err(fn(error) { error.diagnostic() }) })?
+    }
+    relative :: resolved.strip_prefix(resolver.root()).map_err(fn(_) { AuthorityError.Escapes(resolved.clone()).diagnostic() })?
+    checked :: resolver.checked_file(relative).map_err(fn(error) { Diagnostic.error("E0603", "can't find the file `{path_str}`", "a file import path must point at an existing `.jet` file next to this file's tree", "create `{path_str}.{Syntax.FILE_EXT}`, or fix the path in `{Syntax.KW_USE} \"{path_str}\"` ({error})", Some(span)) })?
+    resolver.revalidate_file(&checked).map_err(fn(error) { Diagnostic.error("E0603", "can't find the file `{path_str}`", "a file import path must point at an existing `.jet` file next to this file's tree", "restore the checked file and fix the path in `{Syntax.KW_USE} \"{path_str}\"` ({error})", Some(span)) })?
+    Ok(checked.path)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5187
+fn is_loose_file(importing: &OSPath) -> Bool {
+    has_header :: CheckReads.read_to_string(importing).map(fn(source) { if Package.extract_inline_package(&source) == { .Ok(.None) -> false; _ -> true } }).unwrap_or(false)
+    if has_header { return false }
+    folder :: importing.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }).unwrap_or(OSPath.new("."))
+    if find_manifest_root_checked(folder) == { .Ok(.None) -> true; _ -> false }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5204
+pub fn shared_folder_below_package(path: &OSPath) -> (OSPath, OSPath)? {
+    // Rust cfg(unix) and cfg(not(unix)); dispatch on the selected target, never the host.
+    if core.sys.target.selected_family() != "unix" { return None }
+    shared := None
+    for folder in path.ancestors().skip(1) {
+        if folder.as_os_str().is_empty() { continue }
+        if shared == {
+            .Some(below) -> if folder.join(Syntax.PACKAGE_FILE).is_file() { return Some((below.to_path_buf(), folder.to_path_buf())) }
+            .None -> {
+                // GATE #4494: retained native permission mode accessor.
+                if fs.symlink_metadata(folder).is_ok_and(fn(metadata) { metadata.permissions().mode() & 0o002 != 0 }) { shared = Some(folder) }
+            }
+        }
+    }
+    None
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5233
+pub fn namespace_root(path: &OSPath, cache: &[OSPath:OSPath?]) -> OSPath? {
+    if path.starts_with(CORE_SOURCE_ROOT) || !path.is_file() { return None }
+    has_header :: CheckReads.read_to_string(path).map(fn(source) { if Package.extract_inline_package(&source) == { .Ok(.None) -> false; _ -> true } }).unwrap_or(false)
+    if has_header { return None }
+    folder :: path.parent().filter(fn(parent) { !parent.as_os_str().is_empty() }).unwrap_or(OSPath.new("."))
+    cache.entry(folder.to_path_buf()).or_insert_with(fn() { find_manifest_root_checked(folder).ok().flatten().map(fn(root) { normalize_path(&root) }) }).clone()
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5262
+pub fn package_member_files(root: &OSPath) -> [OSPath] Diagnostic! {
+    resolver :: AuthorityResolver.open(root).map_err(fn(error) { error.diagnostic() })?
+    files :: resolver.discover_source_files().map_err(fn(error) { error.diagnostic() })?
+    Ok(files.into_iter().filter(fn(file) { name :: file.relative.file_name().and_then(fn(name) { name.to_str() }); name != Some(Syntax.PACKAGE_FILE) && name != Some(Syntax.PAYLOAD_FILE) && name != Some(Syntax.WORKSPACE_FILE) }).map(fn(file) { normalize_path(&file.path) }).collect())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5281
+fn namespace_item_names(items: &[Item]) -> [(String, Span)] {
+    names := [(String, Span)].new()
+    for item in items {
+        if item == {
+            .Func(function) -> names.push((function.name.clone(), function.name_span))
+            .Struct(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .Enum(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .Distinct(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .TypeAlias(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .Trait(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .Tag(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .Const(definition) -> names.push((definition.name.clone(), definition.name_span))
+            .UnitFamily(family) -> for definition in family.distinct_defs() { names.push((definition.name.clone(), definition.name_span)) }
+            .ProtocolDecl(protocol) -> names.push((protocol.name.clone(), protocol.name_span))
+            _ -> {}
+        }
+    }
+    names
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5311
+fn member_error(modules: &[LoadedModule], module_idx: USize, entry_idx: USize, diagnostic: Diagnostic) -> LoaderError {
+    module :: &modules[module_idx]
+    error :: LoaderError.at(&module.display, &module.source, [diagnostic])
+    if module_idx == entry_idx { error } else { error.with_module_origin(&module.display, &module.path) }
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5329
+// One namespace per package. Compiler-owned sibling bindings use zero-width spans.
+pub fn bind_package_namespaces(modules: &[LoadedModule], entry_idx: USize, namespace_roots: &[OSPath:OSPath?], name_ledger: &NameLedger) -> Unit LoaderError! {
+    groups := [(OSPath, [USize])].new()
+    group_positions := [OSPath:USize].new()
+    for module_idx in 0..modules.len() {
+        root_opt :: namespace_root(&modules[module_idx].path, namespace_roots)
+        if root_opt.is_none() { continue }
+        root :: root_opt.unwrap()
+        if group_positions.get(&root) == {
+            .Some(position) -> groups[position].1.push(module_idx)
+            .None -> { _ :: group_positions.insert(root.clone(), groups.len()); groups.push((root, [module_idx])) }
+        }
+    }
+    for (root, members) in &groups {
+        root_key :: root.to_string_lossy().into_owned()
+        for member in members { name_ledger.set_module_namespace(member, root_key.clone()) }
+        facts :: package_facts_for_root(root).ok().flatten()
+        named_entry_files :: facts.iter().flat_map(fn(facts) { facts.outputs.values() }).filter(fn(output) { output.kind == Package.PackageOutputKind.Executable }).filter_map(fn(output) { output.entry.as_deref()?.strip_suffix(".run").map(fn(entry) { entry.to_string() }) }).collect()
+        names :: members.iter().map(fn(member) {
+            path :: &modules[member].path
+            named_entry :: named_entry_files.contains(&modules[member].alias)
+            role_command :: path.file_name().and_then(fn(name) { name.to_str() }).filter(fn(name) { Syntax.COMMAND_ROLE_FILES.contains(name) }).filter(fn(_) { path.parent().is_some_and(fn(parent) { normalize_path(parent) == root }) }).and_then(fn(name) { name.strip_prefix('@')?.strip_suffix(".jet") })
+            namespace_item_names(&modules[member].items).into_iter().filter(fn((name, _)) { !(named_entry && name == "run") && role_command != Some(name.as_str()) }).collect()
+        }).collect()
+        owners := [String:USize].new()
+        for (position, member_names) in names.iter().enumerate() {
+            for (name, span) in member_names {
+                if owners.get(name) == {
+                    .Some(first) if first != position -> {
+                        package :: root.file_name().map(fn(name) { name.to_string_lossy().into_owned() }).unwrap_or_else(fn() { root_key.clone() })
+                        other :: modules[members[first]].display.clone()
+                        // Rust: crates/jet-driver/src/Loader.rs:5401
+                        return Err(member_error(modules, members[position], entry_idx, Diagnostic.from_row("E0624", &[("name", name), ("package", &package), ("other", &other)], Some(span))))
+                    }
+                    .Some(_) -> {}
+                    .None -> { _ :: owners.insert(name.clone(), position) }
+                }
+            }
+        }
+        declares_library :: facts.as_ref().is_some_and(fn(facts) { facts.outputs.values().any(fn(output) { output.kind == Package.PackageOutputKind.Library }) && !facts.outputs.values().any(fn(output) { output.kind == Package.PackageOutputKind.Executable }) })
+        if declares_library {
+            for (position, member_names) in names.iter().enumerate() {
+                if member_names.iter().find(fn((name, _)) { name == "run" }) == { .Some((_, span)) -> return Err(member_error(modules, members[position], entry_idx, Diagnostic.from_row("E0625", &[], Some(span)))); .None -> {} }
+            }
+        }
+        for member in members {
+            taken := modules[member].imports.iter().filter(fn(import) { import.span.start == import.span.end }).map(fn(import) { import.span.start }).collect()
+            _ :: taken.insert(0)
+            next_span := 0
+            fresh_span :: fn() { while taken.contains(&next_span) { next_span += 1 }; _ :: taken.insert(next_span); Span.new(next_span, next_span) }
+            for (sibling_position, sibling) in members.iter().enumerate() {
+                if sibling == member || names[sibling_position].is_empty() { continue }
+                alias :: "__jet_pkg_{modules[sibling].alias}"
+                file_span :: fresh_span()
+                list_span :: fresh_span()
+                bound :: names[sibling_position].iter().map(fn((name, _)) { (name.clone(), None) }).collect()
+                count :: bound.len()
+                sibling_display :: modules[sibling].display.clone()
+                imports :: &modules[member].imports
+                imports.push(ImportDecl { kind: .File(sibling_display, file_span), alias: alias.clone(), alias_span: file_span, span: file_span, item_spans: [], local_spans: [], is_pub: false, is_package_pub: false, inline_version: None })
+                imports.push(ImportDecl { kind: .Unqualified { module_alias: alias.clone(), module_alias_span: list_span, items: bound, items_span: list_span, span: list_span }, alias, alias_span: list_span, span: list_span, item_spans: [list_span; count], local_spans: [list_span; count], is_pub: false, is_package_pub: false, inline_version: None })
+                name_ledger.record_import_target(member, file_span, sibling)
+            }
+        }
+    }
+    Ok(())
+}

@@ -1,0 +1,608 @@
+use std.fs
+use std.process.[Command, Output, Stdio]
+use std.collections.BTreeSet
+use jet.CLI
+use jet_foundation.DataTree.DataTree
+use jet_foundation.JSON.[json_get, json_int, json_str, parse_json]
+use jet_foundation.Tests.Integration.CliParts.Support.[jet, isolated_cwd, check_snapshot, scrub, bad_file]
+use jet_foundation.Tests.Integration.CliParts.Surface.[AGENT_FIX_LOOP_MAX_ROUNDS, AGENT_FIX_LOOP_FIXTURES, RepairEdit, RepairReport, RepairState, repair_json_field, repair_json_string, repair_json_usize, parse_repair_report, parse_repair_reports, check_repair_state, apply_repair_edits, repair_codes, run_repair_loop]
+// GATE #4494: native process/filesystem providers; #4499: OSPath map keys.
+// Rust: tests/cli_parts/surface.rs:7
+#Test("target_equals_and_space_forms_match_for_build_run_and_dev") {
+    host :: String.from_utf8(Command.new("rustc").args(["-vV"]).output().expect("rustc must report its host target").stdout).unwrap().lines().find_map((line) -> line.strip_prefix("host: ").map((value) -> value.to_string())).expect("rustc -vV must include a host target")
+    target :: ["wasm32-unknown-unknown", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-gnu"].into_iter().find((candidate) -> {
+        if candidate == host { return false }
+        output :: Command.new("rustc").args(["--print", "target-libdir", "--target", candidate]).output() ?? return false
+        path := String.from_utf8_lossy(&output.stdout).trim() // #4303
+        output.status.success() && OSPath(path).is_dir()
+    }).expect("rustc must provide an installed non-host target")
+    invoke :: (tag: String, command: String, source: String, target: String?, spaced: Bool) -> {
+        dir :: isolated_cwd(tag)
+        fs.write(dir.join("main.jet"), source).unwrap()
+        args := [command.to_string(), "main.jet"]
+        if spaced {
+            args.push("--target")
+            if target :: target { args.push(target.to_string()) }
+        } else if target :: target { args.push("--target={target}") }
+        Command.new(jet()).args(args).current_dir(dir).env("NO_COLOR", "1").output().unwrap()
+    }
+    for (command, source) in [("build", "fn run() { print(\"target\") }\n"), ("run", "fn run() { print(\"target\") }\n"), ("dev", "fn dev() { print(\"target\") }\n")] {
+        equals :: invoke("target_{command}_equals", command, source, Val(target), false)
+        space :: invoke("target_{command}_space", command, source, Val(target), true)
+        assert_eq(equals.status.code(), 0, "{command} equals failed: {String.from_utf8_lossy(&equals.stderr)}")
+        assert_eq(space.status.code(), 0, "{command} space failed: {String.from_utf8_lossy(&space.stderr)}")
+        assert_eq(equals.stdout, space.stdout, "{command} target forms changed stdout")
+        assert_eq(equals.stderr, space.stderr, "{command} target forms changed stderr")
+    }
+    unknown :: "definitely-not-a-rust-target"
+    for (command, source) in [("build", "fn run() {}\n"), ("run", "fn run() {}\n"), ("dev", "fn run() {}\n")] {
+        equals :: invoke("target_{command}_unknown_equals", command, source, Val(unknown), false)
+        space :: invoke("target_{command}_unknown_space", command, source, Val(unknown), true)
+        assert_eq(equals.status.code(), 1, "{command} equals did not reject target: {String.from_utf8_lossy(&equals.stderr)}")
+        assert_eq(space.status.code(), 1, "{command} space did not reject target: {String.from_utf8_lossy(&space.stderr)}")
+        assert_eq(equals.stderr, space.stderr, "{command} target forms changed normalized E3302 output")
+        stderr :: String.from_utf8_lossy(&equals.stderr)
+        assert(stderr.contains("Error [E3302]:"), "{command} missing E3302: {stderr}")
+        check_snapshot("unknown_target_e3302.txt", &stderr)
+    }
+    for (command, source) in [("build", "fn run() {}\n"), ("run", "fn run() {}\n"), ("dev", "fn run() {}\n")] {
+        for (suffix, spaced) in [("space", true), ("equals", false)] {
+            value :: if spaced { None } else { Val("") }
+            out :: invoke("target_{command}_missing_{suffix}", command, source, value, spaced)
+            assert_eq(out.status.code(), 2, "{command} missing target value was not rejected: {String.from_utf8_lossy(&out.stderr)}")
+            stderr :: String.from_utf8_lossy(&out.stderr)
+            assert(stderr.contains("Error [E2104]:"), "{command} missing target value lost E2104: {stderr}")
+            assert(stderr.contains("`--target` needs a value"), "{command} missing target value was not truthful: {stderr}")
+        }
+    }
+}
+// Rust: tests/cli_parts/surface.rs:180
+#Test("top_level_help_is_registry_inventory_and_env_help_lists_live_actions") {
+    has_route :: (text: String, route: String) -> text.lines().any((line) -> {
+        line := line.trim_start() // #4303
+        line == "jet {route}" || line.starts_with("jet {route} ")
+    })
+    for flag in ["--help", "help"] {
+        out :: Command.new(jet()).arg(flag).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "{flag}: {out:?}")
+        stdout :: String.from_utf8_lossy(&out.stdout)
+        assert(!stdout.to_ascii_lowercase().contains("hangar"), "jet help advertised the environment Hangar: {stdout}")
+        for command in CLI.COMMANDS.iter().filter((command) -> CLI.is_canonical_top_level(command.name)) {
+            assert(has_route(stdout, command.name), "help omitted {command.name}: {stdout}")
+        }
+        for retired in CLI.RETIRED_COMMANDS { assert(!has_route(stdout, retired.spelling), "help advertised retired {retired.spelling}: {stdout}") }
+    }
+    env_help :: Command.new(jet()).args(["env", "--help"]).output().unwrap()
+    assert(env_help.status.success(), "env help failed: {env_help:?}")
+    text :: String.from_utf8_lossy(&env_help.stdout)
+    for action in ["hook", "test", "sync", "info"] { assert(text.contains("jet env {action}"), "env help omitted {action}: {text}") }
+    completions :: [Command.new(jet()).args(["self", "completions", "bash"]).output().unwrap(), Command.new(jet()).args(["self", "completions", "zsh"]).output().unwrap(), Command.new(jet()).args(["self", "completions", "fish"]).output().unwrap(), Command.new(jet()).args(["self", "completions", "powershell"]).output().unwrap()]
+    for output in completions {
+        assert(output.status.success(), "completion failed: {output:?}")
+        text :: String.from_utf8_lossy(&output.stdout)
+        assert(text.contains("env"), "completion omitted env: {text}")
+    }
+    man :: CLI.man_page("0.0.0")
+    for retired in CLI.RETIRED_COMMANDS {
+        assert(!man.lines().any((line) -> line.trim() == ".B {retired.spelling}"), "man advertised retired {retired.spelling}: {man}")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:268
+#Test("run_help_teaches_the_project_default_and_keeps_explicit_targets") {
+    usage :: CLI.command_usage("run")
+    assert_eq(usage, "jet run [<file.jet|dir>] [--no-prepare] [-- <args>]")
+    for args in [["run", "--help"], ["help", "run"]] {
+        out :: Command.new(jet()).args(args).env("NO_COLOR", "1").output().unwrap()
+        assert(out.status.success(), "{args:?}: {out:?}")
+        stdout :: String.from_utf8_lossy(&out.stdout)
+        assert(stdout.contains("jet run [<file.jet|dir>] [--no-prepare] [-- <args>]"), "{args:?} omitted the optional project target: {stdout}")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:288
+#Test("external_completion_preserves_checked_program_commands") {
+    dir :: isolated_cwd("shape_cli_program_commands")
+    fs.write(dir.join("commands.jet"), "#CLI(Standard)\nstruct Commands {\n    #[Doc(\"shared config\"), Short(\"c\"), Env(\"JET_CONFIG\")] config: String{\"default\"}\n    #Doc(\"start the service\") fn serve(self, port: Int{3000}) {}\n    #Doc(\"import one file\") fn import(self, file: String) {}\n}\nfn run(args: Commands) {}\n").unwrap()
+    build :: Command.new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap()
+    assert(build.status.success(), "program build failed: {String.from_utf8_lossy(&build.stderr)}")
+    help :: Command.new(dir.join(".jet/build/commands")).arg("--help").current_dir(&dir).output().unwrap()
+    assert(help.status.success(), "program root help failed: {String.from_utf8_lossy(&help.stderr)}")
+    text :: String.from_utf8(help.stdout).unwrap()
+    assert(text.contains("--config CONFIG"), "root help omitted shared config: {text}")
+    assert_eq(text.matches("--config").count(), 1, "root help repeated shared config: {text}")
+    assert(!text.contains("Serve") && !text.contains("Import"))
+    for shell in ["bash", "zsh", "fish", "powershell"] {
+        completion :: Command.new(jet()).args(["self", "completions", shell, "--for", "build/commands"]).current_dir(&dir).output().unwrap()
+        assert(completion.status.success(), "{shell} subcommand completion failed: {String.from_utf8_lossy(&completion.stderr)}")
+        script :: String.from_utf8(completion.stdout).unwrap()
+        expected :: match shell {
+            "bash" -> ["serve", "import", "--port", "file --file", "--config"],
+            "zsh" -> ["serve", "import", "--port", ":file:value for --file", "--config"],
+            "fish" -> ["serve", "import", "-l port", "-l file", "-l config"],
+            "powershell" -> ["serve", "import", "'--port'", "'file','--file'", "'--config'"],
+            _ -> unreachable()
+        }
+        for fragment in expected { assert(script.contains(fragment), "{shell} external completion omitted {fragment}: {script}") }
+        assert(script.contains("--verbose") || script.contains("-l verbose") || script.contains("'--verbose'"), "{shell} omitted the Standard root flags: {script}")
+        assert(script.contains("--quiet") || script.contains("-l quiet") || script.contains("'--quiet'"), "{shell} omitted the Standard root flags: {script}")
+        assert(script.contains("--color") || script.contains("-l color") || script.contains("'--color'"), "{shell} omitted the Standard root flags: {script}")
+        check_snapshot("shape_cli_program_{shell}.txt", &script)
+    }
+}
+// Rust: tests/cli_parts/surface.rs:395
+#Test("derived_help_uses_program_basename_for_compiled_and_jet_run_paths") {
+    dir :: isolated_cwd("shape_cli_help_program_name")
+    fs.write(dir.join("typed.jet"), "#CLI\nstruct RunArgs { verbose: Bool }\nfn run(args: RunArgs) {}\n").unwrap()
+    build :: Command.new(jet()).args(["build", "typed.jet"]).current_dir(&dir).output().unwrap()
+    assert(build.status.success(), "typed build failed: {String.from_utf8_lossy(&build.stderr)}")
+    built :: dir.join(".jet/build/typed").canonicalize().unwrap()
+    compiled_help :: Command.new(&built).arg("--help").current_dir(&dir).output().unwrap()
+    assert(compiled_help.status.success(), "compiled typed help failed: {String.from_utf8_lossy(&compiled_help.stderr)}")
+    run_help :: Command.new(jet()).args(["run", "typed.jet", "--", "--help"]).current_dir(&dir).output().unwrap()
+    assert(run_help.status.success(), "jet run typed help failed: {String.from_utf8_lossy(&run_help.stderr)}")
+    program_names :: "compiled: {String.from_utf8(compiled_help.stdout).unwrap().lines().next().unwrap()}\njet run: {String.from_utf8(run_help.stdout).unwrap().lines().next().unwrap()}\n"
+    check_snapshot("shape_cli_help_program_names.txt", &program_names)
+}
+// Rust: tests/cli_parts/surface.rs:453
+#Test("derived_program_help_uses_program_basename_for_compiled_and_jet_run_paths") {
+    dir :: isolated_cwd("shape_cli_program_help_program_name")
+    fs.write(dir.join("commands.jet"), "#CLI\nstruct Commands { fn serve(self) {} }\nfn run(args: Commands) {}\n").unwrap()
+    build :: Command.new(jet()).args(["build", "commands.jet"]).current_dir(&dir).output().unwrap()
+    assert(build.status.success(), "program build failed: {String.from_utf8_lossy(&build.stderr)}")
+    built :: dir.join(".jet/build/commands").canonicalize().unwrap()
+    compiled_root :: Command.new(&built).arg("--help").current_dir(&dir).output().unwrap()
+    compiled_sub :: Command.new(&built).args(["serve", "--help"]).current_dir(&dir).output().unwrap()
+    run_root :: Command.new(jet()).args(["run", "commands.jet", "--", "--help"]).current_dir(&dir).output().unwrap()
+    run_sub :: Command.new(jet()).args(["run", "commands.jet", "--", "serve", "--help"]).current_dir(&dir).output().unwrap()
+    for (label, output) in [("compiled root", &compiled_root), ("compiled subcommand", &compiled_sub), ("jet run root", &run_root), ("jet run subcommand", &run_sub)] {
+        assert(output.status.success(), "{label} help failed: {String.from_utf8_lossy(&output.stderr)}")
+    }
+    first_line :: (output: Output) -> String.from_utf8(output.stdout).unwrap().lines().next().unwrap().to_string()
+    program_names :: "compiled root: {first_line(compiled_root)}\ncompiled subcommand: {first_line(compiled_sub)}\njet run root: {first_line(run_root)}\njet run subcommand: {first_line(run_sub)}\n"
+    check_snapshot("shape_cli_program_help_program_names.txt", &program_names)
+}
+// Rust: tests/cli_parts/surface.rs:524
+#Test("moved_bare_commands_are_teaching_errors_not_aliases") {
+    for (verb, replacement) in [("publish", "jet registry publish"), ("semindex", "jet inspect semindex"), ("doctor", "jet self doctor"), ("lsp", "jet self lsp"), ("devtools", "jet self devtools"), ("push", "jet os push")] {
+        out :: Command.new(jet()).arg(verb).arg("sentinel").output().unwrap()
+        assert_eq(out.status.code(), 2, "{verb} must be rejected")
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert(stderr.contains("E2101"), "{verb}: {stderr}")
+        assert(stderr.contains(replacement), "{verb}: {stderr}")
+    }
+    out :: Command.new(jet()).args(["lsp", "--json"]).output().unwrap()
+    assert_eq(out.status.code(), 2)
+    assert(out.stderr.is_empty())
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(stdout.contains("\"code\":\"E2101\""))
+    assert(stdout.contains("jet self lsp --json"))
+}
+// Semantic retirements have zero generated rows but reach registry-owned teaching refusals.
+// Rust: tests/cli_parts/surface.rs:559
+#Test("retired_cli_routes_are_absent_but_teach_real_spelling") {
+    surfaces :: [CLI.usage_page("0.0.0", CLI.HelpOrder.Frequency), CLI.man_page("0.0.0"), CLI.completions_bash(), CLI.completions_zsh(), CLI.completions_fish(), CLI.completions_powershell()]
+    top_help :: Command.new(jet()).arg("--help").output().unwrap()
+    assert(top_help.status.success(), "jet --help failed: {top_help:?}")
+    text :: String.from_utf8_lossy(&top_help.stdout)
+    for retired in CLI.RETIRED_COMMANDS {
+        needle :: "jet {retired.spelling}"
+        assert(surfaces.iter().all((surface) -> !surface.contains(&needle)), "retired route leaked into generated surface: {needle}")
+        assert(!text.contains(&needle), "retired route leaked into `jet --help`: {needle}")
+    }
+    for (argv, replacement) in [(["gc"], "jet clean"), (["serve"], "jet dev <file.jet> --swap"), (["store"], "jetpack hangar / jet clean / jet fetch"), (["store", "fetch"], "jet fetch"), (["store", "verify"], "jetpack hangar verify"), (["store", "generations"], "jetpack hangar"), (["store", "rollback", "2"], "jetpack hangar"), (["store", "gc"], "jet clean"), (["store", "lock", "stats.jet"], "jet fetch --lock stats.jet"), (["serve", "main.jet"], "jet dev main.jet --swap"), (["lock", "stats.jet"], "jet fetch --lock stats.jet")] {
+        out :: Command.new(jet()).args(&argv).output().unwrap()
+        assert_eq(out.status.code(), 2, "{argv:?} must be rejected")
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert(stderr.contains("E2101"), "{argv:?}: {stderr}")
+        assert(stderr.contains(replacement), "{argv:?}: {stderr}")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:611
+#Test("moved_command_registry_agrees_with_dispatch_exceptions") {
+    declared := [String]{}
+    for group in CLI.command_groups() {
+        for action in group.actions {
+            dispatch_exempts :: CLI.moved_command(action.name).is_none() && action.name != "install"
+            assert_eq(action.also_canonical_top_level, dispatch_exempts, "registry and moved_command disagree for {group.name} {action.name}")
+            if action.also_canonical_top_level { declared.push("{group.name} {action.name}") }
+        }
+    }
+    assert_eq(declared, ["inspect audit", "env test", "gc report", "perf run", "perf test"])
+}
+// Rust: tests/cli_parts/surface.rs:640
+#Test("test_help_exposes_measurement_and_retired_command_teaches_it") {
+    test_help :: Command.new(jet()).args(["test", "--help"]).env("NO_COLOR", "1").output().unwrap()
+    assert(test_help.status.success(), "jet test --help failed: {String.from_utf8_lossy(&test_help.stderr)}")
+    text :: String.from_utf8_lossy(&test_help.stdout)
+    assert(text.contains("--filter"), "test help lost shared filter flag: {text}")
+    assert(text.contains("--measure"), "test help omitted measurement mode: {text}")
+    assert(text.contains("--show-default"), "test help missing command override escape hatch: {text}")
+    retired :: Command.new(jet()).args(["bench", "--help"]).env("NO_COLOR", "1").output().unwrap()
+    assert(!retired.status.success(), "retired measurement command unexpectedly succeeded")
+    text :: String.from_utf8_lossy(&retired.stderr)
+    assert(text.contains("jet test --measure"), "retired command did not teach measurement: {text}")
+}
+// I8: coverage names only; whole-artifact goldens belong to commands.rs.
+// Rust: tests/cli_parts/surface.rs:688
+#Test("coverage_help_matches_instrumentation") {
+    // Rust: tests/cli_parts/surface.rs:689
+    COVERAGE_HELP :: "function and branch coverage"
+    help :: Command.new(jet()).args(["test", "--help"]).env("NO_COLOR", "1").output().unwrap()
+    assert(help.status.success(), "jet test --help failed: {String.from_utf8_lossy(&help.stderr)}")
+    text :: String.from_utf8_lossy(&help.stdout)
+    assert(text.contains("--coverage") && text.contains(COVERAGE_HELP), "{text}")
+    assert(!text.contains("function and line coverage"), "{text}")
+    for shell in ["bash", "fish", "zsh", "powershell"] {
+        completion :: Command.new(jet()).args(["self", "completions", shell]).output().unwrap()
+        assert(completion.status.success(), "{shell} completion failed: {String.from_utf8_lossy(&completion.stderr)}")
+        script :: String.from_utf8_lossy(&completion.stdout)
+        coverage_flag :: if shell == "fish" { "-l coverage" } else { "--coverage" }
+        assert(script.contains(coverage_flag), "{shell} omitted {coverage_flag}")
+        if shell == "fish" || shell == "zsh" { assert(script.contains(COVERAGE_HELP), "{shell}: {script}") }
+        assert(!script.contains("function and line coverage"), "{shell}: {script}")
+    }
+    man :: Command.new(jet()).args(["self", "man"]).output().unwrap()
+    assert(man.status.success(), "man page failed: {String.from_utf8_lossy(&man.stderr)}")
+    text :: String.from_utf8_lossy(&man.stdout)
+    assert(text.contains(COVERAGE_HELP), "{text}")
+    assert(!text.contains("function and line coverage"), "{text}")
+}
+// Rust: tests/cli_parts/surface.rs:748
+#Test("bare_dev_uses_file_scoped_run") {
+    out :: Command.new(jet()).args(["dev", "--no-color"]).output().unwrap()
+    assert_eq(out.status.code(), 2)
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("`jet dev` needs a file to watch"), "{stderr}")
+    assert(stderr.contains("jet dev <file.jet>"), "{stderr}")
+}
+// Rust: tests/cli_parts/surface.rs:763
+#Test("every_moved_bare_action_is_e2101_in_human_and_json_modes") {
+    for group in CLI.command_groups() {
+        for action in group.actions {
+            owner :: CLI.moved_command_group(action.name) ?? continue
+            replacement :: "jet {owner} {action.name}"
+            out :: Command.new(jet()).arg(action.name).arg("sentinel").output().unwrap()
+            assert_eq(out.status.code(), 2, "bare {action.name}")
+            stderr :: String.from_utf8_lossy(&out.stderr)
+            assert(stderr.contains("E2101") && stderr.contains(&replacement), "{action.name}: {stderr}")
+            out :: Command.new(jet()).args([action.name, "sentinel\\\"quoted", "--json"]).output().unwrap()
+            assert_eq(out.status.code(), 2, "bare {action.name} --json")
+            assert(out.stderr.is_empty(), "JSON diagnostic leaked stderr for {action.name}")
+            stdout :: String.from_utf8_lossy(&out.stdout)
+            assert(stdout.contains("\"code\":\"E2101\"") && stdout.contains(&replacement), "{action.name}: {stdout}")
+            assert(stdout.contains("sentinel\\\\\\\"quoted"), "replacement was not JSON escaped: {stdout}")
+        }
+    }
+}
+// Rust: tests/cli_parts/surface.rs:808
+#Test("invalid_nested_action_is_e2101_and_json_escaped") {
+    bad :: "bad\\\"action"
+    // Non-exhaustive os falls through to its real dispatcher, not registry E2101.
+    for group in CLI.command_groups().filter((group) -> group.exhaustive) {
+        out :: Command.new(jet()).args([group.name, bad]).output().unwrap()
+        assert_eq(out.status.code(), 2)
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert(stderr.contains("E2101") && stderr.contains(bad), "{stderr}")
+        out :: Command.new(jet()).args([group.name, bad, "--json"]).output().unwrap()
+        assert_eq(out.status.code(), 2)
+        assert(out.stderr.is_empty())
+        stdout :: String.from_utf8_lossy(&out.stdout)
+        assert(stdout.contains("bad\\\\\\\"action"), "invalid JSON escaping: {stdout}")
+        assert(!stdout.contains("`bad\\\"action`"), "raw quote leaked into JSON: {stdout}")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:842
+#Test("grouped_e2101_human_and_json_goldens") {
+    moved :: Command.new(jet()).args(["publish", "sentinel"]).output().unwrap()
+    assert_eq(moved.status.code(), 2)
+    assert(moved.stdout.is_empty())
+    check_snapshot("moved_bare_e2101_human.txt", &String.from_utf8_lossy(&moved.stderr))
+    moved_json :: Command.new(jet()).args(["publish", "sentinel\\\"quoted", "--json"]).output().unwrap()
+    assert_eq(moved_json.status.code(), 2)
+    assert(moved_json.stderr.is_empty())
+    check_snapshot("moved_bare_e2101_json.txt", &String.from_utf8_lossy(&moved_json.stdout))
+    invalid :: Command.new(jet()).args(["inspect", "bad\\\"action"]).output().unwrap()
+    assert_eq(invalid.status.code(), 2)
+    assert(invalid.stdout.is_empty())
+    check_snapshot("invalid_nested_e2101_human.txt", &String.from_utf8_lossy(&invalid.stderr))
+    invalid_json :: Command.new(jet()).args(["inspect", "bad\\\"action", "--json"]).output().unwrap()
+    assert_eq(invalid_json.status.code(), 2)
+    assert(invalid_json.stderr.is_empty())
+    check_snapshot("invalid_nested_e2101_json.txt", &String.from_utf8_lossy(&invalid_json.stdout))
+}
+// Rust: tests/cli_parts/surface.rs:889
+#Test("group_help_and_man_inventory_every_nested_description") {
+    man :: Command.new(jet()).args(["self", "man"]).output().unwrap()
+    assert_eq(man.status.code(), 0)
+    text :: String.from_utf8_lossy(&man.stdout)
+    for group in CLI.command_groups() {
+        // Non-exhaustive groups retain their dispatcher's help; static man inventory still applies.
+        if group.exhaustive {
+            out :: Command.new(jet()).args([group.name, "help"]).output().unwrap()
+            assert_eq(out.status.code(), 0)
+            help :: String.from_utf8_lossy(&out.stdout)
+            assert(help.contains(group.summary), "{group.name} help missing summary")
+            for action in group.actions { assert(help.contains(action.name) && help.contains(action.summary), "{group.name} help missing {action.name}") }
+        }
+        for action in group.actions {
+            assert(text.contains(".B {group.name} {action.name}"), "man missing {group.name} {action.name}")
+            assert(text.contains(action.summary), "man missing summary for {group.name} {action.name}")
+        }
+    }
+}
+// Rust: tests/cli_parts/surface.rs:938
+#Test("palette_uses_canonical_nested_routes") {
+    for group in CLI.command_groups() {
+        for action in group.actions {
+            route :: "{group.name} {action.name}"
+            out :: Command.new(jet()).args(["?", &route]).output().unwrap()
+            assert_eq(out.status.code(), 0)
+            stdout :: String.from_utf8_lossy(&out.stdout)
+            assert(stdout.contains(&route), "palette missing {route}: {stdout}")
+            assert(!stdout.contains("jet {action.name}   "), "palette advertised bare moved action {action.name}")
+        }
+    }
+}
+// Rust: tests/cli_parts/surface.rs:956
+#Test("jet_install_teaches_jet_fetch") {
+    out :: Command.new(jet()).arg("install").output().unwrap()
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E0043"), "`jet install` should emit E0043 teaching error:\n{stderr}")
+    assert(stderr.contains("jet fetch"), "`jet install` error should mention `jet fetch`:\n{stderr}")
+}
+// Rust: tests/cli_parts/surface.rs:971
+#Test("exit_code_explain_unknown") {
+    out :: Command.new(jet()).arg("explain").arg("E9999").output().unwrap()
+    assert_eq(out.status.code(), 1, "unknown code should exit 1")
+}
+// Rust: tests/cli_parts/surface.rs:981
+#Test("check_human_golden") {
+    p :: bad_file("982")
+    out :: Command.new(jet()).arg("check").arg(&p).env("NO_COLOR", "1").output().unwrap()
+    stderr :: scrub(&String.from_utf8_lossy(&out.stderr), &p)
+    check_snapshot("check_human.txt", &stderr)
+}
+// Rust: tests/cli_parts/surface.rs:994
+#Test("check_json_golden") {
+    p :: bad_file("995")
+    out :: Command.new(jet()).arg("check").arg(&p).arg("--json").output().unwrap()
+    stderr :: scrub(&String.from_utf8_lossy(&out.stderr), &p)
+    check_snapshot("check_json.txt", &stderr)
+}
+// Rust: tests/cli_parts/surface.rs:1007
+#Test("name_suggestion_json_golden") {
+    dir :: isolated_cwd("name_suggestion_json")
+    p :: dir.join("name.jet")
+    fs.write(&p, "fn run() {\n    score :: 90\n    print(scor)\n}\n").unwrap()
+    out :: Command.new(jet()).args(["check", p.to_str().unwrap(), "--json"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), 1)
+    assert(out.stdout.is_empty())
+    stderr :: scrub(&String.from_utf8_lossy(&out.stderr), &p)
+    check_snapshot("name_suggestion_json.txt", &stderr)
+}
+// Rust: tests/cli_parts/surface.rs:1023
+#Test("machine_report_paths_stay_resolvable_across_repository_layouts") {
+    dir :: isolated_cwd("machine_report_paths")
+    runner :: dir.join("runner")
+    fs.create_dir_all(&runner).unwrap()
+    report :: (path: &OSPath) -> {
+        output :: Command.new(jet()).args(["check", path.to_str().unwrap(), "--json"]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(output.status.code(), 1, "{String.from_utf8_lossy(&output.stderr)}")
+        assert(output.stdout.is_empty())
+        stderr :: String.from_utf8(output.stderr).unwrap()
+        assert_eq(stderr.lines().count(), 1, "{stderr}")
+        trimmed := stderr.trim() // #4303
+        parse_json(trimmed).unwrap_or_else((_) -> panic("invalid diagnostic JSON: {stderr}"))
+    }
+    report_file :: (value: &DataTree) -> json_str(json_get(value, "file").unwrap()).unwrap().to_string()
+    outside :: dir.join("outside/bad.jet")
+    fs.create_dir_all(outside.parent().unwrap()).unwrap()
+    fs.write(&outside, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap()
+    assert_eq(report_file(&report(&outside)), outside.display().to_string())
+    assert_eq(report_file(&report(&OSPath("../outside/bad.jet"))), outside.display().to_string())
+    inside :: dir.join("repo/src/bad.jet")
+    fs.create_dir_all(inside.parent().unwrap()).unwrap()
+    fs.create_dir_all(dir.join("repo/.git")).unwrap()
+    fs.write(&inside, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap()
+    assert_eq(report_file(&report(&inside)), inside.display().to_string())
+    stray_root :: dir.join("stray")
+    stray :: stray_root.join("nested/bad.jet")
+    fs.create_dir_all(stray.parent().unwrap()).unwrap()
+    fs.create_dir_all(stray_root.join(".git")).unwrap()
+    fs.write(&stray, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap()
+    with_ancestor_git :: report_file(&report(&stray))
+    fs.remove_dir(stray_root.join(".git")).unwrap()
+    without_ancestor_git :: report_file(&report(&stray))
+    assert_eq(with_ancestor_git, without_ancestor_git)
+    assert_eq(without_ancestor_git, stray.display().to_string())
+    fix :: dir.join("fix/bad.jet")
+    fs.create_dir_all(fix.parent().unwrap()).unwrap()
+    fs.write(&fix, "fn run() {\n    println(\"hi\")\n}\n").unwrap()
+    fix_report :: report(&OSPath("../fix/bad.jet"))
+    fix_file :: report_file(&fix_report)
+    assert_eq(json_str(json_get(&fix_report, "applicability").unwrap()).unwrap(), "safe")
+    edits :: match json_get(&fix_report, "fix_edits").unwrap() { DataTree.Array(edits) -> edits, _ -> panic("fix_edits is not an array") }
+    assert_eq(edits.len(), 1)
+    edit :: match &edits[0] { DataTree.Object(_) -> &edits[0], _ -> panic("fix edit is not an object") }
+    edit_file :: json_str(json_get(&edits[0], "file").unwrap()).unwrap()
+    assert_eq(fix_file, edit_file)
+    span :: match json_get(edit, "span").unwrap() { DataTree.Object(_) -> json_get(edit, "span").unwrap(), _ -> panic("fix span is not an object") }
+    start :: json_int(json_get(span, "start").unwrap()).unwrap() as USize
+    end :: json_int(json_get(span, "end").unwrap()).unwrap() as USize
+    new_text :: json_str(json_get(edit, "new_text").unwrap()).unwrap()
+    assert_eq(json_str(json_get(edit, "safety").unwrap()).unwrap(), "behavior-preserving")
+    fixed := fs.read_to_string(edit_file).unwrap()
+    fixed.replace_range(start..end, new_text)
+    fs.write(edit_file, &fixed).unwrap()
+    assert_eq(fs.read_to_string(&fix).unwrap(), fixed)
+    assert(!fixed.contains("println"))
+    left :: dir.join("left/bad.jet")
+    right :: dir.join("right/bad.jet")
+    fs.create_dir_all(left.parent().unwrap()).unwrap()
+    fs.create_dir_all(right.parent().unwrap()).unwrap()
+    fs.write(&left, "fn run( {\n").unwrap()
+    fs.write(&right, "fn run( {\n").unwrap()
+    output :: Command.new(jet()).args(["fmt", "../left/bad.jet", "../right/bad.jet", "--json"]).current_dir(&runner).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), 2, "{String.from_utf8_lossy(&output.stderr)}")
+    reports :: String.from_utf8(output.stderr).unwrap()
+    files :: reports.lines().map((line) -> report_file(&parse_json(line).unwrap())).collect::<[String]>()
+    assert_eq(files, [left.display().to_string(), right.display().to_string()])
+}
+// Rust: tests/cli_parts/surface.rs:1159
+#Test("e0102_and_e0111_typed_fix_edits_apply") {
+    dir :: isolated_cwd("typed_fix_edits")
+    typo :: dir.join("typo.jet")
+    fs.write(&typo, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap()
+    immutable :: dir.join("immutable.jet")
+    fs.write(&immutable, "fn run() {\n    x :: 1\n    x = 2\n    print(x)\n}\n").unwrap()
+    for (file, expected) in [(&typo, "fn run() {\n    print(\"hi\")\n}\n"), (&immutable, "fn run() {\n    x := 1\n    x = 2\n    print(x)\n}\n")] {
+        output :: Command.new(jet()).args(["fix", file.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(output.status.code(), 0, "jet fix failed for {file.display()}: {String.from_utf8_lossy(&output.stderr)}")
+        assert_eq(fs.read_to_string(file).unwrap(), expected)
+    }
+}
+// Rust: tests/cli_parts/surface.rs:1195
+#Test("name_suggestion_json_edit_applies_and_rechecks_clean") {
+    dir :: isolated_cwd("name_suggestion_fix_edit")
+    file :: dir.join("name.jet")
+    fs.write(&file, "fn run() {\n    score :: 90\n    print(scor)\n}\n").unwrap()
+    check :: () -> Command.new(jet()).args(["check", file.to_str().unwrap(), "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    output :: check()
+    assert_eq(output.status.code(), 1)
+    assert(output.stdout.is_empty())
+    text :: String.from_utf8(output.stderr).unwrap()
+    trimmed := text.trim() // #4303
+    report :: parse_json(trimmed).unwrap()
+    assert_eq(json_str(json_get(&report, "code").unwrap()).unwrap(), "E0107")
+    edits :: match json_get(&report, "fix_edits").unwrap() { DataTree.Array(edits) -> edits, _ -> panic("fix_edits is not an array") }
+    assert_eq(edits.len(), 1)
+    edit :: &edits[0]
+    edit_file :: json_str(json_get(edit, "file").unwrap()).unwrap()
+    assert_eq(edit_file, file.to_str().unwrap())
+    span :: json_get(edit, "span").unwrap()
+    start :: json_int(json_get(span, "start").unwrap()).unwrap() as USize
+    end :: json_int(json_get(span, "end").unwrap()).unwrap() as USize
+    new_text :: json_str(json_get(edit, "new_text").unwrap()).unwrap()
+    source :: fs.read_to_string(&file).unwrap()
+    assert_eq(&source[start..end], "scor")
+    assert_eq(new_text, "score")
+    applied :: Command.new(jet()).args(["fix", file.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(applied.status.code(), 0, "{String.from_utf8_lossy(&applied.stderr)}")
+    expected := ^source
+    expected.replace_range(start..end, new_text)
+    assert_eq(fs.read_to_string(&file).unwrap(), expected)
+    fixed :: check()
+    assert_eq(fixed.status.code(), 0, "{String.from_utf8_lossy(&fixed.stderr)}")
+    assert(fixed.stdout.is_empty())
+    assert(fixed.stderr.is_empty())
+}
+// Rust: tests/cli_parts/surface.rs:1507
+#Test("agent_fix_loop_corpus_converges_without_report_regression") {
+    dir :: isolated_cwd("agent_fix_loop")
+    initial := RepairState{}
+    for (name, source) in AGENT_FIX_LOOP_FIXTURES {
+        file :: dir.join(name)
+        fs.write(&file, source).unwrap()
+        initial.insert(^file, source.to_string())
+    }
+    run_file :: dir.join("run.jet")
+    helper_file :: dir.join("helper.jet")
+    check :: (state: &RepairState) -> check_repair_state(&dir, state)
+    initial_reports :: check(&initial)
+    assert(initial_reports.iter().all((report) -> !report.edits.is_empty()), "every fixture report must carry fix_edits: {initial_reports:?}")
+    edits_per_file := [OSPath:USize]{}
+    for edit in initial_reports.iter().flat_map((report) -> &report.edits) { edits_per_file.entry(edit.file.clone()).or_insert(0) += 1 }
+    assert_eq(edits_per_file.keys().cloned().collect::<BTreeSet<OSPath>>(), initial.keys().cloned().collect::<BTreeSet<OSPath>>(), "one repair-loop round must report edits for every fixture file")
+    assert(edits_per_file[&run_file] >= 3, "run.jet needs several errors")
+    assert(edits_per_file[&helper_file] >= 3, "helper.jet needs several errors")
+    bound_error :: run_repair_loop(initial.clone(), 0, check).unwrap_err()
+    assert(bound_error.contains("round bound 0") && bound_error.contains("E0102"), "bound failure must name offending code: {bound_error}")
+    (final_state, rounds) :: run_repair_loop(^initial, AGENT_FIX_LOOP_MAX_ROUNDS, check).unwrap()
+    assert(rounds <= AGENT_FIX_LOOP_MAX_ROUNDS)
+    assert(check(&final_state).is_empty(), "final recheck was not clean")
+    assert_eq(final_state[&run_file], "fn run() {\n    print(\"main typo\")\n    score :: 90\n    print(score)\n    print(\"main old\")\n}\n")
+    assert_eq(final_state[&helper_file], "fn run() {\n    print(\"helper typo\")\n    score :: 90\n    print(score)\n    print(\"helper old\")\n}\n")
+}
+// Rust: tests/cli_parts/surface.rs:1580
+#Test("agent_fix_loop_repeat_guard_names_offending_code") {
+    file :: OSPath("repeat.jet")
+    state :: [file.clone(): "x"]
+    forward :: RepairReport{code: "E0102", edits: [RepairEdit{code: "E0102", file: file.clone(), start: 0, end: 1, new_text: "y"}]}
+    backward :: RepairReport{code: "E0102", edits: [RepairEdit{code: "E0102", file: file.clone(), start: 0, end: 1, new_text: "x"}]}
+    error :: run_repair_loop(state, 3, (state) -> if state[&file] == "x" { [forward.clone()] } else { [backward.clone()] }).unwrap_err()
+    assert(error.contains("repeated file state") && error.contains("E0102"), "repeat failure must name offending code: {error}")
+}
+// Rust: tests/cli_parts/surface.rs:1618
+#Test("agent_fix_loop_regression_guard_names_offending_code") {
+    file :: OSPath("regression.jet")
+    state :: [file.clone(): "x"]
+    first_report :: RepairReport{code: "E0102", edits: [RepairEdit{code: "E0102", file: file.clone(), start: 0, end: 1, new_text: "y"}]}
+    introduced_report :: RepairReport{code: "E0037", edits: [RepairEdit{code: "E0037", file: ^file, start: 0, end: 1, new_text: "z"}]}
+    checks := 0
+    error :: run_repair_loop(state, 2, (_) -> {
+        checks += 1
+        if checks == 1 { [first_report.clone()] } else { [introduced_report.clone()] }
+    }).unwrap_err()
+    assert(error.contains("fix_edit regression") && error.contains("E0037"), "regression failure must name offending code: {error}")
+}
+// Rust: tests/cli_parts/surface.rs:1658
+#Test("fix_safety_tiers_are_reported_and_applied") {
+    dir :: isolated_cwd("typed_fix_edits")
+    typo :: dir.join("typo.jet")
+    fs.write(&typo, "fn run() {\n    pirnt(\"hi\")\n}\n").unwrap()
+    formatting :: dir.join("formatting.jet")
+    fs.write(&formatting, "fn run() {\n    loop item; [1, 2, 3] { print(item) }\n}\n").unwrap()
+    immutable :: dir.join("immutable.jet")
+    immutable_source :: "fn run() {\n    x :: 1\n    x = 2\n    print(x)\n}\n"
+    fs.write(&immutable, immutable_source).unwrap()
+    report_grades :: (file: &OSPath) -> {
+        output :: Command.new(jet()).args(["check", file.to_str().unwrap(), "--json"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(output.status.code(), 1, "{String.from_utf8_lossy(&output.stderr)}")
+        text :: String.from_utf8(output.stderr).unwrap()
+        trimmed := text.trim() // #4303
+        report :: parse_json(trimmed).unwrap()
+        applicability :: json_str(json_get(&report, "applicability").unwrap()).unwrap().to_string()
+        edits :: match json_get(&report, "fix_edits").unwrap() { DataTree.Array(edits) -> edits, _ -> panic("fix_edits is not an array") }
+        assert_eq(edits.len(), 1)
+        safety :: json_str(json_get(&edits[0], "safety").unwrap()).unwrap().to_string()
+        (applicability, safety)
+    }
+    assert_eq(report_grades(&formatting), ("safe", "formatting"))
+    assert_eq(report_grades(&immutable), ("suggested", "api-changing"))
+    output :: Command.new(jet()).args(["fix", typo.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), 0, "jet fix failed: {String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(fs.read_to_string(&typo).unwrap(), "fn run() {\n    print(\"hi\")\n}\n")
+    output :: Command.new(jet()).args(["fix", formatting.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), 0)
+    assert(fs.read_to_string(&formatting).unwrap().contains("loop item in"))
+    output :: Command.new(jet()).args(["fix", immutable.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), 0)
+    assert_eq(fs.read_to_string(&immutable).unwrap(), immutable_source)
+    assert(String.from_utf8_lossy(&output.stdout).contains("skipped 1 suggestion"))
+    output :: Command.new(jet()).args(["fix", immutable.to_str().unwrap(), "--all"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), 0)
+    assert(fs.read_to_string(&immutable).unwrap().contains("x := 1"))
+}
+// Rights-widening E1803 repair is reported unless --all inserts the full inline package.
+// Rust: tests/cli_parts/surface.rs:1765
+#Test("fix_all_inserts_script_inline_authority_block") {
+    dir :: isolated_cwd("fix_script_authority")
+    script :: dir.join("gradient.jet")
+    source :: "// Writes a file.\nuse core.files as files\n\nfn run() {\n    files.write(\"out.txt\", \"hi\") ?? panic(\"write failed\")\n    print(\"wrote\")\n}\n"
+    fs.write(&script, source).unwrap()
+    jet_in :: (args: &[String]) -> Command.new(jet()).args(args).current_dir(&dir).env("NO_COLOR", "1").stdin(Stdio.null()).output().unwrap()
+    refused :: jet_in(&["run", "gradient.jet"])
+    stderr :: String.from_utf8_lossy(&refused.stderr)
+    assert(!refused.status.success() && stderr.contains("E1803") && stderr.contains("allow: [FS, IO]"), "{stderr}")
+    assert(!dir.join("out.txt").exists(), "a refused run must not write")
+    reported :: jet_in(&["fix", "gradient.jet"])
+    assert_eq(reported.status.code(), 0)
+    assert_eq(fs.read_to_string(&script).unwrap(), source)
+    assert(String.from_utf8_lossy(&reported.stdout).contains("1 suggestion"))
+    applied :: jet_in(&["fix", "gradient.jet", "--all"])
+    assert_eq(applied.status.code(), 0)
+    assert_eq(fs.read_to_string(&script).unwrap(), "// Writes a file.\npackage {\n    name: \"gradient\"\n    authority: { holds: { allow: [FS, IO] } }\n}\n\nuse core.files as files\n\nfn run() {\n    files.write(\"out.txt\", \"hi\") ?? panic(\"write failed\")\n    print(\"wrote\")\n}\n")
+    ran :: jet_in(&["run", "gradient.jet"])
+    assert(ran.status.success(), "{String.from_utf8_lossy(&ran.stderr)}")
+    assert_eq(String.from_utf8_lossy(&ran.stdout), "wrote\n")
+    assert_eq(fs.read_to_string(dir.join("out.txt")).unwrap(), "hi")
+}

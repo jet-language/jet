@@ -1,974 +1,289 @@
-// PORT-PENDING 2121 crates-jet-foundation-src-syntax: crates/jet-foundation/src/Syntax.rs:1-970
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! OWNER-CONTROLLED SURFACE.
-//RS //!
-//RS //! Every keyword, sigil, and built-in name a user can type lives in this
-//RS //! file and nowhere else (invariant I7). Each constant maps to a decision
-//RS //! ID in Docs/spec/syntax-decisions.md. Changing a provisional choice means:
-//RS //! change it here, update Docs/spec/syntax-decisions.md, re-bless the ui snapshots. Done.
-//RS //!
-//RS //! Agents: do NOT add an entry here without a decision ID approved by the
-//RS //! owner in Docs/spec/syntax-decisions.md.
-//RS /// One machine-readable row for the owner-controlled lexical ledger (I7).
-//RS /// Surface audits and future front ends consume this table instead of
-//RS /// maintaining a second spelling/decision inventory.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-//RS pub struct LexicalEntry {
-//RS     pub spelling: &'static str,
-//RS     pub meaning: &'static str,
-//RS     pub decision: &'static str,
-//RS }
-//RS 
-//RS pub const LEXICAL_LEDGER: &[LexicalEntry] = &[
-//RS     LexicalEntry { spelling: "::", meaning: "immutable binding", decision: "D-BIND1" },
-//RS     LexicalEntry { spelling: ":=", meaning: "mutable binding", decision: "D-BIND1" },
-//RS     LexicalEntry { spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1" },
-//RS     LexicalEntry { spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D" },
-//RS     LexicalEntry { spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1" },
-//RS     LexicalEntry { spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A" },
-//RS     LexicalEntry { spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A" },
-//RS     LexicalEntry { spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A" },
-//RS     LexicalEntry { spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep { value }`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B" },
-//RS     LexicalEntry { spelling: KW_PREP, meaning: "explicit shared-preparation block `prep { … }`; `NAME :: prep { value }` is the only compile-time binding; `@ { … }` is retired", decision: "D-PREP-SURFACE2=A" },
-//RS     LexicalEntry { spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A" },
-//RS     LexicalEntry { spelling: "prep loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A" },
-//RS     LexicalEntry { spelling: "prep fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A" },
-//RS     LexicalEntry { spelling: "<prep N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A" },
-//RS     LexicalEntry { spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B" },
-//RS     LexicalEntry { spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`", decision: "D-BUILD-FACT3=A" },
-//RS     LexicalEntry { spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A" },
-//RS     LexicalEntry { spelling: "$phase", meaning: "total evaluation-site phase fact", decision: "D-PREP-SURFACE2=A; D-META-ROOT3=A" },
-//RS     LexicalEntry { spelling: "$program", meaning: "authorized checked-program fact root", decision: "D-META-REFLECT2=A; D-META-ROOT3=A" },
-//RS     LexicalEntry { spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A" },
-//RS     LexicalEntry { spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A" },
-//RS     LexicalEntry { spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items", decision: "D-META-PUBLISH2=A" },
-//RS     LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER, meaning: "explicit opt-in provider registration for declared targets", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
-//RS     LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER_EXPANSION, meaning: "explicit opt-in call-expansion provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
-//RS     LexicalEntry { spelling: COMPILER_ADVANCED_REGISTER_SPECIALIZATION, meaning: "explicit opt-in specialization provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
-//RS     LexicalEntry { spelling: COMPILER_ADVANCED_SESSION, meaning: "authorized session within a registered provider", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A" },
-//RS     LexicalEntry { spelling: "-[…]", meaning: "effect row on a callable", decision: "D-EFF1" },
-//RS     LexicalEntry { spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row", decision: "D-TYPE-SUFFIX1=A; D-EFF4" },
-//RS     LexicalEntry { spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A" },
-//RS     LexicalEntry { spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2" },
-//RS     LexicalEntry { spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D" },
-//RS     LexicalEntry { spelling: "T{expr}", meaning: "field default", decision: "D-DEFAULT-SHAPE1" },
-//RS     LexicalEntry { spelling: "Name{\"…\"}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1" },
-//RS     LexicalEntry { spelling: ".{ … }", meaning: "typed anonymous value", decision: "D-POLICY-WORD1" },
-//RS     LexicalEntry { spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1" },
-//RS     LexicalEntry { spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1" },
-//RS     LexicalEntry { spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: "" },
-//RS     LexicalEntry { spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1" },
-//RS     LexicalEntry { spelling: "_name", meaning: "ordinary identifier", decision: "" },
-//RS     LexicalEntry { spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1" },
-//RS     LexicalEntry { spelling: "<:", meaning: "open a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
-//RS     LexicalEntry { spelling: ":>", meaning: "close a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A" },
-//RS     LexicalEntry { spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`", decision: "D-FENCE2=A" },
-//RS ];
-//RS 
-//RS /// D-PREP-SURFACE2=A: a shared preparation block always has an explicit body.
-//RS pub const KW_PREP: &str = "prep";
-//RS /// D-META-REFLECT2=A: checked compiler metadata queries that D-META-ROOT3=A
-//RS /// has not yet given a `$` root. `$phase`, `$program` and `$package` are the
-//RS /// fact roots in `Syntax/core_surface.rs`; type, function, method, closure and
-//RS /// value facts are `$` members of their subject (`T.$fields`).
-//RS pub const META_QUERY_SOURCE: &str = "@SOURCE";
-//RS pub const META_QUERY_TYPES: &str = "@TYPES";
-//RS /// D-META-PUBLISH2=A: publication remains explicit and uses the existing Generated value.
-//RS pub const COMPILER_GENERATE: &str = "compiler.generate";
-//RS /// D-META-CONTROL2=A / D-META-OPTIN2=A: advanced providers are root-opted-in and target-registered.
-//RS pub const COMPILER_ADVANCED_REGISTER: &str = "compiler.advanced.register";
-//RS pub const COMPILER_ADVANCED_REGISTER_EXPANSION: &str = "compiler.advanced.register_expansion";
-//RS pub const COMPILER_ADVANCED_REGISTER_SPECIALIZATION: &str =
-//RS     "compiler.advanced.register_specialization";
-//RS /// A session is available only inside an authorized registered provider.
-//RS pub const COMPILER_ADVANCED_SESSION: &str = "compiler.advanced.session";
-//RS /// D-PLACE1=A: the old standalone marker gets a dedicated teaching diagnostic;
-//RS /// it is not part of the active marker registry.
-//RS pub const MARKER_ALIGN_LEGACY: &str = "Align";
-//RS 
-//RS // D-WRAP-SCOPE1=A (owner outcome, card #2171): MARKER_ARITHMETIC is the one
-//RS // lexical fixed-width arithmetic policy; its menu is Checked, Wrapping, or
-//RS // Saturating and its scope is function, method, or block.
-//RS // D-CORE-USELIST1=A (ratified 2026-08-06, card #1575): grouped `use` imports
-//RS // use one `.[…]` list with an optional `as` beside each member. Brace groups
-//RS // and wildcard imports are retired.
-//RS // D-TESTFAULT1=A: TEST_FAULTS_PARAM is the named configuration slot on the
-//RS // existing KW_TEST marker; it introduces no token or new grammar category.
-//RS // D-META-REG1=A / D-META-NAME1=A / D-META-FORM1=A / D-MARKER-SITES1=B:
-//RS // KW_MARKER is the one
-//RS // declaring word, and `Registry::rows` is the one registration table behind it —
-//RS // a marker rule, a knowledge plane, a right, and a build fact are rows of the
-//RS // same table, separated only by what they attach to. Facts about a rule ride the
-//RS // declaration's own named-parameter list under the compile-time mark
-//RS // (`$sites: [Site]`, `$repeatable: true`); no clause form and no second keyword
-//RS // enter the grammar. Every row states its safe direction and its gate words
-//RS // (D-FACT-LAW1=B); a prover may publish a read-only row (D-FACT-OWN1=A).
-//RS // Marker-plane reconciliation anchors: MARKER_PUB_FILE, MARKER_NO_PRELUDE, MARKER_TARGET,
-//RS // MARKER_LAYOUT, MARKER_CODABLE, Policy::APPLIED_RULES, Registry::rows, KW_FX (#FX),
-//RS // KW_COMPTIME, KW_DERIVE, MARKER_TRACK, MARKER_LOCAL, MARKER_SHARED. Constants live in the private modules
-//RS // below; keep this root file mentioning them so I7 audits can check one
-//RS // canonical surface entrypoint.
-//RS // D-TRACK-ORIGIN1=A (owner outcome): #Track origin is the typed compiler fact
-//RS // `value.$origin`, with no runtime projection; its canonical constant lives in
-//RS // `Syntax::COMPILER_FACT_ORIGIN`.
-//RS // D-BOUND-UNDO1=A: MARKER_UNDO owns the `#Undo(inverse)` binding contract.
-//RS // D-FFI-CAP1=A: MARKER_CLOSE owns the `#Close(close)` foreign-handle contract.
-//RS // D-MEMO1=A: MARKER_MEMO owns `#Memo` and TYPE_MEMO_STATS owns `name.cache()`.
-//RS // D-GENERIC-CALL1=A: GENERIC_CALL_OPEN and GENERIC_CALL_CLOSE own the adjacent
-//RS // call-site type-argument markers; they reuse the existing angle tokens.
-//RS // D-META-CODE1=A / D-META-BODY1=A: `derive T.Trait { … }` and
-//RS // `b.generate(name) { … }` are typed item-template bodies. Their user-visible
-//RS // members and compile-time holes use the ordinary item/statement grammar;
-//RS // neither spelling accepts a source string or re-lexes generated text.
-//RS // D-FAIL-ERROR1=A: core_surface::TYPE_ERR owns the shared default-error type
-//RS // and constructor name. core_surface::RETIRED_TYPE_ERROR exists only for the
-//RS // E0432 teaching diagnostic; it never resolves as a type.
-//RS // D-FAIL-BIND1=A (amended by D-ERR-DECON1=A): core_surface::AMBIENT_ERR owns
-//RS // the contextual lowercase `err` binder inside a fallible `??` fallback. It
-//RS // is not a lexer keyword.
-//RS // D-ERR-DECON1=A (ratified 2026-08-19, card #2041): the existing `??` block
-//RS // accepts ordinary statements followed by either one bare value or one real
-//RS // diverging tail (`return`, `next`, `break`, or `panic(...)`). No new token or
-//RS // binder is added; the old `return value` block-value reading is retired.
-//RS // D-TEXTHEAD-TYPE1=A: a checked text declaration is an ordinary nominal
-//RS // String-backed type with one ordinary `CheckedText` implementation. Its
-//RS // associated error, pure `check(String)`, and pure generic `encode_hole` are
-//RS // resolved by the ordinary trait registry; no marker contract or head registry
-//RS // owns the surface.
-//RS // D-RESULT-DECON2=B (ratified 2026-08-25, card #2173): the existing `?`, `!`,
-//RS // and `->` tokens also delimit one fixed exhaustive Result handler:
-//RS // `result ? ok -> success ! error -> failure`. It is parser sugar for the
-//RS // existing `.Ok`/`.Err` pattern tests; no new keyword, sigil, carrier, or
-//RS // runtime handler enters the surface.
-//RS // Card #1641, ratified 2026-08-07: D-RUN-LAW1=A names one run/one claim;
-//RS // D-CLAIM-WORD1=B names `assert`/`assert_eq`; D-CLAIM-BENCH1=A and
-//RS // D-CLAIM-CASES1=B add `.measure`/`.cases` to the D-DOTSCOPE1 member menu;
-//RS // D-RUN-WATCH1=A adds `--watch`; D-RUN-RECORD1=A adds `--record=` and
-//RS // `--replay=`; D-RUN-SESSION1=A claims the exact `r/R/t/f/q` session keys.
-//RS // Their canonical rows live in the private surface modules below and are
-//RS // re-exported through this file; no parser or execution engine owns a copy.
-//RS // D-FAIL-EXIT1=A / D-FAIL-EDGE1=A (ratified 2026-08-06, cards #1533/#1536)
-//RS // add no token: `fn run()` is the default-fallible entry, and the build target
-//RS // selects the final report boundary. CLI, web, wasm, and service adapters
-//RS // carry one report with target-native delivery.
-//RS // D-FAIL-CONV2=A (ratified 2026-08-17, card #2018) adds no token: the standard
-//RS // library ships one `impl <CoreError> -> Err` per family member on the
-//RS // D-FAIL-CONV1 rail. Sema injects only the conversions a module's `?`
-//RS // operators exercise. A program's own error type still needs its own
-//RS // declaration.
-//RS //
-//RS // D-LITCARRIER1=D (owner, 2026-08-24; card #2164): numeric literals have two
-//RS // suffix mechanisms. Carrier suffix `f` selects Float; component suffixes
-//RS // `i`, `j`, and `k` build imaginary or vector components. Expected-type
-//RS // inference remains the default, and these reserved suffixes precede
-//RS // #UnitFamily resolution.
-//RS //
-//RS // D-APILABEL1=A adds the two parameter-zone separators
-//RS // PARAM_ZONE_POSITIONAL_ONLY (`/`) and PARAM_ZONE_LABEL_ONLY (`*`), written in
-//RS // a parameter list rather than as operators. It also gives a parameter an
-//RS // optional public label ahead of its local name (`timeout seconds: Int`),
-//RS // which needs no new token. Retires the S61 fixed-position label rule.
-//RS // D-CALLPOS1=A adds no spelling: bare arguments fill one unambiguous callable
-//RS // left to right; labels deconflict candidate bodies and the editor supplies
-//RS // their names as inlay hints.
-//RS //
-//RS // D-CONF-WORD1=A gives the word `profile` one meaning, the optimize bundle
-//RS // behind `--profile` and its `--release` sugar. The machine axis is
-//RS // `--target`, which now takes a declared machine name (`board.<name>`) beside
-//RS // a rustc triple. A named environment composition is a preset:
-//RS // ENV_FIELD_PRESETS (`presets:`) and ENV_FLAG_PRESET (`--preset`) replace the
-//RS // retired environment `profiles:` field, while package/user prose uses
-//RS // generations. The environment selector is `--env`; ENV_FLAG_PROFILE_RETIRED
-//RS // exists only to teach `--preset`.
-//RS // D-CONF-KEY1=A (ratified 2026-08-06, card #1519) gives `settings:` its one
-//RS // typed package/profile surface. BUILD_FIELD_SETTINGS and the retired
-//RS // features/env teaching names live in package_files and are re-exported by
-//RS // this root; no second configuration spelling is allowed.
-//RS //
-//RS // D-TRAILBLOCK2=A adds no token: retires D-TRAILBLOCK1 trailing `{ }` sugar.
-//RS // Code arguments are ordinary `() -> { … }` lambdas inside call parentheses;
-//RS // a bare `{` after a call is E0335.
-//RS // D-BIND-BARE1=A adds no token: bindings are always bare `name :: value` /
-//RS // `name := value`; types ride values (`Type{ … }`) or live on signatures
-//RS // and fields. Retires `name: Type ::` / `name: Type :=`.
-//RS // D-ALIAS-OP1=B (ratified 2026-08-06, card #1513; amends D-TYPEALIAS1): alias
-//RS // declarations bind with the existing `::` mark; no token or grammar category
-//RS // is added. The retired `=` spelling is diagnostic-only.
-//RS // D-UNINIT-SENTINEL2=A amends D-UNINIT-SENTINEL1: `uninit` is legal only as
-//RS // the whole body of a `Type{ uninit }` head (`name := Type{ uninit }`).
-//RS // Retires annotated `name: Type := uninit`. KW_UNINIT stays the same token.
-//RS // D-SHAPE-CLI1 reuses the existing `fn run` / `#CLI` surface: a resolved
-//RS // entry-parameter type owns typed shell inputs, while zero-parameter `fn run()`
-//RS // stays valid. D-CLI-GLOBAL1=E (ratified 2026-08-10, card #1858) reuses the
-//RS // existing struct fields, callable members, markers, and `=` binding form:
-//RS // scalar fields are shared root flags and callable members are commands.
-//RS // `#CLI(Standard)` selects the standard flag pack. D-CLI-POS1=A adds field
-//RS // marker `Flag` (`MARKER_FLAG`): required value fields fill positionally by
-//RS // declaration order; `#[Flag]` keeps a field flag-only. D-CLI-FIELD-MARKERS1=A
-//RS // adds `Short` (`MARKER_SHORT`) and `Env` (`MARKER_ENV`) to that same field
-//RS // marker list. D-SHAPE6 adds no Jet source token; grouped tool commands remain
-//RS // owned by the single registry in crates/jet-cli/src/CLI.rs.
-//RS // D-ECO-DECL1=A adds no spelling: ecosystem entries reuse ordinary named
-//RS // fields and D-LIT-DOT1 `Type{ ... }` construction. D-ECO-ROOTNAME1 still
-//RS // owns the root noun; #560 owns executable source and tooling behavior.
-//RS // D-ECO-INLINEPACKAGE1=A: `package { … }` is a contextual leading carrier,
-//RS // not a second keyword family. Its structural shell is owned by the loader and
-//RS // editor grammar; PackageFacts remains the only field parser.
-//RS // D-ECO-GRAPH1=A (ratified 2026-08-23, card #532) adds no spelling: Package
-//RS // owns one semantic graph and one lock identity; JetOS projects its typed
-//RS // system/fleet facts from that graph. Filename, merge, and receipt storage
-//RS // choices stay with their existing decisions.
-//RS // D-MEM-VIEWRET1=B adds no token, sigil, lifetime spelling, or grammar rule.
-//RS // It reuses the existing named-type spellings `View`, `ViewMut`, and the
-//RS // restricted `str` element spelling at public string-view boundaries; sema
-//RS // infers and publishes their owner provenance.
-//RS // D-MEMPROVENANCE3=A adds contextual `from` after a return type (VIEW_FROM),
-//RS // with optional `static.<path>` sources (VIEW_FROM_STATIC). Inference stays
-//RS // the beginner default; the clause is opt-in expert declaration.
-//RS // D-SPREAD1=A reuses `.[` (OP_MEMBER_SPREAD) for member spread
-//RS // `prefix.[a, b, c]` → `[prefix.a, prefix.b, prefix.c]`. Call fan-out stays
-//RS // removed (D-VERDICT-1324-1).
-//RS // D-SHAPE-RESOURCE2=A adds contextual `defer` only at statement head in the
-//RS // exact form `defer close(^resource)`; KW_DEFER/RESOURCE_CLOSE are canonical.
-//RS // D-SHAPE3a=A adds no token: expected-type `.new(...)` reuses MEM_ALLOC_NEW
-//RS // and ordinary call punctuation, with the receiver resolved by sema.
-//RS // D-SCRIPT-ENTRY1=A adds no token: byte-zero `#!/...` is OS launch metadata;
-//RS // the lexer skips the opaque line.
-//RS // D-SUBJECT-CALL1=A adds no token: bare lower-case `.member` chains reuse the
-//RS // existing dot punctuation and lower to ordinary one-parameter lambdas.
-//RS // D-GENERIC-CALL1=A adds no token: `call<T>(...)` reuses the existing angle and
-//RS // call tokens for explicit type arguments on every generic call family.
-//RS // D-SHAPE-OPAQUE-INFER1=A adds no token: `Type.new(...)` may omit generic
-//RS // receiver arguments only when ordinary input/expected-type inference is unique.
-//RS // D-SHAPE-CTORVERB1=C closes fresh-value construction under the `new` prefix:
-//RS // MEM_ALLOC_NEW owns deterministic construction; METHOD_FRESH_NEW_RANDOM owns
-//RS // entropy-drawing construction; CLOCK_TYPE and EXPIRING_VALUE_TYPE own the
-//RS // migrated type names. Lowercase module factories and `generate` are retired.
-//RS // D-UNSAFE-OBLIG1=A adds contextual `assert valid_ptr, aligned, no_alias`,
-//RS // the `obligations: .Track/.Skip` #Unsafe field, and ENV_ORG_UNSAFE_POLICY.
-//RS // D-SHAPE-INTERNAL1=A and D-SHAPE-DUNDER2=A add no token: the canonical
-//RS // IdentifierClass prefix policy makes `_name` soft-public and reserves every
-//RS // source-written `__name` for Jet and generated tooling.
-//RS // D-SHAPE-MODULEINTERNAL1=A adds no token: MODULE_INTERNAL_PREFIX is the
-//RS // automatic-discovery opt-out for `module _name`; explicit imports still use
-//RS // ordinary resolution and access rules.
-//RS // D-SHAPE-CASE1=C owns the identifier category table and its two enforced
-//RS // shapes. D-SHAPE-CASE2=A exempts foreign names inside FFI binding modules.
-//RS // D-ARROW-UNIFY1=B (ratified 2026-08-19): OP_UNIFIED_ARROW (`->`) defines
-//RS // callable results and control arms/bodies in every position.
-//RS // D-ARROW-RESPELL1=A (ratified 2026-08-21): `->` is canonical; `:>` and `=>`
-//RS // are retired teaching spellings with no alias.
-//RS // D-SIG-AFTER1=A (ratified 2026-09-18, card #3503): return facts follow the
-//RS // one arrow (`-> T`, `-[Effects]> T`). Named function and method bodies always
-//RS // use braces. Bare type after the parameter list is a teaching diagnostic.
-//RS // D-CALLABLE-ONE1=A is amended: the plain arrow is present when a non-unit
-//RS // success result is declared; unit bodies keep bare braces.
-//RS // D-EFFECT-ROW2=B (ratified 2026-08-21, card #2144): effect ceilings keep the
-//RS // `-[` / `]>` spelling, including pure `-[]>`; D-LAMBDA-IFACE1=A gives lambdas
-//RS // the same interface suffixes.
-//RS // D-ARMHEAD-PAREN1=A, D-SUBJECT-COHERE1=A, and D-DEFAULT-SHAPE1=B (ratified
-//RS // 2026-08-21, card #2144) add no token: arm grouping, subject chains, and
-//RS // declaration defaults reuse the existing parentheses, dot, and typed-value
-//RS // forms.
-//RS // D-TYPE-SUFFIX1=A (ratified 2026-09-28, card #3687) amends
-//RS // D-FAILURE-FOUNDATION1=A, D-OPT1, and S34: both type marks follow the type
-//RS // they mark. `Entry?` is optional (`[Int?]` differs from `[Int]?`, and
-//RS // `Box<Int?>` from `Box<Int>?`); the typed head is `Int?{…}`. The error
-//RS // contract follows the success type: `-> Int ParseError!`,
-//RS // `-> Entry? (DBError | TimeoutError)!`, unit-fallible `SaveError!`, and
-//RS // `Err!` pins the default. A missing contract is the beginner route: the
-//RS // callable is fallible with the implicit default `Err`. `A | B!` is taught as
-//RS // `(A | B)!` (E-ERR-UNION); prefix `?T`, `!E`, and `!(A | B)` are teaching
-//RS // diagnostics with a machine-applicable fix (E-TYPE-PREFIX), never aliases.
-//RS // Effect denials (`-[!Mem.Alloc]>`), `?(text)`, `??`, `!x`, and `!=` keep
-//RS // their spelling.
-//RS // D-NEVER2=B (ratified 2026-09-02, card #2437): the existing `Never`
-//RS // failure-domain name also occupies callable success-return slots
-//RS // (`fn usage() Never`, `fn serve(addr: String) Never NetError!`, and
-//RS // `fn() Never`). It remains uninhabited in ordinary value positions; a
-//RS // declared function must have no normal path.
-//RS // D-STRUCT-PLANE1=A and D-STRUCT-LIVE1=A add no spelling: structure facts use
-//RS // the existing fact registry, and liveness uses the existing `_name` ladder
-//RS // (D-NAME-SIGIL1). D-STRUCT-ONCE1=A adds no spelling: it extends the existing
-//RS // `@loop` reach and keeps its existing compile-time mark.
-//RS // D-ENTRY-VALUE1=B (card #1446) adds no token: `fn run` is the one entry, and
-//RS // its return value is the program. A returned App is served at the runtime
-//RS // edge; there is no hidden app-name convention or synthesized run overlay.
-//RS // D-ROLEFILE1=A / D-CMDOVERRIDE1=A (card #1866) add no source token: the four
-//RS // optional package-root command homes are `@run.jet`, `@build.jet`, `@dev.jet`,
-//RS // and `@test.jet`, and ordinary `fn run|build|dev|test` overrides use the
-//RS // existing function surface. `--show-default` selects the stock behavior.
-//RS // D-CMD-OVERRIDE1=C (card #1451) remains the older test-suite API detail.
-//RS // D-JOB-NAME1=A (ratified 2026-08-05, card #1448) adds no token: the marker
-//RS // and every command use `job`. Canonical CLI is `jet run <entry> -- <name>`
-//RS // and `jet jobs`. Retired spellings have no alias or fallback. Help,
-//RS // completions, diagnostics, docs, examples, and tests use the same word.
-//RS // KW_JOB / JOB_SCOPE_VARIANTS live in math_layout and are re-exported here.
-//RS // EFFECT_ARROW_OPEN/CLOSE (`-[` / `]>`) add effect ceilings. The unified
-//RS // arrow selects dispatch/guard values, yields finite-loop items, and marks a
-//RS // one-line effect `if`/`loop` body. D-LOOP-STMT-ARROW1=C (ratified
-//RS // 2026-08-13, card #1453) gives every statement-position loop header this
-//RS // body form. D-TAIL-RETURN1=A amends D-BODY-LAST1: `->` remains the
-//RS // one-expression function-body marker, braces hold statements, and the sole
-//RS // unadorned final expression supplies a value when the block expects one.
-//RS // `::` remains the name-binding sigil, and `=` remains for slot-filling
-//RS // declarations such as extern bindings.
-//RS // D-LOOP-COMMA1=A (ratified 2026-07-30, card #1336) uses `(key, value)` for a
-//RS // two-name source binding. D-LOOP-IN1=A (card #2153) joins a source binding to
-//RS // its source with reserved keyword `in`; commas remain for later clauses such
-//RS // as a stride. Expression-position `x in xs` has no operator spelling.
-//RS // D-LOOP-GUARD1=A (ratified 2026-08-20, card #1416) keeps yielding-loop
-//RS // guards comma-less: `loop name in source if condition -> value`; `, if` is
-//RS // E0379, never a stride.
-//RS // D-TIME-IN1=C (ratified 2026-08-28, card #2283) keeps bare `in` reserved for
-//RS // source-loop parsing while the postfix lexer/parser carve-out admits it after
-//RS // `.`. Thus `duration.in(.Seconds)` is a normal method call without making
-//RS // `in` a general identifier.
-//RS // D-LOOPREAD1=A (ratified 2026-09-04, card #2896) keeps the state-loop
-//RS // initializer one-shot. A condition that reads unchanged header state can
-//RS // repeat forever; L0529 teaches repeated input with the existing source-loop
-//RS // `in` form and the body-first `if test { break }` exit shape. No new loop
-//RS // syntax enters.
-//RS // D-LOOPSTATE1 owns break/next target arguments, and
-//RS // D-COMPREHENSION1 fixes yielding-loop results to eager List.
-//RS // D-IFGUARD1=A adds no spelling: subjectless statement/value guard tables
-//RS // reuse KW_IF, KW_ELSE, OP_UNIFIED_ARROW, braces, and ordinary Bool expressions.
-//RS // D-IFDIST1=A (ratified 2026-07-28, card #1305) adds no token: any comparison
-//RS // (`== != < > <= >=`) may mark `if subject OP { … }` dispatch. Bare arm atoms
-//RS // desugar to `subject OP atom`; `|` unions those atoms; `&&`/`||` combine.
-//RS // The same table is a ()-or-value expression in expression position.
-//RS // D-LOOP-SUBJECT1=A adds no token: bindingless source loops reuse Syntax::KW_IT
-//RS // as their implicit subject; scalar and `(key, value)` sources retain named bindings.
-//RS // D-BRANCH-PREF1=A / D-BRANCH-ONELINE1=A / D-BRANCH-ELSEIF1=A /
-//RS // D-BRANCH-LINT1=A / D-BRANCH-VALUE1=A / D-BRANCH-FMT1=C /
-//RS // D-BRANCH-TEACH1=A (ratified 2026-07-28, card #1259) add no token:
-//RS // multi-line braced branches and `else if` chains get L0507, while one-line
-//RS // effect and value forms stay quiet. Fmt preserves the author's branch shape.
-//RS // D-EFFECT-DECL1=A (ratified 2026-07-28, card #1299) mints KW_EFFECT_DECL:
-//RS // `effect Root.Leaf` adds one package-view fact and erases before TIR.
-//RS // D-AUTHORITY-ROOTS1=A (ratified 2026-08-06, card #1567) keeps the closed
-//RS // grantable root table at thirteen and serves foreign-language leaves through
-//RS // BUILTIN_EFFECT_LEAVES (`FFI.Go`, `FFI.Py`, `FFI.Octave`, and the other
-//RS // supported binders). `Panic` and `Mem` are deny-only rows, not roots.
-//RS // D-ABILITY-NAME2=A (ratified 2026-08-25, card #2187) retires the old
-//RS // vocabulary: the fact menu is `Effect`, the carried rights value is
-//RS // `Authority`, and the block marker is `#FX`. Browser `.abilities()` remains a
-//RS // protocol value; build tooling reports the FX graph instead.
-//RS // D-EACH1=C (ratified 2026-07-28, card #1239) mints SIGIL_FENCE_OPEN /
-//RS // SIGIL_FENCE_CLOSE and D-FENCE-GLYPH1=A (card #1516) opens expression-position
-//RS // fences to expression entries: the statement is copied once per entry, fences
-//RS // advance in lock-step. D-FENCE2=A (ratified 2026-09-28, card #3662) respells
-//RS // the fence `<: a, b :>` and reclaims `:>` from the D-ARROW-RESPELL1 retired
-//RS // arrow; a stray `:>` teaches `->` through E0070. RETIRED_FENCE_OPEN/CLOSE
-//RS // (`@[`/`]@`) remain only for the E-FENCE-SPELLING teaching diagnostic.
-//RS // D-SHAPE-CONVERT1=A adds no punctuation: explicit conversion is always a
-//RS // destination-owned `Target.from_source(value)` static method. Text remains
-//RS // the existing `Target.parse(text)` operation; source-owned `to_*` aliases are
-//RS // not part of the language surface.
-//RS // D-OPDEF1=A adds no punctuation: `impl Type.Add`/`.Sub`/`.Mul`/`.Div`,
-//RS // `.Equatable`, and `.Comparable` reuse ordinary trait-impl dot syntax.
-//RS // D-META-AUTO1=A / D-AUTODERIVE1=E / D-AUTODERIVE-SYNTAX1=D (ratified
-//RS // 2026-07-29, cards #1267/#1545) amend S55 and D-MARK-DEBUG1. Every
-//RS // structurally derivable built-in capability — Printable, Equatable, Debug,
-//RS // Comparable, Encode, and Decode — auto-derives when fields qualify. The
-//RS // package default is refused through the named `policy.lints.deny` entry
-//RS // `auto_derive`. At a type site, ordinary marker names opt in and a leading
-//RS // Bang opts out (`#!Printable`, `#!Codable`, `#[!Debug, Equatable]`). Missing
-//RS // traits follow the package default; a hand-written impl always wins.
-//RS // D-HTTP-ROUTE-SYNTAX2=A owns the two route-pattern markers carried inside
-//RS // ordinary String values. They are not lexer tokens; the HTTP router consumes
-//RS // them after String evaluation.
-//RS // D-FLOWTYPE1=A adds no token: after a stable immutable `?T` name is checked
-//RS // with `x != None` (true) or `x == None` (false/else), sema refines that name
-//RS // to `T` for the proven branch and records an S31 Present unwrap for TIR.
-//RS // Mutable locals, fields, indexes, aliases, and calls stay `?T`; bind with
-//RS // `x == Val(v)` instead. Facts reach the right side of `&&` only, not `||`.
-//RS // D-OPT-LIFT1=A adds no token: a plain `T` fills any slot whose checked type
-//RS // is `T?` (returns, arguments, fields, list/map items, typed bindings,
-//RS // reassignment) and `x == 5` compares a `?T` with a present `T`; sema adds
-//RS // one `Present`. The full rule lives on `LIT_VALUE` in `Syntax/core_surface.rs`.
-//RS // D-UNIONTYPE1=A reuses the existing `|` token (TokKind::Pipe / BitOr) in type
-//RS // position as TYPE_UNION_SEP. `T !(E1 | E2)` parses as `T !(E1 | E2)`.
-//RS // D-BITOREXPR1=A (ratified 2026-08-28, card #2299) admits the same token in
-//RS // value position as bitwise OR. It binds tighter than comparisons; type
-//RS // position remains the union grammar above.
-//RS // D-REGEX-LIT1=D adds no punctuation. Regex patterns use the universal
-//RS // `Type{ body }` / inferred `{ body }` form from D-LIT-DOT1.
-//RS // D-RANGE-VALUE1=A makes `a..b` and `a..<b` construct one nominal Range
-//RS // value. Range carries end inclusivity; arm heads and distinct constraints
-//RS // keep their literal-only grammar.
-//RS // D-TYPE2-SPELL1=A makes `Int(lo..hi)` the structural inline refinement in
-//RS // every type position. `TYPE_INLINE_RANGE` is re-exported from math_layout.
-//RS // D-FMT-INTERP1=A adds `Fixed` to the closed interpolation-selector set:
-//RS // `{value:Fixed(n)}` uses the colon rail and ordinary integer-call parentheses.
-//RS // D-FMT-PLAIN1=A adds `Grouped(n)` as the explicit human-grouping escape while
-//RS // `Fixed(n)` and `core.text.fmt.decimal` remain machine-plain.
-//RS // D-FMT-PRETTY1=A (ratified 2026-08-14, card #1966) adds `Pretty` to the same
-//RS // rail; it expands canonical Debug output with stable two-space indentation.
-//RS // D-FMT-INTERP3=B (ratified 2026-08-27, card #2257) adds the closed selector
-//RS // family `Hex(n)`, `Pad(n[, "fill"])`, `PadLeft(n[, "fill"])`, `Sci(n)`,
-//RS // `Percent(n)`, `Bin`, and `Oct`. Each selector lowers to one shared
-//RS // `core.text.fmt` function; all execution tiers must preserve the exact output.
-//RS // D-FMT-INTERP3=B: `Hex(n)` is the lowercase hexadecimal integer selector.
-//RS // D-FMT-INTERP3=B: `Pad(n[, "fill"])` is the right-padding text selector.
-//RS // D-FMT-INTERP3=B: `PadLeft(n[, "fill"])` is the left-padding text selector.
-//RS // D-FMT-INTERP3=B: `Sci(n)` is the scientific-notation number selector.
-//RS // D-FMT-INTERP3=B: `Percent(n)` is the percentage number selector.
-//RS // D-FMT-INTERP3=B: `Bin` is the binary integer selector.
-//RS // D-FMT-INTERP3=B: `Oct` is the octal integer selector.
-//RS // D-FMT-INTERP2=A: trailing `=` in a hole reprints the expression source,
-//RS // then " = ", then the value — `{count=}` → `count = 3`. Composes with
-//RS // selectors: `{count=:Debug}`.
-//RS // D-QUANTITY-PRINT1 adds `Unit(name)` and `Unit(bare)` to that same selector
-//RS // rail. Bare interpolation keeps the declared symbol as the default.
-//RS // D-FACTMODEL1=A: tag, state, taint-kind, and effect leaves are one erased
-//RS // compile-time fact model with one segment-aware subsumption rule.
-//RS // D-TAG-SURFACE1=A: `tag Name { deny: [...], from: [...] }`, direct `#Name`
-//RS // value/type facts, and `#Scrub(Name)` are the sole dataflow-tag surface.
-//RS // D-STATE-NS1=A: state facts have the reserved `T.State.Name` qualified plane;
-//RS // bare names are sugar only inside `#State` and `#Transition`.
-//RS // D-STATE-HOME1=A (amends D-STATE-NS1): the one state set is written as
-//RS // `state { Name, ... }` inside its named `struct` owner. The retired sibling
-//RS // `state Type { ... }` spelling is recognized only for E0157 and never creates
-//RS // a second runtime type.
-//RS // D-STATE-TERMINAL1=A: a checked state with no outgoing transition is a
-//RS // terminal reflection fact. Entry reachability is reported only when `_ -> State`
-//RS // transitions exist; this outcome adds no user-facing syntax.
-//RS // D-RULEARG-TYPES1=A + D-LANGNS-NAME1=A: compiler marker vocabularies are
-//RS // generated enums in `core.compiler.lang`, derived from Policy::APPLIED_RULES.
-//RS // D-MARKER-NAME-HYGIENE1=A: `#Discriminant("field")` owns serde internal
-//RS // discriminants and `#Job fn` owns scheduled entry functions. `#Tag` and
-//RS // `#Task` are retired spellings.
-//RS 
-//RS // D-ADOPT-GUEST1=A: the native library edge uses matching `#Import(c)` and
-//RS // `#Export(c)` spellings. The C ABI and the sema-owned guest surface are one
-//RS // contract in both directions.
-//RS pub const MARKER_IMPORT: &str = "Import";
-//RS pub const MARKER_EXPORT: &str = "Export";
-//RS 
-//RS // Concurrency surface — thirteen ratified D-CONC-* outcomes on card #1505.
-//RS // Rows for forms that implementation cards will make parseable belong here
-//RS // now; parser and sema support land on those cards.
-//RS // D-CONC-UNIT1=A and D-CONC-CROSS1=A change compiler facts only. D-CONC-STM1=A
-//RS // keeps #Transact, D-CONC-SCHED1=A keeps Job/Every/Duration, and
-//RS // D-CONC-STREAM1=A keeps yield/Stream. D-CONC-OUTCOME1=A is retired by
-//RS // D-CONC-FAIL1=A; TaskOutcome, TaskStatus, trace, and exception have no rows.
-//RS /// D-CONC-SPAWN1=D: the one reserved word for structured task spawning.
-//RS pub const KW_CONC_TASK: &str = "task";
-//RS /// D-CONC-FREEZE1=A (ratified 2026-08-12, card #1889): prefix verb that
-//RS /// creates a deeply immutable owned snapshot for a task crossing.
-//RS pub const KW_FREEZE: &str = "freeze";
-//RS // D-CONC-FREEZE1=A adds no second token for consuming captures: `task ^name`
-//RS // reuses SIGIL_MOVE (`^`, D-MEM1) as task-capture syntax on a group child.
-//RS // The child owns the value; later use of the name is ordinary E0121.
-//RS /// D-CONC-SPAWN1=D / D-CONC-ALLNAMED1=A: `task.all` is the one fan-out
-//RS /// selector that accepts either positional branches or uniformly named
-//RS /// branches; named branches return the existing anonymous tuple carrier.
-//RS pub const TASK_ALL: &str = "task.all";
-//RS /// D-CONC-SPAWN1=D: qualified fan-out selector.
-//RS pub const TASK_RACE: &str = "task.race";
-//RS /// D-CONC-SPAWN1=D: qualified fan-out selector.
-//RS pub const TASK_ANY: &str = "task.any";
-//RS /// D-CONC-SPAWN1=D: qualified fan-out selector.
-//RS pub const TASK_GROUP: &str = "task.group";
-//RS 
-//RS /// D-CONC-JOIN1=A / D-CONC-SPAWN1=D: the nameable child-handle type.
-//RS pub const TYPE_TASK: &str = "Task";
-//RS 
-//RS /// D-CONC-CHAN1=A: builtin channel constructor.
-//RS pub const BUILTIN_CHANNEL: &str = "channel";
-//RS /// Compiler-private runtime rows; the source constructor remains `channel<T>`.
-//RS pub const INTERNAL_CHANNEL_NEW_METHOD: &str = "\0jet.channel.new";
-//RS pub const INTERNAL_CHANNEL_BOUNDED_METHOD: &str = "\0jet.channel.bounded";
-//RS /// D-CONC-CHAN1=A: receiver endpoint type is nameable in signatures.
-//RS pub const TYPE_RECEIVER: &str = "Receiver";
-//RS /// D-CONC-CHAN1=A: sender endpoint type is nameable in signatures.
-//RS pub const TYPE_SENDER: &str = "Sender";
-//RS /// D-CONC-CHAN1=A / D-CONC-CHAN2=D: loop source form for channel draining.
-//RS pub const LOOP_CHANNEL_DRAIN: &str = "loop value in receiver";
-//RS /// D-CONC-CHAN2=D: contextual timeout arm in a readiness table.
-//RS pub const READINESS_AFTER: &str = "after";
-//RS /// Compiler-private field used while a readiness arm is carried through the
-//RS /// existing one-field tuple AST node. It cannot be written by source code.
-//RS pub const INTERNAL_SELECT_AFTER_FIELD: &str = "\0jet.select.after";
-//RS 
-//RS /// D-CONC-SHARE1=A: prefix for construction of a shared cell.
-//RS pub const KW_SHARED: &str = "shared";
-//RS 
-//RS /// D-CONC-JOIN1=A / D-CONC-FAIL1=A: consuming task result operation.
-//RS pub const TASK_JOIN: &str = "join";
-//RS /// D-CONC-FAIL1=A: one error type for joined task failures.
-//RS pub const TYPE_TASK_FAILURE: &str = "TaskFailure";
-//RS /// D-CONC-FAIL1=A: cancellation failure variant.
-//RS pub const TASK_FAILURE_CANCELLED: &str = "Cancelled";
-//RS /// D-CONC-FAIL1=A: deadline failure variant.
-//RS pub const TASK_FAILURE_DEADLINE_BLOWN: &str = "DeadlineBlown";
-//RS /// D-CONC-FAIL1=A: panic failure variant.
-//RS pub const TASK_FAILURE_PANICKED: &str = "Panicked";
-//RS 
-//RS pub const HTTP_ROUTE_PARAM_PREFIX: &str = ":";
-//RS pub const HTTP_ROUTE_CATCH_ALL_PREFIX: &str = "*";
-//RS 
-//RS /// D-CALLDUAL1=E: sema-only metadata carried on `Expr::MethodCall` until TIR
-//RS /// lowers a resolved `#Root` call to the ordinary free-function/module-call
-//RS /// shape. These strings are never source syntax.
-//RS pub const INTERNAL_ROOT_CALL_LOCAL: &str = "__jet_root_call_local";
-//RS pub const INTERNAL_ROOT_CALL_IMPORT_PREFIX: &str = "__jet_root_call_import:";
-//RS pub const INTERNAL_ROOT_CALL_CORE_PREFIX: &str = "__jet_root_call_core:";
-//RS 
-//RS /// D-CALLVALUE1=B: sema-only marker for the builtin function-value `.call(...)`
-//RS /// projection. It is never a source spelling; TIR lowers it to the same
-//RS /// function-value call node as `Expr::CallValue`.
-//RS pub const INTERNAL_CALL_VALUE: &str = "__jet_call_value";
-//RS 
-//RS // D-PARCAPTURE1=D (ratified 2026-07-20): every explicit parallel collection
-//RS // adapter uses the owner-selected `para_` prefix. These are a clean break from
-//RS // D-AUTOPAR1's provisional `par_` spellings; there are no aliases.
-//RS pub const METHOD_PARA_MAP: &str = "para_map";
-//RS pub const METHOD_PARA_FILTER: &str = "para_filter";
-//RS pub const METHOD_PARA_PARTITION: &str = "para_partition";
-//RS pub const METHOD_PARA_FOLD: &str = "para_fold";
-//RS pub const PARA_METHODS: &[&str] = &[
-//RS     METHOD_PARA_MAP,
-//RS     METHOD_PARA_FILTER,
-//RS     METHOD_PARA_PARTITION,
-//RS     METHOD_PARA_FOLD,
-//RS ];
-//RS 
-//RS // D-GO127-STDLIB1=A (card #2278, 2026-08-28): Go 1.27 parity names are
-//RS // registered at the syntax authority before sema or an engine accepts them.
-//RS // `cut_last` is the terminal-boundary root; the Euclidean quotient and
-//RS // remainder are separate operations, so neither grows a variant sibling.
-//RS pub const METHOD_CUT_LAST: &str = "cut_last";
-//RS pub const METHOD_DIV_EUCLID: &str = "div_euclid";
-//RS pub const METHOD_REM_EUCLID: &str = "rem_euclid";
-//RS 
-//RS /// Validate a source-literal HTTP route before code generation. Runtime route
-//RS /// parsing repeats this check for computed Strings.
-//RS pub fn validate_http_route_pattern(pattern: &str) -> Result<(), String> {
-//RS     fn valid_name(name: &str) -> bool {
-//RS         let mut chars = name.chars();
-//RS         matches!(chars.next(), Some(c) if c == '_' || c.is_ascii_alphabetic())
-//RS             && chars.all(|c| c == '_' || c.is_ascii_alphanumeric())
-//RS     }
-//RS 
-//RS     fn decode_static(segment: &str) -> Result<(), String> {
-//RS         let bytes = segment.as_bytes();
-//RS         let mut decoded = Vec::with_capacity(bytes.len());
-//RS         let mut index = 0;
-//RS         while index < bytes.len() {
-//RS             if bytes[index] != b'%' {
-//RS                 decoded.push(bytes[index]);
-//RS                 index += 1;
-//RS                 continue;
-//RS             }
-//RS             let hex = |byte: u8| match byte {
-//RS                 b'0'..=b'9' => Some(byte - b'0'),
-//RS                 b'a'..=b'f' => Some(byte - b'a' + 10),
-//RS                 b'A'..=b'F' => Some(byte - b'A' + 10),
-//RS                 _ => None,
-//RS             };
-//RS             let Some(high) = bytes.get(index + 1).and_then(|byte| hex(*byte)) else {
-//RS                 return Err("invalid percent escape".to_string());
-//RS             };
-//RS             let Some(low) = bytes.get(index + 2).and_then(|byte| hex(*byte)) else {
-//RS                 return Err("invalid percent escape".to_string());
-//RS             };
-//RS             let byte = high * 16 + low;
-//RS             if byte == b'/' {
-//RS                 return Err("encoded slash is ambiguous".to_string());
-//RS             }
-//RS             decoded.push(byte);
-//RS             index += 3;
-//RS         }
-//RS         let decoded = String::from_utf8(decoded)
-//RS             .map_err(|_| "route segment is not valid UTF-8".to_string())?;
-//RS         if decoded == "." || decoded == ".." {
-//RS             return Err("dot traversal segment is not allowed".to_string());
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     if !pattern.starts_with('/') {
-//RS         return Err("routes must start with `/`".to_string());
-//RS     }
-//RS     let raw_segments: Vec<&str> = pattern.split('/').skip(1).collect();
-//RS     let mut names = std::collections::BTreeSet::new();
-//RS     for (index, segment) in raw_segments.iter().enumerate() {
-//RS         if segment.is_empty() {
-//RS             if raw_segments.len() == 1 {
-//RS                 continue;
-//RS             }
-//RS             return Err("empty path segments are not allowed".to_string());
-//RS         }
-//RS         if segment.contains('{') || segment.contains('}') {
-//RS             return Err("use `:name` or final `*name`; braces are not route markers".to_string());
-//RS         }
-//RS         if *segment == "*" {
-//RS             return Err("write a named catch-all such as `*wildcard`".to_string());
-//RS         }
-//RS         let name = segment
-//RS             .strip_prefix(':')
-//RS             .or_else(|| segment.strip_prefix('*'));
-//RS         if let Some(name) = name {
-//RS             if segment.starts_with('*') && index + 1 != raw_segments.len() {
-//RS                 return Err("`*name` catch-all must be final".to_string());
-//RS             }
-//RS             if !valid_name(name) {
-//RS                 return Err(format!(
-//RS                     "{} names must match `[A-Za-z_][A-Za-z0-9_]*`",
-//RS                     if segment.starts_with('*') {
-//RS                         "catch-all"
-//RS                     } else {
-//RS                         "parameter"
-//RS                     }
-//RS                 ));
-//RS             }
-//RS             if !names.insert(name) {
-//RS                 return Err(format!("duplicate parameter `{name}`"));
-//RS             }
-//RS         } else {
-//RS             decode_static(segment)?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// Compiler-owned numeric source names for D-SHAPE-CONVERT1=A.
-//RS pub const NUMERIC_CONVERSION_SOURCES: &[(&str, &str)] = &[
-//RS     ("from_i8", "I8"),
-//RS     ("from_i64", "I64"),
-//RS     ("from_i16", "I16"),
-//RS     ("from_i32", "I32"),
-//RS     ("from_int", "Int"),
-//RS     ("from_u8", "U8"),
-//RS     ("from_u16", "U16"),
-//RS     ("from_u32", "U32"),
-//RS     ("from_u64", "U64"),
-//RS     ("from_f32", "F32"),
-//RS     ("from_float", "Float"),
-//RS     // D-TYPE2-EXACT-CONVERT1: the exact-number family uses the same
-//RS     // destination-owned source suffix convention as fixed numerics.
-//RS     ("from_decimal", "Decimal"),
-//RS     ("from_fraction", "Fraction"),
-//RS ];
-//RS 
-//RS /// D-W4310-BYTES1 / D-W4310-EXACT1 (card #2310/#2312, 2026-08-28): the
-//RS /// completeness-pack names are registered here before they enter sema or an
-//RS /// engine. Their implementations remain in the shared Prelude seams.
-//RS pub const W4310_SURFACE_NAMES: &[&str] = &[
-//RS     "read_i8",
-//RS     "read_i16_le",
-//RS     "read_i16_be",
-//RS     "read_i32_le",
-//RS     "read_i32_be",
-//RS     "read_i64_le",
-//RS     "read_i64_be",
-//RS     "read_f32_be",
-//RS     "read_f64_be",
-//RS     "peek",
-//RS     "seek",
-//RS     "skip",
-//RS     "write_i8",
-//RS     "write_i16_le",
-//RS     "write_i16_be",
-//RS     "write_i32_le",
-//RS     "write_i32_be",
-//RS     "write_i64_le",
-//RS     "write_i64_be",
-//RS     "write_f32_le",
-//RS     "write_f32_be",
-//RS     "write_f64_le",
-//RS     "write_f64_be",
-//RS     "hmac_sha256",
-//RS     "to_radix",
-//RS     "from_radix",
-//RS     "round",
-//RS     "floor",
-//RS     "ceil",
-//RS     "from_decimal",
-//RS     "from_fraction",
-//RS ];
-//RS 
-//RS pub fn numeric_conversion_source(method: &str) -> Option<&'static str> {
-//RS     NUMERIC_CONVERSION_SOURCES
-//RS         .iter()
-//RS         .find_map(|(name, source)| (*name == method).then_some(*source))
-//RS }
-//RS 
-//RS pub fn numeric_conversion_method(source: &str) -> Option<&'static str> {
-//RS     NUMERIC_CONVERSION_SOURCES
-//RS         .iter()
-//RS         .find_map(|(method, name)| (*name == source).then_some(*method))
-//RS }
-//RS 
-//RS /// Canonical D-SHAPE-CONVERT1 method generated from a source type name.
-//RS /// Numeric defaults use their bounded aliases; nominal types use snake case.
-//RS pub fn conversion_method_for_source(source: &str) -> String {
-//RS     numeric_conversion_method(source)
-//RS         .map(str::to_string)
-//RS         .unwrap_or_else(|| format!("from_{}", canonical_name_case(source, NameCase::Snake)))
-//RS }
-//RS 
-//RS /// Migration-only lookup for source-owned numeric spellings retired by
-//RS /// D-SHAPE-CONVERT1=A. These are diagnostics, not accepted surface.
-//RS pub fn retired_numeric_conversion_target(method: &str) -> Option<&'static str> {
-//RS     Some(match method {
-//RS         "to_i8" => "I8",
-//RS         "to_i16" => "I16",
-//RS         "to_i32" => "I32",
-//RS         "to_i64" | "to_int" => "Int",
-//RS         "to_u8" => "U8",
-//RS         "to_u16" => "U16",
-//RS         "to_u32" => "U32",
-//RS         "to_u64" => "U64",
-//RS         "to_f32" => "F32",
-//RS         "to_f64" | "to_float" => "Float",
-//RS         _ => return None,
-//RS     })
-//RS }
-//RS 
-//RS /// D-QUANTITY-TYPE1=A: the sole source-written quantity-bound constructor.
-//RS pub const BOUND_QUANTITY: &str = "Quantity";
-//RS /// D-QUANTITY-CONVERT1=B: the closed explicit unit-rounding policies.
-//RS pub const ROUND_TOWARD_ZERO: &str = "TowardZero";
-//RS pub const ROUND_FLOOR: &str = "Floor";
-//RS pub const ROUND_CEILING: &str = "Ceiling";
-//RS pub const ROUND_NEAREST_EVEN: &str = "NearestEven";
-//RS 
-//RS pub fn unit_rounding_mode(name: &str) -> Option<crate::UnitRoundingMode> {
-//RS     match name {
-//RS         ROUND_TOWARD_ZERO => Some(crate::UnitRoundingMode::TowardZero),
-//RS         ROUND_FLOOR => Some(crate::UnitRoundingMode::Floor),
-//RS         ROUND_CEILING => Some(crate::UnitRoundingMode::Ceiling),
-//RS         ROUND_NEAREST_EVEN => Some(crate::UnitRoundingMode::NearestEven),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS /// Identifier cases fixed by D-SHAPE-CASE1=C; the owner amended module
-//RS /// constants to use Screaming.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum NameCase {
-//RS     Pascal,
-//RS     Snake,
-//RS     Screaming,
-//RS }
-//RS 
-//RS /// One compiler-owned category table. Parser/sema callers select the grammar
-//RS /// category; spelling policy never gets reimplemented at individual sites.
-//RS pub const NAME_CASE_CATEGORIES: &[(&str, NameCase)] = &[
-//RS     ("associated type", NameCase::Pascal),
-//RS     ("distinct type", NameCase::Pascal),
-//RS     ("enum", NameCase::Pascal),
-//RS     ("enum variant", NameCase::Pascal),
-//RS     ("variant group", NameCase::Pascal),
-//RS     ("marker", NameCase::Pascal),
-//RS     ("protocol", NameCase::Pascal),
-//RS     ("protocol message", NameCase::Pascal),
-//RS     ("state", NameCase::Pascal),
-//RS     ("state type", NameCase::Pascal),
-//RS     ("struct", NameCase::Pascal),
-//RS     ("tag", NameCase::Pascal),
-//RS     ("trait", NameCase::Pascal),
-//RS     ("type", NameCase::Pascal),
-//RS     ("type alias", NameCase::Pascal),
-//RS     ("type parameter", NameCase::Pascal),
-//RS     ("unit family", NameCase::Pascal),
-//RS     ("config name", NameCase::Snake),
-//RS     ("constant", NameCase::Screaming),
-//RS     ("field", NameCase::Snake),
-//RS     ("function", NameCase::Snake),
-//RS     ("generic module", NameCase::Snake),
-//RS     ("lambda parameter", NameCase::Snake),
-//RS     ("local", NameCase::Snake),
-//RS     ("local constant", NameCase::Snake),
-//RS     ("loop label", NameCase::Snake),
-//RS     ("message field", NameCase::Snake),
-//RS     ("method", NameCase::Snake),
-//RS     ("module", NameCase::Snake),
-//RS     ("module variable", NameCase::Snake),
-//RS     ("module alias", NameCase::Snake),
-//RS     ("parameter", NameCase::Snake),
-//RS     ("pattern binding", NameCase::Snake),
-//RS     ("unit member", NameCase::Snake),
-//RS     ("value parameter", NameCase::Snake),
-//RS     ("variant field", NameCase::Snake),
-//RS ];
-//RS 
-//RS pub fn name_case_for_category(category: &str) -> Option<NameCase> {
-//RS     NAME_CASE_CATEGORIES
-//RS         .iter()
-//RS         .find_map(|(name, case)| (*name == category).then_some(*case))
-//RS }
-//RS 
-//RS pub fn name_has_case(name: &str, case: NameCase) -> bool {
-//RS     if name == "_" {
-//RS         return true;
-//RS     }
-//RS     // D-META-STAGE1=B: the compile-time mark is part of the name; case policy
-//RS     // reads the name under the mark.
-//RS     let name = name.strip_prefix(COMPTIME_MARK).unwrap_or(name);
-//RS     let name = name.strip_prefix('_').unwrap_or(name);
-//RS     if name.is_empty() || name.starts_with('_') || name.ends_with('_') || name.contains("__") {
-//RS         return false;
-//RS     }
-//RS     let mut chars = name.chars();
-//RS     let Some(first) = chars.next() else {
-//RS         return false;
-//RS     };
-//RS     match case {
-//RS         NameCase::Pascal => {
-//RS             (first.is_uppercase() || first.is_alphabetic() && !first.is_lowercase())
-//RS                 && chars.all(char::is_alphanumeric)
-//RS         }
-//RS         NameCase::Snake => {
-//RS             (first.is_lowercase() || first.is_alphabetic() && !first.is_uppercase())
-//RS                 && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_uppercase())
-//RS         }
-//RS         NameCase::Screaming => {
-//RS             (first.is_uppercase() || first.is_alphabetic() && !first.is_lowercase())
-//RS                 && chars.all(|c| c == '_' || c.is_alphanumeric() && !c.is_lowercase())
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS pub fn canonical_name_case(name: &str, case: NameCase) -> String {
-//RS     // D-META-STAGE1=B: keep the compile-time mark, re-case the name under it.
-//RS     if let Some(rest) = name.strip_prefix(COMPTIME_MARK) {
-//RS         return format!("{}{}", COMPTIME_MARK, canonical_name_case(rest, case));
-//RS     }
-//RS     match case {
-//RS         NameCase::Pascal => {
-//RS             let leading = name.starts_with('_');
-//RS             let out: String = name
-//RS                 .trim_start_matches('_')
-//RS                 .split('_')
-//RS                 .filter(|s| !s.is_empty())
-//RS                 .map(|s| {
-//RS                     let mut chars = s.chars();
-//RS                     chars
-//RS                         .next()
-//RS                         .map(|c| c.to_uppercase().collect::<String>() + chars.as_str())
-//RS                         .unwrap_or_default()
-//RS                 })
-//RS                 .collect();
-//RS             if leading {
-//RS                 format!("_{out}")
-//RS             } else {
-//RS                 out
-//RS             }
-//RS         }
-//RS         // D-ACRO-CASE1=A: snake conversion uses the mechanical acronym split.
-//RS         NameCase::Snake => {
-//RS             let leading = name.starts_with('_');
-//RS             let body = name.trim_start_matches('_');
-//RS             let out = to_snake_acronym(body);
-//RS             if leading {
-//RS                 format!("_{out}")
-//RS             } else {
-//RS                 out
-//RS             }
-//RS         }
-//RS         NameCase::Screaming => {
-//RS             let leading = name.starts_with('_');
-//RS             let body = name.trim_start_matches('_');
-//RS             let out = to_snake_acronym(body).to_uppercase();
-//RS             if leading {
-//RS                 format!("_{out}")
-//RS             } else {
-//RS                 out
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod casing_tests {
-//RS     use super::{canonical_name_case, name_has_case, NameCase};
-//RS 
-//RS     #[test]
-//RS     fn uncased_unicode_letters_obey_both_grammar_tiers() {
-//RS         assert!(name_has_case("日本語", NameCase::Pascal));
-//RS         assert!(name_has_case("日本語", NameCase::Snake));
-//RS         assert_eq!(canonical_name_case("日本語", NameCase::Pascal), "日本語");
-//RS         assert_eq!(canonical_name_case("日本語", NameCase::Snake), "日本語");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn cased_unicode_letters_follow_the_selected_tier() {
-//RS         assert!(name_has_case("Éclair", NameCase::Pascal));
-//RS         assert!(name_has_case("éclair", NameCase::Snake));
-//RS         assert_eq!(canonical_name_case("Éclair", NameCase::Snake), "éclair");
-//RS         assert_eq!(canonical_name_case("éclair", NameCase::Pascal), "Éclair");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn acronym_pascal_to_snake() {
-//RS         assert_eq!(
-//RS             canonical_name_case("HTTPHeader", NameCase::Snake),
-//RS             "http_header"
-//RS         );
-//RS         assert_eq!(canonical_name_case("HTTP_API", NameCase::Snake), "http_api");
-//RS         assert_eq!(canonical_name_case("MacOS", NameCase::Snake), "mac_os");
-//RS     }
-//RS     #[test]
-//RS     fn screaming_constants_use_all_caps() {
-//RS         assert!(name_has_case("MAX_RETRIES", NameCase::Screaming));
-//RS         assert!(!name_has_case("max_retries", NameCase::Screaming));
-//RS         assert_eq!(
-//RS             canonical_name_case("max_retries", NameCase::Screaming),
-//RS             "MAX_RETRIES"
-//RS         );
-//RS         assert_eq!(
-//RS             canonical_name_case("HTTPHeader", NameCase::Screaming),
-//RS             "HTTP_HEADER"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS mod acronyms;
-//RS pub use acronyms::*;
-//RS mod core_surface;
-//RS pub use core_surface::*;
-//RS mod math_layout;
-//RS pub use math_layout::*;
-//RS mod effects_surface;
-//RS pub use effects_surface::*;
-//RS mod jetpack_config;
-//RS pub use jetpack_config::*;
-//RS mod package_files;
-//RS pub use package_files::*;
-//RS mod markers;
-//RS pub use markers::*;
-//RS mod highlights;
-//RS pub use highlights::*;
-//RS mod dictionary;
-//RS pub use dictionary::*;
-//RS mod predicates;
-//RS pub use predicates::*;
-//RS 
-//RS /// D-FIELDMEMO1=A: compiler-owned storage for one marked computed field.
-//RS /// Keep this name in the syntax module so every engine addresses the same
-//RS /// hidden member without inventing a second field naming rule.
-//RS pub fn memo_storage_name(field: &str) -> String {
-//RS     crate::Names::mangle_generated(&format!("memo_{field}"))
-//RS }
-//RS 
-//RS /// D-FIELDMEMO1=A: the interpreter carries the same hidden cache slot in its
-//RS /// structural value as native records carry in their generated Rust shape.
-//RS /// It is never a user-visible field, a wire field, or part of value equality.
-//RS pub fn is_memo_storage_name(field: &str) -> bool {
-//RS     field
-//RS         .strip_prefix(GENERATED_NAME_PREFIX)
-//RS         .is_some_and(|name| name.starts_with("__memo_"))
-//RS }
-//RS mod retirements;
-//RS pub use retirements::*;
-//RS mod sinks;
-//RS pub use sinks::*;
-//RS mod core_calls;
-//RS pub use core_calls::*;
-//RS 
-// END-PORT-PENDING 2121 crates/jet-foundation/src/Syntax.rs:1-970
+// Owner-controlled lexical authority (I7). Every row preserves its Rust
+// spelling, meaning and decision; no new surface is introduced by this port.
+use jet_foundation.TEXT_NUL
+use jet_foundation.UnitRoundingMode
+use jet_foundation.Names.Names.foundation_mangle_generated
+use jet_foundation.Syntax.NameCase.[NameCase, canonical_name_case]
+use jet_foundation.Syntax.Spellings.BOUND_QUANTITY
 
+// Rust: crates/jet-foundation/src/Syntax.rs:10
+pub struct LexicalEntry { pub spelling: String, pub meaning: String, pub decision: String }
+// Rust: crates/jet-foundation/src/Syntax.rs:20
+pub LEXICAL_LEDGER :: prep { [LexicalEntry]{
+    LexicalEntry{spelling: "::", meaning: "immutable binding", decision: "D-BIND1"},
+    LexicalEntry{spelling: ":=", meaning: "mutable binding", decision: "D-BIND1"},
+    LexicalEntry{spelling: "#", meaning: "attached marker; #[A, B] stacks", decision: "D-VERDICT-732-1; D-MARK-STACK1"},
+    LexicalEntry{spelling: "#DevPanel", meaning: "exported typed devtools panel marker", decision: "D-DX-PLUGIN1=D"},
+    LexicalEntry{spelling: "web.form(Model, action: handler)", meaning: "struct-derived headless form with progressive action", decision: "D-DX-FORM1"},
+    LexicalEntry{spelling: "#Layout(c, align(N)) / #Layout(c, align(target, N))", meaning: "C layout with portable or target-supported explicit alignment", decision: "D-PLACE1=A; D-LAYOUT-ALIGN1=A"},
+    LexicalEntry{spelling: "#Align", meaning: "retired standalone alignment marker", decision: "D-PLACE1=A"},
+    LexicalEntry{spelling: "Atomic<T>", meaning: "safe lock-free scalar cell", decision: "D-PLACE1=A; D-ATOMIC-WIDTH1=A"},
+    LexicalEntry{spelling: "@", meaning: "live link (D-MEMREF1); retired compile-time `@NAME :: value` constant teaches E0388 with `NAME :: prep {{ value }}`; retired `@` template name splices teach E0388 with `$`; retired `@` fact spellings teach E0003 with `$`", decision: "D-MEMREF1=A; D-AT-INFIX1=A; D-PREP-SURFACE2=A; D-COMPILER-NS1=A; D-NAME-SPLICE1=B"},
+    LexicalEntry{spelling: KW_PREP, meaning: "explicit shared-preparation block `prep {{ … }}`; `NAME :: prep {{ value }}` is the only compile-time binding; `@ {{ … }}` is retired", decision: "D-PREP-SURFACE2=A"},
+    LexicalEntry{spelling: "prep if", meaning: "build-time branch; unchosen arms are name-checked only", decision: "D-PREP-BRANCH1=A"},
+    LexicalEntry{spelling: "prep loop", meaning: "build-time loop over statements or declarations", decision: "D-PREP-BRANCH1=A; D-STRUCT-ONCE1=A"},
+    LexicalEntry{spelling: "prep fn", meaning: "build-time literal-hook method", decision: "D-PREP-FN1=A; D-FOUND-LITERAL1=A"},
+    LexicalEntry{spelling: "<prep N: Int>", meaning: "compile-time number parameter declaration", decision: "D-CONSTGEN2=A"},
+    LexicalEntry{spelling: "$", meaning: "compiler fact: `T.$layout`, `f.$effects`, `value.$origin`; marker/fact declaration metadata `$sites:`; template name splice `fn $method`, `self.$field`, `.$left`; `@` spellings teach E0003 or E0388", decision: "D-COMPILER-NS1=A; D-META-ROOT3=A; D-DECL-META1=A; D-NAME-SPLICE1=B"},
+    LexicalEntry{spelling: "$build", meaning: "build fact root: `$build.os`, `.profile`, `.settings.*`, `.stamp.*`", decision: "D-BUILD-FACT3=A"},
+    LexicalEntry{spelling: "$package", meaning: "package fact root: `$package.name`, `.version`", decision: "D-BUILD-FACT3=A; D-META-REFLECT2=A"},
+    LexicalEntry{spelling: "$phase", meaning: "total evaluation-site phase fact", decision: "D-PREP-SURFACE2=A; D-META-ROOT3=A"},
+    LexicalEntry{spelling: "$program", meaning: "authorized checked-program fact root", decision: "D-META-REFLECT2=A; D-META-ROOT3=A"},
+    LexicalEntry{spelling: META_QUERY_SOURCE, meaning: "lexical source-snapshot metadata query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A"},
+    LexicalEntry{spelling: META_QUERY_TYPES, meaning: "retained runtime type-catalog query (no ratified `$` root yet)", decision: "D-META-REFLECT2=A"},
+    LexicalEntry{spelling: COMPILER_GENERATE, meaning: "explicit shared-preparation publication of Generated items", decision: "D-META-PUBLISH2=A"},
+    LexicalEntry{spelling: COMPILER_ADVANCED_REGISTER, meaning: "explicit opt-in provider registration for declared targets", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A"},
+    LexicalEntry{spelling: COMPILER_ADVANCED_REGISTER_EXPANSION, meaning: "explicit opt-in call-expansion provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A"},
+    LexicalEntry{spelling: COMPILER_ADVANCED_REGISTER_SPECIALIZATION, meaning: "explicit opt-in specialization provider registration", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A"},
+    LexicalEntry{spelling: COMPILER_ADVANCED_SESSION, meaning: "authorized session within a registered provider", decision: "D-META-CONTROL2=A; D-META-OPTIN2=A"},
+    LexicalEntry{spelling: "-[…]", meaning: "effect row on a callable", decision: "D-EFF1"},
+    LexicalEntry{spelling: "!", meaning: "error-contract mark after its error type (`E!`, `(A | B)!`); deny-only root in an effect row", decision: "D-TYPE-SUFFIX1=A; D-EFF4"},
+    LexicalEntry{spelling: "?", meaning: "optional type mark after its type (`T?`)", decision: "D-TYPE-SUFFIX1=A"},
+    LexicalEntry{spelling: "??", meaning: "fallback", decision: "D-RESULT-DECON2"},
+    LexicalEntry{spelling: "&place.method(…) / ^place.method(…)", meaning: "receiver place mark: `&`/`^` on the maximal named place a method call writes or takes; fresh receivers stay unmarked; a line starting `&name`/`^name` begins a statement", decision: "D-CAP-RECEIVER1=D"},
+    LexicalEntry{spelling: "T{{expr}}", meaning: "field default", decision: "D-DEFAULT-SHAPE1"},
+    LexicalEntry{spelling: "Name{{\"…\"}}", meaning: "checked text head", decision: "S8; D-CHECKED-TEXT1"},
+    LexicalEntry{spelling: ".{{ … }}", meaning: "typed anonymous value", decision: "D-POLICY-WORD1"},
+    LexicalEntry{spelling: "`", meaning: "raw ordinary String fence", decision: "D-RAWSTR1"},
+    LexicalEntry{spelling: ",", meaning: "separator with optional trailing item in every comma list", decision: "D-TRAILCOMMA1"},
+    LexicalEntry{spelling: "r\"…\", raw\"…\", $\"…\"", meaning: "unclaimed raw-string prefixes", decision: ""},
+    LexicalEntry{spelling: ";", meaning: "retired explicit statement terminator", decision: "D-SEMI1"},
+    LexicalEntry{spelling: "_name", meaning: "ordinary identifier", decision: ""},
+    LexicalEntry{spelling: "__core_intrinsic", meaning: "compiler-only namespace", decision: "D-CORE-CALL1"},
+    LexicalEntry{spelling: "<:", meaning: "open a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A"},
+    LexicalEntry{spelling: ":>", meaning: "close a lock-step statement-expansion fence", decision: "D-EACH1=C; D-FENCE2=A; D-FENCE-RANGE1=A"},
+    LexicalEntry{spelling: "@[ … ]@", meaning: "retired fence spelling; E-FENCE-SPELLING teaches `<: … :>`", decision: "D-FENCE2=A"},
+} }
+
+// Rust: crates/jet-foundation/src/Syntax.rs:66 (D-PREP-SURFACE2=A)
+pub KW_PREP :: prep { "prep" }
+// Rust: crates/jet-foundation/src/Syntax.rs:72 (D-META-REFLECT2=A)
+pub META_QUERY_SOURCE :: prep { "@SOURCE" }
+// Rust: crates/jet-foundation/src/Syntax.rs:73
+pub META_QUERY_TYPES :: prep { "@TYPES" }
+// Rust: crates/jet-foundation/src/Syntax.rs:75 (D-META-PUBLISH2=A)
+pub COMPILER_GENERATE :: prep { "compiler.generate" }
+// Rust: crates/jet-foundation/src/Syntax.rs:77 (D-META-CONTROL2=A; D-META-OPTIN2=A)
+pub COMPILER_ADVANCED_REGISTER :: prep { "compiler.advanced.register" }
+// Rust: crates/jet-foundation/src/Syntax.rs:78
+pub COMPILER_ADVANCED_REGISTER_EXPANSION :: prep { "compiler.advanced.register_expansion" }
+// Rust: crates/jet-foundation/src/Syntax.rs:79
+pub COMPILER_ADVANCED_REGISTER_SPECIALIZATION :: prep { "compiler.advanced.register_specialization" }
+// Rust: crates/jet-foundation/src/Syntax.rs:82
+pub COMPILER_ADVANCED_SESSION :: prep { "compiler.advanced.session" }
+// Rust: crates/jet-foundation/src/Syntax.rs:85 (D-PLACE1=A)
+pub MARKER_ALIGN_LEGACY :: prep { "Align" }
+
+// Rust: crates/jet-foundation/src/Syntax.rs:87-439
+// Decisions concerning existing punctuation/grammar introduce no additional
+// tokens here. Their constants remain in the canonical Syntax child modules.
+// D-SIG-AFTER1=A: named functions have one result arrow and a braced body.
+
+// Rust: crates/jet-foundation/src/Syntax.rs:444 (D-ADOPT-GUEST1=A)
+pub MARKER_IMPORT :: prep { "Import" }
+// Rust: crates/jet-foundation/src/Syntax.rs:445
+pub MARKER_EXPORT :: prep { "Export" }
+// Rust: crates/jet-foundation/src/Syntax.rs:455 (D-CONC-SPAWN1=D)
+pub KW_CONC_TASK :: prep { "task" }
+// Rust: crates/jet-foundation/src/Syntax.rs:458 (D-CONC-FREEZE1=A)
+pub KW_FREEZE :: prep { "freeze" }
+// Rust: crates/jet-foundation/src/Syntax.rs:465 (D-CONC-ALLNAMED1=A)
+pub TASK_ALL :: prep { "task.all" }
+// Rust: crates/jet-foundation/src/Syntax.rs:467
+pub TASK_RACE :: prep { "task.race" }
+// Rust: crates/jet-foundation/src/Syntax.rs:469
+pub TASK_ANY :: prep { "task.any" }
+// Rust: crates/jet-foundation/src/Syntax.rs:471
+pub TASK_GROUP :: prep { "task.group" }
+// Rust: crates/jet-foundation/src/Syntax.rs:474 (D-CONC-JOIN1=A)
+pub TYPE_TASK :: prep { "Task" }
+// Rust: crates/jet-foundation/src/Syntax.rs:477 (D-CONC-CHAN1=A)
+pub BUILTIN_CHANNEL :: prep { "channel" }
+// Rust: crates/jet-foundation/src/Syntax.rs:479
+pub INTERNAL_CHANNEL_NEW_METHOD :: prep { "{TEXT_NUL}jet.channel.new" }
+// Rust: crates/jet-foundation/src/Syntax.rs:480
+pub INTERNAL_CHANNEL_BOUNDED_METHOD :: prep { "{TEXT_NUL}jet.channel.bounded" }
+// Rust: crates/jet-foundation/src/Syntax.rs:482
+pub TYPE_RECEIVER :: prep { "Receiver" }
+// Rust: crates/jet-foundation/src/Syntax.rs:484
+pub TYPE_SENDER :: prep { "Sender" }
+// Rust: crates/jet-foundation/src/Syntax.rs:486
+pub LOOP_CHANNEL_DRAIN :: prep { "loop value in receiver" }
+// Rust: crates/jet-foundation/src/Syntax.rs:488 (D-CONC-CHAN2=D)
+pub READINESS_AFTER :: prep { "after" }
+// Rust: crates/jet-foundation/src/Syntax.rs:491
+pub INTERNAL_SELECT_AFTER_FIELD :: prep { "{TEXT_NUL}jet.select.after" }
+// Rust: crates/jet-foundation/src/Syntax.rs:494 (D-CONC-SHARE1=A)
+pub KW_SHARED :: prep { "shared" }
+// Rust: crates/jet-foundation/src/Syntax.rs:497 (D-CONC-FAIL1=A)
+pub TASK_JOIN :: prep { "join" }
+// Rust: crates/jet-foundation/src/Syntax.rs:499
+pub TYPE_TASK_FAILURE :: prep { "TaskFailure" }
+// Rust: crates/jet-foundation/src/Syntax.rs:501
+pub TASK_FAILURE_CANCELLED :: prep { "Cancelled" }
+// Rust: crates/jet-foundation/src/Syntax.rs:503
+pub TASK_FAILURE_DEADLINE_BLOWN :: prep { "DeadlineBlown" }
+// Rust: crates/jet-foundation/src/Syntax.rs:505
+pub TASK_FAILURE_PANICKED :: prep { "Panicked" }
+// Rust: crates/jet-foundation/src/Syntax.rs:507 (D-HTTP-ROUTE-SYNTAX2=A)
+pub HTTP_ROUTE_PARAM_PREFIX :: prep { ":" }
+// Rust: crates/jet-foundation/src/Syntax.rs:508
+pub HTTP_ROUTE_CATCH_ALL_PREFIX :: prep { "*" }
+// Rust: crates/jet-foundation/src/Syntax.rs:513 (D-CALLDUAL1=E)
+pub INTERNAL_ROOT_CALL_LOCAL :: prep { "__jet_root_call_local" }
+// Rust: crates/jet-foundation/src/Syntax.rs:514
+pub INTERNAL_ROOT_CALL_IMPORT_PREFIX :: prep { "__jet_root_call_import:" }
+// Rust: crates/jet-foundation/src/Syntax.rs:515
+pub INTERNAL_ROOT_CALL_CORE_PREFIX :: prep { "__jet_root_call_core:" }
+// Rust: crates/jet-foundation/src/Syntax.rs:520 (D-CALLVALUE1=B)
+pub INTERNAL_CALL_VALUE :: prep { "__jet_call_value" }
+// Rust: crates/jet-foundation/src/Syntax.rs:525 (D-PARCAPTURE1=D)
+pub METHOD_PARA_MAP :: prep { "para_map" }
+// Rust: crates/jet-foundation/src/Syntax.rs:526
+pub METHOD_PARA_FILTER :: prep { "para_filter" }
+// Rust: crates/jet-foundation/src/Syntax.rs:527
+pub METHOD_PARA_PARTITION :: prep { "para_partition" }
+// Rust: crates/jet-foundation/src/Syntax.rs:528
+pub METHOD_PARA_FOLD :: prep { "para_fold" }
+// Rust: crates/jet-foundation/src/Syntax.rs:529
+pub PARA_METHODS :: prep { [String]{METHOD_PARA_MAP, METHOD_PARA_FILTER, METHOD_PARA_PARTITION, METHOD_PARA_FOLD} }
+// Rust: crates/jet-foundation/src/Syntax.rs:540 (D-GO127-STDLIB1=A)
+pub METHOD_CUT_LAST :: prep { "cut_last" }
+// Rust: crates/jet-foundation/src/Syntax.rs:541
+pub METHOD_DIV_EUCLID :: prep { "div_euclid" }
+// Rust: crates/jet-foundation/src/Syntax.rs:542
+pub METHOD_REM_EUCLID :: prep { "rem_euclid" }
+
+// Rust: crates/jet-foundation/src/Syntax.rs:544
+pub fn validate_http_route_pattern(pattern: String) -> Err! {
+    if !pattern.starts_with('/') -> return Err("routes must start with `/`")
+    segments :: pattern.split('/').skip(1).collect()
+    names := [String:Bool]{}
+    loop (index, segment) in segments {
+        if segment.is_empty() {
+            if segments.len() == 1 -> next
+            return Err("empty path segments are not allowed")
+        }
+        if segment.contains('{') || segment.contains('}') -> return Err("use `:name` or final `*name`; braces are not route markers")
+        if segment == "*" -> return Err("write a named catch-all such as `*wildcard`")
+        name :: segment.strip_prefix(':').or_else(() -> segment.strip_prefix('*'))
+        if name == .Val(name) {
+            if segment.starts_with('*') && index + 1 != segments.len() -> return Err("`*name` catch-all must be final")
+            if !valid_name(name) -> return Err("{if segment.starts_with('*') -> "catch-all" else -> "parameter"} names must match `[A-Za-z_][A-Za-z0-9_]*`")
+            if names.contains_key(name) -> return Err("duplicate parameter `{name}`")
+            &names.insert(~name, true)
+        } else -> decode_static(segment)
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:547
+fn valid_name(name: String) -> Bool {
+    chars := name.chars()
+    first :: &chars.next() ?? return false
+    if first != '_' && !first.is_ascii_alphabetic() -> return false
+    chars.all(c -> c == '_' || c.is_ascii_alphanumeric())
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:553
+fn decode_static(segment: String) -> Err! {
+    bytes :: segment.bytes()
+    decoded := [U8]{}.with_capacity(bytes.len())
+    index := 0
+    loop index < bytes.len() {
+        if bytes[index] != U8{37} { &decoded.push(bytes[index]); index += 1; next }
+        high :: bytes.get(index + 1).and_then(byte -> route_hex(byte)) ?? return Err("invalid percent escape")
+        low :: bytes.get(index + 2).and_then(byte -> route_hex(byte)) ?? return Err("invalid percent escape")
+        byte :: high * U8{16} + low
+        if byte == U8{47} -> return Err("encoded slash is ambiguous")
+        &decoded.push(byte)
+        index += 3
+    }
+    text :: String.from_bytes(^decoded) ?? return Err("route segment is not valid UTF-8")
+    if text == "." || text == ".." -> return Err("dot traversal segment is not allowed")
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:563
+fn route_hex(byte: U8) -> U8? {
+    if { byte >= U8{48} && byte <= U8{57} -> Val(byte - U8{48}); byte >= U8{97} && byte <= U8{102} -> Val(byte - U8{97} + U8{10}); byte >= U8{65} && byte <= U8{70} -> Val(byte - U8{65} + U8{10}); else -> None }
+}
+
+// Rust: crates/jet-foundation/src/Syntax.rs:635 (D-SHAPE-CONVERT1=A)
+pub NUMERIC_CONVERSION_SOURCES :: prep { [(String, String)]{
+    ("from_i8", "I8"), ("from_i64", "I64"), ("from_i16", "I16"), ("from_i32", "I32"),
+    ("from_int", "Int"), ("from_u8", "U8"), ("from_u16", "U16"), ("from_u32", "U32"),
+    ("from_u64", "U64"), ("from_f32", "F32"), ("from_float", "Float"),
+    ("from_decimal", "Decimal"), ("from_fraction", "Fraction"),
+} }
+// Rust: crates/jet-foundation/src/Syntax.rs:654 (D-W4310-BYTES1; D-W4310-EXACT1)
+pub W4310_SURFACE_NAMES :: prep { [String]{
+    "read_i8", "read_i16_le", "read_i16_be", "read_i32_le", "read_i32_be", "read_i64_le", "read_i64_be",
+    "read_f32_be", "read_f64_be", "peek", "seek", "skip", "write_i8", "write_i16_le", "write_i16_be",
+    "write_i32_le", "write_i32_be", "write_i64_le", "write_i64_be", "write_f32_le", "write_f32_be",
+    "write_f64_le", "write_f64_be", "hmac_sha256", "to_radix", "from_radix", "round", "floor", "ceil", "from_decimal", "from_fraction",
+} }
+// Rust: crates/jet-foundation/src/Syntax.rs:691
+pub fn numeric_conversion_source(method: String) -> String? {
+    loop (name, source) in NUMERIC_CONVERSION_SOURCES { if name == method -> return Val(source) }
+    None
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:697
+pub fn numeric_conversion_method(source: String) -> String? {
+    loop (method, name) in NUMERIC_CONVERSION_SOURCES { if name == source -> return Val(method) }
+    None
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:703
+pub fn conversion_method_for_source(source: String) -> String {
+    if numeric_conversion_method(source) == .Val(method) -> return ~method
+    "from_{canonical_name_case(source, .Snake)}"
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:711
+// Migration diagnostic only; these source-owned methods are not accepted.
+pub fn retired_numeric_conversion_target(method: String) -> String? {
+    if method == {
+        "to_i8" -> Val("I8")
+        "to_i16" -> Val("I16")
+        "to_i32" -> Val("I32")
+        "to_i64" | "to_int" -> Val("Int")
+        "to_u8" -> Val("U8")
+        "to_u16" -> Val("U16")
+        "to_u32" -> Val("U32")
+        "to_u64" -> Val("U64")
+        "to_f32" -> Val("F32")
+        "to_f64" | "to_float" -> Val("Float")
+        else -> None
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax.rs:729
+// BOUND_QUANTITY is canonical in Syntax/Spellings.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:731 (D-QUANTITY-CONVERT1=B)
+pub ROUND_TOWARD_ZERO :: prep { "TowardZero" }
+// Rust: crates/jet-foundation/src/Syntax.rs:732
+pub ROUND_FLOOR :: prep { "Floor" }
+// Rust: crates/jet-foundation/src/Syntax.rs:733
+pub ROUND_CEILING :: prep { "Ceiling" }
+// Rust: crates/jet-foundation/src/Syntax.rs:734
+pub ROUND_NEAREST_EVEN :: prep { "NearestEven" }
+// Rust: crates/jet-foundation/src/Syntax.rs:737
+pub fn unit_rounding_mode(name: String) -> UnitRoundingMode? {
+    if name == { ROUND_TOWARD_ZERO -> Val(.TowardZero); ROUND_FLOOR -> Val(.Floor); ROUND_CEILING -> Val(.Ceiling); ROUND_NEAREST_EVEN -> Val(.NearestEven); else -> None }
+}
+
+// Rust: crates/jet-foundation/src/Syntax.rs:747
+// NameCase: canonical Syntax/NameCase.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:756
+// NAME_CASE_CATEGORIES: canonical Syntax/NameCase.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:797
+// name_case_for_category: canonical Syntax/NameCase.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:803
+// name_has_case: canonical Syntax/NameCase.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:834
+// canonical_name_case: canonical Syntax/NameCase.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:884-926
+// Casing tests are paired in Compiler/JetFoundation/Tests/Syntax.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:928-947
+// Rust module exports are wired to canonical Syntax child modules by the owner;
+// no duplicate acronym, surface, marker, highlight or dictionary tables here.
+
+// Rust: crates/jet-foundation/src/Syntax.rs:949
+pub fn memo_storage_name(field: String) -> String { foundation_mangle_generated("memo_{field}") }
+// Rust: crates/jet-foundation/src/Syntax.rs:956
+// is_memo_storage_name: canonical Syntax/Spellings.jet.
+// Rust: crates/jet-foundation/src/Syntax.rs:964-970
+// Retirements, Sinks and CoreCalls stay owned by their canonical child modules.

@@ -1,0 +1,56 @@
+use std.fs
+use std.process.Command
+use std.process.Stdio
+use std.ffi.c_void
+use core.sys.target.[selected_os, selected_family]
+// Rust: tests/process_sessions.rs:9
+pub fn compile_native_fixture(dir: OSPath) -> OSPath {
+    source :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/process_sessions/session_fixture.rs")
+    binary :: dir.join(if selected_os() == "windows" -> "session_fixture.exe" else -> "session_fixture")
+    // GATE #4494: process spawn.
+    built :: Command.new("rustc").args(["--edition", "2021"]).arg(source).arg("-o").arg(&binary).output().expect("compile native process-session fixture")
+    assert(built.status.success(), "native process-session fixture failed to compile:\n{String.from_utf8_lossy(&built.stderr)}")
+    binary
+}
+// Rust: tests/process_sessions.rs:673
+// GATE #4494: Win32 raw process handles and system FFI.
+#FFI(system) fn CloseHandle(handle: *mut c_void) -> i32
+// Rust: tests/process_sessions.rs:674
+#FFI(system) fn GetExitCodeProcess(handle: *mut c_void, code: *mut u32) -> i32
+// Rust: tests/process_sessions.rs:675
+#FFI(system) fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void
+// Rust: tests/process_sessions.rs:659
+// Rust: tests/process_sessions.rs:669
+pub fn native_pid_alive(pid: String) -> Bool {
+    // GATE #4494: native process queries / system FFI.
+    if selected_family() == "unix" {
+        return Command.new("kill").args(["-0", pid]).stderr(Stdio.null()).status().map(|status| -> status.success()).unwrap_or(false)
+    }
+    if selected_os() == "windows" {
+        parsed :: pid.parse<u32>()
+        if parsed == .Err(_) { return false }
+        native_pid :: parsed.unwrap()
+        PROCESS_QUERY_LIMITED_INFORMATION :: 0x1000
+        STILL_ACTIVE :: 259
+        // Only the explicitly recorded child PID is queried; handle closes once.
+        handle :: #Unsafe("query recorded child PID") { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, native_pid) }
+        if handle.is_null() { return false }
+        code := 0
+        live :: #Unsafe("query process status through owned handle") { GetExitCodeProcess(handle, &code) } != 0 && code == STILL_ACTIVE
+        #Unsafe("close owned process handle exactly once") { _ :: CloseHandle(handle) }
+        return live
+    }
+    panic("native PID query is only supported on Unix and Windows")
+}
+// Rust: tests/process_sessions.rs:696
+// Rust: tests/process_sessions.rs:704
+pub fn stop_native_pid(pid: String) -> {
+    // GATE #4494: process spawn.
+    if selected_family() == "unix" {
+        _ :: Command.new("kill").args(["-9", pid]).stderr(Stdio.null()).status()
+    } else if selected_os() == "windows" {
+        _ :: Command.new("taskkill").args(["/PID", pid, "/T", "/F"]).status()
+    } else {
+        panic("native PID stop is only supported on Unix and Windows")
+    }
+}

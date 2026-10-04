@@ -1,0 +1,35 @@
+use std.[fs, env]
+use std.process.[Command, Output]
+use std.time.[SystemTime, UNIX_EPOCH]
+// GATE #4494: process id, subprocesses, clock and filesystem.
+// Rust: tests/jetdoc.rs:7
+struct Scratch { path: OSPath }
+impl Scratch {
+    // Rust: tests/jetdoc.rs:10
+    fn new() -> Scratch {
+        root :: env.var_os("TMPDIR").map(|p| OSPath.from(p)).unwrap_or_else(|| OSPath.from(env("CARGO_MANIFEST_DIR")).join("target"))
+        path :: root.join("jetdoc-{std.process.id()}-{SystemTime.now().duration_since(UNIX_EPOCH).expect("system clock").as_nanos()}")
+        fs.create_dir_all(&path).expect("jetdoc scratch directory")
+        Scratch(path: path)
+    }
+    // Rust: tests/jetdoc.rs:26
+    fn copy_fixture(self: &Scratch, name: String) -> OSPath {
+        source :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/jetdoc").join(name)
+        destination :: self.path.join(name)
+        fs.copy(source, &destination).expect("copy jetdoc fixture")
+        destination
+    }
+    // Rust: tests/jetdoc.rs:35
+    fn copy_fixture_package(self: &Scratch, entry: String) -> OSPath {
+        _ :: self.copy_fixture("package.jet")
+        self.copy_fixture(entry)
+    }
+}
+impl Scratch.Drop {
+    // Rust: tests/jetdoc.rs:42
+    fn drop(self: &Scratch) -> { _ :: fs.remove_dir_all(&self.path) }
+}
+// Rust: tests/jetdoc.rs:47
+fn jet_doc(args: &[String], cwd: &OSPath) -> Output {
+    Command.new(env("CARGO_BIN_EXE_jet")).args(args).current_dir(cwd).env("NO_COLOR", "1").output().expect("jet doc command")
+}

@@ -1,1985 +1,1143 @@
-// PORT-PENDING 1161 tests-support-fmt-lossless: tests/support/fmt_lossless.rs:1-1981
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS 
-//RS use jet::Lexer::{StrTokPart, TokKind, Token};
-//RS 
-//RS const UI_PARSE_INVALID: &[&str] = &[
-//RS     "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
-//RS     "tests/ui/E0922_body_debug_derive.jet",
-//RS     "tests/ui/E0927_retired_pure_callable.jet",
-//RS     "tests/ui/E0927_retired_pure_trait_oneline.jet",
-//RS     "tests/ui/E0927_retired_pure_trait_twoline.jet",
-//RS     "tests/ui/E0927_unknown_marker_block.jet",
-//RS     "tests/ui/E0927_unknown_marker_constant.jet",
-//RS     "tests/ui/E0927_unknown_marker_distinct.jet",
-//RS     "tests/ui/E0927_unknown_marker_expression.jet",
-//RS     "tests/ui/E0927_unknown_marker_parameter.jet",
-//RS     "tests/ui/E0927_unknown_marker_statement.jet",
-//RS     "tests/ui/E0929_body_capability_derive.jet",
-//RS     "tests/ui/E2714_derive_old_for.jet",
-//RS     "tests/ui/assign_in_condition.jet",
-//RS     "tests/ui/auto_derive_invalid_sign.jet",
-//RS     "tests/ui/bad_escape.jet",
-//RS     "tests/ui/binpat_bad_width.jet",
-//RS     "tests/ui/binpat_multibyte_needs_endian.jet",
-//RS     "tests/ui/binpat_rest_not_final.jet",
-//RS     "tests/ui/binpat_take_pattern_bad_width.jet",
-//RS     "tests/ui/cffi_e3206_reserved_segment.jet",
-//RS     "tests/ui/cffi_e3207_bindgen_outside_cache.jet",
-//RS     "tests/ui/cffi_retired_at_extern.jet",
-//RS     "tests/ui/cffi_retired_hash_extern.jet",
-//RS     "tests/ui/chained_comparison_mixed_direction.jet",
-//RS     "tests/ui/compiler_fact_unknown_member.jet",
-//RS     "tests/ui/compound_non_place_target.jet",
-//RS     "tests/ui/comptime_keyword_retired.jet",
-//RS     "tests/ui/comptime_known_block_retired.jet",
-//RS     "tests/ui/comptime_known_retired.jet",
-//RS     "tests/ui/comptime_prefix_dollar_retired.jet",
-//RS     "tests/ui/computed_fixed_list_noninteger.jet",
-//RS     "tests/ui/computed_fixed_list_range.jet",
-//RS     "tests/ui/const_retired.jet",
-//RS     "tests/ui/context_eq_rejected.jet",
-//RS     "tests/ui/context_unknown_field.jet",
-//RS     "tests/ui/continue_teaches_next.jet",
-//RS     "tests/ui/control_body_needs_braces.jet",
-//RS     "tests/ui/copy_keyword_retired_e0991.jet",
-//RS     "tests/ui/debug_unknown_selector.jet",
-//RS     "tests/ui/declared_text_block_undeclared.jet",
-//RS     "tests/ui/defer_only_close.jet",
-//RS     "tests/ui/deref_forbidden.jet",
-//RS     "tests/ui/dispatch_missing_eq.jet",
-//RS     "tests/ui/dispatch_pattern_needs_eq.jet",
-//RS     "tests/ui/dispatch_redundant_subject.jet",
-//RS     "tests/ui/dotted_literal_e0320.jet",
-//RS     "tests/ui/dunder_marker_not_generated.jet",
-//RS     "tests/ui/dunder_reserved.jet",
-//RS     "tests/ui/effect_arrow_retired.jet",
-//RS     "tests/ui/empty_map_colon_retired.jet",
-//RS     "tests/ui/enum_group_payload.jet",
-//RS     "tests/ui/enum_multi_positional_payload.jet",
-//RS     "tests/ui/enum_pattern_needs_dot_or.jet",
-//RS     "tests/ui/enum_pattern_needs_dot_payload.jet",
-//RS     "tests/ui/external_method_retired_separator.jet",
-//RS     "tests/ui/fact_plane_type_position.jet",
-//RS     "tests/ui/fact_read_type_position.jet",
-//RS     "tests/ui/fallible_unit_return_retired.jet",
-//RS     "tests/ui/fenced_name_bad_position.jet",
-//RS     "tests/ui/fenced_name_binding_nonname.jet",
-//RS     "tests/ui/fenced_name_duplicate.jet",
-//RS     "tests/ui/fenced_name_empty.jet",
-//RS     "tests/ui/fenced_name_mismatched_counts.jet",
-//RS     "tests/ui/ffi_body_not_string.jet",
-//RS     "tests/ui/fixed_interpolation_malformed_precision.jet",
-//RS     "tests/ui/fixed_interpolation_missing_precision.jet",
-//RS     "tests/ui/flow_pipe_unassigned.jet",
-//RS     "tests/ui/fn_type_zone_misplaced.jet",
-//RS     "tests/ui/foreign_declaration_binding.jet",
-//RS     "tests/ui/foreign_do.jet",
-//RS     "tests/ui/foreign_for.jet",
-//RS     "tests/ui/foreign_loop_parenthesized.jet",
-//RS     "tests/ui/foreign_while.jet",
-//RS     "tests/ui/generated_cffi_e3206.jet",
-//RS     "tests/ui/generated_cffi_e3207.jet",
-//RS     "tests/ui/generic_square_brackets.jet",
-//RS     "tests/ui/if_expr_branch_type_mismatch.jet",
-//RS     "tests/ui/if_expr_missing_else.jet",
-//RS     "tests/ui/impl_colon_separator.jet",
-//RS     "tests/ui/impure_no_reason.jet",
-//RS     "tests/ui/inline_range_nonliteral_bound.jet",
-//RS     "tests/ui/interp_debug_label_empty.jet",
-//RS     "tests/ui/interp_empty.jet",
-//RS     "tests/ui/interp_unclosed.jet",
-//RS     "tests/ui/label_not_on_loop.jet",
-//RS     "tests/ui/layout_columnar_partial.jet",
-//RS     "tests/ui/layout_columnar_prefix_reserved.jet",
-//RS     "tests/ui/layout_keyword_retired.jet",
-//RS     "tests/ui/layout_unknown_variant.jet",
-//RS     "tests/ui/layout_unsupported_variant.jet",
-//RS     "tests/ui/loop_counter_form_retired.jet",
-//RS     "tests/ui/loop_header_semicolon_retired.jet",
-//RS     "tests/ui/loop_label_prefix_old_form.jet",
-//RS     "tests/ui/marker_argument_shape.jet",
-//RS     "tests/ui/marker_decl_rejected_forms.jet",
-//RS     "tests/ui/marker_empty_arguments.jet",
-//RS     "tests/ui/marker_experimental_at.jet",
-//RS     "tests/ui/marker_experimental_hash.jet",
-//RS     "tests/ui/marker_hardened_at.jet",
-//RS     "tests/ui/marker_hardened_hash.jet",
-//RS     "tests/ui/marker_repeated_on_one_target.jet",
-//RS     "tests/ui/marker_retired_html_name.jet",
-//RS     "tests/ui/marker_retired_known.jet",
-//RS     "tests/ui/marker_retired_sql_angle.jet",
-//RS     "tests/ui/marker_retired_tag.jet",
-//RS     "tests/ui/marker_retired_task.jet",
-//RS     "tests/ui/marker_tested_at.jet",
-//RS     "tests/ui/marker_tested_hash.jet",
-//RS     "tests/ui/marker_wrong_at_plane.jet",
-//RS     "tests/ui/member_spread_not_ident.jet",
-//RS     "tests/ui/meta_bad_maturity.jet",
-//RS     "tests/ui/meta_on_expression.jet",
-//RS     "tests/ui/meta_unknown_field.jet",
-//RS     "tests/ui/migration_unknown_op.jet",
-//RS     "tests/ui/module_brace_group.jet",
-//RS     "tests/ui/module_unknown_namespace.jet",
-//RS     "tests/ui/module_wildcard.jet",
-//RS     "tests/ui/namespace_foreign_kw.jet",
-//RS     "tests/ui/nested_option.jet",
-//RS     "tests/ui/no_prelude_duplicate.jet",
-//RS     "tests/ui/off_debug_attr_on_expression.jet",
-//RS     "tests/ui/off_debug_attr_on_item.jet",
-//RS     "tests/ui/off_debug_doubled_attr.jet",
-//RS     "tests/ui/operator_foreign_guess.jet",
-//RS     "tests/ui/opt_chain_method.jet",
-//RS     "tests/ui/param_label_duplicate.jet",
-//RS     "tests/ui/param_zone_empty.jet",
-//RS     "tests/ui/param_zone_empty_positional.jet",
-//RS     "tests/ui/param_zone_misplaced.jet",
-//RS     "tests/ui/param_zone_repeated.jet",
-//RS     "tests/ui/parse_pattern_adjacent_holes.jet",
-//RS     "tests/ui/perf_budget_unknown_role_field.jet",
-//RS     "tests/ui/persist_not_module_level.jet",
-//RS     "tests/ui/policy_conflicting_module.jet",
-//RS     "tests/ui/policy_site_bound_authority.jet",
-//RS     "tests/ui/positional_tuple.jet",
-//RS     "tests/ui/project_module_invalid/broken.jet",
-//RS     "tests/ui/protocol_bad_endpoint.jet",
-//RS     "tests/ui/pub_file_duplicate_marker.jet",
-//RS     "tests/ui/pub_file_priv_without_marker.jet",
-//RS     "tests/ui/pub_file_private_teaching.jet",
-//RS     "tests/ui/pub_file_pub_priv_conflict.jet",
-//RS     "tests/ui/pub_file_publicfile_teaching.jet",
-//RS     "tests/ui/pub_file_redundant_pub.jet",
-//RS     "tests/ui/pub_file_section_label.jet",
-//RS     "tests/ui/pub_package_bad_qualifier.jet",
-//RS     "tests/ui/qq_block_fallback.jet",
-//RS     "tests/ui/quantity_unknown_kind.jet",
-//RS     "tests/ui/range_arm_dot_dot_eq.jet",
-//RS     "tests/ui/range_arm_step.jet",
-//RS     "tests/ui/range_constraint_value_rejected.jet",
-//RS     "tests/ui/range_type_empty_range.jet",
-//RS     "tests/ui/repl_effect_denied_e1803.jet",
-//RS     "tests/ui/result_old_syntax.jet",
-//RS     "tests/ui/retired_bare_sanitizer.jet",
-//RS     "tests/ui/retired_cli_marker.jet",
-//RS     "tests/ui/retired_error_type.jet",
-//RS     "tests/ui/retired_function_body_marker.jet",
-//RS     "tests/ui/retired_void_result.jet",
-//RS     "tests/ui/return_arrow_split.jet",
-//RS     "tests/ui/root_param_shape.jet",
-//RS     "tests/ui/schedule_every_without_job.jet",
-//RS     "tests/ui/job_on_method.jet",
-//RS     "tests/ui/shared_retired_constructor.jet",
-//RS     "tests/ui/shield_arguments.jet",
-//RS     "tests/ui/single_bracket_marker.jet",
-//RS     "tests/ui/stacked_type_markers.jet",
-//RS     "tests/ui/string_lone_brace.jet",
-//RS     "tests/ui/subjectless_guard_direct_nesting.jet",
-//RS     "tests/ui/subjectless_guard_value_missing_else.jet",
-//RS     "tests/ui/suppress_retired.jet",
-//RS     "tests/ui/tag_missing_policy.jet",
-//RS     "tests/ui/tag_with_method.jet",
-//RS     "tests/ui/take_pattern_bad_hole.jet",
-//RS     "tests/ui/take_pattern_computed_arg.jet",
-//RS     "tests/ui/take_pattern_string_typed_bad_hole.jet",
-//RS     "tests/ui/task_group_parameter_label.jet",
-//RS     "tests/ui/task_group_value.jet",
-//RS     "tests/ui/task_unknown_selector.jet",
-//RS     "tests/ui/test_block_nested.jet",
-//RS     "tests/ui/trailing_block_double.jet",
-//RS     "tests/ui/trailing_block_not_function.jet",
-//RS     "tests/ui/trailing_block_on_index.jet",
-//RS     "tests/ui/tuple_numeric_field.jet",
-//RS     "tests/ui/tuple_single_field.jet",
-//RS     "tests/ui/two_capability_markers.jet",
-//RS     "tests/ui/two_parse_errors.jet",
-//RS     "tests/ui/typed_binding_retired.jet",
-//RS     "tests/ui/uninit_annotated_retired.jet",
-//RS     "tests/ui/uninit_marker_retired.jet",
-//RS     "tests/ui/uninit_no_type.jet",
-//RS     "tests/ui/unit_family_bad_denominator.jet",
-//RS     "tests/ui/unit_family_base_metadata.jet",
-//RS     "tests/ui/unit_family_derived_requires_base.jet",
-//RS     "tests/ui/unit_family_duplicate_metadata.jet",
-//RS     "tests/ui/unit_family_float_metadata.jet",
-//RS     "tests/ui/unit_family_missing_base.jet",
-//RS     "tests/ui/unit_family_unknown_header_field.jet",
-//RS     "tests/ui/unit_family_unknown_metadata.jet",
-//RS     "tests/ui/unit_family_zero_denominator.jet",
-//RS     "tests/ui/unit_family_zero_scale.jet",
-//RS     "tests/ui/unit_format_unknown_style.jet",
-//RS     "tests/ui/unknown_char.jet",
-//RS     "tests/ui/unsafe_extern_rust_teaching.jet",
-//RS     "tests/ui/unsafe_fn_missing_reason.jet",
-//RS     "tests/ui/unsafe_missing_reason.jet",
-//RS     "tests/ui/unterminated_block_comment.jet",
-//RS     "tests/ui/unterminated_string.jet",
-//RS     "tests/ui/unterminated_triple_string.jet",
-//RS     "tests/ui/value_dispatch_missing_else.jet",
-//RS     "tests/ui/variadic_not_last.jet",
-//RS     "tests/ui/web_target_web_on_module.jet",
-//RS     "tests/ui/yielding_loop_missing_item.jet",
-//RS     "tests/ui/yielding_loop_nonfinite.jet",
-//RS ];
-//RS 
-//RS fn collect_jet_files_recursive(dir: &PathBuf) -> Vec<PathBuf> {
-//RS     let mut out = Vec::new();
-//RS     collect_matching_jet_files(dir, &mut out);
-//RS     out.sort();
-//RS     out
-//RS }
-//RS 
-//RS fn collect_matching_jet_files(dir: &PathBuf, out: &mut Vec<PathBuf>) {
-//RS     if dir.file_name().and_then(|name| name.to_str()) == Some(".jet") {
-//RS         return; // generated bindings/cache, not checked source corpus
-//RS     }
-//RS     for entry in fs::read_dir(dir).unwrap() {
-//RS         let path = entry.unwrap().path();
-//RS         if path.is_dir() {
-//RS             collect_matching_jet_files(&path, out);
-//RS         } else if path.extension().and_then(|e| e.to_str()) == Some(jet::Syntax::FILE_EXT) {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS // The loss oracle is ordered and exact after parser-equivalent rewrites:
-//RS // top-level formatter ordering; marker-list grouping; `Type<T>.method()`;
-//RS // external-method sugar; canonical anonymous-union member order;
-//RS // optional declaration/trailing commas; redundant default file aliases;
-//RS // typed-literal constructor dot removal; and arrow unification. The
-//RS // comparator permits only those named rewrites plus formatter-added arm blocks,
-//RS // bare-lambda parens, leading-dot variant patterns, struct shorthand
-//RS // labels/separators, and a required default alias on a dotted module import.
-//RS // No rule can reorder or discard an expression operand, operator, marker
-//RS // payload, comment, or string interpolation.
-//RS fn canonical_tokens(src: &str, path: &std::path::Path) -> Vec<Token> {
-//RS     let (tokens, diagnostics) = jet::Lexer::lex(src);
-//RS     assert!(
-//RS         diagnostics.is_empty(),
-//RS         "lex failed on {}:\n{}",
-//RS         path.display(),
-//RS         jet::render_diagnostics(&path.display().to_string(), src, &diagnostics)
-//RS     );
-//RS     let tokens = canonicalize_external_methods(canonicalize_static_generic_calls(
-//RS         expand_marker_groups(canonicalize_file_prefix(tokens)),
-//RS     ));
-//RS     let enum_group_commas = enum_group_commas(&tokens);
-//RS     let declaration_field_commas = declaration_field_commas(&tokens);
-//RS     let tokens: Vec<_> = tokens
-//RS         .into_iter()
-//RS         .enumerate()
-//RS         .filter(|(index, _)| !enum_group_commas[*index] && !declaration_field_commas[*index])
-//RS         .map(|(_, token)| token)
-//RS         .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
-//RS         .collect();
-//RS     let mut canonical: Vec<Token> = Vec::with_capacity(tokens.len());
-//RS     let mut index = 0;
-//RS     while index < tokens.len() {
-//RS         if matches!(tokens[index].kind, TokKind::Comma)
-//RS             && tokens.get(index + 1).is_some_and(|next| {
-//RS                 matches!(
-//RS                     next.kind,
-//RS                     TokKind::RParen | TokKind::RBracket | TokKind::RBrace
-//RS                 )
-//RS             })
-//RS         {
-//RS             index += 1;
-//RS             continue;
-//RS         }
-//RS         // D-FAIL-ERROR1=A: the formatter omits an explicit default `Err` in a
-//RS         // fallible function return type (`T !Err` -> `T !`). Keep that
-//RS         // canonical spelling rewrite out of the loss comparison without
-//RS         // matching ordinary `Err(...)` constructor expressions.
-//RS         if matches!(&tokens[index].kind, TokKind::Ident(name) if name == jet::Syntax::TYPE_ERR)
-//RS             && matches!(
-//RS                 canonical.last().map(|token| &token.kind),
-//RS                 Some(TokKind::Bang)
-//RS             )
-//RS             && matches!(
-//RS                 tokens.get(index + 1).map(|token| &token.kind),
-//RS                 Some(TokKind::LBrace | TokKind::Eq)
-//RS             )
-//RS         {
-//RS             index += 1;
-//RS             continue;
-//RS         }
-//RS         // `use "./foo" as foo` and `use "./foo"` parse identically. The
-//RS         // formatter removes that redundant default alias, so erase it from the
-//RS         // comparison stream as a canonical spelling rewrite, not token loss.
-//RS         if redundant_default_file_alias(&canonical, &tokens, index) {
-//RS             index += 2;
-//RS             continue;
-//RS         }
-//RS         canonical.push(tokens[index].clone());
-//RS         index += 1;
-//RS     }
-//RS     canonical
-//RS }
-//RS 
-//RS fn canonicalize_file_prefix(tokens: Vec<Token>) -> Vec<Token> {
-//RS     let mut chunks: Vec<Vec<Token>> = Vec::new();
-//RS     let mut chunk = Vec::new();
-//RS     let mut brace_depth = 0usize;
-//RS     for token in tokens {
-//RS         match token.kind {
-//RS             TokKind::LBrace => brace_depth += 1,
-//RS             TokKind::RBrace => brace_depth -= 1,
-//RS             _ => {}
-//RS         }
-//RS         let end = matches!(token.kind, TokKind::Eof)
-//RS             || (brace_depth == 0 && matches!(token.kind, TokKind::Semi));
-//RS         chunk.push(token);
-//RS         if end {
-//RS             chunks.push(std::mem::take(&mut chunk));
-//RS         }
-//RS     }
-//RS     if !chunk.is_empty() {
-//RS         chunks.push(chunk);
-//RS     }
-//RS 
-//RS     let mut groups: Vec<(usize, Vec<Token>)> = Vec::new();
-//RS     let mut leading_comments = Vec::new();
-//RS     for chunk in chunks {
-//RS         if chunk.iter().all(|token| {
-//RS             matches!(
-//RS                 token.kind,
-//RS                 TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi | TokKind::Eof
-//RS             )
-//RS         }) {
-//RS             leading_comments.extend(chunk);
-//RS             continue;
-//RS         }
-//RS         leading_comments.extend(chunk);
-//RS         let category = file_chunk_category(&leading_comments);
-//RS         groups.push((category, std::mem::take(&mut leading_comments)));
-//RS     }
-//RS     if !leading_comments.is_empty() {
-//RS         groups.push((3, leading_comments));
-//RS     }
-//RS     for directive_i in 0..groups.len() {
-//RS         if !is_spanless_file_marker_group(&groups[directive_i].1) {
-//RS             continue;
-//RS         }
-//RS         let mut displaced = Vec::new();
-//RS         while matches!(
-//RS             groups[directive_i].1.first().map(|token| &token.kind),
-//RS             Some(TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi)
-//RS         ) {
-//RS             displaced.push(groups[directive_i].1.remove(0));
-//RS         }
-//RS         if let Some((_, item_tokens)) = groups
-//RS             .iter_mut()
-//RS             .skip(directive_i + 1)
-//RS             .find(|(category, _)| *category == 3)
-//RS         {
-//RS             displaced.append(item_tokens);
-//RS             *item_tokens = displaced;
-//RS         }
-//RS     }
-//RS     for import_i in 0..groups.len() {
-//RS         if groups[import_i].0 != 1 {
-//RS             continue;
-//RS         }
-//RS         let mut hoisted_comments = Vec::new();
-//RS         for (_, tokens) in groups.iter_mut().take(import_i) {
-//RS             hoisted_comments.extend(drain_top_level_comments(tokens));
-//RS         }
-//RS         if !hoisted_comments.is_empty() {
-//RS             hoisted_comments.append(&mut groups[import_i].1);
-//RS             groups[import_i].1 = hoisted_comments;
-//RS         }
-//RS     }
-//RS     groups.retain(|(_, tokens)| !tokens.is_empty());
-//RS     groups.sort_by_key(|(category, _)| *category);
-//RS     groups.into_iter().flat_map(|(_, tokens)| tokens).collect()
-//RS }
-//RS 
-//RS fn is_spanless_file_marker_group(tokens: &[Token]) -> bool {
-//RS     let kinds: Vec<_> = tokens
-//RS         .iter()
-//RS         .filter(|token| {
-//RS             !matches!(
-//RS                 token.kind,
-//RS                 TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi | TokKind::Eof
-//RS             )
-//RS         })
-//RS         .map(|token| &token.kind)
-//RS         .collect();
-//RS     matches!(
-//RS         kinds.as_slice(),
-//RS         [TokKind::Hash, TokKind::Ident(name), ..]
-//RS             if matches!(name.as_str(), jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML)
-//RS     )
-//RS }
-//RS 
-//RS fn drain_top_level_comments(tokens: &mut Vec<Token>) -> Vec<Token> {
-//RS     let mut comments = Vec::new();
-//RS     let mut retained = Vec::with_capacity(tokens.len());
-//RS     let mut brace_depth = 0usize;
-//RS     for token in tokens.drain(..) {
-//RS         match token.kind {
-//RS             TokKind::LBrace => brace_depth += 1,
-//RS             TokKind::RBrace => brace_depth -= 1,
-//RS             TokKind::LineComment(_) | TokKind::BlockComment(_) if brace_depth == 0 => {
-//RS                 comments.push(token);
-//RS                 continue;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         retained.push(token);
-//RS     }
-//RS     *tokens = retained;
-//RS     comments
-//RS }
-//RS 
-//RS fn file_chunk_category(chunk: &[Token]) -> usize {
-//RS     let kinds: Vec<_> = chunk
-//RS         .iter()
-//RS         .filter(|token| {
-//RS             !matches!(
-//RS                 token.kind,
-//RS                 TokKind::LineComment(_) | TokKind::BlockComment(_) | TokKind::Semi | TokKind::Eof
-//RS             )
-//RS         })
-//RS         .map(|token| &token.kind)
-//RS         .collect();
-//RS     match kinds.as_slice() {
-//RS         [TokKind::KwUse, ..] => 1,
-//RS         [TokKind::KwPub, rest @ ..] if rest.iter().any(|kind| matches!(kind, TokKind::KwUse)) => 1,
-//RS         [TokKind::Hash, TokKind::Ident(name), ..]
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 jet::Syntax::MARKER_PUB_FILE | jet::Syntax::MARKER_NO_PRELUDE
-//RS             ) =>
-//RS         {
-//RS             0
-//RS         }
-//RS         [TokKind::Hash, TokKind::Ident(name), ..]
-//RS             if matches!(
-//RS                 name.as_str(),
-//RS                 jet::Syntax::MARKER_TARGET | jet::Syntax::MARKER_HTML
-//RS             ) =>
-//RS         {
-//RS             2
-//RS         }
-//RS         _ => 3,
-//RS     }
-//RS }
-//RS 
-//RS fn expand_marker_groups(tokens: Vec<Token>) -> Vec<Token> {
-//RS     let mut out = Vec::with_capacity(tokens.len());
-//RS     let mut index = 0;
-//RS     while index < tokens.len() {
-//RS         if matches!(tokens[index].kind, TokKind::Hash)
-//RS             && matches!(
-//RS                 tokens.get(index + 1).map(|t| &t.kind),
-//RS                 Some(TokKind::LBracket)
-//RS             )
-//RS         {
-//RS             if let Some(end) = matching_bracket(&tokens, index + 1) {
-//RS                 let mut group_start = index + 2;
-//RS                 let mut paren_depth = 0usize;
-//RS                 let mut brace_depth = 0usize;
-//RS                 let mut bracket_depth = 0usize;
-//RS                 for cursor in index + 2..=end {
-//RS                     let split = cursor == end
-//RS                         || (matches!(tokens[cursor].kind, TokKind::Comma)
-//RS                             && paren_depth == 0
-//RS                             && brace_depth == 0
-//RS                             && bracket_depth == 0);
-//RS                     if split {
-//RS                         out.push(tokens[index].clone());
-//RS                         out.extend(tokens[group_start..cursor].iter().cloned());
-//RS                         group_start = cursor + 1;
-//RS                         continue;
-//RS                     }
-//RS                     match tokens[cursor].kind {
-//RS                         TokKind::LParen => paren_depth += 1,
-//RS                         TokKind::RParen => paren_depth -= 1,
-//RS                         TokKind::LBrace => brace_depth += 1,
-//RS                         TokKind::RBrace => brace_depth -= 1,
-//RS                         TokKind::LBracket => bracket_depth += 1,
-//RS                         TokKind::RBracket => bracket_depth -= 1,
-//RS                         _ => {}
-//RS                     }
-//RS                 }
-//RS                 index = end + 1;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         out.push(tokens[index].clone());
-//RS         index += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn matching_bracket(tokens: &[Token], open: usize) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     for (index, token) in tokens.iter().enumerate().skip(open) {
-//RS         match token.kind {
-//RS             TokKind::LBracket => depth += 1,
-//RS             TokKind::RBracket => {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return Some(index);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn canonicalize_static_generic_calls(tokens: Vec<Token>) -> Vec<Token> {
-//RS     let mut out = Vec::with_capacity(tokens.len());
-//RS     let mut index = 0;
-//RS     while index < tokens.len() {
-//RS         if matches!(tokens[index].kind, TokKind::Ident(_))
-//RS             && matches!(tokens.get(index + 1).map(|t| &t.kind), Some(TokKind::Lt))
-//RS         {
-//RS             let mut depth = 0usize;
-//RS             let mut close = None;
-//RS             for cursor in index + 1..tokens.len() {
-//RS                 match tokens[cursor].kind {
-//RS                     TokKind::Lt => depth += 1,
-//RS                     TokKind::Gt => {
-//RS                         depth -= 1;
-//RS                         if depth == 0 {
-//RS                             close = Some(cursor);
-//RS                             break;
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS             if let Some(close) = close {
-//RS                 if matches!(tokens.get(close + 1).map(|t| &t.kind), Some(TokKind::Dot))
-//RS                     && matches!(
-//RS                         tokens.get(close + 2).map(|t| &t.kind),
-//RS                         Some(TokKind::Ident(_))
-//RS                     )
-//RS                     && matches!(
-//RS                         tokens.get(close + 3).map(|t| &t.kind),
-//RS                         Some(TokKind::LParen)
-//RS                     )
-//RS                 {
-//RS                     out.push(tokens[index].clone());
-//RS                     out.push(tokens[close + 1].clone());
-//RS                     out.push(tokens[close + 2].clone());
-//RS                     out.extend(tokens[index + 1..=close].iter().cloned());
-//RS                     index = close + 3;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS         }
-//RS         out.push(tokens[index].clone());
-//RS         index += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn canonicalize_external_methods(tokens: Vec<Token>) -> Vec<Token> {
-//RS     let mut out = Vec::with_capacity(tokens.len());
-//RS     let mut index = 0;
-//RS     while index < tokens.len() {
-//RS         if matches!(tokens[index].kind, TokKind::KwFn)
-//RS             && matches!(
-//RS                 tokens.get(index + 1).map(|t| &t.kind),
-//RS                 Some(TokKind::Ident(_))
-//RS             )
-//RS             && matches!(tokens.get(index + 2).map(|t| &t.kind), Some(TokKind::Dot))
-//RS             && matches!(
-//RS                 tokens.get(index + 3).map(|t| &t.kind),
-//RS                 Some(TokKind::Ident(_))
-//RS             )
-//RS             && matches!(
-//RS                 tokens.get(index + 4).map(|t| &t.kind),
-//RS                 Some(TokKind::LParen)
-//RS             )
-//RS         {
-//RS             if let Some(body_open) = tokens[index + 4..]
-//RS                 .iter()
-//RS                 .position(|token| matches!(token.kind, TokKind::LBrace))
-//RS                 .map(|offset| index + 4 + offset)
-//RS             {
-//RS                 if let Some(body_close) = matching_brace(&tokens, body_open) {
-//RS                     out.push(Token {
-//RS                         kind: TokKind::KwImpl,
-//RS                         span: tokens[index].span,
-//RS                     });
-//RS                     out.push(tokens[index + 1].clone());
-//RS                     out.push(Token {
-//RS                         kind: TokKind::LBrace,
-//RS                         span: tokens[index].span,
-//RS                     });
-//RS                     out.push(tokens[index].clone());
-//RS                     out.push(tokens[index + 3].clone());
-//RS                     out.extend(tokens[index + 4..=body_close].iter().cloned());
-//RS                     out.push(Token {
-//RS                         kind: TokKind::RBrace,
-//RS                         span: tokens[body_close].span,
-//RS                     });
-//RS                     index = body_close + 1;
-//RS                     continue;
-//RS                 }
-//RS             } else if let Some(method_end) = tokens[index + 4..]
-//RS                 .iter()
-//RS                 .position(|token| matches!(token.kind, TokKind::Semi | TokKind::Eof))
-//RS                 .map(|offset| index + 4 + offset)
-//RS             {
-//RS                 // The canonical one-line body (`Type -> value`) has no brace
-//RS                 // for the old sugar normalizer to anchor on. Wrap that exact
-//RS                 // method span in the same synthetic impl shape.
-//RS                 out.push(Token {
-//RS                     kind: TokKind::KwImpl,
-//RS                     span: tokens[index].span,
-//RS                 });
-//RS                 out.push(tokens[index + 1].clone());
-//RS                 out.push(Token {
-//RS                     kind: TokKind::LBrace,
-//RS                     span: tokens[index].span,
-//RS                 });
-//RS                 out.push(tokens[index].clone());
-//RS                 out.push(tokens[index + 3].clone());
-//RS                 out.extend(tokens[index + 4..method_end].iter().cloned());
-//RS                 out.push(Token {
-//RS                     kind: TokKind::RBrace,
-//RS                     span: tokens[method_end.saturating_sub(1)].span,
-//RS                 });
-//RS                 index = method_end;
-//RS                 continue;
-//RS             }
-//RS         }
-//RS         out.push(tokens[index].clone());
-//RS         index += 1;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn matching_brace(tokens: &[Token], open: usize) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     for (index, token) in tokens.iter().enumerate().skip(open) {
-//RS         match token.kind {
-//RS             TokKind::LBrace => depth += 1,
-//RS             TokKind::RBrace => {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return Some(index);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn enum_group_commas(tokens: &[Token]) -> Vec<bool> {
-//RS     let mut ignored = vec![false; tokens.len()];
-//RS     let mut enum_base_depth = None;
-//RS     let mut awaiting_enum_body = false;
-//RS     let mut brace_stack: Vec<usize> = Vec::new();
-//RS     for (index, token) in tokens.iter().enumerate() {
-//RS         match token.kind {
-//RS             TokKind::KwEnum => awaiting_enum_body = true,
-//RS             TokKind::LBrace => {
-//RS                 brace_stack.push(index);
-//RS                 if awaiting_enum_body {
-//RS                     enum_base_depth = Some(brace_stack.len());
-//RS                     awaiting_enum_body = false;
-//RS                 }
-//RS             }
-//RS             TokKind::RBrace => {
-//RS                 if enum_base_depth == Some(brace_stack.len()) {
-//RS                     enum_base_depth = None;
-//RS                 }
-//RS                 brace_stack.pop();
-//RS             }
-//RS             TokKind::Comma
-//RS                 if enum_base_depth.is_some_and(|base| brace_stack.len() > base)
-//RS                     && matches!(
-//RS                         tokens.get(index.wrapping_sub(1)).map(|t| &t.kind),
-//RS                         Some(TokKind::Ident(_))
-//RS                     )
-//RS                     && matches!(
-//RS                         tokens.get(index + 1).map(|t| &t.kind),
-//RS                         Some(TokKind::Ident(_))
-//RS                     ) =>
-//RS             {
-//RS                 let group_open = *brace_stack.last().unwrap();
-//RS                 let group_has_field_colon = tokens[group_open + 1..index]
-//RS                     .iter()
-//RS                     .any(|token| matches!(token.kind, TokKind::Colon));
-//RS                 if !group_has_field_colon {
-//RS                     ignored[index] = true;
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     ignored
-//RS }
-//RS 
-//RS fn declaration_field_commas(tokens: &[Token]) -> Vec<bool> {
-//RS     let mut ignored = vec![false; tokens.len()];
-//RS     let mut awaiting_struct_body = false;
-//RS     let mut struct_depth = None;
-//RS     let mut brace_depth = 0usize;
-//RS     let mut paren_depth = 0usize;
-//RS     let mut bracket_depth = 0usize;
-//RS     for (index, token) in tokens.iter().enumerate() {
-//RS         match token.kind {
-//RS             TokKind::KwStruct => awaiting_struct_body = true,
-//RS             TokKind::LBrace => {
-//RS                 brace_depth += 1;
-//RS                 if awaiting_struct_body {
-//RS                     struct_depth = Some(brace_depth);
-//RS                     awaiting_struct_body = false;
-//RS                 }
-//RS             }
-//RS             TokKind::RBrace => {
-//RS                 if struct_depth == Some(brace_depth) {
-//RS                     struct_depth = None;
-//RS                 }
-//RS                 brace_depth -= 1;
-//RS             }
-//RS             TokKind::LParen => paren_depth += 1,
-//RS             TokKind::RParen => paren_depth -= 1,
-//RS             TokKind::LBracket => bracket_depth += 1,
-//RS             TokKind::RBracket => bracket_depth -= 1,
-//RS             TokKind::Comma
-//RS                 if struct_depth == Some(brace_depth) && paren_depth == 0 && bracket_depth == 0 =>
-//RS             {
-//RS                 ignored[index] = true;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     ignored
-//RS }
-//RS 
-//RS fn redundant_default_file_alias(canonical: &[Token], tokens: &[Token], index: usize) -> bool {
-//RS     if index + 1 >= tokens.len()
-//RS         || !matches!(&tokens[index].kind, TokKind::Ident(name) if name == jet::Syntax::KW_AS)
-//RS     {
-//RS         return false;
-//RS     }
-//RS     let Some(Token {
-//RS         kind: TokKind::Str(parts),
-//RS         ..
-//RS     }) = canonical.last()
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     let Some(path) = plain_string_value(parts) else {
-//RS         return false;
-//RS     };
-//RS     matches!(
-//RS         &tokens[index + 1].kind,
-//RS         TokKind::Ident(alias)
-//RS             if path.rsplit('/').next().is_some_and(|default| default == alias)
-//RS     )
-//RS }
-//RS 
-//RS fn plain_string_value(parts: &[StrTokPart]) -> Option<String> {
-//RS     let mut value = String::new();
-//RS     for part in parts {
-//RS         match part {
-//RS             StrTokPart::Lit(text) => value.push_str(text),
-//RS             // D-BYTELIT1=B: a raw `\xNN` byte is not plain text; callers that
-//RS             // need a plain string must not fold byte literals.
-//RS             StrTokPart::Byte(_) => return None,
-//RS             StrTokPart::Interp(_) => return None,
-//RS         }
-//RS     }
-//RS     Some(value)
-//RS }
-//RS 
-//RS fn token_kinds_equal(left: &TokKind, right: &TokKind) -> bool {
-//RS     match (left, right) {
-//RS         (TokKind::Str(left), TokKind::Str(right)) => string_parts_equal(left, right),
-//RS         // D-BINPAT1 / D-UNIFYLIT1=A: `[U8]{"…"}` binary patterns are ordinary
-//RS         // `Str` parts inside a typed literal, so the `Str` arm already covers them.
-//RS         _ => left == right,
-//RS     }
-//RS }
-//RS 
-//RS fn string_parts_equal(left: &[StrTokPart], right: &[StrTokPart]) -> bool {
-//RS     left.len() == right.len()
-//RS         && left
-//RS             .iter()
-//RS             .zip(right)
-//RS             .all(|(left, right)| match (left, right) {
-//RS                 (StrTokPart::Lit(left), StrTokPart::Lit(right)) => left == right,
-//RS                 (StrTokPart::Interp(left), StrTokPart::Interp(right)) => {
-//RS                     let left: Vec<_> = left
-//RS                         .iter()
-//RS                         .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
-//RS                         .cloned()
-//RS                         .collect();
-//RS                     let right: Vec<_> = right
-//RS                         .iter()
-//RS                         .filter(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
-//RS                         .cloned()
-//RS                         .collect();
-//RS                     ordered_token_diff(
-//RS                         std::path::Path::new("<string interpolation>"),
-//RS                         &left,
-//RS                         &right,
-//RS                     )
-//RS                     .is_ok()
-//RS                 }
-//RS                 _ => false,
-//RS             })
-//RS }
-//RS 
-//RS fn assert_fmt_preserves_token_stream(path: &std::path::Path, src: &str, formatted: &str) {
-//RS     let original_tokens = canonical_tokens(&src, path);
-//RS     let formatted_tokens = canonical_tokens(&formatted, path);
-//RS     if let Err(diff) = ordered_token_diff(path, &original_tokens, &formatted_tokens) {
-//RS         panic!("{diff}");
-//RS     }
-//RS     let twice = format_supported_source(path, formatted).unwrap_or_else(|diagnostics| {
-//RS         panic!(
-//RS             "second fmt failed on {}:\n{}",
-//RS             path.display(),
-//RS             jet::render_diagnostics(&path.display().to_string(), &formatted, &diagnostics)
-//RS         )
-//RS     });
-//RS     assert_eq!(
-//RS         formatted,
-//RS         twice,
-//RS         "fmt is not byte-stable on {}",
-//RS         path.display()
-//RS     );
-//RS }
-//RS 
-//RS fn format_supported_source(
-//RS     path: &std::path::Path,
-//RS     src: &str,
-//RS ) -> Result<String, Vec<jet::Diagnostics::Diagnostic>> {
-//RS     match jet::format_source(src) {
-//RS         Ok(formatted) => Ok(formatted),
-//RS         Err(diagnostics) => {
-//RS             jet::Package::format_source(src, path.display().to_string()).or(Err(diagnostics))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn ordered_token_diff(
-//RS     path: &std::path::Path,
-//RS     original: &[Token],
-//RS     formatted: &[Token],
-//RS ) -> Result<(), String> {
-//RS     let mut original_i = 0;
-//RS     let mut formatted_i = 0;
-//RS     let mut inserted_arm_braces = 0usize;
-//RS     let mut inserted_lambda_parens = 0usize;
-//RS     while original_i < original.len() || formatted_i < formatted.len() {
-//RS         if original_i < original.len()
-//RS             && formatted_i < formatted.len()
-//RS             && token_kinds_equal(&original[original_i].kind, &formatted[formatted_i].kind)
-//RS         {
-//RS             original_i += 1;
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         if let Some((next_original, next_formatted)) =
-//RS             reordered_simple_union_type(original, original_i, formatted, formatted_i)
-//RS         {
-//RS             original_i = next_original;
-//RS             formatted_i = next_formatted;
-//RS             continue;
-//RS         }
-//RS         if retired_result_arrow_removal(original, original_i, formatted, formatted_i) {
-//RS             original_i += 1;
-//RS             continue;
-//RS         }
-//RS         if let Some((next_original, next_formatted)) =
-//RS             canonical_arrow_rewrite(original, original_i, formatted, formatted_i)
-//RS         {
-//RS             original_i = next_original;
-//RS             formatted_i = next_formatted;
-//RS             continue;
-//RS         }
-//RS         if typed_literal_dot_rewrite(original, original_i, formatted, formatted_i) {
-//RS             original_i += 1;
-//RS             continue;
-//RS         }
-//RS         if formatted_arm_block_opens(formatted, formatted_i)
-//RS             && !matches!(
-//RS                 original.get(original_i).map(|t| &t.kind),
-//RS                 Some(TokKind::LBrace)
-//RS             )
-//RS         {
-//RS             inserted_arm_braces += 1;
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         if formatted_lambda_params_open(formatted, formatted_i)
-//RS             && !matches!(
-//RS                 original.get(original_i).map(|t| &t.kind),
-//RS                 Some(TokKind::LParen)
-//RS             )
-//RS         {
-//RS             inserted_lambda_parens += 1;
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         if formatted_variant_pattern_dot(original, original_i, formatted, formatted_i) {
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         if inserted_lambda_parens > 0
-//RS             && matches!(
-//RS                 formatted.get(formatted_i).map(|t| &t.kind),
-//RS                 Some(TokKind::RParen)
-//RS             )
-//RS             && matches!(
-//RS                 formatted.get(formatted_i + 1).map(|t| &t.kind),
-//RS                 Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
-//RS             )
-//RS             && matches!(
-//RS                 original.get(original_i).map(|t| &t.kind),
-//RS                 Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
-//RS             )
-//RS         {
-//RS             inserted_lambda_parens -= 1;
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         if inserted_arm_braces > 0
-//RS             && matches!(
-//RS                 formatted.get(formatted_i).map(|t| &t.kind),
-//RS                 Some(TokKind::RBrace)
-//RS             )
-//RS             && (next_token_matches(original, original_i, formatted, formatted_i + 1)
-//RS                 || formatted_variant_pattern_dot(original, original_i, formatted, formatted_i + 1))
-//RS         {
-//RS             inserted_arm_braces -= 1;
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         if formatted_struct_shorthand_expansion(formatted, formatted_i) {
-//RS             formatted_i += 2;
-//RS             continue;
-//RS         }
-//RS         if formatted_default_module_alias(formatted, formatted_i) {
-//RS             formatted_i += 2;
-//RS             continue;
-//RS         }
-//RS         if formatted_struct_separator(formatted, formatted_i) {
-//RS             formatted_i += 1;
-//RS             continue;
-//RS         }
-//RS         return Err(format!(
-//RS             "fmt changed ordered token {} on {}:\n  before: {:?}\n  after: {:?}",
-//RS             original_i,
-//RS             path.display(),
-//RS             original.get(original_i).map(|token| &token.kind),
-//RS             formatted.get(formatted_i).map(|token| &token.kind)
-//RS         ));
-//RS     }
-//RS     if inserted_arm_braces != 0 {
-//RS         return Err(format!(
-//RS             "fmt left an unmatched canonical arm block on {}",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     if inserted_lambda_parens != 0 {
-//RS         return Err(format!(
-//RS             "fmt left unmatched canonical lambda parens on {}",
-//RS             path.display()
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn retired_result_arrow_removal(
-//RS     original: &[Token],
-//RS     original_i: usize,
-//RS     formatted: &[Token],
-//RS     formatted_i: usize,
-//RS ) -> bool {
-//RS     if !matches!(
-//RS         original.get(original_i).map(|token| &token.kind),
-//RS         Some(TokKind::LambdaArrow)
-//RS     ) || !matches!(
-//RS         original
-//RS             .get(original_i.checked_sub(1).unwrap_or_default())
-//RS             .map(|token| &token.kind),
-//RS         Some(TokKind::RParen)
-//RS     ) {
-//RS         return false;
-//RS     }
-//RS     let Some(next_original) = original.get(original_i + 1) else {
-//RS         return false;
-//RS     };
-//RS     let Some(next_formatted) = formatted.get(formatted_i) else {
-//RS         return false;
-//RS     };
-//RS     if !token_kinds_equal(&next_original.kind, &next_formatted.kind)
-//RS         || !function_signature_before(original, original_i)
-//RS     {
-//RS         return false;
-//RS     }
-//RS     original[original_i + 1..]
-//RS         .iter()
-//RS         .take_while(|token| !matches!(token.kind, TokKind::Semi | TokKind::Eof))
-//RS         .any(|token| matches!(token.kind, TokKind::LBrace))
-//RS }
-//RS 
-//RS fn function_signature_before(tokens: &[Token], arrow: usize) -> bool {
-//RS     let mut braces = 0usize;
-//RS     for token in tokens[..arrow].iter().rev() {
-//RS         match token.kind {
-//RS             TokKind::RBrace => braces += 1,
-//RS             TokKind::LBrace if braces > 0 => braces -= 1,
-//RS             TokKind::LBrace => return false,
-//RS             TokKind::KwFn if braces == 0 => return true,
-//RS             TokKind::Semi if braces == 0 => return false,
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn reordered_simple_union_type(
-//RS     original: &[Token],
-//RS     original_i: usize,
-//RS     formatted: &[Token],
-//RS     formatted_i: usize,
-//RS ) -> Option<(usize, usize)> {
-//RS     if !simple_union_type_annotation(original, original_i)
-//RS         || !simple_union_type_annotation(formatted, formatted_i)
-//RS     {
-//RS         return None;
-//RS     }
-//RS     let (mut original_members, next_original) = simple_union_members(original, original_i)?;
-//RS     let (mut formatted_members, next_formatted) = simple_union_members(formatted, formatted_i)?;
-//RS     original_members.sort();
-//RS     formatted_members.sort();
-//RS     (original_members == formatted_members).then_some((next_original, next_formatted))
-//RS }
-//RS 
-//RS fn canonical_arrow_rewrite(
-//RS     original: &[Token],
-//RS     original_i: usize,
-//RS     formatted: &[Token],
-//RS     formatted_i: usize,
-//RS ) -> Option<(usize, usize)> {
-//RS     if matches!(
-//RS         original.get(original_i).map(|token| &token.kind),
-//RS         Some(TokKind::LambdaArrow)
-//RS     ) && matches!(
-//RS         formatted.get(formatted_i).map(|token| &token.kind),
-//RS         Some(TokKind::UnifiedArrow)
-//RS     ) {
-//RS         return Some((original_i + 1, formatted_i + 1));
-//RS     }
-//RS 
-//RS     if !matches!(
-//RS         original.get(original_i).map(|token| &token.kind),
-//RS         Some(TokKind::Eq)
-//RS     ) || !matches!(
-//RS         formatted.get(formatted_i).map(|token| &token.kind),
-//RS         Some(TokKind::Colon)
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     if !matches!(
-//RS         original.get(original_i + 1).map(|token| &token.kind),
-//RS         Some(TokKind::LBracket)
-//RS     ) || !matches!(
-//RS         formatted.get(formatted_i + 1).map(|token| &token.kind),
-//RS         Some(TokKind::LBracket)
-//RS     ) {
-//RS         return None;
-//RS     }
-//RS     let original_close = matching_bracket_end(original, original_i + 1)?;
-//RS     let formatted_close = matching_bracket_end(formatted, formatted_i + 1)?;
-//RS     if original_close - original_i != formatted_close - formatted_i
-//RS         || !original[original_i + 2..original_close]
-//RS             .iter()
-//RS             .zip(&formatted[formatted_i + 2..formatted_close])
-//RS             .all(|(left, right)| token_kinds_equal(&left.kind, &right.kind))
-//RS         || !matches!(
-//RS             original.get(original_close + 1).map(|token| &token.kind),
-//RS             Some(TokKind::LambdaArrow)
-//RS         )
-//RS         || !matches!(
-//RS             formatted.get(formatted_close + 1).map(|token| &token.kind),
-//RS             Some(TokKind::UnifiedArrow)
-//RS         )
-//RS     {
-//RS         return None;
-//RS     }
-//RS     Some((original_close + 2, formatted_close + 2))
-//RS }
-//RS 
-//RS fn matching_bracket_end(tokens: &[Token], open: usize) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     for (index, token) in tokens.iter().enumerate().skip(open) {
-//RS         match token.kind {
-//RS             TokKind::LBracket => depth += 1,
-//RS             TokKind::RBracket => {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return Some(index);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn typed_literal_dot_rewrite(
-//RS     original: &[Token],
-//RS     original_i: usize,
-//RS     formatted: &[Token],
-//RS     formatted_i: usize,
-//RS ) -> bool {
-//RS     if !matches!(
-//RS         original.get(original_i).map(|token| &token.kind),
-//RS         Some(TokKind::Dot)
-//RS     ) {
-//RS         return false;
-//RS     }
-//RS     let Some(original_body) = original.get(original_i + 1) else {
-//RS         return false;
-//RS     };
-//RS     let Some(formatted_body) = formatted.get(formatted_i) else {
-//RS         return false;
-//RS     };
-//RS     matches!(original_body.kind, TokKind::LBrace | TokKind::Str(_))
-//RS         && token_kinds_equal(&original_body.kind, &formatted_body.kind)
-//RS }
-//RS 
-//RS fn simple_union_type_annotation(tokens: &[Token], start: usize) -> bool {
-//RS     let Some(colon) = start.checked_sub(1) else {
-//RS         return false;
-//RS     };
-//RS     if !matches!(
-//RS         tokens.get(colon).map(|token| &token.kind),
-//RS         Some(TokKind::Colon)
-//RS     ) {
-//RS         return false;
-//RS     }
-//RS 
-//RS     let mut awaiting_struct_body = false;
-//RS     let mut awaiting_fn_params = false;
-//RS     let mut struct_scopes = Vec::new();
-//RS     let mut fn_param_scopes = Vec::new();
-//RS     let mut brace_depth = 0usize;
-//RS     let mut paren_depth = 0usize;
-//RS     let mut bracket_depth = 0usize;
-//RS     for token in &tokens[..colon] {
-//RS         match token.kind {
-//RS             TokKind::KwStruct => awaiting_struct_body = true,
-//RS             TokKind::KwFn => awaiting_fn_params = true,
-//RS             TokKind::LBrace => {
-//RS                 brace_depth += 1;
-//RS                 if awaiting_struct_body {
-//RS                     struct_scopes.push((brace_depth, paren_depth, bracket_depth));
-//RS                     awaiting_struct_body = false;
-//RS                 }
-//RS             }
-//RS             TokKind::RBrace => {
-//RS                 if struct_scopes
-//RS                     .last()
-//RS                     .is_some_and(|scope| scope.0 == brace_depth)
-//RS                 {
-//RS                     struct_scopes.pop();
-//RS                 }
-//RS                 brace_depth -= 1;
-//RS             }
-//RS             TokKind::LParen => {
-//RS                 paren_depth += 1;
-//RS                 if awaiting_fn_params {
-//RS                     fn_param_scopes.push((brace_depth, paren_depth, bracket_depth));
-//RS                     awaiting_fn_params = false;
-//RS                 }
-//RS             }
-//RS             TokKind::RParen => {
-//RS                 if fn_param_scopes
-//RS                     .last()
-//RS                     .is_some_and(|scope| scope.1 == paren_depth)
-//RS                 {
-//RS                     fn_param_scopes.pop();
-//RS                 }
-//RS                 paren_depth -= 1;
-//RS             }
-//RS             TokKind::LBracket => bracket_depth += 1,
-//RS             TokKind::RBracket => bracket_depth -= 1,
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     let scope = (brace_depth, paren_depth, bracket_depth);
-//RS     struct_scopes.last() == Some(&scope) || fn_param_scopes.last() == Some(&scope)
-//RS }
-//RS 
-//RS fn simple_union_members(tokens: &[Token], start: usize) -> Option<(Vec<&str>, usize)> {
-//RS     let TokKind::Ident(first) = &tokens.get(start)?.kind else {
-//RS         return None;
-//RS     };
-//RS     let mut members = vec![first.as_str()];
-//RS     let mut cursor = start + 1;
-//RS     while matches!(
-//RS         tokens.get(cursor).map(|token| &token.kind),
-//RS         Some(TokKind::Pipe)
-//RS     ) {
-//RS         let TokKind::Ident(member) = &tokens.get(cursor + 1)?.kind else {
-//RS             return None;
-//RS         };
-//RS         members.push(member);
-//RS         cursor += 2;
-//RS     }
-//RS     (members.len() > 1
-//RS         && matches!(
-//RS             tokens.get(cursor).map(|token| &token.kind),
-//RS             Some(TokKind::Comma | TokKind::Eq | TokKind::RBrace | TokKind::RParen)
-//RS         ))
-//RS     .then_some((members, cursor))
-//RS }
-//RS 
-//RS fn formatted_variant_pattern_dot(
-//RS     original: &[Token],
-//RS     original_i: usize,
-//RS     formatted: &[Token],
-//RS     formatted_i: usize,
-//RS ) -> bool {
-//RS     let (
-//RS         Some(original_token),
-//RS         Some(Token {
-//RS             kind: TokKind::Dot, ..
-//RS         }),
-//RS         Some(formatted_token),
-//RS     ) = (
-//RS         original.get(original_i),
-//RS         formatted.get(formatted_i),
-//RS         formatted.get(formatted_i + 1),
-//RS     )
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     let same_variant = match (&original_token.kind, &formatted_token.kind) {
-//RS         (TokKind::Ident(original), TokKind::Ident(formatted)) => {
-//RS             original == formatted && original.starts_with(char::is_uppercase)
-//RS         }
-//RS         (TokKind::KwNull, TokKind::KwNull) => true,
-//RS         _ => false,
-//RS     };
-//RS     same_variant && variant_pattern_context(original, original_i)
-//RS }
-//RS 
-//RS fn variant_pattern_context(tokens: &[Token], index: usize) -> bool {
-//RS     if matches!(
-//RS         index
-//RS             .checked_sub(1)
-//RS             .and_then(|i| tokens.get(i))
-//RS             .map(|token| &token.kind),
-//RS         Some(TokKind::EqEq)
-//RS     ) {
-//RS         return true;
-//RS     }
-//RS 
-//RS     let mut brace_depth = 0usize;
-//RS     let mut dispatch_open = None;
-//RS     for cursor in (0..index).rev() {
-//RS         match tokens[cursor].kind {
-//RS             TokKind::RBrace => brace_depth += 1,
-//RS             TokKind::LBrace if brace_depth > 0 => brace_depth -= 1,
-//RS             TokKind::LBrace => {
-//RS                 dispatch_open = Some(cursor);
-//RS                 break;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     let Some(open) = dispatch_open else {
-//RS         return false;
-//RS     };
-//RS     matches!(
-//RS         open.checked_sub(1)
-//RS             .and_then(|i| tokens.get(i))
-//RS             .map(|token| &token.kind),
-//RS         Some(TokKind::EqEq)
-//RS     ) && same_brace_scope_has_if(tokens, open - 1)
-//RS         && pattern_reaches_arrow(tokens, index)
-//RS }
-//RS 
-//RS fn same_brace_scope_has_if(tokens: &[Token], before: usize) -> bool {
-//RS     for token in tokens[..before].iter().rev() {
-//RS         match token.kind {
-//RS             TokKind::KwIf => return true,
-//RS             TokKind::LBrace | TokKind::RBrace | TokKind::UnifiedArrow | TokKind::LambdaArrow => {
-//RS                 return false
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn pattern_reaches_arrow(tokens: &[Token], index: usize) -> bool {
-//RS     let mut paren_depth = 0usize;
-//RS     let mut bracket_depth = 0usize;
-//RS     for token in &tokens[index + 1..] {
-//RS         match token.kind {
-//RS             TokKind::LParen => paren_depth += 1,
-//RS             TokKind::RParen if paren_depth > 0 => paren_depth -= 1,
-//RS             TokKind::LBracket => bracket_depth += 1,
-//RS             TokKind::RBracket if bracket_depth > 0 => bracket_depth -= 1,
-//RS             TokKind::UnifiedArrow | TokKind::LambdaArrow
-//RS                 if paren_depth == 0 && bracket_depth == 0 =>
-//RS             {
-//RS                 return true
-//RS             }
-//RS             TokKind::LBrace | TokKind::RBrace if paren_depth == 0 && bracket_depth == 0 => {
-//RS                 return false;
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn formatted_arm_block_opens(tokens: &[Token], index: usize) -> bool {
-//RS     matches!(tokens.get(index).map(|t| &t.kind), Some(TokKind::LBrace))
-//RS         && matches!(
-//RS             index
-//RS                 .checked_sub(1)
-//RS                 .and_then(|i| tokens.get(i))
-//RS                 .map(|t| &t.kind),
-//RS             Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
-//RS         )
-//RS }
-//RS 
-//RS fn formatted_lambda_params_open(tokens: &[Token], index: usize) -> bool {
-//RS     if !matches!(tokens.get(index).map(|t| &t.kind), Some(TokKind::LParen)) {
-//RS         return false;
-//RS     }
-//RS     let mut depth = 0usize;
-//RS     for (cursor, token) in tokens.iter().enumerate().skip(index) {
-//RS         match token.kind {
-//RS             TokKind::LParen => depth += 1,
-//RS             TokKind::RParen => {
-//RS                 depth -= 1;
-//RS                 if depth == 0 {
-//RS                     return matches!(
-//RS                         tokens.get(cursor + 1).map(|t| &t.kind),
-//RS                         Some(TokKind::UnifiedArrow | TokKind::LambdaArrow)
-//RS                     );
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn next_token_matches(
-//RS     original: &[Token],
-//RS     original_i: usize,
-//RS     formatted: &[Token],
-//RS     formatted_i: usize,
-//RS ) -> bool {
-//RS     match (original.get(original_i), formatted.get(formatted_i)) {
-//RS         (None, None) => true,
-//RS         (Some(original), Some(formatted)) => token_kinds_equal(&original.kind, &formatted.kind),
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn struct_literal_head_before_brace(tokens: &[Token], open: usize) -> bool {
-//RS     match open
-//RS         .checked_sub(1)
-//RS         .and_then(|i| tokens.get(i))
-//RS         .map(|t| &t.kind)
-//RS     {
-//RS         Some(
-//RS             TokKind::Dot
-//RS             | TokKind::Colon
-//RS             | TokKind::ColonColon
-//RS             | TokKind::Comma
-//RS             | TokKind::LParen
-//RS             | TokKind::Eq
-//RS             | TokKind::KwReturn,
-//RS         ) => true,
-//RS         Some(TokKind::Ident(name)) => name.starts_with(char::is_uppercase),
-//RS         Some(TokKind::RBracket) => {
-//RS             let Some(bracket_open) = open.checked_sub(2) else {
-//RS                 return false;
-//RS             };
-//RS             matches!(
-//RS                 tokens.get(bracket_open).map(|t| &t.kind),
-//RS                 Some(TokKind::LBracket)
-//RS             ) && matches!(
-//RS                 bracket_open
-//RS                     .checked_sub(1)
-//RS                     .and_then(|i| tokens.get(i))
-//RS                     .map(|t| &t.kind),
-//RS                 Some(TokKind::Ident(name)) if name.starts_with(char::is_uppercase)
-//RS             )
-//RS         }
-//RS         Some(TokKind::Gt) => true,
-//RS         _ => false,
-//RS     }
-//RS }
-//RS 
-//RS fn formatted_struct_shorthand_expansion(tokens: &[Token], index: usize) -> bool {
-//RS     let (
-//RS         Some(Token {
-//RS             kind: TokKind::Colon,
-//RS             ..
-//RS         }),
-//RS         Some(Token {
-//RS             kind: TokKind::Ident(value),
-//RS             ..
-//RS         }),
-//RS     ) = (tokens.get(index), tokens.get(index + 1))
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     let Some(Token {
-//RS         kind: TokKind::Ident(field),
-//RS         ..
-//RS     }) = index.checked_sub(1).and_then(|i| tokens.get(i))
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     if field != value {
-//RS         return false;
-//RS     }
-//RS     let mut depth = 0usize;
-//RS     for cursor in (0..index).rev() {
-//RS         match tokens[cursor].kind {
-//RS             TokKind::RBrace => depth += 1,
-//RS             TokKind::LBrace if depth == 0 => {
-//RS                 return struct_literal_head_before_brace(tokens, cursor);
-//RS             }
-//RS             TokKind::LBrace => depth -= 1,
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn formatted_default_module_alias(tokens: &[Token], index: usize) -> bool {
-//RS     let (
-//RS         Some(Token {
-//RS             kind: TokKind::Ident(as_kw),
-//RS             ..
-//RS         }),
-//RS         Some(Token {
-//RS             kind: TokKind::Ident(alias),
-//RS             ..
-//RS         }),
-//RS     ) = (tokens.get(index), tokens.get(index + 1))
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     as_kw == jet::Syntax::KW_AS
-//RS         && matches!(
-//RS             index.checked_sub(1).and_then(|i| tokens.get(i)).map(|t| &t.kind),
-//RS             Some(TokKind::Ident(segment)) if segment == alias
-//RS         )
-//RS         && matches!(
-//RS             index
-//RS                 .checked_sub(2)
-//RS                 .and_then(|i| tokens.get(i))
-//RS                 .map(|t| &t.kind),
-//RS             Some(TokKind::Dot)
-//RS         )
-//RS         && exact_use_path_before_alias(tokens, index)
-//RS }
-//RS 
-//RS fn exact_use_path_before_alias(tokens: &[Token], alias_index: usize) -> bool {
-//RS     let Some(use_index) = tokens[..alias_index]
-//RS         .iter()
-//RS         .rposition(|token| matches!(token.kind, TokKind::KwUse))
-//RS     else {
-//RS         return false;
-//RS     };
-//RS     let path = &tokens[use_index + 1..alias_index];
-//RS     if path.len() < 3 || path.len() % 2 == 0 {
-//RS         return false;
-//RS     }
-//RS     path.iter().enumerate().all(|(index, token)| {
-//RS         if index % 2 == 0 {
-//RS             matches!(token.kind, TokKind::Ident(_))
-//RS         } else {
-//RS             matches!(token.kind, TokKind::Dot)
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn formatted_struct_separator(tokens: &[Token], index: usize) -> bool {
-//RS     if !matches!(tokens.get(index).map(|t| &t.kind), Some(TokKind::Comma)) {
-//RS         return false;
-//RS     }
-//RS     let mut depth = 0usize;
-//RS     for cursor in (0..index).rev() {
-//RS         match tokens[cursor].kind {
-//RS             TokKind::RBrace => depth += 1,
-//RS             TokKind::LBrace if depth == 0 => {
-//RS                 return struct_literal_head_before_brace(tokens, cursor);
-//RS             }
-//RS             TokKind::LBrace => depth -= 1,
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS #[test]
-//RS fn fmt_is_lossless_on_supported_source_corpus() {
-//RS     // The recursive parser's large expression frames exceed the default test
-//RS     // thread stack on the nested XML corpus fixture. Isolate this one corpus
-//RS     // worker without changing global test settings, and preserve its panic.
-//RS     let worker = std::thread::Builder::new()
-//RS         .name("fmt-lossless-corpus".into())
-//RS         .stack_size(64 * 1024 * 1024)
-//RS         .spawn(run_supported_source_corpus)
-//RS         .expect("start lossless formatter corpus worker");
-//RS     if let Err(payload) = worker.join() {
-//RS         std::panic::resume_unwind(payload);
-//RS     }
-//RS }
-//RS 
-//RS fn run_supported_source_corpus() {
-//RS     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-//RS     let example_files = collect_jet_files_recursive(&root.join("Examples"));
-//RS     let ui_files = collect_jet_files_recursive(&root.join("tests/ui"));
-//RS     let mut example_programs = 0usize;
-//RS     let mut example_configs = 0usize;
-//RS     for path in &example_files {
-//RS         let name = path.file_name().and_then(|name| name.to_str());
-//RS         if matches!(
-//RS             name,
-//RS             Some(jet::Syntax::PAYLOAD_FILE)
-//RS                 | Some(jet::Syntax::WORKSPACE_FILE)
-//RS                 | Some(jet::Syntax::PACKAGE_FILE)
-//RS         ) {
-//RS             example_configs += 1;
-//RS             continue;
-//RS         }
-//RS         let src = fs::read_to_string(path).unwrap();
-//RS         match jet::format_source(&src) {
-//RS             Ok(formatted) => {
-//RS                 assert_fmt_preserves_token_stream(path, &src, &formatted);
-//RS                 example_programs += 1;
-//RS             }
-//RS             Err(diagnostics) => {
-//RS                 let formatted = jet::Package::format_source(&src, path.display().to_string())
-//RS                     .unwrap_or_else(|_| {
-//RS                         panic!(
-//RS                             "example program failed to parse for fmt on {}:\n{}",
-//RS                             path.display(),
-//RS                             jet::render_diagnostics(
-//RS                                 &path.display().to_string(),
-//RS                                 &src,
-//RS                                 &diagnostics
-//RS                             )
-//RS                         )
-//RS                     });
-//RS                 assert_fmt_preserves_token_stream(path, &src, &formatted);
-//RS                 example_configs += 1;
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut ui_parse_valid = 0usize;
-//RS     let mut ui_parse_invalid = 0usize;
-//RS     let mut ui_configs = 0usize;
-//RS     let mut actual_invalid = Vec::new();
-//RS     let mut mismatches = Vec::new();
-//RS     for path in &ui_files {
-//RS         let name = path.file_name().and_then(|name| name.to_str());
-//RS         if matches!(
-//RS             name,
-//RS             Some(jet::Syntax::PAYLOAD_FILE)
-//RS                 | Some(jet::Syntax::WORKSPACE_FILE)
-//RS                 | Some(jet::Syntax::PACKAGE_FILE)
-//RS         ) {
-//RS             // Package/workspace manifests are config, never program source — the
-//RS             // same rule the examples loop above applies. They are not pinned in
-//RS             // UI_PARSE_INVALID; a new manifest fixture needs no manifest entry.
-//RS             ui_configs += 1;
-//RS             continue;
-//RS         }
-//RS         let src = fs::read_to_string(path).unwrap();
-//RS         let relative = path
-//RS             .strip_prefix(&root)
-//RS             .unwrap()
-//RS             .to_string_lossy()
-//RS             .replace('\\', "/");
-//RS         let expected_invalid = UI_PARSE_INVALID.binary_search(&relative.as_str()).is_ok();
-//RS         // `parse_for_check` returns recovered AST items alongside teaching
-//RS         // diagnostics for retired spellings. Ask that parser directly so a
-//RS         // recoverable diagnostic is not mistaken for a hard parse failure;
-//RS         // `Compiler::parse_source` intentionally flattens both outcomes into
-//RS         // a public syntax-tree view.
-//RS         let (tokens, lex_diags) = jet::Lexer::lex(&src);
-//RS         let actual_is_invalid =
-//RS             !lex_diags.is_empty() || jet::Parser::parse_for_check(&tokens).is_err();
-//RS         if actual_is_invalid != expected_invalid {
-//RS             mismatches.push(format!(
-//RS                 "UI parser-validity changed for {relative}; update the pinned manifest only after review (expected_invalid={expected_invalid}, actual_is_invalid={actual_is_invalid})"
-//RS             ));
-//RS             continue;
-//RS         }
-//RS         if expected_invalid {
-//RS             actual_invalid.push(relative);
-//RS             ui_parse_invalid += 1;
-//RS         } else {
-//RS             let is_fixed_companion = path
-//RS                 .file_name()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .is_some_and(|name| name.ends_with(".fixed.jet"));
-//RS             // UI error fixtures may use intentional non-canonical spelling; .fixed.jet
-//RS             // companions are fmt outputs and are not re-checked for token identity.
-//RS             if !is_fixed_companion {
-//RS                 let formatted = jet::format_source(&src).unwrap_or_else(|diagnostics| {
-//RS                     panic!(
-//RS                         "parse-valid UI fixture failed formatter parse on {}:\n{}",
-//RS                         path.display(),
-//RS                         jet::render_diagnostics(&path.display().to_string(), &src, &diagnostics)
-//RS                     )
-//RS                 });
-//RS                 assert_fmt_preserves_token_stream(path, &src, &formatted);
-//RS             }
-//RS             ui_parse_valid += 1;
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         mismatches.is_empty(),
-//RS         "UI corpus parser-validity mismatches ({} found):\n{}",
-//RS         mismatches.len(),
-//RS         mismatches.join("\n")
-//RS     );
-//RS     assert_eq!(
-//RS         example_files.len(),
-//RS         example_programs + example_configs,
-//RS         "every example .jet file must be program source or explicit package/workspace config"
-//RS     );
-//RS     assert_eq!(
-//RS         ui_files.len(),
-//RS         ui_parse_valid + ui_parse_invalid + ui_configs,
-//RS         "every UI .jet fixture must be classified by its actual formatter parse result"
-//RS     );
-//RS     assert!(
-//RS         UI_PARSE_INVALID.windows(2).all(|pair| pair[0] < pair[1]),
-//RS         "UI parse-invalid manifest must be sorted and duplicate-free"
-//RS     );
-//RS     assert_eq!(
-//RS         actual_invalid, UI_PARSE_INVALID,
-//RS         "discovered parser-invalid UI set must exactly equal the pinned manifest"
-//RS     );
-//RS     eprintln!(
-//RS         "formatter corpus: {example_programs} example programs, {example_configs} configs, \
-//RS          {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures, \
-//RS          {ui_configs} UI manifest configs"
-//RS     );
-//RS }
-//RS 
-//RS fn ordered_sources_diff(original: &str, formatted: &str) -> Result<(), String> {
-//RS     let path = std::path::Path::new("canonical-rule.jet");
-//RS     let original = canonical_tokens(original, path);
-//RS     let formatted = canonical_tokens(formatted, path);
-//RS     ordered_token_diff(path, &original, &formatted)
-//RS }
-//RS 
-//RS #[test]
-//RS fn canonical_rewrite_rules_are_explicit_and_narrow() {
-//RS     let allowed = [
-//RS         (
-//RS             "top-level ordering",
-//RS             "#Target(Web)\nuse core.ui as ui\nfn run() {}\n",
-//RS             "use core.ui as ui\n#Target(Web)\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "import-hoisted top-level comments",
-//RS             "// helper\nfn helper() {}\n// import\nuse core.ui as ui\n",
-//RS             "// helper\n// import\nuse core.ui as ui\nfn helper() {}\n",
-//RS         ),
-//RS         (
-//RS             "spanless marker comment position",
-//RS             "// web target\n#Target(Web)\nfn run() {}\n",
-//RS             "#Target(Web)\n// web target\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "marker grouping",
-//RS             "#Codable\n#RenameAll(camel)\nstruct S {}\n",
-//RS             "#[Codable, RenameAll(camel)]\nstruct S {}\n",
-//RS         ),
-//RS         (
-//RS             "static generic call",
-//RS             "fn run() { Pool<Node>.new() }\n",
-//RS             "fn run() { Pool.new<Node>() }\n",
-//RS         ),
-//RS         (
-//RS             "external method",
-//RS             "fn Point.len(self) Int -> 1\n",
-//RS             "impl Point { fn len(self) -> Int -> 1 }\n",
-//RS         ),
-//RS         (
-//RS             "enum group separators",
-//RS             "enum E { G { A, B } }\n",
-//RS             "enum E { G { A B } }\n",
-//RS         ),
-//RS         (
-//RS             "struct declaration separators",
-//RS             "struct S { x: Int, y: Int }\n",
-//RS             "struct S { x: Int y: Int }\n",
-//RS         ),
-//RS         (
-//RS             "trailing comma",
-//RS             "fn run() { xs :: [1,] }\n",
-//RS             "fn run() { xs :: [1] }\n",
-//RS         ),
-//RS         (
-//RS             "default file alias",
-//RS             "use \"./foo\" as foo\nfn run() {}\n",
-//RS             "use \"./foo\"\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "typed-literal dot removal",
-//RS             "fn run() { p :: Point.{x: 1} }\n",
-//RS             "fn run() { p :: Point{x: 1} }\n",
-//RS         ),
-//RS         (
-//RS             "arrow unification",
-//RS             "fn run() { if x == { .A => print(1) } }\n",
-//RS             "fn run() { if x == { .A -> print(1) } }\n",
-//RS         ),
-//RS         (
-//RS             "retired result arrow on braced function",
-//RS             "fn parse_age() => Int { return 42 }\n",
-//RS             "fn parse_age() -> Int { return 42 }\n",
-//RS         ),
-//RS         (
-//RS             "dispatch arm block",
-//RS             "fn run() { if x == { .A -> print(1) } }\n",
-//RS             "fn run() { if x == { .A -> { print(1) } } }\n",
-//RS         ),
-//RS         (
-//RS             "bare lambda params",
-//RS             "fn run() { f :: x -> x }\n",
-//RS             "fn run() { f :: (x) -> x }\n",
-//RS         ),
-//RS         (
-//RS             "bare enum variant pattern",
-//RS             "fn run() { if x == { A(v) -> print(v) } }\n",
-//RS             "fn run() { if x == { .A(v) -> print(v) } }\n",
-//RS         ),
-//RS         (
-//RS             "bare None variant pattern",
-//RS             "fn run() { if x == { None -> print(0) } }\n",
-//RS             "fn run() { if x == { .None -> print(0) } }\n",
-//RS         ),
-//RS         (
-//RS             "struct shorthand label",
-//RS             "fn run() { p :: Point{x} }\n",
-//RS             "fn run() { p :: Point{x: x} }\n",
-//RS         ),
-//RS         (
-//RS             "default module alias",
-//RS             "use core.encoding.json\nfn run() {}\n",
-//RS             "use core.encoding.json as json\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "struct literal separator",
-//RS             "fn run() { p :: Point{x: 1 y: 2} }\n",
-//RS             "fn run() { p :: Point{x: 1, y: 2} }\n",
-//RS         ),
-//RS         (
-//RS             "anonymous union member order",
-//RS             "struct S { value: String | Char }\n",
-//RS             "struct S { value: Char | String }\n",
-//RS         ),
-//RS     ];
-//RS     for (name, original, formatted) in allowed {
-//RS         let diff = ordered_sources_diff(original, formatted);
-//RS         assert!(
-//RS             diff.is_ok(),
-//RS             "allowed canonical rewrite failed: {name}: {diff:?}"
-//RS         );
-//RS     }
-//RS 
-//RS     let paired_forbidden = [
-//RS         (
-//RS             "top-level ordering does not reorder ordinary items",
-//RS             "fn first() {}\nfn second() {}\n",
-//RS             "fn second() {}\nfn first() {}\n",
-//RS         ),
-//RS         (
-//RS             "import hoisting does not reorder comments",
-//RS             "// helper\nfn helper() {}\n// import\nuse core.ui as ui\n",
-//RS             "// import\n// helper\nuse core.ui as ui\nfn helper() {}\n",
-//RS         ),
-//RS         (
-//RS             "spanless marker movement does not delete comments",
-//RS             "// web target\n#Target(Web)\nfn run() {}\n",
-//RS             "#Target(Web)\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "marker grouping does not reorder markers",
-//RS             "#[Codable, RenameAll(camel)]\nstruct S {}\n",
-//RS             "#[RenameAll(camel), Codable]\nstruct S {}\n",
-//RS         ),
-//RS         (
-//RS             "generic-call rewrite requires a call",
-//RS             "fn run() { value :: Pool<Node>.field }\n",
-//RS             "fn run() { value :: Pool.field<Node> }\n",
-//RS         ),
-//RS         (
-//RS             "external-method rewrite preserves receiver",
-//RS             "fn Point.len(self) Int -> 1\n",
-//RS             "impl Other { fn len(self) -> Int -> 1 }\n",
-//RS         ),
-//RS         (
-//RS             "task-block rewrite preserves body",
-//RS             "fn run() { task.group g { x :: task { work() } } }\n",
-//RS             "fn run() { task.group g { x :: task { other() } } }\n",
-//RS         ),
-//RS         (
-//RS             "enum-group comma rule preserves variant order",
-//RS             "enum E { G { A, B } }\n",
-//RS             "enum E { G { B A } }\n",
-//RS         ),
-//RS         (
-//RS             "struct-declaration comma rule preserves field order",
-//RS             "struct S { x: Int, y: Int }\n",
-//RS             "struct S { y: Int x: Int }\n",
-//RS         ),
-//RS         (
-//RS             "trailing-comma rule does not remove argument separators",
-//RS             "fn run() { call(a, b) }\n",
-//RS             "fn run() { call(a b) }\n",
-//RS         ),
-//RS         (
-//RS             "file-alias rule requires the default alias",
-//RS             "use \"./foo\" as bar\nfn run() {}\n",
-//RS             "use \"./foo\"\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "arm-block rule does not remove explicit braces",
-//RS             "fn run() { if x == { .A -> { print(1) } } }\n",
-//RS             "fn run() { if x == { .A -> print(1) } }\n",
-//RS         ),
-//RS         (
-//RS             "lambda rule does not remove explicit parens",
-//RS             "fn run() { f :: (x) -> x }\n",
-//RS             "fn run() { f :: x -> x }\n",
-//RS         ),
-//RS         (
-//RS             "variant-dot rule requires a PascalCase pattern",
-//RS             "fn run() { if x == { value -> print(value) } }\n",
-//RS             "fn run() { if x == { .value -> print(value) } }\n",
-//RS         ),
-//RS         (
-//RS             "variant-dot rule requires a dispatch arm context",
-//RS             "fn run() { Foo work -> print(1) }\n",
-//RS             "fn run() { .Foo work -> print(1) }\n",
-//RS         ),
-//RS         (
-//RS             "shorthand expansion preserves field value",
-//RS             "fn run() { p :: Point{x} }\n",
-//RS             "fn run() { p :: Point{x: y} }\n",
-//RS         ),
-//RS         (
-//RS             "module alias requires exact use-path context",
-//RS             "use core.term as io\nfn run() { foo.bar }\n",
-//RS             "use core.term as io\nfn run() { foo.bar as bar }\n",
-//RS         ),
-//RS         (
-//RS             "struct-literal separator rule does not remove commas",
-//RS             "fn run() { p :: Point{x: 1, y: 2} }\n",
-//RS             "fn run() { p :: Point{x: 1 y: 2} }\n",
-//RS         ),
-//RS         (
-//RS             "union order rule requires a type annotation",
-//RS             "fn run() { value :: left | right }\n",
-//RS             "fn run() { value :: right | left }\n",
-//RS         ),
-//RS         (
-//RS             "union order rule rejects struct field values",
-//RS             "fn run() { p :: Point{x: left | right} }\n",
-//RS             "fn run() { p :: Point{x: right | left} }\n",
-//RS         ),
-//RS         (
-//RS             "union order rule rejects dotted member replacement",
-//RS             "struct S { value: A | B.C }\n",
-//RS             "struct S { value: B | A.C }\n",
-//RS         ),
-//RS         (
-//RS             "union order rule rejects generic member replacement",
-//RS             "struct S { value: A | B<C> }\n",
-//RS             "struct S { value: B | A<C> }\n",
-//RS         ),
-//RS         (
-//RS             "union order rule preserves every member",
-//RS             "struct S { value: A | B }\n",
-//RS             "struct S { value: A | C }\n",
-//RS         ),
-//RS     ];
-//RS     for (name, original, formatted) in paired_forbidden {
-//RS         assert!(
-//RS             ordered_sources_diff(original, formatted).is_err(),
-//RS             "paired forbidden neighbor was accepted: {name}"
-//RS         );
-//RS     }
-//RS 
-//RS     let forbidden = [
-//RS         (
-//RS             "operand reorder",
-//RS             "fn run() { x :: a + b }\n",
-//RS             "fn run() { x :: b + a }\n",
-//RS         ),
-//RS         (
-//RS             "marker payload deletion",
-//RS             "#Pre(x > 0, \"positive\") fn f(x: Int) {}\n",
-//RS             "#Pre(x > 0) fn f(x: Int) {}\n",
-//RS         ),
-//RS         (
-//RS             "comment reorder",
-//RS             "// first\n// second\nfn run() {}\n",
-//RS             "// second\n// first\nfn run() {}\n",
-//RS         ),
-//RS         (
-//RS             "grouping delimiter deletion",
-//RS             "fn run() { x :: (a + b) }\n",
-//RS             "fn run() { x :: a + b }\n",
-//RS         ),
-//RS         (
-//RS             "interpolation deletion",
-//RS             "fn run() { print(\"{a + b}\") }\n",
-//RS             "fn run() { print(\"{a}\") }\n",
-//RS         ),
-//RS         (
-//RS             "arbitrary dotted alias insertion",
-//RS             "fn run() { foo.bar }\n",
-//RS             "fn run() { foo.bar as bar }\n",
-//RS         ),
-//RS         (
-//RS             "operator deletion",
-//RS             "fn run() { x :: a && b }\n",
-//RS             "fn run() { x :: a b }\n",
-//RS         ),
-//RS         (
-//RS             "meaningful token addition",
-//RS             "fn run() { call(a) }\n",
-//RS             "fn run() { call(a, b) }\n",
-//RS         ),
-//RS     ];
-//RS     for (name, original, formatted) in forbidden {
-//RS         assert!(
-//RS             ordered_sources_diff(original, formatted).is_err(),
-//RS             "forbidden rewrite was accepted: {name}"
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 1161 tests/support/fmt_lossless.rs:1-1981
+use core.fs as fs
+use core.path.OSPath
+use jet.Lexer.[StrTokPart, TokKind, Token, lex]
+use jet.Diagnostics.Diagnostic
+use jet.Syntax as Syntax
+use jet.Package as Package
+use jet.Parser as Parser
+use jet.[format_source, render_diagnostics]
 
+// Rust: tests/support/fmt_lossless.rs:6
+UI_PARSE_INVALID :: [
+    "tests/ui/E-CALL-VALUE_call_result_not_called.jet",
+    "tests/ui/E0922_body_debug_derive.jet",
+    "tests/ui/E0927_retired_pure_callable.jet",
+    "tests/ui/E0927_retired_pure_trait_oneline.jet",
+    "tests/ui/E0927_retired_pure_trait_twoline.jet",
+    "tests/ui/E0927_unknown_marker_block.jet",
+    "tests/ui/E0927_unknown_marker_constant.jet",
+    "tests/ui/E0927_unknown_marker_distinct.jet",
+    "tests/ui/E0927_unknown_marker_expression.jet",
+    "tests/ui/E0927_unknown_marker_parameter.jet",
+    "tests/ui/E0927_unknown_marker_statement.jet",
+    "tests/ui/E0929_body_capability_derive.jet",
+    "tests/ui/E2714_derive_old_for.jet",
+    "tests/ui/assign_in_condition.jet",
+    "tests/ui/auto_derive_invalid_sign.jet",
+    "tests/ui/bad_escape.jet",
+    "tests/ui/binpat_bad_width.jet",
+    "tests/ui/binpat_multibyte_needs_endian.jet",
+    "tests/ui/binpat_rest_not_final.jet",
+    "tests/ui/binpat_take_pattern_bad_width.jet",
+    "tests/ui/cffi_e3206_reserved_segment.jet",
+    "tests/ui/cffi_e3207_bindgen_outside_cache.jet",
+    "tests/ui/cffi_retired_at_extern.jet",
+    "tests/ui/cffi_retired_hash_extern.jet",
+    "tests/ui/chained_comparison_mixed_direction.jet",
+    "tests/ui/compiler_fact_unknown_member.jet",
+    "tests/ui/compound_non_place_target.jet",
+    "tests/ui/comptime_keyword_retired.jet",
+    "tests/ui/comptime_known_block_retired.jet",
+    "tests/ui/comptime_known_retired.jet",
+    "tests/ui/comptime_prefix_dollar_retired.jet",
+    "tests/ui/computed_fixed_list_noninteger.jet",
+    "tests/ui/computed_fixed_list_range.jet",
+    "tests/ui/const_retired.jet",
+    "tests/ui/context_eq_rejected.jet",
+    "tests/ui/context_unknown_field.jet",
+    "tests/ui/continue_teaches_next.jet",
+    "tests/ui/control_body_needs_braces.jet",
+    "tests/ui/copy_keyword_retired_e0991.jet",
+    "tests/ui/debug_unknown_selector.jet",
+    "tests/ui/declared_text_block_undeclared.jet",
+    "tests/ui/defer_only_close.jet",
+    "tests/ui/deref_forbidden.jet",
+    "tests/ui/dispatch_missing_eq.jet",
+    "tests/ui/dispatch_pattern_needs_eq.jet",
+    "tests/ui/dispatch_redundant_subject.jet",
+    "tests/ui/dotted_literal_e0320.jet",
+    "tests/ui/dunder_marker_not_generated.jet",
+    "tests/ui/dunder_reserved.jet",
+    "tests/ui/effect_arrow_retired.jet",
+    "tests/ui/empty_map_colon_retired.jet",
+    "tests/ui/enum_group_payload.jet",
+    "tests/ui/enum_multi_positional_payload.jet",
+    "tests/ui/enum_pattern_needs_dot_or.jet",
+    "tests/ui/enum_pattern_needs_dot_payload.jet",
+    "tests/ui/external_method_retired_separator.jet",
+    "tests/ui/fact_plane_type_position.jet",
+    "tests/ui/fact_read_type_position.jet",
+    "tests/ui/fallible_unit_return_retired.jet",
+    "tests/ui/fenced_name_bad_position.jet",
+    "tests/ui/fenced_name_binding_nonname.jet",
+    "tests/ui/fenced_name_duplicate.jet",
+    "tests/ui/fenced_name_empty.jet",
+    "tests/ui/fenced_name_mismatched_counts.jet",
+    "tests/ui/ffi_body_not_string.jet",
+    "tests/ui/fixed_interpolation_malformed_precision.jet",
+    "tests/ui/fixed_interpolation_missing_precision.jet",
+    "tests/ui/flow_pipe_unassigned.jet",
+    "tests/ui/fn_type_zone_misplaced.jet",
+    "tests/ui/foreign_declaration_binding.jet",
+    "tests/ui/foreign_do.jet",
+    "tests/ui/foreign_for.jet",
+    "tests/ui/foreign_loop_parenthesized.jet",
+    "tests/ui/foreign_while.jet",
+    "tests/ui/generated_cffi_e3206.jet",
+    "tests/ui/generated_cffi_e3207.jet",
+    "tests/ui/generic_square_brackets.jet",
+    "tests/ui/if_expr_branch_type_mismatch.jet",
+    "tests/ui/if_expr_missing_else.jet",
+    "tests/ui/impl_colon_separator.jet",
+    "tests/ui/impure_no_reason.jet",
+    "tests/ui/inline_range_nonliteral_bound.jet",
+    "tests/ui/interp_debug_label_empty.jet",
+    "tests/ui/interp_empty.jet",
+    "tests/ui/interp_unclosed.jet",
+    "tests/ui/label_not_on_loop.jet",
+    "tests/ui/layout_columnar_partial.jet",
+    "tests/ui/layout_columnar_prefix_reserved.jet",
+    "tests/ui/layout_keyword_retired.jet",
+    "tests/ui/layout_unknown_variant.jet",
+    "tests/ui/layout_unsupported_variant.jet",
+    "tests/ui/loop_counter_form_retired.jet",
+    "tests/ui/loop_header_semicolon_retired.jet",
+    "tests/ui/loop_label_prefix_old_form.jet",
+    "tests/ui/marker_argument_shape.jet",
+    "tests/ui/marker_decl_rejected_forms.jet",
+    "tests/ui/marker_empty_arguments.jet",
+    "tests/ui/marker_experimental_at.jet",
+    "tests/ui/marker_experimental_hash.jet",
+    "tests/ui/marker_hardened_at.jet",
+    "tests/ui/marker_hardened_hash.jet",
+    "tests/ui/marker_repeated_on_one_target.jet",
+    "tests/ui/marker_retired_html_name.jet",
+    "tests/ui/marker_retired_known.jet",
+    "tests/ui/marker_retired_sql_angle.jet",
+    "tests/ui/marker_retired_tag.jet",
+    "tests/ui/marker_retired_task.jet",
+    "tests/ui/marker_tested_at.jet",
+    "tests/ui/marker_tested_hash.jet",
+    "tests/ui/marker_wrong_at_plane.jet",
+    "tests/ui/member_spread_not_ident.jet",
+    "tests/ui/meta_bad_maturity.jet",
+    "tests/ui/meta_on_expression.jet",
+    "tests/ui/meta_unknown_field.jet",
+    "tests/ui/migration_unknown_op.jet",
+    "tests/ui/module_brace_group.jet",
+    "tests/ui/module_unknown_namespace.jet",
+    "tests/ui/module_wildcard.jet",
+    "tests/ui/namespace_foreign_kw.jet",
+    "tests/ui/nested_option.jet",
+    "tests/ui/no_prelude_duplicate.jet",
+    "tests/ui/off_debug_attr_on_expression.jet",
+    "tests/ui/off_debug_attr_on_item.jet",
+    "tests/ui/off_debug_doubled_attr.jet",
+    "tests/ui/operator_foreign_guess.jet",
+    "tests/ui/opt_chain_method.jet",
+    "tests/ui/param_label_duplicate.jet",
+    "tests/ui/param_zone_empty.jet",
+    "tests/ui/param_zone_empty_positional.jet",
+    "tests/ui/param_zone_misplaced.jet",
+    "tests/ui/param_zone_repeated.jet",
+    "tests/ui/parse_pattern_adjacent_holes.jet",
+    "tests/ui/perf_budget_unknown_role_field.jet",
+    "tests/ui/persist_not_module_level.jet",
+    "tests/ui/policy_conflicting_module.jet",
+    "tests/ui/policy_site_bound_authority.jet",
+    "tests/ui/positional_tuple.jet",
+    "tests/ui/project_module_invalid/broken.jet",
+    "tests/ui/protocol_bad_endpoint.jet",
+    "tests/ui/pub_file_duplicate_marker.jet",
+    "tests/ui/pub_file_priv_without_marker.jet",
+    "tests/ui/pub_file_private_teaching.jet",
+    "tests/ui/pub_file_publicfile_teaching.jet",
+    "tests/ui/pub_file_pub_priv_conflict.jet",
+    "tests/ui/pub_file_redundant_pub.jet",
+    "tests/ui/pub_file_section_label.jet",
+    "tests/ui/pub_package_bad_qualifier.jet",
+    "tests/ui/qq_block_fallback.jet",
+    "tests/ui/quantity_unknown_kind.jet",
+    "tests/ui/range_arm_dot_dot_eq.jet",
+    "tests/ui/range_arm_step.jet",
+    "tests/ui/range_constraint_value_rejected.jet",
+    "tests/ui/range_type_empty_range.jet",
+    "tests/ui/repl_effect_denied_e1803.jet",
+    "tests/ui/result_old_syntax.jet",
+    "tests/ui/retired_bare_sanitizer.jet",
+    "tests/ui/retired_cli_marker.jet",
+    "tests/ui/retired_error_type.jet",
+    "tests/ui/retired_function_body_marker.jet",
+    "tests/ui/retired_void_result.jet",
+    "tests/ui/return_arrow_split.jet",
+    "tests/ui/root_param_shape.jet",
+    "tests/ui/schedule_every_without_job.jet",
+    "tests/ui/job_on_method.jet",
+    "tests/ui/shared_retired_constructor.jet",
+    "tests/ui/shield_arguments.jet",
+    "tests/ui/single_bracket_marker.jet",
+    "tests/ui/stacked_type_markers.jet",
+    "tests/ui/string_lone_brace.jet",
+    "tests/ui/subjectless_guard_direct_nesting.jet",
+    "tests/ui/subjectless_guard_value_missing_else.jet",
+    "tests/ui/suppress_retired.jet",
+    "tests/ui/tag_missing_policy.jet",
+    "tests/ui/tag_with_method.jet",
+    "tests/ui/take_pattern_bad_hole.jet",
+    "tests/ui/take_pattern_computed_arg.jet",
+    "tests/ui/take_pattern_string_typed_bad_hole.jet",
+    "tests/ui/task_group_parameter_label.jet",
+    "tests/ui/task_group_value.jet",
+    "tests/ui/task_unknown_selector.jet",
+    "tests/ui/test_block_nested.jet",
+    "tests/ui/trailing_block_double.jet",
+    "tests/ui/trailing_block_not_function.jet",
+    "tests/ui/trailing_block_on_index.jet",
+    "tests/ui/tuple_numeric_field.jet",
+    "tests/ui/tuple_single_field.jet",
+    "tests/ui/two_capability_markers.jet",
+    "tests/ui/two_parse_errors.jet",
+    "tests/ui/typed_binding_retired.jet",
+    "tests/ui/uninit_annotated_retired.jet",
+    "tests/ui/uninit_marker_retired.jet",
+    "tests/ui/uninit_no_type.jet",
+    "tests/ui/unit_family_bad_denominator.jet",
+    "tests/ui/unit_family_base_metadata.jet",
+    "tests/ui/unit_family_derived_requires_base.jet",
+    "tests/ui/unit_family_duplicate_metadata.jet",
+    "tests/ui/unit_family_float_metadata.jet",
+    "tests/ui/unit_family_missing_base.jet",
+    "tests/ui/unit_family_unknown_header_field.jet",
+    "tests/ui/unit_family_unknown_metadata.jet",
+    "tests/ui/unit_family_zero_denominator.jet",
+    "tests/ui/unit_family_zero_scale.jet",
+    "tests/ui/unit_format_unknown_style.jet",
+    "tests/ui/unknown_char.jet",
+    "tests/ui/unsafe_extern_rust_teaching.jet",
+    "tests/ui/unsafe_fn_missing_reason.jet",
+    "tests/ui/unsafe_missing_reason.jet",
+    "tests/ui/unterminated_block_comment.jet",
+    "tests/ui/unterminated_string.jet",
+    "tests/ui/unterminated_triple_string.jet",
+    "tests/ui/value_dispatch_missing_else.jet",
+    "tests/ui/variadic_not_last.jet",
+    "tests/ui/web_target_web_on_module.jet",
+    "tests/ui/yielding_loop_missing_item.jet",
+    "tests/ui/yielding_loop_nonfinite.jet",
+]
+
+// Rust: tests/support/fmt_lossless.rs:224
+fn collect_jet_files_recursive(dir: &OSPath) -> [OSPath] {
+    out := [OSPath]{}
+    collect_matching_jet_files(dir, &out)
+    &out.sort()
+    out
+}
+
+// Rust: tests/support/fmt_lossless.rs:231
+fn collect_matching_jet_files(dir: &OSPath, out: &[OSPath]) {
+    if dir.file_name().and_then((name) -> name.to_str()) == Val(".jet") -> return
+    loop entry in fs.read_dir(dir).unwrap() {
+        path :: entry.unwrap().path()
+        if path.is_dir() {
+            collect_matching_jet_files(&path, out)
+        } else if path.extension().and_then((e) -> e.to_str()) == Val(Syntax.FILE_EXT) {
+            &out.push(path)
+        }
+    }
+}
+
+// Ordered exact loss oracle: only parser-equivalent, explicitly named rewrites
+// may alter tokens. Expression operands, operators, marker payloads, comments,
+// and interpolation tokens remain ordered and intact.
+// Rust: tests/support/fmt_lossless.rs:255
+fn canonical_tokens(src: String, path: &OSPath) -> [Token] {
+    lexed :: lex(src)
+    tokens :: lexed.0
+    diagnostics :: lexed.1
+    assert(diagnostics.is_empty(), "lex failed on {path.display()}:\n{render_diagnostics(path.display().to_string(), src, &diagnostics)}")
+    normalized :: canonicalize_external_methods(canonicalize_static_generic_calls(expand_marker_groups(canonicalize_file_prefix(^tokens))))
+    enum_commas :: enum_group_commas(&normalized)
+    field_commas :: declaration_field_commas(&normalized)
+    filtered := [Token]{}
+    loop (index, token) in normalized.iter().enumerate() {
+        if !enum_commas[index] && !field_commas[index] && !(token.kind == { .Semi | .Eof -> true else -> false }) {
+            &filtered.push(token.clone())
+        }
+    }
+    canonical := [Token]{}
+    index := 0
+    loop index < filtered.len() {
+        if filtered[index].kind == .Comma && filtered.get(index + 1).is_some_and((next) -> next.kind == { .RParen | .RBracket | .RBrace -> true else -> false }) {
+            index += 1
+            next
+        }
+        // D-FAIL-ERROR1=A: default Err is omitted only in fallible returns.
+        if (filtered[index].kind == { .Ident(name) -> name == Syntax.TYPE_ERR else -> false }) && canonical.last().is_some_and((token) -> token.kind == .Bang) && filtered.get(index + 1).is_some_and((token) -> token.kind == { .LBrace | .Eq -> true else -> false }) {
+            index += 1
+            next
+        }
+        if redundant_default_file_alias(&canonical, &filtered, index) {
+            index += 2
+            next
+        }
+        &canonical.push(filtered[index].clone())
+        index += 1
+    }
+    canonical
+}
+
+// Rust: tests/support/fmt_lossless.rs:319
+fn canonicalize_file_prefix(tokens: [Token]) -> [Token] {
+    chunks := [[Token]]{}
+    chunk := [Token]{}
+    brace_depth := 0
+    loop token in tokens {
+        if token.kind == {
+            .LBrace -> brace_depth += 1
+            .RBrace -> brace_depth -= 1
+            else -> {}
+        }
+        end :: token.kind == .Eof || (brace_depth == 0 && token.kind == .Semi)
+        &chunk.push(^token)
+        if end {
+            &chunks.push(^chunk)
+            chunk = [Token]{}
+        }
+    }
+    if !chunk.is_empty() -> &chunks.push(^chunk)
+    groups := [(category: Int, tokens: [Token])]{}
+    leading_comments := [Token]{}
+    loop chunk in chunks {
+        if chunk.iter().all((token) -> token.kind == { .LineComment(_) | .BlockComment(_) | .Semi | .Eof -> true else -> false }) {
+            &leading_comments.extend(^chunk)
+            next
+        }
+        &leading_comments.extend(^chunk)
+        category :: file_chunk_category(&leading_comments)
+        &groups.push((category: category, tokens: ^leading_comments))
+        leading_comments = [Token]{}
+    }
+    if !leading_comments.is_empty() -> &groups.push((category: 3, tokens: ^leading_comments))
+    loop directive_i in 0..groups.len() {
+        if !is_spanless_file_marker_group(&groups[directive_i].tokens) -> next
+        displaced := [Token]{}
+        loop groups[directive_i].tokens.first().is_some_and((token) -> token.kind == { .LineComment(_) | .BlockComment(_) | .Semi -> true else -> false }) {
+            &displaced.push(&groups[directive_i].tokens.remove(0))
+        }
+        loop item_i in directive_i + 1..groups.len() {
+            if groups[item_i].category == 3 {
+                &displaced.append(&groups[item_i].tokens)
+                groups[item_i].tokens = ^displaced
+                break
+            }
+        }
+    }
+    loop import_i in 0..groups.len() {
+        if groups[import_i].category != 1 -> next
+        hoisted_comments := [Token]{}
+        loop earlier in 0..import_i {
+            &hoisted_comments.extend(drain_top_level_comments(&groups[earlier].tokens))
+        }
+        if !hoisted_comments.is_empty() {
+            &hoisted_comments.append(&groups[import_i].tokens)
+            groups[import_i].tokens = ^hoisted_comments
+        }
+    }
+    &groups.retain((group) -> !group.tokens.is_empty())
+    &groups.sort_by_key((group) -> group.category)
+    out := [Token]{}
+    loop group in groups -> &out.extend(^group.tokens)
+    out
+}
+
+// Rust: tests/support/fmt_lossless.rs:397
+fn is_spanless_file_marker_group(tokens: &[Token]) -> Bool {
+    kinds :: tokens.iter().filter((token) -> !(token.kind == { .LineComment(_) | .BlockComment(_) | .Semi | .Eof -> true else -> false })).map((token) -> &token.kind).collect()
+    if kinds.len() < 2 || kinds[0] != .Hash -> return false
+    kinds[1] == { .Ident(name) -> name == Syntax.MARKER_TARGET || name == Syntax.MARKER_HTML else -> false }
+}
+
+// Rust: tests/support/fmt_lossless.rs:415
+fn drain_top_level_comments(tokens: &[Token]) -> [Token] {
+    comments := [Token]{}
+    retained := [Token]{}
+    brace_depth := 0
+    loop token in &tokens.drain(..) {
+        if token.kind == {
+            .LBrace -> brace_depth += 1
+            .RBrace -> brace_depth -= 1
+            .LineComment(_) | .BlockComment(_) -> {
+                if brace_depth == 0 {
+                    &comments.push(^token)
+                    next
+                }
+            }
+            else -> {}
+        }
+        &retained.push(^token)
+    }
+    tokens = ^retained
+    comments
+}
+
+// Rust: tests/support/fmt_lossless.rs:435
+fn file_chunk_category(chunk: &[Token]) -> Int {
+    kinds :: chunk.iter().filter((token) -> !(token.kind == { .LineComment(_) | .BlockComment(_) | .Semi | .Eof -> true else -> false })).map((token) -> &token.kind).collect()
+    if kinds.is_empty() -> return 3
+    if kinds[0] == .KwUse -> return 1
+    if kinds[0] == .KwPub && kinds.iter().skip(1).any((kind) -> kind == .KwUse) -> return 1
+    if kinds.len() > 1 && kinds[0] == .Hash {
+        if kinds[1] == {
+            .Ident(name) -> {
+                if name == Syntax.MARKER_PUB_FILE || name == Syntax.MARKER_NO_PRELUDE -> return 0
+                if name == Syntax.MARKER_TARGET || name == Syntax.MARKER_HTML -> return 2
+            }
+            else -> {}
+        }
+    }
+    3
+}
+
+// Rust: tests/support/fmt_lossless.rs:469
+fn expand_marker_groups(tokens: [Token]) -> [Token] {
+    out := [Token]{}
+    index := 0
+    loop index < tokens.len() {
+        if tokens[index].kind == .Hash && tokens.get(index + 1).is_some_and((t) -> t.kind == .LBracket) {
+            if matching_bracket(&tokens, index + 1) == .Val(end) {
+                group_start := index + 2
+                paren_depth := 0
+                brace_depth := 0
+                bracket_depth := 0
+                loop cursor in index + 2..=end {
+                    split :: cursor == end || (tokens[cursor].kind == .Comma && paren_depth == 0 && brace_depth == 0 && bracket_depth == 0)
+                    if split {
+                        &out.push(tokens[index].clone())
+                        &out.extend(tokens[group_start..cursor].iter().cloned())
+                        group_start = cursor + 1
+                        next
+                    }
+                    if tokens[cursor].kind == {
+                        .LParen -> paren_depth += 1
+                        .RParen -> paren_depth -= 1
+                        .LBrace -> brace_depth += 1
+                        .RBrace -> brace_depth -= 1
+                        .LBracket -> bracket_depth += 1
+                        .RBracket -> bracket_depth -= 1
+                        else -> {}
+                    }
+                }
+                index = end + 1
+                next
+            }
+        }
+        &out.push(tokens[index].clone())
+        index += 1
+    }
+    out
+}
+
+// Rust: tests/support/fmt_lossless.rs:516
+fn matching_bracket(tokens: &[Token], open: Int) -> Int? {
+    depth := 0
+    loop index in open..tokens.len() {
+        if tokens[index].kind == {
+            .LBracket -> depth += 1
+            .RBracket -> {
+                depth -= 1
+                if depth == 0 -> return Val(index)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// Rust: tests/support/fmt_lossless.rs:533
+fn canonicalize_static_generic_calls(tokens: [Token]) -> [Token] {
+    out := [Token]{}
+    index := 0
+    loop index < tokens.len() {
+        if (tokens[index].kind == { .Ident(_) -> true else -> false }) && tokens.get(index + 1).is_some_and((t) -> t.kind == .Lt) {
+            depth := 0
+            close := None as Int?
+            loop cursor in index + 1..tokens.len() {
+                if tokens[cursor].kind == {
+                    .Lt -> depth += 1
+                    .Gt -> {
+                        depth -= 1
+                        if depth == 0 {
+                            close = Val(cursor)
+                            break
+                        }
+                    }
+                    else -> {}
+                }
+            }
+            if close == .Val(close) {
+                if tokens.get(close + 1).is_some_and((t) -> t.kind == .Dot) && tokens.get(close + 2).is_some_and((t) -> t.kind == { .Ident(_) -> true else -> false }) && tokens.get(close + 3).is_some_and((t) -> t.kind == .LParen) {
+                    &out.push(tokens[index].clone())
+                    &out.push(tokens[close + 1].clone())
+                    &out.push(tokens[close + 2].clone())
+                    &out.extend(tokens[index + 1..=close].iter().cloned())
+                    index = close + 3
+                    next
+                }
+            }
+        }
+        &out.push(tokens[index].clone())
+        index += 1
+    }
+    out
+}
+
+// Rust: tests/support/fmt_lossless.rs:581
+fn canonicalize_external_methods(tokens: [Token]) -> [Token] {
+    out := [Token]{}
+    index := 0
+    loop index < tokens.len() {
+        if tokens[index].kind == .KwFn && tokens.get(index + 1).is_some_and((t) -> t.kind == { .Ident(_) -> true else -> false }) && tokens.get(index + 2).is_some_and((t) -> t.kind == .Dot) && tokens.get(index + 3).is_some_and((t) -> t.kind == { .Ident(_) -> true else -> false }) && tokens.get(index + 4).is_some_and((t) -> t.kind == .LParen) {
+            body_open :: tokens[index + 4..].iter().position((token) -> token.kind == .LBrace).map((offset) -> index + 4 + offset)
+            if body_open == {
+                .Val(body_open) -> {
+                    if matching_brace(&tokens, body_open) == .Val(body_close) {
+                        &out.push(Token{kind: .KwImpl, span: tokens[index].span})
+                        &out.push(tokens[index + 1].clone())
+                        &out.push(Token{kind: .LBrace, span: tokens[index].span})
+                        &out.push(tokens[index].clone())
+                        &out.push(tokens[index + 3].clone())
+                        &out.extend(tokens[index + 4..=body_close].iter().cloned())
+                        &out.push(Token{kind: .RBrace, span: tokens[body_close].span})
+                        index = body_close + 1
+                        next
+                    }
+                }
+                .None -> {
+                    if tokens[index + 4..].iter().position((token) -> token.kind == { .Semi | .Eof -> true else -> false }).map((offset) -> index + 4 + offset) == .Val(method_end) {
+                        // Preserve the exact one-line method span in a synthetic impl.
+                        &out.push(Token{kind: .KwImpl, span: tokens[index].span})
+                        &out.push(tokens[index + 1].clone())
+                        &out.push(Token{kind: .LBrace, span: tokens[index].span})
+                        &out.push(tokens[index].clone())
+                        &out.push(tokens[index + 3].clone())
+                        &out.extend(tokens[index + 4..method_end].iter().cloned())
+                        &out.push(Token{kind: .RBrace, span: tokens[method_end.saturating_sub(1)].span})
+                        index = method_end
+                        next
+                    }
+                }
+            }
+        }
+        &out.push(tokens[index].clone())
+        index += 1
+    }
+    out
+}
+
+// Rust: tests/support/fmt_lossless.rs:659
+fn matching_brace(tokens: &[Token], open: Int) -> Int? {
+    depth := 0
+    loop index in open..tokens.len() {
+        if tokens[index].kind == {
+            .LBrace -> depth += 1
+            .RBrace -> {
+                depth -= 1
+                if depth == 0 -> return Val(index)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// Rust: tests/support/fmt_lossless.rs:676
+fn enum_group_commas(tokens: &[Token]) -> [Bool] {
+    ignored := [false; tokens.len()]
+    enum_base_depth := None as Int?
+    awaiting_enum_body := false
+    brace_stack := [Int]{}
+    loop (index, token) in tokens.iter().enumerate() {
+        if token.kind == {
+            .KwEnum -> awaiting_enum_body = true
+            .LBrace -> {
+                &brace_stack.push(index)
+                if awaiting_enum_body {
+                    enum_base_depth = Val(brace_stack.len())
+                    awaiting_enum_body = false
+                }
+            }
+            .RBrace -> {
+                if enum_base_depth == Val(brace_stack.len()) -> enum_base_depth = None
+                _ :: &brace_stack.pop()
+            }
+            .Comma -> {
+                if enum_base_depth.is_some_and((base) -> brace_stack.len() > base) && index > 0 && (tokens[index - 1].kind == { .Ident(_) -> true else -> false }) && tokens.get(index + 1).is_some_and((t) -> t.kind == { .Ident(_) -> true else -> false }) {
+                    group_open :: brace_stack.last().unwrap()
+                    group_has_field_colon :: tokens[group_open + 1..index].iter().any((token) -> token.kind == .Colon)
+                    if !group_has_field_colon -> ignored[index] = true
+                }
+            }
+            else -> {}
+        }
+    }
+    ignored
+}
+
+// Rust: tests/support/fmt_lossless.rs:722
+fn declaration_field_commas(tokens: &[Token]) -> [Bool] {
+    ignored := [false; tokens.len()]
+    awaiting_struct_body := false
+    struct_depth := None as Int?
+    brace_depth := 0
+    paren_depth := 0
+    bracket_depth := 0
+    loop (index, token) in tokens.iter().enumerate() {
+        if token.kind == {
+            .KwStruct -> awaiting_struct_body = true
+            .LBrace -> {
+                brace_depth += 1
+                if awaiting_struct_body {
+                    struct_depth = Val(brace_depth)
+                    awaiting_struct_body = false
+                }
+            }
+            .RBrace -> {
+                if struct_depth == Val(brace_depth) -> struct_depth = None
+                brace_depth -= 1
+            }
+            .LParen -> paren_depth += 1
+            .RParen -> paren_depth -= 1
+            .LBracket -> bracket_depth += 1
+            .RBracket -> bracket_depth -= 1
+            .Comma -> {
+                if struct_depth == Val(brace_depth) && paren_depth == 0 && bracket_depth == 0 -> ignored[index] = true
+            }
+            else -> {}
+        }
+    }
+    ignored
+}
+
+// Rust: tests/support/fmt_lossless.rs:760
+fn redundant_default_file_alias(canonical: &[Token], tokens: &[Token], index: Int) -> Bool {
+    if index + 1 >= tokens.len() || !(tokens[index].kind == { .Ident(name) -> name == Syntax.KW_AS else -> false }) -> return false
+    if canonical.last() == {
+        .Val(token) -> {
+            if token.kind == .Str(parts) {
+                if plain_string_value(&parts) == .Val(path) {
+                    return tokens[index + 1].kind == { .Ident(alias) -> path.rsplit('/').next().is_some_and((default) -> default == alias) else -> false }
+                }
+            }
+        }
+        else -> {}
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:783
+fn plain_string_value(parts: &[StrTokPart]) -> String? {
+    value := ""
+    loop part in parts {
+        if part == {
+            .Lit(text) -> &value.push_str(text)
+            // D-BYTELIT1=B: raw byte literals are not plain text.
+            .Byte(_) | .Interp(_) -> return None
+        }
+    }
+    Val(value)
+}
+
+// Rust: tests/support/fmt_lossless.rs:797
+fn token_kinds_equal(left: &TokKind, right: &TokKind) -> Bool {
+    if left == .Str(left_parts) {
+        if right == .Str(right_parts) -> return string_parts_equal(&left_parts, &right_parts)
+    }
+    // Typed binary patterns also use ordinary string parts.
+    left == right
+}
+
+// Rust: tests/support/fmt_lossless.rs:806
+fn string_parts_equal(left: &[StrTokPart], right: &[StrTokPart]) -> Bool {
+    if left.len() != right.len() -> return false
+    loop (left, right) in left.iter().zip(right) {
+        equal :: if (left, right) == {
+            (.Lit(left), .Lit(right)) -> left == right
+            (.Interp(left), .Interp(right)) -> {
+                left_tokens :: left.iter().filter((token) -> !(token.kind == { .Semi | .Eof -> true else -> false })).cloned().collect()
+                right_tokens :: right.iter().filter((token) -> !(token.kind == { .Semi | .Eof -> true else -> false })).cloned().collect()
+                ordered_token_diff(&OSPath.new("<string interpolation>"), &left_tokens, &right_tokens).is_ok()
+            }
+            else -> false
+        }
+        if !equal -> return false
+    }
+    true
+}
+
+// Rust: tests/support/fmt_lossless.rs:835
+fn assert_fmt_preserves_token_stream(path: &OSPath, src: String, formatted: String) {
+    original_tokens :: canonical_tokens(src, path)
+    formatted_tokens :: canonical_tokens(formatted, path)
+    if ordered_token_diff(path, &original_tokens, &formatted_tokens) == .Err(diff) -> panic(diff)
+    twice :: format_supported_source(path, formatted).unwrap_or_else((diagnostics) -> panic("second fmt failed on {path.display()}:\n{render_diagnostics(path.display().to_string(), formatted, &diagnostics)}"))
+    assert_eq(formatted, twice, "fmt is not byte-stable on {path.display()}")
+}
+
+// Rust: tests/support/fmt_lossless.rs:856
+fn format_supported_source(path: &OSPath, src: String) -> String [Diagnostic]! {
+    if format_source(src) == {
+        .Ok(formatted) -> return formatted
+        .Err(diagnostics) -> {
+            if Package.format_source(src, path.display().to_string()) == {
+                .Ok(formatted) -> return formatted
+                .Err(_) -> fail diagnostics
+            }
+        }
+    }
+}
+
+// Rust: tests/support/fmt_lossless.rs:868
+fn ordered_token_diff(path: &OSPath, original: &[Token], formatted: &[Token]) -> Err! {
+    original_i := 0
+    formatted_i := 0
+    inserted_arm_braces := 0
+    inserted_lambda_parens := 0
+    loop original_i < original.len() || formatted_i < formatted.len() {
+        if original_i < original.len() && formatted_i < formatted.len() && token_kinds_equal(&original[original_i].kind, &formatted[formatted_i].kind) {
+            original_i += 1
+            formatted_i += 1
+            next
+        }
+        if reordered_simple_union_type(original, original_i, formatted, formatted_i) == .Val(indices) {
+            original_i = indices.original
+            formatted_i = indices.formatted
+            next
+        }
+        if retired_result_arrow_removal(original, original_i, formatted, formatted_i) {
+            original_i += 1
+            next
+        }
+        if canonical_arrow_rewrite(original, original_i, formatted, formatted_i) == .Val(indices) {
+            original_i = indices.original
+            formatted_i = indices.formatted
+            next
+        }
+        if typed_literal_dot_rewrite(original, original_i, formatted, formatted_i) {
+            original_i += 1
+            next
+        }
+        if formatted_arm_block_opens(formatted, formatted_i) && !original.get(original_i).is_some_and((t) -> t.kind == .LBrace) {
+            inserted_arm_braces += 1
+            formatted_i += 1
+            next
+        }
+        if formatted_lambda_params_open(formatted, formatted_i) && !original.get(original_i).is_some_and((t) -> t.kind == .LParen) {
+            inserted_lambda_parens += 1
+            formatted_i += 1
+            next
+        }
+        if formatted_variant_pattern_dot(original, original_i, formatted, formatted_i) {
+            formatted_i += 1
+            next
+        }
+        if inserted_lambda_parens > 0 && formatted.get(formatted_i).is_some_and((t) -> t.kind == .RParen) && formatted.get(formatted_i + 1).is_some_and((t) -> t.kind == { .UnifiedArrow | .LambdaArrow -> true else -> false }) && original.get(original_i).is_some_and((t) -> t.kind == { .UnifiedArrow | .LambdaArrow -> true else -> false }) {
+            inserted_lambda_parens -= 1
+            formatted_i += 1
+            next
+        }
+        if inserted_arm_braces > 0 && formatted.get(formatted_i).is_some_and((t) -> t.kind == .RBrace) && (next_token_matches(original, original_i, formatted, formatted_i + 1) || formatted_variant_pattern_dot(original, original_i, formatted, formatted_i + 1)) {
+            inserted_arm_braces -= 1
+            formatted_i += 1
+            next
+        }
+        if formatted_struct_shorthand_expansion(formatted, formatted_i) {
+            formatted_i += 2
+            next
+        }
+        if formatted_default_module_alias(formatted, formatted_i) {
+            formatted_i += 2
+            next
+        }
+        if formatted_struct_separator(formatted, formatted_i) {
+            formatted_i += 1
+            next
+        }
+        before :: original.get(original_i).map((token) -> &token.kind)
+        after :: formatted.get(formatted_i).map((token) -> &token.kind)
+        fail "fmt changed ordered token {original_i} on {path.display()}:\n  before: {before:?}\n  after: {after:?}"
+    }
+    if inserted_arm_braces != 0 -> fail "fmt left an unmatched canonical arm block on {path.display()}"
+    if inserted_lambda_parens != 0 -> fail "fmt left unmatched canonical lambda parens on {path.display()}"
+}
+
+// Rust: tests/support/fmt_lossless.rs:997
+fn retired_result_arrow_removal(original: &[Token], original_i: Int, formatted: &[Token], formatted_i: Int) -> Bool {
+    if !original.get(original_i).is_some_and((token) -> token.kind == .LambdaArrow) || !original.get(original_i.checked_sub(1).unwrap_or_default()).is_some_and((token) -> token.kind == .RParen) -> return false
+    next_original :: original.get(original_i + 1) ?? return false
+    next_formatted :: formatted.get(formatted_i) ?? return false
+    if !token_kinds_equal(&next_original.kind, &next_formatted.kind) || !function_signature_before(original, original_i) -> return false
+    original[original_i + 1..].iter().take_while((token) -> !(token.kind == { .Semi | .Eof -> true else -> false })).any((token) -> token.kind == .LBrace)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1031
+fn function_signature_before(tokens: &[Token], arrow: Int) -> Bool {
+    braces := 0
+    loop token in tokens[..arrow].iter().rev() {
+        if token.kind == {
+            .RBrace -> braces += 1
+            .LBrace -> {
+                if braces > 0 -> braces -= 1 else -> return false
+            }
+            .KwFn -> { if braces == 0 -> return true }
+            .Semi -> { if braces == 0 -> return false }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:1046
+fn reordered_simple_union_type(original: &[Token], original_i: Int, formatted: &[Token], formatted_i: Int) -> (original: Int, formatted: Int)? {
+    if !simple_union_type_annotation(original, original_i) || !simple_union_type_annotation(formatted, formatted_i) -> return None
+    original_members := simple_union_members(original, original_i) ?? return None
+    formatted_members := simple_union_members(formatted, formatted_i) ?? return None
+    &original_members.members.sort()
+    &formatted_members.members.sort()
+    if original_members.members == formatted_members.members -> Val((original: original_members.next, formatted: formatted_members.next)) else -> None
+}
+
+// Rust: tests/support/fmt_lossless.rs:1064
+fn canonical_arrow_rewrite(original: &[Token], original_i: Int, formatted: &[Token], formatted_i: Int) -> (original: Int, formatted: Int)? {
+    if original.get(original_i).is_some_and((token) -> token.kind == .LambdaArrow) && formatted.get(formatted_i).is_some_and((token) -> token.kind == .UnifiedArrow) -> return Val((original: original_i + 1, formatted: formatted_i + 1))
+    if !original.get(original_i).is_some_and((token) -> token.kind == .Eq) || !formatted.get(formatted_i).is_some_and((token) -> token.kind == .Colon) -> return None
+    if !original.get(original_i + 1).is_some_and((token) -> token.kind == .LBracket) || !formatted.get(formatted_i + 1).is_some_and((token) -> token.kind == .LBracket) -> return None
+    original_close :: matching_bracket_end(original, original_i + 1) ?? return None
+    formatted_close :: matching_bracket_end(formatted, formatted_i + 1) ?? return None
+    if original_close - original_i != formatted_close - formatted_i || !original[original_i + 2..original_close].iter().zip(&formatted[formatted_i + 2..formatted_close]).all((pair) -> token_kinds_equal(&pair.0.kind, &pair.1.kind)) || !original.get(original_close + 1).is_some_and((token) -> token.kind == .LambdaArrow) || !formatted.get(formatted_close + 1).is_some_and((token) -> token.kind == .UnifiedArrow) -> return None
+    Val((original: original_close + 2, formatted: formatted_close + 2))
+}
+
+// Rust: tests/support/fmt_lossless.rs:1119
+fn matching_bracket_end(tokens: &[Token], open: Int) -> Int? {
+    depth := 0
+    loop (index, token) in tokens.iter().enumerate().skip(open) {
+        if token.kind == {
+            .LBracket -> depth += 1
+            .RBracket -> {
+                depth -= 1
+                if depth == 0 -> return Val(index)
+            }
+            else -> {}
+        }
+    }
+    None
+}
+
+// Rust: tests/support/fmt_lossless.rs:1136
+fn typed_literal_dot_rewrite(original: &[Token], original_i: Int, formatted: &[Token], formatted_i: Int) -> Bool {
+    if !original.get(original_i).is_some_and((token) -> token.kind == .Dot) -> return false
+    original_body :: original.get(original_i + 1) ?? return false
+    formatted_body :: formatted.get(formatted_i) ?? return false
+    (original_body.kind == { .LBrace | .Str(_) -> true else -> false }) && token_kinds_equal(&original_body.kind, &formatted_body.kind)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1158
+fn simple_union_type_annotation(tokens: &[Token], start: Int) -> Bool {
+    colon :: start.checked_sub(1) ?? return false
+    if !tokens.get(colon).is_some_and((token) -> token.kind == .Colon) -> return false
+    awaiting_struct_body := false
+    awaiting_fn_params := false
+    struct_scopes := [(brace: Int, paren: Int, bracket: Int)]{}
+    fn_param_scopes := [(brace: Int, paren: Int, bracket: Int)]{}
+    brace_depth := 0
+    paren_depth := 0
+    bracket_depth := 0
+    loop token in &tokens[..colon] {
+        if token.kind == {
+            .KwStruct -> awaiting_struct_body = true
+            .KwFn -> awaiting_fn_params = true
+            .LBrace -> {
+                brace_depth += 1
+                if awaiting_struct_body {
+                    &struct_scopes.push((brace: brace_depth, paren: paren_depth, bracket: bracket_depth))
+                    awaiting_struct_body = false
+                }
+            }
+            .RBrace -> {
+                if struct_scopes.last().is_some_and((scope) -> scope.brace == brace_depth) -> _ :: &struct_scopes.pop()
+                brace_depth -= 1
+            }
+            .LParen -> {
+                paren_depth += 1
+                if awaiting_fn_params {
+                    &fn_param_scopes.push((brace: brace_depth, paren: paren_depth, bracket: bracket_depth))
+                    awaiting_fn_params = false
+                }
+            }
+            .RParen -> {
+                if fn_param_scopes.last().is_some_and((scope) -> scope.paren == paren_depth) -> _ :: &fn_param_scopes.pop()
+                paren_depth -= 1
+            }
+            .LBracket -> bracket_depth += 1
+            .RBracket -> bracket_depth -= 1
+            else -> {}
+        }
+    }
+    scope :: (brace: brace_depth, paren: paren_depth, bracket: bracket_depth)
+    struct_scopes.last() == Val(&scope) || fn_param_scopes.last() == Val(&scope)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1221
+fn simple_union_members(tokens: &[Token], start: Int) -> (members: [String], next: Int)? {
+    first_token :: tokens.get(start) ?? return None
+    first :: if first_token.kind == { .Ident(name) -> name else -> return None }
+    members := [first]
+    cursor := start + 1
+    loop tokens.get(cursor).is_some_and((token) -> token.kind == .Pipe) {
+        member_token :: tokens.get(cursor + 1) ?? return None
+        if member_token.kind == { .Ident(member) -> &members.push(member) else -> return None }
+        cursor += 2
+    }
+    if members.len() > 1 && tokens.get(cursor).is_some_and((token) -> token.kind == { .Comma | .Eq | .RBrace | .RParen -> true else -> false }) -> Val((members: members, next: cursor)) else -> None
+}
+
+// Rust: tests/support/fmt_lossless.rs:1245
+fn formatted_variant_pattern_dot(original: &[Token], original_i: Int, formatted: &[Token], formatted_i: Int) -> Bool {
+    original_token :: original.get(original_i) ?? return false
+    if !formatted.get(formatted_i).is_some_and((token) -> token.kind == .Dot) -> return false
+    formatted_token :: formatted.get(formatted_i + 1) ?? return false
+    same_variant :: if (&original_token.kind, &formatted_token.kind) == {
+        (.Ident(original), .Ident(formatted)) -> original == formatted && original.starts_with(Char.is_uppercase)
+        (.KwNull, .KwNull) -> true
+        else -> false
+    }
+    same_variant && variant_pattern_context(original, original_i)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1275
+fn variant_pattern_context(tokens: &[Token], index: Int) -> Bool {
+    if index > 0 && tokens[index - 1].kind == .EqEq -> return true
+    brace_depth := 0
+    dispatch_open := None as Int?
+    loop cursor in (0..index).rev() {
+        if tokens[cursor].kind == {
+            .RBrace -> brace_depth += 1
+            .LBrace -> {
+                if brace_depth > 0 -> brace_depth -= 1 else {
+                    dispatch_open = Val(cursor)
+                    break
+                }
+            }
+            else -> {}
+        }
+    }
+    open :: dispatch_open ?? return false
+    open > 0 && tokens[open - 1].kind == .EqEq && same_brace_scope_has_if(tokens, open - 1) && pattern_reaches_arrow(tokens, index)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1311
+fn same_brace_scope_has_if(tokens: &[Token], before: Int) -> Bool {
+    loop token in tokens[..before].iter().rev() {
+        if token.kind == {
+            .KwIf -> return true
+            .LBrace | .RBrace | .UnifiedArrow | .LambdaArrow -> return false
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:1324
+fn pattern_reaches_arrow(tokens: &[Token], index: Int) -> Bool {
+    paren_depth := 0
+    bracket_depth := 0
+    loop token in &tokens[index + 1..] {
+        if token.kind == {
+            .LParen -> paren_depth += 1
+            .RParen -> { if paren_depth > 0 -> paren_depth -= 1 }
+            .LBracket -> bracket_depth += 1
+            .RBracket -> { if bracket_depth > 0 -> bracket_depth -= 1 }
+            .UnifiedArrow | .LambdaArrow -> { if paren_depth == 0 && bracket_depth == 0 -> return true }
+            .LBrace | .RBrace -> { if paren_depth == 0 && bracket_depth == 0 -> return false }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:1347
+fn formatted_arm_block_opens(tokens: &[Token], index: Int) -> Bool {
+    tokens.get(index).is_some_and((t) -> t.kind == .LBrace) && index > 0 && (tokens[index - 1].kind == { .UnifiedArrow | .LambdaArrow -> true else -> false })
+}
+
+// Rust: tests/support/fmt_lossless.rs:1358
+fn formatted_lambda_params_open(tokens: &[Token], index: Int) -> Bool {
+    if !tokens.get(index).is_some_and((t) -> t.kind == .LParen) -> return false
+    depth := 0
+    loop (cursor, token) in tokens.iter().enumerate().skip(index) {
+        if token.kind == {
+            .LParen -> depth += 1
+            .RParen -> {
+                depth -= 1
+                if depth == 0 -> return tokens.get(cursor + 1).is_some_and((t) -> t.kind == { .UnifiedArrow | .LambdaArrow -> true else -> false })
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:1381
+fn next_token_matches(original: &[Token], original_i: Int, formatted: &[Token], formatted_i: Int) -> Bool {
+    if (original.get(original_i), formatted.get(formatted_i)) == {
+        (.None, .None) -> true
+        (.Val(original), .Val(formatted)) -> token_kinds_equal(&original.kind, &formatted.kind)
+        else -> false
+    }
+}
+
+// Rust: tests/support/fmt_lossless.rs:1394
+fn struct_literal_head_before_brace(tokens: &[Token], open: Int) -> Bool {
+    if open == 0 -> return false
+    if tokens[open - 1].kind == {
+        .Dot | .Colon | .ColonColon | .Comma | .LParen | .Eq | .KwReturn | .Gt -> true
+        .Ident(name) -> name.starts_with(Char.is_uppercase)
+        .RBracket -> {
+            if open < 3 -> return false
+            tokens[open - 2].kind == .LBracket && (tokens[open - 3].kind == { .Ident(name) -> name.starts_with(Char.is_uppercase) else -> false })
+        }
+        else -> false
+    }
+}
+
+// Rust: tests/support/fmt_lossless.rs:1430
+fn formatted_struct_shorthand_expansion(tokens: &[Token], index: Int) -> Bool {
+    if !tokens.get(index).is_some_and((t) -> t.kind == .Colon) || index == 0 -> return false
+    value_token :: tokens.get(index + 1) ?? return false
+    value :: if value_token.kind == { .Ident(name) -> name else -> return false }
+    field :: if tokens[index - 1].kind == { .Ident(name) -> name else -> return false }
+    if field != value -> return false
+    depth := 0
+    loop cursor in (0..index).rev() {
+        if tokens[cursor].kind == {
+            .RBrace -> depth += 1
+            .LBrace -> {
+                if depth == 0 -> return struct_literal_head_before_brace(tokens, cursor)
+                depth -= 1
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:1468
+fn formatted_default_module_alias(tokens: &[Token], index: Int) -> Bool {
+    as_token :: tokens.get(index) ?? return false
+    alias_token :: tokens.get(index + 1) ?? return false
+    as_kw :: if as_token.kind == { .Ident(name) -> name else -> return false }
+    alias :: if alias_token.kind == { .Ident(name) -> name else -> return false }
+    as_kw == Syntax.KW_AS && index >= 2 && (tokens[index - 1].kind == { .Ident(segment) -> segment == alias else -> false }) && tokens[index - 2].kind == .Dot && exact_use_path_before_alias(tokens, index)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1497
+fn exact_use_path_before_alias(tokens: &[Token], alias_index: Int) -> Bool {
+    use_index :: tokens[..alias_index].iter().rposition((token) -> token.kind == .KwUse) ?? return false
+    path :: &tokens[use_index + 1..alias_index]
+    if path.len() < 3 || path.len() % 2 == 0 -> return false
+    path.iter().enumerate().all((pair) -> if pair.0 % 2 == 0 -> pair.1.kind == { .Ident(_) -> true else -> false } else -> pair.1.kind == .Dot)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1517
+fn formatted_struct_separator(tokens: &[Token], index: Int) -> Bool {
+    if !tokens.get(index).is_some_and((t) -> t.kind == .Comma) -> return false
+    depth := 0
+    loop cursor in (0..index).rev() {
+        if tokens[cursor].kind == {
+            .RBrace -> depth += 1
+            .LBrace -> {
+                if depth == 0 -> return struct_literal_head_before_brace(tokens, cursor)
+                depth -= 1
+            }
+            else -> {}
+        }
+    }
+    false
+}
+
+// Rust: tests/support/fmt_lossless.rs:1550
+pub fn run_supported_source_corpus() {
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    example_files :: collect_jet_files_recursive(&root.join("Examples"))
+    ui_files :: collect_jet_files_recursive(&root.join("tests/ui"))
+    example_programs := 0
+    example_configs := 0
+    loop path in &example_files {
+        name :: path.file_name().and_then((name) -> name.to_str())
+        if name == Val(Syntax.PAYLOAD_FILE) || name == Val(Syntax.WORKSPACE_FILE) || name == Val(Syntax.PACKAGE_FILE) {
+            example_configs += 1
+            next
+        }
+        src :: fs.read_to_string(path).unwrap()
+        if format_source(src) == {
+            .Ok(formatted) -> {
+                assert_fmt_preserves_token_stream(path, src, formatted)
+                example_programs += 1
+            }
+            .Err(diagnostics) -> {
+                formatted :: Package.format_source(src, path.display().to_string()).unwrap_or_else((_) -> panic("example program failed to parse for fmt on {path.display()}:\n{render_diagnostics(path.display().to_string(), src, &diagnostics)}"))
+                assert_fmt_preserves_token_stream(path, src, formatted)
+                example_configs += 1
+            }
+        }
+    }
+    ui_parse_valid := 0
+    ui_parse_invalid := 0
+    ui_configs := 0
+    actual_invalid := [String]{}
+    mismatches := [String]{}
+    loop path in &ui_files {
+        name :: path.file_name().and_then((name) -> name.to_str())
+        if name == Val(Syntax.PAYLOAD_FILE) || name == Val(Syntax.WORKSPACE_FILE) || name == Val(Syntax.PACKAGE_FILE) {
+            // Manifests are config, never program source or pinned invalid fixtures.
+            ui_configs += 1
+            next
+        }
+        src :: fs.read_to_string(path).unwrap()
+        relative :: path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/")
+        expected_invalid :: UI_PARSE_INVALID.binary_search(relative).is_ok()
+        // Recovered AST teaching diagnostics are not hard parse failures.
+        lexed :: lex(src)
+        actual_is_invalid :: !lexed.1.is_empty() || Parser.parse_for_check(&lexed.0).is_err()
+        if actual_is_invalid != expected_invalid {
+            &mismatches.push("UI parser-validity changed for {relative}; update the pinned manifest only after review (expected_invalid={expected_invalid}, actual_is_invalid={actual_is_invalid})")
+            next
+        }
+        if expected_invalid {
+            &actual_invalid.push(relative)
+            ui_parse_invalid += 1
+        } else {
+            is_fixed_companion :: path.file_name().and_then((name) -> name.to_str()).is_some_and((name) -> name.ends_with(".fixed.jet"))
+            if !is_fixed_companion {
+                formatted :: format_source(src).unwrap_or_else((diagnostics) -> panic("parse-valid UI fixture failed formatter parse on {path.display()}:\n{render_diagnostics(path.display().to_string(), src, &diagnostics)}"))
+                assert_fmt_preserves_token_stream(path, src, formatted)
+            }
+            ui_parse_valid += 1
+        }
+    }
+    assert(mismatches.is_empty(), "UI corpus parser-validity mismatches ({mismatches.len()} found):\n{mismatches.join("\n")}")
+    assert_eq(example_files.len(), example_programs + example_configs, "every example .jet file must be program source or explicit package/workspace config")
+    assert_eq(ui_files.len(), ui_parse_valid + ui_parse_invalid + ui_configs, "every UI .jet fixture must be classified by its actual formatter parse result")
+    assert(UI_PARSE_INVALID.windows(2).all((pair) -> pair[0] < pair[1]), "UI parse-invalid manifest must be sorted and duplicate-free")
+    assert_eq(actual_invalid, UI_PARSE_INVALID, "discovered parser-invalid UI set must exactly equal the pinned manifest")
+    eprintln("formatter corpus: {example_programs} example programs, {example_configs} configs, {ui_parse_valid} parse-valid UI fixtures, {ui_parse_invalid} parse-invalid UI fixtures, {ui_configs} UI manifest configs")
+}
+
+// Rust: tests/support/fmt_lossless.rs:1685
+pub fn ordered_sources_diff(original: String, formatted: String) -> Err! {
+    path :: OSPath.new("canonical-rule.jet")
+    original_tokens :: canonical_tokens(original, &path)
+    formatted_tokens :: canonical_tokens(formatted, &path)
+    ordered_token_diff(&path, &original_tokens, &formatted_tokens)
+}

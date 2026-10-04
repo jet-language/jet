@@ -1,1804 +1,709 @@
-// PORT-PENDING 2020 crates-jet-driver-src-driver-mod-slice-1801: crates/jet-driver/src/Driver/mod.rs:1801-3600
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         }
-//RS         crate::AST::Type::Int | crate::AST::Type::Float | crate::AST::Type::String => {
-//RS             Some(crate::TargetMachine::ByteSize::bytes(8))
-//RS         }
-//RS         crate::AST::Type::IntN { bits, .. } => {
-//RS             Some(crate::TargetMachine::ByteSize::bytes((*bits as u64) / 8))
-//RS         }
-//RS         crate::AST::Type::InlineRange { base, .. } => byte_size_for_type(base),
-//RS         crate::AST::Type::Tagged { inner, .. } => byte_size_for_type(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct BuildRunOptions {
-//RS     pub grants: std::collections::BTreeSet<crate::Comptime::Build::BuildCapability>,
-//RS     /// Policy for typed legacy/plugin bridges. Ability grants and bridge
-//RS     /// policy are separate: an explicit `Exec` grant does not implicitly
-//RS     /// enable a legacy wrapper or a plugin.
-//RS     pub policy: crate::Comptime::Build::BuildPolicy,
-//RS     pub execute: bool,
-//RS     pub gates: crate::Policy::GateSet,
-//RS     /// Validate and expose declared graph authority without granting ambient
-//RS     /// comptime authority. Used only by read-only CLI/LSP inspection.
-//RS     pub inspect_only: bool,
-//RS     /// Materialize every registered generated source for the explicit
-//RS     /// `--emit-generated` inspection surface, even when the selected runtime
-//RS     /// target does not list the source explicitly.
-//RS     pub emit_generated: bool,
-//RS     pub locked: bool,
-//RS     pub no_os: bool,
-//RS     pub web_target: bool,
-//RS     pub plugin_target: bool,
-//RS     pub cross_target: Option<String>,
-//RS     /// D-CONF-WORD1=A: the selected optimization bundle, exposed as the
-//RS     /// compile-time `$build.profile` fact.
-//RS     pub profile: String,
-//RS     /// D-DBG1=A: this compile produces a shipped artifact (`jet build`),
-//RS     /// folded into the build-fact snapshot sema reads.
-//RS     pub artifact_build: bool,
-//RS     /// Invocation-local policy merged into the checked runtime before codegen.
-//RS     pub application_authority: Option<jet_foundation::Authority::ApplicationAuthority>,
-//RS     /// D-CONF-KEY1: command-line contributions to declared package settings.
-//RS     pub setting_overrides: BTreeMap<String, String>,
-//RS     /// Optional host-owned remote builder binding. Source and CLI input cannot
-//RS     /// construct an endpoint or credential; `None` is always local.
-//RS     pub remote: Option<crate::Comptime::Build::RemoteBuildBinding>,
-//RS     /// D-CMDOVERRIDE1=A: a bare/package build may discover `fn build` across
-//RS     /// the package; an explicit file or `--show-default` keeps that function
-//RS     /// selection inside the requested file.
-//RS     pub package_scope: bool,
-//RS     /// command-function selection.
-//RS     pub build_override: bool,
-//RS     /// Selected package output callable. The checked runtime file remains the
-//RS     /// bundle entry; this leaf is swapped into `fn run` before sema.
-//RS     pub entry_fn: Option<String>,
-//RS }
-//RS 
-//RS impl Default for BuildRunOptions {
-//RS     fn default() -> Self {
-//RS         BuildRunOptions {
-//RS             grants: std::collections::BTreeSet::new(),
-//RS             policy: crate::Comptime::Build::BuildPolicy::local_default(),
-//RS             execute: true,
-//RS             gates: crate::Policy::GateSet::default(),
-//RS             inspect_only: false,
-//RS             emit_generated: false,
-//RS             locked: false,
-//RS             no_os: false,
-//RS             web_target: false,
-//RS             plugin_target: false,
-//RS             cross_target: None,
-//RS             profile: "dev".to_string(),
-//RS             artifact_build: false,
-//RS             application_authority: None,
-//RS             setting_overrides: BTreeMap::new(),
-//RS             remote: None,
-//RS             package_scope: true,
-//RS             build_override: true,
-//RS             entry_fn: None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Seed the one build-fact snapshot before sema. Package identity comes from
-//RS /// `PackageFacts`; a manifest-less entry keeps the loader's filename fallback.
-//RS /// Provenance comes from the lock model, so no JIT/interpreter engine probes
-//RS /// the host and a locked build never consults the wall clock.
-//RS pub fn seed_build_facts(
-//RS     bundle: &mut crate::AST::ProgramBundle,
-//RS     profile: &str,
-//RS     locked: bool,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     seed_build_facts_with_contributions(bundle, profile, locked, setting_overrides, &[])
-//RS }
-//RS 
-//RS /// Seed the build snapshot after a selected `fn build` has produced computed
-//RS /// writers. The same resolver handles manifest defaults, profile settings,
-//RS /// CLI settings, and computed contributions; no engine receives a lookup.
-//RS pub fn seed_build_facts_with_contributions(
-//RS     bundle: &mut crate::AST::ProgramBundle,
-//RS     profile: &str,
-//RS     locked: bool,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     computed_contributions: &[jet_foundation::Policy::FactContribution],
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     let stamp = build_stamp_for_facts(&bundle.project_root, locked)?;
-//RS     seed_build_facts_from_stamp(
-//RS         bundle,
-//RS         profile,
-//RS         setting_overrides,
-//RS         computed_contributions,
-//RS         &stamp,
-//RS     )
-//RS }
-//RS 
-//RS fn build_stamp_for_facts(
-//RS     project_root: &std::path::Path,
-//RS     locked: bool,
-//RS ) -> Result<jet_foundation::Facts::BuildStamp, Vec<Diagnostic>> {
-//RS     crate::Lock::build_stamp(project_root, locked).map_err(|error| {
-//RS         vec![Diagnostic::error(
-//RS             "E3512",
-//RS             "the build provenance stamp is unavailable".to_string(),
-//RS             error,
-//RS             "run an unlocked build to create the lock stamp, then rerun with `--locked`"
-//RS                 .to_string(),
-//RS             None,
-//RS         )]
-//RS     })
-//RS }
-//RS 
-//RS fn set_bundle_target(bundle: &mut crate::AST::ProgramBundle, cross_target: Option<&str>) {
-//RS     bundle.build_facts.target_triple = cross_target
-//RS         .map(str::to_owned)
-//RS         .unwrap_or_else(jet_foundation::Layout::TargetLayout::host_triple);
-//RS }
-//RS 
-//RS /// Project the manifest's selected release inspect form into the one typed
-//RS /// policy consumed by MIR Rust emission. Host deployment environment belongs
-//RS /// to the host boundary and never changes this compile-time projection.
-//RS pub fn release_devtools_policy_for_bundle(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     profile: &str,
-//RS ) -> crate::Package::ReleaseDevtoolsPolicy {
-//RS     if !matches!(
-//RS         profile,
-//RS         crate::Syntax::BUILD_PROFILE_RELEASE | crate::Syntax::BUILD_PROFILE_HARDENED
-//RS     ) {
-//RS         return crate::Package::ReleaseDevtoolsPolicy::development();
-//RS     }
-//RS     let inspect = crate::Loader::package_facts_for_bundle(bundle)
-//RS         .ok()
-//RS         .flatten()
-//RS         .and_then(|facts| {
-//RS             facts
-//RS                 .build_profiles
-//RS                 .iter()
-//RS                 .find(|candidate| candidate.name == profile)
-//RS                 .map(|candidate| candidate.inspect)
-//RS         })
-//RS         .unwrap_or(crate::Package::ReleaseInspect::Local);
-//RS     crate::Package::ReleaseDevtoolsPolicy::from_manifest_profile(inspect)
-//RS }
-//RS 
-//RS fn seed_build_facts_from_stamp(
-//RS     bundle: &mut crate::AST::ProgramBundle,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS     computed_contributions: &[jet_foundation::Policy::FactContribution],
-//RS     stamp: &jet_foundation::Facts::BuildStamp,
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     bundle.package_guarantees.harden |= profile == crate::Syntax::BUILD_PROFILE_HARDENED;
-//RS     let target_triple = if bundle.build_facts.target_triple.is_empty() {
-//RS         jet_foundation::Layout::TargetLayout::host_triple()
-//RS     } else {
-//RS         bundle.build_facts.target_triple.clone()
-//RS     };
-//RS     let manifest = crate::Loader::package_facts_for_bundle(bundle)?;
-//RS     let package_name = manifest
-//RS         .as_ref()
-//RS         .map(|facts| facts.name.clone())
-//RS         .filter(|name| !name.is_empty())
-//RS         .or_else(|| {
-//RS             bundle.modules.get(bundle.entry).and_then(|module| {
-//RS                 module
-//RS                     .path
-//RS                     .file_stem()
-//RS                     .and_then(|name| name.to_str())
-//RS                     .filter(|name| !name.is_empty())
-//RS                     .map(str::to_string)
-//RS             })
-//RS         })
-//RS         .unwrap_or_else(|| "script".to_string());
-//RS     let package_version = manifest
-//RS         .as_ref()
-//RS         .and_then(|facts| facts.version.clone())
-//RS         .unwrap_or_else(|| "0.0.0".to_string());
-//RS     let profile_source = manifest
-//RS         .as_ref()
-//RS         .map(|facts| facts.origin.as_str())
-//RS         .unwrap_or("<default>");
-//RS     let profile_key = jet_foundation::Policy::FactKey::with_default_source(
-//RS         "Build.Profile",
-//RS         jet_foundation::Policy::FactValue::Text("dev".to_string()),
-//RS         profile_source,
-//RS     );
-//RS     let mut profile_contributions = Vec::new();
-//RS     if profile != "dev" {
-//RS         profile_contributions.push(jet_foundation::Policy::FactContribution::new(
-//RS             "Build.Profile",
-//RS             jet_foundation::Policy::FactValue::Text(profile.to_string()),
-//RS             jet_foundation::Policy::SourceScope::Package,
-//RS             jet_foundation::Policy::ContributionLayer::CommandLine,
-//RS             "command line",
-//RS         ));
-//RS     }
-//RS     let profile_fact = resolve_build_fact(profile_key, profile_contributions)?;
-//RS     let resolved_profile = match &profile_fact.value {
-//RS         jet_foundation::Policy::FactValue::Text(value) => value.clone(),
-//RS         _ => profile.to_string(),
-//RS     };
-//RS     let mut contributions = BTreeMap::from([(profile_fact.key.name.clone(), profile_fact)]);
-//RS 
-//RS     // D-CONF-READ1=A / D-CONF-STAMP1=B: fixed build leaves are facts too.
-//RS     // They enter the same resolver and retain one writer chain, so explain
-//RS     // does not grow a special provenance path for package, OS, or stamp data.
-//RS     let package_source = manifest
-//RS         .as_ref()
-//RS         .map(|facts| facts.origin.as_str())
-//RS         .unwrap_or("<source>");
-//RS     let fixed_facts = [
-//RS         (
-//RS             "Build.Package.Name",
-//RS             jet_foundation::Policy::FactValue::Text(package_name.clone()),
-//RS             package_source,
-//RS         ),
-//RS         (
-//RS             "Build.Package.Version",
-//RS             jet_foundation::Policy::FactValue::Text(package_version.clone()),
-//RS             package_source,
-//RS         ),
-//RS         (
-//RS             "Build.OS",
-//RS             jet_foundation::Policy::FactValue::Enum(bundle.active_os.name().to_string()),
-//RS             "<target>",
-//RS         ),
-//RS         (
-//RS             "Build.Stamp.Git",
-//RS             jet_foundation::Policy::FactValue::OptionalText(stamp.git.clone()),
-//RS             ".jet/lock",
-//RS         ),
-//RS         (
-//RS             "Build.Stamp.Dirty",
-//RS             jet_foundation::Policy::FactValue::Bool(stamp.dirty),
-//RS             ".jet/lock",
-//RS         ),
-//RS         (
-//RS             "Build.Stamp.Toolchain",
-//RS             jet_foundation::Policy::FactValue::Text(stamp.toolchain.clone()),
-//RS             ".jet/lock",
-//RS         ),
-//RS         (
-//RS             "Build.Stamp.At",
-//RS             jet_foundation::Policy::FactValue::Text(stamp.at.clone()),
-//RS             ".jet/lock",
-//RS         ),
-//RS     ];
-//RS     for (name, value, source) in fixed_facts {
-//RS         let contribution = jet_foundation::Policy::FactContribution::new(
-//RS             name,
-//RS             value,
-//RS             jet_foundation::Policy::SourceScope::Package,
-//RS             jet_foundation::Policy::ContributionLayer::Declaration,
-//RS             source,
-//RS         );
-//RS         let fact = resolve_build_fact(jet_foundation::Policy::FactKey::new(name), [contribution])?;
-//RS         contributions.insert(fact.key.name.clone(), fact);
-//RS     }
-//RS     let enum_types = fieldless_setting_enums(bundle);
-//RS     let mut settings = BTreeMap::new();
-//RS     let mut setting_provenance = BTreeMap::new();
-//RS     if let Some(facts) = manifest.as_ref() {
-//RS         let mut setting_contributions =
-//RS             BTreeMap::<String, Vec<jet_foundation::Policy::FactContribution>>::new();
-//RS         let mut setting_defaults = BTreeMap::<String, jet_foundation::Policy::FactValue>::new();
-//RS         for (key, declaration) in &facts.settings {
-//RS             let value = parse_setting_value(&declaration.ty, &declaration.default, &enum_types)
-//RS                 .map_err(|detail| {
-//RS                     vec![setting_value_diagnostic(
-//RS                         key,
-//RS                         &declaration.ty,
-//RS                         &declaration.default,
-//RS                         detail,
-//RS                     )]
-//RS                 })?;
-//RS             setting_defaults.insert(key.clone(), policy_fact_value(&value));
-//RS             setting_contributions.entry(key.clone()).or_default();
-//RS         }
-//RS         // Validate every profile before selecting one. An inactive profile is
-//RS         // still package input and must not hide an undeclared or ill-typed key.
-//RS         for profile_def in &facts.build_profiles {
-//RS             for (key, raw) in &profile_def.settings {
-//RS                 let Some(declaration) = facts.settings.get(key) else {
-//RS                     return Err(vec![undeclared_setting_diagnostic(
-//RS                         key,
-//RS                         "the profile contribution names no declaration in `package.jet`",
-//RS                         &facts.origin,
-//RS                     )]);
-//RS                 };
-//RS                 parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
-//RS                     vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
-//RS                 })?;
-//RS             }
-//RS         }
-//RS         if let Some(profile_def) = facts
-//RS             .build_profiles
-//RS             .iter()
-//RS             .find(|candidate| candidate.name == profile)
-//RS         {
-//RS             for (key, raw) in &profile_def.settings {
-//RS                 let declaration = facts
-//RS                     .settings
-//RS                     .get(key)
-//RS                     .expect("profile settings were validated before contribution");
-//RS                 let value =
-//RS                     parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
-//RS                         vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
-//RS                     })?;
-//RS                 setting_contributions.entry(key.clone()).or_default().push(
-//RS                     jet_foundation::Policy::FactContribution::new(
-//RS                         build_setting_fact_key(key),
-//RS                         policy_fact_value(&value),
-//RS                         jet_foundation::Policy::SourceScope::Package,
-//RS                         jet_foundation::Policy::ContributionLayer::OptimizationBundle,
-//RS                         format!("package.jet:build.{profile}.settings.{key}"),
-//RS                     ),
-//RS                 );
-//RS             }
-//RS         }
-//RS         for (key, raw) in setting_overrides {
-//RS             let Some(declaration) = facts.settings.get(key) else {
-//RS                 return Err(vec![undeclared_setting_diagnostic(
-//RS                     key,
-//RS                     "the CLI contribution names no declaration in `package.jet`",
-//RS                     &facts.origin,
-//RS                 )]);
-//RS             };
-//RS             let value =
-//RS                 parse_setting_value(&declaration.ty, raw, &enum_types).map_err(|detail| {
-//RS                     vec![setting_value_diagnostic(key, &declaration.ty, raw, detail)]
-//RS                 })?;
-//RS             setting_contributions.entry(key.clone()).or_default().push(
-//RS                 jet_foundation::Policy::FactContribution::new(
-//RS                     build_setting_fact_key(key),
-//RS                     policy_fact_value(&value),
-//RS                     jet_foundation::Policy::SourceScope::Package,
-//RS                     jet_foundation::Policy::ContributionLayer::CommandLine,
-//RS                     format!("command line:--set {key}={raw}"),
-//RS                 ),
-//RS             );
-//RS         }
-//RS         for contribution in computed_contributions {
-//RS             let Some(key) = contribution.key.strip_prefix("Build.Settings.") else {
-//RS                 return Err(vec![undeclared_setting_diagnostic(
-//RS                     &contribution.key,
-//RS                     "`fn build` can contribute only to a declared setting",
-//RS                     &facts.origin,
-//RS                 )]);
-//RS             };
-//RS             if !facts.settings.contains_key(key) {
-//RS                 return Err(vec![undeclared_setting_diagnostic(
-//RS                     key,
-//RS                     "the `fn build` contribution names no declaration in `package.jet`",
-//RS                     &facts.origin,
-//RS                 )]);
-//RS             }
-//RS             setting_contributions
-//RS                 .entry(key.to_string())
-//RS                 .or_default()
-//RS                 .push(contribution.clone());
-//RS         }
-//RS         for (key, declarations) in setting_contributions {
-//RS             let default = setting_defaults
-//RS                 .remove(&key)
-//RS                 .expect("every declared setting has one default");
-//RS             let fact_key = jet_foundation::Policy::FactKey::with_default_source(
-//RS                 build_setting_fact_key(&key),
-//RS                 default,
-//RS                 format!("package.jet:settings.{key} (default)"),
-//RS             );
-//RS             let fact = resolve_build_fact(fact_key, declarations)?;
-//RS             let declaration = facts
-//RS                 .settings
-//RS                 .get(&key)
-//RS                 .expect("setting contribution key was checked against the manifest");
-//RS             let value = setting_value_from_fact(&key, &declaration.ty, &fact.value, &enum_types)?;
-//RS             setting_provenance.insert(
-//RS                 key.clone(),
-//RS                 fact.provenance
-//RS                     .iter()
-//RS                     .map(setting_provenance_line)
-//RS                     .collect(),
-//RS             );
-//RS             settings.insert(
-//RS                 key,
-//RS                 jet_foundation::Facts::BuildSettingFact {
-//RS                     ty: declaration.ty.clone(),
-//RS                     value,
-//RS                 },
-//RS             );
-//RS             contributions.insert(fact.key.name.clone(), fact);
-//RS         }
-//RS     } else if !setting_overrides.is_empty() || !computed_contributions.is_empty() {
-//RS         let declaration_site = bundle
-//RS             .project_root
-//RS             .join(crate::Syntax::PACKAGE_FILE)
-//RS             .display()
-//RS             .to_string();
-//RS         let key = setting_overrides
-//RS             .keys()
-//RS             .next()
-//RS             .cloned()
-//RS             .or_else(|| {
-//RS                 computed_contributions.first().map(|contribution| {
-//RS                     contribution
-//RS                         .key
-//RS                         .strip_prefix("Build.Settings.")
-//RS                         .unwrap_or(&contribution.key)
-//RS                         .to_string()
-//RS                 })
-//RS             })
-//RS             .unwrap_or_else(|| "<unknown>".to_string());
-//RS         return Err(vec![undeclared_setting_diagnostic(
-//RS             &key,
-//RS             "the package has no `settings:` declaration",
-//RS             &declaration_site,
-//RS         )]);
-//RS     }
-//RS     let target_dossier = bundle.build_facts.target_dossier.clone();
-//RS     let artifact_build = bundle.build_facts.artifact_build;
-//RS     bundle.build_facts = jet_foundation::Facts::BuildFactSnapshot {
-//RS         package_name,
-//RS         package_version,
-//RS         os: bundle.active_os,
-//RS         target_triple,
-//RS         profile: resolved_profile,
-//RS         artifact_build,
-//RS         stamp: stamp.clone(),
-//RS         contributions,
-//RS         settings,
-//RS         setting_provenance,
-//RS         target_dossier,
-//RS     };
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn build_setting_fact_key(key: &str) -> String {
-//RS     format!("Build.Settings.{key}")
-//RS }
-//RS 
-//RS fn policy_fact_value(
-//RS     value: &jet_foundation::Facts::BuildFactValue,
-//RS ) -> jet_foundation::Policy::FactValue {
-//RS     match value {
-//RS         jet_foundation::Facts::BuildFactValue::Text(value) => {
-//RS             jet_foundation::Policy::FactValue::Text(value.clone())
-//RS         }
-//RS         jet_foundation::Facts::BuildFactValue::Bool(value) => {
-//RS             jet_foundation::Policy::FactValue::Bool(*value)
-//RS         }
-//RS         jet_foundation::Facts::BuildFactValue::Int(value) => {
-//RS             jet_foundation::Policy::FactValue::Int(*value)
-//RS         }
-//RS         jet_foundation::Facts::BuildFactValue::Char(value) => {
-//RS             jet_foundation::Policy::FactValue::Char(*value)
-//RS         }
-//RS         jet_foundation::Facts::BuildFactValue::Enum { variant, .. } => {
-//RS             jet_foundation::Policy::FactValue::Enum(variant.clone())
-//RS         }
-//RS         jet_foundation::Facts::BuildFactValue::OptionalText(value) => {
-//RS             jet_foundation::Policy::FactValue::OptionalText(value.clone())
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn setting_provenance_line(contribution: &jet_foundation::Policy::FactContribution) -> String {
-//RS     let reason = contribution
-//RS         .reason
-//RS         .as_deref()
-//RS         .map_or(String::new(), |reason| format!(" ({reason})"));
-//RS     format!("{}{}", contribution.source, reason)
-//RS }
-//RS 
-//RS fn setting_value_from_fact(
-//RS     key: &str,
-//RS     ty: &str,
-//RS     value: &jet_foundation::Policy::FactValue,
-//RS     enum_types: &BTreeMap<String, BTreeSet<String>>,
-//RS ) -> Result<jet_foundation::Facts::BuildFactValue, Vec<Diagnostic>> {
-//RS     let raw = value.display();
-//RS     let result = match (ty.trim(), value) {
-//RS         ("Bool", jet_foundation::Policy::FactValue::Bool(value)) => {
-//RS             Ok(jet_foundation::Facts::BuildFactValue::Bool(*value))
-//RS         }
-//RS         ("Int", jet_foundation::Policy::FactValue::Int(value)) => {
-//RS             Ok(jet_foundation::Facts::BuildFactValue::Int(*value))
-//RS         }
-//RS         ("Char", jet_foundation::Policy::FactValue::Char(value)) => {
-//RS             Ok(jet_foundation::Facts::BuildFactValue::Char(*value))
-//RS         }
-//RS         ("String", jet_foundation::Policy::FactValue::Text(value)) => {
-//RS             Ok(jet_foundation::Facts::BuildFactValue::Text(value.clone()))
-//RS         }
-//RS         (type_name, jet_foundation::Policy::FactValue::Enum(variant))
-//RS             if valid_setting_type_name(type_name)
-//RS                 && enum_types
-//RS                     .get(type_name)
-//RS                     .is_some_and(|variants| variants.contains(variant)) =>
-//RS         {
-//RS             Ok(jet_foundation::Facts::BuildFactValue::Enum {
-//RS                 type_name: type_name.to_string(),
-//RS                 variant: variant.clone(),
-//RS             })
-//RS         }
-//RS         _ => Err(vec![setting_value_diagnostic(
-//RS             key,
-//RS             ty,
-//RS             &raw,
-//RS             "the computed value does not match the declared setting type".to_string(),
-//RS         )]),
-//RS     };
-//RS     result
-//RS }
-//RS 
-//RS fn fact_contribution_diagnostic(error: jet_foundation::Policy::FactError) -> Diagnostic {
-//RS     match error.diagnostic() {
-//RS         Some(diagnostic) => diagnostic,
-//RS         None => Diagnostic::error(
-//RS             "E3521",
-//RS             "build fact contributions conflict".to_string(),
-//RS             error.message(),
-//RS             "make same-layer writers agree, or move one value to a more explicit layer".to_string(),
-//RS             None,
-//RS         ),
-//RS     }
-//RS }
-//RS 
-//RS fn resolve_build_fact(
-//RS     key: jet_foundation::Policy::FactKey,
-//RS     contributions: impl IntoIterator<Item = jet_foundation::Policy::FactContribution>,
-//RS ) -> Result<jet_foundation::Policy::EffectiveFact, Vec<Diagnostic>> {
-//RS     jet_foundation::Policy::resolve(key, contributions)
-//RS         .map_err(|error| vec![fact_contribution_diagnostic(error)])?
-//RS         .ok_or_else(|| {
-//RS             vec![Diagnostic::error(
-//RS                 "E3521",
-//RS                 "build fact has no contribution".to_string(),
-//RS                 "the selected build fact must have at least one registered writer".to_string(),
-//RS                 "restore the declaration or choose a source with a complete build fact plane"
-//RS                     .to_string(),
-//RS                 None,
-//RS             )]
-//RS         })
-//RS }
-//RS 
-//RS fn undeclared_setting_diagnostic(key: &str, why: &str, declaration_site: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0302",
-//RS         format!("`$build.settings.{key}` is undeclared"),
-//RS         why.to_string(),
-//RS         format!(
-//RS             "add `{key}: Type = default` to the `settings: {{ … }}` block in `{declaration_site}`"
-//RS         ),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn setting_value_diagnostic(key: &str, ty: &str, raw: &str, detail: String) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0302",
-//RS         format!("setting `{key}` cannot use `{raw}` as `{ty}`"),
-//RS         detail,
-//RS         format!("use a `{ty}` value for the declared setting `{key}`"),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn parse_setting_value(
-//RS     ty: &str,
-//RS     raw: &str,
-//RS     enum_types: &BTreeMap<String, BTreeSet<String>>,
-//RS ) -> Result<jet_foundation::Facts::BuildFactValue, String> {
-//RS     let raw = raw.trim();
-//RS     match ty.trim() {
-//RS         "Bool" => match raw {
-//RS             "true" => Ok(jet_foundation::Facts::BuildFactValue::Bool(true)),
-//RS             "false" => Ok(jet_foundation::Facts::BuildFactValue::Bool(false)),
-//RS             _ => Err("Bool settings use `true` or `false`".to_string()),
-//RS         },
-//RS         "Int" => raw
-//RS             .parse::<i64>()
-//RS             .map(jet_foundation::Facts::BuildFactValue::Int)
-//RS             .map_err(|_| "Int settings use a signed 64-bit whole number".to_string()),
-//RS         "Char" => parse_setting_char(raw).map(jet_foundation::Facts::BuildFactValue::Char),
-//RS         "String" => Ok(jet_foundation::Facts::BuildFactValue::Text(
-//RS             unquote_setting(raw),
-//RS         )),
-//RS         type_name => {
-//RS             if !valid_setting_type_name(type_name) {
-//RS                 return Err(
-//RS                     "settings use Bool, Int, Char, String, or a fieldless enum type".to_string(),
-//RS                 );
-//RS             }
-//RS             let variant = raw.strip_prefix('.').unwrap_or(raw).trim();
-//RS             if variant.is_empty() || !valid_setting_variant(variant) {
-//RS                 return Err("fieldless enum settings use a named variant such as `.On`".to_string());
-//RS             }
-//RS             let Some(variants) = enum_types.get(type_name) else {
-//RS                 return Err(format!("`{type_name}` is not a declared fieldless enum"));
-//RS             };
-//RS             if !variants.contains(variant) {
-//RS                 return Err(format!(
-//RS                     "`{type_name}` has no fieldless variant `{variant}`"
-//RS                 ));
-//RS             }
-//RS             Ok(jet_foundation::Facts::BuildFactValue::Enum {
-//RS                 type_name: type_name.to_string(),
-//RS                 variant: variant.to_string(),
-//RS             })
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn fieldless_setting_enums(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS ) -> BTreeMap<String, BTreeSet<String>> {
-//RS     let mut out = BTreeMap::new();
-//RS     for module in &bundle.modules {
-//RS         collect_fieldless_setting_enums(&module.items, &mut out);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn collect_fieldless_setting_enums(
-//RS     items: &[crate::AST::Item],
-//RS     out: &mut BTreeMap<String, BTreeSet<String>>,
-//RS ) {
-//RS     for item in items {
-//RS         match item {
-//RS             crate::AST::Item::Enum(def) => {
-//RS                 let variants = def
-//RS                     .variants
-//RS                     .iter()
-//RS                     .filter_map(|variant| {
-//RS                         matches!(&variant.payload, crate::AST::VariantPayload::Unit)
-//RS                             .then_some(variant.name.clone())
-//RS                     })
-//RS                     .collect::<BTreeSet<_>>();
-//RS                 if variants.len() == def.variants.len() {
-//RS                     out.insert(def.name.clone(), variants);
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::CodeModule(module) => {
-//RS                 if let Some(body) = &module.body {
-//RS                     collect_fieldless_setting_enums(body, out);
-//RS                 }
-//RS             }
-//RS             crate::AST::Item::GenericModule(module) => {
-//RS                 collect_fieldless_setting_enums(&module.body, out);
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn valid_setting_type_name(name: &str) -> bool {
-//RS     let mut chars = name.chars();
-//RS     matches!(chars.next(), Some(first) if first.is_ascii_uppercase())
-//RS         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-//RS }
-//RS 
-//RS fn valid_setting_variant(name: &str) -> bool {
-//RS     name.split('.').all(|segment| {
-//RS         let mut chars = segment.chars();
-//RS         matches!(chars.next(), Some(first) if first.is_ascii_uppercase())
-//RS             && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-//RS     })
-//RS }
-//RS 
-//RS fn unquote_setting(raw: &str) -> String {
-//RS     let raw = raw.trim();
-//RS     let body = raw
-//RS         .strip_prefix('"')
-//RS         .and_then(|value| value.strip_suffix('"'))
-//RS         .unwrap_or(raw);
-//RS     let mut out = String::new();
-//RS     let mut escaped = false;
-//RS     for ch in body.chars() {
-//RS         if escaped {
-//RS             out.push(match ch {
-//RS                 'n' => '\n',
-//RS                 'r' => '\r',
-//RS                 't' => '\t',
-//RS                 other => other,
-//RS             });
-//RS             escaped = false;
-//RS         } else if ch == '\\' {
-//RS             escaped = true;
-//RS         } else {
-//RS             out.push(ch);
-//RS         }
-//RS     }
-//RS     if escaped {
-//RS         out.push('\\');
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn parse_setting_char(raw: &str) -> Result<char, String> {
-//RS     let body = match raw
-//RS         .strip_prefix('\'')
-//RS         .and_then(|value| value.strip_suffix('\''))
-//RS     {
-//RS         Some(body) => body,
-//RS         None if raw.chars().count() == 1 => return Ok(raw.chars().next().unwrap()),
-//RS         None => return Err("Char settings use one quoted character".to_string()),
-//RS     };
-//RS     let value = unquote_setting(body);
-//RS     let mut chars = value.chars();
-//RS     let Some(ch) = chars.next() else {
-//RS         return Err("Char settings need one character".to_string());
-//RS     };
-//RS     if chars.next().is_some() {
-//RS         return Err("Char settings need one character".to_string());
-//RS     }
-//RS     Ok(ch)
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct GeneratedSourceProvenance {
-//RS     pub name: String,
-//RS     pub path: std::path::PathBuf,
-//RS     pub digest: crate::Comptime::Build::ContentDigest,
-//RS     pub source: String,
-//RS }
-//RS 
-//RS #[derive(Debug, Clone)]
-//RS pub struct BuildRun {
-//RS     pub plan: crate::Comptime::Build::BuildPlan,
-//RS     pub execution: crate::Comptime::Build::BuildExecutionReport,
-//RS     pub probes: Vec<crate::Comptime::Build::BuildProbeFact>,
-//RS     pub generated: Vec<GeneratedSourceProvenance>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub struct BuildCompileOutput {
-//RS     pub compile: crate::CompileOutput,
-//RS     pub build: Option<BuildRun>,
-//RS     /// Static compiler-owned nodes in the same BuildPlan graph. Execution
-//RS     /// durations and cache reasons are persisted by the CLI in jet-store.
-//RS     pub compiler_nodes: Vec<crate::Comptime::Build::BuildPlanNode>,
-//RS     /// Final runtime bundle after generated-source staging. Test harnesses
-//RS     /// that exercise the same in-process tier path consume this exact bundle.
-//RS     pub runtime: Option<crate::AST::ProgramBundle>,
-//RS     /// The exact fact snapshot used to check the returned program. Query and
-//RS     /// explain callers consume this instead of rebuilding contribution state.
-//RS     pub build_facts: jet_foundation::Facts::BuildFactSnapshot,
-//RS     /// Effect facts from the final runtime bundle check. Project-check
-//RS     /// staging populates this from the same in-memory generated graph that its
-//RS     /// validators consume.
-//RS     pub runtime_effect_facts: Option<crate::Sema::SemIndexEffectFacts>,
-//RS }
-//RS impl BuildCompileOutput {
-//RS     /// Project compiler work into the same plan returned to graph/query users.
-//RS     /// The final runtime bundle is the source of truth after generated-source
-//RS     /// staging; no path outside the project root enters node identity.
-//RS     pub fn attach_compiler_nodes(&mut self) {
-//RS         let Some(bundle) = self.runtime.as_ref() else {
-//RS             return;
-//RS         };
-//RS         let nodes = compiler_nodes_for_bundle(bundle, self.build.as_ref().map(|run| &run.plan));
-//RS         if let Some(build) = self.build.as_mut() {
-//RS             build.plan.set_compiler_nodes(nodes.clone());
-//RS         }
-//RS         self.compiler_nodes = nodes;
-//RS     }
-//RS }
-//RS 
-//RS struct BuildFilesystemTransaction {
-//RS     files: Vec<(std::path::PathBuf, Option<Vec<u8>>)>,
-//RS     committed: bool,
-//RS }
-//RS 
-//RS impl BuildFilesystemTransaction {
-//RS     fn new(paths: impl IntoIterator<Item = std::path::PathBuf>) -> std::io::Result<Self> {
-//RS         let mut seen = std::collections::BTreeSet::new();
-//RS         let mut files = Vec::new();
-//RS         for path in paths.into_iter().filter(|path| seen.insert(path.clone())) {
-//RS             if path_has_symlinked_component(&path) {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     format!(
-//RS                         "build transaction path `{}` contains a symlink",
-//RS                         path.display()
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             let before = match std::fs::read(&path) {
-//RS                 Ok(bytes) => Some(bytes),
-//RS                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-//RS                 Err(error) => return Err(error),
-//RS             };
-//RS             files.push((path, before));
-//RS         }
-//RS         Ok(Self {
-//RS             files,
-//RS             committed: false,
-//RS         })
-//RS     }
-//RS     fn commit(&mut self) {
-//RS         self.committed = true;
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for BuildFilesystemTransaction {
-//RS     fn drop(&mut self) {
-//RS         if self.committed {
-//RS             return;
-//RS         }
-//RS         for (path, before) in self.files.iter().rev() {
-//RS             match before {
-//RS                 Some(bytes) => {
-//RS                     let _ = safe_atomic_write(path, bytes);
-//RS                 }
-//RS                 None => {
-//RS                     if !std::fs::symlink_metadata(path)
-//RS                         .is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS                     {
-//RS                         let _ = std::fs::remove_file(path);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn path_has_symlinked_component(path: &std::path::Path) -> bool {
-//RS     let mut current = std::path::PathBuf::new();
-//RS     for component in path.components() {
-//RS         match component {
-//RS             std::path::Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-//RS             std::path::Component::RootDir => {
-//RS                 current.push(std::path::MAIN_SEPARATOR.to_string());
-//RS             }
-//RS             std::path::Component::CurDir => {}
-//RS             std::path::Component::ParentDir => return true,
-//RS             std::path::Component::Normal(part) => current.push(part),
-//RS         }
-//RS         if std::fs::symlink_metadata(&current)
-//RS             .is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS         {
-//RS             return true;
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn ensure_real_parent(path: &std::path::Path) -> std::io::Result<()> {
-//RS     let Some(parent) = path.parent() else {
-//RS         return Ok(());
-//RS     };
-//RS     let mut current = std::path::PathBuf::new();
-//RS     for component in parent.components() {
-//RS         match component {
-//RS             std::path::Component::Prefix(prefix) => current.push(prefix.as_os_str()),
-//RS             std::path::Component::RootDir => {
-//RS                 current.push(std::path::MAIN_SEPARATOR.to_string());
-//RS             }
-//RS             std::path::Component::CurDir => {}
-//RS             std::path::Component::ParentDir => {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::InvalidInput,
-//RS                     "build path contains a parent component",
-//RS                 ));
-//RS             }
-//RS             std::path::Component::Normal(part) => current.push(part),
-//RS         }
-//RS         match std::fs::symlink_metadata(&current) {
-//RS             Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
-//RS                 return Err(std::io::Error::new(
-//RS                     std::io::ErrorKind::PermissionDenied,
-//RS                     format!(
-//RS                         "build directory `{}` is not a real directory",
-//RS                         current.display()
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Ok(_) => {}
-//RS             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-//RS                 std::fs::create_dir(&current)?;
-//RS             }
-//RS             Err(error) => return Err(error),
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn safe_atomic_write(path: &std::path::Path, bytes: &[u8]) -> std::io::Result<()> {
-//RS     if path_has_symlinked_component(path) {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             format!("build path `{}` contains a symlink", path.display()),
-//RS         ));
-//RS     }
-//RS     ensure_real_parent(path)?;
-//RS     if std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             format!("build output `{}` is a symlink", path.display()),
-//RS         ));
-//RS     }
-//RS     let parent = path.parent().unwrap_or_else(|| std::path::Path::new("."));
-//RS     for attempt in 0..100u32 {
-//RS         let temporary = parent.join(format!(".jet-atomic-{}-{}", std::process::id(), attempt));
-//RS         let mut file = match std::fs::OpenOptions::new()
-//RS             .create_new(true)
-//RS             .write(true)
-//RS             .open(&temporary)
-//RS         {
-//RS             Ok(file) => file,
-//RS             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-//RS             Err(error) => return Err(error),
-//RS         };
-//RS         use std::io::Write;
-//RS         if let Err(error) = file.write_all(bytes).and_then(|_| file.sync_all()) {
-//RS             let _ = std::fs::remove_file(&temporary);
-//RS             return Err(error);
-//RS         }
-//RS         std::fs::rename(&temporary, path)?;
-//RS         return Ok(());
-//RS     }
-//RS     Err(std::io::Error::new(
-//RS         std::io::ErrorKind::AlreadyExists,
-//RS         "could not allocate a unique build temporary file",
-//RS     ))
-//RS }
-//RS 
-//RS fn read_build_file(root: &std::path::Path, path: &std::path::Path) -> std::io::Result<Vec<u8>> {
-//RS     if path.strip_prefix(root).is_err()
-//RS         || path_has_symlinked_component(path)
-//RS         || std::fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS     {
-//RS         return Err(std::io::Error::new(
-//RS             std::io::ErrorKind::PermissionDenied,
-//RS             format!(
-//RS                 "build file `{}` contains a symlink or is outside the project",
-//RS                 path.display()
-//RS             ),
-//RS         ));
-//RS     }
-//RS     std::fs::read(path)
-//RS }
-//RS 
-//RS /// Static graph facts for CLI and LSP consumers. Build evaluation is pure and
-//RS /// generated files/actions are not materialized or executed.
-//RS pub fn query_build_plan(
-//RS     file: &str,
-//RS ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build(file, build_query_options())
-//RS         .map(|output| output.build.map(|build| build.plan))
-//RS }
-//RS 
-//RS /// Compiler-owned graph nodes for `explain-build`. The project-check seam
-//RS /// supplies a final in-memory bundle without executing declared actions.
-//RS pub fn query_build_nodes(
-//RS     file: &str,
-//RS ) -> Result<Vec<crate::Comptime::Build::BuildPlanNode>, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_with_front_end_for_project_check(file, build_query_options(), None)
-//RS         .map(|output| output.compiler_nodes)
-//RS }
-//RS 
-//RS /// Read the one build-fact snapshot produced by the query path. This keeps
-//RS /// `jet explain` on the same build-entry evaluator and contribution resolver
-//RS /// as sema and codegen without executing actions or writing a lock.
-//RS pub fn query_build_facts(
-//RS     file: &str,
-//RS     profile: &str,
-//RS     setting_overrides: &BTreeMap<String, String>,
-//RS ) -> Result<jet_foundation::Facts::BuildFactSnapshot, Vec<Diagnostic>> {
-//RS     let mut options = build_query_options();
-//RS     options.profile = profile.to_string();
-//RS     options.setting_overrides = setting_overrides.clone();
-//RS     compile_bundle_path_build(file, options).map(|output| output.build_facts)
-//RS }
-//RS 
-//RS fn build_query_options() -> BuildRunOptions {
-//RS     BuildRunOptions {
-//RS         // Inspection verifies source declarations and #Impure gates, but it
-//RS         // must not require execution grants merely to display the graph.
-//RS         grants: crate::Comptime::Build::BuildCapability::ALL
-//RS             .into_iter()
-//RS             .collect(),
-//RS         policy: crate::Comptime::Build::BuildPolicy::local_default(),
-//RS         execute: false,
-//RS         // Graph inspection may describe effectful actions, but it has no
-//RS         // authority to perform ambient comptime I/O. A user-written #Impure
-//RS         // gate therefore still reaches E3411 instead of touching the host.
-//RS         gates: crate::Policy::GateSet::default(),
-//RS         inspect_only: true,
-//RS         emit_generated: false,
-//RS         locked: false,
-//RS         no_os: false,
-//RS         web_target: false,
-//RS         plugin_target: false,
-//RS         cross_target: None,
-//RS         profile: "dev".to_string(),
-//RS         artifact_build: false,
-//RS         application_authority: None,
-//RS         setting_overrides: BTreeMap::new(),
-//RS         remote: None,
-//RS         package_scope: true,
-//RS         build_override: true,
-//RS         entry_fn: None,
-//RS     }
-//RS }
-//RS 
-//RS /// Ratified D-BUILDQUERY1 query expressions. `build` is deliberately the only
-//RS /// expression until another query spelling is owner-ratified.
-//RS #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-//RS pub enum BuildQueryExpression {
-//RS     Build,
-//RS }
-//RS 
-//RS pub fn evaluate_build_query(
-//RS     file: &str,
-//RS     expression: BuildQueryExpression,
-//RS ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-//RS     match expression {
-//RS         BuildQueryExpression::Build => query_build_plan(file),
-//RS     }
-//RS }
-//RS 
-//RS /// LSP variant: the open document is authoritative even before save.
-//RS pub fn query_build_plan_with_overlay(
-//RS     file: &str,
-//RS     source: &str,
-//RS ) -> Result<Option<crate::Comptime::Build::BuildPlan>, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(
-//RS         file,
-//RS         build_query_options(),
-//RS         Some((std::path::Path::new(file), source)),
-//RS         None,
-//RS         None,
-//RS         false,
-//RS         false,
-//RS     )
-//RS     .map(|output| output.build.map(|build| build.plan))
-//RS }
-//RS 
-//RS /// One canonical graph representation shared by CLI and LSP.
-//RS pub fn build_plan_json(
-//RS     plan: &crate::Comptime::Build::BuildPlan,
-//RS     execution: Option<&crate::Comptime::Build::BuildExecutionReport>,
-//RS ) -> String {
-//RS     let graph = crate::Comptime::Build::graph_for_build_query(plan, execution);
-//RS     let targets = graph
-//RS         .targets
-//RS         .iter()
-//RS         .map(|target| {
-//RS             format!(
-//RS                 "{{\"id\":{},\"name\":\"{}\",\"kind\":\"{:?}\",\"deps\":[{}],\"actions\":[{}],\"files\":{}}}",
-//RS                 target.id.0,
-//RS                 graph_json_escape(&target.name),
-//RS                 target.kind,
-//RS                 target
-//RS                     .deps
-//RS                     .iter()
-//RS                     .map(|id| id.0.to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(","),
-//RS                 target
-//RS                     .actions
-//RS                     .iter()
-//RS                     .map(|id| id.0.to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(","),
-//RS                 graph_json_strings(&target.files),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let actions = graph
-//RS         .actions
-//RS         .iter()
-//RS         .map(|action| {
-//RS             let real = &plan.actions()[action.id.0];
-//RS             let probes = real
-//RS                 .probes
-//RS                 .iter()
-//RS                 .map(|probe| plan.probes()[probe.id().0].name.clone())
-//RS                 .collect::<Vec<_>>();
-//RS             let provenance = plan
-//RS                 .explain_action_named(&action.name)
-//RS                 .map(|fact| fact.provenance)
-//RS                 .unwrap_or_default();
-//RS             format!(
-//RS                 "{{\"id\":{},\"name\":\"{}\",\"inputs\":{},\"outputs\":{},\"caps\":{},\"pools\":{},\"toolchain\":\"{}\",\"probes\":{},\"cache\":\"{:?}\",\"cache_status\":\"{}\",\"key\":\"{}\",\"compiler_owned\":{},\"provenance\":{}}}",
-//RS                 action.id.0,
-//RS                 graph_json_escape(&action.name),
-//RS                 graph_json_strings(&action.inputs),
-//RS                 graph_json_strings(&action.outputs),
-//RS                 graph_json_strings(
-//RS                     &action
-//RS                         .caps
-//RS                         .iter()
-//RS                         .map(|cap| cap.name().to_string())
-//RS                         .collect::<Vec<_>>(),
-//RS                 ),
-//RS                 graph_json_strings(
-//RS                     &action
-//RS                         .pools
-//RS                         .iter()
-//RS                         .map(|pool| pool.as_str().to_string())
-//RS                         .collect::<Vec<_>>(),
-//RS                 ),
-//RS                 graph_json_escape(&plan.toolchains()[real.toolchain.id().0].name),
-//RS                 graph_json_strings(&probes),
-//RS                 real.cache,
-//RS                 graph_cache_status(action.cache_hit),
-//RS                 graph_json_escape(action.key.as_str()),
-//RS                 real.compiler_owned,
-//RS                 graph_json_strings(&provenance),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let files = graph
-//RS         .files
-//RS         .iter()
-//RS         .map(graph_file_json)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let affected_files = graph
-//RS         .affected_files()
-//RS         .iter()
-//RS         .map(graph_file_json)
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let action_keys = graph
-//RS         .action_keys()
-//RS         .iter()
-//RS         .map(|entry| {
-//RS             format!(
-//RS                 "{{\"action\":\"{}\",\"key\":\"{}\"}}",
-//RS                 graph_json_escape(&entry.action),
-//RS                 graph_json_escape(entry.key.as_str()),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     let cache_hits = graph
-//RS         .cache_hits()
-//RS         .iter()
-//RS         .map(|action| {
-//RS             format!(
-//RS                 "{{\"action\":\"{}\",\"key\":\"{}\"}}",
-//RS                 graph_json_escape(&action.name),
-//RS                 graph_json_escape(action.key.as_str()),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>()
-//RS         .join(",");
-//RS     format!(
-//RS         "{{\"schema_version\":1,\"default\":{},\"targets\":[{}],\"actions\":[{}],\"action_keys\":[{}],\"cache_hits\":[{}],\"files\":[{}],\"affected_files\":[{}],\"toolchains\":[{}],\"probes\":[{}],\"generated\":[{}]}}",
-//RS         plan.default_target()
-//RS             .map(|target| target.id().0.to_string())
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         targets,
-//RS         actions,
-//RS         action_keys,
-//RS         cache_hits,
-//RS         files,
-//RS         affected_files,
-//RS         plan.toolchains()
-//RS             .iter()
-//RS             .map(|tool| {
-//RS                 format!(
-//RS                     "{{\"name\":\"{}\",\"target\":\"{}\"}}",
-//RS                     graph_json_escape(&tool.name),
-//RS                     graph_json_escape(&tool.target_triple),
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS         plan.probes()
-//RS             .iter()
-//RS             .map(|probe| {
-//RS                 format!(
-//RS                     "{{\"name\":\"{}\",\"kind\":\"{:?}\",\"reproducibility\":\"{:?}\"}}",
-//RS                     graph_json_escape(&probe.name),
-//RS                     probe.kind,
-//RS                     probe.reproducibility,
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS         plan.generated_modules()
-//RS             .iter()
-//RS             .map(|module| {
-//RS                 format!(
-//RS                     "{{\"name\":\"{}\",\"path\":\"{}\",\"digest\":\"{}\"}}",
-//RS                     graph_json_escape(&module.name),
-//RS                     graph_json_escape(module.path.as_str()),
-//RS                     graph_json_escape(module.source_digest.as_str()),
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     )
-//RS }
-//RS 
-//RS fn graph_cache_status(hit: Option<bool>) -> &'static str {
-//RS     match hit {
-//RS         Some(true) => "hit",
-//RS         Some(false) => "miss",
-//RS         None => "unknown",
-//RS     }
-//RS }
-//RS 
-//RS fn graph_json_escape(value: &str) -> String {
-//RS     let mut escaped = String::with_capacity(value.len());
-//RS     for character in value.chars() {
-//RS         match character {
-//RS             '\\' => escaped.push_str("\\\\"),
-//RS             '"' => escaped.push_str("\\\""),
-//RS             '\n' => escaped.push_str("\\n"),
-//RS             '\r' => escaped.push_str("\\r"),
-//RS             '\t' => escaped.push_str("\\t"),
-//RS             character if character.is_control() => {
-//RS                 escaped.push_str(&format!("\\u{:04x}", character as u32));
-//RS             }
-//RS             character => escaped.push(character),
-//RS         }
-//RS     }
-//RS     escaped
-//RS }
-//RS 
-//RS fn graph_json_strings(values: &[String]) -> String {
-//RS     format!(
-//RS         "[{}]",
-//RS         values
-//RS             .iter()
-//RS             .map(|value| format!("\"{}\"", graph_json_escape(value)))
-//RS             .collect::<Vec<_>>()
-//RS             .join(",")
-//RS     )
-//RS }
-//RS 
-//RS fn graph_file_json(file: &crate::Comptime::Build::BuildGraphFile) -> String {
-//RS     format!(
-//RS         "{{\"path\":\"{}\",\"owner\":{},\"consumers\":[{}],\"targets\":[{}]}}",
-//RS         graph_json_escape(&file.path),
-//RS         file.owner
-//RS             .map(|id| id.0.to_string())
-//RS             .unwrap_or_else(|| "null".to_string()),
-//RS         file.consumers
-//RS             .iter()
-//RS             .map(|id| id.0.to_string())
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS         file.targets
-//RS             .iter()
-//RS             .map(|id| id.0.to_string())
-//RS             .collect::<Vec<_>>()
-//RS             .join(","),
-//RS     )
-//RS }
-//RS 
-//RS /// #2083: the exact inputs a prepared front end was produced under.
-//RS ///
-//RS /// A prepared front end may only be resumed by a compile that asks for the
-//RS /// same program under the same facts. The compile compares this value against
-//RS /// its own `BuildRunOptions` before resuming; a mismatch fails closed before
-//RS /// another source snapshot can be loaded.
-//RS #[derive(Debug, Clone, PartialEq, Eq)]
-//RS pub struct FrontEndInputs {
-//RS     pub file: String,
-//RS     pub profile: String,
-//RS     /// D-DBG1=A: `jet build` artifact fact (see `BuildRunOptions`).
-//RS     pub artifact_build: bool,
-//RS     pub setting_overrides: BTreeMap<String, String>,
-//RS     pub locked: bool,
-//RS     pub web_target: bool,
-//RS     pub plugin_target: bool,
-//RS     pub cross_target: Option<String>,
-//RS     pub package_scope: bool,
-//RS     pub build_override: bool,
-//RS     pub entry_fn: Option<String>,
-//RS }
-//RS 
-//RS impl FrontEndInputs {
-//RS     /// The front-end inputs a `compile_bundle_path_build` call implies. This is
-//RS     /// the one place the correspondence between build options and front-end
-//RS     /// inputs is written down, so a caller that prepares a front end and the
-//RS     /// compile that resumes it cannot describe two different programs.
-//RS     pub fn for_build(file: &str, options: &BuildRunOptions) -> Self {
-//RS         Self {
-//RS             file: file.to_string(),
-//RS             profile: options.profile.clone(),
-//RS             artifact_build: options.artifact_build,
-//RS             setting_overrides: options.setting_overrides.clone(),
-//RS             locked: options.locked,
-//RS             web_target: options.web_target,
-//RS             plugin_target: options.plugin_target,
-//RS             cross_target: options.cross_target.clone(),
-//RS             package_scope: options.package_scope,
-//RS             build_override: options.build_override,
-//RS             entry_fn: options.entry_fn.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// #2083: one front end per build.
-//RS ///
-//RS /// The build pipeline's first stage — load the build-entry closure, seed the
-//RS /// one build-fact snapshot, run sema, classify diagnostics — used to run twice
-//RS /// per `jet build`: once inside the CLI's native content-cache key computation
-//RS /// and once inside the compile, which threw the first result away. This value
-//RS /// is that stage's complete result. The native cache key is computed from
-//RS /// `runtime_program()`, and `compile_bundle_path_build_with_front_end` resumes
-//RS /// the pipeline from here, so the key names the program that is actually
-//RS /// emitted instead of a second, independently reloaded copy of it.
-//RS ///
-//RS pub struct PreparedBuildFrontEnd {
-//RS     /// Semantic identity of a package-wide build entry that lives outside the runtime bundle.
-//RS     package_build_fingerprint: Option<String>,
-//RS     inputs: FrontEndInputs,
-//RS     bundle: crate::AST::ProgramBundle,
-//RS     effect_facts: crate::Sema::SemIndexEffectFacts,
-//RS     program_value: Option<crate::Comptime::CtValue>,
-//RS     lints: Vec<Diagnostic>,
-//RS     build_index: Option<usize>,
-//RS     build_span: Option<crate::Diagnostics::Span>,
-//RS     compile_mode: crate::Sema::CompileMode,
-//RS     active_os: crate::Syntax::OSTarget,
-//RS     build_stamp: jet_foundation::Facts::BuildStamp,
-//RS     runtime_bundle_for_package: Option<crate::AST::ProgramBundle>,
-//RS     runtime_source_paths: Vec<std::path::PathBuf>,
-//RS     source_closure: Vec<(std::path::PathBuf, String)>,
-//RS }
-//RS 
-//RS impl PreparedBuildFrontEnd {
-//RS     /// The checked bundle used to build the read-only comptime snapshot.
-//RS     pub fn bundle(&self) -> &crate::AST::ProgramBundle {
-//RS         &self.bundle
-//RS     }
-//RS 
-//RS     /// Attach the snapshot built from the compiler-owned semantic index.
-//RS     pub fn set_program_value(&mut self, value: crate::Comptime::CtValue) {
-//RS         self.program_value = Some(value);
-//RS     }
-//RS 
-//RS     /// Whether this front end selected a `fn build` entry, the only consumer
-//RS     /// of the program snapshot `set_program_value` attaches.
-//RS     pub fn selects_build_entry(&self) -> bool {
-//RS         self.build_index.is_some()
-//RS     }
-//RS 
-//RS     /// The checked runtime program, when this front end checked it directly.
-//RS     ///
-//RS     /// `None` when a package build entry in another file was selected: the
-//RS     /// checked bundle then describes the *build* program, and the runtime
-//RS     /// program is still unchecked. Keying a content cache on it would let two
-//RS     /// different runtime programs share one cache entry, and rendering the
-//RS     /// effect summary from it would describe the wrong program.
-//RS     pub fn runtime_program(&self) -> Option<&crate::AST::ProgramBundle> {
-//RS         self.runtime_bundle_for_package
-//RS             .is_none()
-//RS             .then_some(&self.bundle)
-//RS     }
-//RS 
-//RS     /// The checked program a build will actually emit, when this one front end
-//RS     /// already *is* that program.
-//RS     ///
-//RS     /// `None` when a `fn build` was selected: the plan may materialize
-//RS     /// generated modules, and the emitted program is then the planned bundle
-//RS     /// loaded after execution, not this one. Callers that must describe the
-//RS     /// final program exactly — C link flags, the effect summary — use this
-//RS     /// instead of `runtime_program`, which only has to name the same program
-//RS     /// the content-cache key has always named.
-//RS     pub fn emitted_program(&self) -> Option<&crate::AST::ProgramBundle> {
-//RS         self.build_index
-//RS             .is_none()
-//RS             .then(|| self.runtime_program())
-//RS             .flatten()
-//RS     }
-//RS 
-//RS     /// The effect facts this front end solved. The build effect summary is a
-//RS     /// projection of these, so a caller never needs a third front end for it.
-//RS     pub fn effect_facts(&self) -> &crate::Sema::SemIndexEffectFacts {
-//RS         &self.effect_facts
-//RS     }
-//RS     /// Immutable source texts for every module in the checked build closure.
-//RS     pub fn source_closure(&self) -> &[(std::path::PathBuf, String)] {
-//RS         &self.source_closure
-//RS     }
-//RS }
-//RS 
-//RS /// Run the build front end once, without compiling. The caller computes the
-//RS /// native content-cache key from the result and hands it back to
-//RS /// `compile_bundle_path_build_with_front_end`.
-//RS pub fn prepare_build_front_end(
-//RS     inputs: FrontEndInputs,
-//RS ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(move || {
-//RS         prepare_build_front_end_on_compiler_stack(inputs, None, &[])
-//RS     })
-//RS }
-//RS 
-//RS /// Run the build front end against the complete authority-selected source
-//RS /// closure. Every imported module is supplied as immutable bytes to the same
-//RS /// loader invocation as the entry module.
-//RS pub fn prepare_build_front_end_with_source_closure(
-//RS     inputs: FrontEndInputs,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-//RS     let source_closure = source_closure.to_vec();
-//RS     crate::run_compiler_work(move || {
-//RS         prepare_build_front_end_on_compiler_stack(inputs, None, &source_closure)
-//RS     })
-//RS }
-//RS 
-//RS /// Run the build front end against an authority-selected source snapshot.
-//RS /// The entry overlay replaces only the virtual source file; imported modules
-//RS /// continue resolving relative to `source_path`.
-//RS pub fn prepare_build_front_end_with_overlay(
-//RS     inputs: FrontEndInputs,
-//RS     source_path: &std::path::Path,
-//RS     source: &str,
-//RS ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         prepare_build_front_end_on_compiler_stack(
-//RS             inputs,
-//RS             Some((source_path, source)),
-//RS             &[],
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS /// D-BUILDENTRY1 complete driver staging: check root bundle, evaluate selected
-//RS /// root `fn build`, materialize/re-check generated Jet, execute canonical graph,
-//RS /// remove build-only entry, then codegen runtime program.
-//RS pub fn compile_bundle_path_build(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(file, options, None, None, None, false, false)
-//RS }
-//RS 
-//RS /// #2083: `compile_bundle_path_build` resuming a front end the caller already
-//RS /// ran through `prepare_build_front_end`. The prepared bundle is checked
-//RS /// against `options` before it is resumed; a stale or foreign front end fails
-//RS /// closed instead of reloading a different program.
-//RS pub fn compile_bundle_path_build_with_front_end(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(file, options, None, None, prepared, false, false)
-//RS }
-//RS 
-//RS /// Resume or stage a build while carrying the complete authority-selected
-//RS /// source closure through build evaluation and runtime code generation.
-//RS pub fn compile_bundle_path_build_with_front_end_and_source_closure(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner_with_source_closure(
-//RS         file,
-//RS         options,
-//RS         None,
-//RS         None,
-//RS         prepared,
-//RS         false,
-//RS         false,
-//RS         source_closure,
-//RS     )
-//RS }
-//RS 
-//RS /// Resume a checked build front end for the read-only project-check promise.
-//RS /// This path evaluates `fn build`, overlays its in-memory generated sources,
-//RS /// and re-checks the selected runtime bundle without running actions or
-//RS /// emitting native code.
-//RS pub fn compile_bundle_path_build_with_front_end_for_project_check(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(file, options, None, None, prepared, false, true)
-//RS }
-//RS 
-//RS /// Resume a checked build front end after the native binary cache already
-//RS /// restored the artifact. This preserves diagnostics and build facts while
-//RS /// avoiding the full generated-Rust emission pass.
-//RS pub fn compile_bundle_path_build_with_front_end_without_codegen(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(file, options, None, None, prepared, true, false)
-//RS }
-//RS 
-//RS /// Compile a build entry from the checked source snapshot selected by an
-//RS /// authority resolver. The loader consumes `source` as its entry overlay, so
-//RS /// it does not reopen the validated entry pathname.
-//RS pub fn compile_bundle_path_build_with_overlay(
-//RS     file: &str,
-//RS     source_path: &std::path::Path,
-//RS     source: &str,
-//RS     options: BuildRunOptions,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(
-//RS         file,
-//RS         options,
-//RS         Some((source_path, source)),
-//RS         None,
-//RS         None,
-//RS         false,
-//RS         false,
-//RS     )
-//RS }
-//RS 
-//RS /// Read-only project-check variant for an authority-selected source overlay.
-//RS pub fn compile_bundle_path_build_with_overlay_for_project_check(
-//RS     file: &str,
-//RS     source_path: &std::path::Path,
-//RS     source: &str,
-//RS     options: BuildRunOptions,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(
-//RS         file,
-//RS         options,
-//RS         Some((source_path, source)),
-//RS         None,
-//RS         None,
-//RS         false,
-//RS         true,
-//RS     )
-//RS }
-//RS 
-//RS /// Compile one workspace member as a dependency authority boundary. Its
-//RS /// source declaration and local gate are checked normally, but a missing
-//RS /// effective grant is reported as dependency denial (`E3504`), not as a root
-//RS /// build policy denial (`E3503`).
-//RS pub fn compile_bundle_path_build_as_dependency(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(file, options, None, Some(file), None, false, false)
-//RS }
-//RS 
-//RS /// Dependency variant of `compile_bundle_path_build_with_overlay`.
-//RS pub fn compile_bundle_path_build_as_dependency_with_overlay(
-//RS     file: &str,
-//RS     source_path: &std::path::Path,
-//RS     source: &str,
-//RS     options: BuildRunOptions,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(
-//RS         file,
-//RS         options,
-//RS         Some((source_path, source)),
-//RS         Some(file),
-//RS         None,
-//RS         false,
-//RS         false,
-//RS     )
-//RS }
-//RS 
-//RS /// Read-only project-check variant for a workspace member authority overlay.
-//RS pub fn compile_bundle_path_build_as_dependency_with_overlay_for_project_check(
-//RS     file: &str,
-//RS     source_path: &std::path::Path,
-//RS     source: &str,
-//RS     options: BuildRunOptions,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner(
-//RS         file,
-//RS         options,
-//RS         Some((source_path, source)),
-//RS         Some(file),
-//RS         None,
-//RS         false,
-//RS         true,
-//RS     )
-//RS }
-//RS 
-//RS /// The one build-graph seam. Every `compile_bundle_path_build*` facade and
-//RS /// every build query reaches the graph through here, so the sized compiler
-//RS /// stack is installed once, around build evaluation *and* the runtime
-//RS /// compile that follows it.
-//RS fn compile_bundle_path_build_inner(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     dependency_boundary: Option<&str>,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS     without_codegen: bool,
-//RS     project_check: bool,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     compile_bundle_path_build_inner_with_source_closure(
-//RS         file,
-//RS         options,
-//RS         overlay,
-//RS         dependency_boundary,
-//RS         prepared,
-//RS         without_codegen,
-//RS         project_check,
-//RS         &[],
-//RS     )
-//RS }
-//RS 
-//RS fn compile_bundle_path_build_inner_with_source_closure(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     dependency_boundary: Option<&str>,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS     without_codegen: bool,
-//RS     project_check: bool,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(|| {
-//RS         compile_bundle_path_build_on_compiler_stack(
-//RS             file,
-//RS             options,
-//RS             overlay,
-//RS             dependency_boundary,
-//RS             prepared,
-//RS             without_codegen,
-//RS             project_check,
-//RS             source_closure,
-//RS         )
-//RS     })
-//RS     .map(|mut output| {
-//RS         output.attach_compiler_nodes();
-//RS         output
-//RS     })
-//RS }
-//RS 
-//RS fn prepared_front_end_mismatch(file: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E2105",
-//RS         format!("prepared build front end does not match `{file}`"),
-//RS         "resuming it could compile a source or build-input snapshot different from the requested build"
-//RS             .to_string(),
-//RS         "restart the build from the current source and build inputs".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn compile_bundle_path_build_on_compiler_stack(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     dependency_boundary: Option<&str>,
-//RS     prepared: Option<PreparedBuildFrontEnd>,
-//RS     without_codegen: bool,
-//RS     project_check: bool,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     let mut options = options;
-//RS     if project_check {
-//RS         // D-CHECKSCOPE1=A: a project check is an inspect-only build-front-end
-//RS         // pass.  The facade already selects `execute: false`; make the
-//RS         // no-authority-grant bit part of this seam so every project-check
-//RS         // caller, including workspace members, gets the same policy.
-//RS         options.execute = false;
-//RS         options.inspect_only = true;
-//RS         options.emit_generated = false;
-//RS     }
-//RS     if options.locked {
-//RS         crate::Loader::verify_locked_dependency_sources(file)?;
-//RS     }
-//RS     let inputs = FrontEndInputs::for_build(file, &options);
-//RS     let prepared = match prepared {
-//RS         Some(prepared) if overlay.is_none() && prepared.inputs == inputs => prepared,
-//RS         Some(_) => return Err(vec![prepared_front_end_mismatch(file)]),
-//RS         None => prepare_build_front_end_on_compiler_stack(
-//RS             inputs,
-//RS             overlay,
-//RS             source_closure,
-//RS         )?,
-//RS     };
-//RS     compile_build_from_front_end(
-//RS         file,
-//RS         options,
-//RS         dependency_boundary,
-//RS         prepared,
-//RS         without_codegen,
-//RS         project_check,
-//RS     )
-//RS }
-//RS 
-//RS /// Stage one of the build pipeline, run exactly once per invocation.
-//RS ///
-//RS fn prepare_build_front_end_on_compiler_stack(
-//RS     inputs: FrontEndInputs,
-//RS     overlay: Option<(&std::path::Path, &str)>,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<PreparedBuildFrontEnd, Vec<Diagnostic>> {
-//RS     let file = inputs.file.as_str();
-//RS     let direct_package_overlay = if overlay.is_none() {
-//RS         package_manifest_build_overlay(file)?
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let mut load_span = crate::Trace::span("load");
-//RS     let mut bundle = load_build_entry_bundle(
-//RS         file,
-//RS         overlay,
-//RS         direct_package_overlay.as_ref(),
-//RS         source_closure,
-//RS     )?;
-//RS     load_span.items(bundle.modules.len());
-//RS     drop(load_span);
-//RS     let mut runtime_bundle_for_package = None;
-//RS     let mut package_build_fingerprint = None;
-//RS     // D-BUILDSCOPE1: resolve one package build entry through PackageFacts. The
-//RS     // checked resolver owns package-wide discovery; this Driver only loads the
-//RS     // checked winner and keeps the ordinary runtime bundle for post-build
-//RS     // compilation. Imported build functions remain inert.
-//RS     let runtime_source_paths = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| module.path.clone())
-//RS         .collect::<Vec<_>>();
-//RS     let package_entry = if inputs.build_override && inputs.package_scope {
-//RS         package_build_entry_source(&bundle.project_root)?
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let package_manifest_entry = inputs.build_override && direct_package_overlay.is_some();
-//RS     let has_package_entry = package_entry.is_some() || package_manifest_entry;
-//RS     let active_os = crate::Syntax::OSTarget::active(inputs.cross_target.as_deref());
-//RS     let entry_path = std::path::Path::new(file);
-//RS     let entry_dir = entry_path.parent().unwrap_or(std::path::Path::new("."));
-//RS     let is_workspace_entry = match AuthorityResolver::open(entry_dir) {
-//RS         Ok(resolver) => match resolver.resolve_workspace_source() {
-//RS             Ok(Some(source)) => {
-//RS                 let entry_name = entry_path.file_name().ok_or_else(|| {
-//RS                     vec![Diagnostic::error(
-//RS                         "E1334",
-//RS                         "workspace entry cannot be resolved".to_string(),
-//RS                         "the workspace entry must name one regular file".to_string(),
-//RS                         "use an existing regular run.jet entry".to_string(),
-//RS                         None,
-//RS                     )]
-//RS                 })?;
-//RS                 let checked_entry = resolver
-//RS                     .checked_file(std::path::Path::new(entry_name))
-//RS                     .map_err(|error| vec![error.diagnostic()])?;
-//RS                 resolver
-//RS                     .revalidate_file(&checked_entry)
-//RS                     .map_err(|error| vec![error.diagnostic()])?;
-//RS                 resolver
-//RS                     .revalidate_source(&source)
-//RS                     .map_err(|error| vec![error.diagnostic()])?;
-//RS                 if source.checked.path != checked_entry.path {
-//RS                     false
-//RS                 } else if source.role != jet_pkg_model::WorkspacePlan::WorkspaceSourceRole::Index {
-//RS                     return Err(vec![Diagnostic::error(
-//RS                         "E1334",
-//RS                         "workspace build entry is selected by an authority source".to_string(),
-//RS                         "workspace build execution requires the matching source to have the Index role; an authority source cannot select a workspace entry".to_string(),
-//RS                         "declare the workspace index in `workspace.jet`, or build the member entry directly".to_string(),
-//RS                         None,
-//RS                     )]);
-//RS                 } else {
-//RS                     true
-//RS                 }
-//RS             }
-//RS             Ok(None) => false,
-//RS             Err(error) => return Err(vec![error.workspace_diagnostic()]),
-//RS         },
-//RS         Err(error) if error.is_missing() => false,
-//RS         Err(error) => return Err(vec![error.diagnostic()]),
-//RS     };
-//RS     let compile_mode = if inputs.plugin_target || has_package_entry || is_workspace_entry {
-//RS         crate::Sema::CompileMode::Check
-//RS     } else {
-//RS         crate::Sema::CompileMode::Run
-//RS     };
-//RS     bundle.active_os = active_os;
-//RS     set_bundle_target(&mut bundle, inputs.cross_target.as_deref());
-//RS     // Capture the provenance input once for this package build. Every build
-// END-PORT-PENDING 2020 crates/jet-driver/src/Driver/mod.rs:1801-3600
+use jet_foundation.AST.*
+use jet_foundation.Diagnostics.[Diagnostic, Span]
+use jet_foundation.Facts.[BuildFactValue, BuildFactSnapshot, BuildSettingFact, BuildStamp]
+use jet_foundation.Policy.[FactKey, FactValue, FactContribution, EffectiveFact, FactError, SourceScope, ContributionLayer, resolve]
+use jet_foundation.Layout.TargetLayout
+use jet_foundation.Authority.ApplicationAuthority
+use jet_foundation.Syntax.[OSTarget, BUILD_PROFILE_RELEASE, BUILD_PROFILE_HARDENED, PACKAGE_FILE]
+use jet_driver.Comptime.Build.*
+use jet_driver.Driver.*
+use jet_driver.Driver.Driver03.*
+use jet_driver.Loader.*
+use jet_driver.Package.[ReleaseDevtoolsPolicy, ReleaseInspect]
+use jet_driver.Policy.GateSet
+use jet_driver.Sema.[CompileMode, SemIndexEffectFacts]
+use jet_driver.Comptime.CtValue
+use jet_pkg_model.Authority.AuthorityResolver
+use jet_pkg_model.WorkspacePlan.WorkspaceSourceRole
+use std.[fs, io, path, process]
+// GATE #4494: native filesystem, exclusive creation, sync/rename and compiler-stack scheduling.
+// GATE #4499: typed fact payloads, collections, source identity and semantic enum equality.
 
+// Rust: crates/jet-driver/src/Driver/mod.rs:1814
+#Derive(Debug, Clone)
+pub struct BuildRunOptions {
+    grants: Set[BuildCapability]
+    // Bridge policy is separate from explicit capability grants.
+    policy: BuildPolicy
+    execute: Bool
+    gates: GateSet
+    inspect_only: Bool
+    emit_generated: Bool
+    locked: Bool
+    no_os: Bool
+    web_target: Bool
+    plugin_target: Bool
+    cross_target: String?
+    profile: String
+    artifact_build: Bool
+    application_authority: ApplicationAuthority?
+    setting_overrides: [String:String]
+    remote: RemoteBuildBinding?
+    package_scope: Bool
+    build_override: Bool
+    entry_fn: String?
+}
+impl BuildRunOptions {
+    // Rust: crates/jet-driver/src/Driver/mod.rs:1860
+    fn default() -> Self {
+        Self { grants: Set[BuildCapability].new(), policy: BuildPolicy.local_default(), execute: true,
+            gates: GateSet.default(), inspect_only: false, emit_generated: false, locked: false,
+            no_os: false, web_target: false, plugin_target: false, cross_target: None,
+            profile: "dev", artifact_build: false, application_authority: None,
+            setting_overrides: [String:String].new(), remote: None, package_scope: true,
+            build_override: true, entry_fn: None }
+    }
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:1889
+// Seed one immutable provenance snapshot; locked builds never consult the wall clock.
+pub fn seed_build_facts(bundle: &ProgramBundle, profile: &String, locked: Bool, setting_overrides: &[String:String]) -> Result[(), [Diagnostic]] {
+    seed_build_facts_with_contributions(bundle, profile, locked, setting_overrides, &[])
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:1901
+pub fn seed_build_facts_with_contributions(bundle: &ProgramBundle, profile: &String, locked: Bool, setting_overrides: &[String:String], computed_contributions: &[FactContribution]) -> Result[(), [Diagnostic]] {
+    stamp :: build_stamp_for_facts(&bundle.project_root, locked)?
+    seed_build_facts_from_stamp(bundle, profile, setting_overrides, computed_contributions, &stamp)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:1918
+pub fn build_stamp_for_facts(project_root: &OSPath, locked: Bool) -> Result[BuildStamp, [Diagnostic]] {
+    jet_driver.Lock.build_stamp(project_root, locked).map_err(fn(error) {
+        [Diagnostic.error("E3512", "the build provenance stamp is unavailable", error, "run an unlocked build to create the lock stamp, then rerun with `--locked`", None)]
+    })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:1934
+pub fn set_bundle_target(bundle: &ProgramBundle, cross_target: (&String)?) -> {
+    bundle.build_facts.target_triple = cross_target.map(fn(value) { value.to_owned() }).unwrap_or_else(TargetLayout.host_triple)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:1943
+pub fn release_devtools_policy_for_bundle(bundle: &ProgramBundle, profile: &String) -> ReleaseDevtoolsPolicy {
+    if profile != BUILD_PROFILE_RELEASE && profile != BUILD_PROFILE_HARDENED { return ReleaseDevtoolsPolicy.development() }
+    inspect :: package_facts_for_bundle(bundle).ok().flatten().and_then(fn(facts) {
+        facts.build_profiles.iter().find(fn(candidate) { candidate.name == profile }).map(fn(candidate) { candidate.inspect })
+    }).unwrap_or(ReleaseInspect.Local)
+    ReleaseDevtoolsPolicy.from_manifest_profile(inspect)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:1967
+pub fn seed_build_facts_from_stamp(bundle: &ProgramBundle, profile: &String, setting_overrides: &[String:String], computed_contributions: &[FactContribution], stamp: &BuildStamp) -> Result[(), [Diagnostic]] {
+    bundle.package_guarantees.harden |= profile == BUILD_PROFILE_HARDENED
+    target_triple :: if bundle.build_facts.target_triple.is_empty() { TargetLayout.host_triple() } else { bundle.build_facts.target_triple.clone() }
+    manifest :: package_facts_for_bundle(bundle)?
+    package_name :: manifest.as_ref().map(fn(facts) { facts.name.clone() }).filter(fn(name) { !name.is_empty() }).or_else(fn() {
+        bundle.modules.get(bundle.entry).and_then(fn(module) { module.path.file_stem().and_then(fn(name) { name.to_str() }).filter(fn(name) { !name.is_empty() }).map(fn(name) { name.to_string() }) })
+    }).unwrap_or_else(fn() { "script" })
+    package_version :: manifest.as_ref().and_then(fn(facts) { facts.version.clone() }).unwrap_or_else(fn() { "0.0.0" })
+    profile_source :: manifest.as_ref().map(fn(facts) { facts.origin.as_str() }).unwrap_or("<default>")
+    profile_key :: FactKey.with_default_source("Build.Profile", FactValue.Text("dev"), profile_source)
+    profile_contributions := [FactContribution].new()
+    if profile != "dev" { profile_contributions.push(FactContribution.new("Build.Profile", FactValue.Text(profile.to_string()), SourceScope.Package, ContributionLayer.CommandLine, "command line")) }
+    profile_fact :: resolve_build_fact(profile_key, profile_contributions)?
+    resolved_profile :: profile_fact.value == { .Text(value) -> value.clone(); _ -> profile.to_string() }
+    contributions := [String:EffectiveFact].from([(profile_fact.key.name.clone(), profile_fact)])
+    package_source :: manifest.as_ref().map(fn(facts) { facts.origin.as_str() }).unwrap_or("<source>")
+    fixed_facts :: [
+        ("Build.Package.Name", FactValue.Text(package_name.clone()), package_source),
+        ("Build.Package.Version", FactValue.Text(package_version.clone()), package_source),
+        ("Build.OS", FactValue.Enum(bundle.active_os.name().to_string()), "<target>"),
+        ("Build.Stamp.Git", FactValue.OptionalText(stamp.git.clone()), ".jet/lock"),
+        ("Build.Stamp.Dirty", FactValue.Bool(stamp.dirty), ".jet/lock"),
+        ("Build.Stamp.Toolchain", FactValue.Text(stamp.toolchain.clone()), ".jet/lock"),
+        ("Build.Stamp.At", FactValue.Text(stamp.at.clone()), ".jet/lock")
+    ]
+    for (name, value, source) in fixed_facts {
+        contribution :: FactContribution.new(name, value, SourceScope.Package, ContributionLayer.Declaration, source)
+        fact :: resolve_build_fact(FactKey.new(name), [contribution])?
+        contributions.insert(fact.key.name.clone(), fact)
+    }
+    enum_types :: fieldless_setting_enums(bundle)
+    settings := [String:BuildSettingFact].new()
+    setting_provenance := [String:[String]].new()
+    if manifest.as_ref() == .Some(facts) {
+        setting_contributions := [String:[FactContribution]].new()
+        setting_defaults := [String:FactValue].new()
+        keys :: facts.settings.keys().cloned().collect()
+        keys.sort()
+        for key in keys {
+            declaration :: &facts.settings[&key]
+            value :: parse_setting_value(&declaration.ty, &declaration.default, &enum_types).map_err(fn(detail) { [setting_value_diagnostic(&key, &declaration.ty, &declaration.default, detail)] })?
+            setting_defaults.insert(key.clone(), policy_fact_value(&value))
+            _ :: setting_contributions.entry(key.clone()).or_default()
+        }
+        // Validate inactive profiles too; package input cannot hide undeclared keys.
+        for profile_def in &facts.build_profiles {
+            keys :: profile_def.settings.keys().cloned().collect()
+            keys.sort()
+            for key in keys {
+                raw :: &profile_def.settings[&key]
+                declaration_opt :: facts.settings.get(&key)
+                if declaration_opt.is_none() { return Err([undeclared_setting_diagnostic(&key, "the profile contribution names no declaration in `package.jet`", &facts.origin)]) }
+                declaration :: declaration_opt.unwrap()
+                _ :: parse_setting_value(&declaration.ty, raw, &enum_types).map_err(fn(detail) { [setting_value_diagnostic(&key, &declaration.ty, raw, detail)] })?
+            }
+        }
+        if facts.build_profiles.iter().find(fn(candidate) { candidate.name == profile }) == .Some(profile_def) {
+            keys :: profile_def.settings.keys().cloned().collect()
+            keys.sort()
+            for key in keys {
+                raw :: &profile_def.settings[&key]
+                declaration :: facts.settings.get(&key).expect("profile settings were validated before contribution")
+                value :: parse_setting_value(&declaration.ty, raw, &enum_types).map_err(fn(detail) { [setting_value_diagnostic(&key, &declaration.ty, raw, detail)] })?
+                setting_contributions.entry(key.clone()).or_default().push(FactContribution.new(build_setting_fact_key(&key), policy_fact_value(&value), SourceScope.Package, ContributionLayer.OptimizationBundle, "package.jet:build.{profile}.settings.{key}"))
+            }
+        }
+        keys :: setting_overrides.keys().cloned().collect()
+        keys.sort()
+        for key in keys {
+            raw :: &setting_overrides[&key]
+            declaration_opt :: facts.settings.get(&key)
+            if declaration_opt.is_none() { return Err([undeclared_setting_diagnostic(&key, "the CLI contribution names no declaration in `package.jet`", &facts.origin)]) }
+            declaration :: declaration_opt.unwrap()
+            value :: parse_setting_value(&declaration.ty, raw, &enum_types).map_err(fn(detail) { [setting_value_diagnostic(&key, &declaration.ty, raw, detail)] })?
+            setting_contributions.entry(key.clone()).or_default().push(FactContribution.new(build_setting_fact_key(&key), policy_fact_value(&value), SourceScope.Package, ContributionLayer.CommandLine, "command line:--set {key}={raw}"))
+        }
+        for contribution in computed_contributions {
+            key_opt :: contribution.key.strip_prefix("Build.Settings.")
+            if key_opt.is_none() { return Err([undeclared_setting_diagnostic(&contribution.key, "`fn build` can contribute only to a declared setting", &facts.origin)]) }
+            key :: key_opt.unwrap()
+            if !facts.settings.contains_key(key) { return Err([undeclared_setting_diagnostic(key, "the `fn build` contribution names no declaration in `package.jet`", &facts.origin)]) }
+            setting_contributions.entry(key.to_string()).or_default().push(contribution.clone())
+        }
+        keys :: setting_contributions.keys().cloned().collect()
+        keys.sort()
+        for key in keys {
+            declarations :: setting_contributions.remove(&key).unwrap()
+            default :: setting_defaults.remove(&key).expect("every declared setting has one default")
+            fact_key :: FactKey.with_default_source(build_setting_fact_key(&key), default, "package.jet:settings.{key} (default)")
+            fact :: resolve_build_fact(fact_key, declarations)?
+            declaration :: facts.settings.get(&key).expect("setting contribution key was checked against the manifest")
+            value :: setting_value_from_fact(&key, &declaration.ty, &fact.value, &enum_types)?
+            setting_provenance.insert(key.clone(), fact.provenance.iter().map(setting_provenance_line).collect())
+            settings.insert(key, BuildSettingFact { ty: declaration.ty.clone(), value })
+            contributions.insert(fact.key.name.clone(), fact)
+        }
+    } else if !setting_overrides.is_empty() || !computed_contributions.is_empty() {
+        declaration_site :: bundle.project_root.join(PACKAGE_FILE).display().to_string()
+        keys :: setting_overrides.keys().cloned().collect()
+        keys.sort()
+        key :: keys.first().cloned().or_else(fn() {
+            computed_contributions.first().map(fn(contribution) { contribution.key.strip_prefix("Build.Settings.").unwrap_or(&contribution.key).to_string() })
+        }).unwrap_or_else(fn() { "<unknown>" })
+        return Err([undeclared_setting_diagnostic(&key, "the package has no `settings:` declaration", &declaration_site)])
+    }
+    target_dossier :: bundle.build_facts.target_dossier.clone()
+    artifact_build :: bundle.build_facts.artifact_build
+    bundle.build_facts = BuildFactSnapshot { package_name, package_version, os: bundle.active_os,
+        target_triple, profile: resolved_profile, artifact_build, stamp: stamp.clone(), contributions,
+        settings, setting_provenance, target_dossier }
+    Ok(())
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2259
+fn build_setting_fact_key(key: &String) -> String { "Build.Settings.{key}" }
+// Rust: crates/jet-driver/src/Driver/mod.rs:2263
+fn policy_fact_value(value: &BuildFactValue) -> FactValue {
+    value == {
+        .Text(value) -> FactValue.Text(value.clone())
+        .Bool(value) -> FactValue.Bool(value)
+        .Int(value) -> FactValue.Int(value)
+        .Char(value) -> FactValue.Char(value)
+        .Enum { variant, .. } -> FactValue.Enum(variant.clone())
+        .OptionalText(value) -> FactValue.OptionalText(value.clone())
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2288
+fn setting_provenance_line(contribution: &FactContribution) -> String {
+    reason :: contribution.reason.as_deref().map_or(String.new(), fn(reason) { " ({reason})" })
+    "{contribution.source}{reason}"
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2296
+fn setting_value_from_fact(key: &String, ty: &String, value: &FactValue, enum_types: &[String:Set[String]]) -> Result[BuildFactValue, [Diagnostic]] {
+    raw :: value.display()
+    type_name := ty.trim() // #4303
+    (type_name, value) == {
+        ("Bool", .Bool(value)) -> Ok(BuildFactValue.Bool(value))
+        ("Int", .Int(value)) -> Ok(BuildFactValue.Int(value))
+        ("Char", .Char(value)) -> Ok(BuildFactValue.Char(value))
+        ("String", .Text(value)) -> Ok(BuildFactValue.Text(value.clone()))
+        (type_name, .Enum(variant)) if valid_setting_type_name(type_name) && enum_types.get(type_name).is_some_and(fn(variants) { variants.contains(variant) }) -> Ok(BuildFactValue.Enum { type_name: type_name.to_string(), variant: variant.clone() })
+        _ -> Err([setting_value_diagnostic(key, ty, &raw, "the computed value does not match the declared setting type")])
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2337
+fn fact_contribution_diagnostic(error: FactError) -> Diagnostic {
+    error.diagnostic() == { .Some(diagnostic) -> diagnostic; .None -> Diagnostic.error("E3521", "build fact contributions conflict", error.message(), "make same-layer writers agree, or move one value to a more explicit layer", None) }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2350
+fn resolve_build_fact(key: FactKey, contributions: IntoIterator[FactContribution]) -> Result[EffectiveFact, [Diagnostic]] {
+    resolve(key, contributions).map_err(fn(error) { [fact_contribution_diagnostic(error)] })?.ok_or_else(fn() {
+        [Diagnostic.error("E3521", "build fact has no contribution", "the selected build fact must have at least one registered writer", "restore the declaration or choose a source with a complete build fact plane", None)]
+    })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2368
+fn undeclared_setting_diagnostic(key: &String, why: &String, declaration_site: &String) -> Diagnostic {
+    Diagnostic.error("E0302", "`$build.settings.{key}` is undeclared", why.to_string(), "add `{key}: Type = default` to the `settings: {{ … }}` block in `{declaration_site}`", None)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2380
+fn setting_value_diagnostic(key: &String, ty: &String, raw: &String, detail: String) -> Diagnostic {
+    Diagnostic.error("E0302", "setting `{key}` cannot use `{raw}` as `{ty}`", detail, "use a `{ty}` value for the declared setting `{key}`", None)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2390
+fn parse_setting_value(ty: &String, raw: &String, enum_types: &[String:Set[String]]) -> BuildFactValue Err! {
+    raw := raw.trim() // #4303
+    type_name := ty.trim() // #4303
+    type_name == {
+        "Bool" -> raw == { "true" -> BuildFactValue.Bool(true); "false" -> BuildFactValue.Bool(false); _ -> Err("Bool settings use `true` or `false`") }
+        "Int" -> BuildFactValue.Int(raw.parse[I64]().map_err(fn(_) { "Int settings use a signed 64-bit whole number" })?)
+        "Char" -> BuildFactValue.Char(parse_setting_char(raw)?)
+        "String" -> BuildFactValue.Text(unquote_setting(raw))
+        type_name -> {
+            if !valid_setting_type_name(type_name) { return Err("settings use Bool, Int, Char, String, or a fieldless enum type") }
+            variant := raw.strip_prefix('.').unwrap_or(raw).trim() // #4303
+            if variant.is_empty() || !valid_setting_variant(variant) { return Err("fieldless enum settings use a named variant such as `.On`") }
+            variants_opt :: enum_types.get(type_name)
+            if variants_opt.is_none() { return Err("`{type_name}` is not a declared fieldless enum") }
+            variants :: variants_opt.unwrap()
+            if !variants.contains(variant) { return Err("`{type_name}` has no fieldless variant `{variant}`") }
+            BuildFactValue.Enum { type_name: type_name.to_string(), variant: variant.to_string() }
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2436
+fn fieldless_setting_enums(bundle: &ProgramBundle) -> [String:Set[String]] {
+    out := [String:Set[String]].new()
+    for module in &bundle.modules { collect_fieldless_setting_enums(&module.items, &out) }
+    out
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2446
+fn collect_fieldless_setting_enums(items: &[Item], out: &[String:Set[String]]) -> {
+    for item in items {
+        item == {
+            .Enum(def) -> {
+                variants :: def.variants.iter().filter_map(fn(variant) { if variant.payload == VariantPayload.Unit { Some(variant.name.clone()) } else { None } }).collect[Set[String]]()
+                if variants.len() == def.variants.len() { out.insert(def.name.clone(), variants) }
+            }
+            .CodeModule(module) -> { if module.body == .Some(body) { collect_fieldless_setting_enums(body, out) } }
+            .GenericModule(module) -> collect_fieldless_setting_enums(&module.body, out)
+            _ -> {}
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2478
+fn valid_setting_type_name(name: &String) -> Bool {
+    chars := name.chars()
+    chars.next().is_some_and(fn(first) { first.is_ascii_uppercase() }) && chars.all(fn(ch) { ch.is_ascii_alphanumeric() || ch == '_' })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2484
+fn valid_setting_variant(name: &String) -> Bool {
+    name.split('.').all(fn(segment) {
+        chars := segment.chars()
+        chars.next().is_some_and(fn(first) { first.is_ascii_uppercase() }) && chars.all(fn(ch) { ch.is_ascii_alphanumeric() || ch == '_' })
+    })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2492
+fn unquote_setting(raw: &String) -> String {
+    raw := raw.trim() // #4303
+    body :: raw.strip_prefix('"').and_then(fn(value) { value.strip_suffix('"') }).unwrap_or(raw)
+    out := String.new()
+    escaped := false
+    for ch in body.chars() {
+        if escaped { out.push(ch == { 'n' -> '\n'; 'r' -> '\r'; 't' -> '\t'; other -> other }); escaped = false }
+        else if ch == '\\' { escaped = true }
+        else { out.push(ch) }
+    }
+    if escaped { out.push('\\') }
+    out
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2521
+fn parse_setting_char(raw: &String) -> Char Err! {
+    body :: raw.strip_prefix('\'').and_then(fn(value) { value.strip_suffix('\'') }) == {
+        .Some(body) -> body
+        .None if raw.chars().count() == 1 -> return raw.chars().next().unwrap()
+        .None -> return Err("Char settings use one quoted character")
+    }
+    value :: unquote_setting(body)
+    chars := value.chars()
+    ch :: chars.next()
+    if ch.is_none() || chars.next().is_some() { return Err("Char settings need one character") }
+    ch.unwrap()
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:2541
+#Derive(Debug, Clone)
+pub struct GeneratedSourceProvenance { name: String, path: OSPath, digest: ContentDigest, source: String }
+// Rust: crates/jet-driver/src/Driver/mod.rs:2549
+#Derive(Debug, Clone)
+pub struct BuildRun { plan: BuildPlan, execution: BuildExecutionReport, probes: [BuildProbeFact], generated: [GeneratedSourceProvenance] }
+// Rust: crates/jet-driver/src/Driver/mod.rs:2557
+#Derive(Debug)
+pub struct BuildCompileOutput {
+    compile: jet_driver.CompileOutput
+    build: BuildRun?
+    compiler_nodes: [BuildPlanNode]
+    runtime: ProgramBundle?
+    build_facts: BuildFactSnapshot
+    runtime_effect_facts: SemIndexEffectFacts?
+}
+impl BuildCompileOutput {
+    // Rust: crates/jet-driver/src/Driver/mod.rs:2579
+    fn attach_compiler_nodes(self: &Self) -> {
+        bundle_opt :: self.runtime.as_ref()
+        if bundle_opt.is_none() { return }
+        nodes :: compiler_nodes_for_bundle(bundle_opt.unwrap(), self.build.as_ref().map(fn(run) { &run.plan }))
+        if self.build.as_mut() == .Some(build) { build.plan.set_compiler_nodes(nodes.clone()) }
+        self.compiler_nodes = nodes
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2591
+pub struct BuildFilesystemTransaction { files: [(OSPath, ([U8])?)], committed: Bool }
+impl BuildFilesystemTransaction {
+    // Rust: crates/jet-driver/src/Driver/mod.rs:2597
+    fn new(paths: IntoIterator[OSPath]) -> Result[Self, io.Error] {
+        seen := Set[OSPath].new()
+        files := [(OSPath, ([U8])?)].new()
+        for path in paths.into_iter().filter(fn(path) { seen.insert(path.clone()) }) {
+            if path_has_symlinked_component(&path) { return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build transaction path `{path.display()}` contains a symlink")) }
+            before :: fs.read(&path) == { .Ok(bytes) -> Some(bytes); .Err(error) if error.kind() == io.ErrorKind.NotFound -> None; .Err(error) -> return Err(error) }
+            files.push((path, before))
+        }
+        Ok(Self { files, committed: false })
+    }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:2622
+    fn commit(self: &Self) -> { self.committed = true }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:2628
+    #Drop
+    fn drop(self: &Self) -> {
+        if self.committed { return }
+        for (path, before) in self.files.iter().rev() {
+            before == {
+                .Some(bytes) -> { _ :: safe_atomic_write(path, bytes) }
+                .None -> { if !fs.symlink_metadata(path).is_ok_and(fn(metadata) { metadata.file_type().is_symlink() }) { _ :: fs.remove_file(path) } }
+            }
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2649
+pub fn path_has_symlinked_component(path: &OSPath) -> Bool {
+    current := OSPath.new()
+    for component in path.components() {
+        component == {
+            .Prefix(prefix) -> current.push(prefix.as_os_str())
+            .RootDir -> current.push(std.path.MAIN_SEPARATOR.to_string())
+            .CurDir -> {}
+            .ParentDir -> return true
+            .Normal(part) -> current.push(part)
+        }
+        if fs.symlink_metadata(&current).is_ok_and(fn(metadata) { metadata.file_type().is_symlink() }) { return true }
+    }
+    false
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2670
+fn ensure_real_parent(path: &OSPath) -> Result[(), io.Error] {
+    parent_opt :: path.parent()
+    if parent_opt.is_none() { return Ok(()) }
+    current := OSPath.new()
+    for component in parent_opt.unwrap().components() {
+        component == {
+            .Prefix(prefix) -> current.push(prefix.as_os_str())
+            .RootDir -> current.push(std.path.MAIN_SEPARATOR.to_string())
+            .CurDir -> {}
+            .ParentDir -> return Err(io.Error.new(io.ErrorKind.InvalidInput, "build path contains a parent component"))
+            .Normal(part) -> current.push(part)
+        }
+        fs.symlink_metadata(&current) == {
+            .Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() -> return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build directory `{current.display()}` is not a real directory"))
+            .Ok(_) -> {}
+            .Err(error) if error.kind() == io.ErrorKind.NotFound -> { _ :: fs.create_dir(&current)? }
+            .Err(error) -> return Err(error)
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2710
+pub fn safe_atomic_write(path: &OSPath, bytes: &[U8]) -> Result[(), io.Error] {
+    if path_has_symlinked_component(path) { return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build path `{path.display()}` contains a symlink")) }
+    _ :: ensure_real_parent(path)?
+    if fs.symlink_metadata(path).is_ok_and(fn(metadata) { metadata.file_type().is_symlink() }) { return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build output `{path.display()}` is a symlink")) }
+    parent :: path.parent().unwrap_or_else(fn() { OSPath.new(".") })
+    for attempt in 0..100u32 {
+        temporary :: parent.join(".jet-atomic-{process.id()}-{attempt}")
+        file := fs.OpenOptions.new().create_new(true).write(true).open(&temporary) == {
+            .Ok(file) -> file
+            .Err(error) if error.kind() == io.ErrorKind.AlreadyExists -> continue
+            .Err(error) -> return Err(error)
+        }
+        if file.write_all(bytes).and_then(fn(_) { file.sync_all() }) == .Err(error) { _ :: fs.remove_file(&temporary); return Err(error) }
+        _ :: fs.rename(&temporary, path)?
+        return Ok(())
+    }
+    Err(io.Error.new(io.ErrorKind.AlreadyExists, "could not allocate a unique build temporary file"))
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2750
+pub fn read_build_file(root: &OSPath, path: &OSPath) -> Result[[U8], io.Error] {
+    if path.strip_prefix(root).is_err() || path_has_symlinked_component(path) || fs.symlink_metadata(path).is_ok_and(fn(metadata) { metadata.file_type().is_symlink() }) {
+        return Err(io.Error.new(io.ErrorKind.PermissionDenied, "build file `{path.display()}` contains a symlink or is outside the project"))
+    }
+    fs.read(path)
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:2768
+pub fn query_build_plan(file: &String) -> Result[BuildPlan?, [Diagnostic]] {
+    compile_bundle_path_build(file, build_query_options()).map(fn(output) { output.build.map(fn(build) { build.plan }) })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2777
+pub fn query_build_nodes(file: &String) -> Result[[BuildPlanNode], [Diagnostic]] {
+    compile_bundle_path_build_with_front_end_for_project_check(file, build_query_options(), None).map(fn(output) { output.compiler_nodes })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2787
+pub fn query_build_facts(file: &String, profile: &String, setting_overrides: &[String:String]) -> Result[BuildFactSnapshot, [Diagnostic]] {
+    options := build_query_options()
+    options.profile = profile.to_string()
+    options.setting_overrides = setting_overrides.clone()
+    compile_bundle_path_build(file, options).map(fn(output) { output.build_facts })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2798
+fn build_query_options() -> BuildRunOptions {
+    // Inspection checks declarations/gates but grants no ambient comptime authority.
+    BuildRunOptions { grants: BuildCapability.ALL.into_iter().collect(), policy: BuildPolicy.local_default(),
+        execute: false, gates: GateSet.default(), inspect_only: true, emit_generated: false,
+        locked: false, no_os: false, web_target: false, plugin_target: false, cross_target: None,
+        profile: "dev", artifact_build: false, application_authority: None, setting_overrides: [String:String].new(),
+        remote: None, package_scope: true, build_override: true, entry_fn: None }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2832
+#Derive(Debug, Clone, Copy, Equatable)
+pub enum BuildQueryExpression { Build }
+// Rust: crates/jet-driver/src/Driver/mod.rs:2836
+pub fn evaluate_build_query(file: &String, expression: BuildQueryExpression) -> Result[BuildPlan?, [Diagnostic]] {
+    expression == { .Build -> query_build_plan(file) }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2846
+pub fn query_build_plan_with_overlay(file: &String, source: &String) -> Result[BuildPlan?, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, build_query_options(), Some((&OSPath.new(file), source)), None, None, false, false).map(fn(output) { output.build.map(fn(build) { build.plan }) })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:2863
+pub fn build_plan_json(plan: &BuildPlan, execution: (&BuildExecutionReport)?) -> String {
+    graph :: graph_for_build_query(plan, execution)
+    targets :: graph.targets.iter().map(fn(target) {
+        deps :: target.deps.iter().map(fn(id) { id.0.to_string() }).collect[[String]]().join(",")
+        actions :: target.actions.iter().map(fn(id) { id.0.to_string() }).collect[[String]]().join(",")
+        "{{\"id\":{target.id.0},\"name\":\"{graph_json_escape(&target.name)}\",\"kind\":\"{target.kind:?}\",\"deps\":[{deps}],\"actions\":[{actions}],\"files\":{graph_json_strings(&target.files)}}}"
+    }).collect[[String]]().join(",")
+    actions :: graph.actions.iter().map(fn(action) {
+        real :: &plan.actions()[action.id.0]
+        probes :: real.probes.iter().map(fn(probe) { plan.probes()[probe.id().0].name.clone() }).collect[[String]]()
+        provenance :: plan.explain_action_named(&action.name).map(fn(fact) { fact.provenance }).unwrap_or_default()
+        caps :: action.caps.iter().map(fn(cap) { cap.name().to_string() }).collect[[String]]()
+        pools :: action.pools.iter().map(fn(pool) { pool.as_str().to_string() }).collect[[String]]()
+        "{{\"id\":{action.id.0},\"name\":\"{graph_json_escape(&action.name)}\",\"inputs\":{graph_json_strings(&action.inputs)},\"outputs\":{graph_json_strings(&action.outputs)},\"caps\":{graph_json_strings(&caps)},\"pools\":{graph_json_strings(&pools)},\"toolchain\":\"{graph_json_escape(&plan.toolchains()[real.toolchain.id().0].name)}\",\"probes\":{graph_json_strings(&probes)},\"cache\":\"{real.cache:?}\",\"cache_status\":\"{graph_cache_status(action.cache_hit)}\",\"key\":\"{graph_json_escape(action.key.as_str())}\",\"compiler_owned\":{real.compiler_owned},\"provenance\":{graph_json_strings(&provenance)}}}"
+    }).collect[[String]]().join(",")
+    files :: graph.files.iter().map(graph_file_json).collect[[String]]().join(",")
+    affected_files :: graph.affected_files().iter().map(graph_file_json).collect[[String]]().join(",")
+    action_keys :: graph.action_keys().iter().map(fn(entry) { "{{\"action\":\"{graph_json_escape(&entry.action)}\",\"key\":\"{graph_json_escape(entry.key.as_str())}\"}}" }).collect[[String]]().join(",")
+    cache_hits :: graph.cache_hits().iter().map(fn(action) { "{{\"action\":\"{graph_json_escape(&action.name)}\",\"key\":\"{graph_json_escape(action.key.as_str())}\"}}" }).collect[[String]]().join(",")
+    default :: plan.default_target().map(fn(target) { target.id().0.to_string() }).unwrap_or_else(fn() { "null" })
+    toolchains :: plan.toolchains().iter().map(fn(tool) { "{{\"name\":\"{graph_json_escape(&tool.name)}\",\"target\":\"{graph_json_escape(&tool.target_triple)}\"}}" }).collect[[String]]().join(",")
+    probes :: plan.probes().iter().map(fn(probe) { "{{\"name\":\"{graph_json_escape(&probe.name)}\",\"kind\":\"{probe.kind:?}\",\"reproducibility\":\"{probe.reproducibility:?}\"}}" }).collect[[String]]().join(",")
+    generated :: plan.generated_modules().iter().map(fn(module) { "{{\"name\":\"{graph_json_escape(&module.name)}\",\"path\":\"{graph_json_escape(module.path.as_str())}\",\"digest\":\"{graph_json_escape(module.source_digest.as_str())}\"}}" }).collect[[String]]().join(",")
+    "{{\"schema_version\":1,\"default\":{default},\"targets\":[{targets}],\"actions\":[{actions}],\"action_keys\":[{action_keys}],\"cache_hits\":[{cache_hits}],\"files\":[{files}],\"affected_files\":[{affected_files}],\"toolchains\":[{toolchains}],\"probes\":[{probes}],\"generated\":[{generated}]}}"
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3024
+fn graph_cache_status(hit: Bool?) -> String { hit == { .Some(true) -> "hit"; .Some(false) -> "miss"; .None -> "unknown" } }
+// Rust: crates/jet-driver/src/Driver/mod.rs:3032
+pub fn graph_json_escape(value: &String) -> String {
+    escaped := String.with_capacity(value.len())
+    for character in value.chars() {
+        character == {
+            '\\' -> escaped.push_str("\\\\")
+            '"' -> escaped.push_str("\\\"")
+            '\n' -> escaped.push_str("\\n")
+            '\r' -> escaped.push_str("\\r")
+            '\t' -> escaped.push_str("\\t")
+            character if character.is_control() -> escaped.push_str(&"\\u{character as U32:04x}")
+            character -> escaped.push(character)
+        }
+    }
+    escaped
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3050
+fn graph_json_strings(values: &[String]) -> String {
+    items :: values.iter().map(fn(value) { "\"{graph_json_escape(value)}\"" }).collect[[String]]().join(",")
+    "[{items}]"
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3061
+fn graph_file_json(file: &BuildGraphFile) -> String {
+    owner :: file.owner.map(fn(id) { id.0.to_string() }).unwrap_or_else(fn() { "null" })
+    consumers :: file.consumers.iter().map(fn(id) { id.0.to_string() }).collect[[String]]().join(",")
+    targets :: file.targets.iter().map(fn(id) { id.0.to_string() }).collect[[String]]().join(",")
+    "{{\"path\":\"{graph_json_escape(&file.path)}\",\"owner\":{owner},\"consumers\":[{consumers}],\"targets\":[{targets}]}}"
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:3088
+#Derive(Debug, Clone, Equatable)
+pub struct FrontEndInputs {
+    file: String, profile: String, artifact_build: Bool, setting_overrides: [String:String], locked: Bool,
+    web_target: Bool, plugin_target: Bool, cross_target: String?, package_scope: Bool, build_override: Bool, entry_fn: String?
+}
+impl FrontEndInputs {
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3108
+    fn for_build(file: &String, options: &BuildRunOptions) -> Self {
+        Self { file: file.to_string(), profile: options.profile.clone(), artifact_build: options.artifact_build,
+            setting_overrides: options.setting_overrides.clone(), locked: options.locked, web_target: options.web_target,
+            plugin_target: options.plugin_target, cross_target: options.cross_target.clone(), package_scope: options.package_scope,
+            build_override: options.build_override, entry_fn: options.entry_fn.clone() }
+    }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3136
+// One checked front end per build; cache keys describe the program actually emitted.
+pub struct PreparedBuildFrontEnd {
+    package_build_fingerprint: String?
+    inputs: FrontEndInputs
+    bundle: ProgramBundle
+    effect_facts: SemIndexEffectFacts
+    program_value: CtValue?
+    lints: [Diagnostic]
+    build_index: USize?
+    build_span: Span?
+    compile_mode: CompileMode
+    active_os: OSTarget
+    build_stamp: BuildStamp
+    runtime_bundle_for_package: ProgramBundle?
+    runtime_source_paths: [OSPath]
+    source_closure: [(OSPath, String)]
+}
+impl PreparedBuildFrontEnd {
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3156
+    fn bundle(self: &Self) -> &ProgramBundle { &self.bundle }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3161
+    fn set_program_value(self: &Self, value: CtValue) -> { self.program_value = Some(value) }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3167
+    fn selects_build_entry(self: &Self) -> Bool { self.build_index.is_some() }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3178
+    fn runtime_program(self: &Self) -> (&ProgramBundle)? { if self.runtime_bundle_for_package.is_none() { Some(&self.bundle) } else { None } }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3193
+    fn emitted_program(self: &Self) -> (&ProgramBundle)? { if self.build_index.is_none() { self.runtime_program() } else { None } }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3202
+    fn effect_facts(self: &Self) -> &SemIndexEffectFacts { &self.effect_facts }
+    // Rust: crates/jet-driver/src/Driver/mod.rs:3206
+    fn source_closure(self: &Self) -> &[(OSPath, String)] { &self.source_closure }
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3214
+pub fn prepare_build_front_end(inputs: FrontEndInputs) -> Result[PreparedBuildFrontEnd, [Diagnostic]] {
+    jet_driver.run_compiler_work(fn() { prepare_build_front_end_on_compiler_stack(^inputs, None, &[]) })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3225
+pub fn prepare_build_front_end_with_source_closure(inputs: FrontEndInputs, source_closure: &[(OSPath, String)]) -> Result[PreparedBuildFrontEnd, [Diagnostic]] {
+    source_closure :: source_closure.to_vec()
+    jet_driver.run_compiler_work(fn() { prepare_build_front_end_on_compiler_stack(^inputs, None, &source_closure) })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3238
+pub fn prepare_build_front_end_with_overlay(inputs: FrontEndInputs, source_path: &OSPath, source: &String) -> Result[PreparedBuildFrontEnd, [Diagnostic]] {
+    jet_driver.run_compiler_work(fn() { prepare_build_front_end_on_compiler_stack(^inputs, Some((source_path, source)), &[]) })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3255
+pub fn compile_bundle_path_build(file: &String, options: BuildRunOptions) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, None, None, None, false, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3266
+pub fn compile_bundle_path_build_with_front_end(file: &String, options: BuildRunOptions, prepared: PreparedBuildFrontEnd?) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, None, None, prepared, false, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3276
+pub fn compile_bundle_path_build_with_front_end_and_source_closure(file: &String, options: BuildRunOptions, prepared: PreparedBuildFrontEnd?, source_closure: &[(OSPath, String)]) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner_with_source_closure(file, options, None, None, prepared, false, false, source_closure)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3298
+pub fn compile_bundle_path_build_with_front_end_for_project_check(file: &String, options: BuildRunOptions, prepared: PreparedBuildFrontEnd?) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, None, None, prepared, false, true)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3309
+pub fn compile_bundle_path_build_with_front_end_without_codegen(file: &String, options: BuildRunOptions, prepared: PreparedBuildFrontEnd?) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, None, None, prepared, true, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3320
+pub fn compile_bundle_path_build_with_overlay(file: &String, source_path: &OSPath, source: &String, options: BuildRunOptions) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), None, None, false, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3338
+pub fn compile_bundle_path_build_with_overlay_for_project_check(file: &String, source_path: &OSPath, source: &String, options: BuildRunOptions) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), None, None, false, true)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3359
+pub fn compile_bundle_path_build_as_dependency(file: &String, options: BuildRunOptions) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, None, Some(file), None, false, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3367
+pub fn compile_bundle_path_build_as_dependency_with_overlay(file: &String, source_path: &OSPath, source: &String, options: BuildRunOptions) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file), None, false, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3385
+pub fn compile_bundle_path_build_as_dependency_with_overlay_for_project_check(file: &String, source_path: &OSPath, source: &String, options: BuildRunOptions) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner(file, options, Some((source_path, source)), Some(file), None, false, true)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3406
+fn compile_bundle_path_build_inner(file: &String, options: BuildRunOptions, overlay: (&OSPath, &String)?, dependency_boundary: (&String)?, prepared: PreparedBuildFrontEnd?, without_codegen: Bool, project_check: Bool) -> Result[BuildCompileOutput, [Diagnostic]] {
+    compile_bundle_path_build_inner_with_source_closure(file, options, overlay, dependency_boundary, prepared, without_codegen, project_check, &[])
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3427
+fn compile_bundle_path_build_inner_with_source_closure(file: &String, options: BuildRunOptions, overlay: (&OSPath, &String)?, dependency_boundary: (&String)?, prepared: PreparedBuildFrontEnd?, without_codegen: Bool, project_check: Bool, source_closure: &[(OSPath, String)]) -> Result[BuildCompileOutput, [Diagnostic]] {
+    jet_driver.run_compiler_work(fn() { compile_bundle_path_build_on_compiler_stack(file, ^options, overlay, dependency_boundary, ^prepared, without_codegen, project_check, source_closure) }).map(fn(output) {
+        output.attach_compiler_nodes()
+        output
+    })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3455
+pub fn prepared_front_end_mismatch(file: &String) -> Diagnostic {
+    Diagnostic.error("E2105", "prepared build front end does not match `{file}`", "resuming it could compile a source or build-input snapshot different from the requested build", "restart the build from the current source and build inputs", None)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:3466
+fn compile_bundle_path_build_on_compiler_stack(file: &String, options: BuildRunOptions, overlay: (&OSPath, &String)?, dependency_boundary: (&String)?, prepared: PreparedBuildFrontEnd?, without_codegen: Bool, project_check: Bool, source_closure: &[(OSPath, String)]) -> Result[BuildCompileOutput, [Diagnostic]] {
+    options := options
+    if project_check { options.execute = false; options.inspect_only = true; options.emit_generated = false }
+    if options.locked { _ :: verify_locked_dependency_sources(file)? }
+    inputs :: FrontEndInputs.for_build(file, &options)
+    prepared :: prepared == {
+        .Some(prepared) if overlay.is_none() && prepared.inputs == inputs -> prepared
+        .Some(_) -> return Err([prepared_front_end_mismatch(file)])
+        .None -> prepare_build_front_end_on_compiler_stack(inputs, overlay, source_closure)?
+    }
+    compile_build_from_front_end(file, options, dependency_boundary, prepared, without_codegen, project_check)
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:3511
+// Boundary-spanning stage-one prefix; Driver03 resumes with these exact locals.
+pub fn prepare_build_front_end_on_compiler_stack(inputs: FrontEndInputs, overlay: (&OSPath, &String)?, source_closure: &[(OSPath, String)]) -> Result[PreparedBuildFrontEnd, [Diagnostic]] {
+    file :: inputs.file.as_str()
+    direct_package_overlay :: if overlay.is_none() { package_manifest_build_overlay(file)? } else { None }
+    load_span := jet_driver.Trace.span("load")
+    bundle := load_build_entry_bundle(file, overlay, direct_package_overlay.as_ref(), source_closure)?
+    load_span.items(bundle.modules.len())
+    drop(load_span)
+    runtime_bundle_for_package := None
+    package_build_fingerprint := None
+    runtime_source_paths :: bundle.modules.iter().map(fn(module) { module.path.clone() }).collect[[OSPath]]()
+    package_entry :: if inputs.build_override && inputs.package_scope { package_build_entry_source(&bundle.project_root)? } else { None }
+    package_manifest_entry :: inputs.build_override && direct_package_overlay.is_some()
+    has_package_entry :: package_entry.is_some() || package_manifest_entry
+    active_os :: OSTarget.active(inputs.cross_target.as_deref())
+    entry_path :: OSPath.new(file)
+    entry_dir :: entry_path.parent().unwrap_or(OSPath.new("."))
+    is_workspace_entry :: AuthorityResolver.open(entry_dir) == {
+        .Ok(resolver) -> resolver.resolve_workspace_source() == {
+            .Ok(.Some(source)) -> {
+                entry_name :: entry_path.file_name().ok_or_else(fn() { [Diagnostic.error("E1334", "workspace entry cannot be resolved", "the workspace entry must name one regular file", "use an existing regular run.jet entry", None)] })?
+                checked_entry :: resolver.checked_file(&OSPath.new(entry_name)).map_err(fn(error) { [error.diagnostic()] })?
+                _ :: resolver.revalidate_file(&checked_entry).map_err(fn(error) { [error.diagnostic()] })?
+                _ :: resolver.revalidate_source(&source).map_err(fn(error) { [error.diagnostic()] })?
+                if source.checked.path != checked_entry.path { false }
+                else if source.role != WorkspaceSourceRole.Index { return Err([Diagnostic.error("E1334", "workspace build entry is selected by an authority source", "workspace build execution requires the matching source to have the Index role; an authority source cannot select a workspace entry", "declare the workspace index in `workspace.jet`, or build the member entry directly", None)]) }
+                else { true }
+            }
+            .Ok(.None) -> false
+            .Err(error) -> return Err([error.workspace_diagnostic()])
+        }
+        .Err(error) if error.is_missing() -> false
+        .Err(error) -> return Err([error.diagnostic()])
+    }
+    compile_mode :: if inputs.plugin_target || has_package_entry || is_workspace_entry { CompileMode.Check } else { CompileMode.Run }
+    bundle.active_os = active_os
+    set_bundle_target(&bundle, inputs.cross_target.as_deref())
+    prepare_build_front_end_finish(inputs, bundle, package_entry, active_os, compile_mode, package_build_fingerprint, runtime_bundle_for_package, runtime_source_paths)
+}

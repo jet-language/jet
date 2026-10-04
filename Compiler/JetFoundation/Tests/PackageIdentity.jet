@@ -1,0 +1,15 @@
+use JetFoundation.PackageIdentity.[KeyHasher, source_digest, package_check_key]
+use SHA256.[sha256_hex]
+// Rust: crates/jet-foundation/src/PackageIdentity.rs:649
+#Test("key_framing_is_pinned") {
+    hasher := KeyHasher.new("abc")
+    _ :: hasher.field("")
+    assert(hasher.finish() == sha256_hex([U8]{3, 97, 98, 99, 0}))
+    assert(source_digest([("b.jet", "2".as_bytes()), ("a.jet", "1".as_bytes())], None) == source_digest([("a.jet", "1".as_bytes()), ("b.jet", "2".as_bytes())], None))
+    assert(source_digest([("a.jet", "1".as_bytes())], None) != source_digest([("a.jet", "1".as_bytes())], Val([U8]{})))
+    key :: |deps: [(String, String)]| -> package_check_key("c", "t", "pkg:.", "s", deps)
+    a :: ("pkg:a", "1".repeat(64))
+    b :: ("pkg:b", "2".repeat(64))
+    assert(key([~a, ~b]) == key([~b, ~a]))
+    assert(key([~a]) != key([a, b]))
+}

@@ -1,0 +1,856 @@
+use Compiler.JetFoundation.Tests.Integration.JitRun.*
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use core.sys.target as target
+use std.env as env
+use std.io as io
+use std.process.[Command, Stdio]
+use jet.Loader as Loader
+use jet.Sema as Sema
+use jet.Diagnostics.[Severity]
+use jet_foundation.Foundation.[TEXT_NUL]
+
+// GATE #4494: these are real native process, callback and execution-provider tests.
+// GATE #4483: cfg(unix/windows) arms select target family/OS, never the host.
+
+// Rust: tests/jit_run.rs:24
+#Test("root_receiver_calls_share_the_direct_call_path") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_root_receiver_calls")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("root_calls.jet")
+    fs.write(file, """
+fn scale(#Root value: Int, factor: Int) -> Int {
+    return value * factor
+}
+fn add_half(#Root value: Float) -> Float {
+    return value + 0.5
+}
+fn run() {
+    total :: 3
+    print(total.scale(4))
+    print(scale(total, 4))
+    print(total.add_half())
+    total.print()
+}
+""").unwrap()
+    bundle := Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "#Root fixture diagnostics: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("#Root fixture must lower to canonical native MIR")
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "#Root fixture failed: {String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "12\n12\n3.5\n3\n")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:88
+#Test("named_args_example_runs_on_resident_jit_and_forced_interpreter") {
+    named_args_example_runs_on_resident_jit_and_forced_interpreter_inner()
+}
+
+// Rust: tests/jit_run.rs:92
+fn named_args_example_runs_on_resident_jit_and_forced_interpreter_inner() -> {
+    assert(common.native_host_supported(), "named_args runtime proof requires a supported native target")
+    root :: OSPath.from(env.manifest_dir())
+    file :: root.join("Examples/features/basics/named_args.jet")
+    expected_path :: root.join("Examples/features/expected/basics/named_args.out")
+    expected :: fs.read_to_string(expected_path).expect("named_args golden output")
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("named_args example should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != Severity.Error), "named_args example must type-check: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("named_args example must compile")
+    }
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT named_args failed: {String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(aot.stdout, expected.as_bytes(), "AOT named_args observable order drifted")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "named_args {tier} failed")
+        assert_eq(output.stdout, expected.as_bytes(), "named_args {tier} observable order drifted")
+        assert(output.stderr.is_empty(), "named_args {tier} stderr drifted")
+    }
+}
+
+// Rust: tests/jit_run.rs:180
+#Test("struct_call_word_preserves_bits_on_every_native_tier") {
+    assert(common.native_host_supported(), "#4383 requires a supported native target")
+    root :: OSPath.from(env.manifest_dir())
+    golden :: fs.read_to_string(root.join("Examples/features/expected/basics/struct_call_word.out")).expect("word-call golden")
+    loop (relative, expected) in [
+        ("tests/fixtures/struct_call_word_original.jet", "wrapped: 7299585414513572552\n"),
+        ("Examples/features/basics/struct_call_word.jet", golden.as_str()),
+    ] {
+        file :: root.join(relative)
+        loop tier in ["O0", "O1", "O2", "Web"] {
+            output :: common.run_entry_tier(file, tier)
+            assert_eq(output.status.code(), 0, "{relative}: {String.from_utf8_lossy(output.stderr)}")
+            assert_eq(String.from_utf8_lossy(output.stdout), expected, "{relative}, tier={tier}")
+            assert(output.stderr.is_empty(), "{relative}: {String.from_utf8_lossy(output.stderr)}")
+        }
+        aot :: run_jet(file, true)
+        assert_eq(aot.status.code(), 0, "{String.from_utf8_lossy(aot.stderr)}")
+        assert_eq(aot.stdout, expected.as_bytes())
+    }
+}
+
+// Rust: tests/jit_run.rs:213
+#Test("struct_call_word_wrong_expectation_is_an_assertion_failure") {
+    assert(common.native_host_supported(), "#4383 requires a supported native target")
+    file :: OSPath.from(env.manifest_dir()).join("tests/fixtures/struct_call_word_failure.jet")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier_with_env(file, tier, [("NO_COLOR", "1")])
+        assert_eq(output.status.code(), 70, "{String.from_utf8_lossy(output.stderr)}")
+        assert(String.from_utf8_lossy(output.stderr).contains("E3001"))
+    }
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 70, "{String.from_utf8_lossy(aot.stderr)}")
+    assert(String.from_utf8_lossy(aot.stderr).contains("E3001"))
+}
+
+// Rust: tests/jit_run.rs:233
+#Test("bounded_workers_example_has_total_tir") {
+    path :: OSPath.from(env.manifest_dir()).join("Examples/features/concurrency/bounded_workers.jet")
+    bundle := Loader.load_entry(path.to_str().unwrap()).unwrap()
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(path, tier).expect("bounded worker example must have total checked MIR")
+    }
+}
+
+// Rust: tests/jit_run.rs:252
+#Test("jit_event_four_captures_plus_payload_is_rejected_before_native_call") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_event_four_captures_payload")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("event_four_captures.jet")
+    source :: """
+use core.event as event
+fn run() {
+    first :: 1
+    second :: 2
+    third :: 3
+    fourth :: 4
+    scope :: event.scope()
+    hook :: event.decision_hook<Int, String>(HookPolicy.FirstCancelElseTransform)
+    hook.on(scope, (value: Int) -> {
+        print("{first}|{second}|{third}|{fourth}|{value}")
+        HookDecision.Continue
+    })
+    hook.run(5)
+}
+"""
+    fs.write(file, source).unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("event fixture loads")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "event fixture must type-check: {diagnostics:#?}")
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT event fixture failed: {String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(String.from_utf8_lossy(aot.stdout), "1|2|3|4|5\n", "AOT event callback lost its payload or captures")
+    // The retired four-word JIT ABI restriction is not a language error.
+    // Every retained native tier must deliver all four captures and the payload.
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("five callback arguments must lower before native execution")
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "event {tier}: {String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "1|2|3|4|5\n", "event callback lost its payload or captures")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:337
+#Test("jit_http_worker_teardown_quiesces_runtime_before_resident_drop") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_http_worker_lifetime")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("http_worker_lifetime.jet")
+    fs.write(file, """
+use core.http.server as server
+pub fn handler(_req: HTTPRequest) -> HTTPResponse HTTPError! { Ok(server.response(200, "ok")) }
+fn run() {}
+""").unwrap()
+    bundle := Loader.load_entry(file.to_str().unwrap()).expect("HTTP lifetime fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "HTTP lifetime fixture diagnostics: {diagnostics:#?}")
+    (program, artifact) :: common.lower_native_bundle(&bundle).expect("HTTP lifetime fixture should lower to MIR")
+    // GATE #4494: retained native HTTP provider must quiesce before artifact retirement.
+    common.http_worker_runtime_lifetime_proof_for_test(&program, artifact, "handler").expect("native HTTP lifetime proof")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:370
+#Test("jit_http2_shutdown_race_drains_dispatch_tasks_and_epoch_guards_web_callbacks") {
+    if skip_if_native_target_unsupported() { return }
+    // GATE #4494: real HTTP/2 dispatch drain and callback epoch guard.
+    common.http2_dispatch_drain_proof_for_test().expect("HTTP/2 dispatch cleanup proof")
+}
+
+// Rust: tests/jit_run.rs:409
+#Test("zero_arg_process_spec_builders_run_resident") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_zero_arg_builders")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("builders.jet")
+    fs.write(file, """
+use core.process as process
+fn run() {
+    cleared :: process.cmd(["echo", "x"]).env_clear().run() ?? panic("env_clear failed")
+    print(cleared.success)
+    print(cleared.output.trim())
+    detached :: process.cmd(["echo", "y"]).detached().run() ?? panic("detached failed")
+    print(detached.success)
+    print("[{detached.output.trim()}]")
+    if process.cmd(["printf", "z"]).terminal().run() == {
+        .Ok(v) -> { print(v.output.contains("z")) }
+        .Err(_) -> { print("terminal err") }
+        else -> {}
+    }
+}
+""").unwrap()
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "zero-argument ProcessSpec builders failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "true\nx\ntrue\n[]\ntrue\n")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:461
+#Test("process_child_stdin_write_runs_resident") {
+    if target.selected_family() != "unix" { return }
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_stdin_write")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("stdin_write.jet")
+    fs.write(file, """
+use core.process as process
+fn run() {
+    child :: process.cmd(["sh", "-c", "read line; printf '%s' \"$line\""]).stdin(.Capture).stdout(.Capture).spawn() ?? panic("spawn failed")
+    child.stdin.write("resident-stdin\n") ?? panic("write failed")
+    result :: child.wait() ?? panic("wait failed")
+    print(result.output)
+}
+""").unwrap()
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "ProcessChild.stdin.write failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "resident-stdin\n")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:513
+// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D (#1181).
+#Test("expert_terminal_model_runs_resident_and_fails_closed") {
+    if target.selected_family() != "unix" { return }
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_terminal_policy")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("terminal_policy.jet")
+    fs.write(file, """
+use core.process as process
+fn run() {
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 120, rows: 40 },
+        mode: .Raw
+    }
+    plan :: process.cmd(["echo", "terminal"]).terminal(policy)
+    print(plan.abilities().has(TerminalFact.terminal))
+    facts :: plan.abilities()
+    print(facts.has(TerminalFact.resize))
+    print(facts.has(TerminalFact.raw))
+    print(facts.has("preview_x"))
+    if plan.run() == {
+        .Ok(result) -> { print(result.output.contains("terminal")) }
+        .Err(_) -> { print("terminal err") }
+    }
+    terminal_child :: process.cmd(["printf", "child"]).terminal().spawn() ?? panic("terminal spawn failed")
+    if terminal_child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("terminal present")
+        }
+        .None -> { print("terminal absent") }
+    }
+    terminal_waited :: terminal_child.wait() ?? panic("terminal wait failed")
+    print(terminal_waited.output.contains("child"))
+    child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+    if child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("terminal present")
+        }
+        .None -> { print("terminal absent") }
+    }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.output.trim())
+}
+""").unwrap()
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "expert terminal model failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "true\ntrue\ntrue\nfalse\ntrue\nterminal present\ntrue\nterminal absent\nplain\n")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:610
+#Test("terminal_capabilities_match_aot_resident_jit_and_interpreter") {
+    if target.selected_family() != "unix" { return }
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_terminal_capabilities_tiers")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_process_terminal_capabilities_tiers\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("terminal_capabilities.jet")
+    fs.write(file, """
+use core.process as process
+fn run() {
+    plan :: process.cmd(["echo", "terminal"]).terminal()
+    facts :: plan.abilities()
+    print(facts.has(TerminalFact.terminal))
+    print(facts.has("preview_x"))
+}
+""").unwrap()
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT stderr: {String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(aot.stdout, b"true\nfalse\n")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "capability query failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "true\nfalse\n")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:690
+#Test("process_run_checked_matches_default_and_aot_lenses") {
+    if target.selected_family() != "unix" { return }
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_run_checked")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_process_run_checked\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Time.Wait] } }\n").unwrap()
+    file :: dir.join("run_checked.jet")
+    fs.write(file, """
+use core.process as process
+fn run() {
+    ok :: process.cmd(["sh", "-c", "exit 0"]).run_checked() ?? panic("zero exit failed")
+    print(ok.success)
+    print(ok.code)
+    plain :: process.cmd(["sh", "-c", "exit 7"]).run() ?? panic("plain run failed")
+    print(plain.success)
+    print(plain.code)
+    if process.cmd(["sh", "-c", "printf 'checked-stderr-start:' >&2; printf '%05000d' 0 >&2; printf ':checked-stderr-end' >&2; exit 7"]).run_checked() == {
+        .Ok(_) -> { print("checked:unexpected") }
+        .Err(_) -> { print("checked-error") }
+        else -> {}
+    }
+    if process.cmd(["sh", "-c", "printf 'signal-stderr' >&2; kill -TERM $$"]).run_checked() == {
+        .Ok(_) -> { print("signal:unexpected") }
+        .Err(_) -> { print("signal-error") }
+        else -> {}
+    }
+    child :: process.cmd(["sh", "-c", "kill -TERM $$"]).spawn() ?? panic("signal spawn failed")
+    first :: child.wait() ?? panic("first signal wait failed")
+    second :: child.wait() ?? panic("second signal wait failed")
+    print("{first.code}:{first.success}:{second.code}:{second.success}")
+    if {
+        first.signal == second.signal -> print("repeat-signal-same")
+        else -> print("repeat-signal-different")
+    }
+    if first.signal == {
+        .Val(signal) -> print("repeat-signal:{signal}")
+        .None -> print("repeat-signal:none")
+    }
+}
+""").unwrap()
+    default :: Command.new(common.jet_bin()).arg("run").arg(file).arg("--trace-tiers").env("JET_RUN_CACHE_DIR", dir.join("cache")).env("NO_COLOR", "1").output().expect("run checked process fixture through default lens")
+    release :: Command.new(common.jet_bin()).args(["run", "--release"]).arg(file).env("NO_COLOR", "1").output().expect("run checked process fixture through AOT lens")
+    assert_eq(default.status.code(), 0, "{default:?}")
+    assert_eq(release.status.code(), 0, "{release:?}")
+    assert_eq(default.stdout, release.stdout)
+    assert_eq(String.from_utf8(default.stdout).unwrap(), "true\n0\nfalse\n7\nchecked-error\nsignal-error\n-1:false:-1:false\nrepeat-signal-same\nrepeat-signal:15\n")
+    trace :: String.from_utf8(default.stderr).unwrap()
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "checked process fixture failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "true\n0\nfalse\n7\nchecked-error\nsignal-error\n-1:false:-1:false\nrepeat-signal-same\nrepeat-signal:15\n")
+    }
+    assert(!trace.contains("E0956"), "{trace}")
+    details :: dir.join("run_checked_details.jet")
+    fs.write(details, """
+use core.process as process
+fn run() {
+    if process.cmd(["sh", "-c", "printf 'checked-stderr-start:' >&2; printf '%05000d' 0 >&2; printf ':checked-stderr-end' >&2; exit 7"]).run_checked() == {
+        .Ok(_) -> { print("checked:unexpected") }
+        .Err(e) -> { print(e) }
+        else -> {}
+    }
+    if process.cmd(["sh", "-c", "printf 'signal-stderr' >&2; kill -TERM $$"]).run_checked() == {
+        .Ok(_) -> { print("signal:unexpected") }
+        .Err(e) -> { print(e) }
+        else -> {}
+    }
+}
+""").unwrap()
+    detailed :: Command.new(common.jet_bin()).args(["run", "--release"]).arg(details).env("NO_COLOR", "1").output().expect("run checked error detail fixture through AOT lens")
+    assert_eq(detailed.status.code(), 0, "{detailed:?}")
+    stdout :: String.from_utf8(detailed.stdout).unwrap()
+    assert(stdout.contains("I/O error during close `sh`"), "{stdout}")
+    assert(stdout.contains("code=7"), "{stdout}")
+    assert(stdout.contains("stderr=checked-stderr-start:"), "{stdout}")
+    assert(!stdout.contains("checked-stderr-end"), "{stdout}")
+    assert(stdout.contains("code=-1, signal=15, stderr=signal-stderr"), "{stdout}")
+    assert(stdout.len() < 5000, "checked stderr was not bounded: {stdout.len()}")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:824
+#Test("process_pipeline_output_limit_matches_aot_resident_jit_and_interpreter") {
+    if target.selected_family() != "unix" && target.selected_os() != "windows" { return }
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_pipeline_output_limit")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_process_pipeline_output_limit\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc, Time.Wait] } }\n").unwrap()
+    file :: dir.join("pipeline_output_limit.jet")
+    test_binary :: jet_string(env.current_exe().unwrap())
+    fs.write(file, format("""
+use core.process as process
+fn run() {{
+    direct_source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_FLOOD", "1")
+    direct_sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_sink_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_SINK", "1")
+    if process.pipeline([direct_source, direct_sink]) == {{
+        .Ok(receipt) -> {{
+            if receipt.success -> print("direct:accepted")
+            else -> print("direct:refused")
+        }}
+        .Err(_) -> print("direct:refused")
+    }}
+    source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_FLOOD", "1")
+        .output_limit(1024)
+    sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_sink_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_SINK", "1")
+    if process.pipeline([source, sink]) == {{
+        .Ok(receipt) -> {{
+            if receipt.success -> print("limit:accepted")
+            else -> print("limit:refused")
+        }}
+        .Err(_) -> print("limit:refused")
+    }}
+    broken_source :: process.cmd(["{test_binary}", "--exact", "process_pipeline_flood_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_FLOOD", "1")
+        .output_limit(1048576)
+    broken_sink :: process.cmd(["{test_binary}", "--exact", "process_pipeline_closed_sink_helper", "--nocapture"])
+        .env("JET_PROCESS_PIPELINE_CLOSED_SINK", "1")
+    if process.pipeline([broken_source, broken_sink]) == {{
+        .Ok(receipt) -> {{
+            if receipt.success -> print("broken:accepted")
+            else -> print("broken:refused")
+        }}
+        .Err(_) -> print("broken:refused")
+    }}
+}}
+""")).unwrap()
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT stderr: {String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(aot.stdout, b"direct:accepted\nlimit:refused\nbroken:refused\n")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "pipeline failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), "direct:accepted\nlimit:refused\nbroken:refused\n")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:917
+#Test("prompt_helpers_preserve_behavior_through_named_deopt") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_prompt_named_deopt")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_prompt_named_deopt\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n").unwrap()
+    file :: dir.join("prompts.jet")
+    fs.write(file, """
+use core.term as io
+use core.text as text
+fn prompt_gap() -[IO, Time.Wait]> String {
+    confirmed :: io.confirm("Continue?")
+    choice :: io.choose("Choose:", ["staging", "production"]) ?? panic("choose failed")
+    secret_kind := "unexpected"
+    if io.input_secret("Secret: ") == {
+        .Ok(_) -> { secret_kind = "secret" }
+        .Err(error) -> {
+            if error == {
+                .InvalidInput(_) -> { secret_kind = "non-tty" }
+                else -> { secret_kind = "other" }
+            }
+        }
+    }
+    return "{confirmed}|{choice}|{secret_kind}|{text.casefold("Straße")}"
+}
+fn run() { print(prompt_gap()) }
+""").unwrap()
+    bundle := Loader.load_entry(file.to_str().unwrap()).expect("prompt fixture loads")
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(!diags.iter().any((d) -> d.severity == Severity.Error), "prompt fixture must check: {diags:?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("prompt fixture must compile without a retired deopt plan")
+    }
+    child := Command.new(common.jet_bin()).arg("run").arg(file).arg("--trace-tiers").env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("run prompt named-deopt fixture")
+    // Answers share their one home with Examples/features/io/terminal_parity.jet.
+    answers :: common.example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers")
+    child.stdin.take().unwrap().write_all(answers.piped.as_bytes()).unwrap()
+    output :: child.wait_with_output().unwrap()
+    assert_eq(output.status.code(), 0, "{output:?}")
+    stdout :: String.from_utf8(output.stdout).unwrap()
+    assert(stdout.contains("Continue? [y/N] "), "{stdout}")
+    assert(stdout.contains("  1) staging\n  2) production\n"), "{stdout}")
+    assert(stdout.contains("Enter a number from 1 to 2."), "{stdout}")
+    assert(stdout.ends_with("false|production|non-tty|strasse\n"), "{stdout}")
+    trace :: String.from_utf8(output.stderr).unwrap()
+    assert(!trace.contains("E0956"), "{trace}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        native :: common.run_entry_tier_with_stdin(file, tier, answers.piped.as_bytes())
+        assert_eq(native.status.code(), 0, "prompt sequence failed on {tier}")
+        native_stdout :: String.from_utf8(native.stdout).unwrap()
+        assert(native_stdout.contains("Continue? [y/N] "), "{native_stdout}")
+        assert(native_stdout.contains("  1) staging\n  2) production\n"), "{native_stdout}")
+        assert(native_stdout.contains("Enter a number from 1 to 2."), "{native_stdout}")
+        assert(native_stdout.ends_with("false|production|non-tty|strasse\n"), "{native_stdout}")
+        assert(!String.from_utf8_lossy(native.stderr).contains("E0956"))
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1018
+#Test("args_parse_or_exit_runs_resident_for_return_help_and_usage_error") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_args_parse_or_exit")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_args_parse_or_exit\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Exec, IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("args.jet")
+    fs.write(file, """
+use core.args as args
+use core.process as process
+fn run() {
+    spec :: args.spec().flag("verbose", "print extra detail")
+    parsed :: spec.parse_or_exit(process.argv())
+    print(parsed.flag("verbose"))
+}
+""").unwrap()
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        normal :: common.run_entry_tier_with_args(file, tier, ["--verbose"])
+        assert_eq(normal.status.code(), 0)
+        assert_eq(String.from_utf8_lossy(normal.stdout), "true\n")
+        assert(normal.stderr.is_empty(), "{tier} normal: {String.from_utf8_lossy(normal.stderr)}")
+        help :: common.run_entry_tier_with_args(file, tier, ["--help"])
+        assert_eq(help.status.code(), 0)
+        help_stdout :: String.from_utf8_lossy(help.stdout)
+        assert(help_stdout.contains("Usage: ") && help_stdout.contains("[options]"), "{help_stdout}")
+        assert(help_stdout.contains("--help"), "{help_stdout}")
+        assert(help.stderr.is_empty(), "{tier} help: {String.from_utf8_lossy(help.stderr)}")
+        bad :: common.run_entry_tier_with_args(file, tier, ["--verbse"])
+        assert_eq(bad.status.code(), 2)
+        assert(bad.stdout.is_empty())
+        bad_stderr :: String.from_utf8_lossy(bad.stderr)
+        assert(bad_stderr.contains("unknown option `--verbse`"), "{bad_stderr}")
+        assert(bad_stderr.contains("did you mean `--verbose`?"), "{bad_stderr}")
+        assert(!bad_stderr.contains("E0956"), "{bad_stderr}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1125
+// Portable real child, invoked through the test executable by absolute path.
+#Test("process_probe_helper") {
+    if env.var("JET_PROCESS_PROBE").as_deref() != .Ok("1") { return }
+    cwd :: env.current_dir().unwrap()
+    logical :: env.var("JET_LOGICAL_ENV").unwrap()
+    spec_set :: env.var("JET_SPEC_SET").unwrap()
+    removed :: env.var_os("JET_SPEC_REMOVE").is_none()
+    fs.write(OSPath.from("process-probe.txt"), "cwd={cwd.display()}|logical={logical}|set={spec_set}|removed={removed}").unwrap()
+}
+
+// Rust: tests/jit_run.rs:1145
+#Test("process_pipeline_flood_helper") {
+    if target.selected_family() != "unix" && target.selected_os() != "windows" { return }
+    if env.var("JET_PROCESS_PIPELINE_FLOOD").as_deref() != .Ok("1") { return }
+    output := io.stdout()
+    chunk :: [UInt8#8192].filled(120)
+    loop _ in 0..64 { output.write_all(chunk).unwrap() }
+}
+
+// Rust: tests/jit_run.rs:1158
+#Test("process_pipeline_sink_helper") {
+    if target.selected_family() != "unix" && target.selected_os() != "windows" { return }
+    if env.var("JET_PROCESS_PIPELINE_SINK").as_deref() != .Ok("1") { return }
+    input := io.stdin()
+    sink := io.sink()
+    io.copy(&input, &sink).unwrap()
+}
+
+// Rust: tests/jit_run.rs:1169
+#Test("process_pipeline_closed_sink_helper") {
+    if target.selected_family() != "unix" && target.selected_os() != "windows" { return }
+    if env.var("JET_PROCESS_PIPELINE_CLOSED_SINK").as_deref() != .Ok("1") { return }
+}
+
+// Rust: tests/jit_run.rs:1179
+#Test("arg_process_spec_builders_reach_the_child") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_process_arg_builders")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_process_arg_builders\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Env, Exec, FS, IO, Mem.Alloc] } }\n").unwrap()
+    child_dir :: fs.canonicalize(dir).unwrap()
+    child_probe :: child_dir.join("process-probe.txt")
+    bad_value_path :: child_dir.join("bad-env-value.txt")
+    fs.write(bad_value_path, "bad" + TEXT_NUL + "value").unwrap()
+    test_binary :: jet_string(env.current_exe().unwrap())
+    file :: dir.join("builders.jet")
+    child_dir_text :: jet_string(child_dir)
+    child_probe_text :: jet_string(child_probe)
+    bad_value_text :: jet_string(bad_value_path)
+    fs.write(file, format("""
+use core.sys as env
+use core.files as files
+use core.process as process
+fn run() {{
+    env.set("JET_PROCESS_PROBE", "1")
+    env.set("JET_LOGICAL_ENV", "logical-value")
+    print((env.get("JET_LOGICAL_ENV") ?? "missing") == "logical-value")
+    names :: env.vars() ?? panic("env vars failed")
+    print(names.contains("JET_LOGICAL_ENV"))
+    env.set("JET_LOGICAL_GONE", "gone")
+    print(env.unset("JET_LOGICAL_GONE") ?? false)
+    print((env.get("JET_LOGICAL_GONE") ?? "missing") == "missing")
+    child :: process.cmd(["{test_binary}", "--exact", "process_probe_helper", "--nocapture"])
+        .cwd("{child_dir_text}")
+        .env("JET_SPEC_SET", "spec-value")
+        .env_remove("JET_SPEC_REMOVE")
+        .run() ?? panic("child failed")
+    print(child.success)
+    print(files.read("{child_probe_text}") ?? panic("probe read failed"))
+    if process.cmd(["{test_binary}"]).env("BAD=NAME", "value").run() == {{
+        .Ok(v) -> {{ print("process name accepted") }}
+        .Err(e) -> {{ print("process name rejected") }}
+        else -> {{}}
+    }}
+    bad_value :: files.read("{bad_value_text}") ?? panic("bad value read failed")
+    if process.cmd(["{test_binary}"]).env("JET_BAD_VALUE", bad_value).run() == {{
+        .Ok(v) -> {{ print("process value accepted") }}
+        .Err(e) -> {{ print("process value rejected") }}
+        else -> {{}}
+    }}
+}}
+""")).unwrap()
+    // Byte parity is distinct from the zero-arg builder residency assertion.
+    default :: run_jet(file, false)
+    release :: run_jet(file, true)
+    assert_eq(default.status.code(), release.status.code(), "default stdout:\n{String.from_utf8_lossy(default.stdout)}\ndefault stderr:\n{String.from_utf8_lossy(default.stderr)}\nrelease stdout:\n{String.from_utf8_lossy(release.stdout)}\nrelease stderr:\n{String.from_utf8_lossy(release.stderr)}")
+    assert_eq(default.stdout, release.stdout)
+    // EffectBudget summary is build-tool output, never run stderr.
+    assert_eq(String.from_utf8_lossy(default.stderr), String.from_utf8_lossy(release.stderr), "the run lenses must agree on stderr byte for byte")
+    assert(default.status.success(), "default lens failed\nstdout:\n{String.from_utf8_lossy(default.stdout)}\nstderr:\n{String.from_utf8_lossy(default.stderr)}")
+    stdout :: String.from_utf8_lossy(default.stdout)
+    assert(stdout.starts_with("true\ntrue\ntrue\ntrue\ntrue\ncwd="), "{stdout}")
+    assert(stdout.contains("|logical=logical-value|set=spec-value|removed=true\n"))
+    assert(stdout.ends_with("process name rejected\nprocess value rejected\n"))
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1303
+// #1993: verifier must compile all adapter latch paths before native execution.
+#Test("iter_adapter_latches_emit_dominating_clif") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_iter_adapter_dominance")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_iter_adapter_dominance\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("adapters.jet")
+    fs.write(file, """
+fn run() {
+    jagged :: [1, 2, 3, 5, 6, 9, 10, 12]
+    print(jagged.chunk_while((a: Int, b: Int) -> (b == a + 1)).to_list())
+    parities :: [2, 4, 6, 1, 3, 8, 10]
+    print(parities.dedup_by((n: Int) -> (n % 2)).to_list())
+    print(jagged.is_sorted_by((n: Int) -> n))
+}
+""").unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("adapter fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != Severity.Error), "adapter fixture must type-check: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("adapter fixture must compile with dominating latch definitions")
+    }
+    expected :: "[[1, 2, 3], [5, 6], [9, 10], [12]]\n[2, 1, 8]\ntrue\n"
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT adapter fixture failed: {String.from_utf8_lossy(aot.stderr)}")
+    assert_eq(String.from_utf8_lossy(aot.stdout), expected, "AOT adapter observable drifted")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "adapter fixture failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected, "adapter observable drifted on {tier}")
+        assert(output.stderr.is_empty(), "adapter stderr drifted on {tier}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1429
+// Present and absent results must decode the same canonical Option carrier.
+#Test("optional_builtins_agree_on_one_option_carrier_across_tiers") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_option_carrier")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"test-fixture\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("option_carrier.jet")
+    fs.write(file, """
+fn run() {
+    repeats :: [5, 3, 1, 3, 9]
+    print(repeats.last_index_of(3))
+    print(repeats.last_index_of(7))
+    counts := [String:Int]{ "words": 4 }
+    print(&counts.pop("words") ?? -1)
+    print(&counts.pop("words") ?? -1)
+    priorities := PriorityQueue.from([2, 9, 4])
+    print(&priorities.pop() ?? -1)
+    single := PriorityQueue.from([1])
+    print(&single.pop() ?? -1)
+    print(&single.pop() ?? -1)
+}
+""").unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != Severity.Error), "fixture must type-check: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("option-carrier fixture must compile")
+    }
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT option-carrier fixture failed: {String.from_utf8_lossy(aot.stderr)}")
+    expected :: String.from_utf8_lossy(aot.stdout).into_owned()
+    assert_eq(expected, "3\nnull\n4\n-1\n9\n1\n-1\n", "AOT option-carrier observable drifted")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "option-carrier fixture failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected, "option-carrier observable drifted on {tier}")
+        assert(output.stderr.is_empty(), "option-carrier stderr drifted on {tier}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1536
+#Test("map_has_key_runs_resident_for_supported_key_shapes") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_map_has_key")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_map_has_key\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("map_has_key.jet")
+    fs.write(file, """
+fn run() {
+    strings := [String:Int]{}
+    strings.add("present", 1).drop("seed string map")
+    print(strings.has_key("present"))
+    print(strings.has_key("missing"))
+    ints := [Int:String]{}
+    ints.add(7, "present").drop("seed int map")
+    print(ints.has_key(7))
+    print(ints.has_key(8))
+}
+""").unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("map has_key fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "fixture must type-check: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("map has_key fixture must lower to checked native MIR")
+    }
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT fixture failed")
+    expected :: String.from_utf8_lossy(aot.stdout).into_owned()
+    assert_eq(expected, "true\nfalse\ntrue\nfalse\n")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "map has_key fixture failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected, "map has_key drifted on {tier}")
+        assert(output.stderr.is_empty(), "map has_key stderr drifted on {tier}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1625
+#Test("string_is_empty_runs_resident") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_string_is_empty")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_string_is_empty\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("string_is_empty.jet")
+    fs.write(file, """
+fn run() {
+    print("".is_empty())
+    print("present".is_empty())
+}
+""").unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("string is_empty fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "fixture must type-check: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("String.is_empty fixture must compile")
+    }
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT fixture failed")
+    expected :: String.from_utf8_lossy(aot.stdout).into_owned()
+    assert_eq(expected, "true\nfalse\n")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "String.is_empty fixture failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected, "String.is_empty drifted on {tier}")
+        assert(output.stderr.is_empty(), "String.is_empty stderr drifted on {tier}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/jit_run.rs:1698
+#Test("core_math_float_predicates_run_resident") {
+    if skip_if_native_target_unsupported() { return }
+    dir :: common.unique_tmp("jit_core_math_float_predicates")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"jit_core_math_float_predicates\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+    file :: dir.join("core_math_float_predicates.jet")
+    fs.write(file, """
+use core.math as math
+fn run() {
+    nan :: Float.NAN
+    inf :: Float.INFINITY
+    finite :: Float{1.5}
+    print(math.is_nan(nan))
+    print(math.is_inf(inf))
+    print(math.is_finite(finite))
+}
+""").unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    bundle := Loader.load_entry(shown).expect("float predicate fixture should load")
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "float predicate fixture must type-check: {diagnostics:#?}")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(file, tier).expect("float predicate fixture must lower to checked native MIR")
+    }
+    aot :: run_jet(file, true)
+    assert_eq(aot.status.code(), 0, "AOT float predicate fixture failed")
+    expected :: String.from_utf8_lossy(aot.stdout).into_owned()
+    assert_eq(expected, "true\ntrue\ntrue\n")
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        output :: common.run_entry_tier(file, tier)
+        assert_eq(output.status.code(), 0, "float predicate fixture failed on {tier}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected, "float predicates drifted on {tier}")
+        assert(output.stderr.is_empty(), "float predicate stderr drifted on {tier}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}

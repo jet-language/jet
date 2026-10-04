@@ -1,0 +1,19 @@
+use std.[fs, env]
+// GATE #4494: native fixture embedding and real filesystem operations.
+// Rust: tests/build_metadata_compat.rs:8
+const LOCK_V0: String = include_str("tests/fixtures/build-metadata-compat/lock-v0.lock")
+// Rust: tests/build_metadata_compat.rs:9
+const BUILD_RECORD_V0: String = include_str("tests/fixtures/build-metadata-compat/build-record-v0.json")
+// Rust: tests/build_metadata_compat.rs:11
+const STORE_V0: [U8] = include_bytes("tests/fixtures/build-metadata-compat/store-v0.magic")
+// Rust: tests/build_metadata_compat.rs:12
+const RECEIPT_V1: [U8] = include_bytes("tests/fixtures/build-metadata-compat/receipt-v1.magic")
+// Rust: tests/build_metadata_compat.rs:13
+const RECEIPT_KEY: String = "e27dfe4d5c5f1b2c8a861de44091b4c7ac7eec90fe2f4cac59a328f73c66337f"
+// Rust: tests/build_metadata_compat.rs:15
+fn scratch_root() -> OSPath { OSPath.from(env.var_os("HOME").expect("HOME is required for the compatibility scratch root")).join(".cache/jet-luna/build-metadata-compat-conformance") }
+// Rust: tests/build_metadata_compat.rs:22
+fn reset_scratch(root: &OSPath) -> {
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).expect("create compatibility scratch root")
+}

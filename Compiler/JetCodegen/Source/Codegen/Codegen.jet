@@ -1,1804 +1,428 @@
-// PORT-PENDING 2047 crates-jet-codegen-src-codegen-mod-slice-1: crates/jet-codegen/src/Codegen/mod.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Codegen is deliberately dumb (invariant I3): no checking happens here.
-//RS //! If a Program reaches this module, emission must always succeed and the
-//RS //! resulting Rust must always compile.
-//RS //!
-//RS //! Type-alignment rules (so emitted Rust always typechecks):
-//RS //!   - scalar params (Int/Float/Bool) pass by value, String by `&String`;
-//RS //!     `mut` params are `&mut T`; `take` params are `T` by value
-//RS //!   - a name bound to a `&T`/`&mut T` parameter is always emitted as the
-//RS //!     place `(*__jet_x)`, so every name has its plain Jet type
-//RS //!   - every printed/interpolated value goes through the `JetShow` trait
-//RS //!     in the prelude (Float keeps its decimal part there, S21)
-//RS //!   - every operator result is fully parenthesized
-//RS 
-//RS use crate::Syntax;
-//RS use crate::AST::{FfiLink, Item, ProgramBundle, Type};
-//RS pub(crate) use crate::AST::{mangle, mangle_generated, mangle_path};
-//RS use jet_pkg_model::Package::ReleaseDevtoolsPolicy;
-//RS use std::collections::{BTreeMap, BTreeSet, HashSet};
-//RS use std::sync::{Mutex, OnceLock};
-//RS 
-//RS pub(crate) use jet_foundation::MIR::{
-//RS     MirArtifactPlan, MirProgram, MirRuntimePartId,
-//RS };
-//RS 
-//RS /// The generated-name prefix used by emitter format strings. Keeping this as
-//RS /// one allocator argument lets every emitted temporary share the same machine
-//RS /// lane without embedding a second spelling in an emitter template.
-//RS pub(crate) fn generated_prefix() -> String {
-//RS     mangle_generated("")
-//RS }
-//RS 
-//RS pub(crate) fn canonical_prefix() -> String {
-//RS     mangle("")
-//RS }
-//RS 
-//RS /// Render the backend name for a source trait. Built-in traits with a
-//RS /// canonical Prelude declaration may keep a different Rust name from the
-//RS /// source spelling; ordinary user traits use the normal mangler.
-//RS pub(crate) fn rust_trait_name(trait_name: &str) -> String {
-//RS     crate::Generics::rust_trait_bound(trait_name)
-//RS         .map(str::to_string)
-//RS         .unwrap_or_else(|| mangle(trait_name))
-//RS }
-//RS 
-//RS 
-//RS // Native cache identity must digest the emitted stdlib closure, not the whole
-//RS // compiler binary. Keep the fixed Prelude digest for the process and keep the
-//RS // used-Core digests bounded: a long-lived compiler service can see many
-//RS // programs, but the digest cache must not become another unbounded cache.
-//RS const CORELIB_DIGEST_CACHE_LIMIT: usize = 32;
-//RS 
-//RS pub const JET_CANONICAL_FONT_BYTES: &[u8] =
-//RS     include_bytes!("../../../../Docs/site/assets/fonts/exo2-700.ttf");
-//RS pub const JET_CANONICAL_ARABIC_FONT_BYTES: &[u8] =
-//RS     include_bytes!("../../../../Docs/site/assets/fonts/noto-sans-arabic-regular.ttf");
-//RS pub const JET_CANONICAL_SYMBOLS_FONT_BYTES: &[u8] =
-//RS     include_bytes!("../../../../Docs/site/assets/fonts/noto-sans-symbols2-regular.ttf");
-//RS 
-//RS /// Emit the checked canonical font bytes into generated native sources.  The
-//RS /// generated program must not resolve a host filesystem font, or glyph IDs and
-//RS /// positions would vary across tiers and machines.
-//RS fn canonical_font_prelude() -> String {
-//RS     format!(
-//RS         "const JET_CANONICAL_FONT_BYTES: &[u8] = &{:?};\n\
-//RS          const JET_CANONICAL_ARABIC_FONT_BYTES: &[u8] = &{:?};\n\
-//RS          const JET_CANONICAL_SYMBOLS_FONT_BYTES: &[u8] = &{:?};\n",
-//RS         JET_CANONICAL_FONT_BYTES,
-//RS         JET_CANONICAL_ARABIC_FONT_BYTES,
-//RS         JET_CANONICAL_SYMBOLS_FONT_BYTES
-//RS     )
-//RS }
-//RS static CACHED_RUNTIME_FINGERPRINT: OnceLock<String> = OnceLock::new();
-//RS #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
-//RS struct CoreEmissionFingerprintKey {
-//RS     used_core: Vec<String>,
-//RS     active_os: String,
-//RS     edition: String,
-//RS     force_corelib: bool,
-//RS     test_harness: bool,
-//RS     release_inspect: Option<String>,
-//RS     devtools_panel_code: bool,
-//RS     devtools_stream_code: bool,
-//RS }
-//RS 
-//RS static CORELIB_EMISSION_FINGERPRINTS: OnceLock<
-//RS     Mutex<BTreeMap<CoreEmissionFingerprintKey, String>>,
-//RS > = OnceLock::new();
-//RS 
-//RS #[macro_export]
-//RS macro_rules! jet_generated_format {
-//RS     ($fmt:literal) => {
-//RS         ::std::format!($fmt, jet_prefix = $crate::Codegen::generated_prefix())
-//RS     };
-//RS     ($fmt:literal, $($args:tt)*) => {
-//RS         $crate::jet_generated_format!(@collect $fmt; [] $($args)*)
-//RS     };
-//RS     (@collect $fmt:literal; []) => {
-//RS         ::std::format!($fmt, jet_prefix = $crate::Codegen::generated_prefix())
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*]) => {
-//RS         ::std::format!(
-//RS             $fmt,
-//RS             $($args)*,
-//RS             jet_prefix = $crate::Codegen::generated_prefix()
-//RS         )
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*] ,) => {
-//RS         ::std::format!(
-//RS             $fmt,
-//RS             $($args)*,
-//RS             jet_prefix = $crate::Codegen::generated_prefix()
-//RS         )
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*] , $head:tt $($rest:tt)*) => {
-//RS         $crate::jet_generated_format!(@collect $fmt; [$($args)*, $head] $($rest)*)
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*] $head:tt $($rest:tt)*) => {
-//RS         $crate::jet_generated_format!(@collect $fmt; [$($args)* $head] $($rest)*)
-//RS     };
-//RS }
-//RS 
-//RS #[macro_export]
-//RS macro_rules! jet_name_format {
-//RS     ($fmt:literal) => {
-//RS         ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
-//RS     };
-//RS     ($fmt:literal, $($args:tt)*) => {
-//RS         $crate::jet_name_format!(@collect $fmt; [] $($args)*)
-//RS     };
-//RS     (@collect $fmt:literal; []) => {
-//RS         ::std::format!($fmt, name_prefix = $crate::Codegen::canonical_prefix())
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*]) => {
-//RS         ::std::format!(
-//RS             $fmt,
-//RS             $($args)*,
-//RS             name_prefix = $crate::Codegen::canonical_prefix()
-//RS         )
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*] ,) => {
-//RS         ::std::format!(
-//RS             $fmt,
-//RS             $($args)*,
-//RS             name_prefix = $crate::Codegen::canonical_prefix()
-//RS         )
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*] , $head:tt $($rest:tt)*) => {
-//RS         $crate::jet_name_format!(@collect $fmt; [$($args)*, $head] $($rest)*)
-//RS     };
-//RS     (@collect $fmt:literal; [$($args:tt)*] $head:tt $($rest:tt)*) => {
-//RS         $crate::jet_name_format!(@collect $fmt; [$($args)* $head] $($rest)*)
-//RS     };
-//RS }
-//RS 
-//RS mod Context;
-//RS pub mod Embedding;
-//RS mod Imports;
-//RS mod Items;
-//RS pub use crate::task_group;
-//RS pub mod Library;
-//RS pub mod Plugin;
-//RS mod Statement;
-//RS pub mod TIR;
-//RS pub mod MIREval;
-//RS #[doc(hidden)]
-//RS pub mod NativeLoopCursor;
-//RS #[doc(hidden)]
-//RS pub mod NativePreludeBridge;
-//RS mod Receipt;
-//RS pub mod MIRRust;
-//RS pub mod MIRWeb;
-//RS mod Tuples;
-//RS mod Utils;
-//RS mod VariadicBound;
-//RS mod Web;
-//RS 
-//RS /// D-REPORT-TEST1=A: host-side `jet prove` uses the same source that test
-//RS /// harnesses receive below as their report prelude.
-//RS #[allow(dead_code)]
-//RS pub mod test_report {
-//RS     include!("../../../jet-foundation/src/Report.rs");
-//RS     include!("../../../jet-foundation/src/Evidence.rs");
-//RS     include!("../Prelude/Core/TestEvidence.rs");
-//RS     include!("../Prelude/CoreLib/Top/TestingShared.rs");
-//RS     include!("../Prelude/TestReport.rs");
-//RS }
-//RS 
-//RS pub(crate) use Context::*;
-//RS pub use Embedding::{export_surface, ExportFunction, ExportScalar};
-//RS pub(crate) use Imports::*;
-//RS pub use Library::{emit_library, LibraryArtifacts, LibraryExport};
-//RS pub use Plugin::{emit_plugin, PluginArtifacts};
-//RS pub(crate) use Statement::*;
-//RS pub(crate) use Tuples::*;
-//RS pub(crate) use Utils::*;
-//RS pub use Web::{build_wasm_jet_source_map, canonical_web_raw_assets, CanonicalWebRawAssets};
-//RS 
-//RS /// Build the interpreter's bundle-wide Core alias map from the same import
-//RS /// resolver used by AOT and JIT lowering. In particular, member-list imports
-//RS /// such as `use core.math.[abs, min]` must not fall back to a second policy.
-//RS pub fn core_imports_for_bundle(bundle: &ProgramBundle) -> BTreeMap<String, String> {
-//RS     let mut imports = BTreeMap::new();
-//RS     for module_idx in 0..bundle.modules.len() {
-//RS         for (alias, module) in core_import_map(bundle, module_idx) {
-//RS             imports.entry(alias).or_insert(module);
-//RS         }
-//RS     }
-//RS     imports
-//RS }
-//RS 
-//RS /// Generated-only wrappers around the Foundation-independent native host
-//RS /// registry. The compile-time policy is emitted immediately before the
-//RS /// Prelude, so release artifacts can dead-code-eliminate every callback.
-//RS const DEVTOOLS_NATIVE_WRAPPERS_PRELUDE: &str = r#"
-//RS #[inline(always)]
-//RS pub fn jet_devtools_install_native_host(
-//RS     session_id: impl Into<String>,
-//RS     host: JetDevtoolsNativeHostHandle,
-//RS ) -> Result<JetDevtoolsNativeHostGuard, String> {
-//RS     if !JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         return Err("native devtools host is disabled by the release policy".to_string());
-//RS     }
-//RS     jet_devtools_install_native_host_unchecked(session_id, host)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_bind_session(session_id: &str) -> Result<(), String> {
-//RS     if !JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         return Err("native devtools session is disabled by the release policy".to_string());
-//RS     }
-//RS     jet_devtools_native_bind_session_unchecked(session_id)
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_clear_session(session_id: &str) {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         jet_devtools_native_clear_session_unchecked(session_id);
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_publish_event_for_session(session_id: &str, event: JetDevtoolsEvent) {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         jet_devtools_publish_event_for_session_unchecked(session_id, event);
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_window_open(width: u32, height: u32) {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         jet_devtools_native_window_open_unchecked(width, height);
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_window_close() {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         jet_devtools_native_window_close_unchecked();
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_input(input: JetDevtoolsNativeInput) -> bool {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         return jet_devtools_native_input_unchecked(input);
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_frame_begin(
-//RS     frame_index: u64,
-//RS     width: u32,
-//RS     height: u32,
-//RS ) -> Vec<JetDevtoolsNativeDrawCommand> {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         return jet_devtools_native_frame_begin_unchecked(frame_index, width, height);
-//RS     }
-//RS     Vec::new()
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_draw(command: JetDevtoolsNativeDrawCommand) {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         jet_devtools_native_draw_unchecked(command);
-//RS     }
-//RS }
-//RS 
-//RS #[inline(always)]
-//RS pub fn jet_devtools_native_frame_end() {
-//RS     if JET_DEVTOOLS_RUNTIME_ENABLED {
-//RS         jet_devtools_native_frame_end_unchecked();
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS /// Emitted at the top of every program: core runtime helpers used by generated Rust.
-//RS /// Parts stay in source order so splitting ownership never changes generated bytes.
-//RS ///
-//RS /// Every part here is spliced flat into the generated crate root, so one
-//RS /// namespace holds all of them: item names must be unique across parts, a part
-//RS /// may only use `pub`, `pub(crate)`, or private visibility (`pub(super)` has
-//RS /// no parent at the root), and Foundation items are named unqualified or
-//RS /// through the `jet_foundation` facade (`push_foundation_facade`).
-//RS ///
-//RS /// `Outcome.rs` is not listed: it is the `outcome` root of
-//RS /// `EMBEDDED_PRELUDE_PARTS`, whose dependency closure (JSON kernel,
-//RS /// `RuntimeDiagnosticCore`) `push_cached_runtime_body` emits before these.
-//RS const PRELUDE_PARTS: &[&str] = &[
-//RS     // D-SHAPE-ONE1=A: the compiler and every generated tier consume this
-//RS     // single shape vocabulary; no Prelude-local shape enum is permitted.
-//RS     include_str!("../../../jet-foundation/src/Shape.rs"),
-//RS     // D-DEVR-LAW1=A / I9: every execution tier receives the same development
-//RS     // act receipt shape and serializer.
-//RS     include_str!("../Prelude/DevelopmentReceipt.rs"),
-//RS     include_str!("../Prelude/Core/Receipt.rs"),
-//RS     // D-DX-DEVTOOLS1: one typed observation protocol shared by every execution tier.
-//RS     // `Prelude/Devtools.rs` is a symlink to the Foundation module; its
-//RS     // host-crate native region is cut by `push_prelude` (see
-//RS     // `HOST_DEVTOOLS_NATIVE_BEGIN`) and replaced by the two parts below, so the
-//RS     // native registry source enters the program exactly once.
-//RS     DEVTOOLS_SOURCE,
-//RS     include_str!("../../../jet-foundation/src/DevtoolsNative.rs"),
-//RS     DEVTOOLS_NATIVE_WRAPPERS_PRELUDE,
-//RS     include_str!("../Prelude/FaultInjection.rs"),
-//RS     // D-BENCH-KEEP1=A: every engine includes the same black-box sink source;
-//RS     // resident adapters only marshal their carrier into this function.
-//RS     include_str!("../Prelude/Core/Keep.rs"),
-//RS     include_str!("../Prelude/JobQueueTypes.rs"),
-//RS     include_str!("../Prelude/Job.rs"),
-//RS     include_str!("../Prelude/Core/Option.rs"),
-//RS     include_str!("../Prelude/Core/FixedList.rs"),
-//RS     // D-SOA-TIER1=A: THE shared column store and the one gather read, plus the
-//RS     // Prelude-owned `[S]` facade over it. Right after FixedList because the
-//RS     // read reuses that shared bounds stop; the Cranelift host and the
-//RS     // interpreter ambient include the same store source.
-//RS     include_str!("../Prelude/Core/Columns.rs"),
-//RS     include_str!("../Prelude/Core/ColumnList.rs"),
-//RS     include_str!("../Prelude/Core/UnicodeString.rs"),
-//RS     include_str!("../Prelude/Core/Ascii.rs"),
-//RS     include_str!("../Prelude/Core/ProcessArgs.rs"),
-//RS     // D-STR-CONCAT1: the owned String `+`/`+=` result is one kernel for every
-//RS     // execution tier; the evaluator and JIT include this same source.
-//RS     include_str!("../Prelude/Core/StringConcat.rs"),
-//RS     // D-MEM-COPYSEM1=A: one Rust Prelude copy kernel for native and wasm.
-//RS     include_str!("../Prelude/Core/ViewCopy.rs"),
-//RS     include_str!("../Prelude/Core/Loadable.rs"),
-//RS     include_str!("../Prelude/Core/Values.rs"),
-//RS     include_str!("../Prelude/Core/TextValues.rs"),
-//RS     include_str!("../Prelude/Core/RangeBounds.rs"),
-//RS     include_str!("../Prelude/Core/InlineRange.rs"),
-//RS     include_str!("../Prelude/Core/Disjoint.rs"),
-//RS     include_str!("../Prelude/Core/ExpiringSecret.rs"),
-//RS     include_str!("../Prelude/Core/SetAlgebra.rs"),
-//RS     include_str!("../Prelude/Core/Duration.rs"),
-//RS     include_str!("../Prelude/Core/Measurement.rs"),
-//RS     include_str!("../Prelude/Core/TimeMonotonic.rs"),
-//RS     include_str!("../Prelude/Core/Time.rs"),
-//RS     include_str!("../Prelude/Core/Sketch.rs"),
-//RS     include_str!("../Prelude/Core/Contracts.rs"),
-//RS     include_str!("../Prelude/Core/MapKey.rs"),
-//RS     include_str!("../Prelude/Core/RuntimeStack.rs"),
-//RS     include_str!("../Prelude/Core/Authority.rs"),
-//RS     // D-WRAP-SCOPE1=A / I9: one fixed-width arithmetic operation table for
-//RS     // AOT, JIT, TIR evaluation, comptime, and web adapters.
-//RS     include_str!("../Prelude/Core/FixedArithmetic.rs"),
-//RS     include_str!("../Prelude/Core/FloatOrdering.rs"),
-//RS     include_str!("../Prelude/Core/ParallelKernel.rs"),
-//RS     // D-CLAIM1: every generated producer writes the same typed evidence
-//RS     // records as Foundation; Core.rs calls its root writer below.
-//RS     // Evidence names crate::Facts and crate::ResourceSchedule. Keep those
-//RS     // modules in the fixed runtime so a print-only program still typechecks.
-//RS     RESOURCE_FACTS_PRELUDE,
-//RS     include_str!("../../../jet-foundation/src/Evidence.rs"),
-//RS     include_str!("../Prelude/Core/TestEvidence.rs"),
-//RS     include_str!("../Prelude/Core.rs"),
-//RS     include_str!("../Prelude/Core/ViewAccess.rs"),
-//RS     // D-EXPOP1=A / D-EXPSEM1=A: `^`. Shared verbatim with the wasm module
-//RS     // (Codegen/Web.rs) so every tier runs one power.
-//RS     include_str!("../Prelude/Core/Power.rs"),
-//RS     // D-FLOORDIV1=A: `/%`. Shared the same way, so every tier rounds down
-//RS     // identically.
-//RS     include_str!("../Prelude/Core/Division.rs"),
-//RS     include_str!("../Prelude/TypedText.rs"),
-//RS     include_str!("../Prelude/Core/Progress.rs"),
-//RS     include_str!("../Prelude/Core/Bytes.rs"),
-//RS     // The one parallel-walk kernel. AOT embeds it here; the resident JIT host,
-//RS     // the interpreter ambient and the comptime evaluator `include!` the same
-//RS     // file, so no tier re-implements directory traversal (I9). A nested
-//RS     // `include!` inside an embedded part cannot work: the generated crate has
-//RS     // no Prelude tree to read from.
-//RS     include_str!("../Prelude/Core/FSIgnore.rs"),
-//RS     include_str!("../Prelude/Core/FSWalk.rs"),
-//RS     include_str!("../Prelude/CoreLib/JetStd/Iter.rs"),
-//RS     include_str!("../Prelude/Core/CollectionFailure.rs"),
-//RS     include_str!("../Prelude/Core/SortKernel.rs"),
-//RS     include_str!("../Prelude/Core/Collections.rs"),
-//RS     include_str!("../Prelude/Memo.rs"),
-//RS     include_str!("../Prelude/SharedProtocol.rs"),
-//RS     TERM_PRELUDE,
-//RS     // D-DX-HUMANOUTPUT1: capability-aware human rendering shared by every tier.
-//RS     include_str!("../Prelude/Core/HumanOutput.rs"),
-//RS     // D-TERM1 / I9: the one terminal key kernel. AOT embeds it here; the
-//RS     // canonical TIR evaluator and the resident JIT host `include!` the same
-//RS     // file, so no tier re-decodes key bytes or re-states raw-mode entry.
-//RS     include_str!("../Prelude/Core/TermKey.rs"),
-//RS     include_str!("../Prelude/Core/RuntimeControl.rs"),
-//RS     include_str!("../../../jet-foundation/src/NumericConversion.rs"),
-//RS     include_str!("../Prelude/Core/NumericRuntime.rs"),
-//RS     include_str!("../Prelude/Observe.rs"),
-//RS     include_str!("../../../jet-foundation/src/ExactUnitConversion.rs"),
-//RS     include_str!("../Prelude/Core/NumericWeb.rs"),
-//RS     include_str!("../../../jet-foundation/src/StructuralDebug.rs"),
-//RS     // D-SHIFT1: `binary.Reader` / `text.Cursor`. Owned by jet-foundation so the
-//RS     // AOT prelude and the canonical TIR evaluator run one kernel (I9).
-//RS     include_str!("../../../jet-foundation/src/StreamCursor.rs"),
-//RS     // D-BINPAT1 / I9: one binary-pattern scan kernel. AST-shaped engines only
-//RS     // marshal pattern parts and project its values.
-//RS     include_str!("../../../jet-foundation/src/Prelude/MatchScan.rs"),
-//RS ];
-//RS const COLLECTIONS_PRELUDE_SOURCE: &str = include_str!("../Prelude/Core/Collections.rs");
-//RS const LOOP_CURSOR_PRELUDE_SOURCE: &str = include_str!("../Prelude/Core/LoopCursor.rs");
-//RS const LOOP_CURSOR_INCLUDE_MARKER: &str = "include!(\"LoopCursor.rs\");";
-//RS 
-//RS const OUTCOME_SOURCE: &str = include_str!("../../../jet-foundation/src/Outcome.rs");
-//RS const HOST_RUNTIME_STOP_BEGIN: &str = "// JET_HOST_RUNTIME_STOP_BEGIN";
-//RS const HOST_RUNTIME_SENTRY_BEGIN: &str = "// JET_HOST_RUNTIME_SENTRY_BEGIN";
-//RS const HOST_RUNTIME_SENTRY_END: &str = "// JET_HOST_RUNTIME_SENTRY_END";
-//RS const HOST_RUNTIME_STOP_END: &str = "// JET_HOST_RUNTIME_STOP_END";
-//RS const DEVTOOLS_SOURCE: &str = include_str!("../Prelude/Devtools.rs");
-//RS const TERM_PRELUDE: &str = concat!(
-//RS     "\n// JET_VETTED_UNSAFE_BEGIN: jet_term_kernel\n\
-//RS      // AUDIT: D-IO-TERM1 keeps terminal detection, stream ownership, and the\n\
-//RS      // platform raw-mode ABI in this compiler-owned shared kernel.\n",
-//RS     include_str!("../Prelude/Term.rs"),
-//RS     "\n// JET_VETTED_UNSAFE_END: jet_term_kernel\n",
-//RS );
-//RS const HOST_DEVTOOLS_NATIVE_BEGIN: &str = "// JET_HOST_DEVTOOLS_NATIVE_BEGIN";
-//RS const HOST_DEVTOOLS_NATIVE_END: &str = "// JET_HOST_DEVTOOLS_NATIVE_END";
-//RS 
-//RS /// Embedded Prelude parts are a dependency graph, not a list of incidental
-//RS /// imports. A root part pulls in every transitive part it names before its own
-//RS /// source. Web and native emission use the same closure for the fixed
-//RS /// Outcome/report seam, so a boundary signature cannot strand a dependency.
-//RS enum EmbeddedPreludePartSource {
-//RS     Static(&'static str),
-//RS     Outcome,
-//RS }
-//RS 
-//RS struct EmbeddedPreludePart {
-//RS     name: &'static str,
-//RS     dependencies: &'static [&'static str],
-//RS     source: EmbeddedPreludePartSource,
-//RS }
-//RS 
-//RS const EMBEDDED_PRELUDE_PARTS: &[EmbeddedPreludePart] = &[
-//RS     EmbeddedPreludePart {
-//RS         name: "fixed_allocator",
-//RS         dependencies: &[],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\n// JET_VETTED_UNSAFE_BEGIN: jet_fixed_kernel\npub mod jet_fixed_kernel {\n",
-//RS             include_str!("../Prelude/Core/FixedAllocator.rs"),
-//RS             "\n}\n// JET_VETTED_UNSAFE_END: jet_fixed_kernel\n",
-//RS         )),
-//RS     },
-//RS     EmbeddedPreludePart {
-//RS         name: "runtime_diagnostic_core",
-//RS         dependencies: &[],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\npub mod RuntimeDiagnosticCore {\n",
-//RS             include_str!("../../../jet-foundation/src/RuntimeDiagnosticCore.rs"),
-//RS             "\n}\n",
-//RS         )),
-//RS     },
-//RS     EmbeddedPreludePart {
-//RS         name: "encoding_errors",
-//RS         dependencies: &[],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\nmod jet_encoding_errors {\n",
-//RS             include_str!("../../../jet-foundation/src/EncodingErrors.rs"),
-//RS             "\n}\n"
-//RS         )),
-//RS     },
-//RS     EmbeddedPreludePart {
-//RS         name: "json_number",
-//RS         dependencies: &[],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\nmod jet_json_number {\n",
-//RS             include_str!("../../../jet-foundation/src/JSONNumber.rs"),
-//RS             "\n}\n"
-//RS         )),
-//RS     },
-//RS     EmbeddedPreludePart {
-//RS         name: "encoding_json",
-//RS         dependencies: &["encoding_errors", "json_number"],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\nmod jet_encoding_json {\n",
-//RS             include_str!("../../../jet-foundation/src/EncodingJson.rs"),
-//RS             "\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n"
-//RS         )),
-//RS     },
-//RS     EmbeddedPreludePart {
-//RS         name: "outcome",
-//RS         dependencies: &["encoding_json", "runtime_diagnostic_core"],
-//RS         source: EmbeddedPreludePartSource::Outcome,
-//RS     },
-//RS     // The generated runtime uses the same rooted, no-follow SHA-256
-//RS     // implementation as Foundation. Keeping the full module here closes the
-//RS     // `core.fs` dependency without a second host-only wrapper.
-//RS     EmbeddedPreludePart {
-//RS         name: "sha256",
-//RS         dependencies: &[],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_sha256\n\
-//RS              // AUDIT: this Foundation SHA-256 module owns the bounded hostile-input\n\
-//RS              // tree-hash file boundary; its rooted authority uses checked no-follow\n\
-//RS              // descriptors and keeps every raw descriptor operation in this module.\n\
-//RS              #[allow(non_snake_case)]\nmod SHA256 {\n",
-//RS             include_str!("../../../jet-foundation/src/SHA256.rs"),
-//RS             "\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_sha256\n",
-//RS         )),
-//RS     },
-//RS     EmbeddedPreludePart {
-//RS         name: "performance_budget",
-//RS         dependencies: &["sha256"],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\n#[allow(non_snake_case)]\nmod PerformanceBudget {\n",
-//RS             include_str!("../../../jet-foundation/src/PerformanceBudget.rs"),
-//RS             "\n}\n",
-//RS         )),
-//RS     },
-//RS     // D-DATA-FLOW / I9: the one data-loader kernel (identity, redaction,
-//RS     // snapshot facts) behind `core.data`; `LazyTablePlan.rs` and `DataPlot.rs`
-//RS     // derive column identity from it in every tier.
-//RS     EmbeddedPreludePart {
-//RS         name: "prelude_data_flow",
-//RS         dependencies: &["sha256"],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\nmod jet_prelude_data_flow {\n",
-//RS             include_str!("../../../jet-foundation/src/PreludeDataFlow.rs"),
-//RS             "\n}\n",
-//RS         )),
-//RS     },
-//RS     // Checked Arrow C-data ownership behind `core.data.arrow`'s
-//RS     // `DataArrowBatch`. Its pointer reads are Foundation-vetted (I1).
-//RS     EmbeddedPreludePart {
-//RS         name: "arrow_data",
-//RS         dependencies: &[],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\n// JET_VETTED_UNSAFE_BEGIN: jet_arrow_data\n\
-//RS              // AUDIT: this region imports the Arrow C data interface, validates\n\
-//RS              // schema/length/offset/buffer bounds, and retains release callbacks.\n\
-//RS              // Safe Rust cannot express foreign ownership and callback ABIs.\n\
-//RS              // Callers must provide live C records and transfer each owner once;\n\
-//RS              // violating that contract can read outside a buffer or double-free.\n\
-//RS              mod jet_arrow_data {\n",
-//RS             include_str!("../../../jet-foundation/src/ArrowData.rs"),
-//RS             "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_data\n\
-//RS              #[allow(non_snake_case)]\n\
-//RS              mod ArrowData { pub use crate::jet_arrow_data::*; }\n",
-//RS         )),
-//RS     },
-//RS     // Checked Arrow file-reader registration depends on the C-data carrier
-//RS     // above and uses the generated crate's DataTree/ArrowData facades.
-//RS     EmbeddedPreludePart {
-//RS         name: "arrow_file_reader",
-//RS         dependencies: &["arrow_data"],
-//RS         source: EmbeddedPreludePartSource::Static(concat!(
-//RS             "\n// JET_VETTED_UNSAFE_BEGIN: jet_arrow_file_reader\n\
-//RS              // AUDIT: this region crosses the registered Arrow file-reader\n\
-//RS              // provider boundary and transfers imported batch ownership.\n\
-//RS              mod jet_arrow_file_reader {\n",
-//RS             include_str!("../../../jet-foundation/src/ArrowFileReader.rs"),
-//RS             "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_file_reader\n",
-//RS         )),
-//RS     },
-//RS ];
-//RS 
-//RS /// Where a Foundation module lands in the generated crate.
-//RS enum FoundationPlacement {
-//RS     /// Spliced flat: its items are the crate root's own items.
-//RS     Root,
-//RS     /// Wrapped in this generated module.
-//RS     Module(&'static str),
-//RS }
-//RS 
-//RS /// The Foundation modules a generated program embeds, by their Foundation
-//RS /// name. Prelude sources compile both inside host crates, where
-//RS /// `jet_foundation` is a real dependency, and inside the generated crate,
-//RS /// which has none; this table is the one contract that lets a source spell
-//RS /// `jet_foundation::<Module>::<Item>` identically in both. It emits the
-//RS /// `mod jet_foundation` facade (`push_foundation_facade`) and drives the flat
-//RS /// import merge (`flat_prelude_import_bindings`). Optional source modules
-//RS /// emitted only under `needs_fs_runtime` use their conditional generated
-//RS /// aliases instead of entering this unconditional facade.
-//RS const FOUNDATION_PLACEMENTS: &[(&str, FoundationPlacement)] = &[
-//RS     ("Outcome", FoundationPlacement::Root),
-//RS     ("Shape", FoundationPlacement::Root),
-//RS     ("Devtools", FoundationPlacement::Root),
-//RS     ("DevtoolsNative", FoundationPlacement::Root),
-//RS     ("Evidence", FoundationPlacement::Root),
-//RS     ("NumericConversion", FoundationPlacement::Root),
-//RS     ("ExactUnitConversion", FoundationPlacement::Root),
-//RS     ("StructuralDebug", FoundationPlacement::Root),
-//RS     ("StreamCursor", FoundationPlacement::Root),
-//RS     ("RuntimeDiagnosticCore", FoundationPlacement::Module("RuntimeDiagnosticCore")),
-//RS     ("EncodingErrors", FoundationPlacement::Module("jet_encoding_errors")),
-//RS     ("JSONNumber", FoundationPlacement::Module("jet_json_number")),
-//RS     ("EncodingJson", FoundationPlacement::Module("jet_encoding_json")),
-//RS     ("DataTree", FoundationPlacement::Module("jet_foundation_datatree")),
-//RS     ("ArrowData", FoundationPlacement::Module("jet_arrow_data")),
-//RS     (
-//RS         "ArrowFileReader",
-//RS         FoundationPlacement::Module("jet_arrow_file_reader"),
-//RS     ),
-//RS     ("PreludeDataFlow", FoundationPlacement::Module("jet_prelude_data_flow")),
-//RS     ("SHA256", FoundationPlacement::Module("SHA256")),
-//RS     ("PerformanceBudget", FoundationPlacement::Module("PerformanceBudget")),
-//RS     ("Numeric", FoundationPlacement::Module("jet_foundation_numeric")),
-//RS     ("Facts", FoundationPlacement::Module("Facts")),
-//RS     ("ResourceSchedule", FoundationPlacement::Module("ResourceSchedule")),
-//RS     (
-//RS         "CompilerStack",
-//RS         FoundationPlacement::Module("CompilerStack"),
-//RS     ),
-//RS ];
-//RS fn foundation_placement(module: &str) -> Option<&'static FoundationPlacement> {
-//RS     FOUNDATION_PLACEMENTS
-//RS         .iter()
-//RS         .find(|(name, _)| *name == module)
-//RS         .map(|(_, placement)| placement)
-//RS }
-//RS 
-//RS /// `mod jet_foundation { pub mod <Module> { … } }`: every embedded Foundation
-//RS /// module re-exported under its host-crate path. Root-flat modules re-export
-//RS /// the crate root itself, so an item keeps the visibility Foundation gave it.
-//RS /// Arrow entries are conditional because their modules are demand-driven.
-//RS /// `CompilerStack` is compiler infrastructure; generated programs only receive
-//RS /// the stack-size constant Prelude scheduler workers share with the host.
-//RS fn push_foundation_facade(out: &mut String, include_arrow: bool) {
-//RS     out.push_str(&format!(
-//RS         "\n#[allow(non_snake_case, dead_code)]\npub(crate) mod CompilerStack {{\n    pub const COMPILER_STACK_SIZE: usize = {};\n}}\n",
-//RS         jet_foundation::CompilerStack::COMPILER_STACK_SIZE,
-//RS     ));
-//RS     out.push_str("\n#[allow(non_snake_case, unused_imports)]\nmod jet_foundation {\n");
-//RS     for (module, placement) in FOUNDATION_PLACEMENTS {
-//RS         if !include_arrow && matches!(*module, "ArrowData" | "ArrowFileReader") {
-//RS             continue;
-//RS         }
-//RS         let target = match placement {
-//RS             FoundationPlacement::Root => "crate".to_string(),
-//RS             FoundationPlacement::Module(path) => format!("crate::{path}"),
-//RS         };
-//RS         out.push_str(&format!("    pub mod {module} {{ pub use {target}::*; }}\n"));
-//RS     }
-//RS     out.push_str("}\n");
-//RS }
-//RS 
-//RS fn push_numeric_runtime(out: &mut String) {
-//RS     let start = NUMERIC_FOUNDATION_SOURCE
-//RS         .find("// ── CtFraction")
-//RS         .expect("Numeric.rs CtFraction marker missing");
-//RS     out.push_str(
-//RS         "\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_numeric\n\
-//RS          // AUDIT: D-INTBIG1/D-DECIMAL1 keep the hazard-pointer exact numeric\n\
-//RS          // carrier and its raw i64 ownership adapters in this Foundation module.\n\
-//RS          #[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_foundation_numeric {\nuse crate::jet_json_number::{json_decimal_lexeme, json_decimal_small, json_exact_integer_text};\nuse crate::{AllocError, jet_alloc_error};\nuse std::alloc::{alloc, dealloc, Layout};\nuse std::cell::Cell;\nuse std::fmt;\nuse std::ptr::{self, NonNull};\nuse std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};\nmod Syntax {\n    pub const TYPE_DECIMAL: &'static str = \"Decimal\";\n    pub const TYPE_FRACTION: &'static str = \"Fraction\";\n}\n#[derive(Clone, Debug)]\nenum CtValue {\n    Int(i64),\n    Bool(bool),\n    Str(String),\n    BigInt(CtBigInt),\n    Struct { type_name: String, fields: Vec<(String, CtValue)> },\n}\n",
-//RS     );
-//RS     let body = NUMERIC_FOUNDATION_SOURCE[start..]
-//RS         .replace("crate::AST::CtValue", "CtValue")
-//RS         .replace("crate::Syntax::", "Syntax::")
-//RS         .replace("crate::NumericConversion::", "crate::")
-//RS         .replace("crate::Outcome::", "crate::");
-//RS     out.push_str(&body);
-//RS     out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_numeric\n");
-//RS }
-//RS 
-//RS fn push_shared_numeric_kernels(out: &mut String) {
-//RS     out.push_str(
-//RS         "\n#[allow(non_snake_case, unused_imports, dead_code)]\n\
-//RS          mod jet_exact_numeric {\n\
-//RS          use crate::jet_foundation_numeric::CtBigInt as ExactBigInt;\n",
-//RS     );
-//RS     out.push_str(EXACT_NUMERIC_PRELUDE);
-//RS     out.push_str("\n}\n");
-//RS     out.push_str(
-//RS         "\n#[allow(non_snake_case, unused_imports, dead_code)]\n\
-//RS          mod jet_precise_numeric {\n\
-//RS          use crate::jet_foundation_numeric::{\
-//RS              CtBigInt as ExactBigInt, \
-//RS              CtDecimal as ExactDecimal, \
-//RS              CtFraction as ExactFraction};\n",
-//RS     );
-//RS     out.push_str(PRECISE_NUMERIC_PRELUDE);
-//RS     out.push_str("\n}\n");
-//RS }
-//RS 
-//RS /// Native builders split this exact block into the content-addressed runtime
-//RS /// rlib. Keep the markers stable: emitted Rust remains a complete standalone
-//RS /// program, while the AOT link seam can replace the block with one `--extern`.
-//RS pub const CACHED_RUNTIME_BEGIN: &str = "// jet:cached-runtime-begin\n";
-//RS pub const CACHED_RUNTIME_END: &str = "// jet:cached-runtime-end\n";
-//RS pub const CACHED_CORE_BEGIN: &str = "// jet:cached-core-begin\n";
-//RS pub const CACHED_CORE_END: &str = "// jet:cached-core-end\n";
-//RS 
-//RS /// Collections.rs is also included directly by resident hosts. Expand its
-//RS /// sibling kernel only while assembling a flat generated crate; leaving a
-//RS /// filesystem-relative `include!` in emitted source would make AOT depend on
-//RS /// the compiler checkout.
-//RS fn push_collections_prelude(out: &mut String) {
-//RS     let mut pieces = COLLECTIONS_PRELUDE_SOURCE.split(LOOP_CURSOR_INCLUDE_MARKER);
-//RS     out.push_str(
-//RS         pieces
-//RS             .next()
-//RS             .expect("Collections Prelude source split has a leading segment"),
-//RS     );
-//RS     if let Some(tail) = pieces.next() {
-//RS         out.push_str(LOOP_CURSOR_PRELUDE_SOURCE);
-//RS         out.push_str(tail);
-//RS     } else {
-//RS         panic!("Collections Prelude source is missing its cursor-kernel marker");
-//RS     }
-//RS     assert!(
-//RS         pieces.next().is_none(),
-//RS         "Collections Prelude source has duplicate cursor-kernel markers"
-//RS     );
-//RS }
-//RS 
-//RS fn push_prelude(out: &mut String, devtools_enabled: bool, local_rail_enabled: bool) {
-//RS     // The typed MIR execution policy is lowered once into these constants.
-//RS     // Devtools.rs and Observe.rs can then make publication/install calls
-//RS     // compile away in stripped release artifacts without a second policy
-//RS     // surface or a host-local semantic copy.
-//RS     out.push_str(&format!(
-//RS         "\nconst JET_DEVTOOLS_RUNTIME_ENABLED: bool = {devtools_enabled};\n\
-//RS const JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = {local_rail_enabled};\n\
-//RS #[inline(always)]\n\
-//RS fn jet_web_runtime_devtools_enabled() -> bool {{ JET_DEVTOOLS_RUNTIME_ENABLED }}\n\
-//RS #[inline(always)]\n\
-//RS fn jet_web_runtime_history_enabled() -> bool {{ JET_DEVTOOLS_LOCAL_RAIL_ENABLED }}\n"
-//RS     ));
-//RS     push_numeric_runtime(out);
-//RS     push_shared_numeric_kernels(out);
-//RS     for part in PRELUDE_PARTS {
-//RS         if *part == DEVTOOLS_SOURCE {
-//RS             push_embedded_devtools(out);
-//RS         } else if *part == COLLECTIONS_PRELUDE_SOURCE {
-//RS             push_collections_prelude(out);
-//RS         } else {
-//RS             out.push_str(part);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// `Prelude/Devtools.rs` is the Foundation module itself. Its host-crate
-//RS /// native region (`include!("DevtoolsNative.rs")` plus always-on wrappers) is
-//RS /// cut here; the program gets `DevtoolsNative.rs` as the following Prelude
-//RS /// part and `DEVTOOLS_NATIVE_WRAPPERS_PRELUDE` as its policy-gated wrappers.
-//RS fn push_embedded_devtools(out: &mut String) {
-//RS     let native_start = DEVTOOLS_SOURCE
-//RS         .find(HOST_DEVTOOLS_NATIVE_BEGIN)
-//RS         .expect("Devtools host native region begin marker missing");
-//RS     let native_end = DEVTOOLS_SOURCE
-//RS         .find(HOST_DEVTOOLS_NATIVE_END)
-//RS         .expect("Devtools host native region end marker missing")
-//RS         + HOST_DEVTOOLS_NATIVE_END.len();
-//RS     assert!(
-//RS         native_start < native_end,
-//RS         "Devtools host native region markers are out of order"
-//RS     );
-//RS     out.push_str(&DEVTOOLS_SOURCE[..native_start]);
-//RS     out.push_str(&DEVTOOLS_SOURCE[native_end..]);
-//RS }
-//RS 
-//RS fn push_game_devtools_control_prelude(out: &mut String) {
-//RS     let source = include_str!("../../../jet-foundation/src/DevtoolsControl.rs")
-//RS         .replace("crate::Devtools::", "super::");
-//RS     out.push_str("\nmod jet_devtools_control {\n");
-//RS     out.push_str(&source);
-//RS     out.push_str("\n}\n");
-//RS     out.push_str(
-//RS         "pub use jet_devtools_control::{\
-//RS JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,\
-//RS JetDevtoolsGameControlRequest, JetDevtoolsGameControlCallbackGuard,\
-//RS jet_devtools_install_game_control_callback, jet_devtools_clear_commands,\
-//RS jet_devtools_enqueue_command, jet_devtools_requeue_command_front,\
-//RS jet_devtools_command_count, jet_devtools_poll_command,\
-//RS jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,\
-//RS jet_devtools_poll_game_control, jet_devtools_record_command_receipt,\
-//RS jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,\
-//RS jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts,\
-//RS jet_devtools_take_game_control_relays, jet_devtools_clear_game_control_relays};\n",
-//RS     );
-//RS }
-//RS fn push_game_debug_policy_const(out: &mut String, policy: &ReleaseDevtoolsPolicy) {
-//RS     out.push_str(&format!(
-//RS         "\nconst JET_GAME_DEBUG_DATA_ENABLED: bool = {};\n",
-//RS         !policy.is_release()
-//RS     ));
-//RS }
-//RS 
-//RS fn push_prelude_dependency_closure(out: &mut String, roots: &[&str]) {
-//RS     let mut emitted = HashSet::new();
-//RS     for root in roots {
-//RS         push_prelude_part(out, root, &mut emitted);
-//RS     }
-//RS }
-//RS 
-//RS fn push_prelude_part(out: &mut String, name: &str, emitted: &mut HashSet<&'static str>) {
-//RS     let part = EMBEDDED_PRELUDE_PARTS
-//RS         .iter()
-//RS         .find(|part| part.name == name)
-//RS         .unwrap_or_else(|| panic!("unknown embedded Prelude part `{name}`"));
-//RS     if !emitted.insert(part.name) {
-//RS         return;
-//RS     }
-//RS     for dependency in part.dependencies {
-//RS         push_prelude_part(out, dependency, emitted);
-//RS     }
-//RS     match &part.source {
-//RS         EmbeddedPreludePartSource::Static(source) => out.push_str(source),
-//RS         EmbeddedPreludePartSource::Outcome => push_embedded_outcome(out),
-//RS     }
-//RS }
-//RS 
-//RS /// Project active runtime diagnostic rows into the standalone Prelude. This
-//RS /// keeps generated AOT/Wasm code independent of Foundation's host Registry
-//RS /// module while retaining one durable row source.
-//RS fn runtime_diagnostic_projection() -> String {
-//RS     let rows = jet_foundation::Registry::diagnostic_rows()
-//RS         .iter()
-//RS         .filter(|row| {
-//RS             row.stage == "runtime"
-//RS                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
-//RS         });
-//RS     let mut out = String::from(
-//RS         "\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {\n\n    match code {\n",
-//RS     );
-//RS     for row in rows {
-//RS         let holes = row
-//RS             .template_holes
-//RS             .iter()
-//RS             .map(|hole| format!("{hole:?}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         out.push_str(&format!(
-//RS             "        {code:?} => Some(JetRuntimeDiagnosticRow {{ code: {code:?}, what: {what:?}, why: {why:?}, fix: {fix:?}, template_holes: &[{holes}] }}),\n",
-//RS             code = row.code,
-//RS             what = row.what,
-//RS             why = row.why,
-//RS             fix = row.fix,
-//RS         ));
-//RS     }
-//RS     out.push_str(
-//RS         "        _ => None,\n    }\n}\n\n\
-//RS          pub fn jet_render_runtime_stop(\n\
-//RS              code: &'static str, file: &str, line: u32, fn_name: &str,\n\
-//RS              src_line: &str, col: u32, caret_len: u32, message: &str, locals: &str,\n\
-//RS          ) -> JetRuntimeDiagnostic {\n\
-//RS              jet_render_runtime_stop_from_row(\n\
-//RS                  jet_runtime_diagnostic_row(code), code, file, line, fn_name, src_line,\n\
-//RS                  col, caret_len, message, locals,\n\
-//RS              )\n\
-//RS          }\n\n\
-//RS          pub fn jet_render_runtime_sentry(\n\
-//RS              code: &'static str, file: &str, line: u32, gate: &str,\n\
-//RS              operation: &str, obligation: &str, detail: &str,\n\
-//RS          ) -> JetRuntimeDiagnostic {\n\
-//RS              jet_render_runtime_sentry_with_context(\n\
-//RS                  code, file, line, gate, operation, obligation, detail,\n\
-//RS                  \"false\", None, None,\n\
-//RS              )\n\
-//RS          }\n\n\
-//RS          pub fn jet_render_runtime_sentry_with_context(\n\
-//RS              code: &'static str, file: &str, line: u32, gate: &str,\n\
-//RS              operation: &str, obligation: &str, detail: &str,\n\
-//RS              obligation_status: &str, foreign_component: Option<&str>,\n\
-//RS              foreign_fenced: Option<bool>,\n\
-//RS          ) -> JetRuntimeDiagnostic {\n\
-//RS              jet_render_runtime_sentry_from_row(\n\
-//RS                  jet_runtime_diagnostic_row(code), code, file, line, gate,\n\
-//RS                  operation, obligation, detail, obligation_status,\n\
-//RS                  foreign_component, foreign_fenced,\n\
-//RS              )\n\
-//RS          }\n\n",
-//RS     );
-//RS     out
-//RS }
-//RS 
-//RS /// Project the same active runtime rows for the no-alloc renderer. The
-//RS /// renderer itself lives in `PortableCore.rs`; this is metadata only.
-//RS fn portable_runtime_diagnostic_projection() -> String {
-//RS     let rows = jet_foundation::Registry::diagnostic_rows()
-//RS         .iter()
-//RS         .filter(|row| {
-//RS             row.stage == "runtime"
-//RS                 && row.status == jet_foundation::Registry::DiagnosticStatus::Active
-//RS         });
-//RS     let mut out = String::from(
-//RS         "\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {\n    match code {\n",
-//RS     );
-//RS     for row in rows {
-//RS         let holes = row
-//RS             .template_holes
-//RS             .iter()
-//RS             .map(|hole| format!("{hole:?}"))
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         out.push_str(&format!(
-//RS             "        {code:?} => Some(JetRuntimeDiagnosticRow {{ code: {code:?}, what: {what:?}, why: {why:?}, fix: {fix:?}, template_holes: &[{holes}] }}),\n",
-//RS             code = row.code,
-//RS             what = row.what,
-//RS             why = row.why,
-//RS             fix = row.fix,
-//RS         ));
-//RS     }
-//RS     out.push_str("        _ => None,\n    }\n}\n\n");
-//RS     out
-//RS }
-//RS fn push_embedded_outcome(out: &mut String) {
-//RS     let stop_start = OUTCOME_SOURCE
-//RS         .find(HOST_RUNTIME_STOP_BEGIN)
-//RS         .expect("Outcome host runtime-stop wrapper marker missing");
-//RS     let stop_end = OUTCOME_SOURCE
-//RS         .find(HOST_RUNTIME_STOP_END)
-//RS         .expect("Outcome host runtime-stop wrapper end marker missing")
-//RS         + HOST_RUNTIME_STOP_END.len();
-//RS     let sentry_start = OUTCOME_SOURCE
-//RS         .find(HOST_RUNTIME_SENTRY_BEGIN)
-//RS         .expect("Outcome host sentry wrapper marker missing");
-//RS     let sentry_end = OUTCOME_SOURCE
-//RS         .find(HOST_RUNTIME_SENTRY_END)
-//RS         .expect("Outcome host sentry wrapper end marker missing")
-//RS         + HOST_RUNTIME_SENTRY_END.len();
-//RS     assert!(
-//RS         stop_end <= sentry_start && sentry_start <= sentry_end,
-//RS         "Outcome host wrappers are out of order"
-//RS     );
-//RS     out.push_str(&OUTCOME_SOURCE[..stop_start]);
-//RS     out.push_str(&OUTCOME_SOURCE[stop_end..sentry_start]);
-//RS     out.push_str(&OUTCOME_SOURCE[sentry_end..]);
-//RS     out.push_str(&runtime_diagnostic_projection());
-//RS }
-//RS 
-//RS fn push_ffi_reporter(out: &mut String, link: Option<&FfiLink>) {
-//RS     let Some(link) = link else {
-//RS         out.push_str("fn jet_ffi_install_reporter() {}\n\n");
-//RS         return;
-//RS     };
-//RS     out.push_str(&format!(
-//RS         concat!(
-//RS             "// JET_VETTED_UNSAFE_BEGIN: ffi_reporter\n",
-//RS             "extern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {{\n",
-//RS             "    let _ = (message, len);\n",
-//RS             "}}\n",
-//RS             "// JET_VETTED_UNSAFE_END: ffi_reporter\n",
-//RS             "fn jet_ffi_install_reporter() {{ {}::jet_ffi_set_reporter(jet_ffi_reporter); }}\n\n"
-//RS         ),
-//RS         link.crate_name,
-//RS     ));
-//RS }
-//RS 
-//RS /// Primitive types with a total order. The cached-runtime emitter uses this
-//RS /// single list for its comparable implementations.
-//RS const COMPARABLE_PRIMITIVES: &[&str] = &[
-//RS     "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char", "String",
-//RS ];
-//RS 
-//RS /// Traits owned by the fixed runtime and shared by generated program code.
-//RS /// The Prelude names these traits directly, so their declarations must remain
-//RS /// inside the cached runtime block.
-//RS ///
-//RS /// `__jet_Ordering` is a value type that crosses generated-module boundaries;
-//RS /// one runtime declaration avoids distinct Rust types at those boundaries.
-//RS fn push_cached_runtime_traits(out: &mut String) {
-//RS     out.push_str("pub trait __jet_Display {\n");
-//RS     out.push_str("    fn display(&self) -> String;\n");
-//RS     out.push_str("}\n\n");
-//RS     out.push_str("pub trait __jet_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n");
-//RS     for ty in [
-//RS         "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char",
-//RS         "String",
-//RS     ] {
-//RS         out.push_str(&format!(
-//RS             "impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n"
-//RS         ));
-//RS     }
-//RS     out.push('\n');
-//RS     out.push_str(ORDERING_ENUM);
-//RS     out.push_str(COMPARABLE_TRAIT);
-//RS     push_comparable_primitive_impls(out);
-//RS     for (name, method) in [
-//RS         ("Add", "add"),
-//RS         ("Sub", "sub"),
-//RS         ("Mul", "mul"),
-//RS         ("Div", "div"),
-//RS     ] {
-//RS         out.push_str(&format!(
-//RS             "pub trait __jet_{name}<Rhs = Self>: Sized {{ type Output; fn {method}(&self, rhs: &Rhs) -> Self::Output; }}\n"
-//RS         ));
-//RS     }
-//RS     out.push_str(
-//RS         "pub trait __jet_Index {\n    type __jet_Key;\n    type __jet_Value;\n    fn get(&self, key: &Self::__jet_Key) -> JetOutcome<Self::__jet_Value, JetAbsent>;\n}\n",
-//RS     );
-//RS     out.push_str(
-//RS         "pub trait __jet_IndexMut: __jet_Index {\n    fn set(&mut self, key: &Self::__jet_Key, value: &Self::__jet_Value) -> JetOutcome<(), JetErr>;\n}\n",
-//RS     );
-//RS     // D-ITER-HOOK: sema fixes `Iterator.next(&self) -> Item?` and
-//RS     // `Iterable.iter(^self) -> Iter`; user impls name these declarations.
-//RS     out.push_str(
-//RS         "pub trait __jet_Iterator {\n    type __jet_Item;\n    fn next(&mut self) -> JetOutcome<Self::__jet_Item, JetAbsent>;\n}\n",
-//RS     );
-//RS     out.push_str(
-//RS         "pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n",
-//RS     );
-//RS     // D-SHAPE-RESOURCE2=A: `Close.close(^self)` is the consuming, infallible
-//RS     // cleanup capability that `defer close(^resource)` invokes.
-//RS     out.push_str("pub trait __jet_Close: Sized {\n    fn close(self);\n}\n");
-//RS     out.push('\n');
-//RS }
-//RS 
-//RS // Compiler-owned runtime enums (`tir_to_mir_types::is_compiler_owned_type`):
-//RS // MIR emission names them by their mangled key and never declares them per
-//RS // program, so the cached runtime owns both declarations.
-//RS const ORDERING_ENUM: &str = concat!(
-//RS     "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\n",
-//RS     "pub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n",
-//RS     "#[derive(Clone, Copy, Debug, PartialEq, Eq)]\n",
-//RS     "pub enum __jet_RemoveBy { __jet_Val, __jet_Slot }\n\n",
-//RS );
-//RS const COMPARABLE_TRAIT: &str =
-//RS     "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n";
-//RS 
-//RS fn push_comparable_primitive_impls(out: &mut String) {
-//RS     for ty in COMPARABLE_PRIMITIVES {
-//RS         out.push_str(&format!(
-//RS             "impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n"
-//RS         ));
-//RS     }
-//RS }
-//RS 
-//RS /// Open the cached-runtime block. Everything from here to `CACHED_RUNTIME_END`
-//RS /// is decided by build facts alone — never by user source text — so the native
-//RS /// builder compiles it once into a content-addressed rlib and links it
-//RS /// (`jet_store::runtime`).
-//RS 
-//RS fn push_cached_runtime_begin_with_policy(
-//RS     out: &mut String,
-//RS     link: Option<&FfiLink>,
-//RS     include_arrow: bool,
-//RS     policy: &ReleaseDevtoolsPolicy,
-//RS ) {
-//RS     if link.is_some() {
-//RS         push_ffi_reporter(out, link);
-//RS     }
-//RS     out.push_str(CACHED_RUNTIME_BEGIN);
-//RS     push_cached_runtime_body(out, link, include_arrow, policy);
-//RS }
-//RS 
-//RS fn push_cached_runtime_body(
-//RS     out: &mut String,
-//RS     link: Option<&FfiLink>,
-//RS     include_arrow: bool,
-//RS     policy: &ReleaseDevtoolsPolicy,
-//RS ) {
-//RS     if link.is_none() {
-//RS         // EnvInit is part of cached runtime and calls this hook. Keep no-FFI
-//RS         // stub inside marker block so split rlib has symbol too.
-//RS         push_ffi_reporter(out, None);
-//RS     }
-//RS     push_cached_runtime_traits(out);
-//RS     // The fixed runtime is one dependency closure rooted at `Outcome`: its JSON
-//RS     // parser, error vocabulary, and the diagnostic renderer it imports as
-//RS     // `crate::RuntimeDiagnosticCore` all live in the same cached rlib instead
-//RS     // of the optional Core closure, which is a separate crate when native
-//RS     // runtime reuse is active.  Data-loader and Arrow C-data sources are
-//RS     // demand-driven Core dependencies; keeping them here would make a print-only
-//RS     // program carry their code and unsafe FFI surface.
-//RS     push_prelude_dependency_closure(out, &["outcome", "prelude_data_flow", "performance_budget"]);
-//RS     // Foundation's PerformanceBudget source names the canonical Syntax
-//RS     // namespace. Project the compiler-owned separator into generated native
-//RS     // code instead of maintaining a second parser constant.
-//RS     out.push_str(&format!(
-//RS         "\n#[allow(non_snake_case)]\nmod Syntax {{\n    pub const DIGIT_SEPARATOR: char = {:?};\n}}\n",
-//RS         Syntax::DIGIT_SEPARATOR,
-//RS     ));
-//RS     // The Foundation JetInt formatter is part of the generated runtime
-//RS     // directly. Fixed-width carriers remain ordinary Rust scalars.
-//RS     push_prelude(
-//RS         out,
-//RS         !policy.is_release() || policy.stream_code,
-//RS         policy.local_rail,
-//RS     );
-//RS     out.push_str(ENV_INIT_PRELUDE);
-//RS     push_mem_prelude(out);
-//RS     push_gc_prelude(out);
-//RS     out.push_str(LAYOUT_PRELUDE);
-//RS     push_foundation_facade(out, include_arrow);
-//RS }
-//RS 
-//RS /// The fixed part of the block on its own — what `cached_runtime_fingerprint`
-//RS /// hashes. The policy argument selects the exact fixed-runtime source.
-//RS 
-//RS fn push_cached_runtime_with_policy(
-//RS     out: &mut String,
-//RS     link: Option<&FfiLink>,
-//RS     policy: &ReleaseDevtoolsPolicy,
-//RS ) {
-//RS     if link.is_some() {
-//RS         push_ffi_reporter(out, link);
-//RS     }
-//RS     out.push_str(CACHED_RUNTIME_BEGIN);
-//RS     push_cached_runtime_body(out, link, false, policy);
-//RS     out.push_str(CACHED_RUNTIME_END);
-//RS }
-//RS 
-//RS 
-//RS /// Exact fixed-runtime identity used by the final native-binary cache as well
-//RS /// as the rlib cache. A Prelude edit must invalidate both layers. The value is
-//RS /// memoized because it is the same relevant input for every native program;
-//RS /// unrelated compiler edits must not make each key derivation rebuild and hash
-//RS /// the fixed runtime block.
-//RS pub fn cached_runtime_fingerprint() -> String {
-//RS     CACHED_RUNTIME_FINGERPRINT
-//RS         .get_or_init(|| cached_runtime_fingerprint_with_policy(&ReleaseDevtoolsPolicy::development()))
-//RS         .clone()
-//RS }
-//RS 
-//RS /// Fingerprint the fixed runtime under one typed release policy. Release
-//RS /// artifacts must not share a cache entry with development or protected
-//RS /// Devtools emission.
-//RS pub fn cached_runtime_fingerprint_with_policy(policy: &ReleaseDevtoolsPolicy) -> String {
-//RS     let mut source = String::new();
-//RS     push_cached_runtime_with_policy(&mut source, None, policy);
-//RS     crate::SHA256::sha256_hex(source.as_bytes())
-//RS }
-//RS 
-//RS const ENV_INIT_PRELUDE: &str = include_str!("../Prelude/EnvInit.rs");
-//RS 
-//RS /// D-COV1: coverage state is emitted only for coverage artifacts. The
-//RS /// generated harness owns the flush, while these locks make function and
-//RS /// branch hits safe when tests run in parallel.
-//RS const COVERAGE_PRELUDE: &str = r#"
-//RS static JET_COV_FUNCTION_HITS: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<u64, u64>>> = std::sync::OnceLock::new();
-//RS static JET_COV_BRANCH_HITS: std::sync::OnceLock<std::sync::Mutex<std::collections::BTreeMap<&'static str, (&'static str, u64, u64)>>> = std::sync::OnceLock::new();
-//RS 
-//RS fn jet_cov_function(line: u64) {
-//RS     let mut hits = JET_COV_FUNCTION_HITS
-//RS         .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     *hits.entry(line).or_insert(0) += 1;
-//RS }
-//RS 
-//RS fn jet_cov_register_branch(id: &'static str, function: &'static str) {
-//RS     let mut branches = JET_COV_BRANCH_HITS
-//RS         .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     if let Some((known_function, _, _)) = branches.get(id) {
-//RS         assert_eq!(*known_function, function, "coverage branch identity changed");
-//RS     } else {
-//RS         branches.insert(id, (function, 0, 0));
-//RS     }
-//RS }
-//RS 
-//RS fn jet_cov_branch(id: &'static str, function: &'static str, taken: bool) {
-//RS     let mut branches = JET_COV_BRANCH_HITS
-//RS         .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
-//RS         .lock()
-//RS         .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS     let (known_function, taken_hits, not_taken_hits) = branches
-//RS         .get_mut(id)
-//RS         .unwrap_or_else(|| panic!("coverage branch {id} was not registered"));
-//RS     assert_eq!(*known_function, function, "coverage branch identity changed");
-//RS     if taken {
-//RS         *taken_hits += 1;
-//RS     } else {
-//RS         *not_taken_hits += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn jet_cov_flush() {
-//RS     let Some(path) = std::env::var_os("JET_COV_OUT") else {
-//RS         return;
-//RS     };
-//RS     let mut output = String::new();
-//RS     {
-//RS         let hits = JET_COV_FUNCTION_HITS
-//RS             .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         for line in hits.keys() {
-//RS             output.push_str("f\t");
-//RS             output.push_str(&line.to_string());
-//RS             output.push('\n');
-//RS         }
-//RS     }
-//RS     {
-//RS         let branches = JET_COV_BRANCH_HITS
-//RS             .get_or_init(|| std::sync::Mutex::new(std::collections::BTreeMap::new()))
-//RS             .lock()
-//RS             .unwrap_or_else(|poisoned| poisoned.into_inner());
-//RS         for (id, (function, taken, not_taken)) in branches.iter() {
-//RS             output.push_str("b\t");
-//RS             output.push_str(id);
-//RS             output.push('\t');
-//RS             output.push_str(function);
-//RS             output.push('\t');
-//RS             output.push_str(&taken.to_string());
-//RS             output.push('\t');
-//RS             output.push_str(&not_taken.to_string());
-//RS             output.push('\n');
-//RS         }
-//RS     }
-//RS     std::fs::write(std::path::PathBuf::from(path), output)
-//RS         .unwrap_or_else(|error| panic!("could not write coverage output: {error}"));
-//RS }
-//RS "#;
-//RS 
-//RS pub(crate) fn push_coverage_prelude(out: &mut String) {
-//RS     out.push_str(COVERAGE_PRELUDE);
-//RS }
-//RS 
-//RS /// Extra helpers for `jet test` harnesses only (M6/S43, E2-M11 D-TOOL4).
-//RS const TEST_PRELUDE: &str = r#"
-//RS /// D-TOOL4 (E2-M11): snapshot wrapper — records or compares a golden snapshot.
-//RS struct JetExpect { value: String }
-//RS fn jet_expect(s: String) -> JetExpect { JetExpect { value: s } }
-//RS impl JetExpect {
-//RS     fn snapshot(&self, snap_path: &str) -> Result<(), String> {
-//RS         let update = std::env::var("JET_UPDATE_SNAPSHOTS").is_ok();
-//RS         if update {
-//RS             std::fs::create_dir_all(std::path::Path::new(snap_path).parent().unwrap_or(std::path::Path::new("."))).ok();
-//RS             std::fs::write(snap_path, &self.value).map_err(|e| format!("could not write snapshot {snap_path}: {e}"))?;
-//RS             return Ok(());
-//RS         }
-//RS         match std::fs::read_to_string(snap_path) {
-//RS             Ok(expected) => {
-//RS                 if expected == self.value {
-//RS                     Ok(())
-//RS                 } else {
-//RS                     Err(format!("snapshot mismatch at {snap_path}\n  expected: {}\n  got:      {}", expected.trim(), self.value.trim()))
-//RS                 }
-//RS             }
-//RS             Err(_) => {
-//RS                 Err(format!("missing snapshot {snap_path}; run `jet test --update-snapshots` to create it"))
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS // D-TESTKIT1=A (parallel isolation gap): a test body's `print(...)` is routed
-//RS // here instead of straight to `println!` in test-harness builds (see the
-//RS // `TExprKind::Print` emit site). Buffered per-thread so parallel tests never
-//RS // interleave their own output; `jet_test_take_output` drains it right before
-//RS // the harness prints that test's `name: pass/FAIL` line.
-//RS thread_local! {
-//RS     static JET_TEST_OUT: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
-//RS }
-//RS fn jet_test_print(s: String) {
-//RS     JET_TEST_OUT.with(|buf| {
-//RS         let mut b = buf.borrow_mut();
-//RS         b.push_str(&s);
-//RS         b.push('\n');
-//RS     });
-//RS }
-//RS fn jet_test_take_output() -> String {
-//RS     JET_TEST_OUT.with(|buf| buf.borrow_mut().split_off(0))
-//RS }
-//RS #[derive(Clone, Debug)]
-//RS struct JetTestOutcome {
-//RS     name: String,
-//RS     ok: bool,
-//RS     expected_failure: bool,
-//RS     skipped: bool,
-//RS     stdout: String,
-//RS     stderr: String,
-//RS     property_cases: Option<u64>,
-//RS }
-//RS 
-//RS fn jet_test_filter() -> Option<String> {
-//RS     std::env::var("JET_TEST_FILTER")
-//RS         .ok()
-//RS         .filter(|filter| !filter.is_empty())
-//RS }
-//RS fn jet_test_serial() -> bool {
-//RS     std::env::var_os("JET_TEST_SERIAL").is_some()
-//RS }
-//RS fn jet_test_shuffle_seed() -> Option<u64> {
-//RS     std::env::var("JET_TEST_SHUFFLE_SEED")
-//RS         .ok()
-//RS         .and_then(|seed| seed.parse::<u64>().ok())
-//RS }
-//RS fn jet_test_capture_mode() -> &'static str {
-//RS     match std::env::var("JET_TEST_CAPTURE").ok().as_deref() {
-//RS         Some("all") => "all",
-//RS         Some("none") => "none",
-//RS         _ => "failed",
-//RS     }
-//RS }
-//RS fn jet_test_should_capture(ok: bool) -> bool {
-//RS     match jet_test_capture_mode() {
-//RS         "all" => true,
-//RS         "none" => false,
-//RS         _ => !ok,
-//RS     }
-//RS }
-//RS fn jet_test_json_quote(value: &str) -> String {
-//RS     let mut out = String::with_capacity(value.len() + 2);
-//RS     out.push('"');
-//RS     for ch in value.chars() {
-//RS         match ch {
-//RS             '"' => out.push_str("\\\""),
-//RS             '\\' => out.push_str("\\\\"),
-//RS             '\n' => out.push_str("\\n"),
-//RS             '\r' => out.push_str("\\r"),
-//RS             '\t' => out.push_str("\\t"),
-//RS             c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-//RS             c => out.push(c),
-//RS         }
-//RS     }
-//RS     out.push('"');
-//RS     out
-//RS }
-//RS fn jet_test_finish(results: Vec<JetTestOutcome>) -> bool {
-//RS     for result in &results {
-//RS         let Some(case_count) = result.property_cases else {
-//RS             continue;
-//RS         };
-//RS         let state = if case_count == 0 || result.stderr.starts_with("E0613:") {
-//RS             3
-//RS         } else if result.ok != result.expected_failure {
-//RS             0
-//RS         } else {
-//RS             1
-//RS         };
-//RS         jet_evidence_with_expectation(result.expected_failure, || {
-//RS             jet_proof_record(
-//RS                 3,
-//RS                 state,
-//RS                 &result.name,
-//RS                 &result.stderr,
-//RS                 "",
-//RS                 case_count as u32,
-//RS             );
-//RS         });
-//RS     }
-//RS     let ok = results.iter().all(|result| result.skipped || result.ok);
-//RS     let passed = results.iter().filter(|result| !result.skipped && result.ok && !result.expected_failure).count();
-//RS     let failed = results.iter().filter(|result| !result.skipped && !result.ok && !result.expected_failure).count();
-//RS     let skipped = results.iter().filter(|result| result.skipped).count();
-//RS     let expected_failures = results.iter().filter(|result| !result.skipped && result.ok && result.expected_failure).count();
-//RS     let unexpected_passes = results.iter().filter(|result| !result.skipped && !result.ok && result.expected_failure).count();
-//RS     if std::env::var_os("JET_TEST_JSON").is_some() {
-//RS         let tests = results
-//RS             .iter()
-//RS             .map(|result| {
-//RS                 let stdout = if jet_test_should_capture(result.ok) {
-//RS                     result.stdout.as_str()
-//RS                 } else {
-//RS                     ""
-//RS                 };
-//RS                 let stderr = if jet_test_should_capture(result.ok) {
-//RS                     result.stderr.as_str()
-//RS                 } else {
-//RS                     ""
-//RS                 };
-//RS                 format!(
-//RS                     "{{\"name\":{},\"ok\":{},\"expectedFailure\":{},\"skipped\":{},\"stdout\":{},\"stderr\":{}}}",
-//RS                     jet_test_json_quote(&result.name),
-//RS                     result.ok,
-//RS                     result.expected_failure,
-//RS                     result.skipped,
-//RS                     jet_test_json_quote(stdout),
-//RS                     jet_test_json_quote(stderr)
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(",");
-//RS         println!(
-//RS             "{{\"schema\":\"jet.test.v1\",\"ok\":{},\"passed\":{},\"failed\":{},\"skipped\":{},\"expectedFailures\":{},\"unexpectedPasses\":{},\"tests\":[{}]}}",
-//RS             ok, passed, failed, skipped, expected_failures, unexpected_passes, tests
-//RS         );
-//RS     } else {
-//RS         if let Some(seed) = jet_test_shuffle_seed() {
-//RS             println!("shuffle: seed={seed}");
-//RS         }
-//RS         for result in &results {
-//RS             if jet_test_should_capture(result.ok) {
-//RS                 if !result.stdout.is_empty() {
-//RS                     print!("{}", result.stdout);
-//RS                 }
-//RS                 if !result.stderr.is_empty() {
-//RS                     eprintln!("{}", result.stderr);
-//RS                 }
-//RS             }
-//RS             let status = match (result.skipped, result.ok, result.expected_failure) {
-//RS                 (true, _, _) => "skip",
-//RS                 (false, true, false) => "pass",
-//RS                 (false, false, false) => "FAIL",
-//RS                 (false, true, true) => "expected-fail",
-//RS                 (false, false, true) => "UNEXPECTED-PASS (remove expected_fail: true)",
-//RS             };
-//RS             println!("{}: {}", result.name, status);
-//RS         }
-//RS         print!("{passed} passed, {failed} failed, {skipped} skipped");
-//RS         if expected_failures != 0 {
-//RS             print!(", {expected_failures} expected-fail");
-//RS         }
-//RS         if unexpected_passes != 0 {
-//RS             print!(", {unexpected_passes} unexpected-pass");
-//RS         }
-//RS         println!();
-//RS     }
-//RS     ok
-//RS }
-//RS /// Install the test harness panic hook once. Runtime-stop carriers are an
-//RS /// internal transport detail: the harness turns them into the canonical Jet
-//RS /// report, so the previous Rust hook must not print a second panic voice.
-//RS /// Every other payload delegates to the hook that was installed before the
-//RS /// harness, preserving ordinary Rust diagnostics for generated-code defects.
-//RS static JET_TEST_PANIC_HOOK: std::sync::Once = std::sync::Once::new();
-//RS fn jet_test_install_panic_hook() {
-//RS     JET_TEST_PANIC_HOOK.call_once(|| {
-//RS         let previous = std::panic::take_hook();
-//RS         std::panic::set_hook(Box::new(move |info| {
-//RS             if info.payload().is::<JetRenderedRuntimeStop>()
-//RS                 || info.payload().is::<JetRuntimeDiagnostic>()
-//RS             {
-//RS                 return;
-//RS             }
-//RS             previous(info);
-//RS         }));
-//RS     });
-//RS }
-//RS 
-//RS /// Catch a panic carrier inside a test and retain its product diagnostic. The
-//RS /// normal program boundary owns process exit; this test-only boundary converts
-//RS /// runtime carriers into the canonical Jet report.
-//RS fn jet_test_panic_error(
-//RS     payload: Box<dyn std::any::Any + Send>,
-//RS ) -> Result<(), String> {
-//RS     match payload.downcast::<JetRenderedRuntimeStop>() {
-//RS         Ok(report) => Err(report.rendered),
-//RS         Err(payload) => match payload.downcast::<JetRuntimeDiagnostic>() {
-//RS             Ok(report) => Err(report.rendered),
-//RS             Err(payload) => match payload.downcast::<String>() {
-//RS                 Ok(message) => Err(format!("panic: {message}")),
-//RS                 Err(payload) => match payload.downcast::<&'static str>() {
-//RS                     Ok(message) => Err(format!("panic: {message}")),
-//RS                     Err(_) => Err("panic in test".to_string()),
-//RS                 },
-//RS             },
-//RS         },
-//RS     }
-//RS }
-//RS 
-//RS fn jet_test_run<F>(expected_failure: bool, run: F) -> Result<(), String>
-//RS where
-//RS     F: FnOnce() -> Result<(), String>,
-//RS {
-//RS     // Every generated test gets a private harness frame. It converts runtime
-//RS     // stops from setup, timeout, and ordinary body code into typed carriers;
-//RS     // nested `.expect_fail` frames still consume their matching stop first.
-//RS     jet_testing_clear_failure();
-//RS     let expected_code = if expected_failure {
-//RS         None
-//RS     } else {
-//RS         // Keep the harness frame available to catch ordinary runtime stops,
-//RS         // but do not let it classify those diagnostics as expected failures.
-//RS         Some("__jet_test_ordinary_failure__")
-//RS     };
-//RS     jet_test_expect_fail_enter_scope(u64::MAX, expected_code);
-//RS     let result = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(run)) {
-//RS         Ok(result) => result,
-//RS         Err(payload) => {
-//RS             let result = jet_test_panic_error(payload);
-//RS             if expected_failure && result.is_err() {
-//RS                 let _ = jet_test_expect_fail_catch_scope();
-//RS             }
-//RS             result
-//RS         }
-//RS     };
-//RS     if result.is_err() {
-//RS         jet_test_skip_abort();
-//RS     }
-//RS     jet_test_expect_fail_abort();
-//RS     jet_test_timeout_abort();
-//RS     jet_testing_clear_failure();
-//RS     result
-//RS }
-//RS 
-//RS 
-//RS enum JetPropertyCaseResult {
-//RS     Accepted,
-//RS     Rejected,
-//RS }
-//RS 
-//RS /// Evaluate one generated contract case's pre-call eligibility (D-CLAIM1,
-//RS /// #2502). The compiler-synthesized predicate checks the candidate's own
-//RS /// `#Pre` conditions over the generated arguments BEFORE the callable runs:
-//RS /// `Ok(false)` is a rejected input and the callable never executes. Once the
-//RS /// predicate accepts, the callable runs under ordinary `jet_test_run`
-//RS /// semantics — its own `#Pre`/`#Post` and every nested callee failure are
-//RS /// real failure evidence, never reclassified as input rejection. The lowered
-//RS /// predicate carries its checked `JetOutcome<bool, JetErr>` result; a returned
-//RS /// `JetErr` is failure evidence too. A panic while evaluating the predicate
-//RS /// itself is failure evidence as well: the sampler found an input on which the
-//RS /// precondition cannot even be evaluated.
-//RS fn jet_test_contract_eligibility<P>(eligible: P) -> Result<bool, String>
-//RS where
-//RS     P: FnOnce() -> JetOutcome<bool, JetErr>,
-//RS {
-//RS     match std::panic::catch_unwind(std::panic::AssertUnwindSafe(eligible)) {
-//RS         Ok(Ok(eligible)) => Ok(eligible),
-//RS         Ok(Err(error)) => Err(format!("{:?}", error)),
-//RS         Err(payload) => jet_test_panic_error(payload).map(|()| true),
-//RS     }
-//RS }
-//RS 
-//RS fn jet_test_run_property<F>(
-//RS     expected_failure: bool,
-//RS     run: F,
-//RS ) -> Result<JetPropertyCaseResult, String>
-//RS where
-//RS     F: FnOnce() -> Result<(), String>,
-//RS {
-//RS     jet_test_run(expected_failure, run).map(|()| JetPropertyCaseResult::Accepted)
-//RS }
-//RS /// D-E3-1905: the test child is an AOT binary. The release profile is encoded
-//RS /// at compile time so `jet test --release --trace-tiers` proves which binary
-//RS /// was built, without claiming that the test harness used a JIT or interpreter.
-//RS fn jet_test_trace_tier() {
-//RS     if std::env::var_os("JET_TEST_TRACE_TIERS").is_none() {
-//RS         return;
-//RS     }
-//RS     let line = if cfg!(jet_release) {
-//RS         "tier aot profile=release"
-//RS     } else {
-//RS         "tier aot profile=default"
-//RS     };
-//RS     if std::env::var_os("JET_TEST_JSON").is_some() {
-//RS         eprintln!("{line}");
-//RS     } else {
-//RS         println!("{line}");
-//RS     }
-//RS }
-//RS /// Deterministic splitmix64 step, used by `jet test --shuffle` to reorder tests.
-//RS /// Independent of `JetRng`/`PROP_PRELUDE` (that runtime is only emitted when the
-//RS /// file has a property test) so shuffling never depends on the file's contents.
-//RS fn jet_test_shuffle_next(state: &mut u64) -> u64 {
-//RS     *state = state.wrapping_add(0x9E3779B97F4A7C15);
-//RS     let mut z = *state;
-//RS     z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-//RS     z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-//RS     z ^ (z >> 31)
-//RS }
-//RS /// Fisher-Yates shuffle over test indices, seeded so a run is reproducible with
-//RS /// `--shuffle=<seed>` (or the seed jet printed, when no seed was given).
-//RS fn jet_test_shuffle_order(len: usize, seed: u64) -> Vec<usize> {
-//RS     let mut order: Vec<usize> = (0..len).collect();
-//RS     let mut state = seed;
-//RS     let mut i = len;
-//RS     while i > 1 {
-//RS         i -= 1;
-//RS         let j = (jet_test_shuffle_next(&mut state) % (i as u64 + 1)) as usize;
-//RS         order.swap(i, j);
-//RS     }
-//RS     order
-//RS }
-//RS "#;
-//RS const TESTING_SHARED_PRELUDE: &str = include_str!("../Prelude/CoreLib/Top/TestingShared.rs");
-//RS const REPORT_PRELUDE: &str = include_str!("../../../jet-foundation/src/Report.rs");
-//RS const TEST_REPORT_PRELUDE: &str = include_str!("../Prelude/TestReport.rs");
-//RS /// D-TEST1 (ratified 2026-06-22, option B): property-test runtime. Emitted into
-//RS /// the `jet test` harness only when the file declares a parameterized `#Test fn`.
-//RS /// Std-only (I6): a deterministic splitmix64 PRNG, a `JetGen` trait that
-//RS /// generates and shrinks values per type, and the driver loop that runs N cases
-//RS /// and minimizes a failing input. The seed defaults to a fixed constant so a
-//RS /// failure reproduces; `JET_PROP_SEED=<n>` overrides it.
-//RS const PROP_PRELUDE: &str = r#"
-//RS struct JetRng { s: u64 }
-//RS impl JetRng {
-//RS     fn new(seed: u64) -> JetRng { JetRng { s: seed } }
-//RS     fn next_u64(&mut self) -> u64 {
-//RS         self.s = self.s.wrapping_add(0x9E3779B97F4A7C15);
-//RS         let mut z = self.s;
-//RS         z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
-//RS         z = (z ^ (z >> 27)).wrapping_mul(0x94D049BB133111EB);
-//RS         z ^ (z >> 31)
-//RS     }
-//RS     fn below(&mut self, n: u64) -> u64 { if n == 0 { 0 } else { self.next_u64() % n } }
-//RS     fn coin(&mut self) -> bool { self.next_u64() & 1 == 1 }
-//RS }
-//RS /// A type that the property runner can generate and shrink. `shrink` returns
-//RS /// progressively simpler candidates (closer to a minimal failing case); an empty
-//RS /// list means "already minimal".
-//RS trait JetGen: Sized + Clone {
-//RS     fn generate(rng: &mut JetRng) -> Self;
-//RS     fn shrink(&self) -> Vec<Self>;
-//RS     fn render(&self) -> String;
-//RS }
-//RS impl JetGen for i64 {
-//RS     fn generate(rng: &mut JetRng) -> i64 {
-//RS         // D-E3-1905: keep common predicate landmarks visible while retaining
-//RS         // a uniform full-range fallback. Test and fuzz use the same case seed
-//RS         // stream; the explicit landmarks make boundary predicates observable.
-//RS         match rng.below(32) {
-//RS             0 => 0, 1 => 1, 2 => -1, 3 => 2, 4 => -2,
-//RS             5 => 42, 6 => -42, 7 => 99, 8 => 100, 9 => 255,
-//RS             10 => 256, 11 => 512, 12 => 1024,
-//RS             13 => i64::MIN, 14 => i64::MAX,
-//RS             _ => rng.next_u64() as i64,
-//RS         }
-//RS     }
-//RS     fn shrink(&self) -> Vec<i64> {
-//RS         if *self == 0 { return Vec::new(); }
-//RS         let mut v = vec![0i64];
-//RS         let half = *self / 2;
-//RS         if half != 0 && half != *self { v.push(half); }
-//RS         if *self > 0 { v.push(*self - 1); } else { v.push(*self + 1); }
-//RS         v
-//RS     }
-//RS     fn render(&self) -> String { format!("{}", self) }
-//RS }
-//RS impl JetGen for jet_foundation::Numeric::JetInt {
-//RS     fn generate(rng: &mut JetRng) -> Self {
-//RS         jet_std::jet_int_owned_from_i64(i64::generate(rng))
-//RS     }
-//RS     fn shrink(&self) -> Vec<Self> {
-//RS         let value = jet_std::jet_int_owned_to_i64(self).unwrap_or(0);
-//RS         i64::shrink(&value)
-//RS             .into_iter()
-//RS             .map(jet_std::jet_int_owned_from_i64)
-//RS             .collect()
-//RS     }
-//RS     fn render(&self) -> String {
-//RS         self.to_string_rep()
-//RS     }
-//RS }
-//RS macro_rules! impl_jet_gen_int {
-//RS     ($($ty:ty),+ $(,)?) => {
-//RS         $(
-//RS             impl JetGen for $ty {
-//RS                 fn generate(rng: &mut JetRng) -> $ty {
-//RS                     rng.next_u64() as $ty
-//RS                 }
-//RS                 fn shrink(&self) -> Vec<$ty> {
-//RS                     if *self == 0 {
-//RS                         return Vec::new();
-//RS                     }
-//RS                     let mut values = vec![0 as $ty];
-//RS                     let half = *self / 2 as $ty;
-//RS                     if half != 0 && half != *self {
-//RS                         values.push(half);
-//RS                     }
-//RS                     if *self > 0 {
-//RS                         values.push(*self - 1 as $ty);
-//RS                     } else {
-//RS                         values.push(*self + 1 as $ty);
-//RS                     }
-//RS                     values
-//RS                 }
-//RS                 fn render(&self) -> String {
-//RS                     format!("{}", self)
-//RS                 }
-//RS             }
-//RS         )+
-//RS     };
-//RS }
-//RS impl_jet_gen_int!(i8, i16, i32, u8, u16, u32, u64, u128, isize, usize, i128);
-//RS impl JetGen for f64 {
-//RS     fn generate(rng: &mut JetRng) -> f64 {
-//RS         match rng.below(6) {
-//RS             0 => 0.0, 1 => 1.0, 2 => -1.0,
-//RS             _ => ((rng.next_u64() % 200000) as f64) / 1000.0 - 100.0,
-//RS         }
-//RS     }
-//RS     fn shrink(&self) -> Vec<f64> {
-//RS         if *self == 0.0 { return Vec::new(); }
-//RS         let mut v = vec![0.0f64];
-//RS         let half = *self / 2.0;
-//RS         if half != *self { v.push((half * 1000.0).round() / 1000.0); }
-//RS         v
-//RS     }
-//RS     fn render(&self) -> String { format!("{:?}", self) }
-//RS }
-//RS impl JetGen for f32 {
-//RS     fn generate(rng: &mut JetRng) -> f32 { f64::generate(rng) as f32 }
-//RS     fn shrink(&self) -> Vec<f32> { (*self as f64).shrink().into_iter().map(|x| x as f32).collect() }
-//RS     fn render(&self) -> String { format!("{:?}", self) }
-//RS }
-//RS impl JetGen for bool {
-//RS     fn generate(rng: &mut JetRng) -> bool { rng.coin() }
-//RS     fn shrink(&self) -> Vec<bool> { if *self { vec![false] } else { Vec::new() } }
-//RS     fn render(&self) -> String { format!("{}", self) }
-//RS }
-//RS impl JetGen for char {
-//RS     fn generate(rng: &mut JetRng) -> char {
-//RS         let printable = b" abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-//RS         printable[(rng.below(printable.len() as u64)) as usize] as char
-//RS     }
-//RS     fn shrink(&self) -> Vec<char> { if *self == 'a' { Vec::new() } else { vec!['a'] } }
-//RS     fn render(&self) -> String { format!("{:?}", self) }
-//RS }
-//RS impl JetGen for String {
-//RS     fn generate(rng: &mut JetRng) -> String {
-//RS         let len = rng.below(8) as usize;
-//RS         (0..len).map(|_| char::generate(rng)).collect()
-//RS     }
-//RS     fn shrink(&self) -> Vec<String> {
-//RS         if self.is_empty() { return Vec::new(); }
-//RS         let mut v = vec![String::new()];
-//RS         let chars: Vec<char> = self.chars().collect();
-//RS         let half = chars.len() / 2;
-//RS         if half > 0 && half < chars.len() { v.push(chars[..half].iter().collect()); }
-//RS         if chars.len() > 1 { v.push(chars[..chars.len() - 1].iter().collect()); }
-//RS         v
-//RS     }
-//RS     fn render(&self) -> String { format!("{:?}", self) }
-//RS }
-//RS impl<T: JetGen> JetGen for JetOutcome<T, JetAbsent> {
-//RS     fn generate(rng: &mut JetRng) -> JetOutcome<T, JetAbsent> {
-//RS         if rng.below(4) == 0 {
-//RS             Err(JetAbsent)
-//RS         } else {
-//RS             Ok(T::generate(rng))
-//RS         }
-//RS     }
-//RS     fn shrink(&self) -> Vec<JetOutcome<T, JetAbsent>> {
-//RS         match self {
-//RS             Err(_) => Vec::new(),
-//RS             Ok(value) => {
-//RS                 let mut values = vec![Err(JetAbsent)];
-//RS                 for candidate in value.shrink() {
-//RS                     values.push(Ok(candidate));
-//RS                 }
-//RS                 values
-//RS             }
-//RS         }
-//RS     }
-//RS     fn render(&self) -> String {
-//RS         match self {
-//RS             Err(_) => "none".to_string(),
-//RS             Ok(value) => value.render(),
-//RS         }
-//RS     }
-//RS }
-//RS impl<T: JetGen, const N: usize> JetGen for [T; N] {
-//RS     fn generate(rng: &mut JetRng) -> [T; N] {
-//RS         std::array::from_fn(|_| T::generate(rng))
-//RS     }
-//RS     fn shrink(&self) -> Vec<[T; N]> {
-//RS         let mut values = Vec::new();
-//RS         if let Some(first) = self.first() {
-//RS             for candidate in first.shrink() {
-//RS                 let mut value = self.clone();
-//RS                 value[0] = candidate;
-//RS                 values.push(value);
-//RS             }
-//RS         }
-//RS         values
-//RS     }
-//RS     fn render(&self) -> String {
-//RS         let parts: Vec<String> = self.iter().map(|value| value.render()).collect();
-//RS         format!("[{}]", parts.join(", "))
-//RS     }
-//RS }
-//RS impl<T: JetGen> JetGen for Vec<T> {
-//RS     fn generate(rng: &mut JetRng) -> Vec<T> {
-//RS         let len = rng.below(8) as usize;
-//RS         (0..len).map(|_| T::generate(rng)).collect()
-//RS     }
-//RS     fn shrink(&self) -> Vec<Vec<T>> {
-//RS         if self.is_empty() { return Vec::new(); }
-//RS         let mut v: Vec<Vec<T>> = vec![Vec::new()];
-//RS         // Drop the first element, then the last, then shrink the first element.
-//RS         if self.len() > 1 {
-//RS             v.push(self[1..].to_vec());
-//RS             v.push(self[..self.len() - 1].to_vec());
-//RS         }
-//RS         if let Some(first) = self.first() {
-//RS             for s in first.shrink() {
-//RS                 let mut c = self.clone();
-//RS                 c[0] = s;
-//RS                 v.push(c);
-//RS             }
-//RS         }
-//RS         v
-//RS     }
-//RS     fn render(&self) -> String {
-//RS         let parts: Vec<String> = self.iter().map(|x| x.render()).collect();
-//RS         format!("[{}]", parts.join(", "))
-//RS     }
-//RS }
-//RS fn jet_prop_seed() -> u64 {
-//RS     std::env::var("JET_PROP_SEED").ok()
-//RS         .and_then(|s| s.parse::<u64>().ok())
-//RS         .unwrap_or(0x5EED_1234_ABCD_0001)
-//RS }
-// END-PORT-PENDING 2047 crates/jet-codegen/src/Codegen/mod.rs:1-1800
+// Codegen performs emission only: checked types and policy arrive from MIR.
+use jet_foundation.AST.[FfiLink, Item, ProgramBundle, Type, mangle, mangle_generated, mangle_path]
+use jet_foundation.MIR.[MirArtifactPlan, MirProgram, MirRuntimePartId]
+use jet_foundation.Syntax as Syntax
+use jet_pkg_model.Package.ReleaseDevtoolsPolicy
+use std.sync.[Mutex, OnceLock]
+use jet_codegen.Codegen.Context.*
+use jet_codegen.Codegen.Imports.*
+use jet_codegen.Codegen.Statement.*
+use jet_codegen.Codegen.Tuples.*
+use jet_codegen.Codegen.Utils.*
+use jet_codegen.Codegen.Codegen02.*
+use jet_codegen.Codegen.Embedding.[export_surface, ExportFunction, ExportScalar]
+use jet_codegen.Codegen.Library.[emit_library, LibraryArtifacts, LibraryExport]
+use jet_codegen.Codegen.Plugin.[emit_plugin, PluginArtifacts]
+use jet_codegen.Codegen.Web.[build_wasm_jet_source_map, canonical_web_raw_assets, CanonicalWebRawAssets]
+// GATE #4494: compile-time source/byte inclusion and OnceLock/Mutex retention.
+// GATE #4409: named format argument packs must preserve literal formatting and trailing commas.
+// The embedded Rust text below is generated AOT output, never host execution or a Rust callback.
 
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:28
+pub fn generated_prefix() -> String { mangle_generated("") }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:32
+pub fn canonical_prefix() -> String { mangle("") }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:39
+pub fn rust_trait_name(trait_name: &String) -> String {
+    jet_codegen.Generics.rust_trait_bound(trait_name).map(fn(value) { value.to_string() }).unwrap_or_else(fn() { mangle(trait_name) })
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:50
+const CORELIB_DIGEST_CACHE_LIMIT: USize = 32
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:52
+pub const JET_CANONICAL_FONT_BYTES: [U8] = include_bytes("Docs/site/assets/fonts/exo2-700.ttf")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:54
+pub const JET_CANONICAL_ARABIC_FONT_BYTES: [U8] = include_bytes("Docs/site/assets/fonts/noto-sans-arabic-regular.ttf")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:56
+pub const JET_CANONICAL_SYMBOLS_FONT_BYTES: [U8] = include_bytes("Docs/site/assets/fonts/noto-sans-symbols2-regular.ttf")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:62
+fn canonical_font_prelude() -> String {
+    "const JET_CANONICAL_FONT_BYTES: &[u8] = &{JET_CANONICAL_FONT_BYTES:?};\nconst JET_CANONICAL_ARABIC_FONT_BYTES: &[u8] = &{JET_CANONICAL_ARABIC_FONT_BYTES:?};\nconst JET_CANONICAL_SYMBOLS_FONT_BYTES: &[u8] = &{JET_CANONICAL_SYMBOLS_FONT_BYTES:?};\n"
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:72
+static CACHED_RUNTIME_FINGERPRINT: OnceLock[String] = OnceLock.new()
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:74
+#Derive(Clone, Debug, Equatable, Comparable)
+struct CoreEmissionFingerprintKey {
+    used_core: [String], active_os: String, edition: String, force_corelib: Bool,
+    test_harness: Bool, release_inspect: String?, devtools_panel_code: Bool, devtools_stream_code: Bool
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:85
+static CORELIB_EMISSION_FINGERPRINTS: OnceLock[Mutex[[CoreEmissionFingerprintKey:String]]] = OnceLock.new()
+
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:90
+// A literal-only formatter with the machine-name argument appended after caller arguments.
+pub fn jet_generated_format(fmt: &String, args: std.fmt.Arguments = std.fmt.Arguments.empty()) -> String {
+    std.fmt.format(fmt, args.with_named("jet_prefix", generated_prefix())) // GATE #4409
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:123
+pub fn jet_name_format(fmt: &String, args: std.fmt.Arguments = std.fmt.Arguments.empty()) -> String {
+    std.fmt.format(fmt, args.with_named("name_prefix", canonical_prefix())) // GATE #4409
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:155
+// Module wiring uses the existing Context, Embedding, Imports, Items, Library, Plugin,
+// Statement, TIR, MIREval, NativeLoopCursor, NativePreludeBridge, Receipt, MIRRust,
+// MIRWeb, Tuples, Utils, VariadicBound and Web owners; no second implementations.
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:180
+pub mod test_report {
+    use jet_foundation.Report.*
+    use jet_foundation.Evidence.*
+    use jet_codegen.Prelude.Core.TestEvidence.*
+    use jet_codegen.Prelude.CoreLib.Top.TestingShared.*
+    use jet_codegen.Prelude.TestReport.*
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:201
+pub fn core_imports_for_bundle(bundle: &ProgramBundle) -> [String:String] {
+    imports := [String:String].new()
+    for module_idx in 0..bundle.modules.len() {
+        module_imports :: core_import_map(bundle, module_idx)
+        aliases :: module_imports.keys().cloned().collect()
+        aliases.sort()
+        for alias in aliases { _ :: imports.entry(alias.clone()).or_insert(module_imports[&alias].clone()) }
+    }
+    imports
+}
+
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:214
+// Compile-time extraction preserves raw emitted source byte-for-byte, including braces,
+// quotes, cfg arms and macros. These are source strings, not translated compiler logic.
+const DEVTOOLS_NATIVE_WRAPPERS_PRELUDE: String = include_str("crates/jet-codegen/src/Codegen/mod.rs").split_once("const DEVTOOLS_NATIVE_WRAPPERS_PRELUDE: &str = r#\"").expect("native wrapper source literal").1.split_once("\"#;").expect("native wrapper source end").0.to_string()
+
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:309
+const PRELUDE_PARTS: [String] = [
+    include_str("crates/jet-foundation/src/Shape.rs"),
+    include_str("crates/jet-codegen/src/Prelude/DevelopmentReceipt.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Receipt.rs"),
+    DEVTOOLS_SOURCE,
+    include_str("crates/jet-foundation/src/DevtoolsNative.rs"),
+    DEVTOOLS_NATIVE_WRAPPERS_PRELUDE,
+    include_str("crates/jet-codegen/src/Prelude/FaultInjection.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Keep.rs"),
+    include_str("crates/jet-codegen/src/Prelude/JobQueueTypes.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Job.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Option.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/FixedList.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Columns.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/ColumnList.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/UnicodeString.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Ascii.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/ProcessArgs.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/StringConcat.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/ViewCopy.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Loadable.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Values.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/TextValues.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/RangeBounds.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/InlineRange.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Disjoint.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/ExpiringSecret.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/SetAlgebra.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Duration.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Measurement.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/TimeMonotonic.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Time.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Sketch.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Contracts.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/MapKey.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/RuntimeStack.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Authority.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/FixedArithmetic.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/FloatOrdering.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/ParallelKernel.rs"),
+    RESOURCE_FACTS_PRELUDE,
+    include_str("crates/jet-foundation/src/Evidence.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/TestEvidence.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/ViewAccess.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Power.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Division.rs"),
+    include_str("crates/jet-codegen/src/Prelude/TypedText.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Progress.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Bytes.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/FSIgnore.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/FSWalk.rs"),
+    include_str("crates/jet-codegen/src/Prelude/CoreLib/JetStd/Iter.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/CollectionFailure.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/SortKernel.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/Collections.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Memo.rs"),
+    include_str("crates/jet-codegen/src/Prelude/SharedProtocol.rs"),
+    TERM_PRELUDE,
+    include_str("crates/jet-codegen/src/Prelude/Core/HumanOutput.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/TermKey.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/RuntimeControl.rs"),
+    include_str("crates/jet-foundation/src/NumericConversion.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/NumericRuntime.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Observe.rs"),
+    include_str("crates/jet-foundation/src/ExactUnitConversion.rs"),
+    include_str("crates/jet-codegen/src/Prelude/Core/NumericWeb.rs"),
+    include_str("crates/jet-foundation/src/StructuralDebug.rs"),
+    include_str("crates/jet-foundation/src/StreamCursor.rs"),
+    include_str("crates/jet-foundation/src/Prelude/MatchScan.rs")
+]
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:421
+const COLLECTIONS_PRELUDE_SOURCE: String = include_str("crates/jet-codegen/src/Prelude/Core/Collections.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:422
+const LOOP_CURSOR_PRELUDE_SOURCE: String = include_str("crates/jet-codegen/src/Prelude/Core/LoopCursor.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:423
+const LOOP_CURSOR_INCLUDE_MARKER: String = "include!(\"LoopCursor.rs\");"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:425
+const OUTCOME_SOURCE: String = include_str("crates/jet-foundation/src/Outcome.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:426
+const HOST_RUNTIME_STOP_BEGIN: String = "// JET_HOST_RUNTIME_STOP_BEGIN"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:427
+const HOST_RUNTIME_SENTRY_BEGIN: String = "// JET_HOST_RUNTIME_SENTRY_BEGIN"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:428
+const HOST_RUNTIME_SENTRY_END: String = "// JET_HOST_RUNTIME_SENTRY_END"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:429
+const HOST_RUNTIME_STOP_END: String = "// JET_HOST_RUNTIME_STOP_END"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:430
+const DEVTOOLS_SOURCE: String = include_str("crates/jet-codegen/src/Prelude/Devtools.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:431
+const TERM_PRELUDE: String = "\n// JET_VETTED_UNSAFE_BEGIN: jet_term_kernel\n// AUDIT: D-IO-TERM1 keeps terminal detection, stream ownership, and the\n// platform raw-mode ABI in this compiler-owned shared kernel.\n" + include_str("crates/jet-codegen/src/Prelude/Term.rs") + "\n// JET_VETTED_UNSAFE_END: jet_term_kernel\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:438
+const HOST_DEVTOOLS_NATIVE_BEGIN: String = "// JET_HOST_DEVTOOLS_NATIVE_BEGIN"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:439
+const HOST_DEVTOOLS_NATIVE_END: String = "// JET_HOST_DEVTOOLS_NATIVE_END"
+
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:445
+enum EmbeddedPreludePartSource { Static(String), Outcome }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:450
+struct EmbeddedPreludePart { name: String, dependencies: [String], source: EmbeddedPreludePartSource }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:456
+const EMBEDDED_PRELUDE_PARTS: [EmbeddedPreludePart] = [
+    EmbeddedPreludePart { name: "fixed_allocator", dependencies: [], source: .Static("\n// JET_VETTED_UNSAFE_BEGIN: jet_fixed_kernel\npub mod jet_fixed_kernel {\n" + include_str("crates/jet-codegen/src/Prelude/Core/FixedAllocator.rs") + "\n}\n// JET_VETTED_UNSAFE_END: jet_fixed_kernel\n") },
+    EmbeddedPreludePart { name: "runtime_diagnostic_core", dependencies: [], source: .Static("\npub mod RuntimeDiagnosticCore {\n" + include_str("crates/jet-foundation/src/RuntimeDiagnosticCore.rs") + "\n}\n") },
+    EmbeddedPreludePart { name: "encoding_errors", dependencies: [], source: .Static("\nmod jet_encoding_errors {\n" + include_str("crates/jet-foundation/src/EncodingErrors.rs") + "\n}\n") },
+    EmbeddedPreludePart { name: "json_number", dependencies: [], source: .Static("\nmod jet_json_number {\n" + include_str("crates/jet-foundation/src/JSONNumber.rs") + "\n}\n") },
+    EmbeddedPreludePart { name: "encoding_json", dependencies: ["encoding_errors", "json_number"], source: .Static("\nmod jet_encoding_json {\n" + include_str("crates/jet-foundation/src/EncodingJson.rs") + "\n}\n\n#[allow(non_snake_case)]\nmod EncodingJson { pub use crate::jet_encoding_json::*; }\n") },
+    EmbeddedPreludePart { name: "outcome", dependencies: ["encoding_json", "runtime_diagnostic_core"], source: .Outcome },
+    EmbeddedPreludePart { name: "sha256", dependencies: [], source: .Static("\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_sha256\n// AUDIT: this Foundation SHA-256 module owns the bounded hostile-input\n// tree-hash file boundary; its rooted authority uses checked no-follow\n// descriptors and keeps every raw descriptor operation in this module.\n#[allow(non_snake_case)]\nmod SHA256 {\n" + include_str("crates/jet-foundation/src/SHA256.rs") + "\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_sha256\n") },
+    EmbeddedPreludePart { name: "performance_budget", dependencies: ["sha256"], source: .Static("\n#[allow(non_snake_case)]\nmod PerformanceBudget {\n" + include_str("crates/jet-foundation/src/PerformanceBudget.rs") + "\n}\n") },
+    EmbeddedPreludePart { name: "prelude_data_flow", dependencies: ["sha256"], source: .Static("\nmod jet_prelude_data_flow {\n" + include_str("crates/jet-foundation/src/PreludeDataFlow.rs") + "\n}\n") },
+    EmbeddedPreludePart { name: "arrow_data", dependencies: [], source: .Static("\n// JET_VETTED_UNSAFE_BEGIN: jet_arrow_data\n// AUDIT: this region imports the Arrow C data interface, validates\n// schema/length/offset/buffer bounds, and retains release callbacks.\n// Safe Rust cannot express foreign ownership and callback ABIs.\n// Callers must provide live C records and transfer each owner once;\n// violating that contract can read outside a buffer or double-free.\nmod jet_arrow_data {\n" + include_str("crates/jet-foundation/src/ArrowData.rs") + "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_data\n#[allow(non_snake_case)]\nmod ArrowData { pub use crate::jet_arrow_data::*; }\n") },
+    EmbeddedPreludePart { name: "arrow_file_reader", dependencies: ["arrow_data"], source: .Static("\n// JET_VETTED_UNSAFE_BEGIN: jet_arrow_file_reader\n// AUDIT: this region crosses the registered Arrow file-reader\n// provider boundary and transfers imported batch ownership.\nmod jet_arrow_file_reader {\n" + include_str("crates/jet-foundation/src/ArrowFileReader.rs") + "\n}\n// JET_VETTED_UNSAFE_END: jet_arrow_file_reader\n") }
+]
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:580
+enum FoundationPlacement { Root, Module(String) }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:596
+const FOUNDATION_PLACEMENTS: [(String, FoundationPlacement)] = [
+    ("Outcome", .Root), ("Shape", .Root), ("Devtools", .Root), ("DevtoolsNative", .Root),
+    ("Evidence", .Root), ("NumericConversion", .Root), ("ExactUnitConversion", .Root),
+    ("StructuralDebug", .Root), ("StreamCursor", .Root),
+    ("RuntimeDiagnosticCore", .Module("RuntimeDiagnosticCore")), ("EncodingErrors", .Module("jet_encoding_errors")),
+    ("JSONNumber", .Module("jet_json_number")), ("EncodingJson", .Module("jet_encoding_json")),
+    ("DataTree", .Module("jet_foundation_datatree")), ("ArrowData", .Module("jet_arrow_data")),
+    ("ArrowFileReader", .Module("jet_arrow_file_reader")), ("PreludeDataFlow", .Module("jet_prelude_data_flow")),
+    ("SHA256", .Module("SHA256")), ("PerformanceBudget", .Module("PerformanceBudget")),
+    ("Numeric", .Module("jet_foundation_numeric")), ("Facts", .Module("Facts")),
+    ("ResourceSchedule", .Module("ResourceSchedule")), ("CompilerStack", .Module("CompilerStack"))
+]
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:627
+fn foundation_placement(module: &String) -> (&FoundationPlacement)? {
+    FOUNDATION_PLACEMENTS.iter().find(fn((name, _)) { name == module }).map(fn((_, placement)) { placement })
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:640
+fn push_foundation_facade(out: &String, include_arrow: Bool) -> {
+    out.push_str(&"\n#[allow(non_snake_case, dead_code)]\npub(crate) mod CompilerStack {{\n    pub const COMPILER_STACK_SIZE: usize = {jet_foundation.CompilerStack.COMPILER_STACK_SIZE};\n}}\n")
+    out.push_str("\n#[allow(non_snake_case, unused_imports)]\nmod jet_foundation {\n")
+    for (module, placement) in FOUNDATION_PLACEMENTS {
+        if !include_arrow && (module == "ArrowData" || module == "ArrowFileReader") { continue }
+        target :: placement == { .Root -> "crate"; .Module(path) -> "crate::{path}" }
+        out.push_str(&"    pub mod {module} {{ pub use {target}::*; }}\n")
+    }
+    out.push_str("}\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:659
+fn push_numeric_runtime(out: &String) -> {
+    start :: NUMERIC_FOUNDATION_SOURCE.find("// ── CtFraction").expect("Numeric.rs CtFraction marker missing")
+    out.push_str("\n// JET_VETTED_UNSAFE_BEGIN: jet_foundation_numeric\n// AUDIT: D-INTBIG1/D-DECIMAL1 keep the hazard-pointer exact numeric\n// carrier and its raw i64 ownership adapters in this Foundation module.\n#[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_foundation_numeric {\nuse crate::jet_json_number::{json_decimal_lexeme, json_decimal_small, json_exact_integer_text};\nuse crate::{AllocError, jet_alloc_error};\nuse std::alloc::{alloc, dealloc, Layout};\nuse std::cell::Cell;\nuse std::fmt;\nuse std::ptr::{self, NonNull};\nuse std::sync::atomic::{AtomicPtr, AtomicUsize, Ordering};\nmod Syntax {\n    pub const TYPE_DECIMAL: &'static str = \"Decimal\";\n    pub const TYPE_FRACTION: &'static str = \"Fraction\";\n}\n#[derive(Clone, Debug)]\nenum CtValue {\n    Int(i64),\n    Bool(bool),\n    Str(String),\n    BigInt(CtBigInt),\n    Struct { type_name: String, fields: Vec<(String, CtValue)> },\n}\n")
+    body :: NUMERIC_FOUNDATION_SOURCE[start..].replace("crate::AST::CtValue", "CtValue").replace("crate::Syntax::", "Syntax::").replace("crate::NumericConversion::", "crate::").replace("crate::Outcome::", "crate::")
+    out.push_str(&body)
+    out.push_str("\n}\n// JET_VETTED_UNSAFE_END: jet_foundation_numeric\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:678
+fn push_shared_numeric_kernels(out: &String) -> {
+    out.push_str("\n#[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_exact_numeric {\nuse crate::jet_foundation_numeric::CtBigInt as ExactBigInt;\n")
+    out.push_str(EXACT_NUMERIC_PRELUDE)
+    out.push_str("\n}\n")
+    out.push_str("\n#[allow(non_snake_case, unused_imports, dead_code)]\nmod jet_precise_numeric {\nuse crate::jet_foundation_numeric::{CtBigInt as ExactBigInt, CtDecimal as ExactDecimal, CtFraction as ExactFraction};\n")
+    out.push_str(PRECISE_NUMERIC_PRELUDE)
+    out.push_str("\n}\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:701
+pub const CACHED_RUNTIME_BEGIN: String = "// jet:cached-runtime-begin\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:702
+pub const CACHED_RUNTIME_END: String = "// jet:cached-runtime-end\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:703
+pub const CACHED_CORE_BEGIN: String = "// jet:cached-core-begin\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:704
+pub const CACHED_CORE_END: String = "// jet:cached-core-end\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:710
+fn push_collections_prelude(out: &String) -> {
+    pieces := COLLECTIONS_PRELUDE_SOURCE.split(LOOP_CURSOR_INCLUDE_MARKER)
+    out.push_str(pieces.next().expect("Collections Prelude source split has a leading segment"))
+    if pieces.next() == .Some(tail) { out.push_str(LOOP_CURSOR_PRELUDE_SOURCE); out.push_str(tail) }
+    else { panic("Collections Prelude source is missing its cursor-kernel marker") }
+    assert(pieces.next().is_none(), "Collections Prelude source has duplicate cursor-kernel markers")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:729
+fn push_prelude(out: &String, devtools_enabled: Bool, local_rail_enabled: Bool) -> {
+    out.push_str(&"\nconst JET_DEVTOOLS_RUNTIME_ENABLED: bool = {devtools_enabled};\nconst JET_DEVTOOLS_LOCAL_RAIL_ENABLED: bool = {local_rail_enabled};\n#[inline(always)]\nfn jet_web_runtime_devtools_enabled() -> bool {{ JET_DEVTOOLS_RUNTIME_ENABLED }}\n#[inline(always)]\nfn jet_web_runtime_history_enabled() -> bool {{ JET_DEVTOOLS_LOCAL_RAIL_ENABLED }}\n")
+    push_numeric_runtime(out)
+    push_shared_numeric_kernels(out)
+    for part in PRELUDE_PARTS {
+        if part == DEVTOOLS_SOURCE { push_embedded_devtools(out) }
+        else if part == COLLECTIONS_PRELUDE_SOURCE { push_collections_prelude(out) }
+        else { out.push_str(part) }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:759
+fn push_embedded_devtools(out: &String) -> {
+    native_start :: DEVTOOLS_SOURCE.find(HOST_DEVTOOLS_NATIVE_BEGIN).expect("Devtools host native region begin marker missing")
+    native_end :: DEVTOOLS_SOURCE.find(HOST_DEVTOOLS_NATIVE_END).expect("Devtools host native region end marker missing") + HOST_DEVTOOLS_NATIVE_END.len()
+    assert(native_start < native_end, "Devtools host native region markers are out of order")
+    out.push_str(&DEVTOOLS_SOURCE[..native_start])
+    out.push_str(&DEVTOOLS_SOURCE[native_end..])
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:775
+fn push_game_devtools_control_prelude(out: &String) -> {
+    source :: include_str("crates/jet-foundation/src/DevtoolsControl.rs").replace("crate::Devtools::", "super::")
+    out.push_str("\nmod jet_devtools_control {\n")
+    out.push_str(&source)
+    out.push_str("\n}\n")
+    out.push_str("pub use jet_devtools_control::{JetDevtoolsCommand, JetDevtoolsCommandReceipt, JetDevtoolsGameControlKind,JetDevtoolsGameControlRequest, JetDevtoolsGameControlCallbackGuard,jet_devtools_install_game_control_callback, jet_devtools_clear_commands,jet_devtools_enqueue_command, jet_devtools_requeue_command_front,jet_devtools_command_count, jet_devtools_poll_command,jet_devtools_poll_database_explain, jet_devtools_enqueue_game_control,jet_devtools_poll_game_control, jet_devtools_record_command_receipt,jet_devtools_update_command_receipt, jet_devtools_poll_command_receipt,jet_devtools_command_receipt_count, jet_devtools_clear_command_receipts,jet_devtools_take_game_control_relays, jet_devtools_clear_game_control_relays};\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:795
+fn push_game_debug_policy_const(out: &String, policy: &ReleaseDevtoolsPolicy) -> { out.push_str(&"\nconst JET_GAME_DEBUG_DATA_ENABLED: bool = {!policy.is_release()};\n") }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:802
+fn push_prelude_dependency_closure(out: &String, roots: &[String]) -> {
+    emitted := Set[String].new()
+    for root in roots { push_prelude_part(out, root, &emitted) }
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:809
+fn push_prelude_part(out: &String, name: &String, emitted: &Set[String]) -> {
+    part :: EMBEDDED_PRELUDE_PARTS.iter().find(fn(part) { part.name == name }).unwrap_or_else(fn() { panic("unknown embedded Prelude part `{name}`") })
+    if !emitted.insert(part.name) { return }
+    for dependency in part.dependencies { push_prelude_part(out, dependency, emitted) }
+    part.source == { .Static(source) -> out.push_str(source); .Outcome -> push_embedded_outcome(out) }
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:829
+fn runtime_diagnostic_projection() -> String {
+    rows :: jet_foundation.Registry.diagnostic_rows().iter().filter(fn(row) { row.stage == "runtime" && row.status == jet_foundation.Registry.DiagnosticStatus.Active })
+    out := "\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {\n\n    match code {\n"
+    for row in rows {
+        holes :: row.template_holes.iter().map(fn(hole) { "{hole:?}" }).collect[[String]]().join(", ")
+        out.push_str(&"        {row.code:?} => Some(JetRuntimeDiagnosticRow {{ code: {row.code:?}, what: {row.what:?}, why: {row.why:?}, fix: {row.fix:?}, template_holes: &[{holes}] }}),\n")
+    }
+    out.push_str("        _ => None,\n    }\n}\n\npub fn jet_render_runtime_stop(\ncode: &'static str, file: &str, line: u32, fn_name: &str,\nsrc_line: &str, col: u32, caret_len: u32, message: &str, locals: &str,\n) -> JetRuntimeDiagnostic {\njet_render_runtime_stop_from_row(\njet_runtime_diagnostic_row(code), code, file, line, fn_name, src_line,\ncol, caret_len, message, locals,\n)\n}\n\npub fn jet_render_runtime_sentry(\ncode: &'static str, file: &str, line: u32, gate: &str,\noperation: &str, obligation: &str, detail: &str,\n) -> JetRuntimeDiagnostic {\njet_render_runtime_sentry_with_context(\ncode, file, line, gate, operation, obligation, detail,\n\"false\", None, None,\n)\n}\n\npub fn jet_render_runtime_sentry_with_context(\ncode: &'static str, file: &str, line: u32, gate: &str,\noperation: &str, obligation: &str, detail: &str,\nobligation_status: &str, foreign_component: Option<&str>,\nforeign_fenced: Option<bool>,\n) -> JetRuntimeDiagnostic {\njet_render_runtime_sentry_from_row(\njet_runtime_diagnostic_row(code), code, file, line, gate,\noperation, obligation, detail, obligation_status,\nforeign_component, foreign_fenced,\n)\n}\n\n")
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:892
+fn portable_runtime_diagnostic_projection() -> String {
+    rows :: jet_foundation.Registry.diagnostic_rows().iter().filter(fn(row) { row.stage == "runtime" && row.status == jet_foundation.Registry.DiagnosticStatus.Active })
+    out := "\nfn jet_runtime_diagnostic_row(code: &str) -> Option<JetRuntimeDiagnosticRow> {\n    match code {\n"
+    for row in rows {
+        holes :: row.template_holes.iter().map(fn(hole) { "{hole:?}" }).collect[[String]]().join(", ")
+        out.push_str(&"        {row.code:?} => Some(JetRuntimeDiagnosticRow {{ code: {row.code:?}, what: {row.what:?}, why: {row.why:?}, fix: {row.fix:?}, template_holes: &[{holes}] }}),\n")
+    }
+    out.push_str("        _ => None,\n    }\n}\n\n")
+    out
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:920
+fn push_embedded_outcome(out: &String) -> {
+    stop_start :: OUTCOME_SOURCE.find(HOST_RUNTIME_STOP_BEGIN).expect("Outcome host runtime-stop wrapper marker missing")
+    stop_end :: OUTCOME_SOURCE.find(HOST_RUNTIME_STOP_END).expect("Outcome host runtime-stop wrapper end marker missing") + HOST_RUNTIME_STOP_END.len()
+    sentry_start :: OUTCOME_SOURCE.find(HOST_RUNTIME_SENTRY_BEGIN).expect("Outcome host sentry wrapper marker missing")
+    sentry_end :: OUTCOME_SOURCE.find(HOST_RUNTIME_SENTRY_END).expect("Outcome host sentry wrapper end marker missing") + HOST_RUNTIME_SENTRY_END.len()
+    assert(stop_end <= sentry_start && sentry_start <= sentry_end, "Outcome host wrappers are out of order")
+    out.push_str(&OUTCOME_SOURCE[..stop_start])
+    out.push_str(&OUTCOME_SOURCE[stop_end..sentry_start])
+    out.push_str(&OUTCOME_SOURCE[sentry_end..])
+    out.push_str(&runtime_diagnostic_projection())
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:945
+fn push_ffi_reporter(out: &String, link: (&FfiLink)?) -> {
+    if link.is_none() { out.push_str("fn jet_ffi_install_reporter() {}\n\n"); return }
+    link :: link.unwrap()
+    out.push_str(&"// JET_VETTED_UNSAFE_BEGIN: ffi_reporter\nextern \"C\" fn jet_ffi_reporter(message: *const u8, len: usize) {{\n    let _ = (message, len);\n}}\n// JET_VETTED_UNSAFE_END: ffi_reporter\nfn jet_ffi_install_reporter() {{ {link.crate_name}::jet_ffi_set_reporter(jet_ffi_reporter); }}\n\n")
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:965
+const COMPARABLE_PRIMITIVES: [String] = ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "bool", "char", "String"]
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:975
+fn push_cached_runtime_traits(out: &String) -> {
+    out.push_str("pub trait __jet_Display {\n    fn display(&self) -> String;\n}\n\n")
+    out.push_str("pub trait __jet_Equatable: Sized { fn equal(&self, rhs: &Self) -> bool; }\n")
+    for ty in ["i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "bool", "char", "String"] { out.push_str(&"impl __jet_Equatable for {ty} {{ fn equal(&self, rhs: &Self) -> bool {{ self == rhs }} }}\n") }
+    out.push('\n')
+    out.push_str(ORDERING_ENUM)
+    out.push_str(COMPARABLE_TRAIT)
+    push_comparable_primitive_impls(out)
+    for (name, method) in [("Add", "add"), ("Sub", "sub"), ("Mul", "mul"), ("Div", "div")] { out.push_str(&"pub trait __jet_{name}<Rhs = Self>: Sized {{ type Output; fn {method}(&self, rhs: &Rhs) -> Self::Output; }}\n") }
+    out.push_str("pub trait __jet_Index {\n    type __jet_Key;\n    type __jet_Value;\n    fn get(&self, key: &Self::__jet_Key) -> JetOutcome<Self::__jet_Value, JetAbsent>;\n}\n")
+    out.push_str("pub trait __jet_IndexMut: __jet_Index {\n    fn set(&mut self, key: &Self::__jet_Key, value: &Self::__jet_Value) -> JetOutcome<(), JetErr>;\n}\n")
+    out.push_str("pub trait __jet_Iterator {\n    type __jet_Item;\n    fn next(&mut self) -> JetOutcome<Self::__jet_Item, JetAbsent>;\n}\n")
+    out.push_str("pub trait __jet_Iterable: Sized {\n    type __jet_Iter;\n    fn iter(self) -> Self::__jet_Iter;\n}\n")
+    out.push_str("pub trait __jet_Close: Sized {\n    fn close(self);\n}\n")
+    out.push('\n')
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1025
+const ORDERING_ENUM: String = "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]\npub enum __jet_Ordering { __jet_Less, __jet_Equal, __jet_Greater }\n\n#[derive(Clone, Copy, Debug, PartialEq, Eq)]\npub enum __jet_RemoveBy { __jet_Val, __jet_Slot }\n\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1031
+const COMPARABLE_TRAIT: String = "pub trait __jet_Comparable: Sized { fn compare(&self, rhs: &Self) -> __jet_Ordering; }\n"
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1034
+fn push_comparable_primitive_impls(out: &String) -> {
+    for ty in COMPARABLE_PRIMITIVES { out.push_str(&"impl __jet_Comparable for {ty} {{ fn compare(&self, rhs: &Self) -> __jet_Ordering {{ if self < rhs {{ __jet_Ordering::__jet_Less }} else if self > rhs {{ __jet_Ordering::__jet_Greater }} else {{ __jet_Ordering::__jet_Equal }} }} }}\n") }
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1047
+fn push_cached_runtime_begin_with_policy(out: &String, link: (&FfiLink)?, include_arrow: Bool, policy: &ReleaseDevtoolsPolicy) -> {
+    if link.is_some() { push_ffi_reporter(out, link) }
+    out.push_str(CACHED_RUNTIME_BEGIN)
+    push_cached_runtime_body(out, link, include_arrow, policy)
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1060
+fn push_cached_runtime_body(out: &String, link: (&FfiLink)?, include_arrow: Bool, policy: &ReleaseDevtoolsPolicy) -> {
+    if link.is_none() { push_ffi_reporter(out, None) }
+    push_cached_runtime_traits(out)
+    push_prelude_dependency_closure(out, &["outcome", "prelude_data_flow", "performance_budget"])
+    out.push_str(&"\n#[allow(non_snake_case)]\nmod Syntax {{\n    pub const DIGIT_SEPARATOR: char = {Syntax.DIGIT_SEPARATOR:?};\n}}\n")
+    push_prelude(out, !policy.is_release() || policy.stream_code, policy.local_rail)
+    out.push_str(ENV_INIT_PRELUDE)
+    push_mem_prelude(out)
+    push_gc_prelude(out)
+    out.push_str(LAYOUT_PRELUDE)
+    push_foundation_facade(out, include_arrow)
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1104
+fn push_cached_runtime_with_policy(out: &String, link: (&FfiLink)?, policy: &ReleaseDevtoolsPolicy) -> {
+    if link.is_some() { push_ffi_reporter(out, link) }
+    out.push_str(CACHED_RUNTIME_BEGIN)
+    push_cached_runtime_body(out, link, false, policy)
+    out.push_str(CACHED_RUNTIME_END)
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1123
+pub fn cached_runtime_fingerprint() -> String {
+    CACHED_RUNTIME_FINGERPRINT.get_or_init(fn() { cached_runtime_fingerprint_with_policy(&ReleaseDevtoolsPolicy.development()) }).clone()
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1132
+pub fn cached_runtime_fingerprint_with_policy(policy: &ReleaseDevtoolsPolicy) -> String {
+    source := String.new()
+    push_cached_runtime_with_policy(&source, None, policy)
+    jet_foundation.SHA256.sha256_hex(source.as_bytes())
+}
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1138
+const ENV_INIT_PRELUDE: String = include_str("crates/jet-codegen/src/Prelude/EnvInit.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1143
+const COVERAGE_PRELUDE: String = include_str("crates/jet-codegen/src/Codegen/mod.rs").split_once("const COVERAGE_PRELUDE: &str = r#\"").expect("coverage source literal").1.split_once("\"#;").expect("coverage source end").0.to_string()
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1221
+pub fn push_coverage_prelude(out: &String) -> { out.push_str(COVERAGE_PRELUDE) }
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1226
+const TEST_PRELUDE: String = include_str("crates/jet-codegen/src/Codegen/mod.rs").split_once("const TEST_PRELUDE: &str = r#\"").expect("test source literal").1.split_once("\"#;").expect("test source end").0.to_string()
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1572
+const TESTING_SHARED_PRELUDE: String = include_str("crates/jet-codegen/src/Prelude/CoreLib/Top/TestingShared.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1573
+const REPORT_PRELUDE: String = include_str("crates/jet-foundation/src/Report.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1574
+const TEST_REPORT_PRELUDE: String = include_str("crates/jet-codegen/src/Prelude/TestReport.rs")
+// Rust: crates/jet-codegen/src/Codegen/mod.rs:1581
+// Complete raw property-runtime string, spanning into Codegen02, is one emitted item.
+const PROP_PRELUDE: String = include_str("crates/jet-codegen/src/Codegen/mod.rs").split_once("const PROP_PRELUDE: &str = r#\"").expect("property source literal").1.split_once("\"#;").expect("property source end").0.to_string()

@@ -1,0 +1,129 @@
+use JetFoundation.MIR.MirImageCodec.[Schema, VariantBody, mask_comments_and_literals, parse_imports, emit_codec, function_name, parse_definitions, reachable_schema, parse_public_uses, assign_public_paths, parse_variants, parse_type, emit_definition_codec, encode_expression, decode_expression, emit_runtime_codec_primitives]
+use std.[fs, env, time, process]
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1783
+#Test("type_aliases_follow_imported_chains_and_container_wire_schema") {
+    source :: mask_comments_and_literals("use crate::Kinds::Kind; pub type KindAlias = Kind; pub type KindSet = BTreeSet<KindAlias>; pub struct MirProgram { pub items: KindSet }")
+    imports :: parse_imports(source, "crate::MIR")
+    definitions :: parse_definitions(source, "crate::MIR", imports) ?? panic(err)
+    kind_definitions :: parse_definitions("pub type Code = u8; pub struct Kind { pub code: Code }", "crate::Kinds", [String:String]{}) ?? panic(err)
+    schema := Schema.default()
+    loop definition in kind_definitions -> schema.definitions[definition.key] = definition
+    loop definition in definitions -> schema.definitions[definition.key] = definition
+    assign_public_paths(&schema)
+    reachable :: reachable_schema(schema, "crate::MIR::MirProgram") ?? panic(err)
+    assert(reachable.contains("crate::MIR::KindAlias"))
+    assert(reachable.contains("crate::MIR::KindSet"))
+    assert(reachable.contains("crate::Kinds::Kind"))
+    assert(reachable.contains("crate::Kinds::Code"))
+    generated :: emit_codec(schema, reachable, [String]{}) ?? panic(err)
+    assert(generated.contains("fn {function_name("encode", "crate::MIR::KindSet")}("))
+    assert(generated.contains("fn {function_name("decode", "crate::MIR::KindSet")}("))
+    assert(generated.contains("duplicate native MIR set element encoding"))
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1822
+#Test("reachable_alias_only_cycles_are_rejected_without_recursing_forever") {
+    definitions :: parse_definitions("pub type First = Option<Second>; pub type Second = Box<First>; pub struct MirProgram { pub value: First }", "crate::MIR", [String:String]{}) ?? panic(err)
+    schema := Schema.default()
+    loop definition in definitions -> schema.definitions[definition.key] = definition
+    reachable_schema(schema, "crate::MIR::MirProgram") ?? {
+        assert(err.contains("cyclic native MIR type aliases"))
+        assert(err.contains("crate::MIR::First"))
+        assert(err.contains("crate::MIR::Second"))
+        return
+    }
+    panic("expected alias cycle error")
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1843
+#Test("reachable_generic_aliases_report_the_unsupported_wire_contract") {
+    definitions :: parse_definitions("pub type Generic<T> = Vec<T>; pub struct MirProgram { pub value: Generic<u8> }", "crate::MIR", [String:String]{}) ?? panic(err)
+    schema := Schema.default()
+    loop definition in definitions -> schema.definitions[definition.key] = definition
+    reachable_schema(schema, "crate::MIR::MirProgram") ?? {
+        assert(err.contains("generic native MIR type alias `crate::MIR::Generic`"))
+        assert(err.contains("explicit instantiated wire schema"))
+        return
+    }
+    panic("expected generic wire contract error")
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1862
+#Test("public_paths_follow_reexports_instead_of_private_modules") {
+    schema := Schema.default()
+    loop module in [String]{"crate::AST::details", "crate::Syntax::details"} {
+        definitions := parse_definitions("pub enum Kind { One }", module, [String:String]{}) ?? panic(err)
+        definition :: &definitions.remove(0)
+        schema.definitions[definition.key] = definition
+    }
+    parse_public_uses("pub use details::Kind;", "crate::AST", &schema)
+    parse_public_uses("pub use details::Kind as ExportedKind;", "crate::Syntax", &schema)
+    parse_public_uses("pub use crate::Syntax::ExportedKind as Kind;", "crate", &schema)
+    assign_public_paths(&schema)
+    assert_eq(schema.definitions["crate::AST::details::Kind"].path, "crate::AST::Kind")
+    assert_eq(schema.definitions["crate::Syntax::details::Kind"].path, "crate::Kind")
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1877
+#Test("explicit_rust_discriminants_preserve_wire_variant_order_and_payloads") {
+    variants :: parse_variants("First = 7, Second(u64) = 2, Third { value: u8 } = -1") ?? panic(err)
+    assert_eq(variants.map(variant -> variant.name), [String]{"First", "Second", "Third"})
+    assert(variants[0].body == .Unit)
+    match variants[1].body {
+        .Tuple(fields) -> assert_eq(fields.len(), 1)
+        _ -> panic("expected tuple payload")
+    }
+    match variants[2].body {
+        .Struct(fields) -> {
+            assert_eq(fields.len(), 1)
+            assert_eq(fields[0].name, "value")
+        }
+        _ -> panic("expected struct payload")
+    }
+    assert((parse_variants("Broken =") ?? panic(err))[0].body == .Unsupported(_))
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1887
+#Test("generated_nested_containers_and_paths_round_trip") {
+    spelling :: "(BTreeMap<std::path::PathBuf, BTreeSet<BTreeMap<Leaf, Leaf>>>, HashMap<String, Leaf>, Vec<(i32, f64, String)>)"
+    ty :: parse_type(spelling) ?? panic(err)
+    definitions := parse_definitions("pub struct Leaf(pub u64);", "crate", [String:String]{}) ?? panic(err)
+    context :: &definitions.remove(0)
+    schema := Schema.default()
+    schema.definitions[context.key] = context
+    reachable :: [String:Bool]{context.key: true}
+    interned :: [String]{context.key}
+    leaf_codec := ""
+    emit_definition_codec(&leaf_codec, schema, reachable, context, interned) ?? panic(err)
+    encode :: encode_expression(ty, "value", "writer", schema, reachable, context) ?? panic(err)
+    decode :: decode_expression(ty, "reader", schema, reachable, context) ?? panic(err)
+    primitive_output := ""
+    emit_runtime_codec_primitives(&primitive_output, schema, interned) ?? panic(err)
+    primitives :: primitive_output.split("fn mir_image_static_str")[0]
+    // The Rust source is generated-code test data, not a Rust implementation bridge.
+    source :: "use std::collections::{{BTreeMap, BTreeSet, HashMap}};\ntype Value = {spelling};\n#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]\npub struct Leaf(pub u64);\n{leaf_codec}\n{primitives}\n" +
+        "fn encode(value: &Value, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}\nOk(())\n}}\n" +
+        "fn decode(reader: &mut MirProgramImageReader<'_>) -> Result<Value, String> {{\nOk({decode})\n}}\n" +
+        "fn image(value: &Value) -> Result<Vec<u8>, String> {{\nlet mut interner = MirProgramImageInterner::default();\nlet mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\nencode(value, &mut writer)?;\nlet body = writer.finish();\nmir_image_assemble(interner, body)\n}}\n" +
+        "fn restore(bytes: &[u8]) -> Result<Value, String> {{\nlet (tables, cursor) = mir_image_read_tables(bytes)?;\nlet mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\nlet value = decode(&mut reader)?;\nreader.finish()?;\nOk(value)\n}}\n" +
+        "fn main() {{\nlet leaves = BTreeMap::from([(std::path::PathBuf::from(\"outer/λ\"), BTreeSet::from([\nBTreeMap::from([(Leaf(1), Leaf(7)), (Leaf(2), Leaf(11))]),\nBTreeMap::from([(Leaf(3), Leaf(7))]),\n]))]);\n" +
+        "let named = (0..64).map(|index| (format!(\"key{{index}}\"), Leaf(index % 3))).collect::<HashMap<_, _>>();\nlet rows = vec![(-1, 0.5, \"outer/λ\".to_string()), (i32::MIN, f64::NAN, \"key1\".to_string()), (i32::MAX, -0.0, String::new())];\nlet value = (leaves, named, rows);\nlet bytes = image(&value).unwrap();\nlet restored = restore(&bytes).unwrap();\nassert_eq!(restored.0, value.0);\nassert_eq!(restored.1, value.1);\n" +
+        "for (left, right) in restored.2.iter().zip(&value.2) {{\nassert_eq!((left.0, left.1.to_bits(), &left.2), (right.0, right.1.to_bits(), &right.2));\n}}\n" +
+        "// Intern each distinct string and Leaf once; hash-map keys are ordered.\nassert_eq!(image(&restored).unwrap(), bytes);\nassert_eq!(bytes.windows(\"outer/λ\".len()).filter(|window| *window == \"outer/λ\".as_bytes()).count(), 1);\nassert!(restore(&bytes[..bytes.len() - 1]).is_err());\nlet mut overlong = bytes.clone();\noverlong.splice(0..1, [overlong[0] | 0x80, 0]);\nassert!(restore(&overlong).unwrap_err().contains(\"not canonical\"));\n" +
+        "#[cfg(unix)]\n{{\nuse std::os::unix::ffi::OsStringExt;\nlet path = std::path::PathBuf::from(std::ffi::OsString::from_vec(vec![0xff]));\nlet invalid = (BTreeMap::from([(path, BTreeSet::new())]), HashMap::new(), Vec::new());\nassert!(image(&invalid).unwrap_err().contains(\"not valid UTF-8\"));\n}}\n}}\n"
+    // GATE #4494: native clock, environment, process spawning and filesystem.
+    nonce :: time.SystemTime.now().duration_since(time.UNIX_EPOCH).unwrap().as_nanos()
+    home :: env.var_os("HOME") ?? panic("disk-backed test scratch requires HOME")
+    scratch :: OSPath.from(home).join(".cache/jet-test-scratch").join("mir-codec-roundtrip-{process.id()}-{nonce}")
+    fs.create_dir_all(scratch) ?? panic(err)
+    source_path :: scratch.join("roundtrip.rs")
+    binary :: scratch.join("roundtrip")
+    fs.write(source_path, source) ?? panic(err)
+    compiler :: env.var_os("RUSTC") ?? OSPath.from("rustc")
+    built :: process.Command.new(compiler).args([String]{"--edition=2024", "-Awarnings", "-Dunused_parens"}).arg(source_path).arg("-o").arg(binary).output() ?? panic(err)
+    assert(built.status.success(), String.from_utf8_lossy(built.stderr))
+    run :: process.Command.new(binary).output() ?? panic(err)
+    assert(run.status.success(), String.from_utf8_lossy(run.stderr))
+    fs.remove_dir_all(scratch) ?? panic(err)
+}

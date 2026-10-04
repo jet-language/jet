@@ -1,0 +1,194 @@
+use jet_foundation.Tests.Integration.CliParts.Support.*
+use jet_foundation.Tests.Integration.CliParts.SceneAssets.ASSETS_BUDGET
+use jet_foundation.Tests.Integration.CliParts.SceneDraws.DRAWS_BUDGET
+use jet_foundation.Tests.Integration.CliParts.SceneForged as scene_forged
+use jet_foundation.Tests.Integration.CliParts.SceneProbe as scene_probe
+use jet_foundation.JSON.parse_json
+use jet as compiler
+use std.fs as fs
+use std.process.Command
+// GATE #4494: native CLI processes, filesystem fixtures and retained append handle.
+
+// Rust: tests/cli_parts/inspect.rs:4
+#Test("inspect_env_lists_typed_environment_reads") {
+    dir :: isolated_cwd("inspect_env_reads")
+    loop (file, snapshot) in [("env.jet", "inspect_env_reads.json"), ("config.jet", "inspect_config_reads.json")] {
+        fs.write(dir.join(file), "module env.dev {\n    prompt: $HOME\n}\n").unwrap()
+        output :: Command.new(jet()).args(["inspect", "env", file, "--json"]).current_dir(&dir).env("HOME", "/test/home").env("NO_COLOR", "1").output().unwrap()
+        assert_eq(output.status.code(), .Some(0), "{String.from_utf8_lossy(&output.stderr)}")
+        json :: String.from_utf8(output.stdout).unwrap()
+        assert(parse_json(&json).is_ok(), "inspect env JSON must parse: {json}")
+        assert(json.contains("\"name\":\"$HOME\""), "{json}")
+        assert(json.contains("\"type\":\"String\""), "{json}")
+        check_snapshot(snapshot, &json)
+    }
+}
+// Rust: tests/cli_parts/inspect.rs:40
+#Test("package_team_policy_rejects_effect_unsafe_expert_and_dependency_violations") {
+    loop (tag, policy, source, expected_rule) in [
+        ("team_policy_effect", "effects: { \"main.jet\": -[]> }", "fn run() { print(\"outside the ceiling\") }\n", "policy.effects"),
+        ("team_policy_unsafe", "unsafe: .Paths([\"src\"])", "fn run() {\n    #Unsafe(\"audit\") {}\n}\n", "policy.unsafe"),
+        ("team_policy_expert", "expert: .Deny", "fn run() {\n    #Shield {}\n}\n", "policy.expert"),
+        ("team_policy_dependency", "deps: .List([\"allowed\"])", "fn run() {}\n", "policy.deps"),
+    ] {
+        dir :: isolated_cwd(tag)
+        package :: """name: "guarantees"
+version: "0.1.0"
+deps: { zlib: c@system }
+policy: { __POLICY__ }
+""".replace("__POLICY__", policy)
+        fs.write(dir.join("package.jet"), package).unwrap()
+        fs.write(dir.join("main.jet"), source).unwrap()
+        output :: Command.new(jet()).args(["check", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(output.status.code(), .Some(1), "{tag} unexpectedly passed:\n{String.from_utf8_lossy(&output.stdout)}")
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert(stderr.contains("Error [E2960]") && stderr.contains(expected_rule), "{tag} did not report {expected_rule}:\n{stderr}")
+        assert(stderr.contains("Package policy") && stderr.contains("package.jet"), "{tag} lacks actionable policy text:\n{stderr}")
+    }
+}
+// Rust: tests/cli_parts/inspect.rs:102
+#Test("hardened_release_sentry_reaches_a_foreign_dependency") {
+    dir :: isolated_cwd("inspect_guarantees_runtime_harden")
+    app :: dir.join("app")
+    dependency :: dir.join("dep")
+    fs.create_dir_all(&app).unwrap()
+    fs.create_dir_all(&dependency).unwrap()
+    fs.write(app.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { dep: ../dep }\npolicy: { harden: true }\n").unwrap()
+    fs.write(app.join("main.jet"), "use dep\nfn run() {\n    #Unsafe(\"calls the audited dependency\") {\n        print(dep.read())\n    }\n}\n").unwrap()
+    fs.write(dependency.join("package.jet"), "name: \"dep\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(dependency.join("dep.jet"), "use core.mem\n#Unsafe(\"intentionally invalid address\")\npub fn read() -[]> Int {\n    p :: mem.Ptr<Int>.from_addr(1)\n    return mem.volatile_read(p)\n}\n").unwrap()
+    output :: Command.new(jet()).args(["run", "--release", "main.jet"]).current_dir(&app).env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(!output.status.success(), "invalid dependency access must stop: {stderr}")
+    assert(stderr.contains("R0801"), "hardened dependency sentry was not active: {stderr}")
+    assert(stderr.contains("intentionally invalid address"), "dependency gate was not named: {stderr}")
+}
+// Rust: tests/cli_parts/inspect.rs:151
+#Test("release_hardened_profile_catches_a_local_wrong_unsafe_region") {
+    source :: fs.read_to_string(OSPath.from(env!("CARGO_MANIFEST_DIR")).join("Examples/features/memory/unsafe_sentries.jet")).expect("read unsafe sentries fixture")
+    loop (tag, profile, hardened) in [("release_sentry_normal", "release", false), ("release_sentry_hardened", "hardened", true)] {
+        dir :: isolated_cwd(tag)
+        fs.write(dir.join("package.jet"), "name: \"sentry-profile\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+        fs.write(dir.join("main.jet"), source).unwrap()
+        profile_arg :: "--profile={profile}"
+        output :: Command.new(jet()).args(["run", profile_arg, "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+        stdout :: String.from_utf8_lossy(&output.stdout)
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        if hardened {
+            assert(!output.status.success(), "hardened profile missed the stale pointer: {stderr}")
+            loop marker in ["Runtime fault [R0802]", "in #Unsafe gate", "Why:", "Fix:", "obligation `valid_ptr` was not met on this run"] {
+                assert(stderr.contains(marker), "hardened report missing `{marker}`: {stderr}")
+            }
+        } else {
+            assert(output.status.success(), "normal release must run the deliberately wrong region: {stderr}")
+            assert_eq(stdout, "7\n", "normal release did not execute the fixture: {stderr}")
+            assert(!stderr.contains("Runtime fault [R0802]"), "normal release was hardened: {stderr}")
+        }
+    }
+}
+// Rust: tests/cli_parts/inspect.rs:197
+#Test("test_hardened_profile_catches_a_local_wrong_unsafe_region") {
+    source :: """use core.mem
+#Test("wrong unsafe region") {
+    arena :: mem.Arena.new()
+    #Unsafe("test deliberately reads after arena reset") {
+        stale :: *Int{*arena.alloc(7)}
+        arena.reset()
+        print(stale.*)
+    }
+}
+fn run() {}
+"""
+    loop (tag, profile, hardened) in [("test_release_sentry_normal", "release", false), ("test_hardened_sentry", "hardened", true)] {
+        dir :: isolated_cwd(tag)
+        fs.write(dir.join("package.jet"), "name: \"test-sentry-profile\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").unwrap()
+        fs.write(dir.join("main.jet"), source).unwrap()
+        profile_arg :: "--profile={profile}"
+        output :: Command.new(jet()).args(["test", "main.jet", profile_arg]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+        stdout :: String.from_utf8_lossy(&output.stdout)
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        if hardened {
+            assert_eq(output.status.code(), .Some(1), "hardened test must report a failed suite: {stderr}")
+            report :: "{stdout}{stderr}"
+            loop marker in ["Runtime fault [R0802]", "test deliberately reads after arena reset", "Why:", "Fix:", "obligation `valid_ptr` was not met on this run"] {
+                assert(report.contains(marker), "hardened test report missing `{marker}`: {report}")
+            }
+            assert(!report.contains("panicked at") && !report.contains("RUST_BACKTRACE"), "hardened test leaked Rust panic voice: {report}")
+        } else {
+            assert(output.status.success(), "normal test profile must run the deliberately wrong region: {stderr}")
+            assert(stdout.contains("1 passed"), "normal test did not run: {stdout}")
+            assert(!stdout.contains("Runtime fault [R0802]") && !stderr.contains("Runtime fault [R0802]"), "normal test was hardened: {stdout}{stderr}")
+        }
+    }
+}
+// Rust: tests/cli_parts/inspect.rs:262
+#Test("safe_release_profiles_emit_no_sentry_runtime_overhead") {
+    loop (tag, policy, profile) in [("safe_release_normal", "", "release"), ("safe_release_hardened", "policy: { harden: true }\n", "hardened")] {
+        dir :: isolated_cwd(tag)
+        fs.write(dir.join("package.jet"), "name: \"safe-profile\"\nversion: \"0.1.0\"\n{policy}").unwrap()
+        fs.write(dir.join("main.jet"), "fn run() { print(7) }\n").unwrap()
+        path :: dir.join("main.jet")
+        src :: fs.read_to_string(&path).unwrap()
+        shown :: path.to_string_lossy()
+        output :: compiler.compile_with_target_and_gates_and_profile(&src, &shown, compiler.Policy.GateSet.default(), .None, profile).unwrap_or_else(fn(diags) { panic("safe profile rejected: {diags:?}") })
+        assert(!output.rust.contains("jet_mem::jet_sentry_"), "safe {tag} output carries sentry runtime machinery:\n{output.rust}")
+    }
+}
+// Rust: tests/cli_parts/inspect.rs:295
+#Test("package_guarantees_are_tighten_only") {
+    weak := compiler.Package.PackagePolicy.default()
+    weak.contain.insert("libxml")
+    strong := weak.clone()
+    strong.contain.insert("libz")
+    strong.harden = true
+    assert(weak.guarantees_tighten(&strong).is_ok())
+    assert(strong.guarantees_tighten(&weak).is_err())
+}
+// Rust: tests/cli_parts/inspect.rs:306
+#Test("source_policy_spelling_is_rejected_with_teaching_diagnostic") {
+    dir :: isolated_cwd("inspect_guarantees_source_policy")
+    file :: dir.join("main.jet")
+    fs.write(&file, "#Policy(contain)\nfn run() {}\n").unwrap()
+    output :: Command.new(jet()).args(["check", "main.jet"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), .Some(1))
+    stderr :: String.from_utf8(output.stderr).unwrap()
+    assert(stderr.contains("Error [E0355]") && stderr.contains("contain") && stderr.contains("not a scoped policy"), "{stderr}")
+    teaching :: stderr.lines().filter(fn(line) { line.starts_with("Error [") || line.starts_with(" Why:") || line.starts_with(" Fix:") }).collect().join("\n")
+    check_snapshot("inspect_guarantees_source_policy.txt", "{teaching}\n")
+}
+// Rust: tests/cli_parts/scene_assets.rs:14
+#Test("scene_probe_assets_produces_600_samples") {
+    (_dir, report) :: scene_probe_once("scene_probe_assets", ASSETS_BUDGET)
+    assert_scene_probe_measurement(&report, "SceneAssetBytes")
+}
+// Rust: tests/cli_parts/scene_draws.rs:14
+#Test("scene_probe_draws_produces_600_samples") {
+    (_dir, report) :: scene_probe_once("scene_probe_draws", DRAWS_BUDGET)
+    assert_scene_probe_measurement(&report, "DrawCalls")
+}
+// Rust: tests/cli_parts/scene_forged.rs:14
+#Test("scene_probe_rejects_forged_cache") {
+    (dir, report) :: scene_probe_once("scene_probe_forged", scene_forged.FRAME_BUDGET)
+    assert_scene_probe_measurement(&report, "SceneAssetBytes")
+    reports :: dir.join(".jet/perf/reports")
+    paths :: fn() { fs.read_dir(&reports).unwrap().map(fn(entry) { entry.unwrap().path() }).collect::<[OSPath]>() }
+    initial :: paths()
+    assert_eq(initial.len(), 1, "expected exactly one report; got {initial:?}")
+    fs.OpenOptions.new().append(true).open(&initial[0]).unwrap().write_all("forged".as_bytes()).unwrap()
+    replacement :: scene_probe_run(&dir)
+    assert_eq(replacement.status.code(), .Some(0), "{String.from_utf8_lossy(&replacement.stderr)}")
+    assert_eq(paths().len(), 2, "forged report must not satisfy compatible cache identity")
+}
+// Rust: tests/cli_parts/scene_probe.rs:14
+#Test("scene_probe_reuses_compatible_report") {
+    (dir, report) :: scene_probe_once("scene_probe_runtime", scene_probe.FRAME_BUDGET)
+    assert_scene_probe_measurement(&report, "FrameTime")
+    reports :: dir.join(".jet/perf/reports")
+    paths :: fn() { fs.read_dir(&reports).unwrap().map(fn(entry) { entry.unwrap().path() }).collect::<[OSPath]>() }
+    initial :: paths()
+    assert_eq(initial.len(), 1, "expected exactly one report; got {initial:?}")
+    // A compatible second run must reuse the report without writing another.
+    second :: scene_probe_run(&dir)
+    assert_eq(second.status.code(), .Some(0))
+    assert_eq(paths(), initial, "compatible report should be reused")
+}

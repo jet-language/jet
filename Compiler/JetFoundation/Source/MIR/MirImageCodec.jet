@@ -1,1804 +1,1104 @@
-// PORT-PENDING 2096 crates-jet-foundation-build-mirimagecodec-slice-1: crates/jet-foundation/build/MirImageCodec.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fmt::Write as _;
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum TypeExpr {
-//RS     Named(String),
-//RS     Option(Box<TypeExpr>),
-//RS     Sequence(Box<TypeExpr>),
-//RS     Set(Box<TypeExpr>, bool),
-//RS     Map(Box<TypeExpr>, Box<TypeExpr>, bool),
-//RS     Boxed(Box<TypeExpr>),
-//RS     Arc(Box<TypeExpr>),
-//RS     Tuple(Vec<TypeExpr>),
-//RS     Array(Box<TypeExpr>, usize),
-//RS     StaticStr,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct Field {
-//RS     name: String,
-//RS     ty: TypeExpr,
-//RS     public: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum VariantBody {
-//RS     Unit,
-//RS     Tuple(Vec<TypeExpr>),
-//RS     Struct(Vec<Field>),
-//RS     Unsupported(String),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct Variant {
-//RS     name: String,
-//RS     body: VariantBody,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS enum Body {
-//RS     Struct(Vec<Field>),
-//RS     Tuple(Vec<Field>),
-//RS     Unit,
-//RS     Alias(TypeExpr),
-//RS     Enum(Vec<Variant>),
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct Definition {
-//RS     key: String,
-//RS     path: String,
-//RS     module: String,
-//RS     name: String,
-//RS     imports: BTreeMap<String, String>,
-//RS     body: Body,
-//RS     generic: bool,
-//RS }
-//RS 
-//RS #[derive(Default)]
-//RS struct Schema {
-//RS     definitions: BTreeMap<String, Definition>,
-//RS     aliases: BTreeMap<String, String>,
-//RS     wildcards: Vec<(String, String)>,
-//RS }
-//RS 
-//RS pub fn generate(manifest_dir: &Path, out_dir: &Path) {
-//RS     let source_root = manifest_dir.join("src");
-//RS     let mut files = Vec::new();
-//RS     collect_rust_files(&source_root, &mut files);
-//RS     files.sort();
-//RS     let mut schema = Schema::default();
-//RS     for path in &files {
-//RS         println!("cargo:rerun-if-changed={}", path.display());
-//RS         let source = fs::read_to_string(path)
-//RS             .unwrap_or_else(|error| panic!("cannot read MIR image schema {}: {error}", path.display()));
-//RS         let relative = path
-//RS             .strip_prefix(&source_root)
-//RS             .expect("collected schema path is under source root");
-//RS         let module = module_path(relative);
-//RS         let masked = mask_comments_and_literals(&source);
-//RS         let imports = parse_imports(&masked, &module);
-//RS         parse_public_uses(&masked, &module, &mut schema);
-//RS         let mut definitions = parse_definitions(&masked, &module, &imports)
-//RS             .unwrap_or_else(|error| panic!("invalid native MIR image schema {}: {error}", path.display()));
-//RS         schema.definitions.extend(definitions.drain(..).map(|definition| {
-//RS             (definition.key.clone(), definition)
-//RS         }));
-//RS         if relative == Path::new("MIR.rs") {
-//RS             for name in parse_mir_id_macro_invocations(&masked) {
-//RS                 let key = format!("{module}::{name}");
-//RS                 schema.definitions.insert(
-//RS                     key.clone(),
-//RS                     Definition {
-//RS                         key,
-//RS                         path: format!("{module}::{name}"),
-//RS                         module: module.clone(),
-//RS                         name,
-//RS                         imports: imports.clone(),
-//RS                         body: Body::Tuple(vec![Field {
-//RS                             name: "0".to_string(),
-//RS                             ty: TypeExpr::Named("u64".to_string()),
-//RS                             public: true,
-//RS                         }]),
-//RS                         generic: false,
-//RS                     },
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     for (public_module, target_module) in &schema.wildcards.clone() {
-//RS         let targets = schema
-//RS             .definitions
-//RS             .values()
-//RS             .filter(|definition| definition.module == *target_module)
-//RS             .map(|definition| (format!("{public_module}::{}", definition.name), definition.key.clone()))
-//RS             .collect::<Vec<_>>();
-//RS         schema.aliases.extend(targets);
-//RS     }
-//RS     assign_public_paths(&mut schema);
-//RS     let reachable = reachable_schema(&schema, "crate::MIR::MirProgram")
-//RS         .unwrap_or_else(|error| panic!("native MIR image schema is incomplete: {error}"));
-//RS     let output = emit_codec(&schema, &reachable, INTERNED_DEFINITIONS)
-//RS         .unwrap_or_else(|error| panic!("cannot generate native MIR image codec: {error}"));
-//RS     fs::write(out_dir.join("mir_program_image_codec.rs"), output)
-//RS         .expect("write generated native MIR image codec");
-//RS }
-//RS 
-//RS fn collect_rust_files(root: &Path, output: &mut Vec<PathBuf>) {
-//RS     for entry in fs::read_dir(root).expect("read Foundation source directory") {
-//RS         let entry = entry.expect("read Foundation source entry");
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             collect_rust_files(&path, output);
-//RS         } else if path.extension().is_some_and(|extension| extension == "rs") {
-//RS             output.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn module_path(relative: &Path) -> String {
-//RS     let mut components = relative
-//RS         .components()
-//RS         .filter_map(|component| component.as_os_str().to_str())
-//RS         .map(str::to_string)
-//RS         .collect::<Vec<_>>();
-//RS     if components.last().is_some_and(|last| last == "mod.rs" || last == "lib.rs") {
-//RS         components.pop();
-//RS     } else if let Some(last) = components.last_mut() {
-//RS         if let Some(stem) = last.strip_suffix(".rs") {
-//RS             *last = stem.to_string();
-//RS         }
-//RS     }
-//RS     if components.is_empty() {
-//RS         "crate".to_string()
-//RS     } else {
-//RS         format!("crate::{}", components.join("::"))
-//RS     }
-//RS }
-//RS 
-//RS fn mask_comments_and_literals(source: &str) -> String {
-//RS     let bytes = source.as_bytes();
-//RS     let mut masked = bytes.to_vec();
-//RS     let mut index = 0usize;
-//RS     while index < bytes.len() {
-//RS         if bytes[index..].starts_with(b"//") {
-//RS             let start = index;
-//RS             while index < bytes.len() && bytes[index] != b'\n' {
-//RS                 index += 1;
-//RS             }
-//RS             blank(&mut masked, start, index);
-//RS         } else if bytes[index..].starts_with(b"/*") {
-//RS             let start = index;
-//RS             index += 2;
-//RS             let mut depth = 1usize;
-//RS             while index < bytes.len() && depth != 0 {
-//RS                 if bytes[index..].starts_with(b"/*") {
-//RS                     depth += 1;
-//RS                     index += 2;
-//RS                 } else if bytes[index..].starts_with(b"*/") {
-//RS                     depth -= 1;
-//RS                     index += 2;
-//RS                 } else {
-//RS                     index += 1;
-//RS                 }
-//RS             }
-//RS             blank(&mut masked, start, index);
-//RS         } else if let Some(end) = raw_string_end(bytes, index) {
-//RS             blank(&mut masked, index, end);
-//RS             index = end;
-//RS         } else if bytes[index] == b'"' {
-//RS             let start = index;
-//RS             index = quoted_end(bytes, index, b'"');
-//RS             blank(&mut masked, start, index);
-//RS         } else if bytes[index] == b'\'' && char_literal_end(bytes, index).is_some() {
-//RS             let start = index;
-//RS             index = char_literal_end(bytes, index).expect("checked character literal");
-//RS             blank(&mut masked, start, index);
-//RS         } else {
-//RS             index += 1;
-//RS         }
-//RS     }
-//RS     String::from_utf8(masked).expect("masking preserves UTF-8")
-//RS }
-//RS 
-//RS fn blank(bytes: &mut [u8], start: usize, end: usize) {
-//RS     for byte in &mut bytes[start..end] {
-//RS         if *byte != b'\n' && *byte != b'\r' {
-//RS             *byte = b' ';
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
-//RS     let mut cursor = start;
-//RS     if bytes.get(cursor) == Some(&b'b') {
-//RS         cursor += 1;
-//RS     }
-//RS     if bytes.get(cursor) != Some(&b'r') {
-//RS         return None;
-//RS     }
-//RS     cursor += 1;
-//RS     let mut hashes = 0usize;
-//RS     while bytes.get(cursor) == Some(&b'#') {
-//RS         hashes += 1;
-//RS         cursor += 1;
-//RS     }
-//RS     if bytes.get(cursor) != Some(&b'"') {
-//RS         return None;
-//RS     }
-//RS     cursor += 1;
-//RS     while cursor < bytes.len() {
-//RS         if bytes[cursor] == b'"'
-//RS             && bytes.get(cursor + 1..cursor + 1 + hashes)
-//RS                 .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
-//RS         {
-//RS             return Some(cursor + 1 + hashes);
-//RS         }
-//RS         cursor += 1;
-//RS     }
-//RS     Some(bytes.len())
-//RS }
-//RS 
-//RS fn quoted_end(bytes: &[u8], start: usize, quote: u8) -> usize {
-//RS     let mut cursor = start + 1;
-//RS     while cursor < bytes.len() {
-//RS         if bytes[cursor] == b'\\' {
-//RS             cursor = (cursor + 2).min(bytes.len());
-//RS         } else if bytes[cursor] == quote {
-//RS             return cursor + 1;
-//RS         } else {
-//RS             cursor += 1;
-//RS         }
-//RS     }
-//RS     bytes.len()
-//RS }
-//RS 
-//RS fn char_literal_end(bytes: &[u8], start: usize) -> Option<usize> {
-//RS     if bytes.get(start) != Some(&b'\'') {
-//RS         return None;
-//RS     }
-//RS     let mut cursor = start + 1;
-//RS     let first = *bytes.get(cursor)?;
-//RS     if first == b'\\' {
-//RS         cursor += 1;
-//RS         match *bytes.get(cursor)? {
-//RS             b'u' => {
-//RS                 cursor += 1;
-//RS                 if bytes.get(cursor) != Some(&b'{') {
-//RS                     return None;
-//RS                 }
-//RS                 cursor += 1;
-//RS                 let mut digits = 0;
-//RS                 while let Some(&byte) = bytes.get(cursor) {
-//RS                     if byte.is_ascii_hexdigit() {
-//RS                         digits += 1;
-//RS                     } else if byte != b'_' {
-//RS                         break;
-//RS                     }
-//RS                     cursor += 1;
-//RS                 }
-//RS                 if digits == 0 || digits > 6 || bytes.get(cursor) != Some(&b'}') {
-//RS                     return None;
-//RS                 }
-//RS                 cursor += 1;
-//RS             }
-//RS             b'x' => {
-//RS                 cursor += 1;
-//RS                 if !bytes.get(cursor..cursor + 2)?.iter().all(u8::is_ascii_hexdigit) {
-//RS                     return None;
-//RS                 }
-//RS                 cursor += 2;
-//RS             }
-//RS             b'n' | b'r' | b't' | b'0' | b'\\' | b'\'' | b'"' => cursor += 1,
-//RS             _ => return None,
-//RS         }
-//RS     } else {
-//RS         let width = match first {
-//RS             b'\'' | b'\n' | b'\r' => return None,
-//RS             0..=0x7f => 1,
-//RS             0xc2..=0xdf => 2,
-//RS             0xe0..=0xef => 3,
-//RS             0xf0..=0xf4 => 4,
-//RS             _ => return None,
-//RS         };
-//RS         std::str::from_utf8(bytes.get(cursor..cursor + width)?).ok()?;
-//RS         cursor += width;
-//RS     }
-//RS     (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
-//RS }
-//RS 
-//RS fn parse_imports(source: &str, module: &str) -> BTreeMap<String, String> {
-//RS     let mut imports = BTreeMap::new();
-//RS     let bytes = source.as_bytes();
-//RS     let mut cursor = 0usize;
-//RS     let mut depth = 0usize;
-//RS     while cursor < bytes.len() {
-//RS         match bytes[cursor] {
-//RS             b'{' => depth += 1,
-//RS             b'}' => depth = depth.saturating_sub(1),
-//RS             b'u' if depth == 0 && token_at(source, cursor, "use") => {
-//RS                 let start = cursor + 3;
-//RS                 if let Some(end) = source[start..].find(';') {
-//RS                     let statement = source[start..start + end].trim();
-//RS                     if !statement.starts_with("=") {
-//RS                         insert_use_tree(statement, module, &mut imports);
-//RS                     }
-//RS                     cursor = start + end + 1;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         cursor += 1;
-//RS     }
-//RS     imports
-//RS }
-//RS 
-//RS fn parse_public_uses(source: &str, module: &str, schema: &mut Schema) {
-//RS     let bytes = source.as_bytes();
-//RS     let mut cursor = 0usize;
-//RS     let mut depth = 0usize;
-//RS     while cursor < bytes.len() {
-//RS         match bytes[cursor] {
-//RS             b'{' => depth += 1,
-//RS             b'}' => depth = depth.saturating_sub(1),
-//RS             b'p' if depth == 0 && token_at(source, cursor, "pub use") => {
-//RS                 let start = cursor + "pub use".len();
-//RS                 if let Some(end) = source[start..].find(';') {
-//RS                     let statement = source[start..start + end].trim();
-//RS                     insert_public_use_tree(statement, module, schema);
-//RS                     cursor = start + end + 1;
-//RS                     continue;
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         cursor += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn insert_use_tree(statement: &str, module: &str, imports: &mut BTreeMap<String, String>) {
-//RS     if let Some(open) = top_level_byte(statement, b'{') {
-//RS         let prefix = statement[..open].trim().trim_end_matches(":");
-//RS         let Some(close) = matching_byte(statement.as_bytes(), open, b'{', b'}') else {
-//RS             return;
-//RS         };
-//RS         for item in split_top_level(&statement[open + 1..close], ',') {
-//RS             let item = item.trim();
-//RS             if item.is_empty() || item == "*" {
-//RS                 continue;
-//RS             }
-//RS             let (name, alias) = split_alias(item);
-//RS             let path = normalize_module_path(module, &format!("{prefix}::{name}"));
-//RS             let local_name = alias.unwrap_or(name.rsplit("::").next().unwrap_or(name));
-//RS             imports.insert(local_name.to_string(), path);
-//RS         }
-//RS     } else {
-//RS         let (path, alias) = split_alias(statement.trim());
-//RS         let path = normalize_module_path(module, path);
-//RS         let name = alias
-//RS             .or_else(|| path.rsplit("::").next())
-//RS             .unwrap_or(path.as_str());
-//RS         imports.insert(name.to_string(), path);
-//RS     }
-//RS }
-//RS 
-//RS fn insert_public_use_tree(statement: &str, module: &str, schema: &mut Schema) {
-//RS     if let Some(open) = top_level_byte(statement, b'{') {
-//RS         let prefix = statement[..open].trim().trim_end_matches(":");
-//RS         let Some(close) = matching_byte(statement.as_bytes(), open, b'{', b'}') else {
-//RS             return;
-//RS         };
-//RS         for item in split_top_level(&statement[open + 1..close], ',') {
-//RS             let item = item.trim();
-//RS             if item.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             if item == "*" {
-//RS                 schema
-//RS                     .wildcards
-//RS                     .push((module.to_string(), normalize_module_path(module, prefix)));
-//RS                 continue;
-//RS             }
-//RS             let (name, alias) = split_alias(item);
-//RS             let target = normalize_module_path(module, &format!("{prefix}::{name}"));
-//RS             let export = format!("{module}::{}", alias.unwrap_or(name.rsplit("::").next().unwrap_or(name)));
-//RS             schema.aliases.insert(export, target);
-//RS         }
-//RS     } else if statement.trim().ends_with("::*") {
-//RS         let prefix = statement.trim().trim_end_matches("::*");
-//RS         schema
-//RS             .wildcards
-//RS             .push((module.to_string(), normalize_module_path(module, prefix)));
-//RS     } else {
-//RS         let (name, alias) = split_alias(statement.trim());
-//RS         let target = normalize_module_path(module, name);
-//RS         let export = format!(
-//RS             "{module}::{}",
-//RS             alias.unwrap_or(name.rsplit("::").next().unwrap_or(name))
-//RS         );
-//RS         schema.aliases.insert(export, target);
-//RS     }
-//RS }
-//RS 
-//RS fn split_alias(item: &str) -> (&str, Option<&str>) {
-//RS     let mut parts = item.splitn(2, " as ");
-//RS     let name = parts.next().unwrap_or(item).trim();
-//RS     let alias = parts.next().map(str::trim);
-//RS     (name, alias)
-//RS }
-//RS 
-//RS fn normalize_module_path(module: &str, path: &str) -> String {
-//RS     let path = path.trim();
-//RS     if path.starts_with("crate::") || path.starts_with("std::") || path.starts_with("core::") {
-//RS         return path.to_string();
-//RS     }
-//RS     if path == "crate" {
-//RS         return path.to_string();
-//RS     }
-//RS     let mut components = if path.starts_with("self::") {
-//RS         let mut components = module.split("::").map(str::to_string).collect::<Vec<_>>();
-//RS         components.extend(path[6..].split("::").map(str::to_string));
-//RS         components
-//RS     } else if path.starts_with("super::") {
-//RS         let mut components = module.split("::").map(str::to_string).collect::<Vec<_>>();
-//RS         while components.len() > 1 && components.last().is_some_and(|part| part == "super") {
-//RS             components.pop();
-//RS         }
-//RS         components.pop();
-//RS         components.extend(path[7..].split("::").map(str::to_string));
-//RS         components
-//RS     } else {
-//RS         let mut components = module.split("::").map(str::to_string).collect::<Vec<_>>();
-//RS         components.extend(path.split("::").map(str::to_string));
-//RS         components
-//RS     };
-//RS     if components.first().is_some_and(|part| part != "crate") {
-//RS         components.insert(0, "crate".to_string());
-//RS     }
-//RS     components.join("::")
-//RS }
-//RS 
-//RS fn parse_definitions(
-//RS     source: &str,
-//RS     module: &str,
-//RS     imports: &BTreeMap<String, String>,
-//RS ) -> Result<Vec<Definition>, String> {
-//RS     let mut definitions = Vec::new();
-//RS     let mut cursor = 0usize;
-//RS     while let Some((kind, start)) = find_next_definition(source, cursor) {
-//RS         let prefix = match kind {
-//RS             "struct" => "pub struct",
-//RS             "enum" => "pub enum",
-//RS             "type" => "pub type",
-//RS             _ => unreachable!("unknown native MIR definition kind"),
-//RS         };
-//RS         let mut position = start + prefix.len();
-//RS         skip_space(source, &mut position);
-//RS         if source.as_bytes().get(position) == Some(&b'$') {
-//RS             cursor = skip_macro_declaration(source, position);
-//RS             continue;
-//RS         }
-//RS         let name = read_identifier(source, &mut position)?;
-//RS         skip_space(source, &mut position);
-//RS         let generic = source.as_bytes().get(position) == Some(&b'<');
-//RS         if generic {
-//RS             let end = matching_byte(source.as_bytes(), position, b'<', b'>')
-//RS                 .ok_or_else(|| format!("unclosed generic parameter list for `{name}`"))?;
-//RS             position = end + 1;
-//RS             skip_space(source, &mut position);
-//RS         }
-//RS         let body = if kind == "type" {
-//RS             let equals = top_level_byte(&source[position..], b'=')
-//RS                 .ok_or_else(|| format!("type alias `{name}` has no right-hand side"))?;
-//RS             let rhs_start = position + equals + 1;
-//RS             let end = top_level_byte(&source[rhs_start..], b';')
-//RS                 .ok_or_else(|| format!("type alias `{name}` has no terminating semicolon"))?;
-//RS             let rhs = source[rhs_start..rhs_start + end].trim();
-//RS             position = rhs_start + end + 1;
-//RS             Body::Alias(parse_type(rhs)?)
-//RS         } else {
-//RS             match source.as_bytes().get(position).copied() {
-//RS                 Some(b'{') => {
-//RS                     let end = matching_byte(source.as_bytes(), position, b'{', b'}')
-//RS                         .ok_or_else(|| format!("unclosed declaration body for `{name}`"))?;
-//RS                     let text = &source[position + 1..end];
-//RS                     let body = if kind == "struct" {
-//RS                         Body::Struct(parse_fields(text)?)
-//RS                     } else {
-//RS                         Body::Enum(parse_variants(text)?)
-//RS                     };
-//RS                     position = end + 1;
-//RS                     body
-//RS                 }
-//RS                 Some(b'(') if kind == "struct" => {
-//RS                     let end = matching_byte(source.as_bytes(), position, b'(', b')')
-//RS                         .ok_or_else(|| format!("unclosed tuple struct `{name}`"))?;
-//RS                     let fields = split_top_level(&source[position + 1..end], ',')
-//RS                         .into_iter()
-//RS                         .filter(|field| !field.trim().is_empty())
-//RS                         .enumerate()
-//RS                         .map(|(index, field)| {
-//RS                             let field = field.trim();
-//RS                             Ok(Field {
-//RS                                 name: index.to_string(),
-//RS                                 public: field.starts_with("pub ") || field.starts_with("pub("),
-//RS                                 ty: parse_type(strip_visibility(field))?,
-//RS                             })
-//RS                         })
-//RS                         .collect::<Result<Vec<_>, String>>()?;
-//RS                     position = end + 1;
-//RS                     Body::Tuple(fields)
-//RS                 }
-//RS                 Some(b';') if kind == "struct" => {
-//RS                     position += 1;
-//RS                     Body::Unit
-//RS                 }
-//RS                 _ => return Err(format!("unsupported body for `{name}`")),
-//RS             }
-//RS         };
-//RS         let key = format!("{module}::{name}");
-//RS         definitions.push(Definition {
-//RS             key: key.clone(),
-//RS             path: key,
-//RS             module: module.to_string(),
-//RS             name,
-//RS             imports: imports.clone(),
-//RS             body,
-//RS             generic,
-//RS         });
-//RS         cursor = position;
-//RS     }
-//RS     Ok(definitions)
-//RS }
-//RS 
-//RS 
-//RS fn skip_macro_declaration(source: &str, start: usize) -> usize {
-//RS     let bytes = source.as_bytes();
-//RS     let mut cursor = start;
-//RS     let mut depth = 0usize;
-//RS     while cursor < bytes.len() {
-//RS         match bytes[cursor] {
-//RS             b'(' | b'[' | b'{' | b'<' => depth += 1,
-//RS             b'>' if cursor > 0 && bytes[cursor - 1] == b'-' => {}
-//RS             b')' | b']' | b'}' | b'>' => depth = depth.saturating_sub(1),
-//RS             b';' if depth == 0 => return cursor + 1,
-//RS             _ => {}
-//RS         }
-//RS         cursor += 1;
-//RS     }
-//RS     bytes.len()
-//RS }
-//RS fn parse_mir_id_macro_invocations(source: &str) -> Vec<String> {
-//RS     let mut output = Vec::new();
-//RS     let mut cursor = 0usize;
-//RS     while let Some(index) = source[cursor..].find("mir_id!") {
-//RS         let start = cursor + index + "mir_id!".len();
-//RS         let Some(open) = source[start..].find('(').map(|offset| start + offset) else {
-//RS             break;
-//RS         };
-//RS         let Some(close) = matching_byte(source.as_bytes(), open, b'(', b')') else {
-//RS             break;
-//RS         };
-//RS         let name = source[open + 1..close].trim();
-//RS         if is_identifier(name) {
-//RS             output.push(name.to_string());
-//RS         }
-//RS         cursor = close + 1;
-//RS     }
-//RS     output
-//RS }
-//RS 
-//RS fn parse_fields(body: &str) -> Result<Vec<Field>, String> {
-//RS     let mut fields = Vec::new();
-//RS     for raw in split_top_level(body, ',') {
-//RS         let raw = strip_attributes(raw.trim());
-//RS         if raw.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let colon = top_level_byte(raw, b':')
-//RS             .ok_or_else(|| format!("struct field has no type: `{raw}`"))?;
-//RS         let declaration = raw[..colon].trim();
-//RS         let name = strip_visibility(declaration)
-//RS             .split_whitespace()
-//RS             .last()
-//RS             .ok_or_else(|| format!("struct field has no name: `{raw}`"))?
-//RS             .to_string();
-//RS         fields.push(Field {
-//RS             name,
-//RS             public: declaration.starts_with("pub ") || declaration.starts_with("pub("),
-//RS             ty: parse_type(raw[colon + 1..].trim())?,
-//RS         });
-//RS     }
-//RS     Ok(fields)
-//RS }
-//RS 
-//RS fn variant_suffix_supported(suffix: &str) -> bool {
-//RS     let suffix = suffix.trim();
-//RS     suffix.is_empty() || suffix.strip_prefix('=').is_some_and(|value| !value.trim().is_empty())
-//RS }
-//RS 
-//RS fn parse_variants(body: &str) -> Result<Vec<Variant>, String> {
-//RS     let mut variants = Vec::new();
-//RS     for raw in split_top_level(body, ',') {
-//RS         let raw = strip_attributes(raw.trim());
-//RS         if raw.is_empty() {
-//RS             continue;
-//RS         }
-//RS         let mut cursor = 0usize;
-//RS         let name = read_identifier(raw, &mut cursor)?;
-//RS         skip_space(raw, &mut cursor);
-//RS         let variant_body = match raw.as_bytes().get(cursor).copied() {
-//RS             Some(b'(') => {
-//RS                 let end = matching_byte(raw.as_bytes(), cursor, b'(', b')')
-//RS                     .ok_or_else(|| format!("unclosed tuple variant `{name}`"))?;
-//RS                 if variant_suffix_supported(&raw[end + 1..]) {
-//RS                     VariantBody::Tuple(
-//RS                         split_top_level(&raw[cursor + 1..end], ',')
-//RS                             .into_iter()
-//RS                             .filter(|field| !field.trim().is_empty())
-//RS                             .map(|field| parse_type(field.trim()))
-//RS                             .collect::<Result<Vec<_>, _>>()?,
-//RS                     )
-//RS                 } else {
-//RS                     VariantBody::Unsupported(raw[end + 1..].trim().to_string())
-//RS                 }
-//RS             }
-//RS             Some(b'{') => {
-//RS                 let end = matching_byte(raw.as_bytes(), cursor, b'{', b'}')
-//RS                     .ok_or_else(|| format!("unclosed struct variant `{name}`"))?;
-//RS                 if variant_suffix_supported(&raw[end + 1..]) {
-//RS                     let mut fields = parse_fields(&raw[cursor + 1..end])?;
-//RS                     for field in &mut fields {
-//RS                         field.public = true;
-//RS                     }
-//RS                     VariantBody::Struct(fields)
-//RS                 } else {
-//RS                     VariantBody::Unsupported(raw[end + 1..].trim().to_string())
-//RS                 }
-//RS             }
-//RS             None => VariantBody::Unit,
-//RS             Some(b'=') if variant_suffix_supported(&raw[cursor..]) => VariantBody::Unit,
-//RS             _ => VariantBody::Unsupported(raw[cursor..].trim().to_string()),
-//RS         };
-//RS         variants.push(Variant { name, body: variant_body });
-//RS     }
-//RS     Ok(variants)
-//RS }
-//RS 
-//RS fn strip_attributes(mut input: &str) -> &str {
-//RS     loop {
-//RS         input = input.trim_start();
-//RS         if !input.starts_with("#[") {
-//RS             return input;
-//RS         }
-//RS         let Some(end) = matching_byte(input.as_bytes(), 1, b'[', b']') else {
-//RS             return input;
-//RS         };
-//RS         input = &input[end + 1..];
-//RS     }
-//RS }
-//RS 
-//RS fn strip_visibility(input: &str) -> &str {
-//RS     let input = input.trim();
-//RS     if let Some(rest) = input.strip_prefix("pub(") {
-//RS         return rest
-//RS             .find(')')
-//RS             .map(|end| rest[end + 1..].trim())
-//RS             .unwrap_or(input);
-//RS     }
-//RS     input.strip_prefix("pub ").unwrap_or(input).trim()
-//RS }
-//RS 
-//RS fn parse_type(input: &str) -> Result<TypeExpr, String> {
-//RS     let input = input.trim();
-//RS     if input == "&'static str" || input == "& str" {
-//RS         return Ok(TypeExpr::StaticStr);
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Option") {
-//RS         return Ok(TypeExpr::Option(Box::new(parse_type(inner)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Vec") {
-//RS         return Ok(TypeExpr::Sequence(Box::new(parse_type(inner)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Box") {
-//RS         return Ok(TypeExpr::Boxed(Box::new(parse_type(inner)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "Arc") {
-//RS         return Ok(TypeExpr::Arc(Box::new(parse_type(inner)?)));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "BTreeSet") {
-//RS         return Ok(TypeExpr::Set(Box::new(parse_type(inner)?), false));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "HashSet") {
-//RS         return Ok(TypeExpr::Set(Box::new(parse_type(inner)?), true));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "BTreeMap") {
-//RS         return Ok(parse_map(inner, false).unwrap_or_else(|_| TypeExpr::Named(input.to_string())));
-//RS     }
-//RS     if let Some(inner) = generic_inner(input, "HashMap") {
-//RS         return Ok(parse_map(inner, true).unwrap_or_else(|_| TypeExpr::Named(input.to_string())));
-//RS     }
-//RS     if input.starts_with('(') && input.ends_with(')') {
-//RS         let values = split_top_level(&input[1..input.len() - 1], ',')
-//RS             .into_iter()
-//RS             .filter(|value| !value.trim().is_empty())
-//RS             .map(|value| parse_type(value.trim()))
-//RS             .collect::<Result<Vec<_>, _>>()?;
-//RS         return Ok(TypeExpr::Tuple(values));
-//RS     }
-//RS     if input.starts_with('[') && input.ends_with(']') {
-//RS         let parts = split_top_level(&input[1..input.len() - 1], ';');
-//RS         if parts.len() == 2 {
-//RS             if let Ok(length) = parts[1].trim().parse::<usize>() {
-//RS                 return Ok(TypeExpr::Array(Box::new(parse_type(parts[0].trim())?), length));
-//RS             }
-//RS         }
-//RS         return Ok(TypeExpr::Named(input.to_string()));
-//RS     }
-//RS     if input.is_empty() {
-//RS         return Err("empty native MIR image field type".to_string());
-//RS     }
-//RS     Ok(TypeExpr::Named(input.to_string()))
-//RS }
-//RS fn parse_map(input: &str, hash: bool) -> Result<TypeExpr, String> {
-//RS     let parts = split_top_level(input, ',');
-//RS     if parts.len() != 2 {
-//RS         return Err(format!("native MIR map has invalid parameters `{input}`"));
-//RS     }
-//RS     Ok(TypeExpr::Map(
-//RS         Box::new(parse_type(parts[0].trim())?),
-//RS         Box::new(parse_type(parts[1].trim())?),
-//RS         hash,
-//RS     ))
-//RS }
-//RS 
-//RS fn generic_inner<'a>(input: &'a str, name: &str) -> Option<&'a str> {
-//RS     let (outer, arguments) = input.split_once('<')?;
-//RS     let outer = outer.rsplit("::").next().unwrap_or(outer);
-//RS     if outer != name {
-//RS         return None;
-//RS     }
-//RS     arguments.strip_suffix('>')
-//RS }
-//RS 
-//RS fn reachable_schema(schema: &Schema, root: &str) -> Result<BTreeSet<String>, String> {
-//RS     let mut pending = vec![root.to_string()];
-//RS     let mut reachable = BTreeSet::new();
-//RS     let mut alias_visiting = Vec::new();
-//RS     let mut checked_aliases = BTreeSet::new();
-//RS     while let Some(key) = pending.pop() {
-//RS         let key = resolve_alias(schema, &key)?;
-//RS         if !reachable.insert(key.clone()) {
-//RS             continue;
-//RS         }
-//RS         let definition = schema
-//RS             .definitions
-//RS             .get(&key)
-//RS             .ok_or_else(|| format!("missing declaration for `{key}`"))?;
-//RS         if definition.generic {
-//RS             if matches!(&definition.body, Body::Alias(_)) {
-//RS                 return Err(format!(
-//RS                     "generic native MIR type alias `{}` needs an explicit instantiated wire schema",
-//RS                     definition.key
-//RS                 ));
-//RS             }
-//RS             return Err(format!(
-//RS                 "generic native MIR type `{}` needs an explicit instantiated wire schema",
-//RS                 definition.key
-//RS             ));
-//RS         }
-//RS         if matches!(&definition.body, Body::Alias(_)) {
-//RS             detect_alias_cycle(
-//RS                 schema,
-//RS                 &key,
-//RS                 &mut alias_visiting,
-//RS                 &mut checked_aliases,
-//RS             )?;
-//RS         }
-//RS         if let Body::Enum(variants) = &definition.body {
-//RS             if let Some(variant) = variants
-//RS                 .iter()
-//RS                 .find(|variant| matches!(variant.body, VariantBody::Unsupported(_)))
-//RS             {
-//RS                 let VariantBody::Unsupported(reason) = &variant.body else { unreachable!() };
-//RS                 return Err(format!(
-//RS                     "enum `{}` variant `{}` has unsupported wire syntax `{reason}`",
-//RS                     definition.key, variant.name
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if definition.module != "crate::MIR" {
-//RS             if let Some(field) = body_fields(&definition.body)
-//RS                 .into_iter()
-//RS                 .find(|field| !field.public)
-//RS             {
-//RS                 return Err(format!(
-//RS                     "native MIR image cannot access private field `{}` in `{}`",
-//RS                     field.name, definition.key
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let mut names = Vec::new();
-//RS         collect_named_types(&definition.body, &mut names);
-//RS         for name in names {
-//RS             if is_builtin(&name) {
-//RS                 continue;
-//RS             }
-//RS             pending.push(resolve_type_name(schema, definition, &name)?);
-//RS         }
-//RS     }
-//RS     Ok(reachable)
-//RS }
-//RS 
-//RS fn detect_alias_cycle(
-//RS     schema: &Schema,
-//RS     key: &str,
-//RS     visiting: &mut Vec<String>,
-//RS     checked: &mut BTreeSet<String>,
-//RS ) -> Result<(), String> {
-//RS     let key = resolve_alias(schema, key)?;
-//RS     let Some(definition) = schema.definitions.get(&key) else {
-//RS         return Err(format!("missing declaration for `{key}`"));
-//RS     };
-//RS     if definition.generic {
-//RS         let kind = if matches!(&definition.body, Body::Alias(_)) {
-//RS             "type alias"
-//RS         } else {
-//RS             "type"
-//RS         };
-//RS         return Err(format!(
-//RS             "generic native MIR {kind} `{}` needs an explicit instantiated wire schema",
-//RS             definition.key
-//RS         ));
-//RS     }
-//RS     if !matches!(&definition.body, Body::Alias(_)) {
-//RS         return Ok(());
-//RS     }
-//RS     if checked.contains(&key) {
-//RS         return Ok(());
-//RS     }
-//RS     if let Some(index) = visiting.iter().position(|item| item == &key) {
-//RS         let mut cycle = visiting[index..].to_vec();
-//RS         cycle.push(key);
-//RS         return Err(format!(
-//RS             "cyclic native MIR type aliases: {}",
-//RS             cycle.join(" -> ")
-//RS         ));
-//RS     }
-//RS     visiting.push(key.clone());
-//RS     let mut names = Vec::new();
-//RS     collect_named_types(&definition.body, &mut names);
-//RS     for name in names {
-//RS         if is_builtin(&name) {
-//RS             continue;
-//RS         }
-//RS         let target = resolve_type_name(schema, definition, &name)?;
-//RS         detect_alias_cycle(schema, &target, visiting, checked)?;
-//RS     }
-//RS     visiting.pop();
-//RS     checked.insert(key);
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn collect_named_types(body: &Body, names: &mut Vec<String>) {
-//RS     fn collect(ty: &TypeExpr, names: &mut Vec<String>) {
-//RS         match ty {
-//RS             TypeExpr::Named(name) => names.push(name.clone()),
-//RS             TypeExpr::Option(inner)
-//RS             | TypeExpr::Sequence(inner)
-//RS             | TypeExpr::Set(inner, _)
-//RS             | TypeExpr::Boxed(inner)
-//RS             | TypeExpr::Arc(inner)
-//RS             | TypeExpr::Array(inner, _) => collect(inner, names),
-//RS             TypeExpr::Map(key, value, _) => {
-//RS                 collect(key, names);
-//RS                 collect(value, names);
-//RS             }
-//RS             TypeExpr::Tuple(items) => items.iter().for_each(|item| collect(item, names)),
-//RS             TypeExpr::StaticStr => {}
-//RS         }
-//RS     }
-//RS     match body {
-//RS         Body::Struct(fields) | Body::Tuple(fields) => {
-//RS             fields.iter().for_each(|field| collect(&field.ty, names))
-//RS         }
-//RS         Body::Alias(ty) => collect(ty, names),
-//RS         Body::Enum(variants) => {
-//RS             for variant in variants {
-//RS                 match &variant.body {
-//RS                     VariantBody::Unit | VariantBody::Unsupported(_) => {}
-//RS                     VariantBody::Tuple(fields) => fields.iter().for_each(|field| collect(field, names)),
-//RS                     VariantBody::Struct(fields) => fields.iter().for_each(|field| collect(&field.ty, names)),
-//RS                 }
-//RS             }
-//RS         }
-//RS         Body::Unit => {}
-//RS     }
-//RS }
-//RS 
-//RS fn body_fields(body: &Body) -> Vec<&Field> {
-//RS     match body {
-//RS         Body::Struct(fields) | Body::Tuple(fields) => fields.iter().collect(),
-//RS         Body::Enum(variants) => variants
-//RS             .iter()
-//RS             .flat_map(|variant| match &variant.body {
-//RS                 VariantBody::Struct(fields) => fields.iter().collect::<Vec<_>>(),
-//RS                 VariantBody::Unit | VariantBody::Tuple(_) | VariantBody::Unsupported(_) => Vec::new(),
-//RS             })
-//RS             .collect(),
-//RS         Body::Alias(_) | Body::Unit => Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn is_builtin(name: &str) -> bool {
-//RS     matches!(
-//RS         name,
-//RS         "String" | "bool" | "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16"
-//RS             | "i32" | "i64" | "isize" | "f32" | "f64" | "char" | "str"
-//RS             | "PathBuf" | "std::path::PathBuf"
-//RS     )
-//RS }
-//RS fn generic_type_base(name: &str) -> Option<&str> {
-//RS     let open = top_level_byte(name, b'<')?;
-//RS     let close = matching_byte(name.as_bytes(), open, b'<', b'>')?;
-//RS     if close + 1 != name.len() {
-//RS         return None;
-//RS     }
-//RS     let base = name[..open].trim();
-//RS     (!base.is_empty()).then_some(base)
-//RS }
-//RS 
-//RS fn resolve_type_name(schema: &Schema, definition: &Definition, name: &str) -> Result<String, String> {
-//RS     if let Some(base) = generic_type_base(name) {
-//RS         if !is_builtin(base) {
-//RS             if let Ok(key) = resolve_type_name(schema, definition, base) {
-//RS                 if let Some(target) = schema.definitions.get(&key) {
-//RS                     if target.generic {
-//RS                         let kind = if matches!(&target.body, Body::Alias(_)) {
-//RS                             "type alias"
-//RS                         } else {
-//RS                             "type"
-//RS                         };
-//RS                         return Err(format!(
-//RS                             "generic native MIR {kind} `{key}` needs an explicit instantiated wire schema"
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         return Err(format!(
-//RS             "unsupported generic native MIR type `{name}` referenced by `{}`",
-//RS             definition.key
-//RS         ));
-//RS     }
-//RS     if name == "Self" {
-//RS         return Ok(definition.key.clone());
-//RS     }
-//RS     if let Some(local) = schema.definitions.get(&format!("{}::{name}", definition.module)) {
-//RS         return Ok(local.key.clone());
-//RS     }
-//RS     if let Some(imported) = definition.imports.get(name) {
-//RS         return resolve_alias(schema, imported);
-//RS     }
-//RS     let normalized = normalize_module_path(&definition.module, name);
-//RS     if schema.definitions.contains_key(&normalized) || schema.aliases.contains_key(&normalized) {
-//RS         return resolve_alias(schema, &normalized);
-//RS     }
-//RS     let candidates = schema
-//RS         .definitions
-//RS         .values()
-//RS         .filter(|candidate| candidate.name == name)
-//RS         .map(|candidate| candidate.key.clone())
-//RS         .collect::<Vec<_>>();
-//RS     match candidates.as_slice() {
-//RS         [candidate] => Ok(candidate.clone()),
-//RS         [] => Err(format!("unknown native MIR type `{name}` referenced by `{}`", definition.key)),
-//RS         _ => Err(format!("ambiguous native MIR type `{name}` referenced by `{}`", definition.key)),
-//RS     }
-//RS }
-//RS 
-//RS fn resolve_alias(schema: &Schema, path: &str) -> Result<String, String> {
-//RS     let mut current = path.to_string();
-//RS     let mut seen = BTreeSet::new();
-//RS     loop {
-//RS         if !seen.insert(current.clone()) {
-//RS             return Err(format!("cyclic native MIR type alias `{path}`"));
-//RS         }
-//RS         if schema.definitions.contains_key(&current) {
-//RS             return Ok(current);
-//RS         }
-//RS         if let Some(next) = schema.aliases.get(&current) {
-//RS             current = next.clone();
-//RS         } else {
-//RS             return Err(format!("unknown native MIR type path `{current}`"));
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn assign_public_paths(schema: &mut Schema) {
-//RS     let mut paths = schema.definitions.keys()
-//RS         .map(|key| (key.clone(), key.clone()))
-//RS         .collect::<BTreeMap<_, _>>();
-//RS     for export in schema.aliases.keys() {
-//RS         if let Ok(key) = resolve_alias(schema, export) {
-//RS             let path = paths.get_mut(&key).expect("resolved schema definition");
-//RS             if (export.matches("::").count(), export) < (path.matches("::").count(), &*path) {
-//RS                 *path = export.clone();
-//RS             }
-//RS         }
-//RS     }
-//RS     for (key, path) in paths {
-//RS         schema.definitions.get_mut(&key).unwrap().path = path;
-//RS     }
-//RS }
-//RS 
-//RS /// Definitions the image stores once in its value table: every occurrence in the
-//RS /// payload is a varint index into that table. A definition belongs here when
-//RS /// its values are large or repeat across the program. In the stage-zero
-//RS /// compiler image, 7,431 distinct checked types stand behind 307 MB of type
-//RS /// trees; spans, ownership facts and name references repeat per instruction;
-//RS /// value, block and place ids are 64-bit stable hashes used several times each.
-//RS const INTERNED_DEFINITIONS: &[&str] = &[
-//RS     "crate::MIR::MirType",
-//RS     "crate::Diagnostics::Span",
-//RS     "crate::MIR::MirOwnership",
-//RS     "crate::Names::NameReference",
-//RS     "crate::MIR::MirValueId",
-//RS     "crate::MIR::MirBlockId",
-//RS     "crate::MIR::MirPlaceId",
-//RS ];
-//RS 
-//RS fn emit_codec(schema: &Schema, reachable: &BTreeSet<String>, interned: &[&str]) -> Result<String, String> {
-//RS     let mut out = String::new();
-//RS     for key in interned {
-//RS         if !reachable.contains(*key) {
-//RS             return Err(format!("interned native MIR definition `{key}` is outside the codec closure"));
-//RS         }
-//RS     }
-//RS     emit_runtime_codec_primitives(&mut out, schema, interned)?;
-//RS     let definitions = reachable
-//RS         .iter()
-//RS         .map(|key| schema.definitions.get(key).expect("reachable definition").clone())
-//RS         .collect::<Vec<_>>();
-//RS     for definition in &definitions {
-//RS         emit_definition_codec(&mut out, schema, reachable, definition, interned)?;
-//RS     }
-//RS     let root = schema
-//RS         .definitions
-//RS         .get("crate::MIR::MirProgram")
-//RS         .ok_or_else(|| "missing root MirProgram".to_string())?;
-//RS     let encode_root = function_name("encode", &root.key);
-//RS     let decode_root = function_name("decode", &root.key);
-//RS     // The writer validates before encoding; the reader only decodes. Its
-//RS     // callers bind the bytes to an integrity seal (the compiler-image
-//RS     // checksum) or validate again when they re-encode, so restore does not
-//RS     // re-run whole-program validation.
-//RS     writeln!(
-//RS         out,
-//RS         "pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body)\n}}\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    Ok(value)\n}}\n"
-//RS     )
-//RS     .map_err(|error| error.to_string())?;
-//RS     Ok(out)
-//RS }
-//RS 
-//RS /// The image wire format: unsigned integers, enum tags, counts and lengths are
-//RS /// canonical LEB128 varints; signed integers are zigzag varints; floats keep
-//RS /// their fixed little-endian bits. The payload opens with the string table and
-//RS /// the value table of `INTERNED_DEFINITIONS`, in first-encounter order; strings
-//RS /// and interned values in the body are varint indices into those tables. Every
-//RS /// collection is encoded in a deterministic order (hash containers by sorted
-//RS /// key), so a restored program re-encodes to the identical bytes.
-//RS fn emit_runtime_codec_primitives(out: &mut String, schema: &Schema, interned: &[&str]) -> Result<(), String> {
-//RS     let mut table_fields = String::new();
-//RS     for key in interned {
-//RS         let definition = schema
-//RS             .definitions
-//RS             .get(*key)
-//RS             .ok_or_else(|| format!("missing interned native MIR definition `{key}`"))?;
-//RS         writeln!(table_fields, "    {}: Vec<{}>,", function_name("interned", key), definition.path)
-//RS             .map_err(|error| error.to_string())?;
-//RS     }
-//RS     let mut decode_entries = String::new();
-//RS     for (kind, key) in interned.iter().enumerate() {
-//RS         writeln!(
-//RS             decode_entries,
-//RS             "            {kind} => {{ let value = {}(&mut reader)?; cursor = reader.cursor; tables.{}.push(value); }}",
-//RS             function_name("decode_entry", key),
-//RS             function_name("interned", key),
-//RS         )
-//RS         .map_err(|error| error.to_string())?;
-//RS     }
-//RS     writeln!(
-//RS         out,
-//RS         "#[derive(Default)]\nstruct MirProgramImageTables {{\n    strings: Vec<String>,\n{table_fields}}}\n#[derive(Default)]\nstruct MirProgramImageInterner {{\n    strings: std::collections::HashMap<String, u64>,\n    string_table: Vec<u8>,\n    entries: std::collections::HashMap<(u32, Vec<u8>), u64>,\n    kind_counts: [u64; {}],\n    entry_table: Vec<u8>,\n    entry_count: u64,\n}}",
-//RS         interned.len()
-//RS     )
-//RS     .map_err(|error| error.to_string())?;
-//RS     // Table entries reference only earlier entries (nested values are interned
-//RS     // before the value holding them), so one forward pass restores the tables.
-//RS     writeln!(
-//RS         out,
-//RS         "fn mir_image_read_tables(bytes: &[u8]) -> Result<(MirProgramImageTables, usize), String> {{\n    let mut tables = MirProgramImageTables::default();\n    let mut cursor = {{\n        let mut reader = MirProgramImageReader::new(bytes, &tables);\n        let string_count = reader.read_count()?;\n        let mut strings = Vec::new();\n        strings.try_reserve_exact(string_count).map_err(|_| \"native MIR string table is too large\".to_string())?;\n        for _ in 0..string_count {{\n            let length = reader.read_len()?;\n            let text = std::str::from_utf8(reader.read_raw(length)?).map_err(|_| \"native MIR image string is not UTF-8\".to_string())?;\n            strings.push(text.to_string());\n        }}\n        let cursor = reader.cursor;\n        tables.strings = strings;\n        cursor\n    }};\n    let entry_count = {{\n        let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n        let count = reader.read_count()?;\n        cursor = reader.cursor;\n        count\n    }};\n    for _ in 0..entry_count {{\n        let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n        match reader.read_varint()? {{\n{decode_entries}            _ => return Err(\"unknown native MIR image table entry kind\".to_string()),\n        }}\n    }}\n    Ok((tables, cursor))\n}}"
-//RS     )
-//RS     .map_err(|error| error.to_string())?;
-//RS     out.push_str(
-//RS         r#"
-//RS fn mir_image_push_varint(bytes: &mut Vec<u8>, mut value: u64) {
-//RS     while value >= 0x80 {
-//RS         bytes.push((value as u8) | 0x80);
-//RS         value >>= 7;
-//RS     }
-//RS     bytes.push(value as u8);
-//RS }
-//RS fn mir_image_assemble(interner: MirProgramImageInterner, body: Vec<u8>) -> Result<Vec<u8>, String> {
-//RS     let mut bytes = Vec::new();
-//RS     bytes.try_reserve_exact(interner.string_table.len() + interner.entry_table.len() + body.len() + 20).map_err(|_| "native MIR image is too large to allocate".to_string())?;
-//RS     mir_image_push_varint(&mut bytes, u64::try_from(interner.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?);
-//RS     bytes.extend_from_slice(&interner.string_table);
-//RS     mir_image_push_varint(&mut bytes, interner.entry_count);
-//RS     bytes.extend_from_slice(&interner.entry_table);
-//RS     bytes.extend_from_slice(&body);
-//RS     Ok(bytes)
-//RS }
-//RS #[allow(dead_code)]
-//RS impl MirProgramImageInterner {
-//RS     fn intern_string(&mut self, value: &str) -> Result<u64, String> {
-//RS         if let Some(index) = self.strings.get(value) { return Ok(*index); }
-//RS         let index = u64::try_from(self.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?;
-//RS         mir_image_push_varint(&mut self.string_table, u64::try_from(value.len()).map_err(|_| "MIR image string exceeds u64".to_string())?);
-//RS         self.string_table.extend_from_slice(value.as_bytes());
-//RS         self.strings.insert(value.to_string(), index);
-//RS         Ok(index)
-//RS     }
-//RS     fn intern_entry(&mut self, kind: u32, entry: Vec<u8>) -> u64 {
-//RS         let next = self.kind_counts[kind as usize];
-//RS         match self.entries.entry((kind, entry)) {
-//RS             std::collections::hash_map::Entry::Occupied(found) => *found.get(),
-//RS             std::collections::hash_map::Entry::Vacant(slot) => {
-//RS                 mir_image_push_varint(&mut self.entry_table, u64::from(kind));
-//RS                 self.entry_table.extend_from_slice(&slot.key().1);
-//RS                 self.entry_count += 1;
-//RS                 self.kind_counts[kind as usize] += 1;
-//RS                 slot.insert(next);
-//RS                 next
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS struct MirProgramImageWriter<'t> { bytes: Vec<u8>, interner: &'t mut MirProgramImageInterner }
-//RS #[allow(dead_code)]
-//RS impl<'t> MirProgramImageWriter<'t> {
-//RS     fn child(&mut self) -> MirProgramImageWriter<'_> { MirProgramImageWriter { bytes: Vec::new(), interner: &mut *self.interner } }
-//RS     fn write_u8(&mut self, value: u8) { self.bytes.push(value); }
-//RS     fn write_varint(&mut self, value: u64) { mir_image_push_varint(&mut self.bytes, value); }
-//RS     fn write_u16(&mut self, value: u16) { self.write_varint(u64::from(value)); }
-//RS     fn write_u32(&mut self, value: u32) { self.write_varint(u64::from(value)); }
-//RS     fn write_u64(&mut self, value: u64) { self.write_varint(value); }
-//RS     fn write_signed(&mut self, value: i64) { self.write_varint(((value << 1) ^ (value >> 63)) as u64); }
-//RS     fn write_fixed_u32(&mut self, value: u32) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
-//RS     fn write_fixed_u64(&mut self, value: u64) { self.bytes.extend_from_slice(&value.to_le_bytes()); }
-//RS     fn write_count(&mut self, value: usize) -> Result<(), String> {
-//RS         self.write_varint(u64::try_from(value).map_err(|_| "native MIR collection exceeds u64".to_string())?);
-//RS         Ok(())
-//RS     }
-//RS     fn write_bytes(&mut self, value: &[u8]) -> Result<(), String> {
-//RS         self.write_count(value.len())?;
-//RS         self.bytes.extend_from_slice(value);
-//RS         Ok(())
-//RS     }
-//RS     fn write_string(&mut self, value: &str) -> Result<(), String> {
-//RS         let index = self.interner.intern_string(value)?;
-//RS         self.write_varint(index);
-//RS         Ok(())
-//RS     }
-//RS     fn write_entry(&mut self, kind: u32, entry: Vec<u8>) {
-//RS         let index = self.interner.intern_entry(kind, entry);
-//RS         self.write_varint(index);
-//RS     }
-//RS     fn finish(self) -> Vec<u8> { self.bytes }
-//RS }
-//RS struct MirProgramImageReader<'a> { bytes: &'a [u8], cursor: usize, tables: &'a MirProgramImageTables }
-//RS #[allow(dead_code)]
-//RS impl<'a> MirProgramImageReader<'a> {
-//RS     fn new(bytes: &'a [u8], tables: &'a MirProgramImageTables) -> Self { Self { bytes, cursor: 0, tables } }
-//RS     fn child(&self, bytes: &'a [u8]) -> Self { Self { bytes, cursor: 0, tables: self.tables } }
-//RS     fn read_raw(&mut self, length: usize) -> Result<&'a [u8], String> {
-//RS         let end = self.cursor.checked_add(length).ok_or_else(|| "MIR image cursor overflow".to_string())?;
-//RS         let value = self.bytes.get(self.cursor..end).ok_or_else(|| "truncated native MIR image".to_string())?;
-//RS         self.cursor = end;
-//RS         Ok(value)
-//RS     }
-//RS     fn read_u8(&mut self) -> Result<u8, String> { Ok(self.read_raw(1)?[0]) }
-//RS     fn read_varint(&mut self) -> Result<u64, String> {
-//RS         let mut value = 0u64;
-//RS         let mut shift = 0u32;
-//RS         loop {
-//RS             let byte = self.read_u8()?;
-//RS             let bits = u64::from(byte & 0x7f);
-//RS             if shift == 63 && bits > 1 { return Err("native MIR image varint exceeds u64".to_string()); }
-//RS             value |= bits << shift;
-//RS             if byte & 0x80 == 0 {
-//RS                 if byte == 0 && shift != 0 { return Err("native MIR image varint is not canonical".to_string()); }
-//RS                 return Ok(value);
-//RS             }
-//RS             shift += 7;
-//RS             if shift > 63 { return Err("native MIR image varint exceeds u64".to_string()); }
-//RS         }
-//RS     }
-//RS     fn read_u16(&mut self) -> Result<u16, String> { u16::try_from(self.read_varint()?).map_err(|_| "native MIR image u16 out of range".to_string()) }
-//RS     fn read_u32(&mut self) -> Result<u32, String> { u32::try_from(self.read_varint()?).map_err(|_| "native MIR image u32 out of range".to_string()) }
-//RS     fn read_u64(&mut self) -> Result<u64, String> { self.read_varint() }
-//RS     fn read_signed(&mut self) -> Result<i64, String> { let value = self.read_varint()?; Ok(((value >> 1) as i64) ^ -((value & 1) as i64)) }
-//RS     fn read_fixed_u32(&mut self) -> Result<u32, String> { Ok(u32::from_le_bytes(self.read_raw(4)?.try_into().map_err(|_| "invalid MIR image u32".to_string())?)) }
-//RS     fn read_fixed_u64(&mut self) -> Result<u64, String> { Ok(u64::from_le_bytes(self.read_raw(8)?.try_into().map_err(|_| "invalid MIR image u64".to_string())?)) }
-//RS     fn read_count(&mut self) -> Result<usize, String> {
-//RS         let count = usize::try_from(self.read_varint()?).map_err(|_| "native MIR image count exceeds host range".to_string())?;
-//RS         if count > self.bytes.len().saturating_sub(self.cursor) { return Err("native MIR image collection count exceeds remaining bytes".to_string()); }
-//RS         Ok(count)
-//RS     }
-//RS     fn read_len(&mut self) -> Result<usize, String> { self.read_count() }
-//RS     fn read_bytes(&mut self) -> Result<&'a [u8], String> { let length = self.read_len()?; self.read_raw(length) }
-//RS     fn read_index(&mut self) -> Result<usize, String> { usize::try_from(self.read_varint()?).map_err(|_| "native MIR image table index exceeds host range".to_string()) }
-//RS     fn read_string(&mut self) -> Result<String, String> {
-//RS         let index = self.read_index()?;
-//RS         self.tables.strings.get(index).cloned().ok_or_else(|| "native MIR image references an unknown string".to_string())
-//RS     }
-//RS     fn finish(self) -> Result<(), String> { if self.cursor == self.bytes.len() { Ok(()) } else { Err("native MIR image has trailing bytes".to_string()) } }
-//RS }
-//RS // Static compiler strings resolve to the registry row that owns them. Core
-//RS // rows also come from tables outside `CORE_CALLS` (the TIR lowering's own
-//RS // records), so a string no registry here owns is interned process-wide: each
-//RS // distinct one is leaked once, and restoring images again does not grow
-//RS // memory. The interner goes once those rows join the one registry.
-//RS fn mir_image_static_str(value: String) -> Result<&'static str, String> {
-//RS     for record in crate::Syntax::CORE_CALLS {
-//RS         if record.module == value { return Ok(record.module); }
-//RS         if record.member == value { return Ok(record.member); }
-//RS         if record.symbol.name() == value { return Ok(record.symbol.name()); }
-//RS         if let Some(item) = record.receiver_types.iter().copied().find(|item| *item == value) { return Ok(item); }
-//RS         if let Some(item) = record.effect_leaf.filter(|item| *item == value) { return Ok(item); }
-//RS         if let Some(item) = record.jit_symbol.filter(|item| *item == value) { return Ok(item); }
-//RS         if let Some(marker) = record.marker {
-//RS             if marker.member == value { return Ok(marker.member); }
-//RS             if marker.since == value { return Ok(marker.since); }
-//RS             if marker.replacement == value { return Ok(marker.replacement); }
-//RS             if let Some(item) = marker.removed_in.filter(|item| *item == value) { return Ok(item); }
-//RS         }
-//RS     }
-//RS     static UNOWNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
-//RS         std::sync::OnceLock::new();
-//RS     let mut unowned = UNOWNED
-//RS         .get_or_init(Default::default)
-//RS         .lock()
-//RS         .map_err(|_| "native MIR image static-string interner is poisoned".to_string())?;
-//RS     if let Some(item) = unowned.get(value.as_str()) {
-//RS         return Ok(*item);
-//RS     }
-//RS     let item: &'static str = Box::leak(value.into_boxed_str());
-//RS     unowned.insert(item);
-//RS     Ok(item)
-//RS }
-//RS "#,
-//RS     );
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn emit_definition_codec(
-//RS     out: &mut String,
-//RS     schema: &Schema,
-//RS     reachable: &BTreeSet<String>,
-//RS     definition: &Definition,
-//RS     interned: &[&str],
-//RS ) -> Result<(), String> {
-//RS     // An interned definition's own codec writes its table entry; the public
-//RS     // encode/decode pair writes and resolves the table index.
-//RS     let interned = interned.iter().position(|key| *key == definition.key);
-//RS     let (encoder, decoder) = match interned {
-//RS         Some(_) => (function_name("encode_entry", &definition.key), function_name("decode_entry", &definition.key)),
-//RS         None => (function_name("encode", &definition.key), function_name("decode", &definition.key)),
-//RS     };
-//RS     let path = &definition.path;
-//RS     if let Some(kind) = interned {
-//RS         writeln!(
-//RS             out,
-//RS             "fn {}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n    let mut entry = writer.child();\n    {encoder}(value, &mut entry)?;\n    let entry = entry.finish();\n    writer.write_entry({kind}, entry);\n    Ok(())\n}}\nfn {}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    let index = reader.read_index()?;\n    reader.tables.{}.get(index).cloned().ok_or_else(|| \"native MIR image references an unknown interned value\".to_string())\n}}\n",
-//RS             function_name("encode", &definition.key),
-//RS             function_name("decode", &definition.key),
-//RS             function_name("interned", &definition.key),
-//RS         )
-//RS         .map_err(|error| error.to_string())?;
-//RS     }
-//RS     match &definition.body {
-//RS         Body::Struct(fields) => {
-//RS             let mut encode = String::new();
-//RS             let mut decode = Vec::new();
-//RS             for field in fields {
-//RS                 let expression = encode_expression(&field.ty, &format!("&value.{}", field.name), "writer", schema, reachable, definition)?;
-//RS                 encode.push_str(&expression);
-//RS                 decode.push(format!("{}: {},", field.name, decode_expression(&field.ty, "reader", schema, reachable, definition)?));
-//RS             }
-//RS             writeln!(out, "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({path} {{\n        {}\n    }})\n}}\n", decode.join("\n"))
-//RS                 .map_err(|error| error.to_string())?;
-//RS         }
-//RS         Body::Tuple(fields) => {
-//RS             let mut encode = String::new();
-//RS             let mut decode = Vec::new();
-//RS             for (index, field) in fields.iter().enumerate() {
-//RS                 encode.push_str(&encode_expression(
-//RS                     &field.ty,
-//RS                     &format!("&value.{index}"),
-//RS                     "writer",
-//RS                     schema,
-//RS                     reachable,
-//RS                     definition,
-//RS                 )?);
-//RS                 decode.push(decode_expression(
-//RS                     &field.ty,
-//RS                     "reader",
-//RS                     schema,
-//RS                     reachable,
-//RS                     definition,
-//RS                 )?);
-//RS             }
-//RS             let value = format!("{path}({})", decode.join(", "));
-//RS             writeln!(
-//RS                 out,
-//RS                 "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({value})\n}}\n"
-//RS             )
-//RS             .map_err(|error| error.to_string())?;
-//RS         }
-//RS         Body::Unit => {
-//RS             writeln!(out, "fn {encoder}(_: &{path}, _: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{ Ok(()) }}\nfn {decoder}(_: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{ Ok({path}) }}\n")
-//RS                 .map_err(|error| error.to_string())?;
-//RS         }
-//RS         Body::Alias(ty) => {
-//RS             let encode = encode_expression(ty, "value", "writer", schema, reachable, definition)?;
-//RS             let decode = decode_expression(ty, "reader", schema, reachable, definition)?;
-//RS             writeln!(
-//RS                 out,
-//RS                 "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({decode})\n}}\n"
-//RS             )
-//RS             .map_err(|error| error.to_string())?;
-//RS         }
-//RS         Body::Enum(variants) => {
-//RS             let mut encode_arms = Vec::new();
-//RS             let mut decode_arms = Vec::new();
-//RS             for (tag, variant) in variants.iter().enumerate() {
-//RS                 let tag = u32::try_from(tag).map_err(|_| format!("enum `{}` exceeds native MIR tag range", definition.key))?;
-//RS                 let (pattern, encode_fields, decoded) = match &variant.body {
-//RS                     VariantBody::Unit => (format!("{path}::{}", variant.name), String::new(), Vec::new()),
-//RS                     VariantBody::Tuple(fields) => {
-//RS                         let bindings = (0..fields.len()).map(|index| format!("__field_{index}")).collect::<Vec<_>>();
-//RS                         let mut body = String::new();
-//RS                         for (field, binding) in fields.iter().zip(&bindings) {
-//RS                             body.push_str(&encode_expression(field, binding, "writer", schema, reachable, definition)?);
-//RS                         }
-//RS                         let decoded = fields.iter().map(|field| decode_expression(field, "reader", schema, reachable, definition)).collect::<Result<Vec<_>, _>>()?;
-//RS                         (format!("{path}::{}({})", variant.name, bindings.join(", ")), body, decoded)
-//RS                     }
-//RS                     VariantBody::Struct(fields) => {
-//RS                         let bindings = fields.iter().enumerate().map(|(index, field)| (field, format!("__field_{index}"))).collect::<Vec<_>>();
-//RS                         let mut body = String::new();
-//RS                         let mut pattern_fields = Vec::new();
-//RS                         let mut decoded = Vec::new();
-//RS                         for (field, binding) in bindings {
-//RS                             pattern_fields.push(format!("{}: {binding}", field.name));
-//RS                             body.push_str(&encode_expression(&field.ty, binding.as_str(), "writer", schema, reachable, definition)?);
-//RS                             decoded.push(format!("{}: {}", field.name, decode_expression(&field.ty, "reader", schema, reachable, definition)?));
-//RS                         }
-//RS                         (format!("{path}::{} {{ {} }}", variant.name, pattern_fields.join(", ")), body, decoded)
-//RS                     }
-//RS                     VariantBody::Unsupported(reason) => {
-//RS                         return Err(format!("unsupported variant wire syntax in `{}`: {reason}", definition.key));
-//RS                     }
-//RS                 };
-//RS                 encode_arms.push(format!("        {pattern} => {{ writer.write_u32({tag});\n{encode_fields}            Ok(())\n        }},"));
-//RS                 let constructor = match &variant.body {
-//RS                     VariantBody::Unit => format!("{path}::{}", variant.name),
-//RS                     VariantBody::Tuple(_) => format!("{path}::{}({})", variant.name, decoded.join(", ")),
-//RS                     VariantBody::Struct(_) => format!("{path}::{} {{ {} }}", variant.name, decoded.join(", ")),
-//RS                     VariantBody::Unsupported(_) => unreachable!(),
-//RS                 };
-//RS                 decode_arms.push(format!("        {tag} => Ok({constructor}),"));
-//RS             }
-//RS             writeln!(out, "fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n    match value {{\n{}\n    }}\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    match reader.read_u32()? {{\n{}\n        _ => Err(\"unknown native MIR enum tag\".to_string()),\n    }}\n}}\n", encode_arms.join("\n"), decode_arms.join("\n"))
-//RS                 .map_err(|error| error.to_string())?;
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn encode_expression(
-//RS     ty: &TypeExpr,
-//RS     expression: &str,
-//RS     writer: &str,
-//RS     schema: &Schema,
-//RS     reachable: &BTreeSet<String>,
-//RS     context: &Definition,
-//RS ) -> Result<String, String> {
-//RS     let mut out = String::new();
-//RS     match ty {
-//RS         TypeExpr::Option(inner) => {
-//RS             let body = encode_expression(inner, "__item", writer, schema, reachable, context)?;
-//RS             writeln!(out, "    match ({expression}).as_ref() {{ Some(__item) => {{ {writer}.write_u8(1);\n{body}    }}, None => {writer}.write_u8(0), }}\n").unwrap();
-//RS         }
-//RS         TypeExpr::Sequence(inner) => {
-//RS             let body = encode_expression(inner, "__item", writer, schema, reachable, context)?;
-//RS             writeln!(out, "    {writer}.write_u64(u64::try_from(({expression}).len()).map_err(|_| \"native MIR collection exceeds u64\".to_string())?);\n    for __item in ({expression}).iter() {{\n{body}    }}\n").unwrap();
-//RS         }
-//RS         TypeExpr::Set(inner, hash) => {
-//RS             let body = encode_expression(inner, "__item", "(&mut __item_writer)", schema, reachable, context)?;
-//RS             // Hash containers are walked in sorted order: interning assigns table
-//RS             // indices on first encounter, so the walk order must be canonical.
-//RS             let items = if *hash {
-//RS                 format!("{{ let mut __sorted = ({expression}).iter().collect::<Vec<_>>(); __sorted.sort(); __sorted }}")
-//RS             } else {
-//RS                 format!("({expression}).iter()")
-//RS             };
-//RS             writeln!(out, "    {{ let mut __items = Vec::with_capacity(({expression}).len()); for __item in {items} {{ let mut __item_writer = {writer}.child();\n{body}        __items.push(__item_writer.finish()); }} __items.sort(); if __items.windows(2).any(|pair| pair[0] == pair[1]) {{ return Err(\"duplicate native MIR set element encoding\".to_string()); }} {writer}.write_count(__items.len())?; for __item in __items {{ {writer}.write_bytes(&__item)?; }} }}\n").unwrap();
-//RS         }
-//RS         TypeExpr::Map(key, value, hash) => {
-//RS             let key_body = encode_expression(key, "__key", "(&mut __key_writer)", schema, reachable, context)?;
-//RS             let value_body = encode_expression(value, "__value", "(&mut __value_writer)", schema, reachable, context)?;
-//RS             let entries = if *hash {
-//RS                 format!("{{ let mut __sorted = ({expression}).iter().collect::<Vec<_>>(); __sorted.sort_by(|left, right| left.0.cmp(right.0)); __sorted }}")
-//RS             } else {
-//RS                 format!("({expression}).iter()")
-//RS             };
-//RS             writeln!(out, "    {{ let mut __entries = Vec::with_capacity(({expression}).len()); for (__key, __value) in {entries} {{ let __key_bytes = {{ let mut __key_writer = {writer}.child();\n{key_body}        __key_writer.finish() }}; let __value_bytes = {{ let mut __value_writer = {writer}.child();\n{value_body}        __value_writer.finish() }}; __entries.push((__key_bytes, __value_bytes)); }} __entries.sort_by(|left, right| left.0.cmp(&right.0)); if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate native MIR map key encoding\".to_string()); }} {writer}.write_count(__entries.len())?; for (__key, __value) in __entries {{ {writer}.write_bytes(&__key)?; {writer}.write_bytes(&__value)?; }} }}\n").unwrap();
-//RS         }
-//RS         TypeExpr::Array(inner, _) => {
-//RS             let body = encode_expression(inner, "__item", writer, schema, reachable, context)?;
-//RS             writeln!(out, "    for __item in ({expression}).iter() {{\n{body}    }}\n").unwrap();
-//RS         }
-//RS         TypeExpr::Boxed(inner) | TypeExpr::Arc(inner) => {
-//RS             return encode_expression(inner, &format!("({expression}).as_ref()"), writer, schema, reachable, context);
-//RS         }
-//RS         TypeExpr::Tuple(items) => {
-//RS             for (index, item) in items.iter().enumerate() {
-//RS                 out.push_str(&encode_expression(item, &format!("&({expression}).{index}"), writer, schema, reachable, context)?);
-//RS             }
-//RS         }
-//RS         TypeExpr::StaticStr => writeln!(out, "    {writer}.write_string({expression})?;\n").unwrap(),
-//RS         TypeExpr::Named(name) => emit_named_encode(&mut out, name, expression, writer, schema, reachable, context)?,
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn emit_named_encode(
-//RS     out: &mut String,
-//RS     name: &str,
-//RS     expression: &str,
-//RS     writer: &str,
-//RS     schema: &Schema,
-//RS     reachable: &BTreeSet<String>,
-//RS     context: &Definition,
-//RS ) -> Result<(), String> {
-//RS     match name {
-//RS         "String" => writeln!(out, "    {writer}.write_string(({expression}).as_str())?;\n").unwrap(),
-//RS         "PathBuf" | "std::path::PathBuf" => writeln!(out, "    {writer}.write_string(({expression}).to_str().ok_or_else(|| \"native MIR path is not valid UTF-8\".to_string())?)?;\n").unwrap(),
-//RS         "bool" => writeln!(out, "    {writer}.write_u8(u8::from(*({expression})));\n").unwrap(),
-//RS         "u8" => writeln!(out, "    {writer}.write_u8(*({expression}));\n").unwrap(),
-//RS         "u16" => writeln!(out, "    {writer}.write_u16(*({expression}));\n").unwrap(),
-//RS         "u32" => writeln!(out, "    {writer}.write_u32(*({expression}));\n").unwrap(),
-//RS         "u64" => writeln!(out, "    {writer}.write_u64(*({expression}));\n").unwrap(),
-//RS         "usize" => writeln!(out, "    {writer}.write_u64(u64::try_from(*({expression})).map_err(|_| \"native MIR usize exceeds u64\".to_string())?);\n").unwrap(),
-//RS         "i8" => writeln!(out, "    {writer}.write_u8(*({expression}) as u8);\n").unwrap(),
-//RS         "i16" | "i32" | "i64" => writeln!(out, "    {writer}.write_signed(i64::from(*({expression})));\n").unwrap(),
-//RS         "isize" => writeln!(out, "    {writer}.write_signed(*({expression}) as i64);\n").unwrap(),
-//RS         "f32" => writeln!(out, "    {writer}.write_fixed_u32(({expression}).to_bits());\n").unwrap(),
-//RS         "f64" => writeln!(out, "    {writer}.write_fixed_u64(({expression}).to_bits());\n").unwrap(),
-//RS         "char" => writeln!(out, "    {writer}.write_u32(*({expression}) as u32);\n").unwrap(),
-//RS         _ => {
-//RS             let key = resolve_type_name(schema, context, name)?;
-//RS             if !reachable.contains(&key) {
-//RS                 return Err(format!("native MIR type `{key}` is outside generated codec closure"));
-//RS             }
-//RS             let path = function_name("encode", &key);
-//RS             writeln!(out, "    {path}({expression}, &mut *{writer})?;\n").unwrap();
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn decode_expression(
-//RS     ty: &TypeExpr,
-//RS     reader: &str,
-//RS     schema: &Schema,
-//RS     reachable: &BTreeSet<String>,
-//RS     context: &Definition,
-//RS ) -> Result<String, String> {
-//RS     Ok(match ty {
-//RS         TypeExpr::Option(inner) => {
-//RS             let value = decode_expression(inner, reader, schema, reachable, context)?;
-//RS             format!("match {reader}.read_u8()? {{ 0 => None, 1 => Some({value}), _ => return Err(\"invalid native MIR option tag\".to_string()), }}")
-//RS         }
-//RS         TypeExpr::Sequence(inner) => {
-//RS             let value = decode_expression(inner, reader, schema, reachable, context)?;
-//RS             format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR sequence is too large\".to_string())?; for _ in 0..__count {{ __items.push({value}); }} __items }}")
-//RS         }
-//RS         TypeExpr::Set(inner, hash) => {
-//RS             let value = decode_expression(inner, "(&mut __item_reader)", schema, reachable, context)?;
-//RS             let container = if *hash { "std::collections::HashSet" } else { "std::collections::BTreeSet" };
-//RS             format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR set is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __bytes = {reader}.read_bytes()?; if !__seen.insert(__bytes.to_vec()) {{ return Err(\"duplicate native MIR set element\".to_string()); }} let mut __item_reader = {reader}.child(__bytes); let __item = {value}; __item_reader.finish()?; __items.push(__item); }} let __output = __items.into_iter().collect::<{container}<_>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR set element\".to_string()); }} __output }}")
-//RS         }
-//RS         TypeExpr::Map(key, value, hash) => {
-//RS             let key_value = decode_expression(key, "(&mut __key_reader)", schema, reachable, context)?;
-//RS             let value_value = decode_expression(value, "(&mut __value_reader)", schema, reachable, context)?;
-//RS             let container = if *hash { "std::collections::HashMap" } else { "std::collections::BTreeMap" };
-//RS             format!("{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR map is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __key_bytes = {reader}.read_bytes()?; let mut __key_reader = {reader}.child(__key_bytes); let __key = {key_value}; __key_reader.finish()?; if !__seen.insert(__key_bytes.to_vec()) {{ return Err(\"duplicate native MIR map key\".to_string()); }} let __value_bytes = {reader}.read_bytes()?; let mut __value_reader = {reader}.child(__value_bytes); let __value = {value_value}; __value_reader.finish()?; __items.push((__key, __value)); }} let __output = __items.into_iter().collect::<{container}<_, _>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR map key\".to_string()); }} __output }}")
-//RS         }
-//RS         TypeExpr::Boxed(inner) => format!("Box::new({})", decode_expression(inner, reader, schema, reachable, context)?),
-//RS         TypeExpr::Arc(inner) => format!("std::sync::Arc::new({})", decode_expression(inner, reader, schema, reachable, context)?),
-//RS         TypeExpr::Tuple(items) => {
-//RS             let values = items.iter().map(|item| decode_expression(item, reader, schema, reachable, context)).collect::<Result<Vec<_>, _>>()?;
-//RS             format!("({}{})", values.join(", "), if values.len() == 1 { "," } else { "" })
-//RS         }
-//RS         TypeExpr::Array(inner, length) => {
-//RS             let values = (0..*length)
-//RS                 .map(|_| decode_expression(inner, reader, schema, reachable, context))
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             format!("[{}]", values.join(", "))
-//RS         }
-//RS         TypeExpr::StaticStr => format!("mir_image_static_str({reader}.read_string()?)?"),
-//RS         TypeExpr::Named(name) => decode_named(name, reader, schema, reachable, context)?,
-//RS     })
-//RS }
-//RS 
-//RS fn decode_named(
-//RS     name: &str,
-//RS     reader: &str,
-//RS     schema: &Schema,
-//RS     reachable: &BTreeSet<String>,
-//RS     context: &Definition,
-//RS ) -> Result<String, String> {
-//RS     Ok(match name {
-//RS         "String" => format!("{reader}.read_string()?"),
-//RS         "PathBuf" | "std::path::PathBuf" => format!("std::path::PathBuf::from({reader}.read_string()?)"),
-//RS         "bool" => format!("match {reader}.read_u8()? {{ 0 => false, 1 => true, _ => return Err(\"invalid native MIR boolean\".to_string()), }}"),
-//RS         "u8" => format!("{reader}.read_u8()?"),
-//RS         "u16" => format!("{reader}.read_u16()?"),
-//RS         "u32" => format!("{reader}.read_u32()?"),
-//RS         "u64" => format!("{reader}.read_u64()?"),
-//RS         "usize" => format!("usize::try_from({reader}.read_u64()?).map_err(|_| \"native MIR usize exceeds host range\".to_string())?"),
-//RS         "i8" => format!("{reader}.read_u8()? as i8"),
-//RS         "i16" => format!("i16::try_from({reader}.read_signed()?).map_err(|_| \"native MIR i16 out of range\".to_string())?"),
-//RS         "i32" => format!("i32::try_from({reader}.read_signed()?).map_err(|_| \"native MIR i32 out of range\".to_string())?"),
-//RS         "i64" => format!("{reader}.read_signed()?"),
-//RS         "isize" => format!("isize::try_from({reader}.read_signed()?).map_err(|_| \"native MIR isize exceeds host range\".to_string())?"),
-//RS         "f32" => format!("f32::from_bits({reader}.read_fixed_u32()?)"),
-//RS         "f64" => format!("f64::from_bits({reader}.read_fixed_u64()?)"),
-//RS         "char" => format!("char::from_u32({reader}.read_u32()?).ok_or_else(|| \"invalid native MIR character\".to_string())?"),
-//RS         _ => {
-//RS             let key = resolve_type_name(schema, context, name)?;
-//RS             if !reachable.contains(&key) {
-//RS                 return Err(format!("native MIR type `{key}` is outside generated codec closure"));
-//RS             }
-//RS             format!("{}(&mut *{reader})?", function_name("decode", &key))
-//RS         }
-//RS     })
-//RS }
-//RS 
-//RS fn function_name(prefix: &str, key: &str) -> String {
-//RS     let suffix = key
-//RS         .chars()
-//RS         .map(|character| if character.is_ascii_alphanumeric() { character } else { '_' })
-//RS         .collect::<String>();
-//RS     format!("__mir_image_{prefix}_{suffix}")
-//RS }
-//RS fn find_next_definition(source: &str, from: usize) -> Option<(&'static str, usize)> {
-//RS     let mut next: Option<(&'static str, usize)> = None;
-//RS     for (kind, position) in [
-//RS         ("struct", find_keyword(source, "pub struct", from)),
-//RS         ("enum", find_keyword(source, "pub enum", from)),
-//RS         ("type", find_keyword(source, "pub type", from)),
-//RS     ] {
-//RS         if let Some(position) = position {
-//RS             if next.map_or(true, |(_, current)| position < current) {
-//RS                 next = Some((kind, position));
-//RS             }
-//RS         }
-//RS     }
-//RS     next
-//RS }
-//RS 
-//RS fn find_keyword(source: &str, keyword: &str, from: usize) -> Option<usize> {
-//RS     let mut cursor = from;
-//RS     while let Some(relative) = source[cursor..].find(keyword) {
-//RS         let index = cursor + relative;
-//RS         if boundary(source.as_bytes().get(index.wrapping_sub(1)).copied())
-//RS             && boundary(source.as_bytes().get(index + keyword.len()).copied())
-//RS         {
-//RS             return Some(index);
-//RS         }
-//RS         cursor = index + 1;
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn token_at(source: &str, index: usize, token: &str) -> bool {
-//RS     source[index..].starts_with(token)
-//RS         && boundary(source.as_bytes().get(index.wrapping_sub(1)).copied())
-//RS         && boundary(source.as_bytes().get(index + token.len()).copied())
-//RS }
-//RS 
-//RS fn boundary(byte: Option<u8>) -> bool {
-//RS     byte.map_or(true, |byte| !(byte.is_ascii_alphanumeric() || byte == b'_'))
-//RS }
-//RS 
-//RS fn read_identifier(input: &str, cursor: &mut usize) -> Result<String, String> {
-//RS     let start = *cursor;
-//RS     if input.as_bytes().get(*cursor..*cursor + 2) == Some(b"r#") {
-//RS         *cursor += 2;
-//RS     }
-//RS     let identifier_start = *cursor;
-//RS     while input.as_bytes().get(*cursor).is_some_and(|byte| byte.is_ascii_alphanumeric() || *byte == b'_') {
-//RS         *cursor += 1;
-//RS     }
-//RS     if *cursor == identifier_start {
-//RS         Err(format!("expected identifier at byte {start}"))
-//RS     } else {
-//RS         Ok(input[start..*cursor].to_string())
-//RS     }
-//RS }
-//RS 
-//RS fn is_identifier(value: &str) -> bool {
-//RS     let mut chars = value.chars();
-//RS     chars.next().is_some_and(|first| first == '_' || first.is_ascii_alphabetic())
-//RS         && chars.all(|character| character == '_' || character.is_ascii_alphanumeric())
-//RS }
-//RS 
-//RS fn skip_space(input: &str, cursor: &mut usize) {
-//RS     while input.as_bytes().get(*cursor).is_some_and(u8::is_ascii_whitespace) {
-//RS         *cursor += 1;
-//RS     }
-//RS }
-//RS 
-//RS fn matching_byte(input: &[u8], start: usize, open: u8, close: u8) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     for (index, byte) in input.iter().enumerate().skip(start) {
-//RS         if *byte == open {
-//RS             depth += 1;
-//RS         } else if *byte == close && !(close == b'>' && index > 0 && input[index - 1] == b'-') {
-//RS             depth = depth.checked_sub(1)?;
-//RS             if depth == 0 {
-//RS                 return Some(index);
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn top_level_byte(input: &str, wanted: u8) -> Option<usize> {
-//RS     let mut depth = 0usize;
-//RS     for (index, byte) in input.bytes().enumerate() {
-//RS         if byte == wanted && depth == 0 {
-//RS             return Some(index);
-//RS         }
-//RS         match byte {
-//RS             b'<' | b'(' | b'[' | b'{' => depth += 1,
-//RS             b'>' if index > 0 && input.as_bytes()[index - 1] == b'-' => {}
-//RS             b'>' | b')' | b']' | b'}' => depth = depth.saturating_sub(1),
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn split_top_level(input: &str, delimiter: char) -> Vec<&str> {
-//RS     let mut pieces = Vec::new();
-//RS     let mut depth = 0usize;
-//RS     let mut start = 0usize;
-//RS     for (index, character) in input.char_indices() {
-//RS         match character {
-//RS             '<' | '(' | '[' | '{' => depth += 1,
-//RS             '>' if index > 0 && input.as_bytes()[index - 1] == b'-' => {}
-//RS             '>' | ')' | ']' | '}' => depth = depth.saturating_sub(1),
-//RS             character if character == delimiter && depth == 0 => {
-//RS                 pieces.push(&input[start..index]);
-//RS                 start = index + character.len_utf8();
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     pieces.push(&input[start..]);
-//RS     pieces
-//RS }
-//RS 
-//RS 
-//RS #[cfg(test)]
-//RS mod tests {
-//RS     use super::*;
-//RS 
-//RS     #[test]
-//RS     fn grouped_imports_use_alias_or_final_path_component() {
-//RS         let mut imports = BTreeMap::new();
-//RS         insert_use_tree(
-//RS             "crate::Mir::{Value, Instruction as Op, nested::Block, *}",
-//RS             "crate::Image",
-//RS             &mut imports,
-//RS         );
-//RS         assert_eq!(
-//RS             imports,
-//RS             BTreeMap::from([
-//RS                 ("Value".to_string(), "crate::Mir::Value".to_string()),
-//RS                 ("Op".to_string(), "crate::Mir::Instruction".to_string()),
-//RS                 ("Block".to_string(), "crate::Mir::nested::Block".to_string()),
-//RS             ])
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn character_mask_preserves_lifetimes_and_nested_field_delimiters() {
-//RS         let source = "pub struct Rows { pub rows: &'static [(&'static str, Kind)], pub next: u64 }";
-//RS         let masked = mask_comments_and_literals(source);
-//RS         assert_eq!(masked, source);
-//RS         let definitions = parse_definitions(&masked, "crate::Rows", &BTreeMap::new()).unwrap();
-//RS         let Body::Struct(fields) = &definitions[0].body else {
-//RS             panic!("expected struct");
-//RS         };
-//RS         assert_eq!(fields.len(), 2);
-//RS         assert_eq!(fields[0].name, "rows");
-//RS         assert_eq!(fields[1].name, "next");
-//RS         assert_eq!(mask_comments_and_literals("&'a str, &'b str"), "&'a str, &'b str");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn character_mask_handles_unicode_and_escapes_without_hiding_following_code() {
-//RS         for literal in ["'a'", "'é'", "'中'", "'\u{10400}'", r"'\n'", r"'\''", r"'\\'", r"'\x7f'", r"'\u{10400}'"] {
-//RS             let source = format!("{literal}, following");
-//RS             let expected = format!("{}, following", " ".repeat(literal.len()));
-//RS             assert_eq!(mask_comments_and_literals(&source), expected, "{literal}");
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn function_arrows_do_not_close_generic_delimiters() {
-//RS         let ty = "Option<Arc<dyn Fn(u8) -> Result<(u8, u8), String>>>";
-//RS         assert_eq!(matching_byte(ty.as_bytes(), 6, b'<', b'>'), Some(ty.len() - 1));
-//RS         let fields = format!("pub callback: {ty}, pub next: u64");
-//RS         assert_eq!(split_top_level(&fields, ',').len(), 2);
-//RS         assert_eq!(parse_fields(&fields).unwrap().len(), 2);
-//RS         let suffix = format!("{ty}, following");
-//RS         assert_eq!(top_level_byte(&suffix, b','), Some(ty.len()));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn recursive_self_type_resolves_to_its_declaring_definition() {
-//RS         let definitions = parse_definitions(
-//RS             "pub enum Node { Leaf, Child(Box<Self>) }",
-//RS             "crate::Graph",
-//RS             &BTreeMap::new(),
-//RS         ).unwrap();
-//RS         let mut schema = Schema::default();
-//RS         let definition = definitions[0].clone();
-//RS         schema.definitions.insert(definition.key.clone(), definition.clone());
-//RS         assert_eq!(resolve_type_name(&schema, &definition, "Self").unwrap(), "crate::Graph::Node");
-//RS     }
-//RS     #[test]
-//RS     fn type_aliases_follow_imported_chains_and_container_wire_schema() {
-//RS         let source = mask_comments_and_literals(
-//RS             "use crate::Kinds::Kind;
-//RS              pub type KindAlias = Kind;
-//RS              pub type KindSet = BTreeSet<KindAlias>;
-//RS              pub struct MirProgram { pub items: KindSet }",
-//RS         );
-//RS         let imports = parse_imports(&source, "crate::MIR");
-//RS         let definitions = parse_definitions(&source, "crate::MIR", &imports).unwrap();
-//RS         let kind_definitions = parse_definitions(
-//RS             "pub type Code = u8; pub struct Kind { pub code: Code }",
-//RS             "crate::Kinds",
-//RS             &BTreeMap::new(),
-//RS         )
-//RS         .unwrap();
-//RS         let mut schema = Schema::default();
-//RS         for definition in kind_definitions.into_iter().chain(definitions) {
-//RS             schema.definitions.insert(definition.key.clone(), definition);
-// END-PORT-PENDING 2096 crates/jet-foundation/build/MirImageCodec.rs:1-1800
+use std.fs
+use std.str.from_utf8
 
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:6
+#Derive(Clone, Debug)
+enum TypeExpr {
+    Named(String); Option(TypeExpr); Sequence(TypeExpr); Set(TypeExpr, Bool)
+    Map(TypeExpr, TypeExpr, Bool); Boxed(TypeExpr); Arc(TypeExpr)
+    Tuple([TypeExpr]); Array(TypeExpr, USize); StaticStr
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:20
+#Derive(Clone, Debug)
+struct Field { name: String, ty: TypeExpr, public: Bool }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:27
+#Derive(Clone, Debug)
+enum VariantBody { Unit; Tuple([TypeExpr]); Struct([Field]); Unsupported(String) }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:35
+#Derive(Clone, Debug)
+struct Variant { name: String, body: VariantBody }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:41
+#Derive(Clone, Debug)
+enum Body { Struct([Field]); Tuple([Field]); Unit; Alias(TypeExpr); Enum([Variant]) }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:50
+#Derive(Clone, Debug)
+struct Definition { key: String, path: String, module: String, name: String, imports: [String:String], body: Body, generic: Bool }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:61
+#Derive(Default)
+struct Schema { definitions: [String:Definition], aliases: [String:String], wildcards: [(String, String)] }
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:68
+pub fn generate(manifest_dir: &OSPath, out_dir: &OSPath) -> {
+    source_root := manifest_dir.join("src")
+    files: [OSPath] = []
+    collect_rust_files(&source_root, &files)
+    files.sort()
+    schema := Schema.default()
+    for path in files {
+        println("cargo:rerun-if-changed={path.display()}")
+        // GATE #4494: native filesystem boundary.
+        source := fs.read_to_string(path).unwrap_or_else(fn(error) { panic("cannot read MIR image schema {path.display()}: {error}") })
+        relative := path.strip_prefix(&source_root).expect("collected schema path is under source root")
+        module := module_path(&relative)
+        masked := mask_comments_and_literals(&source)
+        imports := parse_imports(&masked, &module)
+        parse_public_uses(&masked, &module, &schema)
+        definitions := parse_definitions(&masked, &module, &imports).unwrap_or_else(fn(error) { panic("invalid native MIR image schema {path.display()}: {error}") })
+        for definition in ^definitions { schema.definitions.insert(definition.key.clone(), ^definition) }
+        if relative == OSPath.new("MIR.rs") {
+            for name in parse_mir_id_macro_invocations(&masked) {
+                key := "{module}::{name}"
+                schema.definitions.insert(key.clone(), Definition {
+                    key: ^key, path: "{module}::{name}", module: module.clone(), name: ^name,
+                    imports: imports.clone(), body: Body.Tuple([Field { name: "0", ty: TypeExpr.Named("u64"), public: true }]), generic: false
+                })
+            }
+        }
+    }
+    definition_keys := schema.definitions.keys().cloned().collect(); definition_keys.sort()
+    for (public_module, target_module) in schema.wildcards.clone() {
+        for key in definition_keys {
+            definition := schema.definitions.get(key).unwrap()
+            if definition.module == target_module { schema.aliases.insert("{public_module}::{definition.name}", definition.key.clone()) }
+        }
+    }
+    assign_public_paths(&schema)
+    reachable := reachable_schema(&schema, "crate::MIR::MirProgram").unwrap_or_else(fn(error) { panic("native MIR image schema is incomplete: {error}") })
+    output := emit_codec(&schema, &reachable, &INTERNED_DEFINITIONS).unwrap_or_else(fn(error) { panic("cannot generate native MIR image codec: {error}") })
+    // GATE #4494
+    fs.write(out_dir.join("mir_program_image_codec.rs"), output).expect("write generated native MIR image codec")
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:130
+fn collect_rust_files(root: &OSPath, output: &[OSPath]) -> {
+    // GATE #4494
+    for entry in fs.read_dir(root).expect("read Foundation source directory") {
+        entry := entry.expect("read Foundation source entry")
+        path := entry.path()
+        if path.is_dir() { collect_rust_files(&path, output) }
+        else { if path.extension().is_some_and(fn(extension) { extension == "rs" }) { output.push(^path) } }
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:142
+fn module_path(relative: &OSPath) -> String {
+    components: [String] = []
+    for component in relative.components() { if component.as_os_str().to_str() == Val(text) { components.push(text.to_string()) } }
+    if components.last().is_some_and(fn(last) { last == "mod.rs" || last == "lib.rs" }) { _ :: components.pop() }
+    else { if components.last_mut() == Val(last) { if last.strip_suffix(".rs") == Val(stem) { last = stem.to_string() } } }
+    if components.is_empty() { "crate" } else { "crate::{components.join("::")}" }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:162
+fn mask_comments_and_literals(source: &String) -> String {
+    bytes := source.as_bytes(); masked := bytes.to_vec(); index: USize = 0
+    while index < bytes.len() {
+        if bytes[index..].starts_with(b"//") {
+            start := index
+            while index < bytes.len() && bytes[index] != b'\n' { index += 1 }
+            blank(&masked, start, index)
+        } else if bytes[index..].starts_with(b"/*") {
+            start := index; index += 2; depth: USize = 1
+            while index < bytes.len() && depth != 0 {
+                if bytes[index..].starts_with(b"/*") { depth += 1; index += 2 }
+                else if bytes[index..].starts_with(b"*/") { depth -= 1; index += 2 }
+                else { index += 1 }
+            }
+            blank(&masked, start, index)
+        } else if raw_string_end(bytes, index) == Val(end) { blank(&masked, index, end); index = end }
+        else if bytes[index] == b'"' { start := index; index = quoted_end(bytes, index, b'"'); blank(&masked, start, index) }
+        else if bytes[index] == b'\'' && char_literal_end(bytes, index).is_some() {
+            start := index; index = char_literal_end(bytes, index).expect("checked character literal"); blank(&masked, start, index)
+        } else { index += 1 }
+    }
+    String.from_utf8(^masked).expect("masking preserves UTF-8")
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:207
+fn blank(bytes: &[U8], start: USize, end: USize) -> {
+    for byte in &bytes[start..end] { if byte != b'\n' && byte != b'\r' { byte = b' ' } }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:215
+fn raw_string_end(bytes: &[U8], start: USize) -> USize? {
+    cursor := start
+    if bytes.get(cursor) == Val(b'b') { cursor += 1 }
+    if bytes.get(cursor) != Val(b'r') { return None }
+    cursor += 1; hashes: USize = 0
+    while bytes.get(cursor) == Val(b'#') { hashes += 1; cursor += 1 }
+    if bytes.get(cursor) != Val(b'"') { return None }
+    cursor += 1
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'"' && bytes.get(cursor + 1..cursor + 1 + hashes).is_some_and(fn(suffix) { suffix.iter().all(fn(byte) { byte == b'#' }) }) { return Val(cursor + 1 + hashes) }
+        cursor += 1
+    }
+    Val(bytes.len())
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:245
+fn quoted_end(bytes: &[U8], start: USize, quote: U8) -> USize {
+    cursor := start + 1
+    while cursor < bytes.len() {
+        if bytes[cursor] == b'\\' { cursor = (cursor + 2).min(bytes.len()) }
+        else if bytes[cursor] == quote { return cursor + 1 }
+        else { cursor += 1 }
+    }
+    bytes.len()
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:259
+fn char_literal_end(bytes: &[U8], start: USize) -> USize? {
+    if bytes.get(start) != Val(b'\'') { return None }
+    cursor := start + 1
+    first := bytes.get(cursor) == { Val(first) -> first; None -> { return None } }
+    if first == b'\\' {
+        cursor += 1
+        byte := bytes.get(cursor) == { Val(byte) -> byte; None -> { return None } }
+        byte == {
+            b'u' -> {
+                cursor += 1
+                if bytes.get(cursor) != Val(b'{') { return None }
+                cursor += 1; digits: USize = 0
+                while bytes.get(cursor) == Val(byte) {
+                    if byte.is_ascii_hexdigit() { digits += 1 } else if byte != b'_' { break }
+                    cursor += 1
+                }
+                if digits == 0 || digits > 6 || bytes.get(cursor) != Val(b'}') { return None }
+                cursor += 1
+            }
+            b'x' -> {
+                cursor += 1
+                digits := bytes.get(cursor..cursor + 2) == { Val(digits) -> digits; None -> { return None } }
+                if !digits.iter().all(fn(byte) { byte.is_ascii_hexdigit() }) { return None }
+                cursor += 2
+            }
+            b'n' | b'r' | b't' | b'0' | b'\\' | b'\'' | b'"' -> { cursor += 1 }
+            _ -> { return None }
+        }
+    } else {
+        width := first == {
+            b'\'' | b'\n' | b'\r' -> { return None }
+            0..=0x7f -> 1
+            0xc2..=0xdf -> 2
+            0xe0..=0xef -> 3
+            0xf0..=0xf4 -> 4
+            _ -> { return None }
+        }
+        text := bytes.get(cursor..cursor + width) == { Val(text) -> text; None -> { return None } }
+        if from_utf8(text).is_err() { return None }
+        cursor += width
+    }
+    if bytes.get(cursor) == Val(b'\'') { Val(cursor + 1) } else { None }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:313
+fn parse_imports(source: &String, module: &String) -> [String:String] {
+    imports: [String:String] = [:]; bytes := source.as_bytes(); cursor: USize = 0; depth: USize = 0
+    while cursor < bytes.len() {
+        bytes[cursor] == {
+            b'{' -> { depth += 1 }
+            b'}' -> { depth = depth.saturating_sub(1) }
+            b'u' if depth == 0 && token_at(source, cursor, "use") -> {
+                start := cursor + 3
+                if source[start..].find(';') == Val(end) {
+                    statement := source[start..start + end].trim() // #4303
+                    if !statement.starts_with("=") { insert_use_tree(&statement, module, &imports) }
+                    cursor = start + end + 1; continue
+                }
+            }
+            _ -> {}
+        }
+        cursor += 1
+    }
+    ^imports
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:340
+fn parse_public_uses(source: &String, module: &String, schema: &Schema) -> {
+    bytes := source.as_bytes(); cursor: USize = 0; depth: USize = 0
+    while cursor < bytes.len() {
+        bytes[cursor] == {
+            b'{' -> { depth += 1 }
+            b'}' -> { depth = depth.saturating_sub(1) }
+            b'p' if depth == 0 && token_at(source, cursor, "pub use") -> {
+                start := cursor + "pub use".len()
+                if source[start..].find(';') == Val(end) {
+                    statement := source[start..start + end].trim() // #4303
+                    insert_public_use_tree(&statement, module, schema)
+                    cursor = start + end + 1; continue
+                }
+            }
+            _ -> {}
+        }
+        cursor += 1
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:363
+fn insert_use_tree(statement: &String, module: &String, imports: &[String:String]) -> {
+    if top_level_byte(statement, b'{') == Val(open) {
+        prefix := statement[..open].trim().trim_end_matches(":") // #4303
+        close := matching_byte(statement.as_bytes(), open, b'{', b'}') == { Val(close) -> close; None -> { return } }
+        for item in split_top_level(&statement[open + 1..close], ',') {
+            item := item.trim() // #4303
+            if item.is_empty() || item == "*" { continue }
+            (name, alias) := split_alias(&item)
+            path := normalize_module_path(module, &"{prefix}::{name}")
+            local_name := alias.unwrap_or(name.rsplit("::").next().unwrap_or(&name))
+            imports.insert(local_name.to_string(), ^path)
+        }
+    } else {
+        statement := statement.trim() // #4303
+        (path, alias) := split_alias(&statement)
+        path := normalize_module_path(module, &path)
+        name := alias.or_else(fn() { path.rsplit("::").next() }).unwrap_or(&path)
+        imports.insert(name.to_string(), ^path)
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:389
+fn insert_public_use_tree(statement: &String, module: &String, schema: &Schema) -> {
+    if top_level_byte(statement, b'{') == Val(open) {
+        prefix := statement[..open].trim().trim_end_matches(":") // #4303
+        close := matching_byte(statement.as_bytes(), open, b'{', b'}') == { Val(close) -> close; None -> { return } }
+        for item in split_top_level(&statement[open + 1..close], ',') {
+            item := item.trim() // #4303
+            if item.is_empty() { continue }
+            if item == "*" { schema.wildcards.push((module.to_string(), normalize_module_path(module, &prefix))); continue }
+            (name, alias) := split_alias(&item)
+            target := normalize_module_path(module, &"{prefix}::{name}")
+            export := "{module}::{alias.unwrap_or(name.rsplit("::").next().unwrap_or(&name))}"
+            schema.aliases.insert(^export, ^target)
+        }
+    } else {
+        statement := statement.trim() // #4303
+        if statement.ends_with("::*") {
+            prefix := statement.trim_end_matches("::*") // #4303
+            schema.wildcards.push((module.to_string(), normalize_module_path(module, &prefix)))
+        } else {
+            (name, alias) := split_alias(&statement)
+            target := normalize_module_path(module, &name)
+            export := "{module}::{alias.unwrap_or(name.rsplit("::").next().unwrap_or(&name))}"
+            schema.aliases.insert(^export, ^target)
+        }
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:427
+fn split_alias(item: &String) -> (&String, &String?) {
+    parts := item.splitn(2, " as ")
+    name := parts.next().unwrap_or(item).trim() // #4303
+    alias := parts.next().map(fn(value) { value.trim() }) // #4303
+    (name, alias)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:434
+fn normalize_module_path(module: &String, path: &String) -> String {
+    path := path.trim() // #4303
+    if path.starts_with("crate::") || path.starts_with("std::") || path.starts_with("core::") || path == "crate" { return path.to_string() }
+    components := module.split("::").map(fn(value) { value.to_string() }).collect()
+    if path.starts_with("self::") { components.extend(path[6..].split("::").map(fn(value) { value.to_string() })) }
+    else if path.starts_with("super::") {
+        while components.len() > 1 && components.last().is_some_and(fn(part) { part == "super" }) { _ :: components.pop() }
+        _ :: components.pop()
+        components.extend(path[7..].split("::").map(fn(value) { value.to_string() }))
+    } else { components.extend(path.split("::").map(fn(value) { value.to_string() })) }
+    if components.first().is_some_and(fn(part) { part != "crate" }) { components.insert(0, "crate") }
+    components.join("::")
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:465
+fn parse_definitions(source: &String, module: &String, imports: &[String:String]) -> [Definition] Err! {
+    definitions: [Definition] = []; cursor: USize = 0
+    while find_next_definition(source, cursor) == Val((kind, start)) {
+        prefix := kind == { "struct" -> "pub struct"; "enum" -> "pub enum"; "type" -> "pub type"; _ -> { panic("unknown native MIR definition kind") } }
+        position := start + prefix.len(); skip_space(source, &position)
+        if source.as_bytes().get(position) == Val(b'$') { cursor = skip_macro_declaration(source, position); continue }
+        name := read_identifier(source, &position)?; skip_space(source, &position)
+        generic := source.as_bytes().get(position) == Val(b'<')
+        if generic {
+            end := matching_byte(source.as_bytes(), position, b'<', b'>').ok_or_else(fn() { "unclosed generic parameter list for `{name}`" })?
+            position = end + 1; skip_space(source, &position)
+        }
+        body := if kind == "type" {
+            equals := top_level_byte(&source[position..], b'=').ok_or_else(fn() { "type alias `{name}` has no right-hand side" })?
+            rhs_start := position + equals + 1
+            end := top_level_byte(&source[rhs_start..], b';').ok_or_else(fn() { "type alias `{name}` has no terminating semicolon" })?
+            rhs := source[rhs_start..rhs_start + end].trim() // #4303
+            position = rhs_start + end + 1
+            Body.Alias(parse_type(&rhs)?)
+        } else {
+            source.as_bytes().get(position) == {
+                Val(b'{') -> {
+                    end := matching_byte(source.as_bytes(), position, b'{', b'}').ok_or_else(fn() { "unclosed declaration body for `{name}`" })?
+                    text := source[position + 1..end] // #4303
+                    body := if kind == "struct" { Body.Struct(parse_fields(&text)?) } else { Body.Enum(parse_variants(&text)?) }
+                    position = end + 1; ^body
+                }
+                Val(b'(') if kind == "struct" -> {
+                    end := matching_byte(source.as_bytes(), position, b'(', b')').ok_or_else(fn() { "unclosed tuple struct `{name}`" })?
+                    fields: [Field] = []
+                    for field in split_top_level(&source[position + 1..end], ',') {
+                        field := field.trim() // #4303
+                        if field.is_empty() { continue }
+                        fields.push(Field { name: fields.len().to_string(), public: field.starts_with("pub ") || field.starts_with("pub("), ty: parse_type(&strip_visibility(&field))? })
+                    }
+                    position = end + 1; Body.Tuple(^fields)
+                }
+                Val(b';') if kind == "struct" -> { position += 1; Body.Unit }
+                _ -> { return Err("unsupported body for `{name}`") }
+            }
+        }
+        key := "{module}::{name}"
+        definitions.push(Definition { key: key.clone(), path: ^key, module: module.to_string(), name: ^name, imports: imports.clone(), body: ^body, generic: generic })
+        cursor = position
+    }
+    Ok(^definitions)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:559
+fn skip_macro_declaration(source: &String, start: USize) -> USize {
+    bytes := source.as_bytes(); cursor := start; depth: USize = 0
+    while cursor < bytes.len() {
+        bytes[cursor] == {
+            b'(' | b'[' | b'{' | b'<' -> { depth += 1 }
+            b'>' if cursor > 0 && bytes[cursor - 1] == b'-' -> {}
+            b')' | b']' | b'}' | b'>' -> { depth = depth.saturating_sub(1) }
+            b';' if depth == 0 -> { return cursor + 1 }
+            _ -> {}
+        }
+        cursor += 1
+    }
+    bytes.len()
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:575
+fn parse_mir_id_macro_invocations(source: &String) -> [String] {
+    output: [String] = []; cursor: USize = 0
+    while source[cursor..].find("mir_id!") == Val(index) {
+        start := cursor + index + "mir_id!".len()
+        open := source[start..].find('(') == { Val(offset) -> start + offset; None -> { break } }
+        close := matching_byte(source.as_bytes(), open, b'(', b')') == { Val(close) -> close; None -> { break } }
+        name := source[open + 1..close].trim() // #4303
+        if is_identifier(&name) { output.push(name.to_string()) }
+        cursor = close + 1
+    }
+    ^output
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:595
+fn parse_fields(body: &String) -> [Field] Err! {
+    fields: [Field] = []
+    for raw in split_top_level(body, ',') {
+        trimmed := raw.trim() // #4303
+        raw := strip_attributes(&trimmed)
+        if raw.is_empty() { continue }
+        colon := top_level_byte(&raw, b':').ok_or_else(fn() { "struct field has no type: `{raw}`" })?
+        declaration := raw[..colon].trim() // #4303
+        name := strip_visibility(&declaration).split_whitespace().last().ok_or_else(fn() { "struct field has no name: `{raw}`" })?.to_string()
+        field_type := raw[colon + 1..].trim() // #4303
+        fields.push(Field { name: ^name, public: declaration.starts_with("pub ") || declaration.starts_with("pub("), ty: parse_type(&field_type)? })
+    }
+    Ok(^fields)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:619
+fn variant_suffix_supported(suffix: &String) -> Bool {
+    suffix := suffix.trim() // #4303
+    suffix.is_empty() || suffix.strip_prefix('=').is_some_and(fn(value) { !value.trim().is_empty() })
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:624
+fn parse_variants(body: &String) -> [Variant] Err! {
+    variants: [Variant] = []
+    for raw in split_top_level(body, ',') {
+        trimmed := raw.trim() // #4303
+        raw := strip_attributes(&trimmed)
+        if raw.is_empty() { continue }
+        cursor: USize = 0; name := read_identifier(&raw, &cursor)?; skip_space(&raw, &cursor)
+        variant_body := raw.as_bytes().get(cursor) == {
+            Val(b'(') -> {
+                end := matching_byte(raw.as_bytes(), cursor, b'(', b')').ok_or_else(fn() { "unclosed tuple variant `{name}`" })?
+                if variant_suffix_supported(&raw[end + 1..]) {
+                    fields: [TypeExpr] = []
+                    for field in split_top_level(&raw[cursor + 1..end], ',') { field := field.trim(); if !field.is_empty() { fields.push(parse_type(&field)?) } } // #4303
+                    VariantBody.Tuple(^fields)
+                } else { suffix := raw[end + 1..].trim(); VariantBody.Unsupported(suffix.to_string()) } // #4303
+            }
+            Val(b'{') -> {
+                end := matching_byte(raw.as_bytes(), cursor, b'{', b'}').ok_or_else(fn() { "unclosed struct variant `{name}`" })?
+                if variant_suffix_supported(&raw[end + 1..]) {
+                    fields := parse_fields(&raw[cursor + 1..end])?
+                    for field in &fields { field.public = true }
+                    VariantBody.Struct(^fields)
+                } else { suffix := raw[end + 1..].trim(); VariantBody.Unsupported(suffix.to_string()) } // #4303
+            }
+            None -> VariantBody.Unit
+            Val(b'=') if variant_suffix_supported(&raw[cursor..]) -> VariantBody.Unit
+            _ -> { suffix := raw[cursor..].trim(); VariantBody.Unsupported(suffix.to_string()) } // #4303
+        }
+        variants.push(Variant { name: ^name, body: ^variant_body })
+    }
+    Ok(^variants)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:672
+fn strip_attributes(input: &String) -> &String {
+    remaining := input
+    loop {
+        remaining = remaining.trim_start() // #4303
+        if !remaining.starts_with("#[") { return remaining }
+        end := matching_byte(remaining.as_bytes(), 1, b'[', b']') == { Val(end) -> end; None -> { return remaining } }
+        remaining = remaining[end + 1..] // #4303
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:685
+fn strip_visibility(input: &String) -> &String {
+    input := input.trim() // #4303
+    if input.strip_prefix("pub(") == Val(rest) {
+        return rest.find(')') == { Val(end) -> rest[end + 1..].trim(); None -> input } // #4303
+    }
+    input.strip_prefix("pub ").unwrap_or(&input).trim() // #4303
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:696
+fn parse_type(input: &String) -> TypeExpr Err! {
+    input := input.trim() // #4303
+    if input == "&'static str" || input == "& str" { return Ok(TypeExpr.StaticStr) }
+    if generic_inner(&input, "Option") == Val(inner) { return Ok(TypeExpr.Option(parse_type(&inner)?)) }
+    if generic_inner(&input, "Vec") == Val(inner) { return Ok(TypeExpr.Sequence(parse_type(&inner)?)) }
+    if generic_inner(&input, "Box") == Val(inner) { return Ok(TypeExpr.Boxed(parse_type(&inner)?)) }
+    if generic_inner(&input, "Arc") == Val(inner) { return Ok(TypeExpr.Arc(parse_type(&inner)?)) }
+    if generic_inner(&input, "BTreeSet") == Val(inner) { return Ok(TypeExpr.Set(parse_type(&inner)?, false)) }
+    if generic_inner(&input, "HashSet") == Val(inner) { return Ok(TypeExpr.Set(parse_type(&inner)?, true)) }
+    if generic_inner(&input, "BTreeMap") == Val(inner) { return Ok(parse_map(&inner, false).unwrap_or_else(fn(_) { TypeExpr.Named(input.to_string()) })) }
+    if generic_inner(&input, "HashMap") == Val(inner) { return Ok(parse_map(&inner, true).unwrap_or_else(fn(_) { TypeExpr.Named(input.to_string()) })) }
+    if input.starts_with('(') && input.ends_with(')') {
+        values: [TypeExpr] = []
+        for value in split_top_level(&input[1..input.len() - 1], ',') { value := value.trim(); if !value.is_empty() { values.push(parse_type(&value)?) } } // #4303
+        return Ok(TypeExpr.Tuple(^values))
+    }
+    if input.starts_with('[') && input.ends_with(']') {
+        parts := split_top_level(&input[1..input.len() - 1], ';')
+        if parts.len() == 2 {
+            text := parts[1].trim() // #4303
+            if text.parse<USize>() == Ok(length) { element := parts[0].trim(); return Ok(TypeExpr.Array(parse_type(&element)?, length)) } // #4303
+        }
+        return Ok(TypeExpr.Named(input.to_string()))
+    }
+    if input.is_empty() { return Err("empty native MIR image field type") }
+    Ok(TypeExpr.Named(input.to_string()))
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:747
+fn parse_map(input: &String, hash: Bool) -> TypeExpr Err! {
+    parts := split_top_level(input, ',')
+    if parts.len() != 2 { return Err("native MIR map has invalid parameters `{input}`") }
+    key := parts[0].trim(); value := parts[1].trim() // #4303
+    Ok(TypeExpr.Map(parse_type(&key)?, parse_type(&value)?, hash))
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:759
+fn generic_inner(input: &String, name: &String) -> &String? {
+    if input.split_once('<') == Val((outer, arguments)) {
+        outer := outer.rsplit("::").next().unwrap_or(outer)
+        if outer != name { return None }
+        arguments.strip_suffix('>')
+    } else { None }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:768
+fn reachable_schema(schema: &Schema, root: &String) -> HashSet<String> Err! {
+    pending := [root.to_string()]; reachable := HashSet<String>.new(); alias_visiting: [String] = []; checked_aliases := HashSet<String>.new()
+    while pending.pop() == Val(key) {
+        key := resolve_alias(schema, &key)?
+        if !reachable.insert(key.clone()) { continue }
+        definition := schema.definitions.get(&key).ok_or_else(fn() { "missing declaration for `{key}`" })?
+        if definition.generic {
+            if definition.body == Body.Alias(_) { return Err("generic native MIR type alias `{definition.key}` needs an explicit instantiated wire schema") }
+            return Err("generic native MIR type `{definition.key}` needs an explicit instantiated wire schema")
+        }
+        if definition.body == Body.Alias(_) { detect_alias_cycle(schema, &key, &alias_visiting, &checked_aliases)? }
+        if definition.body == Body.Enum(variants) {
+            for variant in variants { if variant.body == VariantBody.Unsupported(reason) { return Err("enum `{definition.key}` variant `{variant.name}` has unsupported wire syntax `{reason}`") } }
+        }
+        if definition.module != "crate::MIR" {
+            for field in body_fields(&definition.body) { if !field.public { return Err("native MIR image cannot access private field `{field.name}` in `{definition.key}`") } }
+        }
+        names: [String] = []; collect_named_types(&definition.body, &names)
+        for name in names { if !is_builtin(&name) { pending.push(resolve_type_name(schema, definition, &name)?) } }
+    }
+    Ok(^reachable)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:837
+fn detect_alias_cycle(schema: &Schema, key: &String, visiting: &[String], checked: &HashSet<String>) -> Unit Err! {
+    key := resolve_alias(schema, key)?
+    definition := schema.definitions.get(&key).ok_or_else(fn() { "missing declaration for `{key}`" })?
+    if definition.generic {
+        kind := if definition.body == Body.Alias(_) { "type alias" } else { "type" }
+        return Err("generic native MIR {kind} `{definition.key}` needs an explicit instantiated wire schema")
+    }
+    if !(definition.body == Body.Alias(_)) || checked.contains(&key) { return Ok(()) }
+    if visiting.iter().position(fn(item) { item == key }) == Val(index) {
+        cycle := visiting[index..].to_vec(); cycle.push(^key)
+        return Err("cyclic native MIR type aliases: {cycle.join(" -> ")}")
+    }
+    visiting.push(key.clone()); names: [String] = []; collect_named_types(&definition.body, &names)
+    for name in names { if !is_builtin(&name) { target := resolve_type_name(schema, definition, &name)?; detect_alias_cycle(schema, &target, visiting, checked)? } }
+    _ :: visiting.pop(); _ :: checked.insert(^key)
+    Ok(())
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:887
+fn collect_named_types(body: &Body, names: &[String]) -> {
+    // Rust: crates/jet-foundation/build/MirImageCodec.rs:888
+    fn collect(ty: &TypeExpr, names: &[String]) -> {
+        ty == {
+            TypeExpr.Named(name) -> names.push(name.clone())
+            TypeExpr.Option(inner) | TypeExpr.Sequence(inner) | TypeExpr.Set(inner, _) | TypeExpr.Boxed(inner) | TypeExpr.Arc(inner) | TypeExpr.Array(inner, _) -> collect(inner, names)
+            TypeExpr.Map(key, value, _) -> { collect(key, names); collect(value, names) }
+            TypeExpr.Tuple(items) -> { for item in items { collect(item, names) } }
+            TypeExpr.StaticStr -> {}
+        }
+    }
+    body == {
+        Body.Struct(fields) | Body.Tuple(fields) -> { for field in fields { collect(&field.ty, names) } }
+        Body.Alias(ty) -> collect(ty, names)
+        Body.Enum(variants) -> {
+            for variant in variants {
+                variant.body == {
+                    VariantBody.Unit | VariantBody.Unsupported(_) -> {}
+                    VariantBody.Tuple(fields) -> { for field in fields { collect(field, names) } }
+                    VariantBody.Struct(fields) -> { for field in fields { collect(&field.ty, names) } }
+                }
+            }
+        }
+        Body.Unit -> {}
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:923
+fn body_fields(body: &Body) -> [&Field] {
+    fields: [&Field] = []
+    body == {
+        Body.Struct(items) | Body.Tuple(items) -> { for field in items { fields.push(field) } }
+        Body.Enum(variants) -> { for variant in variants { if variant.body == VariantBody.Struct(items) { for field in items { fields.push(field) } } } }
+        Body.Alias(_) | Body.Unit -> {}
+    }
+    ^fields
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:937
+fn is_builtin(name: &String) -> Bool {
+    name == {
+        "String" | "bool" | "u8" | "u16" | "u32" | "u64" | "usize" | "i8" | "i16" | "i32" | "i64" | "isize" | "f32" | "f64" | "char" | "str" | "PathBuf" | "std::path::PathBuf" -> true
+        _ -> false
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:945
+fn generic_type_base(name: &String) -> &String? {
+    open := top_level_byte(name, b'<') == { Val(open) -> open; None -> { return None } }
+    close := matching_byte(name.as_bytes(), open, b'<', b'>') == { Val(close) -> close; None -> { return None } }
+    if close + 1 != name.len() { return None }
+    base := name[..open].trim() // #4303
+    if base.is_empty() { None } else { Val(base) }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:955
+fn resolve_type_name(schema: &Schema, definition: &Definition, name: &String) -> String Err! {
+    if generic_type_base(name) == Val(base) {
+        if !is_builtin(&base) {
+            if resolve_type_name(schema, definition, &base) == Ok(key) {
+                if schema.definitions.get(&key) == Val(target) {
+                    if target.generic {
+                        kind := if target.body == Body.Alias(_) { "type alias" } else { "type" }
+                        return Err("generic native MIR {kind} `{key}` needs an explicit instantiated wire schema")
+                    }
+                }
+            }
+        }
+        return Err("unsupported generic native MIR type `{name}` referenced by `{definition.key}`")
+    }
+    if name == "Self" { return Ok(definition.key.clone()) }
+    if schema.definitions.get(&"{definition.module}::{name}") == Val(local) { return Ok(local.key.clone()) }
+    if definition.imports.get(name) == Val(imported) { return resolve_alias(schema, imported) }
+    normalized := normalize_module_path(&definition.module, name)
+    if schema.definitions.contains_key(&normalized) || schema.aliases.contains_key(&normalized) { return resolve_alias(schema, &normalized) }
+    candidates: [String] = []
+    for candidate in schema.definitions.values() { if candidate.name == name { candidates.push(candidate.key.clone()) } }
+    if candidates.len() == 1 { Ok(candidates[0].clone()) }
+    else if candidates.is_empty() { Err("unknown native MIR type `{name}` referenced by `{definition.key}`") }
+    else { Err("ambiguous native MIR type `{name}` referenced by `{definition.key}`") }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1004
+fn resolve_alias(schema: &Schema, path: &String) -> String Err! {
+    current := path.to_string(); seen := HashSet<String>.new()
+    loop {
+        if !seen.insert(current.clone()) { return Err("cyclic native MIR type alias `{path}`") }
+        if schema.definitions.contains_key(&current) { return Ok(^current) }
+        if schema.aliases.get(&current) == Val(next) { current = next.clone() } else { return Err("unknown native MIR type path `{current}`") }
+    }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1022
+fn assign_public_paths(schema: &Schema) -> {
+    paths: [String:String] = [:]
+    for key in schema.definitions.keys() { paths.insert(key.clone(), key.clone()) }
+    exports := schema.aliases.keys().cloned().collect(); exports.sort()
+    for export in exports {
+        if resolve_alias(schema, &export) == Ok(key) {
+            path := paths.get_mut(&key).expect("resolved schema definition")
+            if (export.matches("::").count(), &export) < (path.matches("::").count(), path) { path = export.clone() }
+        }
+    }
+    for (key, path) in ^paths { schema.definitions.get_mut(&key).unwrap().path = ^path }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1045
+// Large or repeating values occur once, with varint indices at every use.
+const INTERNED_DEFINITIONS: [String] = ["crate::MIR::MirType", "crate::Diagnostics::Span", "crate::MIR::MirOwnership", "crate::Names::NameReference", "crate::MIR::MirValueId", "crate::MIR::MirBlockId", "crate::MIR::MirPlaceId"]
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1055
+fn emit_codec(schema: &Schema, reachable: &HashSet<String>, interned: &[String]) -> String Err! {
+    out := String.new()
+    for key in interned { if !reachable.contains(key) { return Err("interned native MIR definition `{key}` is outside the codec closure") } }
+    emit_runtime_codec_primitives(&out, schema, interned)?
+    keys := reachable.iter().cloned().collect(); keys.sort()
+    for key in keys { definition := schema.definitions.get(&key).expect("reachable definition"); emit_definition_codec(&out, schema, reachable, definition, interned)? }
+    root := schema.definitions.get("crate::MIR::MirProgram").ok_or("missing root MirProgram")?
+    encode_root := function_name("encode", &root.key); decode_root := function_name("decode", &root.key)
+    // Generated Rust source is the reference generator's data output, not a Rust callback.
+    // Writer validation is not repeated by the reader: image callers seal or revalidate bytes.
+    out.push_str("pub fn mir_program_image_bytes(value: &MirProgram) -> Result<Vec<u8>, String> {{\n    value.validate().map_err(|error| format!(\"invalid MIR image source: {{error}}\"))?;\n    let mut interner = MirProgramImageInterner::default();\n    let mut writer = MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut interner }};\n    {encode_root}(value, &mut writer)?;\n    let body = writer.finish();\n    mir_image_assemble(interner, body)\n}}\npub fn mir_program_from_image_bytes(bytes: &[u8]) -> Result<MirProgram, String> {{\n    let (tables, cursor) = mir_image_read_tables(bytes)?;\n    let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n    let value = {decode_root}(&mut reader)?;\n    reader.finish()?;\n    Ok(value)\n}}\n\n")
+    Ok(^out)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1095
+// Canonical LEB128, zigzag signed values, fixed little-endian floats, deterministic containers.
+fn emit_runtime_codec_primitives(out: &String, schema: &Schema, interned: &[String]) -> Unit Err! {
+    table_fields := String.new()
+    for key in interned {
+        definition := schema.definitions.get(key).ok_or_else(fn() { "missing interned native MIR definition `{key}`" })?
+        table_fields.push_str("    {function_name("interned", key)}: Vec<{definition.path}>,\n")
+    }
+    decode_entries := String.new()
+    for (kind, key) in interned.iter().enumerate() {
+        decode_entries.push_str("            {kind} => {{ let value = {function_name("decode_entry", key)}(&mut reader)?; cursor = reader.cursor; tables.{function_name("interned", key)}.push(value); }}\n")
+    }
+    out.push_str("#[derive(Default)]\nstruct MirProgramImageTables {{\n    strings: Vec<String>,\n{table_fields}}}\n#[derive(Default)]\nstruct MirProgramImageInterner {{\n    strings: std::collections::HashMap<String, u64>,\n    string_table: Vec<u8>,\n    entries: std::collections::HashMap<(u32, Vec<u8>), u64>,\n    kind_counts: [u64; {interned.len()}],\n    entry_table: Vec<u8>,\n    entry_count: u64,\n}}\n")
+    // Nested values are interned first; table references point only backwards.
+    out.push_str("fn mir_image_read_tables(bytes: &[u8]) -> Result<(MirProgramImageTables, usize), String> {{\n    let mut tables = MirProgramImageTables::default();\n    let mut cursor = {{\n        let mut reader = MirProgramImageReader::new(bytes, &tables);\n        let string_count = reader.read_count()?;\n        let mut strings = Vec::new();\n        strings.try_reserve_exact(string_count).map_err(|_| \"native MIR string table is too large\".to_string())?;\n        for _ in 0..string_count {{\n            let length = reader.read_len()?;\n            let text = std::str::from_utf8(reader.read_raw(length)?).map_err(|_| \"native MIR image string is not UTF-8\".to_string())?;\n            strings.push(text.to_string());\n        }}\n        let cursor = reader.cursor;\n        tables.strings = strings;\n        cursor\n    }};\n    let entry_count = {{\n        let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n        let count = reader.read_count()?;\n        cursor = reader.cursor;\n        count\n    }};\n    for _ in 0..entry_count {{\n        let mut reader = MirProgramImageReader {{ bytes, cursor, tables: &tables }};\n        match reader.read_varint()? {{\n{decode_entries}            _ => return Err(\"unknown native MIR image table entry kind\".to_string()),\n        }}\n    }}\n    Ok((tables, cursor))\n}}\n")
+    out.push_str("""
+fn mir_image_push_varint(bytes: &mut Vec<u8>, mut value: u64) {{
+    while value >= 0x80 {{
+        bytes.push((value as u8) | 0x80);
+        value >>= 7;
+    }}
+    bytes.push(value as u8);
+}}
+fn mir_image_assemble(interner: MirProgramImageInterner, body: Vec<u8>) -> Result<Vec<u8>, String> {{
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(interner.string_table.len() + interner.entry_table.len() + body.len() + 20).map_err(|_| "native MIR image is too large to allocate".to_string())?;
+    mir_image_push_varint(&mut bytes, u64::try_from(interner.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?);
+    bytes.extend_from_slice(&interner.string_table);
+    mir_image_push_varint(&mut bytes, interner.entry_count);
+    bytes.extend_from_slice(&interner.entry_table);
+    bytes.extend_from_slice(&body);
+    Ok(bytes)
+}}
+#[allow(dead_code)]
+impl MirProgramImageInterner {{
+    fn intern_string(&mut self, value: &str) -> Result<u64, String> {{
+        if let Some(index) = self.strings.get(value) {{ return Ok(*index); }}
+        let index = u64::try_from(self.strings.len()).map_err(|_| "native MIR string table exceeds u64".to_string())?;
+        mir_image_push_varint(&mut self.string_table, u64::try_from(value.len()).map_err(|_| "MIR image string exceeds u64".to_string())?);
+        self.string_table.extend_from_slice(value.as_bytes());
+        self.strings.insert(value.to_string(), index);
+        Ok(index)
+    }}
+    fn intern_entry(&mut self, kind: u32, entry: Vec<u8>) -> u64 {{
+        let next = self.kind_counts[kind as usize];
+        match self.entries.entry((kind, entry)) {{
+            std::collections::hash_map::Entry::Occupied(found) => *found.get(),
+            std::collections::hash_map::Entry::Vacant(slot) => {{
+                mir_image_push_varint(&mut self.entry_table, u64::from(kind));
+                self.entry_table.extend_from_slice(&slot.key().1);
+                self.entry_count += 1;
+                self.kind_counts[kind as usize] += 1;
+                slot.insert(next);
+                next
+            }}
+        }}
+    }}
+}}
+struct MirProgramImageWriter<'t> {{ bytes: Vec<u8>, interner: &'t mut MirProgramImageInterner }}
+#[allow(dead_code)]
+impl<'t> MirProgramImageWriter<'t> {{
+    fn child(&mut self) -> MirProgramImageWriter<'_> {{ MirProgramImageWriter {{ bytes: Vec::new(), interner: &mut *self.interner }} }}
+    fn write_u8(&mut self, value: u8) {{ self.bytes.push(value); }}
+    fn write_varint(&mut self, value: u64) {{ mir_image_push_varint(&mut self.bytes, value); }}
+    fn write_u16(&mut self, value: u16) {{ self.write_varint(u64::from(value)); }}
+    fn write_u32(&mut self, value: u32) {{ self.write_varint(u64::from(value)); }}
+    fn write_u64(&mut self, value: u64) {{ self.write_varint(value); }}
+    fn write_signed(&mut self, value: i64) {{ self.write_varint(((value << 1) ^ (value >> 63)) as u64); }}
+    fn write_fixed_u32(&mut self, value: u32) {{ self.bytes.extend_from_slice(&value.to_le_bytes()); }}
+    fn write_fixed_u64(&mut self, value: u64) {{ self.bytes.extend_from_slice(&value.to_le_bytes()); }}
+    fn write_count(&mut self, value: usize) -> Result<(), String> {{
+        self.write_varint(u64::try_from(value).map_err(|_| "native MIR collection exceeds u64".to_string())?);
+        Ok(())
+    }}
+    fn write_bytes(&mut self, value: &[u8]) -> Result<(), String> {{
+        self.write_count(value.len())?;
+        self.bytes.extend_from_slice(value);
+        Ok(())
+    }}
+    fn write_string(&mut self, value: &str) -> Result<(), String> {{
+        let index = self.interner.intern_string(value)?;
+        self.write_varint(index);
+        Ok(())
+    }}
+    fn write_entry(&mut self, kind: u32, entry: Vec<u8>) {{
+        let index = self.interner.intern_entry(kind, entry);
+        self.write_varint(index);
+    }}
+    fn finish(self) -> Vec<u8> {{ self.bytes }}
+}}
+struct MirProgramImageReader<'a> {{ bytes: &'a [u8], cursor: usize, tables: &'a MirProgramImageTables }}
+#[allow(dead_code)]
+impl<'a> MirProgramImageReader<'a> {{
+    fn new(bytes: &'a [u8], tables: &'a MirProgramImageTables) -> Self {{ Self {{ bytes, cursor: 0, tables }} }}
+    fn child(&self, bytes: &'a [u8]) -> Self {{ Self {{ bytes, cursor: 0, tables: self.tables }} }}
+    fn read_raw(&mut self, length: usize) -> Result<&'a [u8], String> {{
+        let end = self.cursor.checked_add(length).ok_or_else(|| "MIR image cursor overflow".to_string())?;
+        let value = self.bytes.get(self.cursor..end).ok_or_else(|| "truncated native MIR image".to_string())?;
+        self.cursor = end;
+        Ok(value)
+    }}
+    fn read_u8(&mut self) -> Result<u8, String> {{ Ok(self.read_raw(1)?[0]) }}
+    fn read_varint(&mut self) -> Result<u64, String> {{
+        let mut value = 0u64;
+        let mut shift = 0u32;
+        loop {{
+            let byte = self.read_u8()?;
+            let bits = u64::from(byte & 0x7f);
+            if shift == 63 && bits > 1 {{ return Err("native MIR image varint exceeds u64".to_string()); }}
+            value |= bits << shift;
+            if byte & 0x80 == 0 {{
+                if byte == 0 && shift != 0 {{ return Err("native MIR image varint is not canonical".to_string()); }}
+                return Ok(value);
+            }}
+            shift += 7;
+            if shift > 63 {{ return Err("native MIR image varint exceeds u64".to_string()); }}
+        }}
+    }}
+    fn read_u16(&mut self) -> Result<u16, String> {{ u16::try_from(self.read_varint()?).map_err(|_| "native MIR image u16 out of range".to_string()) }}
+    fn read_u32(&mut self) -> Result<u32, String> {{ u32::try_from(self.read_varint()?).map_err(|_| "native MIR image u32 out of range".to_string()) }}
+    fn read_u64(&mut self) -> Result<u64, String> {{ self.read_varint() }}
+    fn read_signed(&mut self) -> Result<i64, String> {{ let value = self.read_varint()?; Ok(((value >> 1) as i64) ^ -((value & 1) as i64)) }}
+    fn read_fixed_u32(&mut self) -> Result<u32, String> {{ Ok(u32::from_le_bytes(self.read_raw(4)?.try_into().map_err(|_| "invalid MIR image u32".to_string())?)) }}
+    fn read_fixed_u64(&mut self) -> Result<u64, String> {{ Ok(u64::from_le_bytes(self.read_raw(8)?.try_into().map_err(|_| "invalid MIR image u64".to_string())?)) }}
+    fn read_count(&mut self) -> Result<usize, String> {{
+        let count = usize::try_from(self.read_varint()?).map_err(|_| "native MIR image count exceeds host range".to_string())?;
+        if count > self.bytes.len().saturating_sub(self.cursor) {{ return Err("native MIR image collection count exceeds remaining bytes".to_string()); }}
+        Ok(count)
+    }}
+    fn read_len(&mut self) -> Result<usize, String> {{ self.read_count() }}
+    fn read_bytes(&mut self) -> Result<&'a [u8], String> {{ let length = self.read_len()?; self.read_raw(length) }}
+    fn read_index(&mut self) -> Result<usize, String> {{ usize::try_from(self.read_varint()?).map_err(|_| "native MIR image table index exceeds host range".to_string()) }}
+    fn read_string(&mut self) -> Result<String, String> {{
+        let index = self.read_index()?;
+        self.tables.strings.get(index).cloned().ok_or_else(|| "native MIR image references an unknown string".to_string())
+    }}
+    fn finish(self) -> Result<(), String> {{ if self.cursor == self.bytes.len() {{ Ok(()) }} else {{ Err("native MIR image has trailing bytes".to_string()) }} }}
+}}
+// Static compiler strings resolve to the registry row that owns them. Core
+// rows also come from tables outside `CORE_CALLS` (the TIR lowering's own
+// records), so a string no registry here owns is interned process-wide: each
+// distinct one is leaked once, and restoring images again does not grow
+// memory. The interner goes once those rows join the one registry.
+fn mir_image_static_str(value: String) -> Result<&'static str, String> {{
+    for record in crate::Syntax::CORE_CALLS {{
+        if record.module == value {{ return Ok(record.module); }}
+        if record.member == value {{ return Ok(record.member); }}
+        if record.symbol.name() == value {{ return Ok(record.symbol.name()); }}
+        if let Some(item) = record.receiver_types.iter().copied().find(|item| *item == value) {{ return Ok(item); }}
+        if let Some(item) = record.effect_leaf.filter(|item| *item == value) {{ return Ok(item); }}
+        if let Some(item) = record.jit_symbol.filter(|item| *item == value) {{ return Ok(item); }}
+        if let Some(marker) = record.marker {{
+            if marker.member == value {{ return Ok(marker.member); }}
+            if marker.since == value {{ return Ok(marker.since); }}
+            if marker.replacement == value {{ return Ok(marker.replacement); }}
+            if let Some(item) = marker.removed_in.filter(|item| *item == value) {{ return Ok(item); }}
+        }}
+    }}
+    static UNOWNED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<&'static str>>> =
+        std::sync::OnceLock::new();
+    let mut unowned = UNOWNED
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "native MIR image static-string interner is poisoned".to_string())?;
+    if let Some(item) = unowned.get(value.as_str()) {{
+        return Ok(*item);
+    }}
+    let item: &'static str = Box::leak(value.into_boxed_str());
+    unowned.insert(item);
+    Ok(item)
+}}
+""")
+    Ok(())
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1290
+fn emit_definition_codec(out: &String, schema: &Schema, reachable: &HashSet<String>, definition: &Definition, interned: &[String]) -> Unit Err! {
+    interned := interned.iter().position(fn(key) { key == definition.key })
+    (encoder, decoder) := if interned.is_some() { (function_name("encode_entry", &definition.key), function_name("decode_entry", &definition.key)) } else { (function_name("encode", &definition.key), function_name("decode", &definition.key)) }
+    path := &definition.path
+    if interned == Val(kind) {
+        out.push_str("fn {function_name("encode", &definition.key)}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n    let mut entry = writer.child();\n    {encoder}(value, &mut entry)?;\n    let entry = entry.finish();\n    writer.write_entry({kind}, entry);\n    Ok(())\n}}\nfn {function_name("decode", &definition.key)}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    let index = reader.read_index()?;\n    reader.tables.{function_name("interned", &definition.key)}.get(index).cloned().ok_or_else(|| \"native MIR image references an unknown interned value\".to_string())\n}}\n\n")
+    }
+    definition.body == {
+        Body.Struct(fields) -> {
+            encode := String.new(); decode: [String] = []
+            for field in fields {
+                encode.push_str(&encode_expression(&field.ty, &"&value.{field.name}", "writer", schema, reachable, definition)?)
+                decode.push("{field.name}: {decode_expression(&field.ty, "reader", schema, reachable, definition)?},")
+            }
+            out.push_str("fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({path} {{\n        {decode.join("\n")}\n    }})\n}}\n\n")
+        }
+        Body.Tuple(fields) -> {
+            encode := String.new(); decode: [String] = []
+            for (index, field) in fields.iter().enumerate() {
+                encode.push_str(&encode_expression(&field.ty, &"&value.{index}", "writer", schema, reachable, definition)?)
+                decode.push(decode_expression(&field.ty, "reader", schema, reachable, definition)?)
+            }
+            value := "{path}({decode.join(", ")})"
+            out.push_str("fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({value})\n}}\n\n")
+        }
+        Body.Unit -> out.push_str("fn {encoder}(_: &{path}, _: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{ Ok(()) }}\nfn {decoder}(_: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{ Ok({path}) }}\n\n")
+        Body.Alias(ty) -> {
+            encode := encode_expression(ty, "value", "writer", schema, reachable, definition)?
+            decode := decode_expression(ty, "reader", schema, reachable, definition)?
+            out.push_str("fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n{encode}    Ok(())\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    Ok({decode})\n}}\n\n")
+        }
+        Body.Enum(variants) -> {
+            encode_arms: [String] = []; decode_arms: [String] = []
+            for (tag, variant) in variants.iter().enumerate() {
+                tag := U32.try_from(tag).map_err(fn(_) { "enum `{definition.key}` exceeds native MIR tag range" })?
+                (pattern, encode_fields, decoded) := variant.body == {
+                    VariantBody.Unit -> ("{path}::{variant.name}", String.new(), [])
+                    VariantBody.Tuple(fields) -> {
+                        bindings := (0..fields.len()).map(fn(index) { "__field_{index}" }).collect()
+                        body := String.new(); decoded: [String] = []
+                        for (field, binding) in fields.iter().zip(&bindings) { body.push_str(&encode_expression(field, binding, "writer", schema, reachable, definition)?) }
+                        for field in fields { decoded.push(decode_expression(field, "reader", schema, reachable, definition)?) }
+                        ("{path}::{variant.name}({bindings.join(", ")})", ^body, ^decoded)
+                    }
+                    VariantBody.Struct(fields) -> {
+                        body := String.new(); pattern_fields: [String] = []; decoded: [String] = []
+                        for (index, field) in fields.iter().enumerate() {
+                            binding := "__field_{index}"
+                            pattern_fields.push("{field.name}: {binding}")
+                            body.push_str(&encode_expression(&field.ty, &binding, "writer", schema, reachable, definition)?)
+                            decoded.push("{field.name}: {decode_expression(&field.ty, "reader", schema, reachable, definition)?}")
+                        }
+                        ("{path}::{variant.name} {{ {pattern_fields.join(", ")} }}", ^body, ^decoded)
+                    }
+                    VariantBody.Unsupported(reason) -> { return Err("unsupported variant wire syntax in `{definition.key}`: {reason}") }
+                }
+                encode_arms.push("        {pattern} => {{ writer.write_u32({tag});\n{encode_fields}            Ok(())\n        }},")
+                constructor := variant.body == {
+                    VariantBody.Unit -> "{path}::{variant.name}"
+                    VariantBody.Tuple(_) -> "{path}::{variant.name}({decoded.join(", ")})"
+                    VariantBody.Struct(_) -> "{path}::{variant.name} {{ {decoded.join(", ")} }}"
+                    VariantBody.Unsupported(_) -> { panic("unsupported variant wire syntax") }
+                }
+                decode_arms.push("        {tag} => Ok({constructor}),")
+            }
+            out.push_str("fn {encoder}(value: &{path}, writer: &mut MirProgramImageWriter<'_>) -> Result<(), String> {{\n    match value {{\n{encode_arms.join("\n")}\n    }}\n}}\nfn {decoder}(reader: &mut MirProgramImageReader<'_>) -> Result<{path}, String> {{\n    match reader.read_u32()? {{\n{decode_arms.join("\n")}\n        _ => Err(\"unknown native MIR enum tag\".to_string()),\n    }}\n}}\n\n")
+        }
+    }
+    Ok(())
+}
+
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1415
+fn encode_expression(ty: &TypeExpr, expression: &String, writer: &String, schema: &Schema, reachable: &HashSet<String>, context: &Definition) -> String Err! {
+    out := String.new()
+    ty == {
+        TypeExpr.Option(inner) -> {
+            body := encode_expression(inner, "__item", writer, schema, reachable, context)?
+            out.push_str("    match ({expression}).as_ref() {{ Some(__item) => {{ {writer}.write_u8(1);\n{body}    }}, None => {writer}.write_u8(0), }}\n\n")
+        }
+        TypeExpr.Sequence(inner) -> {
+            body := encode_expression(inner, "__item", writer, schema, reachable, context)?
+            out.push_str("    {writer}.write_u64(u64::try_from(({expression}).len()).map_err(|_| \"native MIR collection exceeds u64\".to_string())?);\n    for __item in ({expression}).iter() {{\n{body}    }}\n\n")
+        }
+        TypeExpr.Set(inner, hash) -> {
+            body := encode_expression(inner, "__item", "(&mut __item_writer)", schema, reachable, context)?
+            items := if hash { "{{ let mut __sorted = ({expression}).iter().collect::<Vec<_>>(); __sorted.sort(); __sorted }}" } else { "({expression}).iter()" }
+            out.push_str("    {{ let mut __items = Vec::with_capacity(({expression}).len()); for __item in {items} {{ let mut __item_writer = {writer}.child();\n{body}        __items.push(__item_writer.finish()); }} __items.sort(); if __items.windows(2).any(|pair| pair[0] == pair[1]) {{ return Err(\"duplicate native MIR set element encoding\".to_string()); }} {writer}.write_count(__items.len())?; for __item in __items {{ {writer}.write_bytes(&__item)?; }} }}\n\n")
+        }
+        TypeExpr.Map(key, value, hash) -> {
+            key_body := encode_expression(key, "__key", "(&mut __key_writer)", schema, reachable, context)?
+            value_body := encode_expression(value, "__value", "(&mut __value_writer)", schema, reachable, context)?
+            entries := if hash { "{{ let mut __sorted = ({expression}).iter().collect::<Vec<_>>(); __sorted.sort_by(|left, right| left.0.cmp(right.0)); __sorted }}" } else { "({expression}).iter()" }
+            out.push_str("    {{ let mut __entries = Vec::with_capacity(({expression}).len()); for (__key, __value) in {entries} {{ let __key_bytes = {{ let mut __key_writer = {writer}.child();\n{key_body}        __key_writer.finish() }}; let __value_bytes = {{ let mut __value_writer = {writer}.child();\n{value_body}        __value_writer.finish() }}; __entries.push((__key_bytes, __value_bytes)); }} __entries.sort_by(|left, right| left.0.cmp(&right.0)); if __entries.windows(2).any(|pair| pair[0].0 == pair[1].0) {{ return Err(\"duplicate native MIR map key encoding\".to_string()); }} {writer}.write_count(__entries.len())?; for (__key, __value) in __entries {{ {writer}.write_bytes(&__key)?; {writer}.write_bytes(&__value)?; }} }}\n\n")
+        }
+        TypeExpr.Array(inner, _) -> {
+            body := encode_expression(inner, "__item", writer, schema, reachable, context)?
+            out.push_str("    for __item in ({expression}).iter() {{\n{body}    }}\n\n")
+        }
+        TypeExpr.Boxed(inner) | TypeExpr.Arc(inner) -> { return encode_expression(inner, &"({expression}).as_ref()", writer, schema, reachable, context) }
+        TypeExpr.Tuple(items) -> { for (index, item) in items.iter().enumerate() { out.push_str(&encode_expression(item, &"&({expression}).{index}", writer, schema, reachable, context)?) } }
+        TypeExpr.StaticStr -> out.push_str("    {writer}.write_string({expression})?;\n\n")
+        TypeExpr.Named(name) -> emit_named_encode(&out, name, expression, writer, schema, reachable, context)?
+    }
+    Ok(^out)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1472
+fn emit_named_encode(out: &String, name: &String, expression: &String, writer: &String, schema: &Schema, reachable: &HashSet<String>, context: &Definition) -> Unit Err! {
+    name == {
+        "String" -> out.push_str("    {writer}.write_string(({expression}).as_str())?;\n\n")
+        "PathBuf" | "std::path::PathBuf" -> out.push_str("    {writer}.write_string(({expression}).to_str().ok_or_else(|| \"native MIR path is not valid UTF-8\".to_string())?)?;\n\n")
+        "bool" -> out.push_str("    {writer}.write_u8(u8::from(*({expression})));\n\n")
+        "u8" -> out.push_str("    {writer}.write_u8(*({expression}));\n\n")
+        "u16" -> out.push_str("    {writer}.write_u16(*({expression}));\n\n")
+        "u32" -> out.push_str("    {writer}.write_u32(*({expression}));\n\n")
+        "u64" -> out.push_str("    {writer}.write_u64(*({expression}));\n\n")
+        "usize" -> out.push_str("    {writer}.write_u64(u64::try_from(*({expression})).map_err(|_| \"native MIR usize exceeds u64\".to_string())?);\n\n")
+        "i8" -> out.push_str("    {writer}.write_u8(*({expression}) as u8);\n\n")
+        "i16" | "i32" | "i64" -> out.push_str("    {writer}.write_signed(i64::from(*({expression})));\n\n")
+        "isize" -> out.push_str("    {writer}.write_signed(*({expression}) as i64);\n\n")
+        "f32" -> out.push_str("    {writer}.write_fixed_u32(({expression}).to_bits());\n\n")
+        "f64" -> out.push_str("    {writer}.write_fixed_u64(({expression}).to_bits());\n\n")
+        "char" -> out.push_str("    {writer}.write_u32(*({expression}) as u32);\n\n")
+        _ -> {
+            key := resolve_type_name(schema, context, name)?
+            if !reachable.contains(&key) { return Err("native MIR type `{key}` is outside generated codec closure") }
+            path := function_name("encode", &key)
+            out.push_str("    {path}({expression}, &mut *{writer})?;\n\n")
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1508
+fn decode_expression(ty: &TypeExpr, reader: &String, schema: &Schema, reachable: &HashSet<String>, context: &Definition) -> String Err! {
+    value := ty == {
+        TypeExpr.Option(inner) -> {
+            value := decode_expression(inner, reader, schema, reachable, context)?
+            "match {reader}.read_u8()? {{ 0 => None, 1 => Some({value}), _ => return Err(\"invalid native MIR option tag\".to_string()), }}"
+        }
+        TypeExpr.Sequence(inner) -> {
+            value := decode_expression(inner, reader, schema, reachable, context)?
+            "{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR sequence is too large\".to_string())?; for _ in 0..__count {{ __items.push({value}); }} __items }}"
+        }
+        TypeExpr.Set(inner, hash) -> {
+            value := decode_expression(inner, "(&mut __item_reader)", schema, reachable, context)?
+            container := if hash { "std::collections::HashSet" } else { "std::collections::BTreeSet" }
+            "{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR set is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __bytes = {reader}.read_bytes()?; if !__seen.insert(__bytes.to_vec()) {{ return Err(\"duplicate native MIR set element\".to_string()); }} let mut __item_reader = {reader}.child(__bytes); let __item = {value}; __item_reader.finish()?; __items.push(__item); }} let __output = __items.into_iter().collect::<{container}<_>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR set element\".to_string()); }} __output }}"
+        }
+        TypeExpr.Map(key, value, hash) -> {
+            key_value := decode_expression(key, "(&mut __key_reader)", schema, reachable, context)?
+            value_value := decode_expression(value, "(&mut __value_reader)", schema, reachable, context)?
+            container := if hash { "std::collections::HashMap" } else { "std::collections::BTreeMap" }
+            "{{ let __count = {reader}.read_count()?; let mut __items = Vec::new(); __items.try_reserve_exact(__count).map_err(|_| \"native MIR map is too large\".to_string())?; let mut __seen = BTreeSet::new(); for _ in 0..__count {{ let __key_bytes = {reader}.read_bytes()?; let mut __key_reader = {reader}.child(__key_bytes); let __key = {key_value}; __key_reader.finish()?; if !__seen.insert(__key_bytes.to_vec()) {{ return Err(\"duplicate native MIR map key\".to_string()); }} let __value_bytes = {reader}.read_bytes()?; let mut __value_reader = {reader}.child(__value_bytes); let __value = {value_value}; __value_reader.finish()?; __items.push((__key, __value)); }} let __output = __items.into_iter().collect::<{container}<_, _>>(); if __output.len() != __count {{ return Err(\"duplicate native MIR map key\".to_string()); }} __output }}"
+        }
+        TypeExpr.Boxed(inner) -> "Box::new({decode_expression(inner, reader, schema, reachable, context)?})"
+        TypeExpr.Arc(inner) -> "std::sync::Arc::new({decode_expression(inner, reader, schema, reachable, context)?})"
+        TypeExpr.Tuple(items) -> {
+            values: [String] = []
+            for item in items { values.push(decode_expression(item, reader, schema, reachable, context)?) }
+            "({values.join(", ")}{if values.len() == 1 { "," } else { "" }})"
+        }
+        TypeExpr.Array(inner, length) -> {
+            values: [String] = []
+            for _ in 0..length { values.push(decode_expression(inner, reader, schema, reachable, context)?) }
+            "[{values.join(", ")}]"
+        }
+        TypeExpr.StaticStr -> "mir_image_static_str({reader}.read_string()?)?"
+        TypeExpr.Named(name) -> decode_named(name, reader, schema, reachable, context)?
+    }
+    Ok(^value)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1552
+fn decode_named(name: &String, reader: &String, schema: &Schema, reachable: &HashSet<String>, context: &Definition) -> String Err! {
+    value := name == {
+        "String" -> "{reader}.read_string()?"
+        "PathBuf" | "std::path::PathBuf" -> "std::path::PathBuf::from({reader}.read_string()?)"
+        "bool" -> "match {reader}.read_u8()? {{ 0 => false, 1 => true, _ => return Err(\"invalid native MIR boolean\".to_string()), }}"
+        "u8" -> "{reader}.read_u8()?"
+        "u16" -> "{reader}.read_u16()?"
+        "u32" -> "{reader}.read_u32()?"
+        "u64" -> "{reader}.read_u64()?"
+        "usize" -> "usize::try_from({reader}.read_u64()?).map_err(|_| \"native MIR usize exceeds host range\".to_string())?"
+        "i8" -> "{reader}.read_u8()? as i8"
+        "i16" -> "i16::try_from({reader}.read_signed()?).map_err(|_| \"native MIR i16 out of range\".to_string())?"
+        "i32" -> "i32::try_from({reader}.read_signed()?).map_err(|_| \"native MIR i32 out of range\".to_string())?"
+        "i64" -> "{reader}.read_signed()?"
+        "isize" -> "isize::try_from({reader}.read_signed()?).map_err(|_| \"native MIR isize exceeds host range\".to_string())?"
+        "f32" -> "f32::from_bits({reader}.read_fixed_u32()?)"
+        "f64" -> "f64::from_bits({reader}.read_fixed_u64()?)"
+        "char" -> "char::from_u32({reader}.read_u32()?).ok_or_else(|| \"invalid native MIR character\".to_string())?"
+        _ -> {
+            key := resolve_type_name(schema, context, name)?
+            if !reachable.contains(&key) { return Err("native MIR type `{key}` is outside generated codec closure") }
+            "{function_name("decode", &key)}(&mut *{reader})?"
+        }
+    }
+    Ok(^value)
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1586
+fn function_name(prefix: &String, key: &String) -> String {
+    suffix := key.chars().map(fn(character) { if character.is_ascii_alphanumeric() { character } else { '_' } }).collect<String>()
+    "__mir_image_{prefix}_{suffix}"
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1593
+fn find_next_definition(source: &String, from: USize) -> (String, USize)? {
+    next: (String, USize)? = None
+    for (kind, position) in [("struct", find_keyword(source, "pub struct", from)), ("enum", find_keyword(source, "pub enum", from)), ("type", find_keyword(source, "pub type", from))] {
+        if position == Val(position) { if next.map_or(true, fn(current) { position < current.1 }) { next = Val((kind, position)) } }
+    }
+    ^next
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1609
+fn find_keyword(source: &String, keyword: &String, from: USize) -> USize? {
+    cursor := from
+    while source[cursor..].find(keyword) == Val(relative) {
+        index := cursor + relative
+        if boundary(source.as_bytes().get(index.wrapping_sub(1)).copied()) && boundary(source.as_bytes().get(index + keyword.len()).copied()) { return Val(index) }
+        cursor = index + 1
+    }
+    None
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1623
+fn token_at(source: &String, index: USize, token: &String) -> Bool {
+    source[index..].starts_with(token) && boundary(source.as_bytes().get(index.wrapping_sub(1)).copied()) && boundary(source.as_bytes().get(index + token.len()).copied())
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1629
+fn boundary(byte: U8?) -> Bool { byte.map_or(true, fn(byte) { !(byte.is_ascii_alphanumeric() || byte == b'_') }) }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1633
+fn read_identifier(input: &String, cursor: &USize) -> String Err! {
+    start := cursor
+    if input.as_bytes().get(cursor..cursor + 2) == Val(b"r#") { cursor += 2 }
+    identifier_start := cursor
+    while input.as_bytes().get(cursor).is_some_and(fn(byte) { byte.is_ascii_alphanumeric() || byte == b'_' }) { cursor += 1 }
+    if cursor == identifier_start { Err("expected identifier at byte {start}") } else { Ok(input[start..cursor].to_string()) }
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1649
+fn is_identifier(value: &String) -> Bool {
+    chars := value.chars()
+    chars.next().is_some_and(fn(first) { first == '_' || first.is_ascii_alphabetic() }) && chars.all(fn(character) { character == '_' || character.is_ascii_alphanumeric() })
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1655
+fn skip_space(input: &String, cursor: &USize) -> { while input.as_bytes().get(cursor).is_some_and(fn(byte) { byte.is_ascii_whitespace() }) { cursor += 1 } }
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1661
+fn matching_byte(input: &[U8], start: USize, open: U8, close: U8) -> USize? {
+    depth: USize = 0
+    for index in start..input.len() {
+        byte := input[index]
+        if byte == open { depth += 1 }
+        else if byte == close && !(close == b'>' && index > 0 && input[index - 1] == b'-') {
+            depth = depth.checked_sub(1) == { Val(depth) -> depth; None -> { return None } }
+            if depth == 0 { return Val(index) }
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1676
+fn top_level_byte(input: &String, wanted: U8) -> USize? {
+    depth: USize = 0
+    for (index, byte) in input.bytes().enumerate() {
+        if byte == wanted && depth == 0 { return Val(index) }
+        byte == {
+            b'<' | b'(' | b'[' | b'{' -> { depth += 1 }
+            b'>' if index > 0 && input.as_bytes()[index - 1] == b'-' -> {}
+            b'>' | b')' | b']' | b'}' -> { depth = depth.saturating_sub(1) }
+            _ -> {}
+        }
+    }
+    None
+}
+// Rust: crates/jet-foundation/build/MirImageCodec.rs:1692
+fn split_top_level(input: &String, delimiter: Char) -> [&String] {
+    pieces: [&String] = []; depth: USize = 0; start: USize = 0
+    for (index, character) in input.char_indices() {
+        character == {
+            '<' | '(' | '[' | '{' -> { depth += 1 }
+            '>' if index > 0 && input.as_bytes()[index - 1] == b'-' -> {}
+            '>' | ')' | ']' | '}' -> { depth = depth.saturating_sub(1) }
+            character if character == delimiter && depth == 0 -> { pieces.push(input[start..index]); start = index + character.len_utf8() }
+            _ -> {}
+        }
+    }
+    pieces.push(input[start..])
+    ^pieces
+}

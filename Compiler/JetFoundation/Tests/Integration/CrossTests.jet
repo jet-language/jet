@@ -1,0 +1,295 @@
+use std.[fs, env, process]
+use std.process.Command
+use core.sys.target.selected_os
+use jet.[compile_no_os, compile_with_target, render_diagnostics, resolve_c_links]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.Cross.[check_freestanding_src, os_target_gating_path, os_target_gating_src, ui_native_linux_path]
+use jet_foundation.Tests.Integration.DataBridges.[build_and_run_env, rscript_on_path, BRIDGE_SRC]
+use jet_foundation.Tests.Integration.DataHostile.[repo_root, assert_example_matches_golden]
+// GATE #4494: real native filesystem/process/GTK/display providers; #4483: selected OS.
+// Rust: tests/cross.rs:26
+#Test("e3301_fs_read_in_freestanding") {
+    src :: "use core.files as fs\n\nfn run() {\n    _ :: fs.read(\"config.txt\")\n}\n"
+    out :: check_freestanding_src(src, "fs_read")
+    assert(out.contains("E3301"), "expected E3301 for fs.read in freestanding mode; got:\n{out}")
+    assert(out.contains("no-OS"), "expected 'no-OS' in error; got:\n{out}")
+}
+// Rust: tests/cross.rs:47
+#Test("e3301_http_in_freestanding") {
+    src :: "use core.http as http\n\nfn run() {\n    _ :: http.get(\"http://example.com\")\n}\n"
+    out :: check_freestanding_src(src, "http")
+    assert(out.contains("E3301"), "expected E3301 for http.get in freestanding mode; got:\n{out}")
+}
+// Rust: tests/cross.rs:63
+#Test("e3301_tasks_in_freestanding") {
+    src :: "use core.tasks as tasks\n\nfn run() {\n    t :: task 42\n    t.join() ?? panic(\"task failed\")\n}\n"
+    out :: check_freestanding_src(src, "tasks")
+    assert(out.contains("E3301"), "expected E3301 for task in freestanding mode; got:\n{out}")
+}
+// Rust: tests/cross.rs:80
+#Test("freestanding_allows_core_math") {
+    src :: "use core.math as math\n\nfn run() {\n    x :: math.sqrt(4.0)\n    print(x)\n}\n"
+    out :: check_freestanding_src(src, "core_math")
+    assert(!out.contains("E3301"), "core.math should be allowed in freestanding mode; got:\n{out}")
+}
+// Rust: tests/cross.rs:98
+#Test("freestanding_allows_core_json") {
+    src :: "use core.encoding.json as json\n\nfn run() {\n    s :: json.to_string(\"hello\")\n    print(s)\n}\n"
+    out :: check_freestanding_src(src, "core_json")
+    assert(!out.contains("E3301"), "core.encoding.json should be allowed in freestanding mode; got:\n{out}")
+}
+// Rust: tests/cross.rs:119
+#Test("e3301_snapshot") {
+    root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap())
+    src_path :: root.join("tests/ui/freestanding_e3301.jet")
+    snap_path :: root.join("tests/ui/freestanding_e3301.stderr")
+    if !src_path.exists() { panic("missing tests/ui/freestanding_e3301.jet (I4 requires a snapshot)") }
+    src :: fs.read_to_string(&src_path).unwrap()
+    shown :: "tests/ui/freestanding_e3301.jet"
+    actual :: if compile_no_os(&src_path.to_string_lossy()) == {
+        .Ok(_) -> "(no errors)\n"
+        .Err(diags) -> render_diagnostics(shown, &src, &diags)
+    }
+    if env.var("UPDATE_EXPECT").is_ok() { fs.write(&snap_path, &actual).unwrap() } else {
+        expected :: fs.read_to_string(&snap_path).unwrap_or_default()
+        assert_eq(actual, expected, "\nE3301 snapshot mismatch (run UPDATE_EXPECT=1 Jet tests to bless)\n")
+    }
+}
+// Rust: tests/cross.rs:168
+#Test("os_target_gating_emits_only_linux_impl_for_linux_triple") {
+    src :: os_target_gating_src()
+    file :: os_target_gating_path()
+    out :: compile_with_target(&src, &file, "x86_64-unknown-linux-gnu").unwrap_or_else(fn(diags) { panic("front end rejected os_target_gating.jet:\n{render_diagnostics(&file, &src, &diags)}") })
+    assert(out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"), "Linux triple should keep the OS.Linux impl:\n{out.rust}")
+    assert(!out.rust.contains("impl __jet_Backend for __jet_MacosBackend"), "Linux triple should strip the OS.MacOS impl:\n{out.rust}")
+    assert(out.rust.contains("\"gtk\""), "Linux triple should keep only the .Linux dispatch arm (\"gtk\"):\n{out.rust}")
+    assert(!out.rust.contains("\"appkit\"") && !out.rust.contains("\"win32\""), "Linux triple should discard the .MacOS/.Windows dispatch arms:\n{out.rust}")
+}
+// Rust: tests/cross.rs:206
+#Test("os_target_gating_emits_only_macos_impl_for_macos_triple") {
+    src :: os_target_gating_src()
+    file :: os_target_gating_path()
+    out :: compile_with_target(&src, &file, "aarch64-apple-darwin").unwrap_or_else(fn(diags) { panic("front end rejected os_target_gating.jet:\n{render_diagnostics(&file, &src, &diags)}") })
+    assert(out.rust.contains("impl __jet_Backend for __jet_MacosBackend"), "macOS triple should keep the OS.MacOS impl:\n{out.rust}")
+    assert(!out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"), "macOS triple should strip the OS.Linux impl:\n{out.rust}")
+    assert(out.rust.contains("\"appkit\""), "macOS triple should keep only the .MacOS dispatch arm (\"appkit\"):\n{out.rust}")
+    assert(!out.rust.contains("\"gtk\"") && !out.rust.contains("\"win32\""), "macOS triple should discard the .Linux/.Windows dispatch arms:\n{out.rust}")
+}
+// Rust: tests/cross.rs:244
+#Test("os_target_gating_defaults_to_host_os_with_no_target_flag") {
+    src :: os_target_gating_src()
+    file :: os_target_gating_path()
+    out :: compile_with_target(&src, &file, None).unwrap_or_else(fn(diags) { panic("front end rejected os_target_gating.jet:\n{render_diagnostics(&file, &src, &diags)}") })
+    host_is_linux :: selected_os() == "linux"
+    assert_eq(out.rust.contains("impl __jet_Backend for __jet_LinuxBackend"), host_is_linux, "no --target= should default to the host OS:\n{out.rust}")
+}
+// Rust: tests/cross.rs:282
+#Test("gtk_backend_emits_gtk_ffi_for_linux_triple") {
+    path :: ui_native_linux_path()
+    src :: fs.read_to_string(&path).unwrap()
+    out :: compile_with_target(&src, &path, "x86_64-unknown-linux-gnu").unwrap_or_else(fn(diags) { panic("front end rejected ui_native_linux.jet:\n{render_diagnostics(&path, &src, &diags)}") })
+    assert(out.rust.contains("mod jet_gtk"), "Linux build should emit the native GTK4 backend prelude:\n{out.rust}")
+    assert(out.rust.contains("jet_ui_gtk()"), "Linux build should construct the GTK backend via core.ui:\n{out.rust}")
+    for sym in ["gtk_init_check", "gtk_window_new", "gtk_box_append", "gtk_label_new", "gtk_label_set_text", "gtk_button_new_with_label", "gtk_entry_new", "gtk_editable_set_text", "gtk_box_remove", "gtk_widget_grab_focus", "gtk_widget_set_size_request", "gtk_css_provider_load_from_string", "g_signal_connect_data", "g_main_loop_run"] {
+        assert(out.rust.contains(sym), "Linux GTK4 backend should call `{sym}`:\n{out.rust}")
+    }
+}
+// Rust: tests/cross.rs:330
+#Test("gtk_backend_folds_away_for_macos_triple") {
+    path :: ui_native_linux_path()
+    src :: fs.read_to_string(&path).unwrap()
+    out :: compile_with_target(&src, &path, "aarch64-apple-darwin").unwrap_or_else(fn(diags) { panic("front end rejected ui_native_linux.jet:\n{render_diagnostics(&path, &src, &diags)}") })
+    assert(!out.rust.contains("mod jet_gtk"), "macOS build must not emit the GTK4 backend prelude:\n{out.rust}")
+    assert(!out.rust.contains("gtk_window_new"), "macOS build must not wire any gtk calls:\n{out.rust}")
+    assert(out.rust.contains("not yet on macOS"), "macOS build should keep only the .MacOS dispatch arm:\n{out.rust}")
+}
+// Rust: tests/cross.rs:362
+#Test("gtk_backend_resolves_gtk4_link_flags") {
+    have_gtk :: Command.new("pkg-config").args(["--exists", "gtk4"]).status().map(fn(s) { s.success() }).unwrap_or(false)
+    if !have_gtk { eprintln("note: skipping gtk4 link-flag check (no pkg-config gtk4)"); return }
+    path :: ui_native_linux_path()
+    clinks :: resolve_c_links(&path).expect("gtk4 link flags should resolve")
+    assert(clinks.iter().any(fn(a) { a == "gtk-4" }), "expected `-l gtk-4` in the link line; got {clinks}")
+}
+// Rust: tests/cross.rs:385
+#Test("gtk_canonical_tree_reconciles_real_widgets_under_xvfb") {
+    have_gtk :: Command.new("pkg-config").args(["--exists", "gtk4"]).status().map(fn(status) { status.success() }).unwrap_or(false)
+    have_xvfb :: Command.new("xvfb-run").arg("--help").output().map(fn(output) { output.status.success() }).unwrap_or(false)
+    have_display :: env.var_os("DISPLAY").is_some()
+    if !have_gtk || (!have_xvfb && !have_display) { eprintln("note: skipping live GTK reconcile proof (need gtk4 + display)"); return }
+    dir :: env.temp_dir().join("jet_gtk_tree_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("gtk_tree.jet")
+    src :: """
+use core.ui as ui
+use core.reactive as reactive
+use c.gtk4 as gtk4
+fn run() {
+    app := ui.gtk_backend()
+    clicks := reactive.signal(0)
+    first := ui.box([
+        ui.text("Title"),
+        ui.button("Save"),
+        ui.node_role("Name", 120.0, 24.0, ui.aria_role_text_input())
+    ])
+    size := app.measure(first, ui.constraint(0.0, 0.0, 320.0, 240.0))
+    app.layout(first, ui.rect(0.0, 0.0, size.width, size.height))
+    app.paint(first)
+    save := app.button("Save")
+    app.on_click(save, () -> { &clicks.set(clicks.get() + 1) })
+    app.set_text(save, "__JET_TEST_CLICK__")
+    app.on_event(ui.key_event("Tab"))
+    second := ui.box([ui.text("Updated")])
+    app.paint(second)
+    app.set_text(save, "stale")
+    third := ui.box([ui.text("Updated"), ui.button("Save")])
+    app.paint(third)
+    app.set_text(save, "Rebound")
+    app.set_text(save, "__JET_TEST_CLICK__")
+    print("{app.focused_label()}:{clicks.get()}")
+}
+"""
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: compile_with_target(src, &shown, "x86_64-unknown-linux-gnu").unwrap_or_else(fn(diags) { panic("{render_diagnostics(&shown, src, &diags)}") })
+    // Retained generated-Rust peer fixture: test-local real GTK signal hook,
+    // never a production Jet-to-Rust callback or Jet-visible testing API.
+    extern_marker :: "    extern \"C\" {\n        fn gtk_init_check() -> gboolean;"
+    extern_replacement :: "    extern \"C\" {\n        fn g_signal_emit_by_name(instance: gpointer, detailed_signal: *const c_char, ...);\n        fn gtk_init_check() -> gboolean;"
+    set_text_marker :: "        pub fn set_text(&self, id: i64, text: &str) {\n            let state = self.state.borrow();"
+    set_text_replacement :: """
+        pub fn set_text(&self, id: i64, text: &str) {
+            if text == "__JET_TEST_CLICK__" {
+                let state = self.state.borrow();
+                if let Some((widget, GtkWidgetKind::Button)) = state.resolve_widget_handle(id) {
+                    let signal = CString::new("clicked").unwrap();
+                    unsafe { g_signal_emit_by_name(widget as gpointer, signal.as_ptr()); }
+                }
+                return;
+            }
+            let state = self.state.borrow();
+"""
+    assert(out.rust.contains(extern_marker), "missing GTK extern injection marker")
+    assert(out.rust.contains(set_text_marker), "missing GTK signal injection marker")
+    rust :: out.rust.replacen(extern_marker, extern_replacement, 1).replacen(set_text_marker, set_text_replacement, 1)
+    rs :: dir.join("gtk_tree.rs")
+    bin :: dir.join("gtk_tree")
+    fs.write(&rs, rust).unwrap()
+    rustc := Command.new("rustc")
+    rustc.args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin)
+    for arg in resolve_c_links(&shown).expect("gtk4 link flags") { rustc.arg(arg) }
+    compiled :: rustc.output().unwrap()
+    assert(compiled.status.success(), "generated GTK Rust failed:\n{String.from_utf8_lossy(&compiled.stderr)}")
+    run_command := if have_xvfb {
+        command := Command.new("xvfb-run")
+        command.arg("-a").arg(&bin)
+        command
+    } else { Command.new(&bin) }
+    run :: run_command.env("JET_UI_GTK_TRACE", "1").output().unwrap()
+    assert(run.status.success(), "live GTK fixture failed:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "Save:2\n")
+    trace :: String.from_utf8_lossy(&run.stderr)
+    for event in ["GTK_UI create root Box", "GTK_UI create root/1 Button", "GTK_UI create root/2 Entry", "GTK_UI click-connect root/1 1", "GTK_UI focus root/2", "GTK_UI update root/0 Updated", "GTK_UI remove root/2", "GTK_UI remove root/1", "GTK_UI handle-miss 0", "GTK_UI create root/1 Button", "GTK_UI click-connect root/1 1", "GTK_UI handle-set-text 0 Rebound", "GTK_UI cleanup"] {
+        assert(trace.contains(event), "missing `{event}` in GTK trace:\n{trace}")
+    }
+    assert_eq(trace.matches("GTK_UI click-connect root/1 1").count(), 2, "click handler must connect exactly once per widget lifetime:\n{trace}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/data_bridges.rs:106
+#Test("data_bridges_declare_costs_and_fail_closed") {
+    dir :: env.temp_dir().join("jet_data_bridges_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run_env(&dir, "data_bridges", BRIDGE_SRC, &[])
+    assert_eq(code, 0, "data bridges program failed: {stderr}\n{stdout}")
+    assert(!stdout.contains("bridge-ready"), "must not claim bridge-ready facade:\n{stdout}")
+    assert(stdout.contains("py.* path=unavailable copy=owned-copy ownership=python-sidecar trust=untrusted-foreign fallback=none"), "py status:\n{stdout}")
+    assert(stdout.contains("r.* path=unavailable copy=owned-copy ownership=r-sidecar trust=untrusted-foreign fallback=none"), "r default status:\n{stdout}")
+    assert(stdout.contains("gpu.* path=unavailable copy=device-transfer ownership=device-buffer trust=untrusted-accelerator fallback=none"), "gpu status:\n{stdout}")
+    assert(stdout.contains("py: Bridge require_bridge: py.* unavailable"), "py fail:\n{stdout}")
+    assert(stdout.contains("r: Bridge require_bridge: r.* unavailable"), "r fail by default:\n{stdout}")
+    assert(stdout.contains("gpu: Bridge require_bridge: gpu.* unavailable"), "gpu fail:\n{stdout}")
+    assert(stdout.contains("nope: InvalidArgument require_bridge"), "unknown provider:\n{stdout}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/data_bridges.rs:153
+#Test("data_bridges_r_available_with_opt_in_and_rscript") {
+    if !rscript_on_path() { eprintln("note: skipping R available test (no Rscript on PATH)"); return }
+    dir :: env.temp_dir().join("jet_data_bridges_r_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run_env(&dir, "data_bridges_r", BRIDGE_SRC, &[("JET_DATA_R_BRIDGE", "1")])
+    assert_eq(code, 0, "r available program failed: {stderr}\n{stdout}")
+    assert(stdout.contains("r.* path=available copy=owned-copy ownership=r-sidecar"), "r available status:\n{stdout}")
+    assert(stdout.contains("r: available"), "r require_bridge should succeed:\n{stdout}")
+    assert(stdout.contains("py: Bridge require_bridge:"), "py still fails:\n{stdout}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/data_bridges.rs:189
+#Test("data_bridges_r_fails_closed_without_rscript_on_path") {
+    dir :: env.temp_dir().join("jet_data_bridges_nors_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.data as data
+fn run() {
+    status :: data.status()
+    loop row in status {
+        if row.step == "r.*" { print("{row.step}:{row.path}") }
+    }
+    asked := data.require_bridge("r")
+    if asked == {
+        Ok(_) -> print("r:ok")
+        Err(error) -> print("r:{error}")
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run_env(&dir, "data_bridges_nors", src, &[("PATH", ""), ("JET_DATA_R_BRIDGE", "1")])
+    assert_eq(code, 0, "{stdout}\n{stderr}")
+    assert(stdout.contains("r.*:unavailable"), "{stdout}")
+    assert(stdout.contains("r:Bridge"), "{stdout}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/data_bridges.rs:227
+#Test("dossier_data_lens_matches_status_rows") {
+    out :: Command.new(common.jet_bin()).args(["inspect", "dossier", "data", "--json"]).output().expect("jet inspect dossier data")
+    assert(out.status.success(), "dossier data failed: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    assert(stdout.contains("\"lens\":\"data\""), "{stdout}")
+    assert(stdout.contains("\"step\":\"py.*\""), "{stdout}")
+    assert(stdout.contains("\"step\":\"r.*\""), "{stdout}")
+    assert(stdout.contains("\"step\":\"gpu.*\""), "{stdout}")
+    assert(stdout.contains("\"copy\":\"owned-copy\""), "{stdout}")
+    assert(stdout.contains("\"fallback\":\"none\""), "{stdout}")
+    assert(stdout.contains("\"path\":\"unavailable\""), "{stdout}")
+    assert(!stdout.contains("bridge-ready"), "{stdout}")
+}
+// Rust: tests/data_hostile.rs:80
+#Test("flagship_analysis_example_matches_golden_aot") {
+    assert_example_matches_golden("data_analysis")
+}
+// Rust: tests/data_hostile.rs:85
+#Test("plot_example_matches_golden_aot") {
+    assert_example_matches_golden("data_plot")
+}
+// Rust: tests/data_hostile.rs:94
+#Test("hostile_data_corpus_matches_golden_aot") {
+    assert_example_matches_golden("data_hostile")
+}
+// Rust: tests/data_hostile.rs:99
+#Test("hostile_corpus_covers_required_failure_classes") {
+    root :: repo_root()
+    out :: fs.read_to_string(root.join("Examples/features/expected/tooling/data_hostile.out")).expect("data_hostile.out")
+    for needle in ["empty_mean: Empty mean:", "empty_quantile: Empty quantile:", "empty_variance: Empty variance:", "missing_count: 3", "dup_join_count: 5", "pivot: row=a|b col=c sum=12.0", "tie_order: 3.0,1.0,2.0", "nan_mean: NonFinite", "inf_sum: NonFinite", "signed_zero_sum: 0.0", "signed_zero_mean: 0.0", "pop_variance: 0.6666666666666666", "one_variance: 0.0", "bad_quantile: InvalidArgument quantile:", "bad_window: InvalidArgument rolling_mean:", "hostile_svg_escaped: true", "large_limit: Limit group_mean:", "cancellation_sum: 1.0", "cancellation_mean: 0.3333333333333333"] {
+        assert(out.contains(needle), "hostile golden missing required class `{needle}`:\n{out}")
+    }
+}
+// Rust: tests/data_hostile.rs:133
+#Test("flagship_example_covers_analysis_pipeline") {
+    root :: repo_root()
+    out :: fs.read_to_string(root.join("Examples/features/expected/tooling/data_analysis.out")).expect("data_analysis.out")
+    for needle in ["tickets: 5", "focused: 4", "owned: Core", "mean: Core", "describe: count=5", "Core | ## 2", "svg bytes:", "status: core.data.csv native"] {
+        assert(out.contains(needle), "flagship golden missing `{needle}`:\n{out}")
+    }
+}

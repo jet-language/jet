@@ -1,0 +1,321 @@
+use BrowserLock.*
+use std.fs
+use std.process.Command
+use std.thread
+use std.sync.atomic.Ordering
+use core.sys.target
+use jet.[Loader, ScriptDeps]
+use jet.Syntax.RuntimeLayer
+
+// Rust: tests/browser_lock.rs:72
+#Test("jetpack_browser_lock_resolve_list_success") {
+    root :: temp_root("success")
+    binary :: root.join("tools").join("chromium")
+    write_executable(&binary, "#!/bin/sh\necho 'Chromium 131.0.6778.0'\n")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "lock", "chromium", "--binary", binary.to_str().unwrap(), "--version", "131.0.6778.0", "--protocol", "bidi-2025.5"])
+    assert_eq(code, 0, "lock failed: {err}")
+    lock :: fs.read_to_string(root.join(".jet/lock")).expect("lock file")
+    assert(lock.contains("[[browser]]"), "{lock}")
+    assert(lock.contains("engine = \"chromium\""), "{lock}")
+    assert(lock.contains("protocol = \"bidi-2025.5\""), "{lock}")
+    assert(lock.contains("output-hash = \"sha256-"), "{lock}")
+    (code, out, err) :: run_jetpack(&root, ["browser", "resolve", "chromium"])
+    assert_eq(code, 0, "resolve failed: {err}")
+    assert(out.contains("engine=chromium"), "{out}")
+    assert(out.contains("protocol=bidi-2025.5"), "{out}")
+    assert(out.contains("binary={binary.canonicalize().unwrap().display()}"), "{out}")
+    (code, out, err) :: run_jetpack(&root, ["browser", "list"])
+    assert_eq(code, 0, "list failed: {err}")
+    assert(out.contains("chromium"), "{out}")
+    assert(out.contains("bidi-2025.5"), "{out}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/browser_lock.rs:120
+#Test("jetpack_browser_reject_unknown_engine_and_missing_binary") {
+    root :: temp_root("reject")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "lock", "edge", "--binary", root.join("missing").to_str().unwrap()])
+    assert_ne(code, 0)
+    assert(err.contains("not supported") || err.contains("edge"), "{err}")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "lock", "firefox", "--binary", root.join("no-such-bin").to_str().unwrap()])
+    assert_ne(code, 0)
+    assert(err.contains("not found") || err.contains("failed"), "{err}")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "resolve", "firefox"])
+    assert_ne(code, 0)
+    assert(err.contains("no locked browser") || err.contains("failed"), "{err}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/browser_lock.rs:162
+#Test("jetpack_browser_hash_drift_is_hostile") {
+    root :: temp_root("drift")
+    binary :: root.join("chromium")
+    write_executable(&binary, "#!/bin/sh\necho Chromium 1\n")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "lock", "chromium", "--binary", binary.to_str().unwrap(), "--version", "1"])
+    assert_eq(code, 0, "{err}")
+    write_executable(&binary, "#!/bin/sh\necho Chromium TAMPERED\n")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "resolve", "chromium"])
+    assert_ne(code, 0)
+    assert(err.contains("drift") || err.contains("hash") || err.contains("size"), "{err}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/browser_lock.rs:191
+#Test("core_browser_locked_reads_project_pin") {
+    root :: temp_root("core")
+    binary :: root.join("chromium")
+    write_executable(&binary, "#!/bin/sh\necho Chromium 140.0\n")
+    (code, _out, err) :: run_jetpack(&root, ["browser", "lock", "chromium", "--binary", binary.to_str().unwrap(), "--version", "140.0", "--protocol", "bidi-2025.5"])
+    assert_eq(code, 0, "{err}")
+    source :: """
+use core.web.browser as browser
+fn run() -[FS, IO]> {
+    locked :: browser.locked("chromium") ?? panic("missing lock")
+    print("engine:{locked.engine()}")
+    print("version:{locked.version()}")
+    print("protocol:{locked.protocol()}")
+    locked.verify() ?? panic("verify")
+    print("verified:true")
+}
+"""
+    (code, out, err) :: run_jet_source(&root, source)
+    assert_eq(code, 0, "jet run failed: {err}\n{out}")
+    assert(out.contains("engine:chromium"), "{out}")
+    assert(out.contains("version:140.0"), "{out}")
+    assert(out.contains("protocol:bidi-2025.5"), "{out}")
+    assert(out.contains("verified:true"), "{out}")
+    fs.remove_file(&binary).unwrap()
+    hostile :: """
+use core.web.browser as browser
+fn run() -[FS, IO]> {
+    if browser.locked("chromium") == .Err(_) {
+        print("outcome:caught")
+    } else {
+        print("outcome:ok")
+    }
+}
+"""
+    (code, out, err) :: run_jet_source(&root, hostile)
+    assert_eq(code, 0, "{err}\n{out}")
+    assert(out.contains("outcome:caught"), "{out}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/browser_lock.rs:250
+#Test("core_browser_locked_requires_fs_effect") {
+    missing_effect :: """
+use core.web.browser as browser
+fn run() -[IO]> {
+    locked :: browser.locked("chromium") ?? return
+}
+"""
+    diags :: jet.compile(missing_effect).expect_err("locked requires FS")
+    assert(diags.iter().any((diag) -> diag.code == "E0740" && diag.what.contains("FS")), "{diags:?}")
+}
+// Rust: tests/build_cache_normalization.rs:97
+#Test("script_cache_identity_changes_for_source_dependency_toolchain_and_target") {
+    root :: scratch_dir("identity")
+    script :: write_scratch_file(&root, "standalone.jet", "print(\"before\")\n".as_bytes())
+    dependency_file :: write_scratch_file(&root, ".jet/inline-deps/textkit/1.4.2/value.jet", "pub fn value() -> String {\n    return \"before\"\n}\n".as_bytes())
+    dependency :: inline_dep("textkit", "1.4.2")
+    resolved :: ScriptDeps.resolve(&dependency, &root).unwrap()
+    source_hash :: ScriptDeps.file_hash(&script).unwrap()
+    baseline :: script_cache_digest(&source_hash, std.slice.from_ref(&resolved), "jet-toolchain-a", "x86_64-unknown-linux-gnu")
+    _ :: write_scratch_file(&root, "standalone.jet", "print(\"after\")\n".as_bytes())
+    changed_source_hash :: ScriptDeps.file_hash(&script).unwrap()
+    assert_ne(baseline, script_cache_digest(&changed_source_hash, std.slice.from_ref(&resolved), "jet-toolchain-a", "x86_64-unknown-linux-gnu"), "changed standalone source must invalidate the prepared identity")
+    _ :: write_scratch_file(&root, ".jet/inline-deps/textkit/1.4.2/value.jet", "pub fn value() -> String {\n    return \"after\"\n}\n".as_bytes())
+    changed_dependency :: ScriptDeps.resolve(&dependency, &root).unwrap()
+    assert_ne(resolved.content_hash, changed_dependency.content_hash, "the changed local dependency must receive a new content hash")
+    assert_ne(baseline, script_cache_digest(&source_hash, std.slice.from_ref(&changed_dependency), "jet-toolchain-a", "x86_64-unknown-linux-gnu"), "changed dependency material must invalidate the prepared identity")
+    assert_ne(baseline, script_cache_digest(&source_hash, std.slice.from_ref(&resolved), "jet-toolchain-b", "x86_64-unknown-linux-gnu"), "changed toolchain identity must invalidate the prepared identity")
+    assert_ne(baseline, script_cache_digest(&source_hash, std.slice.from_ref(&resolved), "jet-toolchain-a", "aarch64-unknown-linux-gnu"), "changed target identity must invalidate the prepared identity")
+    relocated := resolved.clone()
+    relocated.dir = OSPath("/another/checkout")
+    assert_eq(baseline, script_cache_digest(&source_hash, std.slice.from_ref(&relocated), "jet-toolchain-a", "x86_64-unknown-linux-gnu"), "moving an otherwise identical local source must not change its identity")
+    assert_eq(fs.read(&dependency_file).unwrap(), "pub fn value() -> String {\n    return \"after\"\n}\n".as_bytes())
+    fs.remove_dir_all(root).unwrap()
+}
+// Rust: tests/build_cache_normalization.rs:191
+#Test("script_dependency_missing_material_fails_closed_without_creating_state") {
+    root :: scratch_dir("missing")
+    name :: "missing_buildnorm_{std.process.id()}_{COUNTER.fetch_add(1, Ordering.Relaxed)}"
+    dependency :: inline_dep(&name, "1.0.0")
+    error :: ScriptDeps.resolve(&dependency, &root).unwrap_err()
+    assert(if error == { .UnknownPackage -> true else -> false })
+    assert_eq(ScriptDeps.e1253(&dependency, &error).code, "E1253")
+    assert(!root.join(".jet").exists(), "a missing dependency must not materialize a cache or lock tree")
+    fs.remove_dir_all(root).unwrap()
+}
+// Rust: tests/build_cache_normalization.rs:215
+#Test("script_dependency_hostile_material_fails_closed_without_creating_state") {
+    // GATE #4483: preserve Unix-only scope; GATE #4494: symlink provider.
+    if target.selected_family() == "unix" {
+        root :: scratch_dir("hostile")
+        package :: root.join(".jet/inline-deps/hostile/1.0.0")
+        fs.create_dir_all(&package).unwrap()
+        fs.write(package.join("value.jet"), "stable\n".as_bytes()).unwrap()
+        std.os.unix.fs.symlink(".", package.join("loop")).unwrap()
+        dependency :: inline_dep("hostile", "1.0.0")
+        error :: ScriptDeps.resolve(&dependency, &root).unwrap_err()
+        assert(if error == { .InvalidTree(_) -> true else -> false })
+        diagnostic :: ScriptDeps.e1253(&dependency, &error)
+        assert_eq(diagnostic.code, "E1253")
+        assert(diagnostic.why.contains("cannot be hashed safely"), "hostile dependency diagnostics must explain the closed failure")
+        assert(!root.join("standalone.jet.lock").exists())
+        fs.remove_dir_all(root).unwrap()
+    }
+}
+// Rust: tests/build_cache_normalization.rs:241
+#Test("standalone_local_selector_resolves_without_preparation_side_effects") {
+    root :: scratch_dir("selector")
+    script :: write_scratch_file(&root, "standalone.jet", "print(\"stable\")\n".as_bytes())
+    _ :: write_scratch_file(&root, ".jet/inline-deps/local_only/1.4.1/value.jet", "one\n".as_bytes())
+    selected_source :: write_scratch_file(&root, ".jet/inline-deps/local_only/1.4.2/value.jet", "two\n".as_bytes())
+    source_before :: fs.read(&script).unwrap()
+    selected_source_before :: fs.read(&selected_source).unwrap()
+    source_hash :: ScriptDeps.file_hash(&script).unwrap()
+    loose :: inline_dep("local_only", "1.4")
+    resolved_loose :: ScriptDeps.resolve(&loose, &root).unwrap()
+    assert_eq(resolved_loose.resolved_version, "1.4.2")
+    assert_eq(resolved_loose.dir, selected_source.parent().unwrap().to_path_buf())
+    exact :: inline_dep("local_only", "1.4.2")
+    resolved_exact :: ScriptDeps.resolve(&exact, &root).unwrap()
+    assert_eq(resolved_loose.content_hash, resolved_exact.content_hash, "loose and exact selectors should use the same locally selected source")
+    assert_ne(script_cache_digest(&source_hash, std.slice.from_ref(&resolved_loose), "jet-toolchain-a", "x86_64-unknown-linux-gnu"), script_cache_digest(&source_hash, std.slice.from_ref(&resolved_exact), "jet-toolchain-a", "x86_64-unknown-linux-gnu"), "the selector remains part of the identity even when it selects the same source")
+    assert_eq(fs.read(&script).unwrap(), source_before)
+    assert_eq(fs.read(&selected_source).unwrap(), selected_source_before)
+    assert(!root.join("package.jet").exists(), "standalone preparation must not lift local dependencies into a manifest")
+    assert(!root.join("standalone.jet.lock").exists(), "resolution must not write a lock sidecar")
+    assert(!root.join(".jet/lock").exists(), "resolution must not create managed lock state")
+    fs.remove_dir_all(root).unwrap()
+}
+// Rust: tests/build_cache_normalization.rs:306
+#Test("whitespace_insensitive") {
+    a :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    b :: "fn  add( a : Int ,  b : Int )  {\n\n        print(  a  +  b  )\n\n}\n"
+    assert_eq(key(a), key(b), "reformatting must not change the key")
+}
+// Rust: tests/build_cache_normalization.rs:313
+#Test("comment_insensitive") {
+    a :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    b :: "/// doc comment\n// leading comment\nfn add(a: Int, b: Int) {\n  // inline\n  print(a + b) // trailing\n}\n"
+    assert_eq(key(a), key(b), "adding comments must not change the key")
+}
+// Rust: tests/build_cache_normalization.rs:320
+#Test("rename_sensitive") {
+    a :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    b :: "fn add(x: Int, y: Int) {\n    print(x + y)\n}\n"
+    assert_ne(key(a), key(b), "renaming a parameter must change the key")
+}
+// Rust: tests/build_cache_normalization.rs:328
+#Test("reorder_sensitive") {
+    a :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    b :: "fn add(a: Int, b: Int) {\n    print(b + a)\n}\n"
+    assert_ne(key(a), key(b), "reordering operands must change the key")
+}
+// Rust: tests/build_cache_normalization.rs:335
+#Test("profile_sensitive") {
+    src :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    default :: key_with(src, "default", "v")
+    small :: key_with(src, "small", "v")
+    release :: key_with(src, "release", "v")
+    assert_ne(default, small, "profiles must not share a cache entry")
+    assert_ne(default, release)
+    assert_ne(small, release)
+}
+// Rust: tests/build_cache_normalization.rs:346
+#Test("version_sensitive") {
+    src :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    assert_ne(key_with(src, "default", "0.1.0"), key_with(src, "default", "0.2.0"), "a version-salt change must change the key")
+}
+// Rust: tests/build_cache_normalization.rs:361
+#Test("operator_sensitive") {
+    a :: "fn f(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    b :: "fn f(a: Int, b: Int) {\n    print(a - b)\n}\n"
+    assert_ne(key(a), key(b), "a different operator must change the key")
+}
+// Rust: tests/build_cache_normalization.rs:368
+#Test("literal_sensitive") {
+    a :: "fn f() {\n    print(1)\n}\n"
+    b :: "fn f() {\n    print(2)\n}\n"
+    assert_ne(key(a), key(b), "a different literal must change the key")
+}
+// Rust: tests/build_cache_normalization.rs:375
+#Test("script_body_sensitive") {
+    a :: "print(\"a\")\n"
+    b :: "print(\"b\")\n"
+    c :: "print(\"a\")\nprint(\"b\")\n"
+    assert_ne(key(a), key(b), "a different script statement must change the key")
+    assert_ne(key(a), key(c), "an added script statement must change the key")
+}
+// Rust: tests/build_cache_normalization.rs:392
+#Test("string_literal_content_sensitive") {
+    a :: "fn f() {\n    print(\"Span start 1 end 2\")\n}\n"
+    b :: "fn f() {\n    print(\"Span start 7 end 3\")\n}\n"
+    assert_ne(key(a), key(b), "string-literal contents must survive span-stripping")
+}
+// Rust: tests/build_cache_normalization.rs:407
+#Test("stable_across_reloads") {
+    src :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    assert_eq(key(src), key(src), "same input must yield the same key")
+    assert_eq(key(src).len(), 64, "key is a 64-hex SHA-256 digest")
+}
+// Rust: tests/build_cache_normalization.rs:414
+#Test("target_dossier_inputs_invalidate_artifact_key") {
+    n :: COUNTER.fetch_add(1, Ordering.Relaxed)
+    dir :: std.env.temp_dir().join("jet-buildnorm-dossier-{std.process.id()}-{n}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("prog.jet")
+    src :: "fn add(a: Int, b: Int) {\n    print(a + b)\n}\n"
+    fs.write(&file, src).unwrap()
+    bundle :: Loader.load_entry_with_overlay(file.to_str().unwrap(), None, false).unwrap_or_else((d) -> panic("test program should parse:\n{src}\n{d:?}"))
+    baseline :: key_with_target_dossier(&bundle, (_) -> {})
+    assert_eq(baseline, key_with_target_dossier(&bundle, (_) -> {}), "identical input must keep the artifact key stable")
+    assert_changes :: (name, mutate) -> {
+        assert_ne(baseline, key_with_target_dossier(&bundle, mutate), "{name} must invalidate the artifact key")
+    }
+    assert_changes("runtime layer", (dossier) -> { dossier.layer = RuntimeLayer.Core })
+    assert_changes("provider digest/identity", (dossier) -> { dossier.provider_identity = "target-providers-v1:sha256:provider-b" })
+    assert_changes("Prelude closure", (dossier) -> { dossier.closure_identity = "prelude-hosted-v2:sha256:closure-b" })
+    assert_changes("linker", (dossier) -> { dossier.linker_identity = "lld:sha256:linker-b" })
+    assert_changes("execution tier", (dossier) -> { dossier.tier_identity = "aot" })
+    assert_changes("compiler", (dossier) -> { dossier.compiler_identity = "jet@next" })
+    assert_changes("environment", (dossier) -> { dossier.environment_identity = "wasi" })
+    assert_changes("dependency graph", (dossier) -> { dossier.dependency_identity = "deps:sha256:dependency-b" })
+    assert_ne(baseline, key_with_target_triple(&bundle, "wasm32-unknown-unknown"), "target triple must invalidate the artifact key")
+    _ :: fs.remove_dir_all(&dir).ok()
+}
+// Rust: tests/build_cache_race.rs:29
+#Test("concurrent_distinct_sources_sharing_a_stem_do_not_poison_the_cache") {
+    // GATE #4494: real concurrent launches with shared native cache/cwd.
+    root :: std.env.temp_dir().join("jet-cache-race-{std.process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    cache :: root.join("cache")
+    fs.create_dir_all(&cache).unwrap()
+    shared_cwd :: root.join("cwd")
+    fs.create_dir_all(&shared_cwd).unwrap()
+    files := [OSPath]{}
+    for i in 0..N {
+        dir :: root.join("src{i}")
+        fs.create_dir_all(&dir).unwrap()
+        f :: dir.join("main.jet")
+        fs.write(&f, "fn run() {\n    print(\"prog-{i}\")\n}\n").unwrap()
+        files.push(f)
+    }
+    handles :: files.iter().cloned().map((f) -> {
+        cwd :: shared_cwd.clone()
+        cache :: cache.clone()
+        thread.spawn(() -> Command.new(jet()).arg("run").arg(&f).current_dir(&cwd).env("JET_STORE_DIR", &cache).output().expect("spawn jet run"))
+    }).collect()
+    for h in handles {
+        out :: h.join().expect("thread")
+        assert(out.status.success(), "a concurrent `jet run` failed:\nstderr: {String.from_utf8_lossy(&out.stderr)}")
+    }
+    for (i, f) in files.iter().enumerate() {
+        iso :: root.join("verify{i}")
+        fs.create_dir_all(&iso).unwrap()
+        out :: Command.new(jet()).arg("run").arg(f).current_dir(&iso).env("JET_STORE_DIR", &cache).output().expect("spawn jet run (verify)")
+        assert(out.status.success(), "verify run {i} failed:\n{String.from_utf8_lossy(&out.stderr)}")
+        stdout :: String.from_utf8_lossy(&out.stdout)
+        assert(stdout.contains("prog-{i}"), "cache entry for source {i} returned the wrong binary — expected `prog-{i}`, got: {stdout:?}")
+    }
+    _ :: fs.remove_dir_all(&root).ok()
+}

@@ -1,0 +1,427 @@
+use std.[fs, env]
+use std.process.Command
+use jet
+use jet.Diagnostics.[FixApplicability, FixSafety]
+use jet_foundation.Tests.Integration.Common
+
+// Rust: tests/ownership.rs:5399
+#Test("aggregate_view_slot_composes_through_parameter_projection") {
+    src :: "struct Pair {{ left: View<Int>, right: View<Int> }}\nfn pair(left: [Int], right: [Int]) -[]> Pair {{\n    left_view :: left[0..1]\n    right_view :: right[0..1]\n    return Pair{{ left: left_view, right: right_view }}\n}}\nfn first(pair: Pair) -[]> View<Int> {{ return pair.left }}\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    result :: pair(left, right)\n    selected :: first(result)\n    &left.push(11)\n    print(selected[0])\n}}\n"
+    diags :: jet.compile(src).expect_err("the projected left slot must retain its original owner")
+    assert(diags.iter().any(diag -> diag.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:5428
+#Test("returned_view_aggregate_cannot_cross_task_boundary") {
+    src :: "struct Window {{ values: View<Int> }}\nfn window(values: [Int]) -[]> Window {{\n    selected :: values[0..1]\n    return Window{{ values: selected }}\n}}\nfn run() {{\n    handle :: task window([7, 8])\n    print((handle.join() ?? Window{{ values: [] }}).values[0])\n}}\n"
+    diags :: jet.compile(src).expect_err("view aggregates are not task-sendable")
+    assert(diags.iter().any(d -> d.code == "E1102"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:5447
+#Test("nested_returned_view_paths_with_same_source_compile") {
+    src :: "fn choose(xs: [Int]) -[]> View<Int> {{\n    if true {{ return xs[0..1] }}\n    return xs[1..2]\n}}\nfn run() {{ print(0) }}\n"
+    jet.compile(src).expect("all returned-view paths share parameter 0")
+}
+// Rust: tests/ownership.rs:5464
+#Test("returned_view_paths_form_a_safe_source_union") {
+    src :: "fn choose(left: [Int], right: [Int], first: Bool) -[]> View<Int> {{\n    if first {{ return left[0..1] }}\n    return right[0..1]\n}}\nfn run() {{\n    left := [7, 8]\n    right := [9, 10]\n    print(choose(left, right, true)[0])\n    print(choose(left, right, false)[0])\n}}\n"
+    out :: jet.compile(src).expect("both compatible parameter owners form one source union")
+    assert(out.rust.contains("__jet_left: &'__jet___view Vec<i64>") && out.rust.contains("__jet_right: &'__jet___view Vec<i64>") && out.rust.contains("-> JetOutcome<&'__jet___view [i64], JetErr>"), out.rust)
+}
+// Rust: tests/ownership.rs:5491
+#Test("borrowed_parameter_binding_never_inserts_hidden_copy") {
+    src :: "fn bind_again(text: String) {{\n    alias :: text\n    print(alias)\n}}\nfn run() {{ bind_again(\"hello\") }}\n"
+    diags :: jet.compile(src).expect_err("borrowed parameter binding must need explicit ownership")
+    escape :: diags.iter().find(diag -> diag.code == "E0120").expect("borrowed binding must report E0120 instead of cloning")
+    assert(escape.fix.contains("~text"), "fix must name explicit copy: {escape:?}")
+}
+// Rust: tests/ownership.rs:5515
+#Test("ownership_copy_edit_grade_tracks_cloneability") {
+    safe_src :: "#Policy(copies: .Explicit)\nstruct Holder {{ value: String }}\nfn wrap(value: String) -> Holder {{ return Holder{{value: value}} }}\nfn run() {{ print(0) }}\n"
+    safe_diags :: jet.compile(safe_src).expect_err("explicit copy policy must report E0120")
+    safe :: safe_diags.iter().find(diagnostic -> diagnostic.code == "E0120").expect("safe E0120")
+    assert_eq(safe.applicability, Some(FixApplicability.Safe))
+    assert_eq(safe.safety, Some(FixSafety.BehaviorPreserving))
+    safe_edit :: safe.edit.as_ref().expect("safe E0120 must carry an edit")
+    assert_eq(safe_edit.new_text, "~")
+    assert_eq(safe_src[safe_edit.span.start..safe_edit.span.end], "")
+    safe_fixed :: jet.LSP.apply_edit(safe_src, safe_edit)
+    assert(jet.compile(safe_fixed).is_ok(), "the safe `~` edit must clear the E0120 report: {safe_fixed}")
+    suggested_src :: "struct Holder {{ value: fn(Int) -> Int }}\nfn wrap(value: fn(Int) -> Int) -> Holder {{ return Holder{{value: value}} }}\nfn run() {{ print(0) }}\n"
+    suggested_diags :: jet.compile(suggested_src).expect_err("non-cloneable copy must report E0120")
+    suggested :: suggested_diags.iter().find(diagnostic -> diagnostic.code == "E0120").expect("suggested E0120")
+    assert(suggested.edit.is_none(), "a non-cloneable E0120 must not offer a `~` edit")
+    assert(jet.LSP.fixes_from_diagnostics(suggested_diags.clone()).is_empty())
+}
+// Rust: tests/ownership.rs:5577
+#Test("ownership_copy_edit_wraps_the_whole_place") {
+    src :: "#Policy(copies: .Explicit)\nstruct Inner {{ name: String? }}\nstruct Outer {{ inner: Inner\n    names: [String?] }}\nfn first_name(outer: Outer) -> String {{\n    picked :: outer.inner.name ?? return \"\"\n    picked\n}}\nfn indexed(outer: Outer) -> String {{\n    picked :: outer.names[0] ?? return \"\"\n    picked\n}}\nfn run() {{ print(0) }}\n"
+    diags :: jet.compile(src).expect_err("borrowed subplaces must report E0120")
+    fixed := src.to_string()
+    edits := diags.iter().filter(diagnostic -> diagnostic.code == "E0120").map(diagnostic -> diagnostic.edit.clone().expect("a cloneable E0120 must carry the `~` edit")).collect()
+    assert_eq(edits.len(), 2)
+    edits.sort_by_key(edit -> std.cmp.Reverse(edit.span.start))
+    loop edit in edits {
+        assert_eq(edit.new_text, "~")
+        fixed = jet.LSP.apply_edit(fixed, edit)
+    }
+    assert(fixed.contains("picked :: ~outer.inner.name ?? return"), fixed)
+    assert(fixed.contains("picked :: ~outer.names[0] ?? return"), fixed)
+    assert(jet.compile(fixed).is_ok(), "the `~` edits must clear the E0120 reports: {fixed}")
+}
+// Rust: tests/ownership.rs:5628
+#Test("core_string_view_copy_edit_names_consuming_expression") {
+    src :: #IncludeText("../../../../tests/ui/core_string_view_reuse_after_json.jet")
+    diags :: jet.compile(src).expect_err("explicit-copy Core boundary must report E2307")
+    diagnostic :: diags.iter().find(diagnostic -> diagnostic.code == "E2307").expect("the Core string-view refusal must be present")
+    assert_eq(diagnostic.applicability, Some(FixApplicability.Safe))
+    assert_eq(diagnostic.safety, Some(FixSafety.BehaviorPreserving))
+    edit :: diagnostic.edit.as_ref().expect("the named Core expression must carry a structured copy edit")
+    assert_eq(edit.new_text, "~")
+    assert_eq(src[edit.span.start..edit.span.end], "")
+    diagnostic_span :: diagnostic.span.expect("the Core expression must be highlighted")
+    assert_eq(edit.span.start, diagnostic_span.start)
+    assert_eq(src[diagnostic_span.start..diagnostic_span.end], "view")
+    fixed :: jet.LSP.apply_edit(src, edit)
+    assert(jet.compile(fixed).is_ok(), "applying the named Core copy edit must clear the report: {fixed}")
+    expected :: "alue\n\"value\"\n"
+    if Common.have_rustc() {
+        (code, stdout, stderr) :: Common.build_and_run("jet_string_view_core_reuse", "core_reuse", fixed)
+        assert_eq(code, 0, "AOT witness failed: {stderr}")
+        assert_eq(stdout, expected, "AOT witness output drift")
+    }
+    root :: Common.unique_tmp("jet_string_view_core_reuse_default")
+    // GATE #4494: actual filesystem and default CLI execution.
+    fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(path, fixed).unwrap()
+    output :: Command.new(env.var("JET_BIN").unwrap()).args(["run", path.to_str().unwrap()]).current_dir(root).output().expect("run the fixed Core witness through the default tier")
+    assert(output.status.success(), "default witness failed:\n{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).unwrap(), expected)
+}
+// Rust: tests/ownership.rs:5702
+#Test("generic_borrowed_parameter_materializes_an_owned_return") {
+    src :: "fn identity<T>(value: T) -[]> T {{ return value }}\nfn run() {{ print(0) }}\n"
+    out :: jet.compile(src).expect("a cloneable read parameter materializes at an owned return")
+    assert(out.rust.contains("pub fn __jet_identity<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr> {{"), "the escape must be paid for in the signature, not laundered: {out.rust}")
+    assert(out.rust.contains("return Ok(((*__jet_value)).clone());"), "the owned return must copy through the borrow, never move out of it: {out.rust}")
+    assert(!out.rust.contains("__jet_value: T"), "the parameter must stay a read borrow, not become an owned slot: {out.rust}")
+}
+// Rust: tests/ownership.rs:5742
+#Test("every_unmarked_nonscalar_parameter_has_read_borrow_rust_shape") {
+    src :: """
+struct Parcel {{ label: String }}
+impl Parcel {{
+    fn show(self) {{ print(self.label) }}
+}}
+fn read_text(text: String) {{ if true {{ print(text) }} }}
+fn read_list(values: [Int]) {{ print(values.len()) }}
+fn read_parcel(parcel: Parcel) {{ parcel.show() }}
+fn read_generic<T>(value: T) {{ print(0) }}
+fn apply(f: fn(Int) -> Int, value: Int) -[]> Int {{ return f(value) }}
+fn run() {{
+    text :: "hello"
+    values :: [1, 2, 3]
+    parcel :: Parcel{{ label: "parcel" }}
+    read_text(text)
+    read_list(values)
+    read_parcel(parcel)
+    read_generic(text)
+    print(apply((n: Int) -> (n + 1), 41))
+}}
+"""
+    out :: jet.compile(src).expect("all plain parameters are read borrows")
+    assert(out.rust.contains("__jet_text: &String"), out.rust)
+    assert(out.rust.contains("__jet_values: &Vec<i64>"), out.rust)
+    assert(out.rust.contains("__jet_parcel: &__jet_Parcel"), out.rust)
+    assert(out.rust.contains("__jet_value: &T"), out.rust)
+    assert(out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn"), out.rust)
+    assert(out.rust.contains("pub fn __jet_read_generic<T>(__jet_value: &T)"), "a read-only generic parameter must stay bound-free: {out.rust}")
+    assert(!out.rust.contains("((*__jet_text)).clone()"), out.rust)
+}
+// Rust: tests/ownership.rs:5823
+#Test("function_value_calls_preserve_plain_parameter_read_borrows") {
+    src :: "fn inspect(value: String) -[]> Int {{ return value.len() }}\nfn apply(f: fn(String) -> Int, value: String) -[]> Int {{ return f(value) }}\nfn run() {{ print(apply(inspect, \"hello\")) }}\n"
+    out :: jet.compile(src).expect("function-value call must preserve read access")
+    assert(out.rust.contains("__jet_f: &std::rc::Rc<dyn Fn(&String)"), "the function value must arrive as a read borrow: {out.rust}")
+    assert(out.rust.contains("__jet_value: &String"), out.rust)
+    assert(out.rust.contains("((*__jet_f))(&((*__jet_value)))"), out.rust)
+    assert(!out.rust.contains("((*__jet_value)).clone()"), out.rust)
+}
+// Rust: tests/ownership.rs:5861
+#Test("function_value_returning_view_preserves_owner_provenance") {
+    src :: "fn first(values: [Int]) -[]> View<Int> {{ return values[0..1] }}\nfn run() {{\n    callback :: first\n    values := [7, 8]\n    result :: callback(values)\n    &values.push(9)\n    print(result[0])\n}}\n"
+    diags :: jet.compile(src).expect_err("callback result must keep its owner live")
+    assert(diags.iter().any(d -> d.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:5891
+#Test("parameter_rooted_lambda_and_generic_callback_preserve_view_provenance") {
+    src :: "fn apply(callback: fn([Int]) -> View<Int>, values: [Int]) -[]> View<Int> {{ return callback(values) }}\nfn run() {{\n    values := [7, 8]\n    selected :: apply((items: [Int]) -> items[0..1], values)\n    print(selected[0])\n}}\n"
+    out :: jet.compile(src).expect("callback provenance is hidden in the function value")
+    assert(out.rust.contains("dyn for<'__jet___fn_view> Fn(&'__jet___fn_view Vec<i64>) -> JetOutcome<&'__jet___fn_view [i64], JetErr>"), "the callback must return a window into its own argument: {out.rust}")
+    assert(out.rust.contains("__jet_values: &'__jet___view Vec<i64>) -> JetOutcome<&'__jet___view [i64], JetErr>"), "the wrapper's returned window must be tied to its list parameter: {out.rust}")
+    assert(!out.rust.contains("dyn for<'__jet___view>"), "the callback binder must not shadow the enclosing view lifetime: {out.rust}")
+}
+// Rust: tests/ownership.rs:5930
+#Test("function_values_keep_exact_view_owner_identity") {
+    src :: "fn first(left: [Int], right: [Int]) -[]> View<Int> {{ return left[0..1] }}\nfn run() {{\n    left := [7, 8]\n    right := [9]\n    callback :: first\n    selected :: callback(left, right)\n    &right.push(10)\n    print(selected[0])\n    print(right[1])\n}}\n"
+    jet.compile(src).expect("unrelated callback arguments must not borrow the returned view")
+    if Common.have_rustc() {
+        (code, stdout, stderr) :: Common.build_and_run("jet_exact_callback_view_owner", "exact_callback_view_owner", src)
+        assert_eq(code, 0, stderr)
+        assert_eq(stdout, "7\n10\n")
+    }
+}
+// Rust: tests/ownership.rs:5959
+#Test("lambdas_keep_exact_view_owner_identity") {
+    src :: "fn run() {{\n    left := [7, 8]\n    right := [9]\n    callback :: (first: [Int], second: [Int]) -> first[0..1]\n    selected :: callback(left, right)\n    &right.push(10)\n    print(selected[0])\n    print(right[1])\n}}\n"
+    jet.compile(src).expect("unrelated lambda arguments must not borrow the returned view")
+    if Common.have_rustc() {
+        (code, stdout, stderr) :: Common.build_and_run("jet_exact_lambda_view_owner", "exact_lambda_view_owner", src)
+        assert_eq(code, 0, stderr)
+        assert_eq(stdout, "7\n10\n")
+    }
+}
+// Rust: tests/ownership.rs:5984
+#Test("stored_lambda_returning_view_is_rejected_before_codegen") {
+    src :: "fn first(values: [Int]) -[]> View<Int> {{ return values[0..1] }}\nfn run() {{\n    values := [7, 8]\n    callback :: () -> first(values)\n    print(0)\n}}\n"
+    diags :: jet.compile(src).expect_err("stored lambda view source cannot stabilize")
+    assert(diags.iter().any(d -> d.code == "E2305"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6001
+#Test("returned_view_composes_from_receiver_field") {
+    src :: "struct Bucket {{ values: [Int] }}\nimpl Bucket {{\n    fn first(self) -[]> View<Int> {{ return self.values[0..1] }}\n}}\nfn wrapper(bucket: Bucket) -[]> View<Int> {{ return bucket.first() }}\nfn run() {{ print(0) }}\n"
+    out :: jet.compile(src).expect("receiver-rooted method view must compose")
+    assert(out.rust.contains("&'__jet___view self"), out.rust)
+}
+// Rust: tests/ownership.rs:6019
+#Test("generic_returned_view_composes_through_wrapper") {
+    src :: "fn first<T>(values: [T]) -[]> View<T> {{ return values[0..1] }}\nfn wrapper(values: [Int]) -[]> View<Int> {{ return first(values) }}\nfn run() {{\n    values := [7, 8]\n    result :: wrapper(values)\n    print(result[0])\n}}\n"
+    jet.compile(src).expect("generic instantiation provenance must compose through wrapper")
+}
+// Rust: tests/ownership.rs:6037
+#Test("open_dynamic_trait_view_dispatch_is_rejected") {
+    src :: "trait Select {{\n    fn select(self, left: [Int], right: [Int]) -> View<Int>\n}}\nfn wrapper(selector: Select, left: [Int], right: [Int]) -[]> View<Int> {{ return selector.select(left, right) }}\nfn run() {{ print(0) }}\n"
+    diags :: jet.compile(src).expect_err("open trait dispatch has no stable source")
+    assert(diags.iter().any(d -> d.code == "E2305"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6052
+#Test("returned_view_blocks_owner_resize_and_move") {
+    loop action in ["values.push(4)", "consume(^values)"] {
+        src :: "fn first(values: [Int]) -[]> View<Int> {{ return values[0..1] }}\nfn consume(values: ^[Int]) {{ print(values.len()) }}\nfn run() {{\n    values := [1, 2, 3]\n    result :: first(values)\n    {action}\n    print(result[0])\n}}\n"
+        diags :: jet.compile(src).expect_err("live returned view must keep owner stable")
+        assert(diags.iter().any(d -> d.code == "E0212"), "{diags:?}")
+    }
+}
+// Rust: tests/ownership.rs:6073
+#Test("returned_view_aggregate_blocks_owner_resize") {
+    src :: "struct Window {{ values: View<Int> }}\nfn window(values: [Int]) -[]> Window {{\n    selected :: values[0..1]\n    return Window{{ values: selected }}\n}}\nfn run() {{\n    values := [1, 2, 3]\n    result :: window(values)\n    &values.push(4)\n    print(result.values[0])\n}}\n"
+    diags :: jet.compile(src).expect_err("stored returned view must keep owner stable")
+    assert(diags.iter().any(d -> d.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6092
+#Test("returned_mutable_view_conflicts_with_overlapping_view") {
+    src :: "fn edit(values: &[Int]) -[]> ViewMut<Int> {{ return &values[0..1] }}\nfn run() {{\n    values := [1, 2, 3]\n    left :: edit(&values)\n    right :: &values[0..1]\n    print(left[0] + right[0])\n}}\n"
+    diags :: jet.compile(src).expect_err("returned mutable view must remain exclusive")
+    assert(diags.iter().any(d -> d.code == "E0212"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6109
+#Test("returned_view_can_be_carried_in_a_list") {
+    src :: "fn first(values: [Int]) -[]> View<Int> {{ return values[0..1] }}\nfn run() {{\n    values := [1, 2, 3]\n    result :: first(values)\n    windows :: [result]\n    print(windows[0][0])\n}}\n"
+    jet.compile(src).expect("list element provenance remains attached to its owner")
+}
+// Rust: tests/ownership.rs:6125
+#Test("stored_view_field_cannot_be_rebound_to_different_owner") {
+    src :: "struct Window {{ values: View<Int> }}\nfn replace(left: [Int], right: [Int]) {{\n    first :: left[0..1]\n    holder := Window{{ values: first }}\n    second :: right[0..1]\n    holder.values = second\n    print(holder.values[0])\n}}\nfn run() {{ print(0) }}\n"
+    diags :: jet.compile(src).expect_err("stored view field source cannot change")
+    assert(diags.iter().any(d -> d.code == "E2305"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6142
+#Test("named_write_and_move_functions_cannot_erase_access_as_function_values") {
+    loop src in ["fn edit(value: &String) {{ print(value) }}\nfn run() {{ callback :: edit }}\n", "fn consume(value: ^String) {{ print(value) }}\nfn run() {{ callback :: consume }}\n"] {
+        diags :: jet.compile(src).expect_err("function-value coercion must preserve access")
+        mismatch :: diags.iter().find(d -> d.code == "E0112").expect("E0112")
+        assert(mismatch.why.contains("plain read access"), "{mismatch:?}")
+    }
+}
+// Rust: tests/ownership.rs:6160
+#Test("function_value_call_rejects_move_and_tracks_aliases_per_call") {
+    moved :: "fn inspect(value: String) {{ print(value) }}\nfn run() {{\n    callback :: inspect\n    value :: \"hello\"\n    callback(^value)\n}}\n"
+    diags :: jet.compile(moved).expect_err("read callback must reject explicit move")
+    assert(diags.iter().any(d -> d.code == "E0203"), "{diags:?}")
+    aliased :: "fn both(a: String, b: String) {{\n    print(a)\n    print(b)\n}}\nfn run() {{\n    callback :: both\n    value := \"hello\"\n    callback(&value, value)\n}}\n"
+    aliases :: jet.compile(aliased).expect_err("callback arguments must preserve alias rules")
+    assert_eq(aliases.iter().filter(d -> d.code == "E0204").count(), 1, "alias state must stay within this call and flow across its arguments: {aliases:?}")
+}
+// Rust: tests/ownership.rs:6192
+#Test("borrowed_parameter_subplaces_copy_in_owning_positions") {
+    cases :: [
+        "struct Parcel {{ label: String }}\nstruct Holder {{ value: String }}\nfn wrap(parcel: Parcel) -[]> Holder {{ return Holder{{ value: parcel.label }} }}\nfn run() {{ print(0) }}\n",
+        "enum Wrapped {{ Val(String) }}\nfn wrap(values: [String]) -[]> Wrapped {{ return Wrapped.Val(values[0]) }}\nfn run() {{ print(0) }}\n",
+        "struct Parcel {{ label: String }}\nfn replace(parcel: Parcel) {{\n    owned := \"old\"\n    owned = parcel.label\n}}\nfn run() {{ print(0) }}\n"
+    ]
+    loop src in cases { jet.compile(src).expect("an owning destination must materialize a read subplace") }
+}
+// Rust: tests/ownership.rs:6231
+#Test("function_value_borrow_context_preserves_parameter_place_window") {
+    src :: "struct Parcel {{ label: String }}\nfn inspect(text: String, n: Int) {{\n    print(text)\n    print(n)\n}}\nfn apply_to(parcel: Parcel, callback: fn(String, Int)) {{\n    callback(parcel.label, 1)\n    alias :: parcel.label\n}}\nfn run() {{ apply_to(Parcel{{ label: \"hello\" }}, inspect) }}\n"
+    out :: jet.compile(src).expect("bare parameter subplace is a read window")
+    assert(out.rust.contains("__jet_parcel: &__jet_Parcel"), out.rust)
+    assert(out.rust.contains("((*__jet_callback))(&(((*__jet_parcel)).__jet_label),"), "the callback argument must reborrow the subplace: {out.rust}")
+    assert(out.rust.contains("let __jet_alias = &"), out.rust)
+    assert(!out.rust.contains("((*__jet_parcel)).__jet_label).clone()"), "a bare `::` binding must not allocate a copy of the subplace: {out.rust}")
+}
+// Rust: tests/ownership.rs:6281
+#Test("plain_parameter_write_take_and_escape_diagnostics_name_explicit_access") {
+    write_src :: "fn edit(values: [Int]) {{ values[0] = 4 }}\nfn run() {{ print(0) }}\n"
+    write_diags :: jet.compile(write_src).expect_err("plain list parameter cannot be edited")
+    write :: write_diags.iter().find(d -> d.code == "E0205").unwrap_or_else(() -> panic("expected E0205: {write_diags:?}"))
+    assert(write.fix.contains("&[Int]"), "{write:?}")
+    take_src :: "fn consume<T>(value: ^T) {{ print(0) }}\nfn relay<T>(value: T) {{ consume(value) }}\nfn run() {{ print(0) }}\n"
+    take_diags :: jet.compile(take_src).expect_err("plain generic parameter cannot be consumed")
+    take :: take_diags.iter().find(d -> d.code == "E0209").expect("E0209")
+    assert(take.fix.contains("^value"), "{take:?}")
+    callback_src :: "fn keep(f: fn(Int) -> Int) -[]> fn(Int) -> Int {{ return f }}\nfn run() {{ print(0) }}\n"
+    escape :: jet.compile(callback_src).expect_err("plain callback parameter cannot escape")
+    assert(escape.iter().any(d -> d.code == "E0120"), "{escape:?}")
+}
+// Rust: tests/ownership.rs:6316
+#Test("optional_constructor_payload_obeys_field_ownership") {
+    src :: "struct Node {{\n    value: Int\n    prev: Node?\n    next: Node?\n}}\nfn run() {{\n    first := Node{{value: 1, prev: None, next: None}}\n    second := Node{{value: 2, prev: Val(first), next: None}}\n    first.next = Val(second)\n    print(first.value)\n    print(second.value)\n}}\n"
+    diags :: jet.compile(src).expect_err("the optional payload must be tracked as an owning move")
+    assert(diags.iter().any(diagnostic -> diagnostic.code == "E0121"), "expected the existing moved-value diagnostic: {diags:?}")
+}
+// Rust: tests/ownership.rs:6339
+#Test("borrowed_parameter_fills_an_owned_struct_field_with_an_implicit_copy") {
+    src :: "struct Holder {{ value: String }}\nfn wrap(value: String) -[]> Holder {{ return Holder{{ value: value }} }}\nfn run() {{ print(0) }}\n"
+    jet.compile(src).expect("an owned field must materialize a read parameter")
+}
+// Rust: tests/ownership.rs:6351
+#Test("stored_lambda_materializes_a_read_view_capture") {
+    src :: "fn store(text: String) -[..E]> fn() -> String -[..E]> {{\n    domain :: text.after(\"@\")\n    return () -> domain\n}}\nfn run() {{\n    callback :: store(\"nate@jet-lang.dev\")\n    print(callback())\n}}\n"
+    compiled :: jet.compile(src).expect("stored read-view capture must become owning")
+    assert(compiled.rust.contains("jet_string_view_copy"), compiled.rust)
+    if Common.have_rustc() {
+        (code, stdout, stderr) :: Common.build_and_run("jet_stored_view_capture", "whole_root", src)
+        assert_eq(code, 0, stderr)
+        assert_eq(stdout, "jet-lang.dev\n")
+    }
+}
+// Rust: tests/ownership.rs:6377
+#Test("owning_collection_elements_materialize_read_views_without_expected_type") {
+    src :: "fn collect(text: String) -[]> [String] {{\n    domain :: text.after(\"@\")\n    values :: [domain]\n    return values\n}}\nfn run() {{ print(collect(\"nate@jet-lang.dev\")[0]) }}\n"
+    compiled :: jet.compile(src).expect("an owning collection element must materialize")
+    assert(compiled.rust.contains("jet_string_view_copy"), compiled.rust)
+}
+// Rust: tests/ownership.rs:6397
+#Test("borrowed_parameter_can_feed_stored_lambda_after_explicit_copy") {
+    src :: "fn store(text: String) {{\n    owned :: ~text\n    callback :: () -> owned.len()\n    print(callback())\n}}\nfn run() {{ store(\"read\") }}\n"
+    jet.compile(src).expect("explicitly copied capture should compile")
+}
+// Rust: tests/ownership.rs:6410
+#Test("borrowed_parameter_can_feed_task_after_explicit_copy") {
+    src :: "fn launch(text: String) {{\n    owned :: ~text\n    handle :: task owned.len()\n    print(handle.join() ?? 0)\n}}\nfn run() {{ launch(\"read\") }}\n"
+    jet.compile(src).expect("explicitly copied task capture should compile")
+}
+// Rust: tests/ownership.rs:6423
+#Test("two_binding_loop_over_owned_task_list_compiles") {
+    src :: "fn run() {{\n    handles :: [task 1, task 2]\n    total := 0\n    loop (i, h) in handles {{ total += (h.join() ?? 0) + i }}\n    print(total)\n}}\n"
+    jet.compile(src).expect("owned two-binding task loop must compile")
+}
+// Rust: tests/ownership.rs:6436
+#Test("nested_task_list_loop_compiles") {
+    src :: "fn run() {{\n    groups :: [[task 1], [task 2]]\n    n := 0\n    loop g in groups {{ n += g.len() }}\n    print(n)\n}}\n"
+    jet.compile(src).expect("loop over [[Task]] must compile by value")
+}
+// Rust: tests/ownership.rs:6449
+#Test("mutable_task_list_drain_discharges_linear_duty") {
+    src :: "fn run() {{\n    workers := [Task<Int>]{{}}\n    &workers.push(task 1)\n    loop workers.len() > 0 {{\n        worker :: &workers.pop() ?? panic(\"missing worker\")\n        print(worker.join() ?? 0)\n    }}\n}}\n"
+    jet.compile(src).expect("a proven pop-to-empty loop must discharge the task-list duty")
+}
+// Rust: tests/ownership.rs:6464
+#Test("task_list_drain_that_reinserts_still_owes_consume") {
+    src :: "fn run() {{\n    workers := [Task<Int>]{{}}\n    &workers.push(task 1)\n    loop workers.len() > 0 {{\n        worker :: &workers.pop() ?? panic(\"missing worker\")\n        print(worker.join() ?? 0)\n        &workers.push(task 2)\n    }}\n}}\n"
+    diags :: jet.compile(src).expect_err("a drain that reinserts is not proven empty")
+    duty :: diags.iter().find(d -> d.code == "E0140").expect("E0140")
+    assert(duty.what.contains("workers"), "{duty:?}")
+}
+// Rust: tests/ownership.rs:6482
+#Test("moved_task_list_parameter_loop_compiles") {
+    src :: "fn drain(hs: ^[Task<Int>]) -[]> Int {{\n    total := 0\n    loop h in hs {{ total += h.join() ?? 0 }}\n    total\n}}\nfn run() {{\n    handles :: [task 1, task 2]\n    print(drain(^handles))\n}}\n"
+    jet.compile(src).expect("moved task-list parameter loop must compile")
+}
+// Rust: tests/ownership.rs:6498
+#Test("two_binding_borrowed_task_list_reports_e0120") {
+    src :: "fn drain(hs: [Task<Int>]) -[]> Int {{\n    total := 0\n    loop (i, h) in hs {{ total += (h.join() ?? 0) + i }}\n    total\n}}\nfn run() {{\n    handles :: [task 1]\n    print(drain(handles))\n}}\n"
+    diags :: jet.compile(src).expect_err("borrowed two-binding task loop needs ^")
+    assert(diags.iter().any(d -> d.code == "E0120"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6515
+#Test("task_list_index_loop_reports_e0120") {
+    src :: "fn run() {{\n    groups :: [[task 1]]\n    total := 0\n    loop h in groups[0] {{ total += h.join() ?? 0 }}\n    print(total)\n}}\n"
+    diags :: jet.compile(src).expect_err("index projection cannot be consumed by value")
+    escape :: diags.iter().find(d -> d.code == "E0120").expect("E0120")
+    assert(escape.what.contains("field or index"), "must not rewrite the root as the list: {escape:?}")
+    assert(!escape.fix.contains("groups: ^"), "must not suggest taking the outer list as [Task]: {escape:?}")
+}
+// Rust: tests/ownership.rs:6537
+#Test("stream_reuse_after_loop_reports_e0121") {
+    src :: "fn count(n: Int) -[]> Stream<Int> {{\n    i := 0\n    loop i < n {{\n        yield i\n        i += 1\n    }}\n}}\nfn run() {{\n    s :: count(3)\n    loop x in s {{ print(\"{{x}}\") }}\n    loop x in s {{ print(\"{{x}}\") }}\n}}\n"
+    diags :: jet.compile(src).expect_err("Stream is consumed by the first loop")
+    assert(diags.iter().any(d -> d.code == "E0121"), "{diags:?}")
+}
+// Rust: tests/ownership.rs:6560
+#Test("lone_write_borrow_matches_on_jit_and_aot") {
+    cases :: [
+        ("local_add", "struct P {{ position: Int }}\nfn run() {{\n  ps := [P{{ position: 10 }}, P{{ position: 20 }}]\n  a :: &ps[0]\n  a.position += 2\n  print(ps[0].position)\n}}\n", "12\n"),
+        ("local_field", "struct P {{ position: Int }}\nfn run() {{\n  ps := [P{{ position: 1 }}, P{{ position: 2 }}]\n  a :: &ps[0]\n  a.position = 42\n  print(ps[0].position)\n}}\n", "42\n"),
+        ("through_param", "struct P {{ position: Int }}\nstruct W {{ ps: [P] }}\nfn bump(w: &W) {{\n  a :: &w.ps[0]\n  a.position = 42\n}}\nfn run() {{\n  w := W{{ ps: [P{{ position: 1 }}] }}\n  bump(&w)\n  print(w.ps[0].position)\n}}\n", "42\n"),
+        ("nested_index", "fn run() {{\n  grid := [[1, 2], [3, 4]]\n  a :: &grid[0][1]\n  a = 42\n  print(grid[0][1])\n}}\n", "42\n")
+    ]
+    loop (name, source, expected) in cases {
+        out :: jet.compile(source).unwrap_or_else(diags -> panic("{name} must compile for AOT emit: {diags:?}"))
+        if name == "nested_index" {
+            assert(out.rust.contains("jet_index_vec_mut"), "{name} must borrow the live inner list, not a clone: {out.rust}")
+            assert(out.rust.contains("let __jet___place_plan_0_root = &mut ((*jet_index_vec_mut("), "{name} split-view root must use jet_index_vec_mut: {out.rust}")
+        }
+        root :: Common.unique_tmp("jet_lone_write_{name}")
+        fs.create_dir_all(root).unwrap()
+        path :: root.join("main.jet")
+        fs.write(path, source).unwrap()
+        loop release in [false, true] {
+            cmd := Command.new(env.var("JET_BIN").unwrap())
+            cmd.arg("run")
+            if release { cmd.arg("--release") }
+            cmd.arg(path.to_str().unwrap()).current_dir(root)
+            output :: cmd.output().unwrap_or_else(err -> panic("jet run failed to spawn for {name}: {err}"))
+            assert(output.status.success(), "{name} release={release} failed:\n{String.from_utf8_lossy(output.stderr)}")
+            assert_eq(String.from_utf8_lossy(output.stdout), expected, "{name} release={release}")
+        }
+    }
+}
+// Rust: tests/ownership.rs:6663
+#Test("declared_trait_from_allows_dyn_view_return_on_jit") {
+    dir :: env.temp_dir().join("jet_view_from_trait_dyn_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("main.jet")
+    // ONE-arrow owner ruling: the head method has a braced value body.
+    fs.write(path, "trait Slice {{\n    fn head(self) -[]> View<Int> from self\n}}\nstruct Packet {{ data: [Int] }}\nimpl Packet.Slice {{\n    fn head(self) -> View<Int> from self {{ self.data[0..1] }}\n}}\nfn first(s: Slice) -[..E]> View<Int> from s {{ return s.head() }}\nfn run() {{\n    boxed :: [Slice]{{Packet{{ data: [9, 8, 7] }}}}\n    print(first(boxed[0])[0])\n}}\n").unwrap()
+    output :: Command.new(env.var("JET_BIN").unwrap()).arg("run").arg(path).output().expect("jet run")
+    code :: output.status.code().unwrap_or(1)
+    stdout :: String.from_utf8_lossy(output.stdout).to_string()
+    stderr :: String.from_utf8_lossy(output.stderr).to_string()
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, "9\n", stderr)
+}
+// Rust: tests/ownership.rs:6713
+#Test("undeclared_view_callback_freezes_every_non_scalar_argument") {
+    src :: "fn pick_first(line: String, noise: String) -[]> View<str> {{\n    text :: line.before(\":\")\n    return text\n}}\nfn apply(f: fn(String, String) -> View<str>, a: String, b: String) -[]> View<str> {{ return f(a, b) }}\nfn run() {{\n    a := \"hello:x\"\n    b := \"world\"\n    result :: apply(pick_first, a, b)\n    b = \"mutated\"\n    print(result)\n}}\n"
+    diags :: jet.compile(src).expect_err("wide callback must freeze noise owner")
+    assert(diags.iter().any(d -> d.code == "E0212"), "expected E0212, got {diags:?}")
+    assert(diags.iter().all(d -> d.code != "E2307"), "fixture itself must typecheck: {diags:?}")
+}
+// Rust: tests/ownership.rs:6746
+#Test("declared_view_callback_from_freezes_only_named_source") {
+    src :: "fn pick_first(line: String, noise: String) -[]> View<str> {{\n    text :: line.before(\":\")\n    return text\n}}\nfn apply(f: fn(line: String, noise: String) -> View<str> from line, a: String, b: String) -[]> View<str> {{ return f(a, b) }}\nfn run() {{\n    a := \"hello:x\"\n    b := \"world\"\n    result :: apply(pick_first, a, b)\n    b = \"mutated\"\n    print(result)\n}}\n"
+    jet.compile(src).expect("narrow from-clause must leave noise free")
+}

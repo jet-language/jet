@@ -1,0 +1,139 @@
+use jet_foundation as f
+
+// Rust: crates/jet-foundation/src/Authority.rs:898
+#Test("rights_use_one_tree_and_only_tighten") {
+    outer :: f.authority_holds([String]{"FS", "Net"})
+    inner :: f.authority_holds([String]{"FS.Read", "Net", "DB"})
+    assert(f.authority_covers("FS", "FS.Read"))
+    assert(!f.authority_tighten(outer, inner))
+    assert(!f.authority_tighten(inner, outer))
+    assert_eq(f.authority_uncovered(inner, outer), [String]{"DB"})
+}
+// Rust: crates/jet-foundation/src/Authority.rs:908
+#Test("every_checkpoint_uses_one_canonical_answer") {
+    held :: [String]{"FS"}
+    denied :: [String]{"Secret"}
+    missing :: [String]{}
+    right :: f.authority_parse_right("fs.Read") ?? panic("known right")
+    assert_eq(right, "FS.Read")
+    assert_eq(f.authority_parse_right("fs.read"), Val("FS.read"))
+    checkpoints :: [(String, f.AuthorityVerdict)]{
+        ("compile", f.authority_answer(held, denied, right)), ("build", f.authority_answer(held, denied, right)),
+        ("session", f.authority_answer(held, denied, right)), ("repl", f.authority_answer(held, denied, right))}
+    loop (_, verdict) in checkpoints -> assert_eq(verdict, f.AuthorityVerdict.Allowed)
+    assert_eq(f.authority_answer(held, [String]{"FS"}, right), f.AuthorityVerdict.Denied)
+    assert_eq(f.authority_answer(held, denied, "Secret"), f.AuthorityVerdict.Denied)
+    assert_eq(f.authority_answer(held, denied, "Net"), f.AuthorityVerdict.Missing)
+    assert_eq(f.authority_answer(held, missing, "FS.Read"), f.authority_answer(held, missing, "fs.Read"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:938
+#Test("one_gate_record_keeps_provenance") {
+    ledger := f.GateLedger.default()
+    entry :: (provenance: String) -> f.GateEntry{kind: f.GateKind.TrustGrant, domain: "security", scope: "package",
+        source: "package.jet", span: None, subject: "dep", reason: None, status: Val("recorded"), detail: "FS.Read",
+        provenance: [String]{provenance}, operations: []}
+    &ledger.push(entry("lockfile"))
+    &ledger.push(entry("trust store"))
+    assert_eq(ledger.entries().len(), 1)
+    assert_eq(ledger.entries()[0].provenance.len(), 2)
+}
+// Rust: crates/jet-foundation/src/Authority.rs:960
+#Test("effect_roots_are_the_thirteen_grantable_roots") {
+    assert_eq(f.AUTHORITY_EFFECT_ROOTS, [String]{"Net", "FS", "IO", "DB", "Time", "Rand", "Env", "Exec", "Log", "GPU", "FFI", "Browser", "Secret"})
+    assert_eq(f.Effect.all().len(), 13)
+    assert_eq(f.authority_parse_right("Panic"), Val("Panic"))
+    assert_eq(f.authority_parse_right("Mem.Alloc"), Val("Mem.Alloc"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:974
+#Test("manifestless_application_default_grants_beginner_basics") {
+    authority :: f.ApplicationAuthority.default()
+    assert_eq(authority.granted_effects, f.authority_holds([String]{"IO", "Mem.Alloc", f.AUTHORITY_EXEC_ARGS_LEAF}))
+    assert_eq(authority.denied_effects.len(), 0)
+    assert_eq(authority.authority, "application default")
+}
+// Rust: crates/jet-foundation/src/Authority.rs:989
+#Test("manifestless_floor_reads_arguments_but_cannot_spawn") {
+    argv := f.ApplicationAuthority.ambient_basics()
+    argv.required_effects = f.authority_holds([String]{"IO", f.AUTHORITY_EXEC_ARGS_LEAF})
+    assert(argv.is_allowed())
+    spawn := f.ApplicationAuthority.ambient_basics()
+    spawn.required_effects = f.authority_holds([String]{"Exec", "IO"})
+    diagnostic :: spawn.policy_diagnostic() ?? panic("spawning needs a grant")
+    assert_eq(diagnostic.code, "E1803")
+    assert(diagnostic.what.contains("`Exec`"))
+    loop granted in f.AUTHORITY_AMBIENT_BASIC_EFFECTS -> assert(!f.authority_covers(granted, "Exec"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1012
+#Test("authority_refusal_why_is_a_sentence_and_facts_are_detail") {
+    authority := f.ApplicationAuthority.package_default()
+    authority.required_effects = f.authority_holds([String]{"IO", "FS.Write", "Exec"})
+    diagnostic :: authority.policy_diagnostic() ?? panic("E1803")
+    assert_eq(diagnostic.why, "This program starts other programs and writes files, and package.jet (which has no authority block) has not allowed that yet.")
+    assert(!diagnostic.why.contains("="))
+    detail :: diagnostic.detail ?? panic("facts detail")
+    assert(detail.starts_with("authority_facts:required_effects=Exec, FS.Write, IO;"))
+    assert(detail.contains("undecided_effects=Exec, FS.Write"))
+    assert(diagnostic.fix.contains("allow: [Exec, FS.Write, IO]"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1037
+#Test("authority_diagnostic_fix_lists_all_undecided_effects") {
+    authority :: f.ApplicationAuthority{required_effects: f.authority_holds([String]{"IO", "Mem.Alloc", "Exec"}),
+        granted_effects: [], denied_effects: [], authority: "package.jet authority.holds"}
+    diagnostic :: authority.policy_diagnostic() ?? panic("E1803")
+    assert(diagnostic.fix.contains("allow: [Exec, IO, Mem.Alloc]"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1053
+#Test("manifestless_fix_declares_the_complete_inline_row") {
+    authority := f.ApplicationAuthority.ambient_basics()
+    authority.required_effects = f.authority_holds([String]{"FS", "IO", "Panic"})
+    diagnostic :: authority.policy_diagnostic() ?? panic("E1803")
+    assert(diagnostic.what.contains("`FS`"))
+    assert(diagnostic.fix.contains("allow: [FS, IO]"))
+    assert(diagnostic.fix.contains("package {{ … }}"))
+    assert(!diagnostic.fix.contains("package.jet"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1067
+#Test("application_authority_does_not_request_a_positive_panic_grant") {
+    authority := f.ApplicationAuthority{required_effects: f.authority_holds([String]{"IO", "Panic"}), granted_effects: [String]{"IO"},
+        denied_effects: [], authority: "application default"}
+    assert_eq(authority.undecided_effects().len(), 0)
+    assert(authority.is_allowed())
+    assert_eq(authority.policy_diagnostic(), None)
+    f.authority_holds_insert(&authority.denied_effects, "Panic")
+    diagnostic :: authority.policy_diagnostic() ?? panic("E1803")
+    assert(diagnostic.what.contains("Panic"))
+    assert(diagnostic.fix.to_ascii_lower().contains("adjust the denial"))
+    assert(!diagnostic.fix.contains("allow: [Panic]"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1089
+#Test("every_ffi_language_leaf_is_covered_by_the_ffi_root") {
+    loop leaf in f.BUILTIN_EFFECT_LEAVES {
+        if !leaf.starts_with("FFI.") -> next
+        assert(f.authority_covers("FFI", leaf))
+        assert(f.authority_parse_right(leaf) != None)
+        assert_eq(f.authority_answer([], [String]{"FFI"}, leaf), f.AuthorityVerdict.Denied)
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1106
+#Test("retired_flat_ffi_spellings_do_not_parse") {
+    loop root in [String]{"Go", "Java", "DotNet", "Fortran", "Cobol", "Tcl", "Lua", "Ada", "Pascal", "Dart", "PowerShell", "Perl", "Ruby", "Php", "R", "Com", "Cpp", "Py", "Octave"} {
+        assert_eq(f.authority_parse_right(root), None)
+        assert_eq(f.Effect.parse(root), None)
+    }
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1136
+#Test("resource_qualified_rights_keep_tree_boundaries") {
+    assert(f.authority_covers("FS.Read", "FS.Read:/data/file"))
+    assert(f.authority_covers("Net.Connect", "Net.Connect:api.example.com"))
+    assert(!f.authority_covers("FS.Read:/data", "FS.Read:/database"))
+    assert(!f.authority_covers("Net.Connect:api.example.com", "Net.Connect:api.example.com.evil"))
+}
+// Rust: crates/jet-foundation/src/Authority.rs:1144
+#Test("canonical_authority_tightens_without_widening") {
+    host :: f.CanonicalAuthority.from_rights([String]{"FS.Read", "Net.Connect"})
+    child :: [String]{"FS.Read:/data"}
+    narrowed :: host.tighten(child) ?? panic("child scope is covered")
+    assert(narrowed.allows("FS.Read:/data/file"))
+    assert(!narrowed.allows("FS.Read:/other"))
+    assert(host.tighten([String]{"Exec"}) == .Err(_))
+}

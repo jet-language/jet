@@ -1,1804 +1,749 @@
-// PORT-PENDING 2006 crates-jet-codegen-src-codegen-mirrust-slice-9001: crates/jet-codegen/src/Codegen/MIRRust.rs:9001-10800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS             values[0], values[1]
-//RS         )
-//RS     }
-//RS 
-//RS     fn history_provenance_expression(&self) -> String {
-//RS         let (source, tool, target) = self.history_base_provenance();
-//RS         format!(
-//RS             "Some(crate::jet_testing_history_foundation::HistoryProvenance {{ source: {}.to_string(), tool: {}.to_string(), target: {}.to_string() }})",
-//RS             quote_rust_string(&source), quote_rust_string(&tool), quote_rust_string(&target),
-//RS         )
-//RS     }
-//RS 
-//RS     // Emit codecs from checked types, but read their values only when the
-//RS     // selected runtime callable is bound. Recursive records call the same
-//RS     // codec; no operand ID or source-expression evaluation enters the hash.
-//RS     fn history_capture_expression(&self, ty: &MirType, value: &str) -> String {
-//RS         if let MirTypeKind::Apply { name, args } = ty.kind() {
-//RS             if args.is_empty() && self.history_type_parameters(ty).contains(&name.name) {
-//RS                 return format!("{}jet_history_encode_type(&__jet_history_types, {}, {value}, __jet_history_depth + 1)?", self.config.root_prefix, quote_rust_string(&name.name));
-//RS             }
-//RS         }
-//RS         let key = ty.canonical_key();
-//RS         let name = format!(
-//RS             "__jet_history_capture_{}",
-//RS             jet_foundation::SHA256::sha256_hex(key.as_bytes())
-//RS         );
-//RS         let call = format!(
-//RS             "{}{}({value}, __jet_history_depth + 1, &__jet_history_types)?",
-//RS             self.config.root_prefix, name
-//RS         );
-//RS         if self.history_capture_encoders.borrow().contains_key(&key) {
-//RS             return call;
-//RS         }
-//RS         // Reserve before traversing fields so recursive types terminate here.
-//RS         self.history_capture_encoders
-//RS             .borrow_mut()
-//RS             .insert(key.clone(), String::new());
-//RS         let tree = format!("{}jet_std::DataTree", self.config.root_prefix);
-//RS         let unavailable = "return Err(\"history capture is opaque or redacted\".to_string())";
-//RS         let inner = |ty: &MirType, value: &str| self.history_capture_expression(ty, value);
-//RS         let body = if self.is_handle_type(ty)
-//RS             // `Group` is also the source spelling of the zero-arity task-group
-//RS             // handle. Do not resolve that builtin through the generic
-//RS             // collection `Group<K, V>` definition when emitting history code.
-//RS             || matches!(
-//RS                 ty.kind(),
-//RS                 MirTypeKind::Apply { name, args }
-//RS                     if name.name == jet_foundation::Syntax::TYPE_TASKGROUP && args.is_empty()
-//RS             ) {
-//RS             unavailable.to_string()
-//RS         } else {
-//RS             match ty.kind() {
-//RS                 MirTypeKind::Int | MirTypeKind::IntN { .. } => {
-//RS                     format!("{tree}::Text(value.to_string())")
-//RS                 }
-//RS                 MirTypeKind::Float | MirTypeKind::Float32 | MirTypeKind::Measure(_) => {
-//RS                     format!("{tree}::Text(value.to_bits().to_string())")
-//RS                 }
-//RS                 MirTypeKind::Bool => format!("{tree}::Bool(*value)"),
-//RS                 MirTypeKind::String | MirTypeKind::Char => {
-//RS                     format!("{tree}::Text(value.to_string())")
-//RS                 }
-//RS                 MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. } => {
-//RS                     inner(base, "value")
-//RS                 }
-//RS                 MirTypeKind::Tagged {
-//RS                     marker,
-//RS                     inner: base,
-//RS                 } => {
-//RS                     if marker.to_string().to_ascii_lowercase().contains("secret") {
-//RS                         unavailable.to_string()
-//RS                     } else {
-//RS                         inner(base, "value")
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::List(elem) | MirTypeKind::FixedList { elem, .. } => {
-//RS                     let item = inner(elem, "item");
-//RS                     let list = if self.columnar_type_def(elem).is_some() {
-//RS                         "value.to_aos()"
-//RS                     } else {
-//RS                         "value"
-//RS                     };
-//RS                     format!("{{ let mut items = Vec::new(); for item in {list}.iter() {{ items.push({item}); }} {tree}::Array(items) }}")
-//RS                 }
-//RS                 MirTypeKind::Map {
-//RS                     key,
-//RS                     value: item_ty,
-//RS                 } => {
-//RS                     let key = inner(key, "key");
-//RS                     let item = inner(item_ty, "item");
-//RS                     format!("{{ let mut items = Vec::new(); for (key, item) in value.iter() {{ items.push({tree}::Array(vec![{key}, {item}])); }} {tree}::Array(items) }}")
-//RS                 }
-//RS                 MirTypeKind::Shared(base) => {
-//RS                     let item = inner(base, "item");
-//RS                     format!("value.read(|item| -> Result<{tree}, String> {{ Ok({item}) }})?")
-//RS                 }
-//RS                 MirTypeKind::Option(base) => {
-//RS                     let item = inner(base, "item");
-//RS                     format!("match value {{ Ok(item) => {tree}::Array(vec![{item}]), Err(_) => {tree}::Array(vec![]) }}")
-//RS                 }
-//RS                 MirTypeKind::Result { ok, err } => {
-//RS                     let ok = inner(ok, "item");
-//RS                     let err = inner(err, "item");
-//RS                     format!("match value {{ Ok(item) => {tree}::Array(vec![{tree}::Text(\"ok\".to_string()), {ok}]), Err(item) => {tree}::Array(vec![{tree}::Text(\"err\".to_string()), {err}]) }}")
-//RS                 }
-//RS                 MirTypeKind::Tuple(fields) => {
-//RS                     let fields = fields
-//RS                         .iter()
-//RS                         .enumerate()
-//RS                         .map(|(index, (_, ty))| inner(ty, &format!("&value.{index}")))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     format!("{tree}::Array(vec![{fields}])")
-//RS                 }
-//RS                 MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
-//RS                     format!(
-//RS                         "{}jet_history_callback_captures(value.as_ref())?",
-//RS                         self.config.root_prefix
-//RS                     )
-//RS                 }
-//RS                 MirTypeKind::Apply {
-//RS                     name: nominal,
-//RS                     args,
-//RS                 } => {
-//RS                     if nominal.name == jet_foundation::Syntax::INTERNAL_UNIT_TYPE {
-//RS                         format!("{tree}::Null")
-//RS                     } else if crate::Codegen::history_rust_type_name(&nominal.name) == Some("Count")
-//RS                     {
-//RS                         format!("{tree}::Text(value.to_string())")
-//RS                     } else if crate::Codegen::history_rust_type_name(&nominal.name)
-//RS                         == Some("HistoryRNG")
-//RS                     {
-//RS                         unavailable.to_string()
-//RS                     } else if matches!(
-//RS                         nominal.name.as_str(),
-//RS                         "DataTree" | "core.DataTree" | "core::DataTree"
-//RS                     ) {
-//RS                         format!(
-//RS                             "{}jet_history_data_tree_capture(value, __jet_history_depth)?",
-//RS                             self.config.root_prefix
-//RS                         )
-//RS                     } else if nominal.name.to_ascii_lowercase().contains("secret") {
-//RS                         unavailable.to_string()
-//RS                     } else if let Some(def) =
-//RS                         self.program.types.iter().find(|def| def.id == nominal.id)
-//RS                     {
-//RS                         let bindings = def
-//RS                             .generic_params
-//RS                             .iter()
-//RS                             .zip(args)
-//RS                             .map(|(param, ty)| (param.name.clone(), ty.clone()))
-//RS                             .collect::<BTreeMap<_, _>>();
-//RS                         let field_value = |ty: &MirType, value: &str| {
-//RS                             inner(&Self::history_capture_type(ty, &bindings), value)
-//RS                         };
-//RS                         match &def.kind {
-//RS                             MirTypeDefKind::Struct { fields, .. } => {
-//RS                                 if fields.iter().any(|field| field.skip) {
-//RS                                     unavailable.to_string()
-//RS                                 } else {
-//RS                                     let fields = fields.iter().filter(|field| !field.computed).map(|field| {
-//RS                                         let field_name = self.field_name(field.id);
-//RS                                         let raw = format!("value.{field_name}.clone()");
-//RS                                         let converted = if def.key == jet_foundation::Syntax::TYPE_ERR
-//RS                                             && field.name == "cause"
-//RS                                         {
-//RS                                             format!(
-//RS                                                 "match &value.{field_name} {{ Ok(item) => Ok((**item).clone()), Err(_) => Err({}JetAbsent) }}",
-//RS                                                 self.config.root_prefix,
-//RS                                             )
-//RS                                         } else {
-//RS                                             self.history_source_field_value(&def.key, &field.name, raw.clone())
-//RS                                         };
-//RS                                         let encoded = if converted != raw {
-//RS                                             let encoded = field_value(&field.ty, "&__jet_history_field");
-//RS                                             format!("{{ let __jet_history_field = {converted}; {encoded} }}")
-//RS                                         } else {
-//RS                                             field_value(&field.ty, &format!("&value.{field_name}"))
-//RS                                         };
-//RS                                         format!("({}.to_string(), {encoded})", quote_rust_string(&field.name))
-//RS                                     }).collect::<Vec<_>>().join(", ");
-//RS                                     format!("{tree}::Object(vec![{fields}])")
-//RS                                 }
-//RS                             }
-//RS                             MirTypeDefKind::Enum { variants, .. } => {
-//RS                                 let head = self.type_name(def.id);
-//RS                                 let arms = variants.iter().map(|variant| {
-//RS                                     let path = format!("{head}::{}", mangle_variant(&variant.name));
-//RS                                     let tag = quote_rust_string(&variant.name);
-//RS                                     let (pattern, fields) = match &variant.payload {
-//RS                                         MirVariantPayload::Unit => (path, String::new()),
-//RS                                         MirVariantPayload::Single(ty) => (format!("{path}(item)"), field_value(ty, "item")),
-//RS                                         MirVariantPayload::Named(fields) => {
-//RS                                             let pattern = fields.iter().enumerate().map(|(index, field)| format!("{}: item_{index}", self.field_name(field.id))).collect::<Vec<_>>().join(", ");
-//RS                                             if fields.iter().any(|field| field.skip) {
-//RS                                                 return format!("{path} {{ .. }} => {{ {unavailable} }}");
-//RS                                             }
-//RS                                             let values = fields.iter().enumerate().map(|(index, field)| field_value(&field.ty, &format!("item_{index}"))).collect::<Vec<_>>().join(", ");
-//RS                                             (format!("{path} {{ {pattern} }}"), values)
-//RS                                         }
-//RS                                     };
-//RS                                     format!("{pattern} => {tree}::Array(vec![{tree}::Text({tag}.to_string()), {fields}])")
-//RS                                 }).collect::<Vec<_>>().join(", ");
-//RS                                 format!("match value {{ {arms} }}")
-//RS                             }
-//RS                             MirTypeDefKind::Distinct { base, .. } => field_value(base, "&value.0"),
-//RS                             MirTypeDefKind::Alias { target } => field_value(target, "value"),
-//RS                             MirTypeDefKind::UnitFamily { members } => {
-//RS                                 let head = self.type_name(def.id);
-//RS                                 let arms = members
-//RS                                     .iter()
-//RS                                     .map(|member| {
-//RS                                         format!(
-//RS                                             "{head}::{} => {tree}::Text({}.to_string())",
-//RS                                             mangle(member),
-//RS                                             quote_rust_string(member)
-//RS                                         )
-//RS                                     })
-//RS                                     .collect::<Vec<_>>()
-//RS                                     .join(", ");
-//RS                                 format!("match value {{ {arms} }}")
-//RS                             }
-//RS                         }
-//RS                     } else {
-//RS                         // A genuinely unresolved nominal carrier has no codec.
-//RS                         self.history_capture_encoders.borrow_mut().remove(&key);
-//RS                         return format!("{{ {unavailable} }}");
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::Union(_) => {
-//RS                     if let Some(def) = ty.identity.and_then(|id| self.history_type_def(id)) {
-//RS                         let nominal = MirType::from_kind(MirTypeKind::Apply {
-//RS                             name: MirNominalRef {
-//RS                                 id: def.id,
-//RS                                 name: def.key.clone(),
-//RS                             },
-//RS                             args: Vec::new(),
-//RS                         });
-//RS                         inner(&nominal, "value")
-//RS                     } else {
-//RS                         unavailable.to_string()
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::TraitObject(_) => unavailable.to_string(),
-//RS             }
-//RS         };
-//RS         let rust_ty = self.rust_type(ty);
-//RS         let parameters = self.history_type_parameters(ty);
-//RS         let generics = if parameters.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!(
-//RS                 "<{}>",
-//RS                 parameters
-//RS                     .iter()
-//RS                     .map(|name| format!("{}: 'static", mangle(name)))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             )
-//RS         };
-//RS         let checked_key = self.history_capture_key(ty);
-//RS         let constraints = self.history_codec_constraints(ty);
-//RS         let constraints = if constraints.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!(
-//RS                 " where {}",
-//RS                 constraints.into_iter().collect::<Vec<_>>().join(", ")
-//RS             )
-//RS         };
-//RS         let encoded = format!(
-//RS             "fn {name}{generics}(value: &{rust_ty}, __jet_history_depth: usize, __jet_history_types: &{}JetHistoryTypes) -> Result<{tree}, String>{constraints} {{\n    if __jet_history_depth >= 64 {{ return Err(\"history capture exceeds the nesting bound\".to_string()); }}\n    let value = {{ {body} }};\n    Ok({tree}::Array(vec![{tree}::Text({checked_key}), value]))\n}}\n",
-//RS             self.config.root_prefix,
-//RS         );
-//RS         self.history_capture_encoders
-//RS             .borrow_mut()
-//RS             .insert(key, encoded);
-//RS         call
-//RS     }
-//RS 
-//RS     fn history_codec_constraints(&self, ty: &MirType) -> BTreeSet<String> {
-//RS         let mut constraints = BTreeSet::new();
-//RS         let mut children = Vec::new();
-//RS         match ty.kind() {
-//RS             MirTypeKind::Apply { name, args } => {
-//RS                 if let Some(def) = self.program.types.iter().find(|def| def.id == name.id) {
-//RS                     for (param, argument) in def.generic_params.iter().zip(args) {
-//RS                         if !param.bounds.is_empty() {
-//RS                             constraints.insert(format!(
-//RS                                 "{}: {}",
-//RS                                 self.rust_type(argument),
-//RS                                 param
-//RS                                     .bounds
-//RS                                     .iter()
-//RS                                     .map(|bound| self.trait_nominal_name(bound))
-//RS                                     .collect::<Vec<_>>()
-//RS                                     .join(" + ")
-//RS                             ));
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 children.extend(args);
-//RS             }
-//RS             MirTypeKind::List(ty)
-//RS             | MirTypeKind::Shared(ty)
-//RS             | MirTypeKind::Option(ty)
-//RS             | MirTypeKind::FixedList { elem: ty, .. }
-//RS             | MirTypeKind::InlineRange { base: ty, .. }
-//RS             | MirTypeKind::Tagged { inner: ty, .. }
-//RS             | MirTypeKind::Quantity { base: ty, .. } => children.push(ty),
-//RS             MirTypeKind::Map { key, value }
-//RS             | MirTypeKind::Result {
-//RS                 ok: key,
-//RS                 err: value,
-//RS             } => {
-//RS                 children.push(key);
-//RS                 children.push(value);
-//RS             }
-//RS             MirTypeKind::Tuple(fields) => children.extend(fields.iter().map(|(_, ty)| ty)),
-//RS             MirTypeKind::Union(types) => children.extend(types),
-//RS             MirTypeKind::Fn(signature) => {
-//RS                 children.extend(&signature.params);
-//RS                 if let Some(ty) = &signature.ret {
-//RS                     children.push(ty);
-//RS                 }
-//RS             }
-//RS             MirTypeKind::SendFn { params, ret, .. } => {
-//RS                 children.extend(params);
-//RS                 if let Some(ty) = ret {
-//RS                     children.push(ty);
-//RS                 }
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS         for child in children {
-//RS             constraints.extend(self.history_codec_constraints(child));
-//RS         }
-//RS         constraints
-//RS     }
-//RS 
-//RS     fn history_type_parameters(&self, ty: &MirType) -> BTreeSet<String> {
-//RS         let known = self
-//RS             .program
-//RS             .functions
-//RS             .iter()
-//RS             .flat_map(|function| &function.generic_params)
-//RS             .chain(
-//RS                 self.program
-//RS                     .types
-//RS                     .iter()
-//RS                     .flat_map(|def| &def.generic_params),
-//RS             )
-//RS             .map(|param| param.name.as_str())
-//RS             .collect::<BTreeSet<_>>();
-//RS         fn visit(ty: &MirType, known: &BTreeSet<&str>, found: &mut BTreeSet<String>) {
-//RS             match ty.kind() {
-//RS                 MirTypeKind::Apply { name, args } => {
-//RS                     if args.is_empty() && known.contains(name.name.as_str()) {
-//RS                         found.insert(name.name.clone());
-//RS                     }
-//RS                     for ty in args {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::List(ty)
-//RS                 | MirTypeKind::Shared(ty)
-//RS                 | MirTypeKind::Option(ty)
-//RS                 | MirTypeKind::FixedList { elem: ty, .. }
-//RS                 | MirTypeKind::InlineRange { base: ty, .. }
-//RS                 | MirTypeKind::Tagged { inner: ty, .. }
-//RS                 | MirTypeKind::Quantity { base: ty, .. } => visit(ty, known, found),
-//RS                 MirTypeKind::Map { key, value }
-//RS                 | MirTypeKind::Result {
-//RS                     ok: key,
-//RS                     err: value,
-//RS                 } => {
-//RS                     visit(key, known, found);
-//RS                     visit(value, known, found);
-//RS                 }
-//RS                 MirTypeKind::Tuple(fields) => {
-//RS                     for (_, ty) in fields {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::Union(types) => {
-//RS                     for ty in types {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::Fn(signature) => {
-//RS                     for ty in &signature.params {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                     if let Some(ty) = &signature.ret {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::SendFn { params, ret, .. } => {
-//RS                     for ty in params {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                     if let Some(ty) = ret {
-//RS                         visit(ty, known, found);
-//RS                     }
-//RS                 }
-//RS                 _ => {}
-//RS             }
-//RS         }
-//RS         let mut found = BTreeSet::new();
-//RS         visit(ty, &known, &mut found);
-//RS         found
-//RS     }
-//RS 
-//RS     fn history_capture_key(&self, ty: &MirType) -> String {
-//RS         let parameters = self.history_type_parameters(ty);
-//RS         if parameters.is_empty() {
-//RS             return format!("{}.to_string()", quote_rust_string(&ty.canonical_key()));
-//RS         }
-//RS         // Substitute checked type nodes, never text in a nominal name. The
-//RS         // temporary markers only split the compiler's canonical type template.
-//RS         let bindings = parameters
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, name)| {
-//RS                 (
-//RS                     name.clone(),
-//RS                     MirType::from_kind(MirTypeKind::Apply {
-//RS                         name: MirNominalRef {
-//RS                             id: MirTypeId(0),
-//RS                             name: format!("\0{index}\0"),
-//RS                         },
-//RS                         args: Vec::new(),
-//RS                     }),
-//RS                 )
-//RS             })
-//RS             .collect();
-//RS         let template = Self::history_capture_type(ty, &bindings).canonical_key();
-//RS         let mut parts = Vec::new();
-//RS         for (index, part) in template.split('\0').enumerate() {
-//RS             if index % 2 == 0 {
-//RS                 parts.push(format!("{}.to_string()", quote_rust_string(part)));
-//RS             } else {
-//RS                 let name = parameters
-//RS                     .iter()
-//RS                     .nth(part.parse::<usize>().expect("type template marker"))
-//RS                     .expect("type template binding");
-//RS                 parts.push(format!("__jet_history_types.get({}).ok_or_else(|| \"history capture type is unresolved\".to_string())?.checked_type.clone()", quote_rust_string(name)));
-//RS             }
-//RS         }
-//RS         format!("[{}].concat()", parts.join(", "))
-//RS     }
-//RS 
-//RS     fn history_instantiated_call(
-//RS         &self,
-//RS         callee: &MirCallee,
-//RS         type_args: &[MirType],
-//RS         invocation: String,
-//RS     ) -> String {
-//RS         if !self.history_runtime_metadata_enabled() {
-//RS             return invocation;
-//RS         }
-//RS         let (target, owner) = match callee {
-//RS             MirCallee::User(id) => (self.function_row(*id), None),
-//RS             MirCallee::Associated { function, owner } | MirCallee::Method { function, owner } => {
-//RS                 (self.function_row(*function), Some(owner))
-//RS             }
-//RS             _ => return invocation,
-//RS         };
-//RS         let mut bindings = target
-//RS             .generic_params
-//RS             .iter()
-//RS             .zip(type_args)
-//RS             .map(|(param, ty)| (param.name.clone(), ty))
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         if let Some(MirType {
-//RS             kind: MirTypeKind::Apply { name, args },
-//RS             ..
-//RS         }) = owner
-//RS         {
-//RS             if let Some(def) = self.program.types.iter().find(|def| def.id == name.id) {
-//RS                 bindings.extend(
-//RS                     def.generic_params
-//RS                         .iter()
-//RS                         .zip(args)
-//RS                         .map(|(param, ty)| (param.name.clone(), ty)),
-//RS                 );
-//RS             }
-//RS         }
-//RS         if bindings.is_empty() {
-//RS             return invocation;
-//RS         }
-//RS         let root = &self.config.root_prefix;
-//RS         let mut setup = String::new();
-//RS         for (name, ty) in bindings {
-//RS             let encoded = self.history_capture_expression(ty, "__jet_value");
-//RS             let key = self.history_capture_key(ty);
-//RS             let ty = self.rust_type(ty);
-//RS             // Missing dictionaries remain errors when the codec is used. A
-//RS             // missing type argument never becomes an opaque success identity.
-//RS             let _ = writeln!(setup, "__jet_instantiated.insert({}.to_string(), {{ let __jet_history_types = __jet_history_types.clone(); let __jet_key = (|| -> Result<String, String> {{ Ok({key}) }})(); {root}jet_history_type_codec::<{ty}>(__jet_key.unwrap_or_default(), move |__jet_value, __jet_history_depth| {{ Ok({encoded}) }}) }});", quote_rust_string(&name));
-//RS         }
-//RS         format!("{{ let mut __jet_instantiated = {root}JetHistoryTypes::new(); {setup} {root}jet_history_with_types(__jet_instantiated, || {invocation}) }}")
-//RS     }
-//RS 
-//RS     fn history_capture_type(ty: &MirType, bindings: &BTreeMap<String, MirType>) -> MirType {
-//RS         let sub = |ty: &MirType| Self::history_capture_type(ty, bindings);
-//RS         let kind = match ty.kind() {
-//RS             MirTypeKind::Apply { name, args } => {
-//RS                 if args.is_empty() {
-//RS                     if let Some(ty) = bindings.get(&name.name) {
-//RS                         return ty.clone();
-//RS                     }
-//RS                 }
-//RS                 MirTypeKind::Apply {
-//RS                     name: name.clone(),
-//RS                     args: args.iter().map(sub).collect(),
-//RS                 }
-//RS             }
-//RS             MirTypeKind::List(ty) => MirTypeKind::List(Box::new(sub(ty))),
-//RS             MirTypeKind::Shared(ty) => MirTypeKind::Shared(Box::new(sub(ty))),
-//RS             MirTypeKind::Option(ty) => MirTypeKind::Option(Box::new(sub(ty))),
-//RS             MirTypeKind::Map { key, value } => MirTypeKind::Map {
-//RS                 key: Box::new(sub(key)),
-//RS                 value: Box::new(sub(value)),
-//RS             },
-//RS             MirTypeKind::Result { ok, err } => MirTypeKind::Result {
-//RS                 ok: Box::new(sub(ok)),
-//RS                 err: Box::new(sub(err)),
-//RS             },
-//RS             MirTypeKind::Tuple(fields) => MirTypeKind::Tuple(
-//RS                 fields
-//RS                     .iter()
-//RS                     .map(|(name, ty)| (name.clone(), sub(ty)))
-//RS                     .collect(),
-//RS             ),
-//RS             MirTypeKind::Union(types) => MirTypeKind::Union(types.iter().map(sub).collect()),
-//RS             MirTypeKind::FixedList { elem, len } => MirTypeKind::FixedList {
-//RS                 elem: Box::new(sub(elem)),
-//RS                 len: len.clone(),
-//RS             },
-//RS             MirTypeKind::InlineRange { base, lo, hi } => MirTypeKind::InlineRange {
-//RS                 base: Box::new(sub(base)),
-//RS                 lo: *lo,
-//RS                 hi: *hi,
-//RS             },
-//RS             MirTypeKind::Tagged { marker, inner } => MirTypeKind::Tagged {
-//RS                 marker: marker.clone(),
-//RS                 inner: Box::new(sub(inner)),
-//RS             },
-//RS             MirTypeKind::Quantity { base, dimension } => MirTypeKind::Quantity {
-//RS                 base: Box::new(sub(base)),
-//RS                 dimension: dimension.clone(),
-//RS             },
-//RS             MirTypeKind::Fn(signature) => {
-//RS                 let mut signature = signature.clone();
-//RS                 signature.params = signature.params.iter().map(sub).collect();
-//RS                 signature.ret = signature.ret.as_deref().map(|ty| Box::new(sub(ty)));
-//RS                 MirTypeKind::Fn(signature)
-//RS             }
-//RS             MirTypeKind::SendFn {
-//RS                 params,
-//RS                 ret,
-//RS                 conventions,
-//RS             } => MirTypeKind::SendFn {
-//RS                 params: params.iter().map(sub).collect(),
-//RS                 ret: ret.as_deref().map(|ty| Box::new(sub(ty))),
-//RS                 conventions: conventions.clone(),
-//RS             },
-//RS             _ => return ty.clone(),
-//RS         };
-//RS         if bindings.is_empty() {
-//RS             ty.clone()
-//RS         } else {
-//RS             MirType::from_kind(kind)
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_history_strategies(&self, out: &mut String) {
-//RS         let foundation = "crate::jet_testing_history_foundation";
-//RS         let ids = self.history_command_type_ids();
-//RS         if ids.is_empty() {
-//RS             return;
-//RS         }
-//RS         out.push_str("use crate::jet_testing_history_foundation::HistoryValue;\n\n");
-//RS         let mut registrations = Vec::new();
-//RS         for id in ids {
-//RS             let Some(def) = self.history_type_def(id) else {
-//RS                 continue;
-//RS             };
-//RS             if !self.module_selected(def.module) {
-//RS                 continue;
-//RS             }
-//RS             if crate::Codegen::core_rust_type_name(&def.key) == Some("DataTree") {
-//RS                 continue;
-//RS             }
-//RS             let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
-//RS                 continue;
-//RS             };
-//RS             if !def.generic_params.is_empty() {
-//RS                 continue;
-//RS             }
-//RS             let Some(command_ty) = self.types.get(&id) else {
-//RS                 continue;
-//RS             };
-//RS             let suffix = id.0.to_string();
-//RS             let mut supported = Vec::new();
-//RS             let mut unsupported_variant = None;
-//RS             for (variant_index, variant) in variants.iter().enumerate() {
-//RS                 let fields = match &variant.payload {
-//RS                     MirVariantPayload::Unit => Vec::new(),
-//RS                     MirVariantPayload::Single(ty) => vec![ty],
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         fields.iter().map(|field| &field.ty).collect()
-//RS                     }
-//RS                 };
-//RS                 let specs = fields
-//RS                     .iter()
-//RS                     .map(|field| self.history_scalar_spec(field))
-//RS                     .collect::<Option<Vec<_>>>();
-//RS                 let generate_name = format!("__jet_history_generate_{suffix}_{variant_index}");
-//RS                 let rebuild_name = format!("__jet_history_rebuild_{suffix}_{variant_index}");
-//RS                 let valid_name = format!("__jet_history_valid_{suffix}_{variant_index}");
-//RS                 if specs.is_none() {
-//RS                     if unsupported_variant.is_none() {
-//RS                         unsupported_variant = Some(variant.name.clone());
-//RS                     }
-//RS                     let _ = writeln!(
-//RS                         out,
-//RS                         "fn {generate_name}(_: &mut {foundation}::HistoryRNG, _: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{ None }}\n\
-//RS                          fn {rebuild_name}(_: &{foundation}::HistoryOperation) -> Option<{command_ty}> {{ None }}\n\
-//RS                          fn {valid_name}(_: &{foundation}::HistoryOperation, _: &{command_ty}) -> bool {{ false }}\n"
-//RS                     );
-//RS                     continue;
-//RS                 }
-//RS                 let specs = specs.unwrap_or_default();
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "fn {generate_name}(rng: &mut {foundation}::HistoryRNG, index: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{"
-//RS                 );
-//RS                 for (field_index, field) in fields.iter().enumerate() {
-//RS                     let expression = self
-//RS                         .history_generate_expression(field)
-//RS                         .unwrap_or_else(|| "return None".to_string());
-//RS                     let _ = writeln!(
-//RS                         out,
-//RS                         "    let __history_value_{field_index}: {} = {expression};",
-//RS                         self.rust_type(field)
-//RS                     );
-//RS                 }
-//RS                 let mut operation = format!(
-//RS                     "    let mut operation = {foundation}::HistoryOperation::new(index, {});",
-//RS                     quote_rust_string(&variant.wire_name)
-//RS                 );
-//RS                 for (field_index, (kind, _)) in specs.iter().enumerate() {
-//RS                     operation.push_str(&format!(
-//RS                         "\n    operation = operation.with_argument({}::{});",
-//RS                         foundation,
-//RS                         Self::history_value_expression(
-//RS                             *kind,
-//RS                             &format!("__history_value_{field_index}"),
-//RS                         )
-//RS                     ));
-//RS                 }
-//RS                 out.push_str(&operation);
-//RS                 let command_expression = match &variant.payload {
-//RS                     MirVariantPayload::Unit => {
-//RS                         format!("{command_ty}::{}", mangle_variant(&variant.name))
-//RS                     }
-//RS                     MirVariantPayload::Single(_) => {
-//RS                         format!("{command_ty}::{}(__history_value_0)", mangle_variant(&variant.name))
-//RS                     }
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         let fields = fields
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .map(|(index, field)| {
-//RS                                 format!("{}: __history_value_{index}", self.field_name(field.id))
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ");
-//RS                         format!("{command_ty}::{} {{ {fields} }}", mangle_variant(&variant.name))
-//RS                     }
-//RS                 };
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "\n    Some({foundation}::HistoryGeneratedStep {{ operation, command: {command_expression} }})\n}}\n"
-//RS                 );
-//RS 
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "fn {rebuild_name}(operation: &{foundation}::HistoryOperation) -> Option<{command_ty}> {{"
-//RS                 );
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    if operation.name != {} || operation.arguments.len() != {} {{ return None; }}",
-//RS                     quote_rust_string(&variant.wire_name),
-//RS                     fields.len()
-//RS                 );
-//RS                 out.push_str("    let __history_arguments = operation.arguments.as_slice();\n");
-//RS                 for (field_index, field) in fields.iter().enumerate() {
-//RS                     let (kind, _) = specs[field_index];
-//RS                     let expression = self.history_rebuild_expression(field, kind, field_index);
-//RS                     let _ = writeln!(
-//RS                         out,
-//RS                         "    let __history_value_{field_index}: {} = {expression};",
-//RS                         self.rust_type(field)
-//RS                     );
-//RS                 }
-//RS                 let _ = writeln!(out, "    Some({command_expression})\n}}\n");
-//RS 
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "fn {valid_name}(operation: &{foundation}::HistoryOperation, command: &{command_ty}) -> bool {{"
-//RS                 );
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    if operation.name != {} {{ return false; }}\n    let __history_arguments = operation.arguments.as_slice();",
-//RS                     quote_rust_string(&variant.wire_name)
-//RS                 );
-//RS                 let checks = specs
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(field_index, (kind, _))| {
-//RS                         Self::history_valid_expression(
-//RS                             *kind,
-//RS                             field_index,
-//RS                             &format!("__history_value_{field_index}"),
-//RS                         )
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 let check = if checks.is_empty() {
-//RS                     "true".to_string()
-//RS                 } else {
-//RS                     checks.join(" && ")
-//RS                 };
-//RS                 let pattern = match &variant.payload {
-//RS                     MirVariantPayload::Unit => {
-//RS                         format!("{command_ty}::{}", mangle_variant(&variant.name))
-//RS                     }
-//RS                     MirVariantPayload::Single(_) => {
-//RS                         format!("{command_ty}::{}(__history_value_0)", mangle_variant(&variant.name))
-//RS                     }
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         let fields = fields
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .map(|(index, field)| {
-//RS                                 format!("{}: __history_value_{index}", self.field_name(field.id))
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ");
-//RS                         format!("{command_ty}::{} {{ {fields} }}", mangle_variant(&variant.name))
-//RS                     }
-//RS                 };
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    match command {{ {pattern} => __history_arguments.len() == {} && {check}, _ => false }}\n}}\n",
-//RS                     fields.len()
-//RS                 );
-//RS                 supported.push((
-//RS                     variant_index,
-//RS                     variant,
-//RS                     generate_name,
-//RS                     rebuild_name,
-//RS                     valid_name,
-//RS                 ));
-//RS             }
-//RS 
-//RS             let encode_name = format!("__jet_history_commands_to_tree_{suffix}");
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "fn {encode_name}(commands: &[{command_ty}]) -> jet_std::DataTree {{\n    jet_std::DataTree::Array(commands.iter().map(|command| match command {{"
-//RS             );
-//RS             for variant in variants {
-//RS                 let fields = match &variant.payload {
-//RS                     MirVariantPayload::Unit => Vec::new(),
-//RS                     MirVariantPayload::Single(ty) => vec![ty],
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         fields.iter().map(|field| &field.ty).collect()
-//RS                     }
-//RS                 };
-//RS                 let bindings = fields
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(index, _)| format!("__history_value_{index}"))
-//RS                     .collect::<Vec<_>>();
-//RS                 let pattern = match &variant.payload {
-//RS                     MirVariantPayload::Unit => {
-//RS                         format!("{command_ty}::{}", mangle_variant(&variant.name))
-//RS                     }
-//RS                     MirVariantPayload::Single(_) => {
-//RS                         format!("{command_ty}::{}(__history_value_0)", mangle_variant(&variant.name))
-//RS                     }
-//RS                     MirVariantPayload::Named(fields) => {
-//RS                         let fields = fields
-//RS                             .iter()
-//RS                             .enumerate()
-//RS                             .map(|(index, field)| {
-//RS                                 format!("{}: __history_value_{index}", self.field_name(field.id))
-//RS                             })
-//RS                             .collect::<Vec<_>>()
-//RS                             .join(", ");
-//RS                         format!("{command_ty}::{} {{ {fields} }}", mangle_variant(&variant.name))
-//RS                     }
-//RS                 };
-//RS                 let values = fields
-//RS                     .iter()
-//RS                     .enumerate()
-//RS                     .map(|(index, field)| {
-//RS                         self.history_command_tree_expression(field, &bindings[index])
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "        {pattern} => jet_std::DataTree::Object(vec![(\"tag\".to_string(), jet_std::DataTree::Text({}.to_string())), (\"values\".to_string(), jet_std::DataTree::Array(vec![{values}]))]),",
-//RS                     quote_rust_string(&variant.wire_name)
-//RS                 );
-//RS             }
-//RS             let unsupported_reason = if variants.is_empty() {
-//RS                 Some(jet_foundation::TestingHistory::history_unsupported_type_reason(&def.name))
-//RS             } else {
-//RS                 unsupported_variant.as_deref().map(|variant| {
-//RS                     jet_foundation::TestingHistory::history_unsupported_variant_reason(
-//RS                         &def.name, variant,
-//RS                     )
-//RS                 })
-//RS             };
-//RS             out.push_str("    }).collect())\n}\n\n");
-//RS 
-//RS             let variants_name = format!("__JET_HISTORY_VARIANTS_{suffix}");
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "static {variants_name}: &[{foundation}::HistoryGeneratedVariant<{command_ty}>] = &["
-//RS             );
-//RS             for (_, variant, generate_name, rebuild_name, valid_name) in &supported {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    {foundation}::HistoryGeneratedVariant {{ operation: {}, weight: 1, generate: {generate_name}, rebuild: {rebuild_name}, valid: {valid_name} }},",
-//RS                     quote_rust_string(&variant.wire_name)
-//RS                 );
-//RS             }
-//RS             out.push_str("];\n\n");
-//RS             let strategy_constructor = unsupported_reason.as_deref().map_or_else(
-//RS                 || {
-//RS                     format!(
-//RS                         "{foundation}::HistoryGeneratedStrategy::new({}, {variants_name}, {encode_name})",
-//RS                         quote_rust_string(&def.name)
-//RS                     )
-//RS                 },
-//RS                 |reason| {
-//RS                     format!(
-//RS                         "{foundation}::HistoryGeneratedStrategy::new_with_unsupported({}, {variants_name}, {encode_name}, {})",
-//RS                         quote_rust_string(&def.name),
-//RS                         quote_rust_string(reason)
-//RS                     )
-//RS                 },
-//RS             );
-//RS             let codec_method = format!(
-//RS                 "    fn history_commands_to_data_tree(commands: &[Self]) -> Option<jet_std::DataTree> {{ Some({encode_name}(commands)) }}\n"
-//RS             );
-//RS             let (provenance_source, provenance_tool, provenance_target) =
-//RS                 self.history_base_provenance();
-//RS             let provenance_method = format!(
-//RS                 "    fn history_provenance() -> Option<{foundation}::HistoryProvenance> {{\n        Some({foundation}::HistoryProvenance {{ source: {}.to_string(), tool: {}.to_string(), target: {}.to_string() }})\n    }}\n",
-//RS                 quote_rust_string(&provenance_source),
-//RS                 quote_rust_string(&provenance_tool),
-//RS                 quote_rust_string(&provenance_target),
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "impl {foundation}::HistoryCommand for {command_ty} {{\n    type Strategy = {foundation}::HistoryGeneratedStrategy<{command_ty}>;\n    fn history_command_type() -> &'static str {{ {} }}\n    fn history_strategy() -> Self::Strategy {{\n        {strategy_constructor}\n    }}\n{codec_method}{provenance_method}}}\n",
-//RS                 quote_rust_string(&def.name)
-//RS             );
-//RS             if self.config.target_kind == MirRustTarget::WebWasm {
-//RS                 let dispatch_name = format!("__jet_history_dispatch_{suffix}");
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "#[cfg(target_arch = \"wasm32\")]\nfn {dispatch_name}(root: &jet_std::DataTree) -> Result<jet_std::JetTestComparison, String> {{\n    crate::jet_testing_history_web::run_wire_with_strategy::<{command_ty}, {foundation}::HistoryGeneratedStrategy<{command_ty}>>(root, <{command_ty} as {foundation}::HistoryCommand>::history_strategy())\n}}\n"
-//RS                 );
-//RS                 registrations.push((def.name.clone(), dispatch_name));
-//RS             }
-//RS         }
-//RS         if self.config.target_kind == MirRustTarget::WebWasm && !registrations.is_empty() {
-//RS             out.push_str(
-//RS                 "#[cfg(target_arch = \"wasm32\")]\n#[no_mangle]\npub extern \"C\" fn jet_testing_history_web_register_strategies() {\n",
-//RS             );
-//RS             for (name, dispatch) in &registrations {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "    crate::jet_testing_history_web::register_strategy({}, {dispatch});",
-//RS                     quote_rust_string(name)
-//RS                 );
-//RS             }
-//RS             out.push_str("}\n\n");
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_period_anchor_impls(&self, out: &mut String) {
-//RS         for def in &self.program.types {
-//RS             if !self.module_selected(def.module) {
-//RS                 continue;
-//RS             }
-//RS             let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
-//RS                 continue;
-//RS             };
-//RS             if variants.len() != 3 {
-//RS                 continue;
-//RS             }
-//RS             let mut has_date = false;
-//RS             let mut has_local_date = false;
-//RS             let mut has_date_time = false;
-//RS             for variant in variants {
-//RS                 let MirVariantPayload::Single(payload) = &variant.payload else {
-//RS                     has_date = false;
-//RS                     has_local_date = false;
-//RS                     has_date_time = false;
-//RS                     break;
-//RS                 };
-//RS                 let MirTypeKind::Apply { name: nominal, .. } = payload.kind() else {
-//RS                     has_date = false;
-//RS                     has_local_date = false;
-//RS                     has_date_time = false;
-//RS                     break;
-//RS                 };
-//RS                 match nominal.name.as_str() {
-//RS                     "Date" => has_date = true,
-//RS                     "LocalDate" => has_local_date = true,
-//RS                     "DateTime" => has_date_time = true,
-//RS                     _ => {
-//RS                         has_date = false;
-//RS                         has_local_date = false;
-//RS                         has_date_time = false;
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if !(has_date && has_local_date && has_date_time) {
-//RS                 continue;
-//RS             }
-//RS 
-//RS             let name = self.type_name(def.id);
-//RS             let trait_name = format!("{}JetPeriodAnchor", self.config.root_prefix);
-//RS             let _ = writeln!(out, "impl {trait_name} for {name} {{");
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    fn period_total_in(&self, period: &{}JetPeriod, unit: &String) -> f64 {{",
-//RS                 self.config.root_prefix
-//RS             );
-//RS             let _ = writeln!(out, "        match self {{");
-//RS             for variant in variants {
-//RS                 let MirVariantPayload::Single(payload) = &variant.payload else {
-//RS                     unreachable!("validated period anchor union variant payload");
-//RS                 };
-//RS                 let MirTypeKind::Apply { name: nominal, .. } = payload.kind() else {
-//RS                     unreachable!("validated period anchor union payload type");
-//RS                 };
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "            {name}::{}(anchor) => anchor.period_total_in(period, unit),",
-//RS                     mangle_variant(&variant.name)
-//RS                 );
-//RS                 debug_assert!(matches!(
-//RS                     nominal.name.as_str(),
-//RS                     "Date" | "LocalDate" | "DateTime"
-//RS                 ));
-//RS             }
-//RS             let _ = writeln!(out, "        }}");
-//RS             let _ = writeln!(out, "    }}");
-//RS             let _ = writeln!(out, "}}\n");
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_columnar_row_adapter(&self, def: &MirTypeDef, declared: &[MirField], out: &mut String) {
-//RS         let fields = declared
-//RS             .iter()
-//RS             .filter(|field| !field.computed)
-//RS             .collect::<Vec<_>>();
-//RS         let cell = mangle_path(&format!("{}_cell", def.name));
-//RS         let generic_args = if def.generic_params.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!(
-//RS                 "<{}>",
-//RS                 def.generic_params
-//RS                     .iter()
-//RS                     .map(|param| mangle(&param.name))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             )
-//RS         };
-//RS         let impl_generics = if def.generic_params.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             let params = def
-//RS                 .generic_params
-//RS                 .iter()
-//RS                 .map(|param| {
-//RS                     let mut bounds = param
-//RS                         .bounds
-//RS                         .iter()
-//RS                         .map(|bound| self.trait_nominal_name(bound))
-//RS                         .collect::<Vec<_>>();
-//RS                     bounds.push("Clone".to_string());
-//RS                     bounds.push("core::fmt::Debug".to_string());
-//RS                     format!("{}: {}", mangle(&param.name), bounds.join(" + "))
-//RS                 })
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             format!("<{params}>")
-//RS         };
-//RS         let cell_ty = format!("{cell}{generic_args}");
-//RS         let row_ty = format!("{}{}", self.type_name(def.id), generic_args);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "#[derive(Clone, Debug)]\n#[allow(dead_code, non_camel_case_types)]\npub enum {cell}{generic_args} {{"
-//RS         );
-//RS         for field in &fields {
-//RS             let name = self.field_name(field.id);
-//RS             let _ = writeln!(out, "    {name}({}),", self.rust_type(&field.ty));
-//RS         }
-//RS         let _ = writeln!(out, "}}\n");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "#[allow(dead_code, unreachable_patterns)]\nimpl{impl_generics} {cell_ty} {{"
-//RS         );
-//RS         for field in &fields {
-//RS             let name = self.field_name(field.id);
-//RS             let accessor = format!("jet_col_{name}");
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    pub fn {accessor}(self) -> {} {{\n        match self {{\n            {cell_ty}::{name}(__value) => __value,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}",
-//RS                 self.rust_type(&field.ty)
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    pub fn {accessor}_ref(&self) -> &{} {{\n        match self {{\n            {cell_ty}::{name}(__value) => __value,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}",
-//RS                 self.rust_type(&field.ty)
-//RS             );
-//RS         }
-//RS         let _ = writeln!(out, "}}\n");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "impl{impl_generics} {}JetRow for {row_ty} {{",
-//RS             self.config.root_prefix
-//RS         );
-//RS         let _ = writeln!(out, "    type Cell = {cell_ty};");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "    fn jet_row_width() -> usize {{ {} }}",
-//RS             fields.len()
-//RS         );
-//RS         let _ = writeln!(out, "    fn jet_row_split(self) -> Vec<Self::Cell> {{");
-//RS         let _ = writeln!(out, "        vec![");
-//RS         for field in &fields {
-//RS             let name = self.field_name(field.id);
-//RS             let _ = writeln!(out, "            {cell_ty}::{name}(self.{name}),");
-//RS         }
-//RS         let _ = writeln!(out, "        ]\n    }}");
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "    fn jet_row_join(__cells: Vec<Self::Cell>) -> Self {{\n        let mut __cells = __cells.into_iter();\n        Self {{"
-//RS         );
-//RS         for field in &fields {
-//RS             let name = self.field_name(field.id);
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "            {name}: match __cells.next() {{\n                Some({cell_ty}::{name}(__value)) => __value,\n                _ => unreachable!(\"columnar row is narrower than its column set\"),\n            }},"
-//RS             );
-//RS         }
-//RS         let _ = writeln!(out, "        }}\n    }}\n}}\n");
-//RS     }
-//RS 
-//RS     fn field_visibility(&self, field: &MirField) -> &'static str {
-//RS         if field.public {
-//RS             "pub "
-//RS         } else if field.package_public {
-//RS             "pub(crate) "
-//RS         } else {
-//RS             ""
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_foreign(&self, foreign: &MirForeign, out: &mut String) {
-//RS         if matches!(
-//RS             foreign.callback_transport.as_deref(),
-//RS             Some("managed" | "managed-close" | "emit-task")
-//RS         ) {
-//RS             return;
-//RS         }
-//RS         if !self.module_selected(foreign.module_id) {
-//RS             panic!(
-//RS                 "MIR foreign {:?} belongs to an unselected module",
-//RS                 foreign.id
-//RS             );
-//RS         }
-//RS         if !self.target_applicable(foreign.target_applicability) {
-//RS             panic!(
-//RS                 "MIR foreign {:?} is not applicable to the selected artifact target",
-//RS                 foreign.id
-//RS             );
-//RS         }
-//RS         let abi = self.foreign_abi_name(&foreign.foreign_abi);
-//RS         let language = self.foreign_language_name(foreign.foreign_language);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "// jet-mir-foreign: id={} module={} language={} abi={} symbol={} path={:?} callback={:?} handle={:?} close={:?} undo={:?}",
-//RS             foreign.id.0,
-//RS             foreign.module,
-//RS             language,
-//RS             abi,
-//RS             foreign.symbol,
-//RS             foreign.path,
-//RS             foreign.callback,
-//RS             foreign.handle,
-//RS             foreign.close_function,
-//RS             foreign.undo_function
-//RS         );
-//RS         let mut params = foreign
-//RS             .params
-//RS             .iter()
-//RS             .map(|param| {
-//RS                 format!(
-//RS                     "{}: {}",
-//RS                     mangle(&param.name),
-//RS                     self.foreign_param_type(foreign, param)
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         if foreign.callback_transport.as_deref() == Some("native-start") {
-//RS             params.push("__jet_callback_ctx: *mut core::ffi::c_void".to_string());
-//RS         }
-//RS         let params = params.join(", ");
-//RS         let ret = self.foreign_return_type(foreign);
-//RS         // A Rust crate item has no C symbol: calls go through the bridge
-//RS         // crate's safe wrapper (see `foreign_call`).
-//RS         if matches!(foreign.foreign_language, MirForeignLanguage::Rust) {
-//RS             return;
-//RS         }
-//RS         let rust_name = self.foreign_name(foreign.id);
-//RS         let _ = writeln!(out, "extern \"{abi}\" {{");
-//RS         if rust_name != foreign.symbol {
-//RS             let _ = writeln!(out, "    #[link_name = {:?}]", foreign.symbol);
-//RS         }
-//RS         let _ = writeln!(out, "    fn {rust_name}({params}) -> {ret};\n}}\n");
-//RS     }
-//RS     fn emit_link_closure(&self, out: &mut String) {
-//RS         let mut seen = BTreeSet::new();
-//RS         for link in &self.artifact.links {
-//RS             self.emit_link_unit(*link, &mut seen, out);
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_link_unit(
-//RS         &self,
-//RS         id: jet_foundation::MIR::MirLinkUnitId,
-//RS         seen: &mut BTreeSet<jet_foundation::MIR::MirLinkUnitId>,
-//RS         out: &mut String,
-//RS     ) {
-//RS         if !seen.insert(id) {
-//RS             return;
-//RS         }
-//RS         let link = self
-//RS             .program
-//RS             .links
-//RS             .iter()
-//RS             .find(|link| link.id == id)
-//RS             .unwrap_or_else(|| panic!("MIR link unit ID {:?} has no row", id));
-//RS         if !self.target_applicable(link.target_applicability) {
-//RS             panic!(
-//RS                 "MIR link unit {:?} is not applicable to the selected artifact target",
-//RS                 link.id
-//RS             );
-//RS         }
-//RS         for dependency in &link.link_closure {
-//RS             self.emit_link_unit(*dependency, seen, out);
-//RS         }
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "// jet-mir-link-unit: id={} crate={} cache={}",
-//RS             link.id.0, link.crate_spec, link.cache_identity
-//RS         );
-//RS         for directory in &link.dependency_dirs {
-//RS             let _ = writeln!(out, "// jet-mir-link-search-path: {directory}");
-//RS         }
-//RS         for artifact in &link.artifacts {
-//RS             match artifact.kind {
-//RS                 MirLinkArtifactKind::Object
-//RS                 | MirLinkArtifactKind::StaticLibrary
-//RS                 | MirLinkArtifactKind::DynamicLibrary
-//RS                 | MirLinkArtifactKind::Framework => {
-//RS                     let _ = writeln!(out, "#[link(name = {:?})] extern \"C\" {{}}", artifact.path);
-//RS                 }
-//RS                 MirLinkArtifactKind::GeneratedSource => {
-//RS                     let _ = writeln!(out, "// jet-mir-generated-link-source: {}", artifact.path);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn callback_ids(&self) -> BTreeSet<MirCallbackId> {
-//RS         let mut callbacks = BTreeSet::new();
-//RS         for function in &self.program.functions {
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 continue;
-//RS             }
-//RS             for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
-//RS                 if let MirOperation::Semantic(MirSemanticOp::CCallback { callback, .. }) =
-//RS                     &instruction.operation
-//RS                 {
-//RS                     callbacks.insert(*callback);
-//RS                 }
-//RS             }
-//RS         }
-//RS         callbacks
-//RS     }
-//RS     fn callback_boundary_symbol(&self, callback_id: MirCallbackId) -> String {
-//RS         let mut route = None;
-//RS         for function in &self.program.functions {
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 continue;
-//RS             }
-//RS             for instruction in function.blocks.iter().flat_map(|block| &block.instructions) {
-//RS                 if let MirOperation::Semantic(MirSemanticOp::CCallback { call, callback, .. }) =
-//RS                     &instruction.operation
-//RS                 {
-//RS                     if *callback != callback_id {
-//RS                         continue;
-//RS                     }
-//RS                     match route {
-//RS                         Some(previous) if previous != *call => {
-//RS                             panic!(
-//RS                                 "MIR callback {:?} uses multiple boundary Prelude routes",
-//RS                                 callback_id
-//RS                             );
-//RS                         }
-//RS                         Some(_) => {}
-//RS                         None => route = Some(*call),
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         let call = route.unwrap_or_else(|| {
-//RS             panic!(
-//RS                 "MIR callback {:?} has no boundary Prelude route",
-//RS                 callback_id
-//RS             )
-//RS         });
-//RS         self.prelude_symbol(call)
-//RS     }
-//RS 
-//RS     fn emit_callback_trampolines(&self, out: &mut String) {
-//RS         let mut symbols = BTreeSet::new();
-//RS         for callback_id in self.callback_ids() {
-//RS             let callback = self
-//RS                 .program
-//RS                 .callbacks
-//RS                 .iter()
-//RS                 .find(|callback| callback.id == callback_id)
-//RS                 .unwrap_or_else(|| panic!("MIR callback ID {:?} has no adapter row", callback_id));
-//RS             if !symbols.insert(callback.symbol.clone()) {
-//RS                 panic!(
-//RS                     "MIR callback symbol {:?} is emitted more than once",
-//RS                     callback.symbol
-//RS                 );
-//RS             }
-//RS             if callback.symbol.is_empty() {
-//RS                 panic!(
-//RS                     "MIR callback {:?} has an empty exported symbol",
-//RS                     callback.id
-//RS                 );
-//RS             }
-//RS             let target = self.function_row(callback.function);
-//RS             if !matches!(target.form, MirFunctionForm::TopLevel) {
-//RS                 panic!(
-//RS                     "MIR callback {:?} target is not a top-level callable",
-//RS                     callback.id
-//RS                 );
-//RS             }
-//RS             if !callback.managed && !target.capture_params.is_empty() {
-//RS                 panic!(
-//RS                     "MIR callback {:?} target has captures not representable by its adapter row",
-//RS                     callback.id
-//RS                 );
-//RS             }
-//RS             if !self.module_selected(target.module_id) || !self.selected_for_target(target) {
-//RS                 panic!(
-//RS                     "MIR callback {:?} target is not selected for this artifact",
-//RS                     callback.id
-//RS                 );
-//RS             }
-//RS             if callback.managed {
-//RS                 if target.params.len() != callback.params.len()
-//RS                     || target
-//RS                         .params
-//RS                         .iter()
-//RS                         .zip(&callback.params)
-//RS                         .any(|(left, right)| !left.ty.same_checked_type(&right.ty))
-//RS                 {
-//RS                     panic!("managed MIR callback adapter parameters disagree with target function");
-//RS                 }
-//RS                 match (&target.declared_return, &callback.return_type) {
-//RS                     (Some(target), Some(callback)) if !target.same_checked_type(callback) => {
-//RS                         panic!("managed MIR callback adapter return type disagrees with target function")
-//RS                     }
-//RS                     (Some(_), None) if !target.return_type.is_unit() => {
-//RS                         panic!("managed MIR callback adapter omits a non-unit return type")
-//RS                     }
-//RS                     (None, Some(_)) => {
-//RS                         panic!("managed MIR callback adapter adds a return type to a unit target")
-//RS                     }
-//RS                     (None, None) | (Some(_), Some(_)) | (Some(_), None) => {}
-//RS                 }
-//RS                 let payload = match callback.params.as_slice() {
-//RS                     [param] => match param.ty.kind() {
-//RS                         MirTypeKind::Apply { name, args }
-//RS                             if name.name == "FfiCallbackEvent" && args.len() == 1 =>
-//RS                         {
-//RS                             args[0].clone()
-//RS                         }
-//RS                         _ => panic!(
-//RS                             "managed MIR callback {:?} target is not FfiCallbackEvent<T>",
-//RS                             callback.id
-//RS                         ),
-//RS                     },
-//RS                     _ => panic!(
-//RS                         "managed MIR callback {:?} must carry exactly one event payload",
-//RS                         callback.id
-//RS                     ),
-//RS                 };
-//RS                 if callback.return_type.is_some() || !target.return_type.is_unit() {
-//RS                     panic!("managed MIR callback {:?} must return Unit", callback.id);
-//RS                 }
-//RS                 let payload = self.rust_type(&payload);
-//RS                 let abi = self.foreign_abi_name(&callback.abi);
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "#[no_mangle]\npub unsafe extern \"{abi}\" fn {}(__jet_callback_ctx: *mut core::ffi::c_void, __jet_callback_value: {payload}) {{ let _ = {}jet_std::jet_ffi_callback_registration_invoke_i64(__jet_callback_ctx, __jet_callback_value as i64); }}\n",
-//RS                     callback.symbol,
-//RS                     self.config.root_prefix,
-//RS                 );
-//RS                 continue;
-//RS             }
-//RS             if target.params.len() != callback.params.len()
-//RS                 || target
-//RS                     .params
-//RS                     .iter()
-//RS                     .zip(&callback.params)
-//RS                     .any(|(left, right)| !left.ty.same_checked_type(&right.ty))
-//RS             {
-//RS                 panic!("MIR callback adapter parameters disagree with target function");
-//RS             }
-//RS             match (&target.declared_return, &callback.return_type) {
-//RS                 (Some(target), Some(callback)) if !target.same_checked_type(callback) => {
-//RS                     panic!("MIR callback adapter return type disagrees with target function")
-//RS                 }
-//RS                 (Some(_), None) if !target.return_type.is_unit() => {
-//RS                     panic!("MIR callback adapter omits a non-unit return type")
-//RS                 }
-//RS                 (None, Some(_)) => {
-//RS                     panic!("MIR callback adapter adds a return type to a unit target")
-//RS                 }
-//RS                 (None, None) | (Some(_), Some(_)) | (Some(_), None) => {}
-//RS             }
-//RS             let params = callback
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| format!("{}: {}", mangle(&param.name), self.parameter_type(param)))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             let args = callback
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| mangle(&param.name))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             let ret = callback
-//RS                 .return_type
-//RS                 .as_ref()
-//RS                 .map(|ty| format!(" -> {}", self.rust_type(ty)))
-//RS                 .unwrap_or_default();
-//RS             let target_call = self.function_name(callback.function);
-//RS             let target_call = if target.is_unsafe {
-//RS                 format!("unsafe {{ {target_call}({args}) }}")
-//RS             } else {
-//RS                 format!("{target_call}({args})")
-//RS             };
-//RS             let boundary = self.callback_boundary_symbol(callback_id);
-//RS             let abi = self.foreign_abi_name(&callback.abi);
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "#[no_mangle]\npub extern \"{abi}\" fn {}({params}){ret} {{ {boundary}(|| {target_call}) }}\n",
-//RS                 callback.symbol,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn c_callback(
-//RS         &self,
-//RS         outer: &MirFunction,
-//RS         call: MirPreludeCallId,
-//RS         callback: MirCallbackId,
-//RS         lambda: MirValueId,
-//RS     ) -> String {
-//RS         let _ = self.prelude_row(call);
-//RS         let row = self
-//RS             .program
-//RS             .callbacks
-//RS             .iter()
-//RS             .find(|row| row.id == callback)
-//RS             .unwrap_or_else(|| panic!("MIR callback ID {:?} has no adapter row", callback));
-//RS         let (lambda_target, captures) = self
-//RS             .value_instruction(outer, lambda)
-//RS             .and_then(|instruction| {
-//RS                 match &instruction.operation {
-//RS                     MirOperation::Closure {
-//RS                         function, captures, ..
-//RS                     } => Some((*function, captures.clone())),
-//RS                     _ => panic!("MIR C callback lambda is not a Closure operation"),
-//RS                 }
-//RS             })
-//RS             .unwrap_or_else(|| panic!("MIR C callback lambda {:?} has no producer", lambda));
-//RS         if lambda_target != row.function {
-//RS             panic!(
-//RS                 "MIR C callback {:?} lambda target {:?} disagrees with adapter target {:?}",
-//RS                 callback, lambda_target, row.function
-//RS             );
-//RS         }
-//RS         let target = self.function_row(row.function);
-//RS         if !matches!(&target.form, MirFunctionForm::TopLevel) {
-//RS             panic!("MIR C callback target is not a top-level callable");
-//RS         }
-//RS         if !row.managed && !target.capture_params.is_empty() {
-//RS             panic!("MIR C callback target has captures not representable by its adapter");
-//RS         }
-//RS         if target.params.len() != row.params.len()
-//RS             || target
-//RS                 .params
-//RS                 .iter()
-//RS                 .zip(&row.params)
-//RS                 .any(|(left, right)| !left.ty.same_checked_type(&right.ty))
-//RS         {
-//RS             panic!("MIR C callback adapter parameters disagree with target function");
-//RS         }
-//RS         match (&target.declared_return, &row.return_type) {
-//RS             (Some(target), Some(callback)) if !target.same_checked_type(callback) => {
-//RS                 panic!("MIR C callback adapter return type disagrees with target function")
-//RS             }
-//RS             (Some(_), None) if !target.return_type.is_unit() => {
-//RS                 panic!("MIR C callback adapter omits a non-unit return type")
-//RS             }
-//RS             (None, Some(_)) => {
-//RS                 panic!("MIR C callback adapter adds a return type to a unit target")
-//RS             }
-//RS             (None, None) | (Some(_), Some(_)) | (Some(_), None) => {}
-//RS         }
-//RS         if row.managed {
-//RS             if captures.len() != target.capture_params.len() {
-//RS                 panic!(
-//RS                     "managed MIR callback {:?} captures {} values, expected {}",
-//RS                     callback,
-//RS                     captures.len(),
-//RS                     target.capture_params.len()
-//RS                 );
-//RS             }
-//RS             let mut setup = String::new();
-//RS             let mut call_args = Vec::with_capacity(captures.len() + target.params.len());
-//RS             for (index, (operand, capture)) in
-//RS                 captures.iter().zip(&target.capture_params).enumerate()
-//RS             {
-//RS                 if capture.slot != index || capture.access != MirAccess::Read {
-//RS                     panic!("managed MIR callback captures must be ordered read captures");
-//RS                 }
-//RS                 let captured = match operand {
-//RS                     MirCaptureOperand::Place(place) => {
-//RS                         self.place_reference(outer, *place, MirAccess::Read)
-//RS                     }
-//RS                     MirCaptureOperand::Value(_) => {
-//RS                         panic!("managed MIR callback read capture is not a place")
-//RS                     }
-//RS                 };
-//RS                 let name = self.capture_param_name(capture.slot);
-//RS                 let _ = writeln!(setup, "let {name} = ({captured}).clone();");
-//RS                 let call_arg = format!("&{name}");
-//RS                 call_args.push(call_arg);
-//RS             }
-//RS             let event_param = target
-//RS                 .params
-//RS                 .first()
-//RS                 .unwrap_or_else(|| panic!("managed MIR callback target has no event parameter"));
-//RS             let event_name = "__jet_callback_event_value";
-//RS             let event_arg = if self.parameter_borrowed(event_param) {
-//RS                 format!("&{event_name}")
-//RS             } else {
-//RS                 event_name.to_string()
-//RS             };
-//RS             call_args.push(event_arg);
-//RS             let invocation = format!(
-//RS                 "{}({})",
-//RS                 self.function_name(row.function),
-//RS                 call_args.join(", ")
-//RS             );
-//RS             let invocation = if target.is_unsafe {
-//RS                 format!("unsafe {{ {invocation} }}")
-//RS             } else {
-//RS                 invocation
-//RS             };
-//RS             return format!(
-//RS                 "{{ {setup}std::sync::Arc::new(move |__jet_callback_event| {{ let {event_name} = {}jet_std::JetFfiCallbackEventValue::new((*__jet_callback_event.value()).clone()); {invocation}; Ok(()) }}) }}",
-//RS                 self.config.root_prefix,
-//RS             );
-//RS         }
-//RS         let _abi = self.foreign_abi_name(&row.abi);
-//RS         row.symbol.clone()
-//RS     }
-//RS 
-//RS     fn emit_exports(&self, out: &mut String) {
-//RS         if matches!(
-//RS             self.artifact.kind,
-//RS             MirArtifactKind::NativeLibrary | MirArtifactKind::SandboxPlugin
-//RS         ) {
-//RS             // Library and sandbox adapters own their checked boundary wrappers;
-//RS             // the generic MIR export would duplicate their symbols and expose
-//RS             // the internal failure carrier instead of the host ABI.
-//RS             return;
-//RS         }
-//RS         if self.config.target_kind == MirRustTarget::WebWasm {
-//RS             self.emit_web_exports(out);
-//RS             return;
-//RS         }
-//RS         let mut symbols = BTreeSet::new();
-//RS         for export in &self.artifact.exports {
-//RS             let function = self.function_row(export.function);
-//RS             if export.symbol.is_empty() {
-//RS                 panic!(
-//RS                     "MIR export for function {:?} has an empty symbol",
-//RS                     export.function
-//RS                 );
-//RS             }
-//RS             if self.callback_ids().iter().any(|callback_id| {
-//RS                 self.program
-//RS                     .callbacks
-//RS                     .iter()
-//RS                     .any(|callback| callback.id == *callback_id && callback.symbol == export.symbol)
-//RS             }) {
-//RS                 panic!(
-//RS                     "MIR export symbol {:?} collides with a callback trampoline",
-//RS                     export.symbol
-//RS                 );
-//RS             }
-//RS             if !symbols.insert(export.symbol.clone()) {
-//RS                 panic!(
-//RS                     "MIR export symbol {:?} is emitted more than once",
-//RS                     export.symbol
-//RS                 );
-//RS             }
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 panic!(
-//RS                     "MIR export {:?} targets an unselected function",
-//RS                     export.symbol
-//RS                 );
-//RS             }
-//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS                 || !function.capture_params.is_empty()
-//RS             {
-//RS                 panic!(
-//RS                     "MIR export {:?} targets a non-exportable function",
-//RS                     export.symbol
-//RS                 );
-//RS             }
-//RS             let params = function
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| format!("{}: {}", mangle(&param.name), self.parameter_type(param)))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             let args = function
-//RS                 .params
-//RS                 .iter()
-//RS                 .map(|param| mangle(&param.name))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             let ret = self.rust_type(&function.return_type);
-//RS             let call = self.function_name(function.id);
-//RS             let call = if function.is_unsafe {
-//RS                 format!("unsafe {{ {call}({args}) }}")
-//RS             } else {
-//RS                 format!("{call}({args})")
-//RS             };
-//RS             let abi = self.foreign_abi_name(&export.abi);
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "#[no_mangle]\npub extern \"{abi}\" fn {}({params}) -> {ret} {{ {call} }}\n",
-//RS                 export.symbol
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn web_abi_type(&self, ty: &MirType) -> (&'static str, Option<&'static str>) {
-//RS         if ty.is_unit() {
-//RS             return ("()", None);
-//RS         }
-//RS         match ty.kind() {
-//RS             MirTypeKind::Tagged { inner, .. } => self.web_abi_type(inner),
-//RS             MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. } => {
-//RS                 self.web_abi_type(base)
-//RS             }
-//RS             MirTypeKind::Int => ("u64", Some("int")),
-//RS             MirTypeKind::String => ("u64", Some("string")),
-//RS             MirTypeKind::Float => ("f64", None),
-//RS             MirTypeKind::Float32 => ("f32", None),
-//RS             MirTypeKind::Bool => ("i32", None),
-//RS             MirTypeKind::Char => ("u32", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 8,
-//RS                 signed: true,
-//RS             } => ("i8", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 8,
-//RS                 signed: false,
-//RS             } => ("u8", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 16,
-//RS                 signed: true,
-//RS             } => ("i16", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 16,
-//RS                 signed: false,
-//RS             } => ("u16", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 32,
-//RS                 signed: true,
-//RS             } => ("i32", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 32,
-//RS                 signed: false,
-//RS             } => ("u32", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 64,
-//RS                 signed: true,
-//RS             } => ("i64", None),
-//RS             MirTypeKind::IntN {
-//RS                 bits: 64,
-//RS                 signed: false,
-//RS             } => ("u64", None),
-//RS             MirTypeKind::List(inner) => match self.web_abi_type(inner) {
-//RS                 (_, Some("int")) => ("u64", Some("list_int")),
-//RS                 (_, Some("string")) => ("u64", Some("list_string")),
-//RS                 ("i64", None) => ("u64", Some("list_i64")),
-//RS                 _ => panic!("checked Web list has no ABI rail: {ty:?}"),
-//RS             },
-//RS             MirTypeKind::Map { key, value, .. }
-//RS                 if self.web_abi_type(key) == ("u64", Some("string"))
-//RS                     && self.web_abi_type(value) == ("u64", Some("int")) =>
-//RS             {
-//RS                 ("u64", Some("map_string_int"))
-//RS             }
-//RS             _ => panic!("checked Web export has no ABI rail: {ty:?}"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn web_abi_decode(&self, ty: &MirType, value: &str) -> String {
-//RS         if let Some(rail) = self.web_abi_type(ty).1 {
-//RS             return format!("jet_abi_{rail}_arg({value})");
-//RS         }
-//RS         match ty.kind() {
-//RS             MirTypeKind::Tagged { inner, .. } => self.web_abi_decode(inner, value),
-//RS             MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. } => {
-//RS                 self.web_abi_decode(base, value)
-//RS             }
-//RS             MirTypeKind::Bool => format!("({value} != 0)"),
-//RS             MirTypeKind::Char => format!("char::from_u32({value}).expect(\"Web Char scalar\")"),
-//RS             _ => value.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn web_abi_encode(&self, ty: &MirType, value: &str) -> String {
-//RS         if let Some(rail) = self.web_abi_type(ty).1 {
-//RS             return format!("jet_abi_{rail}_ret({value})");
-//RS         }
-//RS         match ty.kind() {
-//RS             MirTypeKind::Tagged { inner, .. } => self.web_abi_encode(inner, value),
-//RS             MirTypeKind::InlineRange { base, .. } | MirTypeKind::Quantity { base, .. } => {
-//RS                 self.web_abi_encode(base, value)
-//RS             }
-//RS             MirTypeKind::Bool => format!("if {value} {{ 1 }} else {{ 0 }}"),
-//RS             MirTypeKind::Char => format!("({value} as u32)"),
-//RS             _ => value.to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_web_time_zones(out: &mut String) -> std::io::Result<()> {
-//RS         fn visit(
-//RS             root: &std::path::Path,
-//RS             dir: &std::path::Path,
-//RS             out: &mut String,
-//RS         ) -> std::io::Result<()> {
-//RS             let mut entries = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
-//RS             entries.sort_by_key(|entry| entry.file_name());
-//RS             for entry in entries {
-//RS                 let path = entry.path();
-//RS                 let kind = entry.file_type()?;
-//RS                 if kind.is_dir() {
-//RS                     visit(root, &path, out)?;
-//RS                 } else if kind.is_file() {
-//RS                     let bytes = std::fs::read(&path)?;
-//RS                     if !bytes.starts_with(b"TZif") {
-//RS                         continue;
-//RS                     }
-//RS                     let relative = path.strip_prefix(root).expect("timezone path below root");
-//RS                     let name = relative.to_str().ok_or_else(|| {
-//RS                         std::io::Error::new(
-//RS                             std::io::ErrorKind::InvalidData,
-//RS                             "non-UTF-8 timezone name",
-//RS                         )
-//RS                     })?;
-//RS                     let name = if std::path::MAIN_SEPARATOR == '/' {
-//RS                         std::borrow::Cow::Borrowed(name)
-//RS                     } else {
-//RS                         std::borrow::Cow::Owned(name.replace(std::path::MAIN_SEPARATOR, "/"))
-//RS                     };
-//RS                     write!(out, "{name:?} => Some(b\"").unwrap();
-//RS                     for byte in bytes {
-//RS                         write!(out, "\\x{byte:02x}").unwrap();
-//RS                     }
-//RS                     out.push_str("\"),\n");
-//RS                 }
-//RS             }
-//RS             Ok(())
-//RS         }
-//RS         out.push_str(
-//RS             "\nfn jet_time_embedded_zone_bytes(name: &str) -> Option<&'static [u8]> {\n\
-//RS              let name = name.strip_prefix(\"posix/\").unwrap_or(name);\n\
-//RS              let name = name.strip_prefix(\"right/\").unwrap_or(name);\n\
-//RS              match name {\n",
-//RS         );
-//RS         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../Core/time/tzdb");
-//RS         visit(&root, &root, out)?;
-//RS         out.push_str("_ => None,\n}\n}\n");
-//RS         Ok(())
-//RS     }
-//RS 
-//RS     fn emit_web_exports(&self, out: &mut String) {
-//RS         let exports = self
-//RS             .program
-//RS             .functions
-//RS             .iter()
-//RS             .filter(|function| {
-//RS                 self.module_selected(function.module_id)
-//RS                     && self.selected_for_target(function)
-//RS                     && function.web_marker
-//RS                         == Some(jet_foundation::WebPartition::WebPartitionMarker::WasmExport)
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         out.push_str(include_str!("../Prelude/Core/WebAbi.rs"));
-//RS         Self::emit_web_time_zones(out)
-//RS             .unwrap_or_else(|error| panic!("cannot embed checked Web timezone data: {error}"));
-//RS         for function in exports {
-//RS             if !matches!(function.form, MirFunctionForm::TopLevel)
-//RS                 || !function.capture_params.is_empty()
-//RS             {
-//RS                 panic!("checked Web export is not a top-level callable");
-//RS             }
-//RS             let mut params = Vec::new();
-//RS             let mut decode = String::new();
-//RS             let mut args = Vec::new();
-//RS             for param in &function.params {
-//RS                 let name = mangle(&param.name);
-//RS                 if let Some(reconstruction) = function
-//RS                     .web_param_reconstructions
-//RS                     .iter()
-//RS                     .find(|reconstruction| reconstruction.local == param.name)
-//RS                 {
-//RS                     let mut fields = Vec::new();
-//RS                     for field in &reconstruction.fields {
-//RS                         let flat = mangle(&field.parameter);
-//RS                         params.push(format!("{flat}: {}", self.web_abi_type(&field.ty).0));
-//RS                         fields.push(format!(
-//RS                             "{}: {}",
-//RS                             mangle(&field.field),
-//RS                             self.web_abi_decode(&field.ty, &flat),
-//RS                         ));
-//RS                     }
-//RS                     let _ = writeln!(
-//RS                         decode,
-//RS                         "    let mut {name} = {} {{ {} }};",
-//RS                         self.rust_type(&reconstruction.ty),
-//RS                         fields.join(", "),
-//RS                     );
-//RS                 } else {
-//RS                     params.push(format!("{name}: {}", self.web_abi_type(&param.ty).0));
-//RS                     let _ = writeln!(
-//RS                         decode,
-//RS                         "    let mut {name} = {};",
-//RS                         self.web_abi_decode(&param.ty, &name),
-//RS                     );
-//RS                 }
-//RS                 args.push(if param.access == MirAccess::Write {
-//RS                     format!("&mut {name}")
-//RS                 } else if self.parameter_borrowed(param) {
-// END-PORT-PENDING 2006 crates/jet-codegen/src/Codegen/MIRRust.rs:9001-10800
+use jet_foundation.MIR.*
+use jet_foundation.Syntax
+use jet_foundation.Syntax.TEXT_NUL
+use jet_foundation.SHA256.sha256_hex
+use jet_foundation.TestingHistory.[history_unsupported_type_reason, history_unsupported_variant_reason]
+use jet_foundation.WebPartition.WebPartitionMarker
+use jet_codegen.Codegen.[history_rust_type_name, core_rust_type_name]
+use jet_codegen.Codegen.MIRRust.[RustEmitter, MirRustTarget, mangle, mangle_path, mangle_variant, quote_rust_string]
+use std.[fs, io, env]
+use std.path.MAIN_SEPARATOR
+use std.collections.Set
 
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9005
+    fn history_provenance_expression(self) -> String {
+        (source, tool, target) :: self.history_base_provenance()
+        "Some(crate::jet_testing_history_foundation::HistoryProvenance {{ source: {quote_rust_string(&source)}.to_string(), tool: {quote_rust_string(&tool)}.to_string(), target: {quote_rust_string(&target)}.to_string() }})"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9016
+    // Reserve recursive codecs before traversing fields; only bound runtime values enter captures.
+    fn history_capture_expression(self, ty: &MirType, value: &String) -> String {
+        if ty.kind() == .Apply(name, args) {
+            if args.is_empty() && self.history_type_parameters(ty).contains(&name.name) {
+                return "{self.config.root_prefix}jet_history_encode_type(&__jet_history_types, {quote_rust_string(&name.name)}, {value}, __jet_history_depth + 1)?"
+            }
+        }
+        key :: ty.canonical_key()
+        name :: "__jet_history_capture_{sha256_hex(key.as_bytes())}"
+        call :: "{self.config.root_prefix}{name}({value}, __jet_history_depth + 1, &__jet_history_types)?"
+        if self.history_capture_encoders.borrow().contains_key(&key) { return call }
+        self.history_capture_encoders.borrow_mut().insert(key.clone(), "")
+        tree :: "{self.config.root_prefix}jet_std::DataTree"
+        unavailable :: "return Err(\"history capture is opaque or redacted\".to_string())"
+        inner :: fn(ty, value) { self.history_capture_expression(ty, value) }
+        task_group :: if ty.kind() == { .Apply(name, args) -> name.name == Syntax.TYPE_TASKGROUP && args.is_empty() _ -> false }
+        body :: if self.is_handle_type(ty) || task_group { unavailable.to_string() } else {
+            if ty.kind() == {
+                .Int | .IntN(..) -> "{tree}::Text(value.to_string())"
+                .Float | .Float32 | .Measure(_) -> "{tree}::Text(value.to_bits().to_string())"
+                .Bool -> "{tree}::Bool(*value)"
+                .String | .Char -> "{tree}::Text(value.to_string())"
+                .InlineRange(base, ..) | .Quantity(base, ..) -> inner(base, "value")
+                .Tagged(marker, base) -> if marker.to_string().to_ascii_lowercase().contains("secret") { unavailable.to_string() } else { inner(base, "value") }
+                .List(elem) | .FixedList(elem, ..) -> {
+                    item :: inner(elem, "item")
+                    list :: if self.columnar_type_def(elem).is_some() { "value.to_aos()" } else { "value" }
+                    "{{ let mut items = Vec::new(); for item in {list}.iter() {{ items.push({item}); }} {tree}::Array(items) }}"
+                }
+                .Map(key, item_ty) -> {
+                    key :: inner(key, "key")
+                    item :: inner(item_ty, "item")
+                    "{{ let mut items = Vec::new(); for (key, item) in value.iter() {{ items.push({tree}::Array(vec![{key}, {item}])); }} {tree}::Array(items) }}"
+                }
+                .Shared(base) -> "value.read(|item| -> Result<{tree}, String> {{ Ok({inner(base, "item")}) }})?"
+                .Option(base) -> "match value {{ Ok(item) => {tree}::Array(vec![{inner(base, "item")}]), Err(_) => {tree}::Array(vec![]) }}"
+                .Result(ok, err) -> "match value {{ Ok(item) => {tree}::Array(vec![{tree}::Text(\"ok\".to_string()), {inner(ok, "item")}]), Err(item) => {tree}::Array(vec![{tree}::Text(\"err\".to_string()), {inner(err, "item")}]) }}"
+                .Tuple(fields) -> {
+                    fields :: fields.iter().enumerate().map(fn((index, (_, ty))) { inner(ty, &"&value.{index}") }).collect().join(", ")
+                    "{tree}::Array(vec![{fields}])"
+                }
+                .Fn(_) | .SendFn(..) -> "{self.config.root_prefix}jet_history_callback_captures(value.as_ref())?"
+                .Apply(nominal, args) -> {
+                    if nominal.name == Syntax.INTERNAL_UNIT_TYPE { "{tree}::Null" }
+                    else if history_rust_type_name(&nominal.name) == Some("Count") { "{tree}::Text(value.to_string())" }
+                    else if history_rust_type_name(&nominal.name) == Some("HistoryRNG") { unavailable.to_string() }
+                    else if ["DataTree", "core.DataTree", "core::DataTree"].contains(&nominal.name.as_str()) { "{self.config.root_prefix}jet_history_data_tree_capture(value, __jet_history_depth)?" }
+                    else if nominal.name.to_ascii_lowercase().contains("secret") { unavailable.to_string() }
+                    else if self.program.types.iter().find(fn(def) { def.id == nominal.id }) == Some(def) {
+                        bindings :: def.generic_params.iter().zip(args).map(fn((param, ty)) { (param.name.clone(), ty.clone()) }).collect()
+                        field_value :: fn(ty, value) { inner(&Self.history_capture_type(ty, &bindings), value) }
+                        if def.kind == {
+                            .Struct(fields, ..) -> {
+                                if fields.iter().any(fn(field) { field.skip }) { unavailable.to_string() }
+                                else {
+                                    fields :: fields.iter().filter(fn(field) { !field.computed }).map(fn(field) {
+                                        field_name :: self.field_name(field.id)
+                                        raw :: "value.{field_name}.clone()"
+                                        converted :: if def.key == Syntax.TYPE_ERR && field.name == "cause" {
+                                            "match &value.{field_name} {{ Ok(item) => Ok((**item).clone()), Err(_) => Err({self.config.root_prefix}JetAbsent) }}"
+                                        } else { self.history_source_field_value(&def.key, &field.name, raw.clone()) }
+                                        encoded :: if converted != raw {
+                                            encoded :: field_value(&field.ty, "&__jet_history_field")
+                                            "{{ let __jet_history_field = {converted}; {encoded} }}"
+                                        } else { field_value(&field.ty, &"&value.{field_name}") }
+                                        "({quote_rust_string(&field.name)}.to_string(), {encoded})"
+                                    }).collect().join(", ")
+                                    "{tree}::Object(vec![{fields}])"
+                                }
+                            }
+                            .Enum(variants, ..) -> {
+                                head :: self.type_name(def.id)
+                                arms :: variants.iter().map(fn(variant) {
+                                    path :: "{head}::{mangle_variant(&variant.name)}"
+                                    tag :: quote_rust_string(&variant.name)
+                                    (pattern, fields) :: if variant.payload == {
+                                        .Unit -> (path, "")
+                                        .Single(ty) -> ("{path}(item)", field_value(ty, "item"))
+                                        .Named(fields) -> {
+                                            pattern :: fields.iter().enumerate().map(fn((index, field)) { "{self.field_name(field.id)}: item_{index}" }).collect().join(", ")
+                                            if fields.iter().any(fn(field) { field.skip }) { return "{path} {{ .. }} => {{ {unavailable} }}" }
+                                            values :: fields.iter().enumerate().map(fn((index, field)) { field_value(&field.ty, &"item_{index}") }).collect().join(", ")
+                                            ("{path} {{ {pattern} }}", values)
+                                        }
+                                    }
+                                    "{pattern} => {tree}::Array(vec![{tree}::Text({tag}.to_string()), {fields}])"
+                                }).collect().join(", ")
+                                "match value {{ {arms} }}"
+                            }
+                            .Distinct(base, ..) -> field_value(base, "&value.0")
+                            .Alias(target) -> field_value(target, "value")
+                            .UnitFamily(members) -> {
+                                head :: self.type_name(def.id)
+                                arms :: members.iter().map(fn(member) { "{head}::{mangle(member)} => {tree}::Text({quote_rust_string(member)}.to_string())" }).collect().join(", ")
+                                "match value {{ {arms} }}"
+                            }
+                        }
+                    } else {
+                        self.history_capture_encoders.borrow_mut().remove(&key)
+                        return "{{ {unavailable} }}"
+                    }
+                }
+                .Union(_) -> {
+                    if ty.identity.and_then(fn(id) { self.history_type_def(id) }) == Some(def) {
+                        nominal :: MirType.from_kind(MirTypeKind.Apply(MirNominalRef{id: def.id, name: def.key.clone()}, []))
+                        inner(&nominal, "value")
+                    } else { unavailable.to_string() }
+                }
+                .TraitObject(_) -> unavailable.to_string()
+            }
+        }
+        rust_ty :: self.rust_type(ty)
+        parameters :: self.history_type_parameters(ty).into_iter().collect()
+        parameters.sort()
+        generics :: if parameters.is_empty() { "" } else { "<{parameters.iter().map(fn(name) { "{mangle(name)}: 'static" }).collect().join(", ")}>" }
+        checked_key :: self.history_capture_key(ty)
+        constraints :: self.history_codec_constraints(ty).into_iter().collect()
+        constraints.sort()
+        constraints :: if constraints.is_empty() { "" } else { " where {constraints.join(", ")}" }
+        encoded :: "fn {name}{generics}(value: &{rust_ty}, __jet_history_depth: usize, __jet_history_types: &{self.config.root_prefix}JetHistoryTypes) -> Result<{tree}, String>{constraints} {{\n    if __jet_history_depth >= 64 {{ return Err(\"history capture exceeds the nesting bound\".to_string()); }}\n    let value = {{ {body} }};\n    Ok({tree}::Array(vec![{tree}::Text({checked_key}), value]))\n}}\n"
+        self.history_capture_encoders.borrow_mut().insert(key, encoded)
+        call
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9281
+    fn history_codec_constraints(self, ty: &MirType) -> Set[String] {
+        constraints := [String].new().into_set()
+        children := [&MirType].new()
+        if ty.kind() == {
+            .Apply(name, args) -> {
+                if self.program.types.iter().find(fn(def) { def.id == name.id }) == Some(def) {
+                    for (param, argument) in def.generic_params.iter().zip(args) {
+                        if !param.bounds.is_empty() {
+                            bounds :: param.bounds.iter().map(fn(bound) { self.trait_nominal_name(bound) }).collect().join(" + ")
+                            constraints.insert("{self.rust_type(argument)}: {bounds}")
+                        }
+                    }
+                }
+                children.extend(args)
+            }
+            .List(ty) | .Shared(ty) | .Option(ty) | .FixedList(ty, ..) | .InlineRange(ty, ..) | .Tagged(_, ty) | .Quantity(ty, ..) -> children.push(ty)
+            .Map(key, value) | .Result(key, value) -> { children.push(key); children.push(value) }
+            .Tuple(fields) -> children.extend(fields.iter().map(fn((_, ty)) { ty }))
+            .Union(types) -> children.extend(types)
+            .Fn(signature) -> { children.extend(&signature.params); if signature.ret == Some(ty) { children.push(ty) } }
+            .SendFn(params, ret, ..) -> { children.extend(params); if ret == Some(ty) { children.push(ty) } }
+            _ -> {}
+        }
+        for child in children { constraints.extend(self.history_codec_constraints(child)) }
+        constraints
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9341
+    fn history_type_parameters(self, ty: &MirType) -> Set[String] {
+        known :: self.program.functions.iter().flat_map(fn(function) { &function.generic_params }).chain(self.program.types.iter().flat_map(fn(def) { &def.generic_params })).map(fn(param) { param.name.as_str() }).collect_set()
+        // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9355
+        fn visit(ty: &MirType, known: &Set[&String], found: &Set[String]) -> Unit {
+            if ty.kind() == {
+                .Apply(name, args) -> {
+                    if args.is_empty() && known.contains(name.name.as_str()) { found.insert(name.name.clone()) }
+                    for ty in args { visit(ty, known, found) }
+                }
+                .List(ty) | .Shared(ty) | .Option(ty) | .FixedList(ty, ..) | .InlineRange(ty, ..) | .Tagged(_, ty) | .Quantity(ty, ..) -> visit(ty, known, found)
+                .Map(key, value) | .Result(key, value) -> { visit(key, known, found); visit(value, known, found) }
+                .Tuple(fields) -> for (_, ty) in fields { visit(ty, known, found) }
+                .Union(types) -> for ty in types { visit(ty, known, found) }
+                .Fn(signature) -> { for ty in &signature.params { visit(ty, known, found) }; if signature.ret == Some(ty) { visit(ty, known, found) } }
+                .SendFn(params, ret, ..) -> { for ty in params { visit(ty, known, found) }; if ret == Some(ty) { visit(ty, known, found) } }
+                _ -> {}
+            }
+        }
+        found := [String].new().into_set()
+        visit(ty, &known, &found)
+        found
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9414
+    fn history_capture_key(self, ty: &MirType) -> String {
+        parameters :: self.history_type_parameters(ty).into_iter().collect()
+        parameters.sort()
+        if parameters.is_empty() { return "{quote_rust_string(&ty.canonical_key())}.to_string()" }
+        bindings :: parameters.iter().enumerate().map(fn((index, name)) {
+            (name.clone(), MirType.from_kind(MirTypeKind.Apply(MirNominalRef{id: MirTypeId(0), name: "{TEXT_NUL}{index}{TEXT_NUL}"}, [])))
+        }).collect()
+        template :: Self.history_capture_type(ty, &bindings).canonical_key()
+        parts := [String].new()
+        for (index, part) in template.split(TEXT_NUL).enumerate() {
+            if index % 2 == 0 { parts.push("{quote_rust_string(part)}.to_string()") }
+            else {
+                name :: parameters.get(part.parse[USize]().expect("type template marker")).expect("type template binding")
+                parts.push("__jet_history_types.get({quote_rust_string(name)}).ok_or_else(|| \"history capture type is unresolved\".to_string())?.checked_type.clone()")
+            }
+        }
+        "[{parts.join(", ")}].concat()"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9453
+    fn history_instantiated_call(self, callee: &MirCallee, type_args: &[MirType], invocation: String) -> String {
+        if !self.history_runtime_metadata_enabled() { return invocation }
+        (target, owner) :: if callee == {
+            .User(id) -> (self.function_row(id), None)
+            .Associated(function, owner) | .Method(function, owner) -> (self.function_row(function), Some(owner))
+            _ -> return invocation
+        }
+        bindings := target.generic_params.iter().zip(type_args).map(fn((param, ty)) { (param.name.clone(), ty) }).collect()
+        if owner == Some(owner) {
+            if owner.kind() == .Apply(name, args) {
+                if self.program.types.iter().find(fn(def) { def.id == name.id }) == Some(def) {
+                    bindings.extend(def.generic_params.iter().zip(args).map(fn((param, ty)) { (param.name.clone(), ty) }))
+                }
+            }
+        }
+        if bindings.is_empty() { return invocation }
+        root :: &self.config.root_prefix
+        setup := String.new()
+        names :: bindings.keys().cloned().collect()
+        names.sort()
+        for name in names {
+            ty :: bindings[&name]
+            encoded :: self.history_capture_expression(ty, "__jet_value")
+            key :: self.history_capture_key(ty)
+            ty :: self.rust_type(ty)
+            setup.push_str(&"__jet_instantiated.insert({quote_rust_string(&name)}.to_string(), {{ let __jet_history_types = __jet_history_types.clone(); let __jet_key = (|| -> Result<String, String> {{ Ok({key}) }})(); {root}jet_history_type_codec::<{ty}>(__jet_key.unwrap_or_default(), move |__jet_value, __jet_history_depth| {{ Ok({encoded}) }}) }});\n")
+        }
+        "{{ let mut __jet_instantiated = {root}JetHistoryTypes::new(); {setup} {root}jet_history_with_types(__jet_instantiated, || {invocation}) }}"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9505
+    fn history_capture_type(ty: &MirType, bindings: &[String:MirType]) -> MirType {
+        sub :: fn(ty) { Self.history_capture_type(ty, bindings) }
+        kind :: if ty.kind() == {
+            .Apply(name, args) -> {
+                if args.is_empty() { if bindings.get(&name.name) == Some(ty) { return ty.clone() } }
+                MirTypeKind.Apply(name.clone(), args.iter().map(sub).collect())
+            }
+            .List(ty) -> MirTypeKind.List(sub(ty))
+            .Shared(ty) -> MirTypeKind.Shared(sub(ty))
+            .Option(ty) -> MirTypeKind.Option(sub(ty))
+            .Map(key, value) -> MirTypeKind.Map(sub(key), sub(value))
+            .Result(ok, err) -> MirTypeKind.Result(sub(ok), sub(err))
+            .Tuple(fields) -> MirTypeKind.Tuple(fields.iter().map(fn((name, ty)) { (name.clone(), sub(ty)) }).collect())
+            .Union(types) -> MirTypeKind.Union(types.iter().map(sub).collect())
+            .FixedList(elem, len) -> MirTypeKind.FixedList(sub(elem), len.clone())
+            .InlineRange(base, lo, hi) -> MirTypeKind.InlineRange(sub(base), lo, hi)
+            .Tagged(marker, inner) -> MirTypeKind.Tagged(marker.clone(), sub(inner))
+            .Quantity(base, dimension) -> MirTypeKind.Quantity(sub(base), dimension.clone())
+            .Fn(signature) -> {
+                signature := signature.clone()
+                signature.params = signature.params.iter().map(sub).collect()
+                signature.ret = signature.ret.as_ref().map(sub)
+                MirTypeKind.Fn(signature)
+            }
+            .SendFn(params, ret, conventions) -> MirTypeKind.SendFn(params.iter().map(sub).collect(), ret.as_ref().map(sub), conventions.clone())
+            _ -> return ty.clone()
+        }
+        if bindings.is_empty() { ty.clone() } else { MirType.from_kind(kind) }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9578
+    fn emit_history_strategies(self, out: &String) -> Unit {
+        foundation :: "crate::jet_testing_history_foundation"
+        ids :: self.history_command_type_ids().into_iter().collect()
+        ids.sort()
+        if ids.is_empty() { return }
+        out.push_str("use crate::jet_testing_history_foundation::HistoryValue;\n\n")
+        registrations := [(String, String)].new()
+        for id in ids {
+            def :: if self.history_type_def(id) == { .Some(def) -> def .None -> continue }
+            if !self.module_selected(def.module) || core_rust_type_name(&def.key) == Some("DataTree") { continue }
+            variants :: if def.kind == { .Enum(variants, ..) -> variants _ -> continue }
+            if !def.generic_params.is_empty() { continue }
+            command_ty :: if self.types.get(&id) == { .Some(command_ty) -> command_ty .None -> continue }
+            suffix :: id.0.to_string()
+            supported := [(USize, &MirVariant, String, String, String)].new()
+            unsupported_variant := None
+            for (variant_index, variant) in variants.iter().enumerate() {
+                fields :: if variant.payload == { .Unit -> [] .Single(ty) -> [ty] .Named(fields) -> fields.iter().map(fn(field) { &field.ty }).collect() }
+                specs :: fields.iter().map(fn(field) { self.history_scalar_spec(field) }).collect_option()
+                generate_name :: "__jet_history_generate_{suffix}_{variant_index}"
+                rebuild_name :: "__jet_history_rebuild_{suffix}_{variant_index}"
+                valid_name :: "__jet_history_valid_{suffix}_{variant_index}"
+                if specs.is_none() {
+                    if unsupported_variant.is_none() { unsupported_variant = Some(variant.name.clone()) }
+                    out.push_str(&"fn {generate_name}(_: &mut {foundation}::HistoryRNG, _: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{ None }}\nfn {rebuild_name}(_: &{foundation}::HistoryOperation) -> Option<{command_ty}> {{ None }}\nfn {valid_name}(_: &{foundation}::HistoryOperation, _: &{command_ty}) -> bool {{ false }}\n\n")
+                    continue
+                }
+                specs :: specs.unwrap_or_default()
+                out.push_str(&"fn {generate_name}(rng: &mut {foundation}::HistoryRNG, index: u32) -> Option<{foundation}::HistoryGeneratedStep<{command_ty}>> {{\n")
+                for (field_index, field) in fields.iter().enumerate() {
+                    expression :: self.history_generate_expression(field).unwrap_or_else(fn() { "return None".to_string() })
+                    out.push_str(&"    let __history_value_{field_index}: {self.rust_type(field)} = {expression};\n")
+                }
+                operation := "    let mut operation = {foundation}::HistoryOperation::new(index, {quote_rust_string(&variant.wire_name)});"
+                for (field_index, (kind, _)) in specs.iter().enumerate() {
+                    expression :: Self.history_value_expression(kind, &"__history_value_{field_index}")
+                    operation.push_str(&"\n    operation = operation.with_argument({foundation}::{expression});")
+                }
+                out.push_str(&operation)
+                command_expression :: if variant.payload == {
+                    .Unit -> "{command_ty}::{mangle_variant(&variant.name)}"
+                    .Single(_) -> "{command_ty}::{mangle_variant(&variant.name)}(__history_value_0)"
+                    .Named(fields) -> {
+                        fields :: fields.iter().enumerate().map(fn((index, field)) { "{self.field_name(field.id)}: __history_value_{index}" }).collect().join(", ")
+                        "{command_ty}::{mangle_variant(&variant.name)} {{ {fields} }}"
+                    }
+                }
+                out.push_str(&"\n    Some({foundation}::HistoryGeneratedStep {{ operation, command: {command_expression} }})\n}}\n\n")
+                out.push_str(&"fn {rebuild_name}(operation: &{foundation}::HistoryOperation) -> Option<{command_ty}> {{\n    if operation.name != {quote_rust_string(&variant.wire_name)} || operation.arguments.len() != {fields.len()} {{ return None; }}\n    let __history_arguments = operation.arguments.as_slice();\n")
+                for (field_index, field) in fields.iter().enumerate() {
+                    (kind, _) :: specs[field_index]
+                    expression :: self.history_rebuild_expression(field, kind, field_index)
+                    out.push_str(&"    let __history_value_{field_index}: {self.rust_type(field)} = {expression};\n")
+                }
+                out.push_str(&"    Some({command_expression})\n}}\n\n")
+                out.push_str(&"fn {valid_name}(operation: &{foundation}::HistoryOperation, command: &{command_ty}) -> bool {{\n    if operation.name != {quote_rust_string(&variant.wire_name)} {{ return false; }}\n    let __history_arguments = operation.arguments.as_slice();\n")
+                checks :: specs.iter().enumerate().map(fn((field_index, (kind, _))) { Self.history_valid_expression(kind, field_index, &"__history_value_{field_index}") }).collect()
+                check :: if checks.is_empty() { "true" } else { checks.join(" && ") }
+                pattern :: command_expression
+                out.push_str(&"    match command {{ {pattern} => __history_arguments.len() == {fields.len()} && {check}, _ => false }}\n}}\n\n")
+                supported.push((variant_index, variant, generate_name, rebuild_name, valid_name))
+            }
+            encode_name :: "__jet_history_commands_to_tree_{suffix}"
+            out.push_str(&"fn {encode_name}(commands: &[{command_ty}]) -> jet_std::DataTree {{\n    jet_std::DataTree::Array(commands.iter().map(|command| match command {{\n")
+            for variant in variants {
+                fields :: if variant.payload == { .Unit -> [] .Single(ty) -> [ty] .Named(fields) -> fields.iter().map(fn(field) { &field.ty }).collect() }
+                bindings :: fields.iter().enumerate().map(fn((index, _)) { "__history_value_{index}" }).collect()
+                pattern :: if variant.payload == {
+                    .Unit -> "{command_ty}::{mangle_variant(&variant.name)}"
+                    .Single(_) -> "{command_ty}::{mangle_variant(&variant.name)}(__history_value_0)"
+                    .Named(fields) -> {
+                        fields :: fields.iter().enumerate().map(fn((index, field)) { "{self.field_name(field.id)}: __history_value_{index}" }).collect().join(", ")
+                        "{command_ty}::{mangle_variant(&variant.name)} {{ {fields} }}"
+                    }
+                }
+                values :: fields.iter().enumerate().map(fn((index, field)) { self.history_command_tree_expression(field, &bindings[index]) }).collect().join(", ")
+                out.push_str(&"        {pattern} => jet_std::DataTree::Object(vec![(\"tag\".to_string(), jet_std::DataTree::Text({quote_rust_string(&variant.wire_name)}.to_string())), (\"values\".to_string(), jet_std::DataTree::Array(vec![{values}]))]),\n")
+            }
+            unsupported_reason :: if variants.is_empty() { Some(history_unsupported_type_reason(&def.name)) } else { unsupported_variant.as_ref().map(fn(variant) { history_unsupported_variant_reason(&def.name, variant) }) }
+            out.push_str("    }).collect())\n}\n\n")
+            variants_name :: "__JET_HISTORY_VARIANTS_{suffix}"
+            out.push_str(&"static {variants_name}: &[{foundation}::HistoryGeneratedVariant<{command_ty}>] = &[\n")
+            for (_, variant, generate_name, rebuild_name, valid_name) in &supported {
+                out.push_str(&"    {foundation}::HistoryGeneratedVariant {{ operation: {quote_rust_string(&variant.wire_name)}, weight: 1, generate: {generate_name}, rebuild: {rebuild_name}, valid: {valid_name} }},\n")
+            }
+            out.push_str("];\n\n")
+            strategy_constructor :: if unsupported_reason == {
+                .Some(reason) -> "{foundation}::HistoryGeneratedStrategy::new_with_unsupported({quote_rust_string(&def.name)}, {variants_name}, {encode_name}, {quote_rust_string(&reason)})"
+                .None -> "{foundation}::HistoryGeneratedStrategy::new({quote_rust_string(&def.name)}, {variants_name}, {encode_name})"
+            }
+            codec_method :: "    fn history_commands_to_data_tree(commands: &[Self]) -> Option<jet_std::DataTree> {{ Some({encode_name}(commands)) }}\n"
+            (provenance_source, provenance_tool, provenance_target) :: self.history_base_provenance()
+            provenance_method :: "    fn history_provenance() -> Option<{foundation}::HistoryProvenance> {{\n        Some({foundation}::HistoryProvenance {{ source: {quote_rust_string(&provenance_source)}.to_string(), tool: {quote_rust_string(&provenance_tool)}.to_string(), target: {quote_rust_string(&provenance_target)}.to_string() }})\n    }}\n"
+            out.push_str(&"impl {foundation}::HistoryCommand for {command_ty} {{\n    type Strategy = {foundation}::HistoryGeneratedStrategy<{command_ty}>;\n    fn history_command_type() -> &'static str {{ {quote_rust_string(&def.name)} }}\n    fn history_strategy() -> Self::Strategy {{\n        {strategy_constructor}\n    }}\n{codec_method}{provenance_method}}}\n\n")
+            if self.config.target_kind == MirRustTarget.WebWasm {
+                dispatch_name :: "__jet_history_dispatch_{suffix}"
+                out.push_str(&"#[cfg(target_arch = \"wasm32\")]\nfn {dispatch_name}(root: &jet_std::DataTree) -> Result<jet_std::JetTestComparison, String> {{\n    crate::jet_testing_history_web::run_wire_with_strategy::<{command_ty}, {foundation}::HistoryGeneratedStrategy<{command_ty}>>(root, <{command_ty} as {foundation}::HistoryCommand>::history_strategy())\n}}\n\n")
+                registrations.push((def.name.clone(), dispatch_name))
+            }
+        }
+        if self.config.target_kind == MirRustTarget.WebWasm && !registrations.is_empty() {
+            out.push_str("#[cfg(target_arch = \"wasm32\")]\n#[no_mangle]\npub extern \"C\" fn jet_testing_history_web_register_strategies() {\n")
+            for (name, dispatch) in &registrations { out.push_str(&"    crate::jet_testing_history_web::register_strategy({quote_rust_string(name)}, {dispatch});\n") }
+            out.push_str("}\n\n")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9899
+    fn emit_period_anchor_impls(self, out: &String) -> Unit {
+        for def in &self.program.types {
+            if !self.module_selected(def.module) { continue }
+            variants :: if def.kind == { .Enum(variants, ..) -> variants _ -> continue }
+            if variants.len() != 3 { continue }
+            has_date := false; has_local_date := false; has_date_time := false
+            for variant in variants {
+                payload :: if variant.payload == { .Single(payload) -> payload _ -> { has_date = false; has_local_date = false; has_date_time = false; break } }
+                nominal :: if payload.kind() == { .Apply(nominal, ..) -> nominal _ -> { has_date = false; has_local_date = false; has_date_time = false; break } }
+                if nominal.name.as_str() == {
+                    "Date" -> has_date = true
+                    "LocalDate" -> has_local_date = true
+                    "DateTime" -> has_date_time = true
+                    _ -> { has_date = false; has_local_date = false; has_date_time = false; break }
+                }
+            }
+            if !(has_date && has_local_date && has_date_time) { continue }
+            name :: self.type_name(def.id)
+            trait_name :: "{self.config.root_prefix}JetPeriodAnchor"
+            out.push_str(&"impl {trait_name} for {name} {{\n    fn period_total_in(&self, period: &{self.config.root_prefix}JetPeriod, unit: &String) -> f64 {{\n        match self {{\n")
+            for variant in variants {
+                payload :: if variant.payload == { .Single(payload) -> payload _ -> panic("validated period anchor union variant payload") }
+                nominal :: if payload.kind() == { .Apply(nominal, ..) -> nominal _ -> panic("validated period anchor union payload type") }
+                out.push_str(&"            {name}::{mangle_variant(&variant.name)}(anchor) => anchor.period_total_in(period, unit),\n")
+                debug_assert(["Date", "LocalDate", "DateTime"].contains(&nominal.name.as_str()))
+            }
+            out.push_str("        }\n    }\n}\n\n")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:9974
+    fn emit_columnar_row_adapter(self, def: &MirTypeDef, declared: &[MirField], out: &String) -> Unit {
+        fields :: declared.iter().filter(fn(field) { !field.computed }).collect()
+        cell :: mangle_path(&"{def.name}_cell")
+        generic_args :: if def.generic_params.is_empty() { "" } else { "<{def.generic_params.iter().map(fn(param) { mangle(&param.name) }).collect().join(", ")}>" }
+        impl_generics :: if def.generic_params.is_empty() { "" } else {
+            params :: def.generic_params.iter().map(fn(param) {
+                bounds := param.bounds.iter().map(fn(bound) { self.trait_nominal_name(bound) }).collect()
+                bounds.push("Clone".to_string()); bounds.push("core::fmt::Debug".to_string())
+                "{mangle(&param.name)}: {bounds.join(" + ")}"
+            }).collect().join(", ")
+            "<{params}>"
+        }
+        cell_ty :: "{cell}{generic_args}"
+        row_ty :: "{self.type_name(def.id)}{generic_args}"
+        out.push_str(&"#[derive(Clone, Debug)]\n#[allow(dead_code, non_camel_case_types)]\npub enum {cell}{generic_args} {{\n")
+        for field in &fields { out.push_str(&"    {self.field_name(field.id)}({self.rust_type(&field.ty)}),\n") }
+        out.push_str("}\n\n")
+        out.push_str(&"#[allow(dead_code, unreachable_patterns)]\nimpl{impl_generics} {cell_ty} {{\n")
+        for field in &fields {
+            name :: self.field_name(field.id)
+            accessor :: "jet_col_{name}"
+            out.push_str(&"    pub fn {accessor}(self) -> {self.rust_type(&field.ty)} {{\n        match self {{\n            {cell_ty}::{name}(__value) => __value,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}\n")
+            out.push_str(&"    pub fn {accessor}_ref(&self) -> &{self.rust_type(&field.ty)} {{\n        match self {{\n            {cell_ty}::{name}(__value) => __value,\n            _ => unreachable!(\"columnar cell does not match its column\"),\n        }}\n    }}\n")
+        }
+        out.push_str("}\n\n")
+        out.push_str(&"impl{impl_generics} {self.config.root_prefix}JetRow for {row_ty} {{\n    type Cell = {cell_ty};\n    fn jet_row_width() -> usize {{ {fields.len()} }}\n    fn jet_row_split(self) -> Vec<Self::Cell> {{\n        vec![\n")
+        for field in &fields { name :: self.field_name(field.id); out.push_str(&"            {cell_ty}::{name}(self.{name}),\n") }
+        out.push_str("        ]\n    }\n")
+        out.push_str("    fn jet_row_join(__cells: Vec<Self::Cell>) -> Self {\n        let mut __cells = __cells.into_iter();\n        Self {\n")
+        for field in &fields {
+            name :: self.field_name(field.id)
+            out.push_str(&"            {name}: match __cells.next() {{\n                Some({cell_ty}::{name}(__value)) => __value,\n                _ => unreachable!(\"columnar row is narrower than its column set\"),\n            }},\n")
+        }
+        out.push_str("        }\n    }\n}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10074
+    fn field_visibility(self, field: &MirField) -> String { if field.public { "pub " } else if field.package_public { "pub(crate) " } else { "" } }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10084
+    fn emit_foreign(self, foreign: &MirForeign, out: &String) -> Unit {
+        if foreign.callback_transport.as_ref().is_some_and(fn(transport) { ["managed", "managed-close", "emit-task"].contains(transport) }) { return }
+        if !self.module_selected(foreign.module_id) { panic("MIR foreign {foreign.id:?} belongs to an unselected module") }
+        if !self.target_applicable(foreign.target_applicability) { panic("MIR foreign {foreign.id:?} is not applicable to the selected artifact target") }
+        abi :: self.foreign_abi_name(&foreign.foreign_abi)
+        language :: self.foreign_language_name(foreign.foreign_language)
+        out.push_str(&"// jet-mir-foreign: id={foreign.id.0} module={foreign.module} language={language} abi={abi} symbol={foreign.symbol} path={foreign.path:?} callback={foreign.callback:?} handle={foreign.handle:?} close={foreign.close_function:?} undo={foreign.undo_function:?}\n")
+        params := foreign.params.iter().map(fn(param) { "{mangle(&param.name)}: {self.foreign_param_type(foreign, param)}" }).collect()
+        if foreign.callback_transport.as_ref() == Some("native-start") { params.push("__jet_callback_ctx: *mut core::ffi::c_void".to_string()) }
+        params :: params.join(", ")
+        ret :: self.foreign_return_type(foreign)
+        if foreign.foreign_language == .Rust { return }
+        rust_name :: self.foreign_name(foreign.id)
+        out.push_str(&"extern \"{abi}\" {{\n")
+        if rust_name != foreign.symbol { out.push_str(&"    #[link_name = {foreign.symbol:?}]\n") }
+        out.push_str(&"    fn {rust_name}({params}) -> {ret};\n}}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10147
+    fn emit_link_closure(self, out: &String) -> Unit {
+        seen := [MirLinkUnitId].new().into_set()
+        for link in &self.artifact.links { self.emit_link_unit(link, &seen, out) }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10154
+    fn emit_link_unit(self, id: MirLinkUnitId, seen: &Set[MirLinkUnitId], out: &String) -> Unit {
+        if !seen.insert(id) { return }
+        link :: self.program.links.iter().find(fn(link) { link.id == id }).unwrap_or_else(fn() { panic("MIR link unit ID {id:?} has no row") })
+        if !self.target_applicable(link.target_applicability) { panic("MIR link unit {link.id:?} is not applicable to the selected artifact target") }
+        for dependency in &link.link_closure { self.emit_link_unit(dependency, seen, out) }
+        out.push_str(&"// jet-mir-link-unit: id={link.id.0} crate={link.crate_spec} cache={link.cache_identity}\n")
+        for directory in &link.dependency_dirs { out.push_str(&"// jet-mir-link-search-path: {directory}\n") }
+        for artifact in &link.artifacts {
+            if artifact.kind == {
+                .Object | .StaticLibrary | .DynamicLibrary | .Framework -> out.push_str(&"#[link(name = {artifact.path:?})] extern \"C\" {{}}\n")
+                .GeneratedSource -> out.push_str(&"// jet-mir-generated-link-source: {artifact.path}\n")
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10201
+    fn callback_ids(self) -> Set[MirCallbackId] {
+        callbacks := [MirCallbackId].new().into_set()
+        for function in &self.program.functions {
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) { continue }
+            for instruction in function.blocks.iter().flat_map(fn(block) { &block.instructions }) {
+                if instruction.operation == .Semantic(.CCallback(_, callback, ..)) { callbacks.insert(callback) }
+            }
+        }
+        callbacks
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10217
+    fn callback_boundary_symbol(self, callback_id: MirCallbackId) -> String {
+        route := None
+        for function in &self.program.functions {
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) { continue }
+            for instruction in function.blocks.iter().flat_map(fn(block) { &block.instructions }) {
+                if instruction.operation == .Semantic(.CCallback(call, callback, ..)) {
+                    if callback != callback_id { continue }
+                    if route == {
+                        .Some(previous) -> if previous != call { panic("MIR callback {callback_id:?} uses multiple boundary Prelude routes") }
+                        .None -> route = Some(call)
+                    }
+                }
+            }
+        }
+        call :: route.unwrap_or_else(fn() { panic("MIR callback {callback_id:?} has no boundary Prelude route") })
+        self.prelude_symbol(call)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10252
+    fn emit_callback_trampolines(self, out: &String) -> Unit {
+        symbols := [String].new().into_set()
+        callback_ids :: self.callback_ids().into_iter().collect()
+        callback_ids.sort()
+        for callback_id in callback_ids {
+            callback :: self.program.callbacks.iter().find(fn(callback) { callback.id == callback_id }).unwrap_or_else(fn() { panic("MIR callback ID {callback_id:?} has no adapter row") })
+            if !symbols.insert(callback.symbol.clone()) { panic("MIR callback symbol {callback.symbol:?} is emitted more than once") }
+            if callback.symbol.is_empty() { panic("MIR callback {callback.id:?} has an empty exported symbol") }
+            target :: self.function_row(callback.function)
+            if target.form != .TopLevel { panic("MIR callback {callback.id:?} target is not a top-level callable") }
+            if !callback.managed && !target.capture_params.is_empty() { panic("MIR callback {callback.id:?} target has captures not representable by its adapter row") }
+            if !self.module_selected(target.module_id) || !self.selected_for_target(target) { panic("MIR callback {callback.id:?} target is not selected for this artifact") }
+            if callback.managed {
+                if target.params.len() != callback.params.len() || target.params.iter().zip(&callback.params).any(fn((left, right)) { !left.ty.same_checked_type(&right.ty) }) { panic("managed MIR callback adapter parameters disagree with target function") }
+                if (target.declared_return.as_ref(), callback.return_type.as_ref()) == {
+                    (.Some(target), .Some(callback)) -> if !target.same_checked_type(callback) { panic("managed MIR callback adapter return type disagrees with target function") }
+                    (.Some(_), .None) -> if !target.return_type.is_unit() { panic("managed MIR callback adapter omits a non-unit return type") }
+                    (.None, .Some(_)) -> panic("managed MIR callback adapter adds a return type to a unit target")
+                    (.None, .None) -> {}
+                }
+                payload :: if callback.params.as_slice() == {
+                    [param] -> if param.ty.kind() == {
+                        .Apply(name, args) -> if name.name == "FfiCallbackEvent" && args.len() == 1 { args[0].clone() } else { panic("managed MIR callback {callback.id:?} target is not FfiCallbackEvent<T>") }
+                        _ -> panic("managed MIR callback {callback.id:?} target is not FfiCallbackEvent<T>")
+                    }
+                    _ -> panic("managed MIR callback {callback.id:?} must carry exactly one event payload")
+                }
+                if callback.return_type.is_some() || !target.return_type.is_unit() { panic("managed MIR callback {callback.id:?} must return Unit") }
+                payload :: self.rust_type(&payload)
+                abi :: self.foreign_abi_name(&callback.abi)
+                out.push_str(&"#[no_mangle]\npub unsafe extern \"{abi}\" fn {callback.symbol}(__jet_callback_ctx: *mut core::ffi::c_void, __jet_callback_value: {payload}) {{ let _ = {self.config.root_prefix}jet_std::jet_ffi_callback_registration_invoke_i64(__jet_callback_ctx, __jet_callback_value as i64); }}\n\n")
+                continue
+            }
+            if target.params.len() != callback.params.len() || target.params.iter().zip(&callback.params).any(fn((left, right)) { !left.ty.same_checked_type(&right.ty) }) { panic("MIR callback adapter parameters disagree with target function") }
+            if (target.declared_return.as_ref(), callback.return_type.as_ref()) == {
+                (.Some(target), .Some(callback)) -> if !target.same_checked_type(callback) { panic("MIR callback adapter return type disagrees with target function") }
+                (.Some(_), .None) -> if !target.return_type.is_unit() { panic("MIR callback adapter omits a non-unit return type") }
+                (.None, .Some(_)) -> panic("MIR callback adapter adds a return type to a unit target")
+                (.None, .None) -> {}
+            }
+            params :: callback.params.iter().map(fn(param) { "{mangle(&param.name)}: {self.parameter_type(param)}" }).collect().join(", ")
+            args :: callback.params.iter().map(fn(param) { mangle(&param.name) }).collect().join(", ")
+            ret :: callback.return_type.as_ref().map(fn(ty) { " -> {self.rust_type(ty)}" }).unwrap_or_default()
+            target_call :: self.function_name(callback.function)
+            target_call :: if target.is_unsafe { "unsafe {{ {target_call}({args}) }}" } else { "{target_call}({args})" }
+            boundary :: self.callback_boundary_symbol(callback_id)
+            abi :: self.foreign_abi_name(&callback.abi)
+            out.push_str(&"#[no_mangle]\npub extern \"{abi}\" fn {callback.symbol}({params}){ret} {{ {boundary}(|| {target_call}) }}\n\n")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10398
+    fn c_callback(self, outer: &MirFunction, call: MirPreludeCallId, callback: MirCallbackId, lambda: MirValueId) -> String {
+        _ :: self.prelude_row(call)
+        row :: self.program.callbacks.iter().find(fn(row) { row.id == callback }).unwrap_or_else(fn() { panic("MIR callback ID {callback:?} has no adapter row") })
+        (lambda_target, captures) :: self.value_instruction(outer, lambda).map(fn(instruction) {
+            if instruction.operation == { .Closure(function, captures, ..) -> (function, captures.clone()) _ -> panic("MIR C callback lambda is not a Closure operation") }
+        }).unwrap_or_else(fn() { panic("MIR C callback lambda {lambda:?} has no producer") })
+        if lambda_target != row.function { panic("MIR C callback {callback:?} lambda target {lambda_target:?} disagrees with adapter target {row.function:?}") }
+        target :: self.function_row(row.function)
+        if target.form != .TopLevel { panic("MIR C callback target is not a top-level callable") }
+        if !row.managed && !target.capture_params.is_empty() { panic("MIR C callback target has captures not representable by its adapter") }
+        if target.params.len() != row.params.len() || target.params.iter().zip(&row.params).any(fn((left, right)) { !left.ty.same_checked_type(&right.ty) }) { panic("MIR C callback adapter parameters disagree with target function") }
+        if (target.declared_return.as_ref(), row.return_type.as_ref()) == {
+            (.Some(target), .Some(callback)) -> if !target.same_checked_type(callback) { panic("MIR C callback adapter return type disagrees with target function") }
+            (.Some(_), .None) -> if !target.return_type.is_unit() { panic("MIR C callback adapter omits a non-unit return type") }
+            (.None, .Some(_)) -> panic("MIR C callback adapter adds a return type to a unit target")
+            (.None, .None) -> {}
+        }
+        if row.managed {
+            if captures.len() != target.capture_params.len() { panic("managed MIR callback {callback:?} captures {captures.len()} values, expected {target.capture_params.len()}") }
+            setup := String.new()
+            call_args := [String].with_capacity(captures.len() + target.params.len())
+            for (index, (operand, capture)) in captures.iter().zip(&target.capture_params).enumerate() {
+                if capture.slot != index || capture.access != .Read { panic("managed MIR callback captures must be ordered read captures") }
+                captured :: if operand == { .Place(place) -> self.place_reference(outer, place, MirAccess.Read) .Value(_) -> panic("managed MIR callback read capture is not a place") }
+                name :: self.capture_param_name(capture.slot)
+                setup.push_str(&"let {name} = ({captured}).clone();\n")
+                call_args.push("&{name}")
+            }
+            event_param :: target.params.first().unwrap_or_else(fn() { panic("managed MIR callback target has no event parameter") })
+            event_name :: "__jet_callback_event_value"
+            event_arg :: if self.parameter_borrowed(event_param) { "&{event_name}" } else { event_name.to_string() }
+            call_args.push(event_arg)
+            invocation :: "{self.function_name(row.function)}({call_args.join(", ")})"
+            invocation :: if target.is_unsafe { "unsafe {{ {invocation} }}" } else { invocation }
+            return "{{ {setup}std::sync::Arc::new(move |__jet_callback_event| {{ let {event_name} = {self.config.root_prefix}jet_std::JetFfiCallbackEventValue::new((*__jet_callback_event.value()).clone()); {invocation}; Ok(()) }}) }}"
+        }
+        _abi :: self.foreign_abi_name(&row.abi)
+        row.symbol.clone()
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10517
+    fn emit_exports(self, out: &String) -> Unit {
+        if self.artifact.kind == .NativeLibrary || self.artifact.kind == .SandboxPlugin { return }
+        if self.config.target_kind == .WebWasm { self.emit_web_exports(out); return }
+        symbols := [String].new().into_set()
+        for export in &self.artifact.exports {
+            function :: self.function_row(export.function)
+            if export.symbol.is_empty() { panic("MIR export for function {export.function:?} has an empty symbol") }
+            if self.callback_ids().iter().any(fn(callback_id) { self.program.callbacks.iter().any(fn(callback) { callback.id == callback_id && callback.symbol == export.symbol }) }) { panic("MIR export symbol {export.symbol:?} collides with a callback trampoline") }
+            if !symbols.insert(export.symbol.clone()) { panic("MIR export symbol {export.symbol:?} is emitted more than once") }
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) { panic("MIR export {export.symbol:?} targets an unselected function") }
+            if function.form != .TopLevel || !function.capture_params.is_empty() { panic("MIR export {export.symbol:?} targets a non-exportable function") }
+            params :: function.params.iter().map(fn(param) { "{mangle(&param.name)}: {self.parameter_type(param)}" }).collect().join(", ")
+            args :: function.params.iter().map(fn(param) { mangle(&param.name) }).collect().join(", ")
+            ret :: self.rust_type(&function.return_type)
+            call :: self.function_name(function.id)
+            call :: if function.is_unsafe { "unsafe {{ {call}({args}) }}" } else { "{call}({args})" }
+            abi :: self.foreign_abi_name(&export.abi)
+            out.push_str(&"#[no_mangle]\npub extern \"{abi}\" fn {export.symbol}({params}) -> {ret} {{ {call} }}\n\n")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10599
+    fn web_abi_type(self, ty: &MirType) -> (String, String?) {
+        if ty.is_unit() { return ("()", None) }
+        if ty.kind() == {
+            .Tagged(_, inner) -> self.web_abi_type(inner)
+            .InlineRange(base, ..) | .Quantity(base, ..) -> self.web_abi_type(base)
+            .Int -> ("u64", Some("int"))
+            .String -> ("u64", Some("string"))
+            .Float -> ("f64", None)
+            .Float32 -> ("f32", None)
+            .Bool -> ("i32", None)
+            .Char -> ("u32", None)
+            .IntN(8, true) -> ("i8", None)
+            .IntN(8, false) -> ("u8", None)
+            .IntN(16, true) -> ("i16", None)
+            .IntN(16, false) -> ("u16", None)
+            .IntN(32, true) -> ("i32", None)
+            .IntN(32, false) -> ("u32", None)
+            .IntN(64, true) -> ("i64", None)
+            .IntN(64, false) -> ("u64", None)
+            .List(inner) -> if self.web_abi_type(inner) == {
+                (_, .Some("int")) -> ("u64", Some("list_int"))
+                (_, .Some("string")) -> ("u64", Some("list_string"))
+                ("i64", .None) -> ("u64", Some("list_i64"))
+                _ -> panic("checked Web list has no ABI rail: {ty:?}")
+            }
+            .Map(key, value) -> if self.web_abi_type(key) == ("u64", Some("string")) && self.web_abi_type(value) == ("u64", Some("int")) { ("u64", Some("map_string_int")) } else { panic("checked Web export has no ABI rail: {ty:?}") }
+            _ -> panic("checked Web export has no ABI rail: {ty:?}")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10662
+    fn web_abi_decode(self, ty: &MirType, value: &String) -> String {
+        if self.web_abi_type(ty).1 == Some(rail) { return "jet_abi_{rail}_arg({value})" }
+        if ty.kind() == {
+            .Tagged(_, inner) -> self.web_abi_decode(inner, value)
+            .InlineRange(base, ..) | .Quantity(base, ..) -> self.web_abi_decode(base, value)
+            .Bool -> "({value} != 0)"
+            .Char -> "char::from_u32({value}).expect(\"Web Char scalar\")"
+            _ -> value.to_string()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10677
+    fn web_abi_encode(self, ty: &MirType, value: &String) -> String {
+        if self.web_abi_type(ty).1 == Some(rail) { return "jet_abi_{rail}_ret({value})" }
+        if ty.kind() == {
+            .Tagged(_, inner) -> self.web_abi_encode(inner, value)
+            .InlineRange(base, ..) | .Quantity(base, ..) -> self.web_abi_encode(base, value)
+            .Bool -> "if {value} {{ 1 }} else {{ 0 }}"
+            .Char -> "({value} as u32)"
+            _ -> value.to_string()
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10692
+    fn emit_web_time_zones(out: &String) -> Unit io.Error! {
+        // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10693
+        fn visit(root: &OSPath, dir: &OSPath, out: &String) -> Unit io.Error! {
+            // GATE #4494: native filesystem directory entries and lossless OS paths.
+            entries :: fs.read_dir(dir)?.collect_result()?
+            entries.sort_by_key(fn(entry) { entry.file_name() })
+            for entry in entries {
+                path :: entry.path()
+                kind :: entry.file_type()?
+                if kind.is_dir() { visit(root, &path, out)? }
+                else if kind.is_file() {
+                    bytes :: fs.read(&path)?
+                    if !bytes.starts_with(b"TZif") { continue }
+                    relative :: path.strip_prefix(root).expect("timezone path below root")
+                    name :: relative.to_str().ok_or_else(fn() { io.Error.new(io.ErrorKind.InvalidData, "non-UTF-8 timezone name") })?
+                    name :: if MAIN_SEPARATOR == '/' { name.to_string() } else { name.replace(MAIN_SEPARATOR, "/") }
+                    out.push_str(&"{name:?} => Some(b\"")
+                    for byte in bytes { out.push_str(&"\\x{byte:02x}") }
+                    out.push_str("\"),\n")
+                }
+            }
+        }
+        out.push_str("\nfn jet_time_embedded_zone_bytes(name: &str) -> Option<&'static [u8]> {\nlet name = name.strip_prefix(\"posix/\").unwrap_or(name);\nlet name = name.strip_prefix(\"right/\").unwrap_or(name);\nmatch name {\n")
+        root :: OSPath.new(env.manifest_dir()).join("../../Core/time/tzdb") // GATE #4494: compile-time package manifest directory.
+        visit(&root, &root, out)?
+        out.push_str("_ => None,\n}\n}\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:10743
+    // Includes the closing continuation at Rust:10801-10840 so the item remains whole.
+    fn emit_web_exports(self, out: &String) -> Unit {
+        exports :: self.program.functions.iter().filter(fn(function) { self.module_selected(function.module_id) && self.selected_for_target(function) && function.web_marker == Some(WebPartitionMarker.WasmExport) }).collect()
+        out.push_str(include_str("../Prelude/Core/WebAbi.rs")) // GATE #4494: compile-time source inclusion.
+        Self.emit_web_time_zones(out).unwrap_or_else(fn(error) { panic("cannot embed checked Web timezone data: {error}") })
+        for function in exports {
+            if function.form != .TopLevel || !function.capture_params.is_empty() { panic("checked Web export is not a top-level callable") }
+            params := [String].new(); decode := String.new(); args := [String].new()
+            for param in &function.params {
+                name :: mangle(&param.name)
+                if function.web_param_reconstructions.iter().find(fn(reconstruction) { reconstruction.local == param.name }) == Some(reconstruction) {
+                    fields := [String].new()
+                    for field in &reconstruction.fields {
+                        flat :: mangle(&field.parameter)
+                        params.push("{flat}: {self.web_abi_type(&field.ty).0}")
+                        fields.push("{mangle(&field.field)}: {self.web_abi_decode(&field.ty, &flat)}")
+                    }
+                    decode.push_str(&"    let mut {name} = {self.rust_type(&reconstruction.ty)} {{ {fields.join(", ")} }};\n")
+                } else {
+                    params.push("{name}: {self.web_abi_type(&param.ty).0}")
+                    decode.push_str(&"    let mut {name} = {self.web_abi_decode(&param.ty, &name)};\n")
+                }
+                args.push(if param.access == .Write { "&mut {name}" } else if self.parameter_borrowed(param) { "&{name}" } else { name })
+            }
+            call :: "{self.function_name(function.id)}({args.join(", ")})"
+            call :: if function.is_unsafe { "unsafe {{ {call} }}" } else { call }
+            success :: if function.failure == {
+                .Result(success, ..) -> success
+                .Optional(value) -> value
+                .Infallible | .Diverges(..) -> &function.return_type
+            }
+            ret :: self.web_abi_type(success).0
+            encoded :: self.web_abi_encode(success, "__jet_value")
+            body :: if function.failure == {
+                .Result(..) -> "match {call} {{ Ok(__jet_value) => {encoded}, Err(__jet_error) => {{ jet_wasm_store_error(&__jet_error); Default::default() }} }}"
+                .Optional(..) -> "match {call} {{ Ok(__jet_value) => {encoded}, Err(_) => {{ jet_wasm_store_absent(); Default::default() }} }}"
+                .Infallible | .Diverges(..) -> "let __jet_value = {call};\n    {encoded}"
+            }
+            export_name :: "jet_export_{function.name}"
+            out.push_str(&"#[export_name = {export_name:?}]\npub extern \"C\" fn __jet_web_export_{function.id.0}({params.join(", ")}) -> {ret} {{\n    jet_wasm_error_clear();\n{decode}    {body}\n}}\n\n")
+        }
+    }
+}

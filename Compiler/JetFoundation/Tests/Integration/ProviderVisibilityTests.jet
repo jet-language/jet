@@ -1,0 +1,20 @@
+use std.[fs, env]
+use std.process.Command
+
+// Rust: tests/provider_visibility.rs:7
+// GATE #4494: real external peer compiler validates private Rust provider symbols.
+#Test("raw_provider_backends_are_not_external_api") {
+    root :: env.manifest_dir()
+    scratch :: env.temp_dir().join("jet-provider-visibility-{std.process.id()}")
+    _ :: fs.remove_dir_all(&scratch)
+    fs.create_dir_all(scratch.join("src")).unwrap()
+    fs.write(scratch.join("Cargo.toml"), "[package]\nname = \"provider-visibility\"\nversion = \"0.0.0\"\nedition = \"2021\"\n\n[workspace]\n\n[dependencies]\njetpack = {{ path = {root.join("crates/jetpack"):?} }}\n").unwrap()
+    fs.write(scratch.join("src/main.rs"), "use jetpack::Provider::{provider_for, CoreProvider, NixProvider, Provider};\nfn main() {}\n").unwrap()
+    output :: Command.new("cargo").args(["check", "--offline"]).current_dir(&scratch).env("CARGO_TARGET_DIR", root.join("target")).output().unwrap()
+    assert(!output.status.success(), "raw provider API unexpectedly compiled")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    for symbol in ["provider_for", "CoreProvider", "NixProvider", "Provider"] {
+        assert(stderr.contains(symbol) && stderr.contains("private"), "stderr: {stderr}")
+    }
+    _ :: fs.remove_dir_all(scratch)
+}

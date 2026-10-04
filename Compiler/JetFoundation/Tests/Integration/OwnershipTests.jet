@@ -1,0 +1,1384 @@
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use core.fs as fs
+use std.process.[Command]
+use jet
+use Compiler.JetFoundation.Tests.Integration.Ownership.[CellLoanPair]
+use core.cell.[Cell]
+use std.panic.[catch_unwind, AssertUnwindSafe]
+
+// Generated Rust and standalone rustc cases below are original reference
+// comparators, not a native runtime bridge or a compiler-retirement parity claim.
+// GATE #4494: real process, filesystem, loans, unwinding and shared lock providers.
+
+// Rust: tests/ownership.rs:10
+#Test("discard_binding_is_not_a_referenceable_local") {
+    src :: """
+fn consume(value: ^String) { print(value) }
+fn run() {
+    _ :: "discarded"
+    consume(^_)
+}
+"""
+    diags :: jet.compile(src).expect_err("the discard name must not be referenceable")
+    assert(diags.iter().any((diagnostic) -> diagnostic.code == "E0107"), "expected the ordinary unknown-name error: {diags:?}")
+    assert(diags.iter().all((diagnostic) -> !diagnostic.fix.contains("~_")), "a discard must never receive a copy suggestion: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:37
+// D-MEM1/S2: no clone is silent; E0209 is a hard error, not L0201.
+#Test("implicit_clone_is_error_not_lint") {
+    src :: """
+fn consume(s: ^String) { print(s) }
+fn run() {
+    msg :: "hello"
+    consume(msg)
+}
+"""
+    diags :: jet.compile(src).expect_err("should error")
+    assert(diags.iter().any((d) -> d.code == "E0209"), "expected E0209 implicit-clone hard error")
+}
+
+// Rust: tests/ownership.rs:59
+#Test("body_write_to_unmarked_param_is_error") {
+    src :: """
+struct Counter { n: Int }
+fn bump(c: Counter) { c.n = c.n + 1 }
+fn run() {
+    c :: Counter{ n: 0 }
+    bump(c)
+}
+"""
+    diags :: jet.compile(src).expect_err("should error")
+    d :: diags.iter().find((d) -> d.code == "E0205").expect("expected E0205: body write to an unmarked (Read) param")
+    assert(d.fix.contains("&Counter"), "fix should point at adding `&` to the param, got: {d.fix}")
+}
+
+// Rust: tests/ownership.rs:85
+#Test("generic_clone_bound_is_usage_sensitive") {
+    src :: """
+fn inspect<T>(value: T) -> Int { 1 }
+fn duplicate<T>(value: T) -[..E]> T { return ~value }
+fn increment(value: Int) -[]> Int { return value + 1 }
+fn run() {
+    callback :: increment
+    print(inspect(callback))
+    print(duplicate(4))
+}
+"""
+    out :: jet.compile(src).expect("usage-sensitive generic bounds should compile")
+    assert(out.rust.contains("pub fn __jet_inspect<T>(__jet_value: &T) -> JetOutcome<i64, JetErr>"), "read-only generic must not require Clone: {out.rust}")
+    assert(out.rust.contains("pub fn __jet_duplicate<T: Clone>(__jet_value: &T) -> JetOutcome<T, JetErr>"), "explicit copy must require Clone: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:111
+#Test("nested_plain_parameter_read_does_not_clone") {
+    src :: """
+struct Leaf { text: String }
+struct Branch { leaf: Leaf }
+fn show(branch: Branch) { print(branch.leaf.text) }
+fn run() {
+    branch :: Branch{leaf: Leaf{text: "read"}}
+    show(branch)
+}
+"""
+    out :: jet.compile(src).expect("nested read should compile")
+    assert(!out.rust.contains("__jet_branch.__jet_leaf.__jet_text).clone()"), "nested read must stay borrowed: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:134
+// #3735: stored-field projection must not clone the entire receiver.
+#Test("stored_field_read_clones_only_the_field") {
+    src :: """
+struct Sprite {
+    text: [U8]
+    width: Int
+    fn row_width(self, row: Int) -> Int { self.width * row }
+}
+struct Frame { sprite: Sprite }
+fn frame_width(frame: Frame) -> Int { frame.sprite.width }
+fn run() {
+    sprite :: Sprite{text: [U8{1}, U8{2}, U8{3}], width: 4}
+    total := 0
+    loop row in 0..3 -> total += sprite.row_width(row)
+    print(total)
+    local_width :: sprite.width
+    frame :: Frame{sprite: sprite}
+    print(frame_width(frame) + local_width)
+}
+"""
+    out :: jet.compile(src).expect("stored field reads should compile")
+    body :: (marker: String) -> {
+        start :: out.rust.find(marker).unwrap_or_else(() -> panic("generated Rust has no `{marker}` frame:\n{out.rust}"))
+        rest :: out.rust[start..]
+        rest[..rest.find("\n}\n").unwrap_or(rest.len())]
+    }
+    row_width :: body("\"Sprite::row_width\"")
+    assert(row_width.contains("((*self).__jet_width).clone()"), "the method must read only the width field: {row_width}")
+    assert(!row_width.contains("(*self).clone()"), "the method must not copy the whole receiver: {row_width}")
+    frame_width :: body("\"frame_width\"")
+    assert(frame_width.contains("(((*__jet_frame).__jet_sprite).__jet_width).clone()"), "a nested stored-field read must project the field chain: {frame_width}")
+    tir_support.assert_tiers_agree("stored_field_read", src, "24\n8\n")
+}
+
+// Rust: tests/ownership.rs:192
+// D-CONC-SHARE1=A: one read lock and one edit lock for field access and +=.
+#Test("shared_callbacks_receive_exactly_one_host_borrow") {
+    src :: """
+struct Config { hits: Int }
+fn run() {
+    config := shared Config{ hits: 0 }
+    print(config.hits)
+    config.hits += 1
+}
+"""
+    out :: jet.compile(src).expect("plain shared access must lower without double borrowing")
+    assert(out.rust.contains("|__jet_shared_value: &__jet_Config|"), "{out.rust}")
+    assert(out.rust.contains("|__jet_shared_value: &mut __jet_Config|"), "{out.rust}")
+    assert(!out.rust.contains("&&__jet_Config"), "{out.rust}")
+    assert(!out.rust.contains("&mut &__jet_Config"), "{out.rust}")
+    assert_eq(out.rust.matches("|__jet_shared_value: &__jet_Config|").count(), 1, "the field read is one locked read: {out.rust}")
+    assert_eq(out.rust.matches("|__jet_shared_value: &mut __jet_Config|").count(), 1, "the read-modify-write is one locked edit: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:239
+#Test("shared_edit_guard_spans_helper_calls") {
+    src :: """
+struct Jobs { items: [Int] }
+impl Jobs {
+    fn add(&self, value: Int) { &self.items.push(value) }
+    fn count(self) -[]> Int { return self.items.len() }
+}
+fn run() {
+    queue := shared Jobs{ items: [Int]{} }
+    other := shared Jobs{ items: [Int]{} }
+    guard :: queue.guard_edit()
+    other_guard :: other.guard_read()
+    guard.value.add(1)
+    guard.value.add(2)
+    print(other_guard.value.count())
+    print(guard.value.count())
+}
+"""
+    output :: jet.compile(src).expect("an edit guard must preserve one write loan across helper calls")
+    first :: output.rust.find("jet-shared-lock-order-receipt: lock=__jet_queue; acquire=guard_edit; order=source").expect("first lock receipt needs identity and acquisition mode")
+    second :: output.rust.find("jet-shared-lock-order-receipt: lock=__jet_other; acquire=guard_read; order=source").expect("second lock receipt needs identity and acquisition mode")
+    assert(first < second, "nested-lock audit receipts must preserve source acquisition order")
+}
+
+// Rust: tests/ownership.rs:286
+#Test("shared_read_guard_value_is_not_writable") {
+    src :: """
+struct Counter { value: Int }
+fn run() {
+    counter := shared Counter{ value: 0 }
+    guard :: counter.guard_read()
+    guard.value.value += 1
+}
+"""
+    diagnostics :: jet.compile(src).expect_err("a read guard must not grant write access to its value")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0205"), "expected the ordinary read-only write diagnostic: {diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:307
+#Test("shared_guard_public_type_annotation_resolves") {
+    src :: """
+fn inspect(guard: SharedGuard<Int>) { print(guard.value) }
+fn run() {
+    cell := shared 1
+    guard :: cell.guard_edit()
+    inspect(guard)
+    guard.value += 1
+}
+"""
+    jet.compile(src).expect("SharedGuard<T> must be a public, annotatable expert type")
+}
+
+// Rust: tests/ownership.rs:324
+#Test("shared_read_guard_cannot_enter_write_helper") {
+    src :: """
+fn bump(&guard: SharedGuard<Int>) { guard.value += 1 }
+fn run() {
+    cell := shared 1
+    guard := cell.guard_read()
+    bump(&guard)
+}
+"""
+    diagnostics :: jet.compile(src).expect_err("a write helper must require an edit SharedGuard")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0205"), "expected read-vs-edit guard diagnostic: {diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:347
+#Test("returned_public_guard_is_read_only_without_write_helper_access") {
+    src :: """
+fn acquire(handle: Shared<Int>) -[]> SharedGuard<Int> { return handle.guard_edit() }
+fn run() {
+    cell := shared 1
+    guard := acquire(cell)
+    guard.value += 1
+}
+"""
+    diagnostics :: jet.compile(src).expect_err("an untagged returned guard must not regain edit access")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0205"), "expected returned guard access diagnostic: {diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:370
+#Test("shared_guard_map_and_split_preserve_disjoint_places") {
+    src :: """
+struct Pair { left: Int, right: Int }
+fn run() {
+    first := shared Pair{ left: 1, right: 2 }
+    mapped :: first.guard_edit().map(value -> value.left)
+    mapped.value += 1
+    second := shared Pair{ left: 3, right: 4 }
+    (left, right) :: second.guard_edit().split(value -> value.left, value -> value.right)
+    left.value += 1
+    right.value += 1
+}
+"""
+    jet.compile(src).expect("mapped and split guards must preserve safe field provenance")
+}
+
+// Rust: tests/ownership.rs:392
+#Test("shared_guard_split_rejects_overlapping_places") {
+    src :: """
+struct Pair { left: Int, right: Int }
+fn run() {
+    cell := shared Pair{ left: 1, right: 2 }
+    guard :: cell.guard_edit()
+    _ :: guard.split(value -> value.left, value -> value.left)
+}
+"""
+    diagnostics :: jet.compile(src).expect_err("split guard projections must be disjoint")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0216"), "expected a projection error: {diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:412
+#Test("shared_guard_is_owned_and_noncloneable") {
+    src :: """
+fn run() {
+    cell := shared 1
+    guard :: cell.guard_read()
+    _ :: ~guard
+}
+"""
+    diagnostics :: jet.compile(src).expect_err("a lock token must have one owner")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0211"), "expected the noncloneable-value diagnostic: {diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:430
+#Test("shared_guard_wait_requires_edit_access_and_bool_predicate") {
+    read_src :: """
+fn run() {
+    cell := shared 1
+    changed := Condition.new()
+    guard :: cell.guard_read()
+    _ :: guard.wait(changed, value -> value == 1)
+}
+"""
+    diagnostics :: jet.compile(read_src).expect_err("waiting must require an exclusive guard")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0205"), "expected the read-guard wait diagnostic: {diagnostics:?}")
+    predicate_src :: """
+fn run() {
+    cell := shared 1
+    changed := Condition.new()
+    guard :: cell.guard_edit()
+    _ :: guard.wait(changed, value -> value)
+}
+"""
+    predicate_diagnostics :: jet.compile(predicate_src).expect_err("a wait predicate must return Bool")
+    assert(predicate_diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0112" || diagnostic.code == "E0113"), "expected the predicate diagnostic: {predicate_diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:464
+#Test("shared_guard_long_scope_has_lock_order_lint") {
+    src :: """
+fn run() {
+    cell := shared 1
+    guard :: cell.guard_edit()
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+    print(guard.value)
+}
+"""
+    output :: jet.compile(src).expect("a long guard scope is legal expert code")
+    lint :: output.lints.iter().find((diagnostic) -> diagnostic.code == "L0206").expect("long guard scopes must produce an audit lint")
+    assert(lint.fix.contains("stable order"), "the lint must teach nested lock order: {lint:?}")
+}
+
+// Rust: tests/ownership.rs:492
+#Test("local_cell_surface_uses_read_receivers_and_host_borrows") {
+    source :: """
+struct Pair { left: Int, right: Int }
+fn update(cell: Cell<Pair>) -[]> Int {
+    &cell.set(Pair{ left: 2, right: 3 })
+    old :: &cell.replace(Pair{ left: 4, right: 5 })
+    &cell.edit(pair -> pair.left += old.left)
+    return cell.read(pair -> pair.left + pair.right)
+}
+fn run() {
+    cell :: Cell.new(Pair{ left: 0, right: 1 })
+    print(update(cell))
+}
+"""
+    output :: jet.compile(source).expect("local Cell surface must compile")
+    assert(output.rust.contains("jet_std::JetCell<__jet_Pair>"), "{output.rust}")
+    assert(output.rust.contains("|__jet_pair: &__jet_Pair|"), "{output.rust}")
+    assert(output.rust.contains("|__jet_pair: &mut __jet_Pair|"), "{output.rust}")
+}
+
+// Rust: tests/ownership.rs:526
+#Test("local_cell_runtime_has_no_atomic_or_os_lock_storage") {
+    cell :: #IncludeText("crates/jet-codegen/src/Prelude/LocalCell.rs")
+    assert(cell.contains("std::rc::Rc"), "{cell}")
+    assert(cell.contains("std::cell::UnsafeCell"), "{cell}")
+    assert(!cell.contains("std::sync::Arc"), "{cell}")
+    assert(!cell.contains("Mutex"), "{cell}")
+    assert(!cell.contains("RwLock"), "{cell}")
+}
+
+// Rust: tests/ownership.rs:536
+#Test("local_cell_runtime_releases_original_loans_on_drop_and_unwind") {
+    if !common.have_rustc() { return }
+    cell :: #IncludeText("crates/jet-codegen/src/Prelude/LocalCell.rs")
+    outcome :: #IncludeText("crates/jet-foundation/src/Outcome.rs")
+    carrier :: "pub type JetOutcome<T, E> = Result<T, E>;"
+    absent_derive :: "#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default, Debug)]"
+    absent :: "pub struct JetAbsent;"
+    loop line in [carrier, absent_derive, absent] {
+        assert(outcome.contains(line), "the outcome carrier moved; this harness now declares a second shape: {line}")
+    }
+    // The reference harness projects canonical Outcome declarations verbatim;
+    // it never supplies a second optional representation or a production bridge.
+    harness :: ["mod jet_cell {", carrier, absent_derive, absent, cell, "}", """
+use jet_cell::JetCell;
+use std::panic::{catch_unwind, AssertUnwindSafe};
+#[derive(Clone)]
+struct Pair { left: i64, right: i64 }
+#[test]
+fn loans_release_after_every_exit() {
+    let cell = JetCell::new(Pair { left: 1, right: 2 });
+    let first = cell.guard_read();
+    let second = cell.guard_read();
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(first);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(second);
+    let edit = cell.guard_edit();
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err());
+    drop(edit);
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        cell.read::<_, ()>(|_| panic!("read unwind"))
+    })).is_err());
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        cell.edit::<_, ()>(|_| panic!("edit unwind"))
+    })).is_err());
+    cell.edit(|pair| pair.left = 3);
+    assert_eq!(cell.read(|pair| pair.left), 3);
+    let guard = cell.guard_edit();
+    assert!(catch_unwind(AssertUnwindSafe(|| {
+        &guard.edit(|_| &guard.edit(|_| ()))
+    })).is_err());
+    guard.set(Pair { left: 4, right: 5 });
+    drop(guard);
+    assert_eq!(cell.read(|pair| pair.left), 4);
+}
+#[test]
+fn mapped_and_split_guards_keep_the_original_loan() {
+    let cell = JetCell::new(Pair { left: 4, right: 5 });
+    let mapped = cell.guard_read().map(|pair| &pair.left);
+    assert_eq!(mapped.get(), 4);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(mapped);
+    let (left, right) = cell.guard_read().split(|pair| (&pair.left, &pair.right));
+    assert_eq!((left.get(), right.get()), (4, 5));
+    drop(left);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_edit())).is_err());
+    drop(right);
+    let (left, right) = cell.guard_edit().split(|pair| (&mut pair.left, &mut pair.right));
+    left.set(7);
+    right.set(8);
+    drop(left);
+    assert!(catch_unwind(AssertUnwindSafe(|| cell.guard_read())).is_err());
+    drop(right);
+    assert_eq!(cell.read(|pair| (pair.left, pair.right)), (7, 8));
+}
+"""].join("\n")
+    root :: common.unique_tmp("jet_local_cell_runtime")
+    fs.create_dir_all(root).unwrap()
+    source :: root.join("cell_runtime.rs")
+    binary :: root.join("cell_runtime_test")
+    fs.write(source, harness).unwrap()
+    compiled :: Command.new("rustc").args(["--edition=2021", "--test"]).arg(source).arg("-o").arg(binary).output().unwrap()
+    assert(compiled.status.success(), "Cell runtime harness failed to compile:\n{String.from_utf8_lossy(compiled.stderr)}")
+    ran :: Command.new(binary).output().unwrap()
+    assert(ran.status.success(), "Cell runtime harness failed:\nstdout:\n{String.from_utf8_lossy(ran.stdout)}\nstderr:\n{String.from_utf8_lossy(ran.stderr)}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/ownership.rs:580 (standalone runtime witness)
+// GATE #4494: canonical native dynamic loan and unwind primitives.
+#Test("loans_release_after_every_exit") {
+    cell :: Cell.new(CellLoanPair{left: 1, right: 2})
+    first :: cell.guard_read()
+    second :: cell.guard_read()
+    assert(catch_unwind(AssertUnwindSafe(() -> cell.guard_edit())).is_err())
+    drop(^first)
+    assert(catch_unwind(AssertUnwindSafe(() -> cell.guard_edit())).is_err())
+    drop(^second)
+    edit :: cell.guard_edit()
+    assert(catch_unwind(AssertUnwindSafe(() -> cell.guard_read())).is_err())
+    drop(^edit)
+    assert(catch_unwind(AssertUnwindSafe(() -> {
+        cell.read((_) -> panic("read unwind"))
+    })).is_err())
+    assert(catch_unwind(AssertUnwindSafe(() -> {
+        &cell.edit((_) -> panic("edit unwind"))
+    })).is_err())
+    &cell.edit((pair) -> pair.left = 3)
+    assert_eq(cell.read((pair) -> pair.left), 3)
+    guard :: cell.guard_edit()
+    assert(catch_unwind(AssertUnwindSafe(() -> {
+        &guard.edit((_) -> &guard.edit((_) -> ()))
+    })).is_err())
+    &guard.set(CellLoanPair{left: 4, right: 5})
+    drop(^guard)
+    assert_eq(cell.read((pair) -> pair.left), 4)
+}
+
+// Rust: tests/ownership.rs:615 (standalone runtime witness)
+#Test("mapped_and_split_guards_keep_the_original_loan") {
+    cell :: Cell.new(CellLoanPair{left: 4, right: 5})
+    mapped :: cell.guard_read().map((pair) -> pair.left)
+    assert_eq(mapped.get(), 4)
+    assert(catch_unwind(AssertUnwindSafe(() -> cell.guard_edit())).is_err())
+    drop(^mapped)
+    (left, right) :: cell.guard_read().split((pair) -> pair.left, (pair) -> pair.right)
+    assert_eq((left.get(), right.get()), (4, 5))
+    drop(^left)
+    assert(catch_unwind(AssertUnwindSafe(() -> cell.guard_edit())).is_err())
+    drop(^right)
+    (edit_left, edit_right) :: cell.guard_edit().split((pair) -> pair.left, (pair) -> pair.right)
+    &edit_left.set(7)
+    &edit_right.set(8)
+    drop(^edit_left)
+    assert(catch_unwind(AssertUnwindSafe(() -> cell.guard_read())).is_err())
+    drop(^edit_right)
+    assert_eq(cell.read((pair) -> (pair.left, pair.right)), (7, 8))
+}
+
+// Rust: tests/ownership.rs:670
+#Test("local_cell_guard_mapping_and_splitting_keep_projected_types") {
+    source :: """
+struct Pair { left: Int, right: Int }
+fn inspect(cell: Cell<Pair>) {
+    mapped :: cell.guard_read().map(pair -> pair.left)
+    print(mapped.get())
+}
+fn edit_pair(cell: Cell<Pair>) {
+    (left, right) :: cell.guard_edit().split(pair -> pair.left, pair -> pair.right)
+    &left.set(7)
+    &right.set(8)
+}
+fn run() {}
+"""
+    output :: jet.compile(source).expect("guard projections must compile")
+    assert(output.rust.contains("JetCellReadGuard<i64>") && output.rust.contains("JetCellEditGuard<i64>"), "{output.rust}")
+}
+
+// Rust: tests/ownership.rs:697
+#Test("local_cell_guard_map_rejects_detached_values") {
+    source :: """
+struct Pair { left: Int, right: Int }
+fn inspect(cell: Cell<Pair>) { _ :: cell.guard_read().map(pair -> pair.left + pair.right) }
+fn run() {}
+"""
+    diagnostics :: jet.compile(source).expect_err("map must preserve the original dynamic loan")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0112" && diagnostic.what.contains("needs a field projection")), "{diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:717
+#Test("local_cell_get_rejects_values_without_copy_semantics") {
+    source :: """
+fn inspect(cell: Cell<fn() -> Int>) { _ :: cell.get() }
+fn run() {}
+"""
+    diagnostics :: jet.compile(source).expect_err("Cell.get must not defer a missing Clone bound to rustc")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0112" && diagnostic.what.contains("cannot copy its value")), "{diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:735
+#Test("local_cell_edit_guard_split_rejects_overlapping_paths") {
+    source :: """
+struct Pair { left: Int, right: Int }
+fn edit_pair(cell: Cell<Pair>) { _ :: cell.guard_edit().split(pair -> pair.left, pair -> pair.left) }
+fn run() {}
+"""
+    diagnostics :: jet.compile(source).expect_err("split must prove projections disjoint in sema")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0112" && diagnostic.what.contains("projections overlap")), "{diagnostics:?}")
+}
+
+// Rust: tests/ownership.rs:757
+#Test("mutate_required_at_call_site") {
+    src :: """
+fn touch(n: &Int) { print(n) }
+fn run() {
+    x := 1
+    touch(x)
+}
+"""
+    diags :: jet.compile(src).expect_err("should error")
+    assert(diags.iter().any((d) -> d.code == "E0202"))
+}
+
+// Rust: tests/ownership.rs:773
+#Test("move_non_clonable_is_hard_error") {
+    src :: """
+fn consume(item: ^NoClone) { print(0) }
+fn run() {
+    msg :: "hi"
+    consume(msg)
+}
+"""
+    diags :: jet.compile(src).expect_err("should error")
+    assert(diags.iter().any((d) -> d.code == "E0201"))
+}
+
+// Rust: tests/ownership.rs:789
+#Test("shared_auto_clone_in_loop_is_lint") {
+    src :: """
+fn noop(h: Shared<Int>) { print(0) }
+fn loop_user(h: Shared<Int>) { loop { noop(h) } }
+fn run() { print(0) }
+"""
+    out :: jet.compile(src).expect("should compile with lint")
+    assert(out.lints.iter().any((d) -> d.code == "L0202"), "expected L0202 loop auto-clone lint")
+    // D-MEM1 S6: the cheap JetShared handle owns its Clone implementation.
+    assert(out.rust.contains(").clone()"))
+}
+
+// Rust: tests/ownership.rs:828
+#Test("const_address_taken_emits_static") {
+    src :: """
+#Static LIMIT :: prep { 10 }
+fn show(n: Int) { print(n) }
+fn run() { show(LIMIT) }
+"""
+    out :: jet.compile(src).expect("should compile")
+    assert(out.rust.contains("static __JET_CT_LIMIT"), "`#Static` should give the constant its own address: {out.rust}")
+    inlined :: jet.compile(src.replace("#Static ", "")).expect("should compile")
+    assert(!inlined.rust.contains("__JET_CT_LIMIT"), "an unmarked constant should inline, not take an address: {inlined.rust}")
+}
+
+// Rust: tests/ownership.rs:860
+#Test("same_call_mut_and_read_is_error") {
+    src :: """
+fn both(a: &Int, b: Int) { print(b) }
+fn run() {
+    x := 1
+    both(&x, x)
+}
+"""
+    diags :: jet.compile(src).expect_err("should error")
+    assert(diags.iter().any((d) -> d.code == "E0204"))
+}
+
+// Rust: tests/ownership.rs:876
+#Test("nested_call_argument_cannot_read_an_active_write_place") {
+    src :: """
+fn see(x: Int) -[]> Int { return x }
+fn both(a: &Int, b: Int) { a += b }
+fn run() {
+    x := 1
+    both(&x, see(x))
+}
+"""
+    diags :: jet.compile(src).expect_err("nested read must fail in sema before rustc")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "expected the call-alias diagnostic: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:894
+#Test("composite_argument_cannot_read_an_active_write_place") {
+    src :: """
+fn both(a: &Int, b: Int) { a += b }
+fn run() {
+    x := 1
+    both(&x, x + 1)
+}
+"""
+    diags :: jet.compile(src).expect_err("composite read must fail in sema before rustc")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "expected the call-alias diagnostic: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:911
+#Test("lambda_capture_cannot_read_an_active_write_place") {
+    src :: """
+fn both(a: &String, callback: fn() -> String) {
+    print(a)
+    print(callback())
+}
+fn run() {
+    x := "jet"
+    both(&x, () -> x)
+}
+"""
+    diags :: jet.compile(src).expect_err("lambda capture must fail in sema before rustc")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "expected the call-alias diagnostic: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:931
+#Test("inferred_mutable_lambda_capture_stays_active_through_call") {
+    src :: """
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    values := [1, 2]
+    both(() -> &values.push(3), values)
+}
+"""
+    diags :: jet.compile(src).expect_err("mutable lambda capture must remain active through the call")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "expected the call-alias diagnostic: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:952
+#Test("nested_lambda_forms_use_the_enclosing_call_access_frame") {
+    composite :: """
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, Work{ callback: () -> values.len() })
+}
+"""
+    diags :: jet.compile(composite).expect_err("a lambda inside an aggregate must see the active write")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    immediate_callee :: """
+fn both(values: &[Int], count: Int) { &values.push(count) }
+fn run() {
+    values := [1, 2]
+    both(&values, (() -> values.len()).call())
+}
+"""
+    immediate_diags :: jet.compile(immediate_callee).expect_err("an immediate lambda callee must see the outer active write")
+    assert(immediate_diags.iter().any((diag) -> diag.code == "E0204"), "{immediate_diags:?}")
+}
+
+// Rust: tests/ownership.rs:980
+#Test("move_and_fnmut_lambda_captures_have_exact_lifetimes_and_places") {
+    copy_move :: """
+fn both(callback: fn() -> Int, value: &Int) { value += callback() }
+fn run() {
+    value := 1
+    both(() -> value, &value)
+}
+"""
+    jet.compile(copy_move).expect("a read-only move closure copies a scalar before the write")
+    disjoint :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> &pair.right.push(3), pair.left)
+}
+"""
+    jet.compile(disjoint).expect("Rust 2021 captures disjoint struct fields separately")
+    conflicting :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> &pair.right.push(3), pair.right)
+}
+"""
+    diags :: jet.compile(conflicting).expect_err("the same captured field must remain write-borrowed")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+}
+
+// Rust: tests/ownership.rs:1020
+#Test("move_lambda_capture_identity_matches_rust_2021_places") {
+    disjoint_owned_field :: """
+struct Pair { left: String, right: [Int] }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    pair := Pair{ left: "jet", right: [1, 2] }
+    both(() -> { print(pair.left) }, pair.right)
+}
+"""
+    jet.compile(disjoint_owned_field).expect("moving one captured field must leave a disjoint field usable")
+    copy_field :: """
+struct Pair { count: Int, values: [Int] }
+fn both(callback: fn(), pair: Pair) {
+    callback()
+    print(pair.count)
+}
+fn run() {
+    pair := Pair{ count: 2, values: [1, 2] }
+    both(() -> { print(pair.count) }, pair)
+}
+"""
+    jet.compile(copy_field).expect("capturing a Copy field must not move its owner")
+    view_alias :: """
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    call(() -> { print(first.len()) })
+    print(values.len())
+}
+"""
+    jet.compile(view_alias).expect("a closure captures a View alias, not its source owner")
+    same_owned_field :: """
+struct Pair { left: String, right: [Int] }
+fn both(callback: fn(), text: String) {
+    callback()
+    print(text)
+}
+fn run() {
+    pair := Pair{ left: "jet", right: [1, 2] }
+    both(() -> { print(pair.left) }, pair.left)
+}
+"""
+    moved_diags :: jet.compile(same_owned_field).expect_err("the moved captured field cannot be reused")
+    assert(moved_diags.iter().any((diag) -> diag.code == "E0121"), "{moved_diags:?}")
+    conflicting_view_alias :: """
+fn both(values: &[Int], callback: fn()) {
+    &values.push(3)
+    callback()
+}
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    both(&values, () -> { print(first.len()) })
+}
+"""
+    alias_diags :: jet.compile(conflicting_view_alias).expect_err("a copied View alias still borrows its source place")
+    assert(alias_diags.iter().any((diag) -> diag.code == "E0204"), "{alias_diags:?}")
+    reverse_view_alias :: """
+fn both(callback: fn() -> Int, values: &[Int]) { &values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    first :: values[0..1]
+    both(() -> first.len(), &values)
+}
+"""
+    reverse_diags :: jet.compile(reverse_view_alias).expect_err("a closure keeps its copied View alias live across the whole call")
+    assert(reverse_diags.iter().any((diag) -> diag.code == "E0204"), "{reverse_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1103
+#Test("erased_capture_and_view_do_not_consume_outer_values") {
+    src :: """
+struct NoClone { label: Int }
+fn run() {
+    item :: NoClone{ label: 7 }
+    values := [1, 2]
+    #Off {
+        callback :: () -> item.label
+        window :: values[0..1]
+        retained :: () -> window[0]
+    }
+    &values.push(3)
+    print(item.label)
+    print(values.len())
+}
+"""
+    tir_support.assert_tiers_agree("erased_capture_view", src, "7\n3\n")
+}
+
+// Rust: tests/ownership.rs:1124
+#Test("move_lambda_index_and_slice_captures_stop_at_the_rust_prefix") {
+    loop source in ["""
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    call(() -> { print(values[0]) })
+    print(values.len())
+}
+""", """
+fn call(callback: fn()) { callback() }
+fn run() {
+    values := [1, 2]
+    call(() -> { print(values[0..1].len()) })
+    print(values.len())
+}
+"""] {
+        diags :: jet.compile(source).expect_err("indexing cannot make a move capture element-precise")
+        assert(diags.iter().any((diag) -> diag.code == "E0121"), "{diags:?}")
+    }
+    field_before_index :: """
+struct Pair { left: [Int], right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    call(() -> { print(pair.left[0]) })
+    print(pair.right.len())
+}
+"""
+    jet.compile(field_before_index).expect("Rust may capture the field prefix before an index")
+}
+
+// Rust: tests/ownership.rs:1161
+#Test("moved_places_can_be_reinitialized_without_clearing_relatives") {
+    whole :: """
+fn consume(value: String) { print(value) }
+fn run() {
+    value := "jet"
+    consume(value)
+    value = "again"
+    print(value)
+}
+"""
+    jet.compile(whole).expect("whole assignment reinitializes the moved binding")
+    field :: """
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair{ left: "jet", right: [1] }
+    call(() -> { print(pair.left) })
+    pair.left = "again"
+    print(pair.left)
+    print(pair.right.len())
+}
+"""
+    jet.compile(field).expect("field assignment reinitializes the exact moved field")
+    sibling :: """
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair{ left: "jet", right: [1] }
+    call(() -> { print(pair.left) })
+    pair.right = [2]
+    print(pair.left)
+}
+"""
+    sibling_diags :: jet.compile(sibling).expect_err("assigning a sibling must not restore the moved field")
+    assert(sibling_diags.iter().any((diag) -> diag.code == "E0121"), "{sibling_diags:?}")
+    ancestor :: """
+struct Pair { left: String, right: [Int] }
+fn call(callback: fn()) { callback() }
+fn run() {
+    pair := Pair{ left: "jet", right: [1] }
+    call(() -> { print(pair) })
+    pair.left = "again"
+}
+"""
+    ancestor_diags :: jet.compile(ancestor).expect_err("assigning a field cannot restore a moved ancestor")
+    assert(ancestor_diags.iter().any((diag) -> diag.code == "E0121"), "{ancestor_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1215
+#Test("builtin_and_composite_receivers_use_the_call_access_frame") {
+    builtin :: """
+fn run() {
+    values := [1, 2]
+    &values.insert(0, values.remove(0, .Slot))
+}
+"""
+    diags :: jet.compile(builtin).expect_err("a nested builtin receiver must see the outer receiver write")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    composite :: """
+fn both(value: &Int, count: Int) { value += count }
+fn run() {
+    value := 1
+    both(&value, [value].len())
+}
+"""
+    composite_diags :: jet.compile(composite).expect_err("a composite receiver must evaluate inside the call")
+    assert(composite_diags.iter().any((diag) -> diag.code == "E0204"), "{composite_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1239
+#Test("if_expression_prefix_reads_use_the_call_access_frame") {
+    src :: """
+fn both(value: &Int, count: Int) { value += count }
+fn run() {
+    value := 1
+    both(&value, if true -> {
+        seen :: value
+        seen
+    } else -> { 0 })
+}
+"""
+    diags :: jet.compile(src).expect_err("an if-expression prefix read must see the active write")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+}
+
+// Rust: tests/ownership.rs:1256
+#Test("deferred_lambda_capture_reports_once") {
+    src :: """
+fn see(value: String) -[]> String { return value }
+fn both(value: &String, callback: fn() -> String) {
+    print(value)
+    print(callback())
+}
+fn run() {
+    value := "jet"
+    both(&value, () -> see(value))
+}
+"""
+    diags :: jet.compile(src).expect_err("the deferred capture conflicts with the active write")
+    assert_eq(diags.iter().filter((diag) -> diag.code == "E0204").count(), 1, "the post-inference capture summary must be the only report: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:1278
+#Test("evaluated_statement_accesses_are_scoped_and_mode_aware") {
+    write :: """
+fn both(values: [Int], count: Int) { print(values.len() + count) }
+fn run() {
+    values := [1, 2]
+    both(values, if true -> {
+        values = [3]
+        1
+    } else -> { 0 })
+}
+"""
+    diags :: jet.compile(write).expect_err("an if-prefix assignment must conflict with the read loan")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    shadow :: """
+fn both(value: &Int, callback: fn(Int) -> Int) { value += callback(2) }
+fn run() {
+    value := 1
+    both(&value, (value: Int) -> value)
+}
+"""
+    jet.compile(shadow).expect("a lambda-local shadow must not capture the outer write-borrowed place")
+}
+
+// Rust: tests/ownership.rs:1305
+#Test("lambda_capture_access_is_projection_specific_and_transitive") {
+    mixed :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> {
+        print(pair.left.len())
+        &pair.right.push(3)
+    }, pair.left)
+}
+"""
+    jet.compile(mixed).expect("reading left and mutating right keeps projection modes separate")
+    conflict :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    both(() -> {
+        print(pair.left.len())
+        &pair.right.push(3)
+    }, pair.right)
+}
+"""
+    diags :: jet.compile(conflict).expect_err("the mutated projection remains write-borrowed")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    transitive :: """
+fn both(value: &String, callback: fn() -> fn() -> String) {
+    print(value)
+    print(callback().call())
+}
+fn run() {
+    value := "jet"
+    both(&value, () -> () -> value)
+}
+"""
+    transitive_diags :: jet.compile(transitive).expect_err("a nested closure capture is also an outer capture")
+    assert(transitive_diags.iter().any((diag) -> diag.code == "E0204"), "{transitive_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1355
+#Test("composite_lambda_capture_walks_if_prefix_and_fallback_values") {
+    if_prefix :: """
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, if true -> {
+        work :: Work{ callback: () -> values.len() }
+        work
+    } else -> {
+        Work{ callback: () -> 0 }
+    })
+}
+"""
+    diags :: jet.compile(if_prefix).expect_err("a lambda created in an if prefix must be summarized")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    fallback :: """
+fn both(values: &[Int], callback: fn() -> Int) { &values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, Val(() -> values.len()) ?? () -> 0)
+}
+"""
+    fallback_diags :: jet.compile(fallback).expect_err("a lambda created through fallback evaluation must retain its capture")
+    assert(fallback_diags.iter().any((diag) -> diag.code == "E0204"), "{fallback_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1386
+#Test("builtin_mut_receiver_uses_two_phase_reservation") {
+    accepted :: """
+fn run() {
+    values := [1, 2]
+    &values.push(values.len())
+}
+"""
+    jet.compile(accepted).expect("a shared argument read is allowed during receiver reservation")
+    rejected :: """
+fn run() {
+    values := [1, 2]
+    &values.push(values.remove(0, .Slot))
+}
+"""
+    diags :: jet.compile(rejected).expect_err("a nested write conflicts with receiver reservation")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    loop eager in ["""
+fn run() {
+    values := [2, 1]
+    &values.sort_by((value: Int) -> value + values.len())
+}
+""", """
+fn run() {
+    clock := Clock.new(0)
+    &clock.advance(clock.now())
+}
+""", """
+use core.compute.solve as solve
+fn run() {
+    solver := solve.Solver.new(1)
+    solver.require(solver.failure_count() == 0)
+}
+"""] {
+        eager_diags :: jet.compile(eager).expect_err("explicit-helper receiver borrows are eager")
+        assert(eager_diags.iter().any((diag) -> diag.code == "E0204"), "{eager_diags:?}")
+    }
+}
+
+// Rust: tests/ownership.rs:1432
+#Test("semantic_capture_events_drive_retention_and_deferred_clone_modes") {
+    field_write :: """
+struct Bucket { values: [Int] }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    bucket := Bucket{ values: [1, 2] }
+    both(() -> { bucket.values = [3] }, bucket.values)
+}
+"""
+    field_diags :: jet.compile(field_write).expect_err("a captured field assignment stays write-borrowed")
+    assert(field_diags.iter().any((diag) -> diag.code == "E0204"), "{field_diags:?}")
+    user_method :: """
+struct Bucket { values: [Int] }
+impl Bucket { fn clear(&self) { self.values = [0] } }
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    bucket := Bucket{ values: [1, 2] }
+    both(() -> &bucket.clear(), bucket.values)
+}
+"""
+    method_diags :: jet.compile(user_method).expect_err("a captured user mutable receiver stays write-borrowed")
+    assert(method_diags.iter().any((diag) -> diag.code == "E0204"), "{method_diags:?}")
+    reactive_clone :: """
+fn both(callback: fn(), values: &[Int]) {
+    &values.push(4)
+    callback()
+}
+fn run() {
+    values := [1, 2]
+    both(() -> {
+        #Reactive { &values.push(3) }
+    }, &values)
+}
+"""
+    reactive_diags :: jet.compile(reactive_clone).expect_err("the outer move closure consumes the reactive source before the later loan")
+    assert(!reactive_diags.is_empty(), "expected a move or alias diagnostic")
+}
+
+// Rust: tests/ownership.rs:1484
+#Test("pattern_value_tests_and_reactive_clones_use_runtime_capture_places") {
+    pattern_value :: """
+struct Incident { count: Int, label: String }
+fn both(values: &[Int], callback: fn()) {
+    &values.push(3)
+    callback()
+}
+fn run() {
+    values := [1, 2]
+    changed := [0]
+    incident := Incident{ count: 2, label: "jet" }
+    both(&values, () -> {
+        &changed.push(1)
+        if incident == {
+            { count: values.len(), label, .. } -> print(label)
+            else -> {}
+        }
+    })
+}
+"""
+    pattern_diags :: jet.compile(pattern_value).expect_err("a struct-pattern value expression is evaluated before its arm")
+    assert(pattern_diags.iter().any((diag) -> diag.code == "E0204"), "{pattern_diags:?}")
+    reactive_root :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) {
+    &values.push(3)
+    callback()
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    changed := [0]
+    both(&pair.right, () -> {
+        &changed.push(1)
+        #Reactive { &pair.left.push(3) }
+    })
+}
+"""
+    root_diags :: jet.compile(reactive_root).expect_err("reactive lowering clones the whole captured root")
+    assert(root_diags.iter().any((diag) -> diag.code == "E0204"), "{root_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1529
+#Test("reactive_root_capture_replaces_existing_owner_projections") {
+    src :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) {
+    &values.push(3)
+    callback()
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    both(&pair.right, () -> {
+        print(pair.left.len())
+        #Reactive { &pair.right.push(4) }
+    })
+}
+"""
+    diags :: jet.compile(src).expect_err("Reactive clones the root after an earlier field capture")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    write_then_reactive :: """
+struct Pair { left: [Int], right: [Int] }
+fn both(values: &[Int], callback: fn()) {
+    &values.push(3)
+    callback()
+}
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    both(&pair.right, () -> {
+        &pair.left.push(4)
+        #Reactive { print(pair.right.len()) }
+    })
+}
+"""
+    write_diags :: jet.compile(write_then_reactive).expect_err("Reactive coarsening must preserve an earlier mutable capture")
+    assert(write_diags.iter().any((diag) -> diag.code == "E0204"), "{write_diags:?}")
+}
+
+// Rust: tests/ownership.rs:1568
+#Test("reactive_codegen_clones_the_whole_root_before_running") {
+    source :: """
+struct Pair { left: [Int], right: [Int] }
+fn run() {
+    pair := Pair{ left: [1], right: [2] }
+    #Reactive {
+        &pair.left.push(3)
+        print(pair.left.len())
+    }
+    print(pair.right.len())
+}
+"""
+    compiled :: jet.compile(source).expect("direct Reactive cloning must remain valid")
+    assert(compiled.rust.contains("let mut __jet___cap_pair = (__jet_pair).clone();"), "{compiled.rust}")
+    // Native behavioral proof cannot depend on a Rust compiler being installed.
+    tir_support.assert_tiers_agree("jet_reactive_capture_whole_root", source, "2\n1\n")
+}
+
+// Rust: tests/ownership.rs:1597
+#Test("reactive_capture_materializes_local_views_before_rustc") {
+    // Inclusive 0..0 is narrower than the owner and therefore proves window copying.
+    source :: """
+fn run() {
+    values := [1, 2]
+    first :: values[0..0]
+    #Reactive { print(first.len()) }
+}
+"""
+    compiled :: jet.compile(source).expect("a stored read View gets an owning copy")
+    assert(compiled.rust.contains("jet_view_copy"), "{compiled.rust}")
+    tir_support.assert_tiers_agree("jet_reactive_view_capture_whole_root", source, "1\n")
+}
+
+// Rust: tests/ownership.rs:1620
+#Test("move_lambda_construction_consumes_owned_nonscalar_captures") {
+    loop (source, expected) in [("""
+fn both(callback: fn(), values: [Int]) {
+    callback()
+    print(values.len())
+}
+fn run() {
+    values := [1, 2]
+    both(() -> values.len(), values)
+}
+""", "E0121"), ("""
+fn both(values: [Int], callback: fn()) {
+    print(values.len())
+    callback()
+}
+fn run() {
+    values := [1, 2]
+    both(values, () -> values.len())
+}
+""", "E0204")] {
+        diags :: jet.compile(source).expect_err("a move closure consumes its owned non-scalar capture")
+        assert(diags.iter().any((diag) -> diag.code == expected), "{expected}: {diags:?}")
+    }
+    scalar_copy :: """
+fn both(callback: fn(), value: Int) {
+    callback()
+    print(value)
+}
+fn run() {
+    value := 2
+    both(() -> { print(value) }, value)
+}
+"""
+    jet.compile(scalar_copy).expect("Copy scalar captures remain usable")
+}
+
+// Rust: tests/ownership.rs:1671
+#Test("semantic_capture_walker_covers_fallback_and_scope_member_arguments") {
+    fallback :: """
+fn missing() -[]> Int? { return null }
+fn both(values: &[Int], callback: fn()) {
+    &values.push(3)
+    callback()
+}
+fn run() {
+    values := [1, 2]
+    both(&values, () -> {
+        found :: missing() ?? panic("length {values.len()}")
+        print(found)
+    })
+}
+"""
+    diags :: jet.compile(fallback).expect_err("panic fallback arguments are closure captures")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "{diags:?}")
+    scope_member :: """
+fn run() { print(0) }
+#Test("member argument capture walk") {
+    values := [1, 2]
+    .skip("length {values.len()}") { assert(false) }
+}
+"""
+    jet.compile(scope_member).expect("valid scope-member arguments remain walkable")
+}
+
+// Rust: tests/ownership.rs:1700
+#Test("wrapped_and_branch_returned_views_stay_live_through_outer_calls") {
+    loop view in ["(first(values))", "if true -> { first(values) } else -> { first(values) }", "Val(first(values)) ?? first(values)"] {
+        src :: format("""
+fn first(values: [Int]) -[]> View<Int> {{ return values[0..1] }}
+fn both(view: View<Int>, values: &[Int]) {{ &values.push(view[0]) }}
+fn run() {{
+    values := [1, 2]
+    both({view}, &values)
+}}
+""")
+        diags :: jet.compile(src).expect_err("wrapped returned views retain their source loan")
+        assert(diags.iter().any((diag) -> diag.code == "E0204"), "{view}: {diags:?}")
+    }
+}
+
+// Rust: tests/ownership.rs:1730
+#Test("return_fallback_view_does_not_reach_the_enclosing_call") {
+    source :: """
+struct View<T> { value: T }
+fn first(values: [Int]) -[]> View<Int> { return values[0..1] }
+fn both(view: View<Int>, values: &[Int]) { &values.push(view[0]) }
+fn choose(other: [Int], values: &[Int]) -[..E]> View<Int> {
+    both(Val(first(other)) ?? return first(values), &values)
+    return first(other)
+}
+fn run() {
+    other := [1]
+    values := [2]
+    chosen :: choose(other, &values)
+    print(chosen[0])
+}
+"""
+    jet.compile(source).expect("a return fallback exits before the enclosing call can run")
+}
+
+// Rust: tests/ownership.rs:1750
+#Test("generic_constructor_nested_argument_sees_active_write_place") {
+    src :: """
+struct Pair<T> { value: T }
+impl Pair {
+    fn new(first: &T, second: T) -[]> Pair<T> { return Pair<T>{ value: second } }
+}
+fn see(value: Int) -[]> Int { return value }
+fn run() {
+    x := 1
+    pair :: Pair.new(&x, see(x))
+    print(pair.value)
+}
+"""
+    diags :: jet.compile(src).expect_err("constructor pre-inference must fail in sema before rustc")
+    assert(diags.iter().any((diag) -> diag.code == "E0204"), "expected the call-alias diagnostic: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:1775
+#Test("dynamic_projection_operands_are_checked_but_not_retained") {
+    hostile_index :: """
+fn both(index: &Int, value: Int) { index += value }
+fn run() {
+    values := [10, 20]
+    index := 0
+    both(&index, values[index])
+}
+"""
+    index_diags :: jet.compile(hostile_index).expect_err("dynamic index evaluation must fail in sema before rustc")
+    assert(index_diags.iter().any((diag) -> diag.code == "E0204"), "{index_diags:?}")
+    hostile_slice :: """
+fn both(end: &Int, values: [Int]) { end += values.len() }
+fn run() {
+    values := [10, 20]
+    end := 1
+    both(&end, values[0..end])
+}
+"""
+    slice_diags :: jet.compile(hostile_slice).expect_err("dynamic slice-bound evaluation must fail in sema before rustc")
+    assert(slice_diags.iter().any((diag) -> diag.code == "E0204"), "{slice_diags:?}")
+    ordered :: """
+fn both(value: Int, index: &Int) { index += value }
+fn run() {
+    values := [10, 20]
+    index := 0
+    both(values[index], &index)
+}
+"""
+    jet.compile(ordered).expect("the index read finishes before the later write borrow is retained")
+}

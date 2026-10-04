@@ -1,0 +1,42 @@
+use jet_foundation as f
+
+// Rust: crates/jet-foundation/src/AST/ffi.rs:1445
+fn param(name: String, convention: f.AccessConvention, ty: f.Type) -> f.Param Never! {
+    f.Param{convention: convention, root: false, name: name, name_span: f.Span.new(0, 0), public_label: None,
+        zone: f.ParamZone.Either, ty: ty, ty_span: f.Span.new(0, 0), default: None, variadic: false,
+        variadic_bound_list: None, declared_view_from_names: None}
+}
+// Rust: crates/jet-foundation/src/AST/ffi.rs:1462
+fn foreign(params: [f.Param], return_type: f.Type?, generated: Bool) -> f.ExternFn Never! {
+    f.ExternFn{abi: None, name: "ffi_fixture", name_span: f.Span.new(0, 0), params: params, return_type: return_type,
+        return_type_span: None, rust_path: "ffi_fixture", rust_path_span: f.Span.new(0, 0), generated: generated,
+        callback_transport: None, callback_plan_digest: None, callback_identity: None, effect_root: None,
+        undo: None, close: None, span: f.Span.new(0, 0)}
+}
+// Rust: crates/jet-foundation/src/AST/ffi.rs:1483
+fn handle(name: String) -> f.FfiHandleFact Never! {
+    f.FfiHandleFact{lib: "fixture", typedef_name: name, jet_name: name, close: "{name}_close",
+        close_source: f.CloseSource.Conventional, thread_safety: f.ThreadSafety.Safe}
+}
+
+// Rust: crates/jet-foundation/src/AST/ffi.rs:1494
+#Test("resident_writeback_gate_admits_checked_scalar_string_and_handle_rows") {
+    no_handles :: [f.FfiHandleFact]{}
+    assert(foreign([f.Param]{param("value", .Write, .Int)}, None, false).hidden_c_bridge_compatible_with_handles(no_handles))
+    assert(foreign([f.Param]{param("value", .Write, .String)}, Val(f.Type.String), false).hidden_c_bridge_compatible_with_handles(no_handles))
+    handles :: [f.FfiHandleFact]{handle("HbFont")}
+    assert(foreign([f.Param]{param("font", .Write, f.Type.Named("HbFont")), param("scale", .Read, .Int)}, None, true).hidden_c_bridge_compatible_with_handles(handles))
+    assert(foreign([f.Param]{param("font", .Move, f.Type.Named("HbFont"))}, None, true).hidden_c_bridge_compatible_with_handles(handles))
+    mixed_handles :: [f.FfiHandleFact]{handle("HbFont"), handle("HbBuffer")}
+    assert(foreign([f.Param]{param("font", .Write, f.Type.Named("HbFont")), param("buffer", .Read, f.Type.Named("HbBuffer"))}, None, true).hidden_c_bridge_compatible_with_handles(mixed_handles))
+    assert(!foreign([f.Param]{param("font", .Write, f.Type.Named("HbFont"))}, None, true).hidden_c_bridge_compatible_with_handles(no_handles))
+}
+
+// Rust: crates/jet-foundation/src/AST/ffi.rs:1548
+#Test("resident_writeback_gate_preserves_record_and_list_direct_routes") {
+    handles :: [f.FfiHandleFact]{handle("HbFont")}
+    assert(!foreign([f.Param]{param("record", .Write, f.Type.Named("Coord"))}, None, false).hidden_c_bridge_compatible_with_handles(handles))
+    assert(!foreign([f.Param]{param("records", .Write, f.Type.List(f.Type.Named("Coord")))}, None, false).hidden_c_bridge_compatible_with_handles(handles))
+    generated_array :: foreign([f.Param]{param("values", .Read, f.Type.List(f.Type.Int)), param("length", .Write, .Int)}, Val(f.Type.List(f.Type.Int)), true)
+    assert(generated_array.hidden_c_bridge_compatible_with_handles(handles))
+}

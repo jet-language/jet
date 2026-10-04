@@ -1,0 +1,1133 @@
+use Compiler.JetFoundation.Tests.Integration.DevParts.Support.*
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.Common.[add_generated_rust, have_rustc]
+use jet.Interpreter.[dev_iteration, RunOutcome]
+use jet_jit as jit
+use jet_jit.[CraneliftBackend, ResidentJitSafety]
+use jet.Loader as Loader
+use jet.Sema as Sema
+use jet.Diagnostics.[Severity]
+use jet.AST as AST
+use core.fs as fs
+use std.process.[Command]
+
+// Rust: tests/dev_parts/routine.rs:1847
+#Test("dev_default_io_log_reports_jit_gap") {
+    file :: "Examples/features/io/log.jet"
+    assert_default_dev_jit_gap("io/log", file)
+}
+// Rust: tests/dev_parts/routine.rs:1853
+#Test("dev_default_resident_boundaries_report_jit_gap") {
+    loop stem in ["memory/entity_tree", "memory/expiring_secret"] {
+        file :: example_path(stem)
+        assert_default_dev_jit_gap(stem, file)
+    }
+}
+// Rust: tests/dev_parts/routine.rs:1862
+#Test("scheduler_spawn_runs_via_jit") {
+    if skip_if_cranelift_host_unsupported() { return }
+    file :: "Examples/features/concurrency/scheduler_spawn.jet"
+    bundle := Loader.load_entry(file).expect("bundle should load")
+    diags :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors :: diags.into_iter().filter((d) -> d.severity == Severity.Error).collect()
+    assert(errors.is_empty(), "scheduler_spawn must type-check")
+    assert(common.cranelift_resident_safe(bundle), "scheduler_spawn must be resident-safe: {common.cranelift_resident_safe_detail(bundle)}")
+    common.compile_cranelift_bundle(bundle, common.development_policy()).unwrap_or_else((e) -> panic("scheduler_spawn JIT compile failed: {e}"))
+    got :: if dev_iteration(file, false, false) == {
+        .Ran { stdout, .. } -> stdout
+        .Problems(ds) -> panic("scheduler_spawn must run via default dev/JIT, got: {ds:?}")
+    }
+    trimmed := got.trim() // #4303
+    assert_eq(trimmed, "1000")
+}
+// Rust: tests/dev_parts/routine.rs:1892
+#Test("dev_default_interprets_display_debug_interpolation") {
+    file :: "Examples/features/types/display_debug.jet"
+    jit.reset_jit_trace_for_test()
+    if dev_iteration_with_timeout("types/display_debug", file, false) == {
+        .Ran { stdout, .. } -> {
+            assert(jit.jit_executed_for_test(), "types/display_debug must run native JIT")
+            gold :: fs.read_to_string("Examples/features/expected/types/display_debug.out").expect("golden")
+            assert_eq(stdout, gold)
+        }
+        .Problems(diags) -> panic("types/display_debug must run: {diags:?}")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:1913
+#Test("fixed_interpolation_matches_interpreter_and_resident_jit_rounding") {
+    if skip_if_cranelift_host_unsupported() { return }
+    src :: """
+fn run() -> {
+    lower_tie :: Float{1.125}
+    upper_tie :: Float{1.375}
+    grouped :: Float{1234.5678}
+    integer :: 1234
+    print("{lower_tie:Fixed(2)}|{upper_tie:Fixed(2)}|{grouped:Fixed(2)}|{grouped:Grouped(2)}|{integer:Fixed(2)}|{integer:Grouped(2)}")
+}
+"""
+    expected :: ProgramOutput.ran("1.12|1.38|1234.57|1,234.57|1234.00|1,234.00\n", "", 0)
+    file :: std.env.temp_dir().join("jet_fixed_interpolation_parity.jet")
+    fs.write(file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    interpreted :: if dev_iteration(shown, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("fixed interpolation must run in the interpreter: {diags:?}")
+    }
+    jit.reset_jit_trace_for_test()
+    resident :: run_cranelift_without_fallback(src, "fixed_interpolation_parity")
+    assert(jit.jit_executed_for_test(), "fixed interpolation must execute in resident JIT")
+    assert(!jit.deopt_invoked_for_test() && !jit.fallback_invoked_for_test(), "fixed interpolation must not deopt or fall back")
+    assert_eq(interpreted, expected)
+    assert_eq(resident, expected)
+}
+// Rust: tests/dev_parts/routine.rs:1956
+#Test("dev_packed_enum_print_is_safe_across_run_processes") {
+    stamp :: std.time.SystemTime.now().duration_since(std.time.UNIX_EPOCH).unwrap().as_nanos() // GATE #4494
+    cache :: std.env.temp_dir().join("jet_dev_packed_enum_cache_{std.process.id()}_{stamp}")
+    file :: "Examples/features/errors/errors.jet"
+    expected :: "42\n84\nBadDigit(\"x\")\n"
+    loop run in 1..=2 {
+        output :: Command.new(std.env.compile_time_var("CARGO_BIN_EXE_jet")).args(["run", file]).env("JET_RUN_CACHE_DIR", cache).output().unwrap() // GATE #4494
+        assert(output.status.success(), "run {run} failed: {String.from_utf8_lossy(output.stderr)}")
+        assert_eq(String.from_utf8_lossy(output.stdout), expected, "run {run} must preserve the Jet enum name")
+    }
+    _ :: fs.remove_dir_all(cache)
+}
+// Rust: tests/dev_parts/routine.rs:1994
+#Test("cranelift_backend_matches_hello") {
+    if skip_if_cranelift_host_unsupported() { return }
+    file :: "Examples/features/basics/hello.jet"
+    bundle :: checked_bundle_from_path(file)
+    expected :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, .. } -> stdout
+        .Problems(ds) -> panic("interpreter baseline must run hello, got diagnostics: {ds:?}")
+    }
+    policy :: common.development_policy()
+    backend := CraneliftBackend.new()
+    got :: if common.run_cranelift_bundle(&backend, bundle, false, policy) == {
+        .Ran { stdout, .. } -> stdout
+        .Problems(ds) -> panic("cranelift backend did not run hello: {ds:?}")
+    }
+    assert_eq(got, expected, "cranelift output drifted from interpreter")
+    src :: fs.read_to_string(file).expect("hello source should read")
+    compiled :: jet.compile_with_path(src, file).expect("hello should compile")
+    rs :: std.env.temp_dir().join("jet_dev_cranelift_hello.rs")
+    bin :: std.env.temp_dir().join("jet_dev_cranelift_hello")
+    command := Command.new("rustc")
+    runtime_lease :: add_generated_rust(&command, rs, compiled.rust, compiled.ffi.is_some(), [])
+    rustc :: command.arg("-o").arg(bin).output().expect("run rustc")
+    assert(rustc.status.success(), "rustc failed compiling hello fixture: {String.from_utf8_lossy(rustc.stderr)}")
+    run :: Command.new(bin).output().expect("run compiled hello")
+    compiled_stdout :: String.from_utf8_lossy(run.stdout).to_string()
+    assert_eq(got, compiled_stdout, "cranelift output drifted from AOT binary")
+}
+// Rust: tests/dev_parts/routine.rs:2047
+#Test("post_contract_failure_matches_aot_under_quick_run") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+#Post(result == 99, "must equal 99")
+fn get() -> Int {
+    return 1
+}
+
+fn run() -> {
+    print(get())
+}
+"""
+    dir :: std.env.temp_dir().join("jet_contract_parity_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("post_failure.jet")
+    fs.write(file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    quick :: if dev_iteration(shown, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(ds) -> panic("quick run returned diagnostics: {ds:?}")
+    }
+    aot :: compiled_binary_output(dir, "post_contract", 0, "contracts/post_failure", shown)
+    assert_eq(quick.exit_code, 70, "quick run must trap: {quick:?}")
+    assert(quick.stderr.contains("#Post contract failed: must equal 99"))
+    assert_eq(quick, aot, "quick run and AOT contract behavior diverged")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2087
+#Test("post_contract_success_and_failure_match_on_all_tiers") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+#Post(result > 0, "post sees the successful payload")
+fn counted(value: Int) -> Int {
+    print("body:{value}")
+    if value > 0 {
+        return value
+    }
+    return Err("sentinel")
+}
+
+fn run() -> {
+    good :: counted(7)
+    good ? value -> print("good:{value}") ! error -> print("good-error:{error.message}")
+    bad :: counted(0)
+    bad ? value -> print("bad:{value}") ! error -> print("bad-error:{error.message}")
+}
+"""
+    expected :: ProgramOutput.ran("body:7\ngood:7\nbody:0\nbad-error:sentinel\n", "", 0)
+    dir :: std.env.temp_dir().join("jet_contract_success_failure_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("post_contract_success_failure.jet")
+    fs.write(file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    interpreted :: if dev_iteration(shown, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(ds) -> panic("contract interpreter failed: {ds:?}")
+    }
+    resident :: run_cranelift_resident(src, "contracts_success_failure")
+    default :: if dev_iteration(shown, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(ds) -> panic("contract default run failed: {ds:?}")
+    }
+    aot :: compiled_binary_output(dir, "post_contract_success_failure", 0, "contracts/post_contract_success_failure", shown)
+    assert_eq(interpreted, expected, "contract interpreter output drifted")
+    assert_eq(resident, expected, "contract resident JIT output drifted")
+    assert_eq(default, expected, "contract default JIT output drifted")
+    assert_eq(aot, expected, "contract AOT output drifted")
+    have_node :: Command.new("node").arg("--version").output().map((output) -> output.status.success()).unwrap_or(false)
+    have_wasm_target :: Command.new("rustc").args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"]).output().map((output) -> output.status.success()).unwrap_or(false)
+    if have_node && have_wasm_target {
+        output :: jet.compile_web_with_path(src, shown).unwrap_or_else((diags) -> panic("contract web source failed: {diags:?}"))
+        web :: output.web.expect("contract web output should be present")
+        scratch :: common.Scratch.new("contract-success-failure-web")
+        fs.write(scratch.join("app.js"), web.js_app).unwrap()
+        fs.write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+        fs.write(scratch.join("app_wasm.rs"), web.wasm_rust).unwrap()
+        wasm :: Command.new("rustc").current_dir(scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("spawn contract web wasm rustc")
+        assert(wasm.status.success(), "rustc rejected contract web output: {String.from_utf8_lossy(wasm.stderr)}")
+        js :: Command.new("node").current_dir(scratch.path).arg("app.js").output().expect("run contract web JS")
+        assert(js.status.success(), "contract web JS failed: {String.from_utf8_lossy(js.stderr)}")
+        assert_eq(String.from_utf8_lossy(js.stdout), expected.stdout.as_str(), "contract JavaScript output drifted")
+        fs.write(scratch.join("wasm.mjs"), """
+const { instantiateWasm, takeWasmError } = await import("./jet_dom_runtime.js");
+const instance = await instantiateWasm("./app.wasm");
+const status = instance.exports.jet_export_run();
+if (status !== 0) throw new Error(`contract Wasm status: ${status}`);
+if (takeWasmError(instance.exports)?.tag !== "Ok") throw new Error("contract Wasm stopped");
+""").unwrap()
+        wasm_run :: Command.new("node").current_dir(scratch.path).arg("wasm.mjs").output().expect("run contract web Wasm")
+        assert(wasm_run.status.success(), "contract web Wasm failed: {String.from_utf8_lossy(wasm_run.stderr)}")
+        assert_eq(String.from_utf8_lossy(wasm_run.stdout), expected.stdout.as_str(), "contract Wasm output drifted")
+    } else {
+        eprintln("note: skipping contract web execution (need node and wasm32 target)")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2243
+#Test("unicode_string_and_core_text_match_aot_comptime_and_resident_jit") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    upper :: Char.from_u32(0xA7CE).unwrap()
+    lower :: Char.from_u32(0xA7CF).unwrap()
+    whitespace :: Char.from_u32(0x2003).unwrap()
+    source :: format("""use core.text as text
+
+fn run() -> {{
+    print("{upper}".to_lower() == "{lower}")
+    print("{lower}".to_upper() == "{upper}")
+    print("{whitespace}jet{whitespace}".trim())
+    print(text.lower("{upper}") == "{lower}")
+    print(text.upper("{lower}") == "{upper}")
+    print(text.trim("{whitespace}jet{whitespace}"))
+}}
+""")
+    expected :: "true\ntrue\njet\ntrue\ntrue\njet\n"
+    resident :: run_cranelift_without_fallback(source, "unicode_public_string")
+    assert_eq(resident.stdout, expected)
+    dir :: common.unique_tmp("jet_unicode_public_string_aot")
+    fs.create_dir_all(dir).unwrap()
+    jet_path :: dir.join("main.jet")
+    rust_path :: dir.join("main.rs")
+    binary :: dir.join("main")
+    fs.write(jet_path, source).unwrap()
+    compiled :: jet.compile_with_path(source, jet_path.to_string_lossy()).expect("pinned Unicode String fixture should compile")
+    command := Command.new("rustc")
+    runtime_lease :: add_generated_rust(&command, rust_path, compiled.rust, compiled.ffi.is_some(), [])
+    rustc :: command.arg("-o").arg(binary).output().unwrap()
+    assert(rustc.status.success(), "pinned Unicode AOT fixture rejected:\n{String.from_utf8_lossy(rustc.stderr)}")
+    aot :: Command.new(binary).output().unwrap()
+    assert(aot.status.success())
+    assert_eq(String.from_utf8_lossy(aot.stdout), expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2298
+#Test("exact_int_equality_matches_aot_in_resident_and_default_dev") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+fn run() -> {
+    left :: -999999999999999999999999999999
+    same :: -999999999999999999999999999999
+    other :: 999999999999999999999999999999
+    print(left == same)
+    print(left != same)
+    print(left != other)
+}
+"""
+    resident :: run_cranelift_without_fallback(src, "exact_int_value_equality")
+    dir :: std.env.temp_dir().join("jet_exact_int_equality_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("exact_int_value_equality.jet")
+    fs.write(file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    default :: if dev_iteration(shown, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed exact Int equality: {diags:?}")
+    }
+    aot :: compiled_binary_output(dir, "exact_int_value_equality", 0, "exact_int_value_equality", shown)
+    expected :: ProgramOutput.ran("true\nfalse\ntrue\n", "", 0)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2343
+#Test("default_err_matches_interpreter_resident_jit_default_dev_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    file :: "Examples/features/errors/default_err_edge.jet"
+    expected_stderr :: fs.read_to_string("Examples/features/expected/errors/default_err_edge.err.out").expect("default_err_edge.err.out")
+    expected :: ProgramOutput.ran("", expected_stderr, 1)
+    interpreted :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default Err example must execute in interpreter tier: {diags:?}")
+    }
+    source :: fs.read_to_string(file).unwrap()
+    jit.reset_jit_trace_for_test()
+    resident :: run_cranelift_without_fallback(source, "default_err")
+    assert(jit.jit_executed_for_test(), "default Err must execute as native JIT")
+    assert(!jit.deopt_invoked_for_test() && !jit.fallback_invoked_for_test(), "default Err must not use interpreter deopt or fallback")
+    default :: if dev_iteration(file, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed default Err: {diags:?}")
+    }
+    dir :: std.env.temp_dir().join("jet_default_err_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    aot :: compiled_binary_output(dir, "default_err", 0, "default_err", file)
+    assert_eq(interpreted, expected)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2398
+#Test("exact_int_example_matches_interpreter_resident_jit_default_dev_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    file :: "Examples/features/text/int_exact.jet"
+    expected :: ProgramOutput.ran(golden_stdout("text/int_exact"), "", 0)
+    interpreted :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("exact Int example must execute in interpreter tier: {diags:?}")
+    }
+    source :: fs.read_to_string(file).unwrap()
+    jit.reset_jit_trace_for_test()
+    resident :: run_cranelift_without_fallback(source, "exact_int_example")
+    assert(jit.jit_executed_for_test(), "exact Int example must execute as native JIT")
+    assert(!jit.deopt_invoked_for_test() && !jit.fallback_invoked_for_test(), "exact Int example must not use interpreter deopt or fallback")
+    default :: if dev_iteration(file, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed exact Int example: {diags:?}")
+    }
+    dir :: std.env.temp_dir().join("jet_exact_int_example_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    aot :: compiled_binary_output(dir, "exact_int_example", 0, "exact_int_example", file)
+    assert_eq(interpreted, expected)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2450
+#Test("decimal_scale_arithmetic_matches_interpreter_default_jit_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    dir :: common.unique_tmp("jet_decimal_scale_parity")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("decimal_scale.jet")
+    source :: """fn run() -> {
+    left :: 1.20
+    right :: 2.30
+    print(left + right)
+    print(right - left)
+    print(9.5 * 2.0)
+}
+"""
+    fs.write(file, source).unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    expected :: ProgramOutput.ran("3.50\n1.10\n19.0\n", "", 0)
+    interpreted :: if dev_iteration(shown, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("Decimal interpreter failed: {diags:?}")
+    }
+    jit.reset_jit_trace_for_test()
+    resident :: run_cranelift_without_fallback(source, "decimal_scale_parity")
+    assert(jit.jit_executed_for_test(), "Decimal scale arithmetic must execute in resident JIT")
+    assert(!jit.deopt_invoked_for_test() && !jit.fallback_invoked_for_test(), "Decimal scale arithmetic must not use interpreter fallback")
+    default :: if dev_iteration(shown, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("Decimal default run failed: {diags:?}")
+    }
+    aot :: compiled_binary_output(dir, "decimal_scale_parity", 0, "decimal_scale", shown)
+    assert_eq(interpreted, expected, "Decimal interpreter scale drift")
+    assert_eq(resident, expected, "Decimal resident JIT scale drift")
+    assert_eq(default, expected, "Decimal default JIT scale drift")
+    assert_eq(aot, expected, "Decimal AOT scale drift")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2506
+#Test("type_alias_example_matches_golden_on_all_execution_tiers") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    file :: "Examples/features/types/type_alias.jet"
+    expected :: ProgramOutput.ran(golden_stdout("types/type_alias"), "", 0)
+    interpreted :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("type_alias example must execute in interpreter tier: {diags:?}")
+    }
+    source :: fs.read_to_string(file).unwrap()
+    resident :: run_cranelift_resident(source, "type_alias_golden")
+    default :: if dev_iteration(file, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed type_alias example: {diags:?}")
+    }
+    dir :: std.env.temp_dir().join("jet_type_alias_golden_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    aot :: compiled_binary_output(dir, "type_alias_golden", 0, "types/type_alias", file)
+    assert_eq(interpreted, expected, "type_alias interpreter output drifted")
+    assert_eq(resident, expected, "type_alias resident JIT output drifted")
+    assert_eq(default, expected, "type_alias default dev output drifted")
+    assert_eq(aot, expected, "type_alias AOT output drifted")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2552
+#Test("archive_matches_interpreter_resident_jit_default_dev_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    file :: "Examples/features/io/archive.jet"
+    expected :: ProgramOutput.ran(golden_stdout("io/archive"), "", 0)
+    interpreted :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("Archive example must execute in interpreter tier: {diags:?}")
+    }
+    source :: fs.read_to_string(file).unwrap()
+    jit.reset_jit_trace_for_test()
+    resident :: run_cranelift_without_fallback(source, "archive")
+    assert(jit.jit_executed_for_test(), "Archive example must execute as native JIT")
+    assert(!jit.deopt_invoked_for_test() && !jit.fallback_invoked_for_test(), "Archive example must not use interpreter deopt or fallback")
+    default :: if dev_iteration(file, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed Archive example: {diags:?}")
+    }
+    dir :: common.test_scratch_root("dev_archive").join("jet_archive_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    aot :: compiled_binary_output(dir, "archive", 0, "archive", file)
+    assert_eq(interpreted, expected)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2605
+#Test("progress_reporter_matches_interpreter_resident_jit_default_dev_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    file :: "Examples/features/io/progress.jet"
+    expected :: ProgramOutput.ran(golden_stdout("io/progress"), "", 0)
+    interpreted :: if dev_iteration_with_timeout("progress_reporter", file, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("progress example must execute in interpreter tier: {diags:?}")
+    }
+    source :: fs.read_to_string(file).unwrap()
+    jit.reset_jit_trace_for_test()
+    resident_source :: source.clone()
+    (resident, resident_flags, resident_trace) :: with_jit_test_scope(() -> {
+        jit.set_trace_tiers(true)
+        resident :: run_cranelift_without_fallback(resident_source, "progress_reporter")
+        flags :: jit.jit_trace_flags_for_test()
+        trace :: jit.take_last_trace()
+        (resident, flags, trace)
+    })
+    jit.merge_jit_trace_flags_for_test(resident_flags)
+    assert(!jit.fallback_invoked_for_test(), "progress example must not fall back to a second runtime")
+    // Unsupported adapters may deopt, retaining the same Prelude meaning.
+    _ :: jit.jit_executed_for_test()
+    _ :: resident_trace
+    default :: if dev_iteration_with_timeout("progress_reporter", file, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed progress example: {diags:?}")
+    }
+    dir :: std.env.temp_dir().join("jet_progress_reporter_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    aot :: compiled_binary_output(dir, "progress_reporter", 0, "progress_reporter", file)
+    assert_eq(interpreted, expected)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2666
+#Test("set_union_matches_interpreter_resident_jit_default_dev_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    file :: "Examples/features/collections/set.jet"
+    expected :: ProgramOutput.ran(golden_stdout("collections/set"), "", 0)
+    interpreted :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("Set example must execute in interpreter tier: {diags:?}")
+    }
+    source :: fs.read_to_string(file).unwrap()
+    jit.reset_jit_trace_for_test()
+    resident :: run_cranelift_resident(source, "set_union")
+    assert(jit.jit_executed_for_test(), "Set example must execute as native JIT")
+    assert(!jit.deopt_invoked_for_test() && !jit.fallback_invoked_for_test(), "Set example must not use interpreter deopt or fallback")
+    default :: if dev_iteration(file, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed Set example: {diags:?}")
+    }
+    dir :: std.env.temp_dir().join("jet_set_union_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    aot :: compiled_binary_output(dir, "set_union", 0, "set_union", file)
+    assert_eq(interpreted, expected)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/dev_parts/routine.rs:2718
+#Test("unified_loop_jit_tiers_are_explicit_and_match_aot") {
+    counted :: "fn run() -> {\n    loop i in 0..<4 {\n        if i == 1 { next }\n        print(i)\n    }\n}\n"
+    if !skip_if_cranelift_host_unsupported() {
+        native :: run_cranelift_without_fallback(counted, "counted_next")
+        assert_eq(native.stdout, "0\n2\n3\n")
+    }
+    stride :: "fn run() -> {\n    xs := [0, 1, 2, 3, 4]\n    loop x in xs, 2 {\n        print(x)\n        if x == 0 { next }\n    }\n}\n"
+    if !skip_if_cranelift_host_unsupported() {
+        native :: run_cranelift_without_fallback(stride, "source_stride_next")
+        assert_eq(native.stdout, "0\n2\n4\n")
+        invalid :: "fn run() -> {\n    xs := [1, 2]\n    stride := 0\n    loop x in xs, stride {\n        print(x)\n    }\n}\n"
+        if run_cranelift_outcome_without_fallback(invalid, "source_stride_pre_pull") == {
+            .Ran { stdout, stderr, exit_code } -> {
+                assert_eq(exit_code, 70, "invalid stride must exit 70: out={stdout} err={stderr}")
+                assert(stdout.is_empty(), "invalid dynamic stride must stop before the first source pull, got stdout={stdout:?}")
+                assert(stderr.contains("panic:") && stderr.contains("E0123"), "invalid stride must carry E0123 in panic wording, got: {stderr}")
+                assert(!stderr.contains("E0953") && !stderr.contains("comptime"), "invalid stride must not use comptime voice: {stderr}")
+            }
+            other -> panic("invalid dynamic stride expected runtime trap, got: {other:?}")
+        }
+    }
+}
+// Rust: tests/dev_parts/routine.rs:2762
+#Test("range_values_run_in_resident_jit_without_fallback") {
+    if skip_if_cranelift_host_unsupported() { return }
+    unboxed :: """
+fn identity(band: ^Range) -> Range {
+    return band
+}
+fn run() -> {
+    band := 2..<5
+    copied :: identity(band)
+    print(copied)
+    print(band.start)
+    print(copied.contains(4))
+    print(copied == band)
+    bands :: [1..3, 8..<10]
+    print("{bands[1]:Debug}")
+    print(bands[0].start)
+    print(bands[0].contains(3))
+    total := 0
+    loop n in copied {
+        total += n
+    }
+    print(total)
+    values :: [10, 20, 30, 40, 50, 60]
+    print(~values[copied])
+    band = 7..9
+    print(band)
+}
+"""
+    unboxed_proof :: std.env.temp_dir().join("jet_jit_range_unboxed_safety.jet")
+    fs.write(unboxed_proof, unboxed).unwrap()
+    unboxed_bundle :: checked_bundle_from_path(unboxed_proof.to_string_lossy())
+    common.compile_cranelift_bundle(unboxed_bundle, common.development_policy()).unwrap_or_else((error) -> panic("unboxed Range resident compilation failed: {error}"))
+    assert_eq(common.cranelift_func_safety(unboxed_bundle, "run"), ResidentJitSafety.Covered, "unboxed Range values must stay in resident JIT")
+    jit.reset_struct_new_count_for_test()
+    unboxed_run :: run_cranelift_without_fallback(unboxed, "range_unboxed")
+    assert_eq(unboxed_run.stdout, "Range { start: 2, end: 5, exclusive: true }\n2\ntrue\ntrue\nRange { start: 8, end: 10, exclusive: true }\n1\ntrue\n9\n[30, 40, 50]\nRange { start: 7, end: 9, exclusive: false }\n")
+    assert_eq(jit.struct_new_count_for_test(), 0, "Range construct/copy/pass/return/list/field/contains/show/equality/loop/slice must not call struct_new")
+    src :: """
+fn identity(band: ^Range) -> Range {
+    return band
+}
+fn run() -> {
+    band :: 2..<5
+    copied :: identity(band)
+    print(copied == band)
+    bands :: [1..3, 8..<10]
+    print(bands[0])
+    print("{bands[1]:Debug}")
+    print(bands[0].contains(3))
+    print(band)
+    print("{band}")
+    print("{band:Debug}")
+    print(band == (2..<5))
+    print(band == (2..5))
+    print(band.start)
+    print(band.end)
+    print(band.contains(4))
+    print((5..2).contains(3))
+    total := 0
+    loop n in band {
+        total += n
+    }
+    print(total)
+    values := [10, 20, 30, 40, 50, 60]
+    print(~values[band])
+    edit :: &values[band]
+    edit[0] = 99
+    print(values)
+}
+"""
+    proof :: std.env.temp_dir().join("jet_jit_range_value_safety.jet")
+    fs.write(proof, src).unwrap()
+    bundle :: checked_bundle_from_path(proof.to_string_lossy())
+    common.compile_cranelift_bundle(bundle, common.development_policy()).unwrap_or_else((error) -> panic("Range resident compilation failed: {error}"))
+    assert_eq(common.cranelift_func_safety(bundle, "run"), ResidentJitSafety.Covered, "Range values and windows must stay in resident JIT")
+    native :: run_cranelift_without_fallback(src, "range_values")
+    expected :: "true\nRange { start: 1, end: 3, exclusive: false }\nRange { start: 8, end: 10, exclusive: true }\ntrue\nRange { start: 2, end: 5, exclusive: true }\nRange { start: 2, end: 5, exclusive: true }\nRange { start: 2, end: 5, exclusive: true }\ntrue\nfalse\n2\n5\ntrue\nfalse\n9\n[30, 40, 50]\n[10, 20, 99, 40, 50, 60]\n"
+    assert_eq(native.stdout, expected)
+    dir :: common.unique_tmp("jet_range_value_interpreter")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("main.jet")
+    fs.write(path, src).unwrap()
+    if dev_iteration(path.to_string_lossy(), false, true) == {
+        .Ran { stdout, .. } -> assert_eq(stdout, expected)
+        .Problems(diags) -> panic("Range views must run in the canonical evaluator: {diags:?}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:2903
+#Test("subjectless_guards_match_aot_in_resident_jit") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+fn run() -> {
+    n :: 7
+    if n > 10 -> print("too big")
+    if {
+        n < 0 -> print("negative")
+        n < 10 -> print("single digit")
+    }
+    label :: if {
+        n < 5 -> "small"
+        n < 10 -> "medium"
+        else -> "large"
+    }
+    print(label)
+}
+"""
+    native :: run_cranelift_without_fallback(src, "subjectless_guards")
+    dir :: std.env.temp_dir().join("jet_guard_jit_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("subjectless_guards.jet")
+    fs.write(file, src).unwrap()
+    aot :: compiled_binary_output(dir, "subjectless_guards", 0, "subjectless_guards", file.to_str().unwrap())
+    assert_eq(native, aot)
+    assert_eq(native.stdout, "single digit\nmedium\n")
+}
+// Rust: tests/dev_parts/routine.rs:2940
+#Test("resident_jit_numeric_methods_and_parse_are_native") {
+    if skip_if_cranelift_host_unsupported() { return }
+    src :: """
+fn run() -> {
+    Int.parse("41").drop("native parse proof")
+    n :: 41
+    print(Float.from_int(n))
+    print(n.count_ones())
+    one :: Float{1.0}
+    print(one.is_finite())
+    print(n.to_string())
+}
+"""
+    assert_eq(run_cranelift_without_fallback(src, "numeric_parse"), ProgramOutput.ran("41.0\n3\ntrue\n41\n", "", 0))
+}
+// Rust: tests/dev_parts/routine.rs:2962
+#Test("forced_interpreter_preserves_f32_width_like_aot") {
+    if !have_rustc() { eprintln("note: rustc not found; skipping F32 dev differential"); return }
+    source :: """fn pass(value: F32) -> F32 { return value }
+fn run() -> {
+    value :: F32{ 16777217.0 }
+    one :: F32{ 1.0 }
+    mutable := F32{ value }
+    mutable += one
+    print(pass(value))
+    print(mutable)
+    print([value, mutable])
+}"""
+    dir :: common.unique_tmp("jet_dev_f32_width")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("f32_width.jet")
+    fs.write(path, source).unwrap()
+    file :: path.to_string_lossy()
+    expected :: compiled_binary_output(dir, "f32_width", 0, "f32-width", file)
+    actual :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("forced F32 interpreter failed: {diags:?}")
+    }
+    assert_eq(actual, expected)
+    assert_eq(actual.stdout, "16777216.0\n16777216.0\n[16777216.0, 16777216.0]\n")
+}
+// Rust: tests/dev_parts/routine.rs:2999
+#Test("gzip_golden_matches_forced_interpreter_and_aot") {
+    if !have_rustc() { eprintln("note: rustc not found; skipping gzip dev differential"); return }
+    source :: """use core.archive.gzip as gzip
+
+fn run() -> {
+    bytes :: [U8]{ 72, 101, 108, 108, 111 }
+    encoded :: gzip.compress(bytes) ?? [U8]{}
+    gz :: gzip.decompress(encoded) ?? [U8]{}
+    golden :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 5, 0, 0, 0]) ?? [U8]{}
+    bad_size :: gzip.decompress([31, 139, 8, 0, 0, 0, 0, 0, 2, 3, 203, 72, 205, 201, 201, 7, 0, 134, 166, 16, 54, 6, 0, 0, 0]) ?? [U8]{ 255 }
+    h :: U8{ 72 }
+    lower_h :: U8{ 104 }
+    o :: U8{ 111 }
+    max :: U8{ 255 }
+    print(gz.len() == 5)
+    print(gz[0] == h)
+    print(golden.len() == 5)
+    print(golden[0] == lower_h)
+    print(golden[4] == o)
+    print(bad_size[0] == max)
+}
+"""
+    dir :: common.unique_tmp("jet_dev_compression")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("compression.jet")
+    fs.write(path, source).unwrap()
+    file :: path.to_string_lossy()
+    expected :: compiled_binary_output(dir, "compression", 0, "compression", file)
+    actual :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("forced compression interpreter failed: {diags:?}")
+    }
+    assert_eq(actual, expected)
+    assert_eq(actual.stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:3044
+#Test("zstd_compress_runs_in_forced_interpreter_with_aot_wire_shape") {
+    if !have_rustc() { eprintln("note: rustc not found; skipping zstd dev differential"); return }
+    source :: """use core.archive.zstd as zstd
+
+fn run() -> {
+    frame :: zstd.compress([72, 101, 108, 108, 111]) ?? panic("compress")
+    m0 :: U8{ 40 }
+    m1 :: U8{ 181 }
+    m2 :: U8{ 47 }
+    m3 :: U8{ 253 }
+    print(frame.len() > 9)
+    print(frame[0] == m0 && frame[1] == m1 && frame[2] == m2 && frame[3] == m3)
+}
+"""
+    dir :: common.unique_tmp("jet_dev_zstd_compress")
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("zstd_compress.jet")
+    fs.write(path, source).unwrap()
+    file :: path.to_string_lossy()
+    expected :: compiled_binary_output(dir, "zstd_compress", 0, "zstd-compress", file)
+    actual :: if dev_iteration(file, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("forced zstd compressor failed: {diags:?}")
+    }
+    assert_eq(actual, expected)
+    assert_eq(actual.stdout, "true\ntrue\n")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:3081
+#Test("resident_jit_checked_numeric_and_distinct_conversion_matrix_is_native") {
+    if skip_if_cranelift_host_unsupported() { return }
+    src :: """
+#Numeric UserID :: distinct Int
+#Numeric Severity :: distinct Int(0..10)
+#UnitFamily(Currency) { usd }
+
+fn run() -> {
+    print(I64.from_u8(255))
+    byte_ok :: I32{ 100 }
+    byte_bad :: I32{ 100000 }
+    U8.from_i32(byte_ok).drop("checked conversion success proof")
+    U8.from_i32(byte_bad).drop("checked conversion error proof")
+    float_ok :: Float{42.9}
+    float_bad :: Float{300.0}
+    U8.from_float(float_ok).drop("checked float conversion success proof")
+    U8.from_float(float_bad).drop("checked float conversion error proof")
+    narrow_ok :: Float{2.5}
+    narrow_bad :: Float{1e100}
+    F32.from_float(narrow_ok).drop("checked F32 conversion success proof")
+    F32.from_float(narrow_bad).drop("checked F32 conversion error proof")
+    user_source :: U64.from_u8(8)
+    UserID.from_u64(user_source).drop("checked distinct conversion proof")
+    print(UserID.from_u8(8).raw())
+    print(Severity.from_u8(8).raw())
+    severity_source :: 7
+    Severity.from_int(severity_source).drop("checked range conversion proof")
+    print(Severity.from_int(7).raw())
+    print(Usd.from_int(5).raw())
+}
+"""
+    assert_eq(run_cranelift_without_fallback(src, "checked_numeric_distinct_matrix"), ProgramOutput.ran("255\n8\n8\n7\n5.0\n", "", 0))
+}
+// Rust: tests/dev_parts/routine.rs:3121
+#Test("physical_quantities_run_in_resident_jit_without_fallback") {
+    if skip_if_cranelift_host_unsupported() { return }
+    out :: run_cranelift_without_fallback("""
+#UnitFamily(Length, dimension, base: meter) {
+    meter
+    millimeter(scale: 1/1000)
+    thirdish(scale: 2/3)
+}
+fn run() -> {
+    distance :: 12meter
+    elapsed :: 3s
+    speed :: distance / elapsed
+    recovered :: speed * elapsed
+    ratio :: recovered / distance
+    print(ratio)
+    exact :: Meter.from_millimeter(3000millimeter)
+    rounded :: Meter.from_thirdish_rounded(1thirdish, .NearestEven, digits: 0)
+    print("{(exact.raw())} {(rounded.raw())}")
+}
+""", "physical_quantity")
+    assert_eq(out.stdout, "1.0\n3.0 1.0\n")
+    fixture_shown :: (tag: String) -> std.env.temp_dir().join("jet_jit_no_fallback_{tag}.jet").to_string_lossy().into_owned()
+    failed :: run_cranelift_without_fallback("""
+#UnitFamily(Length, base: meter) {
+    meter
+    thirdish(scale: 2/3)
+}
+fn run() -> {
+    Meter.from_thirdish(1thirdish)
+}
+""", "physical_quantity_inexact")
+    inexact_shown :: fixture_shown("physical_quantity_inexact")
+    assert_eq(failed, ProgramOutput.ran("", "Error: unit conversion would round\n Trail [E3002] (1 hop via ?, origin first):\n  1. run ({inexact_shown}:7)\n", 1))
+    beyond_f64 :: run_cranelift_without_fallback("""
+#UnitFamily(Length, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+}
+fn run() -> {
+    Meter.from_almost(1almost)
+}
+""", "physical_quantity_exact_rational_edge")
+    rational_edge_shown :: fixture_shown("physical_quantity_exact_rational_edge")
+    assert_eq(beyond_f64, ProgramOutput.ran("", "Error: unit conversion would round\n Trail [E3002] (1 hop via ?, origin first):\n  1. run ({rational_edge_shown}:7)\n", 1))
+    rational_edges :: run_cranelift_without_fallback("""
+#UnitFamily(Length, base: meter) {
+    meter
+    almost(scale: 9007199254740993/9007199254740992)
+    half(scale: 1/2)
+    above_half(scale: 9007199254740993/18014398509481984)
+    three_halves(scale: 3/2)
+}
+#UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    tie_offset(scale: 1, offset: 1/2)
+    above_offset(scale: 1, offset: 9007199254740993/18014398509481984)
+    below_offset(scale: 1, offset: -9007199254740993/18014398509481984)
+}
+fn run() -> {
+    tie :: Meter.from_half_rounded(1half, .NearestEven, digits: 0)
+    above :: Meter.from_above_half_rounded(1above_half, .NearestEven, digits: 0)
+    negative_source :: ThreeHalves.from_float(-Float{1.0})
+    negative :: Meter.from_three_halves_rounded(negative_source, .NearestEven, digits: 0)
+    tie_point :: TieOffsetPoint.from_float(Float{0.0})
+    above_point :: AboveOffsetPoint.from_float(Float{0.0})
+    below_point :: BelowOffsetPoint.from_float(Float{0.0})
+    affine_tie :: KelvinPoint.from_tie_offset_point_rounded(tie_point, .NearestEven, digits: 0)
+    affine_above :: KelvinPoint.from_above_offset_point_rounded(above_point, .NearestEven, digits: 0)
+    affine_below :: KelvinPoint.from_below_offset_point_rounded(below_point, .NearestEven, digits: 0)
+    print("{(tie.raw())} {(above.raw())} {(negative.raw())} {(affine_tie.raw())} {(affine_above.raw())} {(affine_below.raw())}")
+}
+""", "physical_quantity_rational_edges")
+    assert_eq(rational_edges, ProgramOutput.ran("0.0 1.0 -2.0 0.0 1.0 -1.0\n", "", 0))
+    overflow :: """
+#UnitFamily(Length, base: meter) { meter double(scale: 2) }
+fn run() -> {
+    source :: Double.from_float(Float{1.7976931348623157e308})
+    Meter.from_double_rounded(source, .NearestEven, digits: 0)
+}
+"""
+    overflow_shown :: fixture_shown("physical_quantity_rounded_overflow")
+    assert_eq(run_cranelift_without_fallback(overflow, "physical_quantity_rounded_overflow"), ProgramOutput.ran("", "Error: unit conversion overflows its runtime representation\n Trail [E3002] (1 hop via ?, origin first):\n  1. run ({overflow_shown}:5)\n", 1))
+}
+// Rust: tests/dev_parts/routine.rs:3282
+#Test("rounded_physical_quantities_match_resident_default_dev_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+#UnitFamily(Length, base: meter) {
+    meter
+    half(scale: 1/2)
+    near_quarter(scale: 249/1000)
+    near_three_quarters(scale: 751/1000)
+}
+#UnitFamily(Temperature, base: kelvin) {
+    kelvin
+    shifted(scale: 1, offset: 249/1000)
+}
+fn run() -> {
+    positive :: Half.from_float(Float{5.0})
+    negative :: Half.from_float(-Float{5.0})
+    toward_zero :: Meter.from_half_rounded(positive, .TowardZero, digits: 0)
+    floor :: Meter.from_half_rounded(negative, .Floor, digits: 0)
+    ceiling :: Meter.from_half_rounded(positive, .Ceiling, digits: 0)
+    nearest_even :: Meter.from_near_quarter_rounded(1near_quarter, .NearestEven, digits: 2)
+    nearest_odd :: Meter.from_near_three_quarters_rounded(1near_three_quarters, .NearestEven, digits: 2)
+    point :: KelvinPoint.from_shifted_point_rounded(ShiftedPoint.from_float(Float{0.0}), .Ceiling, digits: 2)
+    delta :: KelvinDelta.from_shifted_delta_rounded(ShiftedDelta.from_float(Float{0.0}), .Ceiling, digits: 2)
+    print("{(toward_zero.raw())} {(floor.raw())} {(ceiling.raw())} {(nearest_even.raw())} {(nearest_odd.raw())} {(point.raw())} {(delta.raw())}")
+}
+"""
+    expected :: ProgramOutput.ran("2.0 -3.0 3.0 0.25 0.75 0.25 0.0\n", "", 0)
+    resident :: run_cranelift_without_fallback(src, "rounded_quantity_parity")
+    dir :: std.env.temp_dir().join("jet_rounded_quantity_parity_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("rounded_quantity_parity.jet")
+    fs.write(file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    default :: if dev_iteration(shown, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed rounded quantity parity: {diags:?}")
+    }
+    aot :: compiled_binary_output(dir, "rounded_quantity_parity", 0, "rounded_quantity_parity", shown)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:3346
+#Test("generic_module_instance_runs_identically_in_resident_jit_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+module value(n: Int) { pub fn get() -> Int { return n } }
+module three :: value(3)
+module same :: value(3)
+fn run() -> {
+    print(three.get())
+    print(same.get())
+}
+"""
+    native :: run_cranelift_without_fallback(src, "generic_module_instance")
+    assert_eq(native.stdout, "3\n3\n")
+    dir :: std.env.temp_dir().join("jet_generic_module_jit_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("generic_module_instance.jet")
+    fs.write(file, src).unwrap()
+    aot :: compiled_binary_output(dir, "generic_module_instance", 0, "generic_module_instance", file.to_str().unwrap())
+    assert_eq(native, aot)
+}
+// Rust: tests/dev_parts/routine.rs:3378
+#Test("generic_user_derive_multi_instantiation_matches_every_execution_tier") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+derive T.Access {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn make(value: ^@param) -> @name<@param> {
+        return @name<@param>{ value: value }
+    }
+    fn marker() -> Int { 17 }
+    fn get_value(self) -> @param { ~self.value }
+    fn type_name(self) -> String { T.$name }
+}
+
+derive T.NumericAccess {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn replace(&self, value: ^@param) -> @param {
+        self.value = value
+        return ~self.value
+    }
+    fn plus(self, rhs: @param) -> @param { self.value + rhs }
+    fn equal_to(self, rhs: @param) -> Bool { self.value == rhs }
+}
+
+#Access
+struct Box<T: Printable> { value: T }
+#Access
+struct StaticOnly<T: Printable> { value: T }
+struct Wrapper<U: Printable> { boxed: Box<U> }
+#NumericAccess
+struct NumericBox<T: [Printable, Add, Equatable]> { value: T }
+
+fn run() -> {
+    number := Box<Int>.make(7)
+    decimal := Box<Float>{ value: 2.5 }
+    flag := Box<Bool>{ value: true }
+    letter := Box<Char>{ value: 'J' }
+    text := Box<String>.make("jet")
+    numeric := NumericBox<Float>{ value: 1.5 }
+    print(number.get_value())
+    print(decimal.get_value())
+    print(flag.get_value())
+    print(letter.get_value())
+    print(text.get_value())
+    print(text.get_value())
+    print(number.type_name())
+    print(&numeric.replace(4.5))
+    print(numeric.plus(0.5))
+    print(numeric.equal_to(4.5))
+    print(StaticOnly<Int>.marker())
+    print(StaticOnly<String>.marker())
+}
+"""
+    expected :: ProgramOutput.ran("7\n2.5\ntrue\nJ\njet\njet\nBox\n4.5\n5.0\ntrue\n17\n17\n", "", 0)
+    dir :: std.env.temp_dir().join("jet_generic_user_derive_jit_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("generic_user_derive.jet")
+    fs.write(file, src).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    bundle :: checked_bundle_from_path(shown)
+    run_func :: bundle.modules[bundle.entry].items.iter().find_map((item) -> if item == {
+        .Func(func) -> if func.name == "run" { .Some(func) } else { .None }
+        _ -> .None
+    }).expect("run function")
+    numeric_binding :: run_func.body.iter().find_map((stmt) -> if stmt == {
+        .Val(binding) -> if binding.name == "numeric" { .Some(binding) } else { .None }
+        _ -> .None
+    }).expect("numeric binding")
+    assert_eq(numeric_binding.ty, .Some(AST.Type.Apply { name: "NumericBox", args: [AST.Type.Float] }), "sema must retain the concrete generic binding identity")
+    resident :: run_cranelift_without_fallback(src, "generic_user_derive")
+    default :: if dev_iteration(shown, false, false) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("default dev failed generic user derive: {diags:?}")
+    }
+    interpreted :: if dev_iteration(shown, false, true) == {
+        .Ran { stdout, stderr, exit_code } -> ProgramOutput.ran(stdout, stderr, exit_code)
+        .Problems(diags) -> panic("forced interpreter failed generic user derive: {diags:?}")
+    }
+    aot :: compiled_binary_output(dir, "generic_user_derive", 0, "generic_user_derive", shown)
+    assert_eq(resident, expected)
+    assert_eq(default, expected)
+    assert_eq(interpreted, expected)
+    assert_eq(aot, expected)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/dev_parts/routine.rs:3507
+#Test("nested_generic_user_derive_reaches_resident_jit") {
+    if skip_if_cranelift_host_unsupported() { return }
+    src :: """
+derive T.Access {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn get_value(self) -> @param { ~self.value }
+}
+
+#Access
+struct Inner<T: Printable> { value: T }
+
+struct Outer<T: Printable> {
+    value: T
+
+    fn read(self) -> T {
+        inner := Inner<T>{ value: ~self.value }
+        return inner.get_value()
+    }
+}
+
+fn run() -> {
+    outer := Outer<Int>{ value: 7 }
+    print(outer.read())
+}
+"""
+    output :: run_cranelift_without_fallback(src, "nested_generic_user_derive")
+    assert_eq(output, ProgramOutput.ran("7\n", "", 0))
+}
+// Rust: tests/dev_parts/routine.rs:3540
+#Test("unused_expanding_generic_body_does_not_expand_jit_worklist") {
+    if skip_if_cranelift_host_unsupported() { return }
+    src :: """
+struct Grow<T: Printable> {
+    value: T
+
+    fn read(self) -> T { return ~self.value }
+    fn unused(self) -> Int {
+        nested := Grow<[T]>{ value: [~self.value] }
+        return nested.unused()
+    }
+}
+
+fn run() -> {
+    value := Grow<Int>{ value: 7 }
+    print(value.read())
+}
+"""
+    output :: run_cranelift_without_fallback(src, "unused_expanding_generic_body")
+    assert_eq(output, ProgramOutput.ran("7\n", "", 0))
+    reachable :: src.replace("print(value.read())", "print(value.unused())")
+    file :: std.env.temp_dir().join("reachable_expanding_generic_method.jet")
+    fs.write(file, reachable).unwrap()
+    bundle :: checked_bundle_from_path(file.to_str().unwrap())
+    error :: common.compile_cranelift_bundle(bundle, common.development_policy()).unwrap_err()
+    assert(error.contains("E0909: generic instantiation goes too deep"), "{error}")
+}
+// Rust: tests/dev_parts/routine.rs:3575
+#Test("nested_ordinary_module_generic_instance_matches_resident_jit_and_aot") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    src :: """
+module outer<T>(n: Int) {
+    module plain {
+        module inner<U> { pub fn total(value: U) -> Int { return n } }
+        module closed :: inner<T>
+        pub fn result(value: T) -> Int { return closed.total(value) }
+    }
+    pub fn result(value: T) -> Int { return plain.result(value) }
+}
+module selected :: outer<Int>(6)
+fn run() -> { print(selected.result(1)) }
+"""
+    native :: run_cranelift_without_fallback(src, "nested_ordinary_generic_module")
+    assert_eq(native.stdout, "6\n")
+    dir :: std.env.temp_dir().join("jet_nested_ordinary_generic_module_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("nested_ordinary_generic_module.jet")
+    fs.write(file, src).unwrap()
+    aot :: compiled_binary_output(dir, "nested_ordinary_generic_module", 0, "nested_ordinary_generic_module", file.to_str().unwrap())
+    assert_eq(native, aot)
+}
+// Rust: tests/dev_parts/routine.rs:3612
+#Test("solver_state_transitions_match_aot_in_resident_jit") {
+    if skip_if_cranelift_host_unsupported() || !have_rustc() { return }
+    source_path :: "Examples/features/tooling/solve_puzzle.jet"
+    src :: fs.read_to_string(source_path).expect("read solve_puzzle example")
+    native :: run_cranelift_without_fallback(src, "solve_puzzle")
+    compiled :: jet.compile_with_path(src, source_path).expect("compile solve_puzzle")
+    dir :: std.env.temp_dir().join("jet_solver_jit_parity_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    rs :: dir.join("solve_puzzle.rs")
+    bin :: dir.join("solve_puzzle")
+    command := Command.new("rustc") // GATE #4494
+    runtime_lease :: add_generated_rust(&command, rs, compiled.rust, compiled.ffi.is_some(), [])
+    rustc :: command.arg("-o").arg(bin).output().expect("run rustc")
+    assert(rustc.status.success(), "rustc failed: {String.from_utf8_lossy(rustc.stderr)}")
+    output :: Command.new(bin).output().expect("run AOT solve_puzzle")
+    aot :: ProgramOutput.ran(String.from_utf8_lossy(output.stdout).into_owned(), String.from_utf8_lossy(output.stderr).into_owned(), output.status.code().unwrap_or(1))
+    assert_eq(native, aot, "Solver state drifted between resident JIT and AOT")
+    assert_eq(native.stdout, "key=1 door=3\nkey=3 door=1\nwins=2\nstatus=failed\nfailures=7\n")
+    _ :: fs.remove_dir_all(dir)
+}

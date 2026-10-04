@@ -1,1804 +1,762 @@
-// PORT-PENDING 2039 crates-jet-driver-src-loader-slice-1: crates/jet-driver/src/Loader.rs:1-1800
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Multi-file program loading (M6 phase 3, S16; M12 package support).
-//RS //!
-//RS //! Resolves the import graph from an entry `.jet` file, detects cycles and
-//RS //! ambiguous module names, and returns a `ProgramBundle` for sema/codegen.
-//RS //! When a `package.jet` is found in the project root (walked upward from entry),
-//RS //! validates the manifest and wires package dep paths into module search (M12.1).
-//RS 
-//RS use crate::Diagnostics::{Diagnostic, Span};
-//RS use crate::Lexer;
-//RS use crate::Manifest;
-//RS use crate::Parser;
-//RS use crate::Syntax;
-//RS use crate::AST::{
-//RS     ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, OutputKind,
-//RS     PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type,
-//RS };
-//RS use jet_pkg_model::Authority::{AuthorityError, AuthorityResolver, CheckedFile};
-//RS use std::collections::{HashMap, HashSet};
-//RS use std::fs;
-//RS use jet_foundation::Names::normalize_path;
-//RS use std::path::{Path, PathBuf};
-//RS use std::sync::atomic::{AtomicUsize, Ordering};
-//RS use std::sync::mpsc;
-//RS 
-//RS const MAX_FRONTEND_WORKERS: usize = 8;
-//RS 
-//RS pub(crate) enum PreparedFrontendModule {
-//RS     Parsed(crate::AST::Program, Vec<Diagnostic>),
-//RS     LexFailed(Vec<Diagnostic>),
-//RS     ParseFailed(Vec<Diagnostic>),
-//RS }
-//RS 
-//RS pub(crate) struct PreparedFrontendEntry {
-//RS     pub(crate) source: String,
-//RS     pub(crate) module: PreparedFrontendModule,
-//RS }
-//RS 
-//RS pub(crate) type PreparedFrontend = HashMap<PathBuf, PreparedFrontendEntry>;
-//RS /// Build the one flattened package guarantee carrier shared by the loader and
-//RS /// inspection. Dependency manifests remain independent packages: their policy
-//RS /// is not inherited into the root package; only the root's already-resolved
-//RS /// package facts enter this carrier.
-//RS pub(crate) fn package_guarantees_for_manifest(
-//RS     package_manifest: &crate::Package::PackageFacts,
-//RS ) -> PackageGuarantees {
-//RS     let memory_denials = package_manifest
-//RS         .authority
-//RS         .holds
-//RS         .deny
-//RS         .clone()
-//RS         .unwrap_or_default()
-//RS         .into_iter()
-//RS         .filter(|name| {
-//RS             name == "Mem.Rc" || crate::Sema::memory_allocation_bound(name).is_some()
-//RS         })
-//RS         .collect();
-//RS     PackageGuarantees {
-//RS         contain: package_manifest.policy.contain.clone(),
-//RS         harden: package_manifest.policy.harden,
-//RS         dependency_names: package_manifest.deps.keys().cloned().collect(),
-//RS         effects: package_manifest.policy.effects.clone(),
-//RS         unsafe_paths: package_manifest.policy.unsafe_paths.clone(),
-//RS         expert: package_manifest.policy.expert,
-//RS         deps: package_manifest.policy.deps.clone(),
-//RS         lints_deny: package_manifest.policy.lints_deny.clone(),
-//RS         memory_denials,
-//RS         authority_needs: package_manifest.authority.needs.clone(),
-//RS         application_authority:
-//RS             jet_foundation::Authority::ApplicationAuthority::from_policy(
-//RS                 package_manifest.authority.holds.allow.as_deref(),
-//RS                 package_manifest.authority.holds.deny.as_deref(),
-//RS                 &format!("{} authority.holds", package_manifest.origin),
-//RS             ),
-//RS     }
-//RS }
-//RS 
-//RS /// Complete one inline Package with the same file-backed Config and member
-//RS /// checks used by the canonical `package.jet` loader. The candidate is mutated
-//RS /// only after each Config has been checked and composed, so a failed inline
-//RS /// load never leaves partially-applied Package facts behind.
-//RS fn complete_inline_package_facts(
-//RS     facts: &mut crate::Package::PackageFacts,
-//RS     source_root: &Path,
-//RS ) -> Result<(), crate::Package::PackageParseError> {
-//RS     facts.compose_configs(source_root)?;
-//RS     facts.validate_guarantees()?;
-//RS     facts
-//RS         .validate_defaults()
-//RS         .map_err(|error| crate::Package::PackageParseError::Composition(error.to_string()))?;
-//RS     facts.validate_members_in(source_root)
-//RS }
-//RS struct InlineLockFailure {
-//RS     path: PathBuf,
-//RS     raw: String,
-//RS     diagnostic: Diagnostic,
-//RS }
-//RS 
-//RS /// Apply the same optional lock freshness check to an inline Package that the
-//RS /// extracted `package.jet` path receives. A missing lock remains valid for an
-//RS /// unlocked load; `--locked` performs the stricter source check separately.
-//RS fn verify_inline_manifest_lock(
-//RS     package_root: &Path,
-//RS     manifest: &Manifest::Manifest,
-//RS ) -> Result<(), InlineLockFailure> {
-//RS     if manifest.dependencies.is_empty() {
-//RS         return Ok(());
-//RS     }
-//RS     let resolver = AuthorityResolver::open(package_root).map_err(|error| InlineLockFailure {
-//RS         path: package_root.to_path_buf(),
-//RS         raw: String::new(),
-//RS         diagnostic: error.diagnostic(),
-//RS     })?;
-//RS     let lock_file = match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
-//RS         Ok(file) => file,
-//RS         Err(error) if error.is_missing() => return Ok(()),
-//RS         Err(error) => {
-//RS             return Err(InlineLockFailure {
-//RS                 path: package_root.to_path_buf(),
-//RS                 raw: String::new(),
-//RS                 diagnostic: error.diagnostic(),
-//RS             })
-//RS         }
-//RS     };
-//RS     let path = lock_file.path.clone();
-//RS     let raw = lock_file.text().map_err(|error| InlineLockFailure {
-//RS         path: path.clone(),
-//RS         raw: String::new(),
-//RS         diagnostic: error.diagnostic(),
-//RS     })?;
-//RS     resolver
-//RS         .revalidate_file(&lock_file)
-//RS         .map_err(|error| InlineLockFailure {
-//RS             path: path.clone(),
-//RS             raw: raw.clone(),
-//RS             diagnostic: error.diagnostic(),
-//RS         })?;
-//RS     let lock = crate::Lock::parse_with_path(&raw, &path).map_err(|diagnostic| InlineLockFailure {
-//RS         path: path.clone(),
-//RS         raw: raw.clone(),
-//RS         diagnostic,
-//RS     })?;
-//RS     crate::Lock::verify_lock_matches_manifest(
-//RS         &lock,
-//RS         manifest,
-//RS         &path.display().to_string(),
-//RS     )
-//RS     .map_err(|diagnostic| InlineLockFailure {
-//RS         path: path.clone(),
-//RS         raw: raw.clone(),
-//RS         diagnostic,
-//RS     })?;
-//RS     resolver
-//RS         .revalidate_file(&lock_file)
-//RS         .map_err(|error| InlineLockFailure {
-//RS             path,
-//RS             raw,
-//RS             diagnostic: error.diagnostic(),
-//RS         })?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-//RS 
-//RS /// Read the single package context carried by an already-loaded program.
-//RS ///
-//RS /// The loader rejects a canonical manifest plus an inline declaration before
-//RS /// sema. This accessor therefore chooses exactly one source and always feeds
-//RS /// the same `PackageFacts` parser used for `package.jet`.
-//RS pub fn package_facts_for_bundle(
-//RS     bundle: &ProgramBundle,
-//RS ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
-//RS     let manifest_root = find_manifest_root_checked(&bundle.project_root)
-//RS         .map_err(|diagnostic| vec![diagnostic])?;
-//RS     let entry = bundle.modules.get(bundle.entry);
-//RS     let inline = match entry {
-//RS         Some(module) => crate::Package::extract_inline_package(&module.source)
-//RS             .map_err(|error| vec![error.diagnostic()]),
-//RS         None => Ok(None),
-//RS     };
-//RS     let inline = match inline {
-//RS         Ok(value) => value,
-//RS         Err(diagnostics) => return Err(diagnostics),
-//RS     };
-//RS     if let Some(block) = inline {
-//RS         if manifest_root.is_some() {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E1363",
-//RS                 "an inline Package conflicts with package.jet".to_string(),
-//RS                 "one project cannot carry both an inline Package block and a package.jet manifest"
-//RS                     .to_string(),
-//RS                 "remove package.jet or remove the inline Package block".to_string(),
-//RS                 Some(block.span),
-//RS             )]);
-//RS         }
-//RS         let module = entry.expect("inline package block has an entry module");
-//RS         let mut facts = crate::Package::PackageFacts::parse_uncomposed(
-//RS             block.body(&module.source),
-//RS             module.display.clone(),
-//RS         )
-//RS         .map_err(|error| {
-//RS             vec![Diagnostic::error(
-//RS                 "E1362",
-//RS                 "the inline Package body is malformed".to_string(),
-//RS                 error.to_string(),
-//RS                 "fix the inline Package fields, then retry".to_string(),
-//RS                 Some(block.body_span),
-//RS             )]
-//RS         })?;
-//RS         let source_root = module.path.parent().unwrap_or_else(|| Path::new("."));
-//RS         complete_inline_package_facts(&mut facts, source_root)
-//RS             .map_err(|error| {
-//RS                 vec![Diagnostic::error(
-//RS                     "E1362",
-//RS                     "the inline Package body is malformed".to_string(),
-//RS                     error.to_string(),
-//RS                     "fix the inline Package fields, then retry".to_string(),
-//RS                     Some(block.body_span),
-//RS                 )]
-//RS             })?;
-//RS         return Ok(Some(facts));
-//RS     }
-//RS     if let Some(inline_root) = find_inline_package_root_checked(&bundle.project_root)
-//RS         .map_err(|diagnostic| vec![diagnostic])?
-//RS     {
-//RS         if manifest_root.is_some() {
-//RS             return Err(inline_manifest_conflict_loader_error(&inline_root).into_plain());
-//RS         }
-//RS         return package_facts_for_root(&inline_root);
-//RS     }
-//RS     let Some(root) = manifest_root else {
-//RS         return Ok(None);
-//RS     };
-//RS     crate::Package::PackageFacts::load_checked(&root)
-//RS         .map_err(|error| vec![error.diagnostic()])
-//RS }
-//RS 
-//RS /// Read the one package context selected by an entry path.
-//RS ///
-//RS /// Inline `Package { … }` is checked before manifest discovery. A canonical
-//RS /// `package.jet` therefore remains the fallback only when the entry carries
-//RS /// no inline package, and the two carriers cannot silently diverge.
-//RS pub fn package_facts_for_entry(
-//RS     entry: &Path,
-//RS ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
-//RS     let source = fs::read_to_string(entry).map_err(|error| {
-//RS         vec![Diagnostic::error(
-//RS             "E1331",
-//RS             format!("entry `{}` cannot be read", entry.display()),
-//RS             error.to_string(),
-//RS             "restore the entry source, then retry".to_string(),
-//RS             None,
-//RS         )]
-//RS     })?;
-//RS     let entry_root = entry.parent().unwrap_or_else(|| Path::new("."));
-//RS     let manifest_root =
-//RS         find_manifest_root_checked(entry_root).map_err(|diagnostic| vec![diagnostic])?;
-//RS     let inline_root =
-//RS         find_inline_package_root_checked(entry_root).map_err(|diagnostic| vec![diagnostic])?;
-//RS     let facts = package_facts_from_entry_source(entry, &source, manifest_root.clone())?;
-//RS     if manifest_root.is_some() && inline_root.is_some() {
-//RS         return Err(
-//RS             inline_manifest_conflict_loader_error(inline_root.as_ref().expect("inline root"))
-//RS                 .into_plain(),
-//RS         );
-//RS     }
-//RS     if facts.is_some() || inline_root.is_none() {
-//RS         return Ok(facts);
-//RS     }
-//RS     package_facts_for_root(&inline_root.expect("inline root checked above"))
-//RS }
-//RS 
-//RS fn package_facts_from_entry_source(
-//RS     entry: &Path,
-//RS     source: &str,
-//RS     manifest_root: Option<PathBuf>,
-//RS ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
-//RS     let inline = crate::Package::extract_inline_package(source)
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     if let Some(block) = inline {
-//RS         if manifest_root.is_some() {
-//RS             return Err(vec![Diagnostic::error(
-//RS                 "E1363",
-//RS                 "an inline Package conflicts with package.jet".to_string(),
-//RS                 "one project cannot carry both an inline Package block and a package.jet manifest"
-//RS                     .to_string(),
-//RS                 "remove package.jet or remove the inline Package block".to_string(),
-//RS                 Some(block.span),
-//RS             )]);
-//RS         }
-//RS         let mut facts = crate::Package::PackageFacts::parse_uncomposed(
-//RS             block.body(source),
-//RS             entry.display().to_string(),
-//RS         )
-//RS         .map_err(|error| {
-//RS             vec![Diagnostic::error(
-//RS                 "E1362",
-//RS                 "the inline Package body is malformed".to_string(),
-//RS                 error.to_string(),
-//RS                 "fix the inline Package fields, then retry".to_string(),
-//RS                 Some(block.body_span),
-//RS             )]
-//RS         })?;
-//RS         let source_root = entry.parent().unwrap_or_else(|| Path::new("."));
-//RS         complete_inline_package_facts(&mut facts, source_root)
-//RS             .map_err(|error| {
-//RS                 vec![Diagnostic::error(
-//RS                     "E1362",
-//RS                     "the inline Package body is malformed".to_string(),
-//RS                     error.to_string(),
-//RS                     "fix the inline Package fields, then retry".to_string(),
-//RS                     Some(block.body_span),
-//RS                 )]
-//RS             })?;
-//RS         return Ok(Some(facts));
-//RS     }
-//RS     let Some(root) = manifest_root else {
-//RS         return Ok(None);
-//RS     };
-//RS     crate::Package::PackageFacts::load_checked(&root)
-//RS         .map_err(|error| vec![error.diagnostic()])
-//RS }
-//RS 
-//RS fn inline_manifest_conflict_loader_error(root: &Path) -> LoaderError {
-//RS     let result = (|| {
-//RS         let resolver = AuthorityResolver::open(root).map_err(|error| error.diagnostic())?;
-//RS         let carrier = checked_inline_package_entry(&resolver)?
-//RS             .ok_or_else(|| {
-//RS                 Diagnostic::error(
-//RS                     "E1363",
-//RS                     "an inline Package conflicts with package.jet".to_string(),
-//RS                     "one project cannot carry both an inline Package block and a package.jet manifest"
-//RS                         .to_string(),
-//RS                     "remove package.jet or remove the inline Package block".to_string(),
-//RS                     None,
-//RS                 )
-//RS             })?;
-//RS         let source = carrier.text().map_err(|error| error.diagnostic())?;
-//RS         let block = crate::Package::extract_inline_package(&source)
-//RS             .map_err(|error| error.diagnostic())?
-//RS             .ok_or_else(|| {
-//RS                 Diagnostic::error(
-//RS                     "E1363",
-//RS                     "an inline Package conflicts with package.jet".to_string(),
-//RS                     "one project cannot carry both an inline Package block and a package.jet manifest"
-//RS                         .to_string(),
-//RS                     "remove package.jet or remove the inline Package block".to_string(),
-//RS                     None,
-//RS                 )
-//RS             })?;
-//RS         Ok::<_, Diagnostic>(LoaderError::at(
-//RS             &carrier.path.display().to_string(),
-//RS             &source,
-//RS             vec![Diagnostic::from_row("E1363", &[], Some(block.span))],
-//RS         ))
-//RS     })();
-//RS     match result {
-//RS         Ok(error) => error,
-//RS         Err(diagnostic) => LoaderError::at(&root.display().to_string(), "", vec![diagnostic]),
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS /// Read the package facts rooted at a project directory. An inline carrier is
-//RS /// selected from the canonical stock entry before extracted manifest lookup.
-//RS pub fn package_facts_for_root(
-//RS     root: &Path,
-//RS ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
-//RS     let resolver = AuthorityResolver::open(root).map_err(|error| vec![error.diagnostic()])?;
-//RS     let manifest_root =
-//RS         find_manifest_root_checked(resolver.root()).map_err(|diagnostic| vec![diagnostic])?;
-//RS     let Some(entry) = checked_inline_package_entry(&resolver).map_err(|diagnostic| vec![diagnostic])?
-//RS     else {
-//RS         let Some(root) = manifest_root else {
-//RS             return Ok(None);
-//RS         };
-//RS         return crate::Package::PackageFacts::load_checked(&root)
-//RS             .map_err(|error| vec![error.diagnostic()]);
-//RS     };
-//RS     let source = entry
-//RS         .text()
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     let facts = package_facts_from_entry_source(&entry.path, &source, manifest_root)?;
-//RS     resolver
-//RS         .revalidate_file(&entry)
-//RS         .map_err(|error| vec![error.diagnostic()])?;
-//RS     Ok(facts)
-//RS }
-//RS 
-//RS fn package_facts_from_resolver(
-//RS     resolver: &AuthorityResolver,
-//RS ) -> Result<Option<crate::Package::PackageFacts>, Vec<Diagnostic>> {
-//RS     match resolver.checked_root_package() {
-//RS         Ok(package) => Ok(Some(package.facts)),
-//RS         Err(error) if error.is_missing() => Ok(None),
-//RS         Err(error) => Err(vec![error.diagnostic()]),
-//RS     }
-//RS }
-//RS 
-//RS fn prepare_frontend_module(source: &str) -> PreparedFrontendModule {
-//RS     let source_for_parse = match crate::Package::mask_inline_package_source(source) {
-//RS         Ok((masked, _)) => masked,
-//RS         Err(error) => return PreparedFrontendModule::LexFailed(vec![error.diagnostic()]),
-//RS     };
-//RS     let (tokens, lex_diags) = Lexer::lex(&source_for_parse);
-//RS     if !lex_diags.is_empty() {
-//RS         return PreparedFrontendModule::LexFailed(lex_diags);
-//RS     }
-//RS     match Parser::parse_for_check_with_source(&tokens, &source_for_parse) {
-//RS         Ok((program, teaching)) => PreparedFrontendModule::Parsed(program, teaching),
-//RS         Err(diagnostics) => PreparedFrontendModule::ParseFailed(diagnostics),
-//RS     }
-//RS }
-//RS 
-//RS fn frontend_worker_count(job_count: usize) -> usize {
-//RS     let available = std::thread::available_parallelism()
-//RS         .map(std::num::NonZeroUsize::get)
-//RS         .unwrap_or(1);
-//RS     job_count.min(available).min(MAX_FRONTEND_WORKERS).max(1)
-//RS }
-//RS 
-//RS /// Prepare staged source files concurrently, but cap the fan-out and publish
-//RS /// results by source order. The loader still consumes the results serially so
-//RS /// module discovery, diagnostics, and sema keep their canonical order.
-//RS fn prepare_overlay_frontend(overlays: &[(&Path, &str)]) -> PreparedFrontend {
-//RS     let sources = overlays
-//RS         .iter()
-//RS         .map(|(path, source)| (normalize_path(path), (*source).to_string()))
-//RS         .collect::<Vec<_>>();
-//RS     prepare_frontend_sources(sources)
-//RS }
-//RS 
-//RS /// Lex and parse a deterministic source batch with a bounded worker pool.
-//RS /// The caller still consumes the returned map serially, so diagnostics and
-//RS /// module discovery keep the loader's canonical order.
-//RS pub(crate) fn prepare_frontend_sources(sources: Vec<(PathBuf, String)>) -> PreparedFrontend {
-//RS     let mut sources = sources
-//RS         .into_iter()
-//RS         .map(|(path, source)| (normalize_path(&path), source))
-//RS         .collect::<HashMap<_, _>>();
-//RS     let mut jobs = sources.drain().collect::<Vec<_>>();
-//RS     jobs.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     if jobs.is_empty() {
-//RS         return HashMap::new();
-//RS     }
-//RS 
-//RS     let workers = frontend_worker_count(jobs.len());
-//RS     let next = AtomicUsize::new(0);
-//RS     let (sender, receiver) = mpsc::channel();
-//RS     let results = std::thread::scope(|scope| {
-//RS         let jobs_ref = &jobs;
-//RS         let next_ref = &next;
-//RS         for _ in 0..workers {
-//RS             let sender = sender.clone();
-//RS             let terminator_driver = crate::Lexer::terminator_driver();
-//RS             let _worker = std::thread::Builder::new()
-//RS                 .name("jet-frontend".to_string())
-//RS                 .stack_size(jet_foundation::CompilerStack::COMPILER_STACK_SIZE)
-//RS                 .spawn_scoped(scope, move || {
-//RS                     crate::Lexer::with_terminator_driver(terminator_driver, || {
-//RS                         crate::run_compiler_work(|| loop {
-//RS                             let index = next_ref.fetch_add(1, Ordering::Relaxed);
-//RS                             let Some((_, source)) = jobs_ref.get(index) else {
-//RS                                 break;
-//RS                             };
-//RS                             let prepared = prepare_frontend_module(source);
-//RS                             sender
-//RS                                 .send((index, prepared))
-//RS                                 .expect("frontend result receiver remains in scope");
-//RS                         });
-//RS                     });
-//RS                 })
-//RS                 .unwrap_or_else(|error| {
-//RS                     jet_foundation::ice!(None, "could not start frontend worker: {error}")
-//RS                 });
-//RS         }
-//RS         drop(sender);
-//RS 
-//RS         let mut results = (0..jobs.len()).map(|_| None).collect::<Vec<_>>();
-//RS         for (index, prepared) in receiver {
-//RS             results[index] = Some(prepared);
-//RS         }
-//RS         results
-//RS     });
-//RS     jobs.into_iter()
-//RS         .zip(results)
-//RS         .filter_map(|((path, source), prepared)| {
-//RS             prepared.map(|module| (path, PreparedFrontendEntry { source, module }))
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS /// A loader diagnostic with the source file and source text that produced it.
-//RS /// The ordinary loader API still returns bare diagnostics for existing callers;
-//RS /// inspection tools use this form to preserve imported-module provenance.
-//RS #[derive(Debug, Clone)]
-//RS pub struct LoaderDiagnostic {
-//RS     pub file: String,
-//RS     pub source: String,
-//RS     pub diagnostic: Diagnostic,
-//RS     pub structure_fact: Option<jet_foundation::Names::StructureFact>,
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS struct LoaderError {
-//RS     diagnostics: Vec<LoaderDiagnostic>,
-//RS }
-//RS 
-//RS impl LoaderError {
-//RS     fn at(file: &str, source: &str, diagnostics: Vec<Diagnostic>) -> Self {
-//RS         Self {
-//RS             diagnostics: diagnostics
-//RS                 .into_iter()
-//RS                 .map(|diagnostic| LoaderDiagnostic {
-//RS                     file: file.to_string(),
-//RS                     source: source.to_string(),
-//RS                     diagnostic,
-//RS                     structure_fact: None,
-//RS                 })
-//RS                 .collect(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn with_structure_fact(mut self, fact: Option<jet_foundation::Names::StructureFact>) -> Self {
-//RS         if let Some(fact) = fact {
-//RS             if let Some(diagnostic) = self.diagnostics.first_mut() {
-//RS                 diagnostic.structure_fact = Some(fact);
-//RS             }
-//RS         }
-//RS         self
-//RS     }
-//RS 
-//RS     /// D5: attach the module's origin to diagnostics raised while reading it.
-//RS     /// Diagnostics from nested imports already carry their own file, and a
-//RS     /// diagnostic with no source text has nothing to render against.
-//RS     fn with_module_origin(mut self, display: &str, path: &Path) -> Self {
-//RS         let mut origin: Option<std::sync::Arc<crate::Diagnostics::DiagnosticOrigin>> = None;
-//RS         for entry in &mut self.diagnostics {
-//RS             if entry.file != display
-//RS                 || entry.source.is_empty()
-//RS                 || entry.diagnostic.origin().is_some()
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             let origin = origin
-//RS                 .get_or_insert_with(|| {
-//RS                     std::sync::Arc::new(crate::Diagnostics::DiagnosticOrigin::new(
-//RS                         display,
-//RS                         path.to_string_lossy().into_owned(),
-//RS                         entry.source.clone(),
-//RS                     ))
-//RS                 })
-//RS                 .clone();
-//RS             entry.diagnostic.set_origin(origin);
-//RS         }
-//RS         self
-//RS     }
-//RS 
-//RS     fn into_plain(self) -> Vec<Diagnostic> {
-//RS         self.diagnostics
-//RS             .into_iter()
-//RS             .map(|entry| entry.diagnostic)
-//RS             .collect()
-//RS     }
-//RS }
-//RS 
-//RS fn is_foreign_namespace_import(imp: &ImportDecl) -> Result<bool, Diagnostic> {
-//RS     let active =
-//RS         crate::Foreign::is_active_namespace_import(imp).map_err(|error| error.diagnostic())?;
-//RS     let c = crate::CFFI::is_c_import(imp).map_err(|error| error.diagnostic())?;
-//RS     Ok(active || c)
-//RS }
-//RS 
-//RS fn record_loader_error(
-//RS     sink: &mut Option<&mut Vec<LoaderDiagnostic>>,
-//RS     error: LoaderError,
-//RS ) -> Vec<Diagnostic> {
-//RS     if let Some(sink) = sink.as_deref_mut() {
-//RS         sink.extend(error.diagnostics.iter().cloned());
-//RS     }
-//RS     error.into_plain()
-//RS }
-//RS 
-//RS /// The standard loader diagnostic for a user-named `.jet` input that does not
-//RS /// exist. A missing *source* is an ordinary spelling/path mistake, not an
-//RS /// authority-metadata failure, so it never wears the E1334 authority wrapper.
-//RS fn missing_source_diagnostic(display: &str) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0603",
-//RS         format!("can't find the file `{display}`"),
-//RS         "a named `.jet` source path must point at an existing file".to_string(),
-//RS         "check the spelling, or create the missing file".to_string(),
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS fn checked_source_file(
-//RS     path: &Path,
-//RS     display: &str,
-//RS ) -> Result<(AuthorityResolver, CheckedFile, String), LoaderError> {
-//RS     let parent = path.parent().unwrap_or_else(|| Path::new("."));
-//RS     let resolver = AuthorityResolver::open(parent)
-//RS         .map_err(|error| LoaderError::at(display, "", vec![error.diagnostic()]))?;
-//RS     checked_source_file_with_resolver(path, display, &resolver)
-//RS }
-//RS 
-//RS fn checked_source_file_with_resolver(
-//RS     path: &Path,
-//RS     display: &str,
-//RS     resolver: &AuthorityResolver,
-//RS ) -> Result<(AuthorityResolver, CheckedFile, String), LoaderError> {
-//RS     let relative = path.strip_prefix(resolver.root()).map_err(|_| {
-//RS         LoaderError::at(
-//RS             display,
-//RS             "",
-//RS             vec![
-//RS                 jet_pkg_model::Authority::AuthorityError::Escapes(path.to_path_buf())
-//RS                     .diagnostic(),
-//RS             ],
-//RS         )
-//RS     })?;
-//RS     let _name = path
-//RS         .file_name()
-//RS         .ok_or_else(|| LoaderError::at(display, "", vec![missing_source_diagnostic(display)]))?;
-//RS     // A missing source reports E0603; every other authority failure (symlink,
-//RS     // wrong kind, changed under us, unreadable) keeps its E1334 row, so
-//RS     // genuinely missing authority *metadata* is still reported as such.
-//RS     let checked = resolver.checked_file(relative).map_err(|error| {
-//RS         let diagnostic = if error.is_missing() {
-//RS             missing_source_diagnostic(display)
-//RS         } else {
-//RS             error.diagnostic()
-//RS         };
-//RS         LoaderError::at(display, "", vec![diagnostic])
-//RS     })?;
-//RS     let source = checked
-//RS         .text()
-//RS         .map_err(|error| LoaderError::at(display, "", vec![error.diagnostic()]))?;
-//RS     resolver
-//RS         .revalidate_file(&checked)
-//RS         .map_err(|error| LoaderError::at(display, &source, vec![error.diagnostic()]))?;
-//RS     Ok((resolver.clone(), checked, source))
-//RS }
-//RS 
-//RS fn project_parts_loader_error(
-//RS     project_root: &Path,
-//RS     conflicts: &[crate::ProjectParts::ProjectPartConflict],
-//RS ) -> LoaderError {
-//RS     let diagnostics = conflicts
-//RS         .iter()
-//RS         .map(|conflict| {
-//RS             let path = conflict.paths.first().cloned();
-//RS             let (file, source) = path
-//RS                 .as_ref()
-//RS                 .and_then(|path| {
-//RS                     checked_source_file(path, &relative_display(project_root, path))
-//RS                         .ok()
-//RS                         .map(|(_, _, source)| (path, source))
-//RS                 })
-//RS                 .map(|(path, source)| (relative_display(project_root, path), source))
-//RS                 .unwrap_or_else(|| (project_root.display().to_string(), String::new()));
-//RS             LoaderDiagnostic {
-//RS                 file,
-//RS                 source,
-//RS                 diagnostic: conflict.diagnostic(project_root, None),
-//RS                 structure_fact: None,
-//RS             }
-//RS         })
-//RS         .collect();
-//RS     LoaderError { diagnostics }
-//RS }
-//RS /// Recover the concrete path behind a project-wide authority failure. The
-//RS /// ProjectParts report keeps its scan root as the failure location, while the
-//RS /// shared resolver owns the offending descendant path. Repeating the read-only
-//RS /// discovery is safe only when it reproduces the same registered diagnostic.
-//RS fn authority_failure_file(
-//RS     project_root: &Path,
-//RS     failure: &crate::ProjectParts::ProjectPartScanFailure,
-//RS ) -> String {
-//RS     let fallback = relative_display(project_root, &failure.path);
-//RS     if failure.problem.code != "E1334" {
-//RS         return fallback;
-//RS     }
-//RS     let Ok(resolver) = AuthorityResolver::open(&failure.path) else {
-//RS         return fallback;
-//RS     };
-//RS     let Err(error) = resolver.discover_source_files() else {
-//RS         return fallback;
-//RS     };
-//RS     let diagnostic = error.diagnostic();
-//RS     if diagnostic.code != failure.problem.code || diagnostic.what != failure.problem.what {
-//RS         return fallback;
-//RS     }
-//RS     let path = match &error {
-//RS         AuthorityError::Missing(path)
-//RS         | AuthorityError::Symlink(path)
-//RS         | AuthorityError::AmbiguousManifest(path)
-//RS         | AuthorityError::RetiredManifest(path)
-//RS         | AuthorityError::Escapes(path)
-//RS         | AuthorityError::Changed(path) => Some(path.as_path()),
-//RS         AuthorityError::ManifestParse { path, .. }
-//RS         | AuthorityError::Io { path, .. }
-//RS         | AuthorityError::WrongKind { path, .. }
-//RS         | AuthorityError::Invalid { path, .. } => Some(path.as_path()),
-//RS         AuthorityError::NestedMembers { member, .. } => Some(member.as_path()),
-//RS         AuthorityError::WorkspaceAmbiguous(paths) => paths.first().map(|path| path.as_path()),
-//RS         AuthorityError::WorkspaceNoModule | AuthorityError::Unsupported(_) => None,
-//RS     };
-//RS     path.map(|path| relative_display(project_root, path))
-//RS         .unwrap_or(fallback)
-//RS }
-//RS 
-//RS /// What the project's manifest + the shared hangar tell the module resolver
-//RS /// about consuming packages with `use <pkg>` (U17).
-//RS ///
-//RS /// One import concept (S16) covers files, modules, and `library` packages: once
-//RS /// a `library` is realized (its source staged in the hangar), `use <pkg>`
-//RS /// resolves to that staged tree — it is just an extra module search root. An
-//RS /// `executable` named in `use` is a teaching error (executables go on PATH,
-//RS /// E0982); a declared-but-unrealized `library` dependency points the user at
-//RS /// `jetpack env --prep` (E0983).
-//RS #[derive(Default)]
-//RS pub struct PkgResolution {
-//RS     /// Realized `library` packages → their staged source dir in the hangar
-//RS     /// (an extra module search root). The hangar is authoritative for the
-//RS     /// realized kind: an empty-`bin` entry is a library (U10).
-//RS     realized_libs: HashMap<String, PathBuf>,
-//RS     /// The held authority for each realized library root. Module discovery
-//RS     /// and subsequent file loads must use this handle, not reopen `out`.
-//RS     realized_authorities: HashMap<String, AuthorityResolver>,
-//RS     /// Realized `executable` packages (non-empty `bin`) by name — naming one in
-//RS     /// `use` is E0982.
-//RS     realized_exes: HashSet<String>,
-//RS     /// Names this project declares as dependencies (`deps:`). A declared dep
-//RS     /// that isn't realized yet is E0983 rather than an unknown-module error.
-//RS     declared_deps: HashSet<String>,
-//RS }
-//RS 
-//RS impl PkgResolution {
-//RS     fn is_empty(&self) -> bool {
-//RS         self.realized_libs.is_empty()
-//RS             && self.realized_exes.is_empty()
-//RS             && self.declared_deps.is_empty()
-//RS     }
-//RS }
-//RS 
-//RS /// D-STRUCT-EDGE1=A: the package-owned part of one resolved import graph.
-//RS /// The loader owns enforcement; engines only receive a successfully loaded
-//RS /// graph, so this policy has no runtime representation.
-//RS #[derive(Clone)]
-//RS struct ImportBoundaryPolicy {
-//RS     package: String,
-//RS     source_root: PathBuf,
-//RS     deny: Vec<crate::Package::ImportBoundary>,
-//RS }
-//RS 
-//RS impl ImportBoundaryPolicy {
-//RS     fn from_manifest(manifest: &Manifest::Manifest, source_root: &Path) -> Self {
-//RS         Self {
-//RS             package: manifest.package.name.clone(),
-//RS             source_root: normalize_path(source_root),
-//RS             deny: manifest.boundaries.clone(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn module_name(&self, path: &Path, items: &[Item]) -> String {
-//RS         if let Some(name) = items.iter().find_map(|item| match item {
-//RS             Item::Module(module) => Some(module.name.as_str()),
-//RS             _ => None,
-//RS         }) {
-//RS             let package_prefix = format!("{}.", self.package);
-//RS             return if name == self.package || name.starts_with(&package_prefix) {
-//RS                 name.to_string()
-//RS             } else {
-//RS                 format!("{}.{}", self.package, name)
-//RS             };
-//RS         }
-//RS         let path = normalize_path(path);
-//RS         let root = normalize_path(&self.source_root);
-//RS         let relative = path.strip_prefix(&root).unwrap_or(path.as_path());
-//RS         let mut parts = relative
-//RS             .components()
-//RS             .filter_map(|component| component.as_os_str().to_str())
-//RS             .map(str::to_owned)
-//RS             .collect::<Vec<_>>();
-//RS         if let Some(last) = parts.last_mut() {
-//RS             let stem = Path::new(last)
-//RS                 .file_stem()
-//RS                 .and_then(|stem| stem.to_str())
-//RS                 .map(str::to_owned);
-//RS             if let Some(stem) = stem {
-//RS                 *last = stem;
-//RS             }
-//RS         }
-//RS         if parts.len() > 1 && matches!(parts.last().map(String::as_str), Some("main" | "module")) {
-//RS             parts.pop();
-//RS         }
-//RS         std::iter::once(self.package.as_str())
-//RS             .chain(parts.iter().map(String::as_str))
-//RS             .collect::<Vec<_>>()
-//RS             .join(".")
-//RS     }
-//RS }
-//RS 
-//RS fn boundary_policy_index(policies: &[ImportBoundaryPolicy], path: &Path) -> Option<usize> {
-//RS     let path = normalize_path(path);
-//RS     policies
-//RS         .iter()
-//RS         .enumerate()
-//RS         .filter(|(_, policy)| {
-//RS             path == policy.source_root || path.strip_prefix(&policy.source_root).is_ok()
-//RS         })
-//RS         .max_by_key(|(_, policy)| policy.source_root.components().count())
-//RS         .map(|(index, _)| index)
-//RS }
-//RS 
-//RS fn import_boundary_violation(
-//RS     policies: &[ImportBoundaryPolicy],
-//RS     from_module: &LoadedModule,
-//RS     to_module: &LoadedModule,
-//RS     span: Span,
-//RS ) -> Option<(usize, usize, Diagnostic)> {
-//RS     let from_index = boundary_policy_index(policies, &from_module.path)?;
-//RS     let to_index = boundary_policy_index(policies, &to_module.path)?;
-//RS     let from_policy = &policies[from_index];
-//RS     let from_name = from_policy.module_name(&from_module.path, &from_module.items);
-//RS     let to_name = policies[to_index].module_name(&to_module.path, &to_module.items);
-//RS     let (rule_index, rule) = from_policy
-//RS         .deny
-//RS         .iter()
-//RS         .enumerate()
-//RS         .find(|(_, rule)| rule.matches(&from_name, &to_name))?;
-//RS     let rule_display = format!("{} -> {}", rule.from, rule.to);
-//RS     let diagnostic = Diagnostic::from_row(
-//RS         "E0619",
-//RS         &[
-//RS             ("from", &from_name),
-//RS             ("to", &to_name),
-//RS             ("rule", &rule_display),
-//RS         ],
-//RS         Some(span),
-//RS     );
-//RS     Some((from_index, rule_index, diagnostic))
-//RS }
-//RS 
-//RS fn import_edge_fact(
-//RS     policies: &[ImportBoundaryPolicy],
-//RS     from_module: &LoadedModule,
-//RS     to_module: &LoadedModule,
-//RS     span: Span,
-//RS     status: &str,
-//RS     detail: String,
-//RS     gate: Option<String>,
-//RS ) -> Option<jet_foundation::Names::StructureFact> {
-//RS     let from_index = boundary_policy_index(policies, &from_module.path)?;
-//RS     let to_index = boundary_policy_index(policies, &to_module.path)?;
-//RS     let from_policy = &policies[from_index];
-//RS     let from_name = from_policy.module_name(&from_module.path, &from_module.items);
-//RS     let to_name = policies[to_index].module_name(&to_module.path, &to_module.items);
-//RS     Some(jet_foundation::Names::StructureFact::new(
-//RS         jet_foundation::Names::StructureFactKind::ImportEdge,
-//RS         format!("{from_name} -> {to_name}"),
-//RS         from_module.display.clone(),
-//RS         span,
-//RS         status,
-//RS         detail,
-//RS         gate,
-//RS     ))
-//RS }
-//RS 
-//RS /// D-STRUCT-EDGE1=A / D-STRUCT-PLANE1=A: preserve the loader's checked edge
-//RS /// observation in the one structure ledger. A package manifest with at least
-//RS /// one boundary rule supplies the written gate; a manifest without the block
-//RS /// keeps the ordinary un-gated resolved-edge fact.
-//RS fn record_import_edge_fact(
-//RS     policies: &[ImportBoundaryPolicy],
-//RS     from_module: &LoadedModule,
-//RS     to_module: &LoadedModule,
-//RS     span: Span,
-//RS     ledger: &mut crate::AST::NameLedger,
-//RS ) {
-//RS     let Some(from_index) = boundary_policy_index(policies, &from_module.path) else {
-//RS         return;
-//RS     };
-//RS     // Presence-only guard: `import_edge_fact` re-resolves this index itself and
-//RS     // the `.expect` below relies on both lookups having succeeded here.
-//RS     let Some(_to_index) = boundary_policy_index(policies, &to_module.path) else {
-//RS         return;
-//RS     };
-//RS     let from_policy = &policies[from_index];
-//RS     let policy_checked = !from_policy.deny.is_empty();
-//RS     let fact = import_edge_fact(
-//RS         policies,
-//RS         from_module,
-//RS         to_module,
-//RS         span,
-//RS         if policy_checked {
-//RS             "allowed"
-//RS         } else {
-//RS             "resolved"
-//RS         },
-//RS         if policy_checked {
-//RS             "manifest boundary policy checked".to_string()
-//RS         } else {
-//RS             "resolved import edge".to_string()
-//RS         },
-//RS         policy_checked.then(|| "manifest rule edit".to_string()),
-//RS     )
-//RS     .expect("boundary policy indexes were checked above");
-//RS     ledger.record_structure_fact(fact);
-//RS }
-//RS 
-//RS /// Build the U17 package resolution from already-parsed Package facts and the
-//RS /// shared hangar store.
-//RS ///
-//RS /// Reading the hangar is a *pure lookup*: the compiler never realizes on demand
-//RS /// (that is `jetpack env --prep`'s job). This keeps `jet build`/`run` offline and
-//RS /// deterministic, exactly like the existing pre-fetched-dependency flow
-//RS /// (`collect_dep_dirs` only links deps already present on disk; `jet fetch` is
-//RS /// the separate realize step). So a declared-but-unbuilt library is a friendly
-//RS /// "run `jetpack env --prep`" (E0983), never a silent network fetch.
-//RS fn verify_realized_store_entry(
-//RS     roots: &crate::Store::Roots,
-//RS     entry: &crate::Store::StoreEntry,
-//RS ) -> Result<(), Diagnostic> {
-//RS     let expected = entry.envelope.output_hash.trim();
-//RS     if expected.is_empty() {
-//RS         return Err(Diagnostic::error(
-//RS             "E1206",
-//RS             format!("realized package `{}` has no output hash", entry.name),
-//RS             "the immutable Hangar object cannot be admitted without its recorded content identity"
-//RS                 .to_string(),
-//RS             "repair the shared package store before loading the project".to_string(),
-//RS             None,
-//RS         ));
-//RS     }
-//RS     let actual = jet_pkg_model::Envelope::try_output_hash_of_in_hangar(
-//RS         &entry.out,
-//RS         &roots.hangar_dir(),
-//RS         false,
-//RS     )
-//RS     .map_err(|error| {
-//RS         Diagnostic::error(
-//RS             "E1206",
-//RS             format!("realized package `{}` failed integrity verification", entry.name),
-//RS             error,
-//RS             "repair the shared package store before loading the project".to_string(),
-//RS             None,
-//RS         )
-//RS     })?;
-//RS     if actual != expected {
-//RS         return Err(Diagnostic::error(
-//RS             "E1206",
-//RS             format!("realized package `{}` failed integrity verification", entry.name),
-//RS             format!(
-//RS                 "the immutable Hangar object hash does not match its record (expected {expected}, got {actual})"
-//RS             ),
-//RS             "repair the shared package store before loading the project".to_string(),
-//RS             None,
-//RS         ));
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn collect_pkg_resolution(
-//RS     facts: &crate::Package::PackageFacts,
-//RS ) -> Result<PkgResolution, Diagnostic> {
-//RS     let mut declared_deps = HashSet::new();
-//RS     let mut hangar_deps = HashSet::new();
-//RS     for (name, source) in &facts.deps {
-//RS         // S59/D-CFFI2: a `c@…` native-library dep is a link dep, not a Jet
-//RS         // package — it must not shadow `use <pkg>` resolution (e.g. a dep
-//RS         // named `c`). Skip it here; CFFI.rs reads it for link flags.
-//RS         if matches!(
-//RS             source,
-//RS             crate::Package::DepSource::CLib { .. } | crate::Package::DepSource::Foreign { .. }
-//RS         ) {
-//RS             continue;
-//RS         }
-//RS         declared_deps.insert(name.clone());
-//RS         if !matches!(
-//RS             source,
-//RS             crate::Package::DepSource::Provider {
-//RS                 provider: jet_pkg_model::RefSpec::Source::Path,
-//RS                 ..
-//RS             }
-//RS         ) {
-//RS             hangar_deps.insert(name.clone());
-//RS         }
-//RS     }
-//RS 
-//RS     // A dependency-free package has no reason to inspect the machine-wide
-//RS     // Hangar. Its health is unrelated to this source graph, and making it an
-//RS     // implicit prerequisite lets one damaged package object break every local
-//RS     // script and compiler regression on the machine.
-//RS     if hangar_deps.is_empty() {
-//RS         return Ok(PkgResolution {
-//RS             declared_deps,
-//RS             ..PkgResolution::default()
-//RS         });
-//RS     }
-//RS 
-//RS     let mut realized_libs = HashMap::new();
-//RS     let mut realized_authorities = HashMap::new();
-//RS     let mut realized_exes = HashSet::new();
-//RS     let roots = crate::Store::resolve();
-//RS     let entries = crate::Store::list_checked(&roots).map_err(|error| {
-//RS         Diagnostic::error(
-//RS             "E1206",
-//RS             "could not read the verified package store".to_string(),
-//RS             error.to_string(),
-//RS             "repair the shared package store metadata before loading the project".to_string(),
-//RS             None,
-//RS         )
-//RS     })?;
-//RS     for entry in entries {
-//RS         if !hangar_deps.contains(&entry.name) {
-//RS             continue;
-//RS         }
-//RS         if entry.bin.is_empty() {
-//RS             // A realized `library` stages source with an empty `bin` (U10).
-//RS             let out = PathBuf::from(&entry.out);
-//RS             if !realized_libs.contains_key(&entry.name) {
-//RS                 verify_realized_store_entry(&roots, &entry)?;
-//RS                 let authority = match AuthorityResolver::open_store(&out) {
-//RS                     Ok(authority) => authority,
-//RS                     Err(error) if error.is_missing() => continue,
-//RS                     Err(error) => return Err(error.diagnostic()),
-//RS                 };
-//RS                 let root = authority.root().to_path_buf();
-//RS                 realized_libs.insert(entry.name.clone(), root);
-//RS                 realized_authorities.insert(entry.name.clone(), authority);
-//RS             }
-//RS         } else {
-//RS             realized_exes.insert(entry.name.clone());
-//RS         }
-//RS     }
-//RS 
-//RS     Ok(PkgResolution {
-//RS         realized_libs,
-//RS         realized_authorities,
-//RS         realized_exes,
-//RS         declared_deps,
-//RS     })
-//RS }
-//RS 
-//RS pub fn load_entry(entry_path: &str) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     crate::boot_mir_eval();
-//RS     load_entry_with_overlay(entry_path, None, false)
-//RS }
-//RS 
-//RS /// Load an entry file and retain source provenance for every loader failure.
-//RS pub fn load_entry_with_diagnostics(
-//RS     entry_path: &str,
-//RS ) -> Result<ProgramBundle, Vec<LoaderDiagnostic>> {
-//RS     crate::boot_mir_eval();
-//RS     let (result, _, mut diagnostics) =
-//RS         load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path, &[], false);
-//RS     match result {
-//RS         Ok(bundle) => Ok(bundle),
-//RS         Err(fallback) => {
-//RS             if diagnostics.is_empty() {
-//RS                 let source = checked_source_file(Path::new(entry_path), entry_path)
-//RS                     .ok()
-//RS                     .map(|(_, _, source)| source)
-//RS                     .unwrap_or_default();
-//RS                 diagnostics.extend(fallback.into_iter().map(|diagnostic| LoaderDiagnostic {
-//RS                     file: entry_path.to_string(),
-//RS                     source: source.clone(),
-//RS                     diagnostic,
-//RS                     structure_fact: None,
-//RS                 }));
-//RS             }
-//RS             Err(diagnostics)
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Load a program, optionally substituting in-memory source for one file
-//RS /// (LSP unsaved buffer for the document being edited).
-//RS pub fn load_entry_with_overlay(
-//RS     entry_path: &str,
-//RS     overlay: Option<(&Path, &str)>,
-//RS     for_check: bool,
-//RS ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     crate::boot_mir_eval();
-//RS     let overlays: Vec<(&Path, &str)> = overlay.into_iter().collect();
-//RS     load_entry_with_overlays(entry_path, &overlays, for_check)
-//RS }
-//RS 
-//RS /// Load a program while substituting an ordered set of in-memory sources.
-//RS ///
-//RS /// Codemods use this to re-check a staged multi-file tree without exposing a
-//RS /// partially rewritten tree on disk. Duplicate canonical paths are rejected by
-//RS /// the caller; the loader deliberately uses the last matching overlay so a
-//RS /// staged transaction can replace an earlier snapshot deterministically.
-//RS pub fn load_entry_with_overlays(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     load_entry_with_overlays_and_dependencies(entry_path, overlays, for_check).0
-//RS }
-//RS 
-//RS pub fn load_entry_with_overlays_and_dependencies(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS ) -> (Result<ProgramBundle, Vec<Diagnostic>>, Vec<PathBuf>) {
-//RS     let (result, dependencies, _) =
-//RS         load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path, overlays, for_check);
-//RS     (result, dependencies)
-//RS }
-//RS 
-//RS pub(crate) fn load_entry_with_overlays_and_dependencies_with_diagnostics(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS ) -> (
-//RS     Result<ProgramBundle, Vec<Diagnostic>>,
-//RS     Vec<PathBuf>,
-//RS     Vec<LoaderDiagnostic>,
-//RS ) {
-//RS     let mut dependencies = Vec::new();
-//RS     let mut diagnostics = Vec::new();
-//RS     let mut prepared_frontend = prepare_overlay_frontend(overlays);
-//RS     let result = load_entry_with_overlays_mode_with_sink(
-//RS         entry_path,
-//RS         overlays,
-//RS         for_check,
-//RS         false,
-//RS         &mut dependencies,
-//RS         Some(&mut prepared_frontend),
-//RS         Some(&mut diagnostics),
-//RS     );
-//RS     (result, dependencies, diagnostics)
-//RS }
-//RS 
-//RS pub(crate) fn load_entry_with_overlays_and_prepared_frontend_with_diagnostics(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS     prepared_frontend: &mut PreparedFrontend,
-//RS ) -> (
-//RS     Result<ProgramBundle, Vec<Diagnostic>>,
-//RS     Vec<PathBuf>,
-//RS     Vec<LoaderDiagnostic>,
-//RS ) {
-//RS     let mut dependencies = Vec::new();
-//RS     let mut diagnostics = Vec::new();
-//RS     let result = load_entry_with_overlays_mode_with_sink(
-//RS         entry_path,
-//RS         overlays,
-//RS         for_check,
-//RS         false,
-//RS         &mut dependencies,
-//RS         Some(prepared_frontend),
-//RS         Some(&mut diagnostics),
-//RS     );
-//RS     (result, dependencies, diagnostics)
-//RS }
-//RS 
-//RS /// Structural tooling loads adjacent modules named by `use alias.Item` from
-//RS /// the candidate file's real directory. Normal compilation keeps D-MOD3's
-//RS /// explicit already-loaded-alias rule; this mode supplies the project context
-//RS /// an editor/merge operation has without rewriting the candidate source.
-//RS pub fn load_entry_with_overlays_and_import_root(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     let mut dependencies = Vec::new();
-//RS     load_entry_with_overlays_mode(entry_path, overlays, for_check, true, &mut dependencies)
-//RS }
-//RS 
-//RS fn load_entry_with_overlays_mode(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS     load_adjacent_unqualified: bool,
-//RS     dependencies: &mut Vec<PathBuf>,
-//RS ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     load_entry_with_overlays_mode_with_sink(
-//RS         entry_path,
-//RS         overlays,
-//RS         for_check,
-//RS         load_adjacent_unqualified,
-//RS         dependencies,
-//RS         None,
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS /// Loading is an unbounded-depth recursive descent over user syntax — the
-//RS /// module graph, the parser, and derive/comptime expansion — so the frame
-//RS /// requirement is per source-nesting level, not per program size. This is the
-//RS /// narrowest point every public `load_entry*` shares, so the sized stack is
-//RS /// installed here instead of being chased caller by caller: `Loader::load_entry`
-//RS /// and its overlay siblings are public API, and an embedder holding its own
-//RS /// entry path — or a 2 MiB libtest worker — would otherwise run the descent on
-//RS /// whatever stack it happens to have, aborting the process on overflow.
-//RS ///
-//RS /// [`crate::run_compiler_work`] is the product boundary rather than
-//RS /// `CompilerStack::run_on_compiler_stack` directly, because it owns this
-//RS /// crate's thread-local carry: it tests re-entrancy *first*, so an outer
-//RS /// boundary (a driver funnel, a JIT public entry) makes this run inline with
-//RS /// no capture and no spawn, and on the spawning path it carries the comptime
-//RS /// ambient hooks — the one piece of caller-established thread-local state the
-//RS /// front end reads — across to the worker.
-//RS fn load_entry_with_overlays_mode_with_sink(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS     load_adjacent_unqualified: bool,
-//RS     dependencies: &mut Vec<PathBuf>,
-//RS     prepared_frontend: Option<&mut PreparedFrontend>,
-//RS     sink: Option<&mut Vec<LoaderDiagnostic>>,
-//RS ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     crate::run_compiler_work(move || {
-//RS         load_entry_with_overlays_mode_on_stack(
-//RS             entry_path,
-//RS             overlays,
-//RS             for_check,
-//RS             load_adjacent_unqualified,
-//RS             dependencies,
-//RS             prepared_frontend,
-//RS             sink,
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS fn load_entry_with_overlays_mode_on_stack(
-//RS     entry_path: &str,
-//RS     overlays: &[(&Path, &str)],
-//RS     for_check: bool,
-//RS     load_adjacent_unqualified: bool,
-//RS     dependencies: &mut Vec<PathBuf>,
-//RS     mut prepared_frontend: Option<&mut PreparedFrontend>,
-//RS     mut sink: Option<&mut Vec<LoaderDiagnostic>>,
-//RS ) -> Result<ProgramBundle, Vec<Diagnostic>> {
-//RS     // Check/LSP overlays skip `load_entry`; still need MirBridge before derive/comptime.
-//RS     crate::boot_mir_eval();
-//RS     let entry = PathBuf::from(entry_path);
-//RS     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-//RS     let entry_abs = if entry.is_absolute() {
-//RS         entry
-//RS     } else {
-//RS         cwd.join(&entry)
-//RS     };
-//RS     let entry_abs = normalize_path(&entry_abs);
-//RS 
-//RS     // Walk upward from the entry file's directory to find the nearest package
-//RS     // and workspace roots. A nested workspace is a project boundary: an outer
-//RS     // package must not widen its module search root or make files outside the
-//RS     // nested workspace look importable.
-//RS     let entry_dir = entry_abs
-//RS         .parent()
-//RS         .map(normalize_path)
-//RS         .unwrap_or_else(|| cwd.clone());
-//RS     let workspace_root = match find_workspace_root_with_error(&entry_dir) {
-//RS         Ok(root) => root,
-//RS         Err((_failure_root, error)) => {
-//RS             let diagnostic = error.workspace_diagnostic();
-//RS             let file = if diagnostic.code == "E1334" {
-//RS                 match &error {
-//RS                     AuthorityError::Symlink(path) => path.display().to_string(),
-//RS                     _ => entry_abs.display().to_string(),
-//RS                 }
-//RS             } else {
-//RS                 entry_abs.display().to_string()
-//RS             };
-//RS             return Err(record_loader_error(
-//RS                 &mut sink,
-//RS                 LoaderError::at(&file, "", vec![diagnostic]),
-//RS             ));
-//RS         }
-//RS     };
-//RS     let manifest_root = match find_manifest_root_checked(&entry_dir) {
-//RS         Ok(root) => root.filter(|manifest| {
-//RS             workspace_root
-//RS                 .as_ref()
-//RS                 .is_none_or(|workspace| is_physically_within(workspace, manifest))
-//RS         }),
-//RS         Err(diagnostic) => {
-//RS             return Err(record_loader_error(
-//RS                 &mut sink,
-//RS                 LoaderError::at(&entry_abs.display().to_string(), "", vec![diagnostic]),
-//RS             ));
-//RS         }
-//RS     };
-//RS     let inline_root = match find_inline_package_root_checked(&entry_dir) {
-//RS         Ok(root) => root.filter(|inline| {
-//RS             workspace_root
-//RS                 .as_ref()
-//RS                 .is_none_or(|workspace| is_physically_within(workspace, inline))
-//RS         }),
-//RS         Err(diagnostic) => {
-//RS             return Err(record_loader_error(
-//RS                 &mut sink,
-//RS                 LoaderError::at(&entry_abs.display().to_string(), "", vec![diagnostic]),
-//RS             ));
-//RS         }
-//RS     };
-//RS     if manifest_root.is_none() {
-//RS         if let Some((path, diagnostic)) = stale_manifest_name_diagnostic(&entry_dir) {
-//RS             return Err(record_loader_error(
-//RS                 &mut sink,
-//RS                 LoaderError::at(&path.display().to_string(), "", vec![diagnostic]),
-//RS             ));
-//RS         }
-//RS     }
-//RS     let validates_project_parts = manifest_root.is_some()
-//RS         || inline_root.is_some()
-//RS         || workspace_root.is_some()
-//RS         || entry_abs
-//RS             .file_name()
-//RS             .and_then(|name| name.to_str())
-//RS             .is_some_and(|name| name == Syntax::DEFAULT_ENTRY_FILE);
-//RS     let mut layer_ceiling = None;
-//RS     let mut package_edition = Manifest::latest_edition().to_string();
-//RS     // U11 (D-JPK-SCRIPTDEP1=A): L0203 lints for inline `use pkg#version;`
-//RS     // deps found in the manifest-less branch below, merged into
-//RS     // `parse_teaching` once that's declared.
-//RS     let mut inline_dep_lints: Vec<Diagnostic> = Vec::new();
-//RS     let organization_policy = match load_organization_policy() {
-//RS         Ok(policy) => policy,
-//RS         Err(error) => return Err(record_loader_error(&mut sink, error)),
-//RS     };
-//RS 
-//RS     let (
-//RS         project_root,
-//RS         pkg_dep_dirs,
-//RS         pkg_resolution,
-//RS         package_policy,
-//RS         package_lints_deny,
-//RS         package_guarantees,
-//RS         package_output_roots,
-//RS         package_output_declarations,
-//RS         package_defaults,
-//RS         program_allocator,
-//RS         boundary_policies,
-//RS     ) = if let Some(manifest_dir) = manifest_root {
-//RS         // Found a Package root — validate it and collect dep source paths.
-//RS         let resolver = match AuthorityResolver::open(&manifest_dir) {
-//RS             Ok(resolver) => resolver,
-//RS             Err(error) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &manifest_dir.display().to_string(),
-//RS                         "",
-//RS                         vec![error.diagnostic()],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let checked = match resolver.checked_manifest(std::path::Path::new(".")) {
-//RS             Ok(checked) => checked,
-//RS             Err(error) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &manifest_dir.display().to_string(),
-//RS                         "",
-//RS                         vec![error.diagnostic()],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let pack_path = checked.file.path.clone();
-//RS         let raw = match checked.file.text() {
-//RS             Ok(raw) => raw,
-//RS             Err(error) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &pack_path.display().to_string(),
-//RS                         "",
-//RS                         vec![error.diagnostic()],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         let entry_source = if let Some((_, text)) = overlays
-//RS             .iter()
-//RS             .rev()
-//RS             .find(|(path, _)| normalize_path(path) == entry_abs)
-//RS         {
-//RS             (*text).to_string()
-//RS         } else {
-//RS             match checked_source_file_with_resolver(
-//RS                 &entry_abs,
-//RS                 &entry_abs.display().to_string(),
-//RS                 &resolver,
-//RS             ) {
-//RS                 Ok((_, _, source)) => source,
-//RS                 Err(error) => return Err(record_loader_error(&mut sink, error)),
-//RS             }
-//RS         };
-//RS         match crate::Package::extract_inline_package(&entry_source) {
-//RS             Ok(Some(block)) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &entry_abs.display().to_string(),
-//RS                         &entry_source,
-//RS                         vec![Diagnostic::from_row("E1363", &[], Some(block.span))],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Ok(None) if inline_root.is_some() => {
-//RS                 let error = inline_manifest_conflict_loader_error(
-//RS                     inline_root.as_ref().expect("inline root"),
-//RS                 );
-//RS                 return Err(record_loader_error(&mut sink, error));
-//RS             }
-//RS             Ok(None) => {}
-//RS             Err(error) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &entry_abs.display().to_string(),
-//RS                         &entry_source,
-//RS                         vec![error.diagnostic()],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS         }
-//RS         let package_manifest = match crate::Package::PackageFacts::parse_uncomposed(
-//RS             &raw,
-//RS             pack_path.display().to_string(),
-//RS         ) {
-//RS             Ok(facts) => facts,
-//RS             Err(crate::Package::PackageParseError::BadMemoryPolicy { detail }) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &pack_path.display().to_string(),
-//RS                         &raw,
-//RS                         vec![Diagnostic::error(
-//RS                             "E0355",
-//RS                             "invalid package memory policy".to_string(),
-//RS                             detail,
-//RS                             "write memory floors as `authority: { holds: { deny: [Mem.Alloc, Mem.Rc, Mem.Alloc(above: 65536)] } }` in `package.jet`; keep `policy:` for non-memory settings".to_string(),
-//RS                             None,
-//RS                         )],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Err(error @ crate::Package::PackageParseError::RetiredPolicyField { .. }) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &pack_path.display().to_string(),
-//RS                         &raw,
-//RS                         vec![crate::Manifest::manifest_parse_diagnostic(
-//RS                             &pack_path, &error,
-//RS                         )],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Err(crate::Package::PackageParseError::BadGuaranteePolicy { detail }) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &pack_path.display().to_string(),
-//RS                         &raw,
-//RS                         vec![Diagnostic::error(
-//RS                             "E1206",
-//RS                             "invalid package guarantee policy".to_string(),
-//RS                             detail,
-//RS                             "use `policy: { contain: [\"dependency\"], harden: true }` in `package.jet`; these keys are package-only and tighten-only".to_string(),
-//RS                             None,
-//RS                         )],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Err(crate::Package::PackageParseError::BadAllocatorPolicy { detail }) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(
-//RS                         &pack_path.display().to_string(),
-//RS                         &raw,
-//RS                         vec![Diagnostic::error(
-//RS                             "E1206",
-//RS                             "invalid hosted program allocator".to_string(),
-//RS                             detail,
-//RS                             "use `allocator: mem.Heap` or `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)` in `package.jet`".to_string(),
-//RS                             None,
-//RS                         )],
-//RS                     ),
-//RS                 ));
-//RS             }
-//RS             Err(error) => {
-//RS                 let diagnostic = match &error {
-//RS                     crate::Package::PackageParseError::Composition(detail)
-//RS                         if detail.contains("is a diagnostic code") =>
-//RS                     {
-//RS                         crate::Manifest::manifest_parse_diagnostic(&pack_path, &error)
-//RS                     }
-//RS                     _ => Diagnostic::error(
-//RS                         "E1206",
-//RS                         "invalid package manifest".to_string(),
-//RS                         error.to_string(),
-//RS                         "fix the fields in package.jet before loading the project".to_string(),
-//RS                         None,
-//RS                     ),
-//RS                 };
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(&pack_path.display().to_string(), &raw, vec![diagnostic]),
-//RS                 ));
-//RS             }
-//RS         };
-//RS         match Manifest::parse(&pack_path, &raw) {
-//RS             Err(d) => {
-//RS                 return Err(record_loader_error(
-//RS                     &mut sink,
-//RS                     LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
-//RS                 ));
-//RS             }
-//RS             Ok(mf) => {
-//RS                 layer_ceiling = mf.package.layer;
-//RS                 package_edition = Manifest::effective_edition(&mf);
-//RS                 // Check toolchain constraint (E1208).
-//RS                 if let Err(d) = Manifest::check_toolchain(&mf, &pack_path.display().to_string()) {
-//RS                     return Err(record_loader_error(
-//RS                         &mut sink,
-//RS                         LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
-//RS                     ));
-//RS                 }
-//RS 
-//RS                 // Check the `edition:` field (E2001, D-REL3): a manifest may not
-//RS                 // ask for an edition this toolchain doesn't ship.
-//RS                 if let Err(d) =
-//RS                     Manifest::check_edition_support(&mf, &pack_path.display().to_string())
-//RS                 {
-//RS                     return Err(record_loader_error(
-//RS                         &mut sink,
-//RS                         LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
-//RS                     ));
-//RS                 }
-//RS 
-//RS                 // If a lock exists, reject stale source identities (E1202).
-//RS                 // Completeness is an explicit --locked/--offline concern;
-//RS                 // generated toolchain facts do not lock unrelated paths.
-//RS                 if !mf.dependencies.is_empty() {
-//RS                     let lock_file =
-//RS                         match resolver.checked_file(Path::new(Syntax::UNIFIED_LOCK_FILE)) {
-//RS                             Ok(file) => Some(file),
-//RS                             Err(error) if error.is_missing() => None,
-//RS                             Err(error) => {
-//RS                                 return Err(record_loader_error(
-//RS                                     &mut sink,
-//RS                                     LoaderError::at(
-//RS                                         &manifest_dir.display().to_string(),
-//RS                                         &raw,
-//RS                                         vec![error.diagnostic()],
-//RS                                     ),
-//RS                                 ));
-//RS                             }
-//RS                         };
-//RS                     if let Some(lock_file) = lock_file {
-//RS                         let lock_path = lock_file.path.clone();
-//RS                         let lock_raw = match lock_file.text() {
-//RS                             Ok(raw) => raw,
-//RS                             Err(error) => {
-//RS                                 return Err(record_loader_error(
-//RS                                     &mut sink,
-//RS                                     LoaderError::at(
-//RS                                         &lock_path.display().to_string(),
-//RS                                         "",
-//RS                                         vec![error.diagnostic()],
-//RS                                     ),
-//RS                                 ));
-//RS                             }
-//RS                         };
-//RS                         resolver.revalidate_file(&lock_file).map_err(|error| {
-//RS                             record_loader_error(
-//RS                                 &mut sink,
-//RS                                 LoaderError::at(
-//RS                                     &lock_path.display().to_string(),
-//RS                                     &lock_raw,
-//RS                                     vec![error.diagnostic()],
-//RS                                 ),
-//RS                             )
-//RS                         })?;
-//RS                         match crate::Lock::parse_with_path(&lock_raw, &lock_path) {
-//RS                             Ok(lock) => {
-//RS                                 if let Err(d) = crate::Lock::verify_lock_matches_manifest(
-//RS                                     &lock,
-//RS                                     &mf,
-//RS                                     &lock_path.display().to_string(),
-//RS                                 ) {
-//RS                                     return Err(record_loader_error(
-//RS                                         &mut sink,
-//RS                                         LoaderError::at(
-//RS                                             &lock_path.display().to_string(),
-//RS                                             &lock_raw,
-//RS                                             vec![d],
-//RS                                         ),
-//RS                                     ));
-//RS                                 }
-//RS                             }
-//RS                             Err(diagnostic) => {
-//RS                                 return Err(record_loader_error(
-//RS                                     &mut sink,
-//RS                                     LoaderError::at(
-//RS                                         &lock_path.display().to_string(),
-//RS                                         &lock_raw,
-//RS                                         vec![diagnostic],
-//RS                                     ),
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                         resolver.revalidate_file(&lock_file).map_err(|error| {
-//RS                             record_loader_error(
-//RS                                 &mut sink,
-//RS                                 LoaderError::at(
-//RS                                     &lock_path.display().to_string(),
-//RS                                     &lock_raw,
-//RS                                     vec![error.diagnostic()],
-//RS                                 ),
-//RS                             )
-//RS                         })?;
-//RS                     }
-//RS                     // E1201: dry-resolve path deps for package name conflicts.
-//RS                     if let Err(d) = dry_resolve_path_deps(&mf, &manifest_dir) {
-//RS                         return Err(record_loader_error(
-//RS                             &mut sink,
-//RS                             LoaderError::at(&pack_path.display().to_string(), &raw, vec![d]),
-//RS                         ));
-//RS                     }
-//RS                 }
-//RS                 // E1212/E1213: each packages: entry must have exactly one
-//RS                 // module declaration in the source tree (U10 Chunk 3).
-//RS                 {
-//RS                     for pkg in &package_manifest.packages {
-//RS                         match crate::Package::discover_module_in(&manifest_dir, &pkg.name) {
-//RS                             Ok(_) => {}
-//RS                             Err(crate::Package::DiscoveryError::NotFound { name }) => {
-//RS                                 return Err(record_loader_error(
-//RS                                     &mut sink,
-//RS                                     LoaderError::at(
-//RS                                         &pack_path.display().to_string(),
-//RS                                         &raw,
-//RS                                         vec![Manifest::e1212(
-//RS                                             &pack_path.display().to_string(),
-//RS                                             &name,
-//RS                                         )],
-//RS                                     ),
-//RS                                 ));
-//RS                             }
-//RS                             Err(crate::Package::DiscoveryError::Ambiguous { name, paths }) => {
-//RS                                 return Err(record_loader_error(
-//RS                                     &mut sink,
-//RS                                     LoaderError::at(
-//RS                                         &pack_path.display().to_string(),
-//RS                                         &raw,
-//RS                                         vec![Manifest::e1213(
-//RS                                             &pack_path.display().to_string(),
-//RS                                             &name,
-//RS                                             &paths,
-//RS                                         )],
-//RS                                     ),
-//RS                                 ));
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS 
-//RS 
-//RS                 // Collect package dep source directories for module search.
-//RS                 let dep_dirs = match collect_dep_dirs(&mf, &manifest_dir) {
-//RS                     Ok(dep_dirs) => dep_dirs,
-//RS                     Err(diagnostics) => {
-//RS                         return Err(record_loader_error(
-//RS                             &mut sink,
-//RS                             LoaderError::at(
-//RS                                 &pack_path.display().to_string(),
-//RS                                 &raw,
-//RS                                 diagnostics,
-//RS                             ),
-//RS                         ));
-//RS                     }
-//RS                 };
-//RS                 // U17: declared package kinds + realized library staging dirs.
-//RS                 let resolution = collect_pkg_resolution(&package_manifest).map_err(|diagnostic| {
-//RS                     record_loader_error(
-//RS                         &mut sink,
-//RS                         LoaderError::at(&pack_path.display().to_string(), &raw, vec![diagnostic]),
-//RS                     )
-//RS                 })?;
-//RS                 let mut policy = organization_policy.clone();
-//RS                 let package_guarantees = package_guarantees_for_manifest(&package_manifest);
-//RS                 let package_output_declarations = package_manifest
-//RS 
-//RS                     .outputs
-//RS                     .iter()
-//RS                     .filter_map(|(address, output)| {
-//RS                         let selected = package_manifest
-//RS                             .entry_path(&manifest_dir, output)
-//RS                             .ok()
-//RS                             .flatten()?;
-//RS                         if selected != entry_abs {
-//RS                             return None;
-//RS                         }
-//RS                         let entry = output.entry.clone()?;
-//RS                         let kind = match &output.kind {
-//RS                             crate::Package::PackageOutputKind::Library => OutputKind::Library,
-//RS                             crate::Package::PackageOutputKind::Executable => OutputKind::Executable,
-//RS                             crate::Package::PackageOutputKind::Service => OutputKind::Service,
-//RS                             crate::Package::PackageOutputKind::Check => OutputKind::Check,
-//RS                             crate::Package::PackageOutputKind::Environment => {
-//RS                                 OutputKind::Environment
-//RS                             }
-//RS                             crate::Package::PackageOutputKind::Image => OutputKind::Image,
-//RS                             crate::Package::PackageOutputKind::Bundle => OutputKind::Bundle,
-//RS                             crate::Package::PackageOutputKind::System => OutputKind::System,
-//RS                             crate::Package::PackageOutputKind::Fleet => OutputKind::Fleet,
-//RS                         };
-//RS                         Some((address.clone(), output.name.clone(), kind, entry))
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 let package_defaults = package_manifest
-//RS                     .defaults
-//RS                     .iter()
-//RS                     .map(|(name, address)| (name.clone(), address.clone()))
-//RS                     .collect::<Vec<_>>();
-//RS                 let package_output_roots = package_output_declarations
-//RS                     .iter()
-//RS                     .filter_map(|(_, _, _, entry)| entry.split('.').next())
-//RS                     .filter(|root| !root.is_empty())
-//RS                     .map(str::to_owned)
-//RS                     .collect::<HashSet<_>>();
-//RS                 let package_lints_deny = package_manifest.policy.lints_deny.unwrap_or_default();
-//RS                 policy.extend(package_manifest.policy.declarations);
-//RS                 let source = pack_path.display().to_string();
-//RS                 for declaration in policy
-//RS                     .iter_mut()
-//RS                     .filter(|declaration| declaration.scope == crate::Policy::PolicyScope::Package)
-//RS                 {
-//RS                     declaration.source = source.clone();
-//RS                 }
-//RS                 resolver.revalidate_file(&checked.file).map_err(|error| {
-//RS                     record_loader_error(
-//RS                         &mut sink,
-//RS                         LoaderError::at(
-//RS                             &pack_path.display().to_string(),
-//RS                             &raw,
-//RS                             vec![error.diagnostic()],
-//RS                         ),
-//RS                     )
-//RS                 })?;
-//RS                 let mut dependency_boundary_policies = dep_dirs
-//RS                     .values()
-//RS                     .filter_map(|dependency| dependency.boundary_policy.clone())
-//RS                     .collect::<Vec<_>>();
-//RS                 dependency_boundary_policies.sort_by(|left, right| {
-//RS                     left.package
-//RS                         .cmp(&right.package)
-//RS                         .then_with(|| left.source_root.cmp(&right.source_root))
-//RS                 });
-//RS                 let mut boundary_policies =
-//RS                     vec![ImportBoundaryPolicy::from_manifest(&mf, &manifest_dir)];
-//RS                 boundary_policies.extend(dependency_boundary_policies);
-//RS                 (
-//RS                     manifest_dir,
-//RS                     dep_dirs,
-//RS                     resolution,
-//RS                     policy,
-//RS                     package_lints_deny,
-//RS                     package_guarantees,
-//RS                     package_output_roots,
-//RS                     package_output_declarations,
-//RS                     package_defaults,
-//RS                     package_manifest.allocator.clone(),
-//RS                     boundary_policies,
-//RS                 )
-//RS             }
-//RS         }
-//RS     } else {
-//RS         // R9: no package manifest — single-file mode uses the nearest
-//RS         // workspace root when one exists, otherwise the entry directory.
-//RS         //
-//RS         // U11 (D-JPK-SCRIPTDEP1=A): a manifest-less entry may open with
-//RS         // inline `use pkg#version;` deps. Parse just the entry file to
-//RS         // collect them (load_file below reparses it as part of the normal
-//RS         // module-graph walk — a small duplicate parse keeps this pass
-//RS         // self-contained) and resolve each one up front, so the ordinary
-//RS         // `Module` import resolution (`resolve_module_import`) finds them in
-//RS         // `realized_libs` exactly like a hangar-realized `library` (U17).
-//RS         let mut package_source_root = inline_root.clone().or_else(|| workspace_root.clone());
-//RS         let project_root = package_source_root
-//RS             .clone()
-//RS             .unwrap_or_else(|| entry_dir.clone());
-//RS         let mut resolution = PkgResolution::default();
-//RS         // An overlay owns its path's text (an LSP unsaved buffer, a staged
-//RS         // codemod tree) exactly as it does in `load_file`: a manifest-less
-//RS         // entry may have no bytes on disk at all, so this inline-dep pre-pass
-//RS         // reads the overlay instead of failing the whole load with E0603.
-// END-PORT-PENDING 2039 crates/jet-driver/src/Loader.rs:1-1800
+// Multi-file loading: resolve imports, package authorities, cycles and module names.
+use jet_foundation.Syntax
+use jet_foundation.Diagnostics.[Diagnostic, DiagnosticOrigin, Span]
+use jet_foundation.AST.[ConstDef, EnumLitArg, Expr, ImportDecl, ImportKind, Item, LoadedModule, OutputKind, PackageGuarantees, ProgramBundle, RustConstKind, StrPart, Type, Program, NameLedger]
+use jet_foundation.Names.[normalize_path, StructureFact, StructureFactKind]
+use jet_foundation.Authority.ApplicationAuthority
+use jet_foundation.CompilerStack.COMPILER_STACK_SIZE
+use jet_pkg_model.Authority.[AuthorityError, AuthorityResolver, CheckedFile]
+use jet_pkg_model.[Envelope, RefSpec]
+use jet_driver.[Lexer, Parser, Package, Manifest, Lock, Sema, Foreign, CFFI, ProjectParts, Store, Policy, boot_mir_eval, run_compiler_work]
+use jet_driver.Loader02.[load_manifestless_context, load_project_finish, load_organization_policy, find_manifest_root_checked, find_inline_package_root_checked, checked_inline_package_entry]
+use jet_driver.Loader03.[find_workspace_root_with_error, stale_manifest_name_diagnostic, dry_resolve_path_deps, collect_dep_dirs]
+use jet_driver.Loader04.[relative_display, is_physically_within]
+use core.path.OSPath
+use std.[fs, thread, env]
+use std.collections.HashSet
+use std.sync.[atomic, mpsc, Arc]
 
+// Rust: crates/jet-driver/src/Loader.rs:25
+const MAX_FRONTEND_WORKERS: USize = 8
+// Rust: crates/jet-driver/src/Loader.rs:27
+pub enum PreparedFrontendModule {
+    Parsed(Program, [Diagnostic]), LexFailed([Diagnostic]), ParseFailed([Diagnostic])
+}
+// Rust: crates/jet-driver/src/Loader.rs:33
+pub struct PreparedFrontendEntry { pub source: String, pub module: PreparedFrontendModule }
+// Rust: crates/jet-driver/src/Loader.rs:38
+pub type PreparedFrontend = [OSPath: PreparedFrontendEntry]
+
+// Rust: crates/jet-driver/src/Loader.rs:43
+// Root facts alone enter the shared guarantee carrier; dependencies do not inherit policy.
+pub fn package_guarantees_for_manifest(package_manifest: &Package.PackageFacts) -> PackageGuarantees {
+    memory_denials :: package_manifest.authority.holds.deny.clone().unwrap_or_default().into_iter()
+        .filter(fn(name) { name == "Mem.Rc" || Sema.memory_allocation_bound(name).is_some() }).collect()
+    PackageGuarantees {
+        contain: package_manifest.policy.contain.clone(), harden: package_manifest.policy.harden,
+        dependency_names: package_manifest.deps.keys().cloned().collect(), effects: package_manifest.policy.effects.clone(),
+        unsafe_paths: package_manifest.policy.unsafe_paths.clone(), expert: package_manifest.policy.expert,
+        deps: package_manifest.policy.deps.clone(), lints_deny: package_manifest.policy.lints_deny.clone(),
+        memory_denials, authority_needs: package_manifest.authority.needs.clone(),
+        application_authority: ApplicationAuthority.from_policy(package_manifest.authority.holds.allow.as_deref(),
+            package_manifest.authority.holds.deny.as_deref(), "{package_manifest.origin} authority.holds")
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:81
+pub fn complete_inline_package_facts(facts: &Package.PackageFacts, source_root: &OSPath) -> Result<Unit, Package.PackageParseError> {
+    facts.compose_configs(source_root)?
+    facts.validate_guarantees()?
+    facts.validate_defaults().map_err(fn(error) { Package.PackageParseError.Composition(error.to_string()) })?
+    facts.validate_members_in(source_root)
+}
+// Rust: crates/jet-driver/src/Loader.rs:92
+#Error
+pub struct InlineLockFailure { pub path: OSPath, pub raw: String, pub diagnostic: Diagnostic }
+// Rust: crates/jet-driver/src/Loader.rs:101
+pub fn verify_inline_manifest_lock(package_root: &OSPath, manifest: &Manifest.Manifest) -> Result<Unit, InlineLockFailure> {
+    if manifest.dependencies.is_empty() { return Ok(()) }
+    resolver :: AuthorityResolver.open(package_root).map_err(fn(error) {
+        InlineLockFailure { path: package_root.clone(), raw: "", diagnostic: error.diagnostic() }
+    })?
+    lock_file :: if resolver.checked_file(OSPath.new(Syntax.UNIFIED_LOCK_FILE)) == {
+        Ok(file) -> file
+        Err(error) -> {
+            if error.is_missing() { return Ok(()) }
+            return Err(InlineLockFailure { path: package_root.clone(), raw: "", diagnostic: error.diagnostic() })
+        }
+    }
+    path :: lock_file.path.clone()
+    raw :: lock_file.text().map_err(fn(error) { InlineLockFailure { path: path.clone(), raw: "", diagnostic: error.diagnostic() } })?
+    resolver.revalidate_file(&lock_file).map_err(fn(error) {
+        InlineLockFailure { path: path.clone(), raw: raw.clone(), diagnostic: error.diagnostic() }
+    })?
+    lock :: Lock.parse_with_path(&raw, &path).map_err(fn(diagnostic) {
+        InlineLockFailure { path: path.clone(), raw: raw.clone(), diagnostic }
+    })?
+    Lock.verify_lock_matches_manifest(&lock, manifest, path.display().to_string()).map_err(fn(diagnostic) {
+        InlineLockFailure { path: path.clone(), raw: raw.clone(), diagnostic }
+    })?
+    resolver.revalidate_file(&lock_file).map_err(fn(error) {
+        InlineLockFailure { path, raw, diagnostic: error.diagnostic() }
+    })?
+    Ok(())
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:169
+pub fn package_facts_for_bundle(bundle: &ProgramBundle) -> Result<Package.PackageFacts?, [Diagnostic]> {
+    manifest_root :: find_manifest_root_checked(&bundle.project_root).map_err(fn(diagnostic) { [diagnostic] })?
+    entry :: bundle.modules.get(bundle.entry)
+    inline :: if entry == {
+        Val(module) -> Package.extract_inline_package(&module.source).map_err(fn(error) { [error.diagnostic()] })?
+        Nil -> Nil
+    }
+    if inline is Val(block) {
+        if manifest_root.is_some() {
+            return Err([Diagnostic.error("E1363", "an inline Package conflicts with package.jet",
+                "one project cannot carry both an inline Package block and a package.jet manifest",
+                "remove package.jet or remove the inline Package block", Val(block.span))])
+        }
+        module :: entry.expect("inline package block has an entry module")
+        mut facts := Package.PackageFacts.parse_uncomposed(block.body(&module.source), module.display.clone()).map_err(fn(error) {
+            [Diagnostic.error("E1362", "the inline Package body is malformed", error.to_string(),
+                "fix the inline Package fields, then retry", Val(block.body_span))]
+        })?
+        source_root :: module.path.parent().unwrap_or(OSPath.new("."))
+        complete_inline_package_facts(&facts, source_root).map_err(fn(error) {
+            [Diagnostic.error("E1362", "the inline Package body is malformed", error.to_string(),
+                "fix the inline Package fields, then retry", Val(block.body_span))]
+        })?
+        return Ok(Val(facts))
+    }
+    if find_inline_package_root_checked(&bundle.project_root).map_err(fn(diagnostic) { [diagnostic] })? is Val(inline_root) {
+        if manifest_root.is_some() { return Err(inline_manifest_conflict_loader_error(&inline_root).into_plain()) }
+        return package_facts_for_root(&inline_root)
+    }
+    root :: manifest_root ?? return Ok(Nil)
+    Package.PackageFacts.load_checked(&root).map_err(fn(error) { [error.diagnostic()] })
+}
+// Rust: crates/jet-driver/src/Loader.rs:242
+pub fn package_facts_for_entry(entry: &OSPath) -> Result<Package.PackageFacts?, [Diagnostic]> {
+    source :: fs.read_to_string(entry).map_err(fn(error) {
+        [Diagnostic.error("E1331", "entry `{entry.display()}` cannot be read", error.to_string(), "restore the entry source, then retry", Nil)]
+    })?
+    entry_root :: entry.parent().unwrap_or(OSPath.new("."))
+    manifest_root :: find_manifest_root_checked(entry_root).map_err(fn(diagnostic) { [diagnostic] })?
+    inline_root :: find_inline_package_root_checked(entry_root).map_err(fn(diagnostic) { [diagnostic] })?
+    facts :: package_facts_from_entry_source(entry, &source, manifest_root.clone())?
+    if manifest_root.is_some() && inline_root.is_some() {
+        return Err(inline_manifest_conflict_loader_error(inline_root.as_ref().expect("inline root")).into_plain())
+    }
+    if facts.is_some() || inline_root.is_none() { return Ok(facts) }
+    package_facts_for_root(&inline_root.expect("inline root checked above"))
+}
+// Rust: crates/jet-driver/src/Loader.rs:272
+fn package_facts_from_entry_source(entry: &OSPath, source: String, manifest_root: OSPath?) -> Result<Package.PackageFacts?, [Diagnostic]> {
+    inline :: Package.extract_inline_package(source).map_err(fn(error) { [error.diagnostic()] })?
+    if inline is Val(block) {
+        if manifest_root.is_some() {
+            return Err([Diagnostic.error("E1363", "an inline Package conflicts with package.jet",
+                "one project cannot carry both an inline Package block and a package.jet manifest",
+                "remove package.jet or remove the inline Package block", Val(block.span))])
+        }
+        mut facts := Package.PackageFacts.parse_uncomposed(block.body(source), entry.display().to_string()).map_err(fn(error) {
+            [Diagnostic.error("E1362", "the inline Package body is malformed", error.to_string(), "fix the inline Package fields, then retry", Val(block.body_span))]
+        })?
+        source_root :: entry.parent().unwrap_or(OSPath.new("."))
+        complete_inline_package_facts(&facts, source_root).map_err(fn(error) {
+            [Diagnostic.error("E1362", "the inline Package body is malformed", error.to_string(), "fix the inline Package fields, then retry", Val(block.body_span))]
+        })?
+        return Ok(Val(facts))
+    }
+    root :: manifest_root ?? return Ok(Nil)
+    Package.PackageFacts.load_checked(&root).map_err(fn(error) { [error.diagnostic()] })
+}
+// Rust: crates/jet-driver/src/Loader.rs:323
+fn inline_manifest_conflict_loader_error(root: &OSPath) -> LoaderError {
+    result :: (fn() -> Result<LoaderError, Diagnostic> {
+        resolver :: AuthorityResolver.open(root).map_err(fn(error) { error.diagnostic() })?
+        carrier :: checked_inline_package_entry(&resolver)?.ok_or_else(fn() {
+            Diagnostic.error("E1363", "an inline Package conflicts with package.jet",
+                "one project cannot carry both an inline Package block and a package.jet manifest",
+                "remove package.jet or remove the inline Package block", Nil)
+        })?
+        source :: carrier.text().map_err(fn(error) { error.diagnostic() })?
+        block :: Package.extract_inline_package(&source).map_err(fn(error) { error.diagnostic() })?.ok_or_else(fn() {
+            Diagnostic.error("E1363", "an inline Package conflicts with package.jet",
+                "one project cannot carry both an inline Package block and a package.jet manifest",
+                "remove package.jet or remove the inline Package block", Nil)
+        })?
+        Ok(LoaderError.at(carrier.path.display().to_string(), &source, [Diagnostic.from_row("E1363", [], Val(block.span))]))
+    })()
+    if result == {
+        Ok(error) -> error
+        Err(diagnostic) -> LoaderError.at(root.display().to_string(), "", [diagnostic])
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:365
+pub fn package_facts_for_root(root: &OSPath) -> Result<Package.PackageFacts?, [Diagnostic]> {
+    resolver :: AuthorityResolver.open(root).map_err(fn(error) { [error.diagnostic()] })?
+    manifest_root :: find_manifest_root_checked(resolver.root()).map_err(fn(diagnostic) { [diagnostic] })?
+    entry :: checked_inline_package_entry(&resolver).map_err(fn(diagnostic) { [diagnostic] })?
+    if entry.is_none() {
+        manifest :: manifest_root ?? return Ok(Nil)
+        return Package.PackageFacts.load_checked(&manifest).map_err(fn(error) { [error.diagnostic()] })
+    }
+    entry :: entry.unwrap()
+    source :: entry.text().map_err(fn(error) { [error.diagnostic()] })?
+    facts :: package_facts_from_entry_source(&entry.path, &source, manifest_root)?
+    resolver.revalidate_file(&entry).map_err(fn(error) { [error.diagnostic()] })?
+    Ok(facts)
+}
+// Rust: crates/jet-driver/src/Loader.rs:389
+pub fn package_facts_from_resolver(resolver: &AuthorityResolver) -> Result<Package.PackageFacts?, [Diagnostic]> {
+    if resolver.checked_root_package() == {
+        Ok(package) -> Ok(Val(package.facts))
+        Err(error) -> if error.is_missing() -> Ok(Nil) else -> Err([error.diagnostic()])
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:399
+pub fn prepare_frontend_module(source: String) -> PreparedFrontendModule {
+    source_for_parse :: if Package.mask_inline_package_source(source) == {
+        Ok((masked, _)) -> masked
+        Err(error) -> { return .LexFailed([error.diagnostic()]) }
+    }
+    (tokens, lex_diags) :: Lexer.lex(&source_for_parse)
+    if !lex_diags.is_empty() { return .LexFailed(lex_diags) }
+    if Parser.parse_for_check_with_source(&tokens, &source_for_parse) == {
+        Ok((program, teaching)) -> .Parsed(program, teaching)
+        Err(diagnostics) -> .ParseFailed(diagnostics)
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:414
+fn frontend_worker_count(job_count: USize) -> USize {
+    // GATE #4494: native thread parallelism.
+    available :: thread.available_parallelism().map(fn(value) { value.get() }).unwrap_or(1)
+    job_count.min(available).min(MAX_FRONTEND_WORKERS).max(1)
+}
+// Rust: crates/jet-driver/src/Loader.rs:424
+fn prepare_overlay_frontend(overlays: &[(OSPath, String)]) -> PreparedFrontend {
+    sources :: overlays.iter().map(fn((path, source)) { (normalize_path(path), source.to_string()) }).collect::<[(OSPath, String)]>()
+    prepare_frontend_sources(sources)
+}
+// Rust: crates/jet-driver/src/Loader.rs:435
+pub fn prepare_frontend_sources(sources: [(OSPath, String)]) -> PreparedFrontend {
+    mut sources := sources.into_iter().map(fn((path, source)) { (normalize_path(&path), source) }).collect::<[OSPath: String]>()
+    mut jobs := sources.drain().collect::<[(OSPath, String)]>()
+    jobs.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+    if jobs.is_empty() { return [:] }
+    workers :: frontend_worker_count(jobs.len())
+    // GATE #4494: scoped workers, atomic work index and mpsc result publication.
+    next :: atomic.AtomicUsize.new(0)
+    (sender, receiver) :: mpsc.channel()
+    results :: thread.scope(fn(scope) {
+        jobs_ref :: &jobs
+        next_ref :: &next
+        for _ in 0..workers {
+            sender :: sender.clone()
+            terminator_driver :: Lexer.terminator_driver()
+            _worker :: thread.Builder.new().name("jet-frontend").stack_size(COMPILER_STACK_SIZE)
+                .spawn_scoped(scope, fn() {
+                    Lexer.with_terminator_driver(terminator_driver, fn() {
+                        run_compiler_work(fn() {
+                            loop {
+                                index :: next_ref.fetch_add(1, atomic.Ordering.Relaxed)
+                                (_, source) :: jobs_ref.get(index) ?? break
+                                prepared :: prepare_frontend_module(source)
+                                sender.send((index, prepared)).expect("frontend result receiver remains in scope")
+                            }
+                        })
+                    })
+                }).unwrap_or_else(fn(error) {
+                    jet_foundation.ice(Nil, "could not start frontend worker: {error}")
+                })
+        }
+        drop(sender)
+        mut results: [PreparedFrontendModule?] := (0..jobs.len()).map(fn(_) { Nil }).collect()
+        for (index, prepared) in receiver { results[index] = Val(prepared) }
+        results
+    })
+    jobs.into_iter().zip(results).filter_map(fn(((path, source), prepared)) {
+        prepared.map(fn(module) { (path, PreparedFrontendEntry { source, module }) })
+    }).collect()
+}
+// Rust: crates/jet-driver/src/Loader.rs:496
+pub struct LoaderDiagnostic { pub file: String, pub source: String, pub diagnostic: Diagnostic, pub structure_fact: StructureFact? }
+// Rust: crates/jet-driver/src/Loader.rs:504
+#Error
+pub struct LoaderError { pub diagnostics: [LoaderDiagnostic] }
+impl LoaderError {
+    // Rust: crates/jet-driver/src/Loader.rs:509
+    pub fn at(file: String, source: String, diagnostics: [Diagnostic]) -> Self {
+        Self { diagnostics: diagnostics.into_iter().map(fn(diagnostic) {
+            LoaderDiagnostic { file: file.to_string(), source: source.to_string(), diagnostic, structure_fact: Nil }
+        }).collect() }
+    }
+    // Rust: crates/jet-driver/src/Loader.rs:523
+    pub fn with_structure_fact(mut self: Self, fact: StructureFact?) -> Self {
+        if fact is Val(fact) {
+            if self.diagnostics.first_mut() is Val(diagnostic) { diagnostic.structure_fact = Val(fact) }
+        }
+        self
+    }
+    // Rust: crates/jet-driver/src/Loader.rs:535
+    pub fn with_module_origin(mut self: Self, display: String, path: &OSPath) -> Self {
+        // GATE #4494: the shared diagnostic origin uses the canonical Arc carrier.
+        mut origin: Arc<DiagnosticOrigin>? := Nil
+        for entry in &self.diagnostics {
+            if entry.file != display || entry.source.is_empty() || entry.diagnostic.origin().is_some() { continue }
+            shared :: origin.get_or_insert_with(fn() { Arc.new(DiagnosticOrigin.new(display, path.to_string_lossy().into_owned(), entry.source.clone())) }).clone()
+            entry.diagnostic.set_origin(shared)
+        }
+        self
+    }
+    // Rust: crates/jet-driver/src/Loader.rs:558
+    pub fn into_plain(self: Self) -> [Diagnostic] { self.diagnostics.into_iter().map(fn(entry) { entry.diagnostic }).collect() }
+}
+// Rust: crates/jet-driver/src/Loader.rs:566
+pub fn is_foreign_namespace_import(imp: &ImportDecl) -> Result<Bool, Diagnostic> {
+    active :: Foreign.is_active_namespace_import(imp).map_err(fn(error) { error.diagnostic() })?
+    c :: CFFI.is_c_import(imp).map_err(fn(error) { error.diagnostic() })?
+    Ok(active || c)
+}
+// Rust: crates/jet-driver/src/Loader.rs:573
+pub fn record_loader_error(sink: &(&[LoaderDiagnostic])?, error: LoaderError) -> [Diagnostic] {
+    if sink.as_deref_mut() is Val(sink) { sink.extend(error.diagnostics.iter().cloned()) }
+    error.into_plain()
+}
+// Rust: crates/jet-driver/src/Loader.rs:586
+fn missing_source_diagnostic(display: String) -> Diagnostic {
+    Diagnostic.error("E0603", "can't find the file `{display}`", "a named `.jet` source path must point at an existing file",
+        "check the spelling, or create the missing file", Nil)
+}
+// Rust: crates/jet-driver/src/Loader.rs:596
+pub fn checked_source_file(path: &OSPath, display: String) -> Result<(AuthorityResolver, CheckedFile, String), LoaderError> {
+    parent :: path.parent().unwrap_or(OSPath.new("."))
+    resolver :: AuthorityResolver.open(parent).map_err(fn(error) { LoaderError.at(display, "", [error.diagnostic()]) })?
+    checked_source_file_with_resolver(path, display, &resolver)
+}
+// Rust: crates/jet-driver/src/Loader.rs:606
+// GATE #4494: checked source reads and revalidation use retained descriptor authority.
+pub fn checked_source_file_with_resolver(path: &OSPath, display: String, resolver: &AuthorityResolver) -> Result<(AuthorityResolver, CheckedFile, String), LoaderError> {
+    relative :: path.strip_prefix(resolver.root()).map_err(fn(_) {
+        LoaderError.at(display, "", [AuthorityError.Escapes(path.clone()).diagnostic()])
+    })?
+    _name :: path.file_name().ok_or_else(fn() { LoaderError.at(display, "", [missing_source_diagnostic(display)]) })?
+    checked :: resolver.checked_file(relative).map_err(fn(error) {
+        diagnostic :: if error.is_missing() -> missing_source_diagnostic(display) else -> error.diagnostic()
+        LoaderError.at(display, "", [diagnostic])
+    })?
+    source :: checked.text().map_err(fn(error) { LoaderError.at(display, "", [error.diagnostic()]) })?
+    resolver.revalidate_file(&checked).map_err(fn(error) { LoaderError.at(display, &source, [error.diagnostic()]) })?
+    Ok((resolver.clone(), checked, source))
+}
+// Rust: crates/jet-driver/src/Loader.rs:644
+pub fn project_parts_loader_error(project_root: &OSPath, conflicts: &[ProjectParts.ProjectPartConflict]) -> LoaderError {
+    diagnostics :: conflicts.iter().map(fn(conflict) {
+        path :: conflict.paths.first().cloned()
+        (file, source) :: path.as_ref().and_then(fn(path) {
+            checked_source_file(path, relative_display(project_root, path)).ok().map(fn((_, _, source)) { (path, source) })
+        }).map(fn((path, source)) { (relative_display(project_root, path), source) })
+            .unwrap_or_else(fn() { (project_root.display().to_string(), "") })
+        LoaderDiagnostic { file, source, diagnostic: conflict.diagnostic(project_root, Nil), structure_fact: Nil }
+    }).collect()
+    LoaderError { diagnostics }
+}
+// Rust: crates/jet-driver/src/Loader.rs:675
+pub fn authority_failure_file(project_root: &OSPath, failure: &ProjectParts.ProjectPartScanFailure) -> String {
+    fallback :: relative_display(project_root, &failure.path)
+    if failure.problem.code != "E1334" { return fallback }
+    resolver :: AuthorityResolver.open(&failure.path).ok() ?? return fallback
+    error :: if resolver.discover_source_files() == {
+        Ok(_) -> { return fallback }
+        Err(error) -> error
+    }
+    diagnostic :: error.diagnostic()
+    if diagnostic.code != failure.problem.code || diagnostic.what != failure.problem.what { return fallback }
+    path :: if &error == {
+        .Missing(path) | .Symlink(path) | .AmbiguousManifest(path) | .RetiredManifest(path) | .Escapes(path) | .Changed(path) -> Val(path)
+        .ManifestParse { path, .. } | .Io { path, .. } | .WrongKind { path, .. } | .Invalid { path, .. } -> Val(path)
+        .NestedMembers { member, .. } -> Val(member)
+        .WorkspaceAmbiguous(paths) -> paths.first()
+        .WorkspaceNoModule | .Unsupported(_) -> Nil
+    }
+    path.map(fn(path) { relative_display(project_root, path) }).unwrap_or(fallback)
+}
+// Rust: crates/jet-driver/src/Loader.rs:722
+pub struct PkgResolution {
+    pub realized_libs: [String: OSPath] = [:], pub realized_authorities: [String: AuthorityResolver] = [:],
+    pub realized_exes: HashSet<String> = HashSet.new(), pub declared_deps: HashSet<String> = HashSet.new()
+}
+impl PkgResolution {
+    // Rust: crates/jet-driver/src/Loader.rs:721
+    pub fn default() -> Self { Self {} }
+    // Rust: crates/jet-driver/src/Loader.rs:739
+    pub fn is_empty(self: &Self) -> Bool { self.realized_libs.is_empty() && self.realized_exes.is_empty() && self.declared_deps.is_empty() }
+}
+// Rust: crates/jet-driver/src/Loader.rs:750
+pub struct ImportBoundaryPolicy { pub package: String, pub source_root: OSPath, pub deny: [Package.ImportBoundary] }
+impl ImportBoundaryPolicy {
+    // Rust: crates/jet-driver/src/Loader.rs:757
+    pub fn from_manifest(manifest: &Manifest.Manifest, source_root: &OSPath) -> Self {
+        Self { package: manifest.package.name.clone(), source_root: normalize_path(source_root), deny: manifest.boundaries.clone() }
+    }
+    // Rust: crates/jet-driver/src/Loader.rs:765
+    pub fn module_name(self: &Self, path: &OSPath, items: &[Item]) -> String {
+        name :: items.iter().find_map(fn(item) { if item == { .Module(module) -> Val(module.name.as_str()) _ -> Nil } })
+        if name is Val(name) {
+            package_prefix :: "{self.package}."
+            return if name == self.package || name.starts_with(&package_prefix) -> name.to_string() else -> "{self.package}.{name}"
+        }
+        path :: normalize_path(path)
+        root :: normalize_path(&self.source_root)
+        relative :: path.strip_prefix(&root).unwrap_or(path.as_path())
+        mut parts := relative.components().filter_map(fn(component) { component.as_os_str().to_str() }).map(fn(text) { text.to_owned() }).collect::<[String]>()
+        if parts.last_mut() is Val(last) {
+            stem :: OSPath.new(last).file_stem().and_then(fn(stem) { stem.to_str() }).map(fn(text) { text.to_owned() })
+            if stem is Val(stem) { last = stem }
+        }
+        if parts.len() > 1 && (parts.last() == Val("main") || parts.last() == Val("module")) { _ :: parts.pop() }
+        [self.package.as_str()].into_iter().chain(parts.iter().map(fn(text) { text.as_str() })).collect::<[String]>().join(".")
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:804
+fn boundary_policy_index(policies: &[ImportBoundaryPolicy], path: &OSPath) -> USize? {
+    path :: normalize_path(path)
+    policies.iter().enumerate().filter(fn((_, policy)) { path == policy.source_root || path.strip_prefix(&policy.source_root).is_ok() })
+        .max_by_key(fn((_, policy)) { policy.source_root.components().count() }).map(fn((index, _)) { index })
+}
+// Rust: crates/jet-driver/src/Loader.rs:816
+pub fn import_boundary_violation(policies: &[ImportBoundaryPolicy], from_module: &LoadedModule, to_module: &LoadedModule, span: Span) -> (USize, USize, Diagnostic)? {
+    from_index :: boundary_policy_index(policies, &from_module.path)?
+    to_index :: boundary_policy_index(policies, &to_module.path)?
+    from_policy :: &policies[from_index]
+    from_name :: from_policy.module_name(&from_module.path, &from_module.items)
+    to_name :: policies[to_index].module_name(&to_module.path, &to_module.items)
+    (rule_index, rule) :: from_policy.deny.iter().enumerate().find(fn((_, rule)) { rule.matches(&from_name, &to_name) })?
+    rule_display :: "{rule.from} -> {rule.to}"
+    diagnostic :: Diagnostic.from_row("E0619", [("from", &from_name), ("to", &to_name), ("rule", &rule_display)], Val(span))
+    Val((from_index, rule_index, diagnostic))
+}
+// Rust: crates/jet-driver/src/Loader.rs:845
+pub fn import_edge_fact(policies: &[ImportBoundaryPolicy], from_module: &LoadedModule, to_module: &LoadedModule, span: Span, status: String, detail: String, gate: String?) -> StructureFact? {
+    from_index :: boundary_policy_index(policies, &from_module.path)?
+    to_index :: boundary_policy_index(policies, &to_module.path)?
+    from_policy :: &policies[from_index]
+    from_name :: from_policy.module_name(&from_module.path, &from_module.items)
+    to_name :: policies[to_index].module_name(&to_module.path, &to_module.items)
+    Val(StructureFact.new(StructureFactKind.ImportEdge, "{from_name} -> {to_name}", from_module.display.clone(), span, status, detail, gate))
+}
+// Rust: crates/jet-driver/src/Loader.rs:874
+pub fn record_import_edge_fact(policies: &[ImportBoundaryPolicy], from_module: &LoadedModule, to_module: &LoadedModule, span: Span, ledger: &NameLedger) -> Unit {
+    from_index :: boundary_policy_index(policies, &from_module.path) ?? return
+    _to_index :: boundary_policy_index(policies, &to_module.path) ?? return
+    from_policy :: &policies[from_index]
+    policy_checked :: !from_policy.deny.is_empty()
+    fact :: import_edge_fact(policies, from_module, to_module, span,
+        if policy_checked -> "allowed" else -> "resolved",
+        if policy_checked -> "manifest boundary policy checked" else -> "resolved import edge",
+        if policy_checked -> Val("manifest rule edit") else -> Nil).expect("boundary policy indexes were checked above")
+    ledger.record_structure_fact(fact)
+}
+// Rust: crates/jet-driver/src/Loader.rs:921
+fn verify_realized_store_entry(roots: &Store.Roots, entry: &Store.StoreEntry) -> Result<Unit, Diagnostic> {
+    expected := entry.envelope.output_hash.trim() // #4303
+    if expected.is_empty() {
+        return Err(Diagnostic.error("E1206", "realized package `{entry.name}` has no output hash",
+            "the immutable Hangar object cannot be admitted without its recorded content identity",
+            "repair the shared package store before loading the project", Nil))
+    }
+    actual :: Envelope.try_output_hash_of_in_hangar(&entry.out, &roots.hangar_dir(), false).map_err(fn(error) {
+        Diagnostic.error("E1206", "realized package `{entry.name}` failed integrity verification", error,
+            "repair the shared package store before loading the project", Nil)
+    })?
+    if actual != expected {
+        return Err(Diagnostic.error("E1206", "realized package `{entry.name}` failed integrity verification",
+            "the immutable Hangar object hash does not match its record (expected {expected}, got {actual})",
+            "repair the shared package store before loading the project", Nil))
+    }
+    Ok(())
+}
+// Rust: crates/jet-driver/src/Loader.rs:964
+pub fn collect_pkg_resolution(facts: &Package.PackageFacts) -> Result<PkgResolution, Diagnostic> {
+    mut declared_deps := HashSet.new()
+    mut hangar_deps := HashSet.new()
+    for (name, source) in &facts.deps {
+        if source == { .CLib { .. } | .Foreign { .. } -> true _ -> false } { continue }
+        declared_deps.insert(name.clone())
+        if !(source == { .Provider { provider: RefSpec.Source.Path, .. } -> true _ -> false }) { hangar_deps.insert(name.clone()) }
+    }
+    // Packages without Hangar dependencies must not read the machine-wide store.
+    if hangar_deps.is_empty() { return Ok(PkgResolution { declared_deps }) }
+    mut realized_libs := [:]
+    mut realized_authorities := [:]
+    mut realized_exes := HashSet.new()
+    roots :: Store.resolve()
+    entries :: Store.list_checked(&roots).map_err(fn(error) {
+        Diagnostic.error("E1206", "could not read the verified package store", error.to_string(),
+            "repair the shared package store metadata before loading the project", Nil)
+    })?
+    for entry in entries {
+        if !hangar_deps.contains(&entry.name) { continue }
+        if entry.bin.is_empty() {
+            out :: OSPath.from(&entry.out)
+            if !realized_libs.contains_key(&entry.name) {
+                verify_realized_store_entry(&roots, &entry)?
+                authority :: if AuthorityResolver.open_store(&out) == {
+                    Ok(authority) -> authority
+                    Err(error) -> { if error.is_missing() { continue }; return Err(error.diagnostic()) }
+                }
+                root :: authority.root().to_path_buf()
+                realized_libs.insert(entry.name.clone(), root)
+                realized_authorities.insert(entry.name.clone(), authority)
+            }
+        } else { realized_exes.insert(entry.name.clone()) }
+    }
+    Ok(PkgResolution { realized_libs, realized_authorities, realized_exes, declared_deps })
+}
+// Rust: crates/jet-driver/src/Loader.rs:1046
+pub fn load_entry(entry_path: String) -> Result<ProgramBundle, [Diagnostic]> {
+    boot_mir_eval()
+    load_entry_with_overlay(entry_path, Nil, false)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1052
+pub fn load_entry_with_diagnostics(entry_path: String) -> Result<ProgramBundle, [LoaderDiagnostic]> {
+    boot_mir_eval()
+    (result, _, mut diagnostics) :: load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path, [], false)
+    if result == {
+        Ok(bundle) -> Ok(bundle)
+        Err(fallback) -> {
+            if diagnostics.is_empty() {
+                source :: checked_source_file(OSPath.new(entry_path), entry_path).ok().map(fn((_, _, source)) { source }).unwrap_or_default()
+                diagnostics.extend(fallback.into_iter().map(fn(diagnostic) { LoaderDiagnostic { file: entry_path.to_string(), source: source.clone(), diagnostic, structure_fact: Nil } }))
+            }
+            Err(diagnostics)
+        }
+    }
+}
+// Rust: crates/jet-driver/src/Loader.rs:1080
+pub fn load_entry_with_overlay(entry_path: String, overlay: (OSPath, String)?, for_check: Bool) -> Result<ProgramBundle, [Diagnostic]> {
+    boot_mir_eval()
+    overlays :: overlay.into_iter().collect::<[(OSPath, String)]>()
+    load_entry_with_overlays(entry_path, &overlays, for_check)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1096
+pub fn load_entry_with_overlays(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool) -> Result<ProgramBundle, [Diagnostic]> {
+    load_entry_with_overlays_and_dependencies(entry_path, overlays, for_check).0
+}
+// Rust: crates/jet-driver/src/Loader.rs:1104
+pub fn load_entry_with_overlays_and_dependencies(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool) -> (Result<ProgramBundle, [Diagnostic]>, [OSPath]) {
+    (result, dependencies, _) :: load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path, overlays, for_check)
+    (result, dependencies)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1114
+pub fn load_entry_with_overlays_and_dependencies_with_diagnostics(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool) -> (Result<ProgramBundle, [Diagnostic]>, [OSPath], [LoaderDiagnostic]) {
+    mut dependencies := []
+    mut diagnostics := []
+    mut prepared_frontend := prepare_overlay_frontend(overlays)
+    result :: load_entry_with_overlays_mode_with_sink(entry_path, overlays, for_check, false, &dependencies, Val(&prepared_frontend), Val(&diagnostics))
+    (result, dependencies, diagnostics)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1138
+pub fn load_entry_with_overlays_and_prepared_frontend_with_diagnostics(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool, prepared_frontend: &PreparedFrontend) -> (Result<ProgramBundle, [Diagnostic]>, [OSPath], [LoaderDiagnostic]) {
+    mut dependencies := []
+    mut diagnostics := []
+    result :: load_entry_with_overlays_mode_with_sink(entry_path, overlays, for_check, false, &dependencies, Val(prepared_frontend), Val(&diagnostics))
+    (result, dependencies, diagnostics)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1166
+pub fn load_entry_with_overlays_and_import_root(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool) -> Result<ProgramBundle, [Diagnostic]> {
+    mut dependencies := []
+    load_entry_with_overlays_mode(entry_path, overlays, for_check, true, &dependencies)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1175
+fn load_entry_with_overlays_mode(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool, load_adjacent_unqualified: Bool, dependencies: &[OSPath]) -> Result<ProgramBundle, [Diagnostic]> {
+    load_entry_with_overlays_mode_with_sink(entry_path, overlays, for_check, load_adjacent_unqualified, dependencies, Nil, Nil)
+}
+// Rust: crates/jet-driver/src/Loader.rs:1209
+// The compiler-work boundary supplies the sized stack and carries comptime hooks.
+fn load_entry_with_overlays_mode_with_sink(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool, load_adjacent_unqualified: Bool, dependencies: &[OSPath], prepared_frontend: (&PreparedFrontend)?, sink: (&[LoaderDiagnostic])?) -> Result<ProgramBundle, [Diagnostic]> {
+    run_compiler_work(fn() { load_entry_with_overlays_mode_on_stack(entry_path, overlays, for_check, load_adjacent_unqualified, dependencies, prepared_frontend, sink) })
+}
+// Rust: crates/jet-driver/src/Loader.rs:1231
+fn load_entry_with_overlays_mode_on_stack(entry_path: String, overlays: &[(OSPath, String)], for_check: Bool, load_adjacent_unqualified: Bool, dependencies: &[OSPath], mut prepared_frontend: (&PreparedFrontend)?, mut sink: (&[LoaderDiagnostic])?) -> Result<ProgramBundle, [Diagnostic]> {
+    boot_mir_eval()
+    entry :: OSPath.from(entry_path)
+    cwd :: env.current_dir().unwrap_or_else(fn(_) { OSPath.from(".") })
+    entry_abs :: normalize_path(&(if entry.is_absolute() -> entry else -> cwd.join(&entry)))
+    entry_dir :: entry_abs.parent().map(normalize_path).unwrap_or_else(fn() { cwd.clone() })
+    workspace_root :: if find_workspace_root_with_error(&entry_dir) == {
+        Ok(root) -> root
+        Err((_failure_root, error)) -> {
+            diagnostic :: error.workspace_diagnostic()
+            file :: if diagnostic.code == "E1334" -> if &error == {
+                .Symlink(path) -> path.display().to_string()
+                _ -> entry_abs.display().to_string()
+            } else -> entry_abs.display().to_string()
+            return Err(record_loader_error(&sink, LoaderError.at(&file, "", [diagnostic])))
+        }
+    }
+    manifest_root :: if find_manifest_root_checked(&entry_dir) == {
+        Ok(root) -> root.filter(fn(manifest) { workspace_root.as_ref().is_none_or(fn(workspace) { is_physically_within(workspace, manifest) }) })
+        Err(diagnostic) -> { return Err(record_loader_error(&sink, LoaderError.at(entry_abs.display().to_string(), "", [diagnostic]))) }
+    }
+    inline_root :: if find_inline_package_root_checked(&entry_dir) == {
+        Ok(root) -> root.filter(fn(inline) { workspace_root.as_ref().is_none_or(fn(workspace) { is_physically_within(workspace, inline) }) })
+        Err(diagnostic) -> { return Err(record_loader_error(&sink, LoaderError.at(entry_abs.display().to_string(), "", [diagnostic]))) }
+    }
+    if manifest_root.is_none() {
+        if stale_manifest_name_diagnostic(&entry_dir) is Val((path, diagnostic)) {
+            return Err(record_loader_error(&sink, LoaderError.at(path.display().to_string(), "", [diagnostic])))
+        }
+    }
+    validates_project_parts :: manifest_root.is_some() || inline_root.is_some() || workspace_root.is_some() ||
+        entry_abs.file_name().and_then(fn(name) { name.to_str() }).is_some_and(fn(name) { name == Syntax.DEFAULT_ENTRY_FILE })
+    mut layer_ceiling := Nil
+    mut package_edition := Manifest.latest_edition().to_string()
+    mut inline_dep_lints: [Diagnostic] := []
+    organization_policy :: if load_organization_policy() == {
+        Ok(policy) -> policy
+        Err(error) -> { return Err(record_loader_error(&sink, error)) }
+    }
+    (project_root, pkg_dep_dirs, pkg_resolution, package_policy, package_lints_deny, package_guarantees,
+        package_output_roots, package_output_declarations, package_defaults, program_allocator, boundary_policies) :: if manifest_root is Val(manifest_dir) {
+        resolver :: if AuthorityResolver.open(&manifest_dir) == {
+            Ok(resolver) -> resolver
+            Err(error) -> { return Err(record_loader_error(&sink, LoaderError.at(manifest_dir.display().to_string(), "", [error.diagnostic()]))) }
+        }
+        checked :: if resolver.checked_manifest(OSPath.new(".")) == {
+            Ok(checked) -> checked
+            Err(error) -> { return Err(record_loader_error(&sink, LoaderError.at(manifest_dir.display().to_string(), "", [error.diagnostic()]))) }
+        }
+        pack_path :: checked.file.path.clone()
+        raw :: if checked.file.text() == {
+            Ok(raw) -> raw
+            Err(error) -> { return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), "", [error.diagnostic()]))) }
+        }
+        entry_source :: if overlays.iter().rev().find(fn((path, _)) { normalize_path(path) == entry_abs }) is Val((_, text)) {
+            text.to_string()
+        } else {
+            if checked_source_file_with_resolver(&entry_abs, entry_abs.display().to_string(), &resolver) == {
+                Ok((_, _, source)) -> source
+                Err(error) -> { return Err(record_loader_error(&sink, error)) }
+            }
+        }
+        if Package.extract_inline_package(&entry_source) == {
+            Ok(Val(block)) -> {
+                return Err(record_loader_error(&sink, LoaderError.at(entry_abs.display().to_string(), &entry_source, [Diagnostic.from_row("E1363", [], Val(block.span))])))
+            }
+            Ok(Nil) -> {
+                if inline_root.is_some() { return Err(record_loader_error(&sink, inline_manifest_conflict_loader_error(inline_root.as_ref().expect("inline root")))) }
+            }
+            Err(error) -> { return Err(record_loader_error(&sink, LoaderError.at(entry_abs.display().to_string(), &entry_source, [error.diagnostic()]))) }
+        }
+        package_manifest :: if Package.PackageFacts.parse_uncomposed(&raw, pack_path.display().to_string()) == {
+            Ok(facts) -> facts
+            Err(Package.PackageParseError.BadMemoryPolicy { detail }) -> {
+                return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw,
+                    [Diagnostic.error("E0355", "invalid package memory policy", detail,
+                        "write memory floors as `authority: { holds: { deny: [Mem.Alloc, Mem.Rc, Mem.Alloc(above: 65536)] } }` in `package.jet`; keep `policy:` for non-memory settings", Nil)])))
+            }
+            Err(error @ Package.PackageParseError.RetiredPolicyField { .. }) -> {
+                return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [Manifest.manifest_parse_diagnostic(&pack_path, &error)])))
+            }
+            Err(Package.PackageParseError.BadGuaranteePolicy { detail }) -> {
+                return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw,
+                    [Diagnostic.error("E1206", "invalid package guarantee policy", detail,
+                        "use `policy: { contain: [\"dependency\"], harden: true }` in `package.jet`; these keys are package-only and tighten-only", Nil)])))
+            }
+            Err(Package.PackageParseError.BadAllocatorPolicy { detail }) -> {
+                return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw,
+                    [Diagnostic.error("E1206", "invalid hosted program allocator", detail,
+                        "use `allocator: mem.Heap` or `allocator: mem.Counting.over(mem.Heap, cap: 2.gb)` in `package.jet`", Nil)])))
+            }
+            Err(error) -> {
+                diagnostic :: if &error == {
+                    Package.PackageParseError.Composition(detail) -> if detail.contains("is a diagnostic code") -> Manifest.manifest_parse_diagnostic(&pack_path, &error)
+                        else -> Diagnostic.error("E1206", "invalid package manifest", error.to_string(), "fix the fields in package.jet before loading the project", Nil)
+                    _ -> Diagnostic.error("E1206", "invalid package manifest", error.to_string(), "fix the fields in package.jet before loading the project", Nil)
+                }
+                return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [diagnostic])))
+            }
+        }
+        if Manifest.parse(&pack_path, &raw) == {
+            Err(d) -> { return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [d]))) }
+            Ok(mf) -> {
+                layer_ceiling = mf.package.layer
+                package_edition = Manifest.effective_edition(&mf)
+                if Manifest.check_toolchain(&mf, pack_path.display().to_string()) is Err(d) {
+                    return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [d])))
+                }
+                if Manifest.check_edition_support(&mf, pack_path.display().to_string()) is Err(d) {
+                    return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [d])))
+                }
+                if !mf.dependencies.is_empty() {
+                    lock_file :: if resolver.checked_file(OSPath.new(Syntax.UNIFIED_LOCK_FILE)) == {
+                        Ok(file) -> Val(file)
+                        Err(error) -> {
+                            if error.is_missing() -> Nil else -> {
+                                return Err(record_loader_error(&sink, LoaderError.at(manifest_dir.display().to_string(), &raw, [error.diagnostic()])))
+                            }
+                        }
+                    }
+                    if lock_file is Val(lock_file) {
+                        lock_path :: lock_file.path.clone()
+                        lock_raw :: if lock_file.text() == {
+                            Ok(raw) -> raw
+                            Err(error) -> { return Err(record_loader_error(&sink, LoaderError.at(lock_path.display().to_string(), "", [error.diagnostic()]))) }
+                        }
+                        resolver.revalidate_file(&lock_file).map_err(fn(error) { record_loader_error(&sink, LoaderError.at(lock_path.display().to_string(), &lock_raw, [error.diagnostic()])) })?
+                        if Lock.parse_with_path(&lock_raw, &lock_path) == {
+                            Ok(lock) -> {
+                                if Lock.verify_lock_matches_manifest(&lock, &mf, lock_path.display().to_string()) is Err(d) {
+                                    return Err(record_loader_error(&sink, LoaderError.at(lock_path.display().to_string(), &lock_raw, [d])))
+                                }
+                            }
+                            Err(diagnostic) -> { return Err(record_loader_error(&sink, LoaderError.at(lock_path.display().to_string(), &lock_raw, [diagnostic]))) }
+                        }
+                        resolver.revalidate_file(&lock_file).map_err(fn(error) { record_loader_error(&sink, LoaderError.at(lock_path.display().to_string(), &lock_raw, [error.diagnostic()])) })?
+                    }
+                    if dry_resolve_path_deps(&mf, &manifest_dir) is Err(d) {
+                        return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [d])))
+                    }
+                }
+                for pkg in &package_manifest.packages {
+                    if Package.discover_module_in(&manifest_dir, &pkg.name) == {
+                        Ok(_) -> {}
+                        Err(Package.DiscoveryError.NotFound { name }) -> {
+                            return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [Manifest.e1212(pack_path.display().to_string(), &name)])))
+                        }
+                        Err(Package.DiscoveryError.Ambiguous { name, paths }) -> {
+                            return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [Manifest.e1213(pack_path.display().to_string(), &name, &paths)])))
+                        }
+                    }
+                }
+                dep_dirs :: if collect_dep_dirs(&mf, &manifest_dir) == {
+                    Ok(dep_dirs) -> dep_dirs
+                    Err(diagnostics) -> { return Err(record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, diagnostics))) }
+                }
+                resolution :: collect_pkg_resolution(&package_manifest).map_err(fn(diagnostic) { record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [diagnostic])) })?
+                mut policy := organization_policy.clone()
+                package_guarantees :: package_guarantees_for_manifest(&package_manifest)
+                // Rust uses ordered output/default maps: preserve their key order.
+                output_addresses :: package_manifest.outputs.keys().cloned().collect::<[String]>().sorted()
+                package_output_declarations :: output_addresses.iter().filter_map(fn(address) {
+                    output :: &package_manifest.outputs[address]
+                    selected :: package_manifest.entry_path(&manifest_dir, output).ok().flatten()?
+                    if selected != entry_abs { return Nil }
+                    entry :: output.entry.clone()?
+                    kind :: if &output.kind == {
+                        .Library -> OutputKind.Library .Executable -> OutputKind.Executable .Service -> OutputKind.Service
+                        .Check -> OutputKind.Check .Environment -> OutputKind.Environment .Image -> OutputKind.Image
+                        .Bundle -> OutputKind.Bundle .System -> OutputKind.System .Fleet -> OutputKind.Fleet
+                    }
+                    Val((address.clone(), output.name.clone(), kind, entry))
+                }).collect::<[(String, String, OutputKind, String)]>()
+                default_names :: package_manifest.defaults.keys().cloned().collect::<[String]>().sorted()
+                package_defaults :: default_names.iter().map(fn(name) { (name.clone(), package_manifest.defaults[name].clone()) }).collect::<[(String, String)]>()
+                package_output_roots :: package_output_declarations.iter().filter_map(fn((_, _, _, entry)) { entry.split('.').next() })
+                    .filter(fn(root) { !root.is_empty() }).map(fn(root) { root.to_owned() }).collect::<HashSet<String>>()
+                package_lints_deny :: package_manifest.policy.lints_deny.unwrap_or_default()
+                policy.extend(package_manifest.policy.declarations)
+                source :: pack_path.display().to_string()
+                for declaration in policy.iter_mut().filter(fn(declaration) { declaration.scope == Policy.PolicyScope.Package }) { declaration.source = source.clone() }
+                resolver.revalidate_file(&checked.file).map_err(fn(error) { record_loader_error(&sink, LoaderError.at(pack_path.display().to_string(), &raw, [error.diagnostic()])) })?
+                mut dependency_boundary_policies := dep_dirs.values().filter_map(fn(dependency) { dependency.boundary_policy.clone() }).collect::<[ImportBoundaryPolicy]>()
+                dependency_boundary_policies.sort_by(fn(left, right) { left.package.cmp(&right.package).then_with(fn() { left.source_root.cmp(&right.source_root) }) })
+                mut boundary_policies := [ImportBoundaryPolicy.from_manifest(&mf, &manifest_dir)]
+                boundary_policies.extend(dependency_boundary_policies)
+                (manifest_dir, dep_dirs, resolution, policy, package_lints_deny, package_guarantees, package_output_roots,
+                    package_output_declarations, package_defaults, package_manifest.allocator.clone(), boundary_policies)
+            }
+        }
+    } else {
+        // Rust: crates/jet-driver/src/Loader.rs:1792
+        load_manifestless_context(&entry_abs, &entry_dir, inline_root, workspace_root, overlays,
+            &organization_policy, &sink, &inline_dep_lints, &layer_ceiling, &package_edition)?
+    }
+    load_project_finish(entry_path, &entry_abs, project_root, pkg_dep_dirs, pkg_resolution, package_policy,
+        package_lints_deny, package_guarantees, package_output_roots, package_output_declarations,
+        package_defaults, program_allocator, boundary_policies, layer_ceiling, package_edition,
+        inline_dep_lints, overlays, for_check, load_adjacent_unqualified, validates_project_parts,
+        dependencies, prepared_frontend, &sink)
+}

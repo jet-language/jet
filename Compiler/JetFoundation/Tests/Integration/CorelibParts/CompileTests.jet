@@ -1,0 +1,622 @@
+use jet_foundation.Tests.Integration.CorelibParts.Compile.*
+use jet_foundation.Tests.Integration.CorelibParts.PlatformEmail.[build_and_run, compile_temp, run_web_js_source]
+use jet_foundation.Tests.Integration.Common as common
+use jet.[compile_with_path, render_diagnostics]
+use jet.Driver
+use std.fs
+use std.env
+use std.process.[Command, Stdio]
+use std.io.[BufReader, BufRead, Read]
+use std.time.[Duration, Instant]
+use std.thread
+use std.sync.mpsc
+use core.sys.target // GATE #4483: Unix-only real-signal tests.
+// GATE #4494: native compiler, process, threads, pipes and filesystem fixtures.
+
+// Rust: tests/corelib_parts/compile.rs:2
+#Test("trivial_aot_without_scheduler_compiles") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_trivial_without_scheduler_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "trivial_without_scheduler", "fn run() -> {}", &[], None)
+    assert_eq(code, 0, "trivial AOT failed: {stderr}")
+    assert_eq(stdout, "")
+    assert_eq(stderr, "")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:21
+#Test("range_interval_proves_fixed_array_index") {
+    src :: """
+tag Checked { deny: [Net] }
+Die :: distinct Int(1..6)
+fn pick(faces: [String#6], roll: Die) -[]> String {
+    return faces[roll.raw() - 1]
+}
+fn run() -> {
+    faces :: [String#6]{ "zero", "one", "two", "three", "four", "five" }
+    print(pick(faces, Die.from_int(3)))
+    print(pick(faces, #Checked Die.from_int(1)))
+}
+"""
+    dir :: env.temp_dir().join("jet_corelib_range_interval_index_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, aot_stdout, stderr) :: build_and_run(&dir, "range_interval_index", src, &[], None)
+    assert_eq(code, 0, "fixed-list AOT failed: {stderr}")
+    assert_eq(aot_stdout, "two\nzero\n")
+    path :: dir.join("range_interval_index.jet")
+    // Retired resident/interpreter representation checks become native O0/O1/O2 equality.
+    loop profile in ["debug", "dev", "release"] {
+        output :: Command.new(env.bin_exe("jet")).args(["run", path.to_str().unwrap(), "--profile={profile}"]).output().unwrap()
+        assert_eq(output.status.code(), Some(0), "{profile} fixed-list run failed: {String.from_utf8_lossy(&output.stderr)}")
+        assert(output.stderr.is_empty())
+        assert_eq(String.from_utf8_lossy(&output.stdout), aot_stdout, "{profile} fixed-list output drifted")
+    }
+    web_src :: """
+#Target(Web)
+tag Checked { deny: [Net] }
+Die :: distinct Int(1..6)
+#Target(JS)
+fn pick(faces: [String#6], roll: Die) -[]> String {
+    return faces[roll.raw() - 1]
+}
+#Target(JS)
+fn run() -> {
+    faces :: [String#6]{ "zero", "one", "two", "three", "four", "five" }
+    print(pick(faces, Die.from_int(3)))
+    print(pick(faces, #Checked Die.from_int(1)))
+}
+"""
+    if run_web_js_source(&dir, "range_interval_index_web", web_src) == { Some(web_stdout) -> assert_eq(web_stdout, "two\nzero\n"), None -> {} }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:105
+#Test("canonical_time_plane_reaches_web_js") {
+    dir :: env.temp_dir().join("jet_corelib_canonical_time_web_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+#Target(Web)
+use core.time as time
+#Target(JS)
+fn run() -> {
+    wait :: 500ms
+    origin :: time.instant()
+    later :: origin + 5min
+    speed :: 12meter / 2s
+    print(wait.in(.Milliseconds) ?? panic("wait"))
+    print((later - origin).in(.Minutes) ?? panic("delta"))
+}
+"""
+    if run_web_js_source(&dir, "canonical_time_plane_web", src) == { Some(web_stdout) -> assert_eq(web_stdout, "500\n5\n"), None -> {} }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:133
+#Test("parenthesized_view_place_return_keeps_parameter_provenance") {
+    if !common.have_rustc() { eprintln("note: skipping parenthesized View return test (need rustc)"); return }
+    src :: """
+fn first(values: [Int]) -[]> View<Int> {
+    return (values[0..1])
+}
+fn run() -> {
+    values :: [7, 8]
+    selected :: first(values)
+    print(selected[0])
+}
+"""
+    dir :: env.temp_dir().join("jet_corelib_parenthesized_view_return_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, aot_stdout, stderr) :: build_and_run(&dir, "parenthesized_view_return", src, &[], None)
+    assert_eq(code, 0, "parenthesized View return AOT failed: {stderr}")
+    assert_eq(aot_stdout, "7\n")
+    path :: dir.join("parenthesized_view_return.jet")
+    fs.write(&path, src).unwrap()
+    loop profile in ["debug", "dev", "release"] {
+        output :: Command.new(env.bin_exe("jet")).args(["run", path.to_str().unwrap(), "--profile={profile}"]).output().unwrap()
+        assert_eq(output.status.code(), Some(0), "{profile} View return failed: {String.from_utf8_lossy(&output.stderr)}")
+        assert(output.stderr.is_empty())
+        assert_eq(String.from_utf8_lossy(&output.stdout), aot_stdout, "{profile} View return output drifted")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:198
+#Test("fnmut_collection_callback_preserves_capture_storage") {
+    if !common.have_rustc() { eprintln("note: skipping FnMut collection callback test (need rustc)"); return }
+    src :: """
+fn run() -> {
+    values :: [1, 2, 3, 4]
+    total := 0
+    values.each((n: Int) -> { total = total + n })
+    print(total)
+}
+"""
+    dir :: env.temp_dir().join("jet_corelib_fnmut_collection_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, aot_stdout, stderr) :: build_and_run(&dir, "fnmut_collection", src, &[], None)
+    assert_eq(code, 0, "FnMut collection AOT failed: {stderr}")
+    assert_eq(aot_stdout, "10\n")
+    path :: dir.join("fnmut_collection.jet")
+    fs.write(&path, src).unwrap()
+    loop profile in ["debug", "dev", "release"] {
+        output :: Command.new(env.bin_exe("jet")).args(["run", path.to_str().unwrap(), "--profile={profile}"]).output().unwrap()
+        assert_eq(output.status.code(), Some(0), "{profile} FnMut run failed: {String.from_utf8_lossy(&output.stderr)}")
+        assert(output.stderr.is_empty())
+        assert_eq(String.from_utf8_lossy(&output.stdout), aot_stdout, "{profile} FnMut capture update was lost")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:260
+#Test("comptime_find_glob_records_sorted_lock_inputs") {
+    dir :: env.temp_dir().join("jet_comptime_find_{std.process.id()}_lock")
+    fs.create_dir_all(dir.join("inputs/nested")).unwrap()
+    fs.write(dir.join("inputs/alpha-1.txt"), "alpha").unwrap()
+    fs.write(dir.join("inputs/nested/beta-2.txt"), "beta").unwrap()
+    fs.write(dir.join("inputs/nested/gamma-3.txt"), "gamma").unwrap()
+    fs.write(dir.join("inputs/nested/beta-2.md"), "skip").unwrap()
+    src :: """
+PATHS :: prep { find("inputs/**/{{alpha,beta}}-[0-9].t?t") }
+fn run() -> {
+    print(PATHS.join("|"))
+}
+"""
+    path :: dir.join("main.jet")
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: compile_with_path(src, &shown).unwrap_or_else(fn(diags) -> panic("front end rejected find fixture:\n{render_diagnostics(&shown, src, &diags)}"))
+    paths :: out.comptime_inputs.iter().map(fn(input) -> input.path.as_str()).collect()
+    assert_eq(paths, ["inputs/alpha-1.txt", "inputs/nested/beta-2.txt"])
+    assert(out.comptime_inputs.iter().all(fn(input) -> input.hash.len() == 64))
+}
+// Rust: tests/corelib_parts/compile.rs:304
+#Test("core_args_audit_surface_runs_and_reports_suggestions") {
+    dir :: env.temp_dir().join("jet_corelib_args_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.args as args
+fn run() -> {
+    spec :: args.spec()
+        .flag_short("verbose", "v", "print extra detail")
+        .option_env("profile", "config profile", "NAME", "JET_ARGS_PROFILE")
+        .option_int("jobs", "worker count", "N")
+        .repeat("tag", "classification tag", "TAG")
+    parsed :: spec.parse(["tool", "-vv", "--jobs", "8", "--tag", "a", "--tag=b"]) ?? panic("parse failed")
+    print(parsed.flag("verbose"))
+    print(parsed.option("profile") ?? "")
+    print(parsed.option_int("jobs") ?? 0)
+    print(parsed.options("tag").len())
+    if spec.parse(["tool", "--verbse"]) == {
+        .Ok(_) -> { print("unexpected") }
+        .Err(e) -> { print(e) }
+    }
+}
+"""
+    (_code, stdout, stderr) :: build_and_run(&dir, "args_audit", src, &[("JET_ARGS_PROFILE", "dev")], None)
+    assert(stdout.contains("unknown option `--verbse`") && stdout.contains("did you mean `--verbose`?"), "core.args suggestion missing:\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    assert(stdout.starts_with("true\ndev\n8\n2\n"))
+}
+// Rust: tests/corelib_parts/compile.rs:347
+#Test("core_args_parse_or_exit_handles_cli_boundaries_and_keeps_parse_pure") {
+    dir :: env.temp_dir().join("jet_corelib_args_exit_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.args as args
+use core.term as io
+fn run() -> {
+    spec :: args.spec().flag("verbose", "print extra detail")
+    parsed :: spec.parse_or_exit(process.argv())
+    embedded :: spec.parse(["embedded", "--verbose"]) ?? panic("pure parse failed")
+    print(parsed.flag("verbose"))
+    print(embedded.flag("verbose"))
+}
+"""
+    path :: dir.join("args_parse_or_exit.jet")
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: compile_with_path(src, &shown).unwrap_or_else(fn(diags) -> panic("front end rejected parse_or_exit fixture:\n{render_diagnostics(&shown, src, &diags)}"))
+    rust :: dir.join("args_parse_or_exit.rs")
+    bin :: dir.join("args_parse_or_exit")
+    command := Command.new("rustc")
+    _runtime_lease :: common.add_generated_rust(&command, &rust, &out.rust, out.ffi.is_some(), &[])
+    built :: command.arg("-o").arg(&bin).output().unwrap()
+    assert(built.status.success(), "rustc rejected generated code:\n{String.from_utf8_lossy(&built.stderr)}")
+    normal :: Command.new(&bin).arg("--verbose").output().unwrap()
+    assert_eq(normal.status.code(), Some(0))
+    assert_eq(String.from_utf8_lossy(&normal.stdout), "true\ntrue\n")
+    assert(normal.stderr.is_empty())
+    help :: Command.new(&bin).arg("--help").output().unwrap()
+    assert_eq(help.status.code(), Some(0))
+    help_stdout :: String.from_utf8_lossy(&help.stdout)
+    assert(help_stdout.contains("Usage: args_parse_or_exit [options]"))
+    assert(help_stdout.contains("--help"))
+    assert(help.stderr.is_empty())
+    bad :: Command.new(&bin).arg("--verbse").output().unwrap()
+    assert_eq(bad.status.code(), Some(2))
+    assert(bad.stdout.is_empty())
+    bad_stderr :: String.from_utf8_lossy(&bad.stderr)
+    assert(bad_stderr.contains("unknown option `--verbse`"))
+    assert(bad_stderr.contains("did you mean `--verbose`?"))
+}
+// Rust: tests/corelib_parts/compile.rs:407
+#Test("core_args_parse_or_exit_rejects_surplus_bare_arguments") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_args_surplus_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.args as args
+use core.process as process
+fn run() -> {
+    spec :: args.spec()
+        .option("name", "display name", "NAME")
+        .positional("name", "display name")
+    parsed :: spec.parse_or_exit(process.argv())
+    print(parsed.option("name") ?? "none")
+}
+"""
+    path :: dir.join("args_surplus.jet")
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy()
+    out :: compile_with_path(src, &shown).unwrap_or_else(fn(diags) -> panic("front end rejected surplus builder fixture:\n{render_diagnostics(&shown, src, &diags)}"))
+    rust :: dir.join("args_surplus.rs")
+    bin :: dir.join("args_surplus")
+    command := Command.new("rustc")
+    _runtime_lease :: common.add_generated_rust(&command, &rust, &out.rust, out.ffi.is_some(), &[])
+    built :: command.arg("-o").arg(&bin).output().unwrap()
+    assert(built.status.success(), "rustc rejected generated code:\n{String.from_utf8_lossy(&built.stderr)}")
+    run :: fn(args) -> Command.new(&bin).args(args).output().unwrap()
+    named :: run(&["bare-loses", "--name", "named"])
+    assert_eq(named.status.code(), Some(0))
+    assert_eq(String.from_utf8_lossy(&named.stdout), "named\n")
+    assert(named.stderr.is_empty())
+    help :: run(&["--help"])
+    assert_eq(help.status.code(), Some(0))
+    help_stdout :: String.from_utf8_lossy(&help.stdout)
+    assert(help_stdout.contains("Usage:"), "{help_stdout}")
+    assert(help_stdout.contains("name"), "{help_stdout}")
+    assert(help.stderr.is_empty())
+    bad :: run(&["first", "second", "third"])
+    assert_eq(bad.status.code(), Some(2))
+    assert(bad.stdout.is_empty())
+    bad_stderr :: String.from_utf8_lossy(&bad.stderr)
+    assert(bad_stderr.contains("unexpected arguments"), "{bad_stderr}")
+    assert(bad_stderr.contains("`second`") && bad_stderr.contains("`third`"), "{bad_stderr}")
+    assert(bad_stderr.contains("Usage:"), "{bad_stderr}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:478
+#Test("core_args_nested_subcommand_does_not_overflow") {
+    src :: """
+use core.args as args
+fn run() -> {
+    serve :: args.spec().option_int("port", "listen port", "PORT")
+    spec :: args.spec()
+        .flag_short("verbose", "v", "print extra detail")
+        .option_int("jobs", "worker count", "N")
+        .option_default("mode", "run mode", "MODE", "fast")
+        .option_choice("color", "color policy", "WHEN", "auto,always,never")
+        .repeat("tag", "classification tag", "TAG")
+        .subcommand("serve", "run the server", serve)
+        .version("args-audit 1.0")
+    print(spec.help().contains("serve"))
+}
+"""
+    out :: compile_temp("args_nested_subcommand.jet", src)
+    assert(out.rust.contains("jet_args_subcommand"))
+}
+// Rust: tests/corelib_parts/compile.rs:501
+#Test("core_os_facts_and_interrupt_hook_compile") {
+    dir :: env.temp_dir().join("jet_corelib_os_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.sys as os
+fn run() -> {
+    os.on_interrupt(() -> { print("interrupted") })
+    print(os.name().len() > 0)
+    print(os.family().len() > 0)
+    print(os.arch().len() > 0)
+    print(os.cpu_count() >= 1)
+    print(os.pid() >= 1)
+    print(os.hostname().len() > 0)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "os_facts", src, &[], None)
+    assert_eq(code, 0, "core.sys program failed: {stderr}")
+    assert_eq(stdout, "true\ntrue\ntrue\ntrue\ntrue\ntrue\n")
+}
+// Rust: tests/corelib_parts/compile.rs:525
+#Test("source_core_plain_return_can_be_passed_as_argument") {
+    src :: """
+use core.sys as sys
+fn consume(value: String) -> {}
+fn run() -> { consume(sys.family()) }
+"""
+    _ :: compile_temp("source_core_plain_return_argument.jet", src)
+}
+// Rust: tests/corelib_parts/compile.rs:540
+#Test("core_os_interrupt_callback_forms_match_dev_tiers") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_corelib_interrupt_callback_forms_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    aot_source :: """
+use core.sys as os
+use core.process as process
+fn named_callback() -> { print("named") }
+fn run() -> {
+    indirect :: named_callback
+    os.on_interrupt(named_callback)
+    os.on_interrupt(indirect)
+    os.on_interrupt(() -> { print("inline"); process.exit(0) })
+    print("ready")
+    loop { }
+}
+"""
+    out :: compile_temp("named_indirect_aot.jet", aot_source)
+    rs :: dir.join("named_indirect_aot.rs")
+    bin :: dir.join("named_indirect_aot")
+    rustc := Command.new("rustc")
+    _runtime_lease :: common.add_generated_rust(&rustc, &rs, &out.rust, out.ffi.is_some(), &[])
+    built :: rustc.arg("-o").arg(&bin).output().unwrap()
+    assert(built.status.success(), "named/indirect/inline AOT rustc failed: {String.from_utf8_lossy(&built.stderr)}")
+    child := Command.new(&bin).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn AOT callback program")
+    stdout := BufReader.new(child.stdout.take().unwrap())
+    ready := String.new()
+    stdout.read_line(&ready).unwrap()
+    assert_eq(ready, "ready\n", "AOT callback registration was not ready")
+    assert_eq(#Unsafe("signal registered test child") { kill(child.id() as I32, 2) }, 0)
+    status :: child.wait().unwrap()
+    rest := String.new()
+    stdout.read_to_string(&rest).unwrap()
+    stderr := String.new()
+    child.stderr.take().unwrap().read_to_string(&stderr).unwrap()
+    assert(status.success(), "AOT callback program failed: {stderr}")
+    assert_eq(rest, "named\nnamed\ninline\n")
+    dev_source :: """
+use core.sys as os
+fn named_callback() -> { print("named") }
+fn stop_callback() -> { print("stop"); panic("stop") }
+fn run() -> {
+    loop indirect := stop_callback, true {
+        named_alias :: named_callback
+        local_lambda :: () -> { print("lambda") }
+        os.on_interrupt(() -> { named_alias() })
+        os.on_interrupt(local_lambda)
+        os.on_interrupt(named_callback)
+        os.on_interrupt(indirect)
+        print("ready")
+        loop { tick :: 0 }
+    }
+}
+"""
+    path :: dir.join("named_indirect_dev.jet")
+    fs.write(&path, dev_source).unwrap()
+    // O0/O1/O2 replace retired interpreter/resident-JIT tier assertions.
+    loop profile in ["debug", "dev", "release"] {
+        command := Command.new(env.bin_exe("jet"))
+        command.args(["build", path.to_str().unwrap(), "--profile={profile}", "-o", bin.to_str().unwrap()]).current_dir(&dir)
+        built :: command.output().unwrap()
+        assert(built.status.success(), "{profile} callback build failed: {String.from_utf8_lossy(&built.stderr)}")
+        child := Command.new(&bin).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap_or_else(fn(error) -> panic("spawn {profile} callback program: {error}"))
+        (lines_tx, lines_rx) :: mpsc.channel()
+        child_stdout :: child.stdout.take().unwrap()
+        thread.spawn(fn() -> {
+            loop line in BufReader.new(^child_stdout).lines() {
+                if lines_tx.send(line).is_err() { break }
+            }
+        })
+        ready :: match lines_rx.recv_timeout(Duration.from_secs(30)) {
+            Ok(line) -> line.unwrap_or_else(fn(error) -> panic("read {profile} readiness: {error}")),
+            Err(error) -> { _ :: child.kill(); _ :: child.wait(); panic("{profile} callback program did not become ready: {error}") }
+        }
+        assert_eq(ready, "ready", "{profile} callback registration was not ready")
+        assert_eq(#Unsafe("SIGINT to child with registered callbacks") { kill(child.id() as I32, 2) }, 0, "send SIGINT to {profile} callback program")
+        deadline :: Instant.now() + Duration.from_secs(30)
+        status :: loop {
+            if child.try_wait().unwrap() == { Some(status) -> break status, None -> {} }
+            if Instant.now() >= deadline { _ :: child.kill(); panic("{profile} callback program did not exit after SIGINT") }
+            thread.sleep(Duration.from_millis(25))
+        }
+        stderr := String.new()
+        child.stderr.take().unwrap().read_to_string(&stderr).unwrap()
+        stdout :: lines_rx.into_iter().collect::<Result<[String], std.io.Error>>().expect("callback stdout is readable").join("\n") + "\n"
+        assert(status.code() == Some(70), "{profile} callback program failed: stdout={stdout:?} stderr={stderr:?}")
+        assert_eq(stdout, "named\nlambda\nnamed\nstop\n", "{profile} callback dispatch drifted")
+        assert(stderr.contains("panic: stop"), "{profile} callback lost the runtime panic diagnostic: {stderr:?}")
+        assert(!stderr.contains("unsupported"), "{profile} emitted an unsupported-feature diagnostic: {stderr}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:738
+#Test("core_os_interrupt_prelude_is_emitted_only_when_used") {
+    facts_only :: compile_temp("os_facts_only.jet", "use core.sys as os\nfn run() -> { print(os.name()) }\n")
+    assert(!facts_only.rust.contains("mod jet_os_interrupt") && !facts_only.rust.contains("SetConsoleCtrlHandler") && !facts_only.rust.contains("jet_std_os_on_interrupt"), "ordinary core.sys facts should not inherit signal FFI")
+    assert(facts_only.rust.contains("JET_INTERRUPT_HANDLER_DEPTH") && facts_only.rust.contains("fn jet_runtime_should_unwind()"), "safe central panic-boundary state must remain available without signal FFI")
+    with_interrupt :: compile_temp("os_interrupt.jet", "use core.sys as os\nfn run() -> { os.on_interrupt(() -> { print(\"interrupted\") }) }\n")
+    assert(with_interrupt.rust.contains("mod jet_os_interrupt") && with_interrupt.rust.contains("SetConsoleCtrlHandler") && with_interrupt.rust.contains("CTRL_C_EVENT") && with_interrupt.rust.contains("AtomicUsize") && with_interrupt.rust.contains("catch_unwind") && with_interrupt.rust.contains("struct PanicBoundary") && with_interrupt.rust.contains("impl Drop for PanicBoundary") && with_interrupt.rust.contains("#[cfg(not(any(unix, windows)))]") && with_interrupt.rust.contains("interrupt handling is unavailable on this target") && with_interrupt.rust.contains("jet_std_os_on_interrupt") && !with_interrupt.rust.contains("let _ = handler"), "on_interrupt should keep its Unix/Windows dispatcher and no silent no-op")
+}
+// Rust: tests/corelib_parts/compile.rs:791
+#Test("core_os_interrupt_handlers_are_additive_and_ordered") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_corelib_interrupt_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.sys as os
+use core.process as process
+fn run() -> {
+    os.on_interrupt(() -> { panic("first handler failed") })
+    os.on_interrupt(() -> { print("second"); process.exit(0) })
+    print("ready")
+    loop { }
+}
+"""
+    out :: compile_temp("os_interrupt_runtime.jet", src)
+    rs :: dir.join("main.rs")
+    bin :: dir.join("interrupt-runtime")
+    command := Command.new("rustc")
+    _runtime_lease :: common.add_generated_rust(&command, &rs, &out.rust, out.ffi.is_some(), &[])
+    rustc :: command.arg("-o").arg(&bin).output().unwrap()
+    assert(rustc.status.success(), "rustc failed:\n{String.from_utf8_lossy(&rustc.stderr)}")
+    child := Command.new(&bin).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    stdout := BufReader.new(child.stdout.take().unwrap())
+    ready := String.new()
+    stdout.read_line(&ready).unwrap()
+    assert_eq(ready, "ready\n", "registration was not ready before run continued")
+    assert_eq(#Unsafe("SIGINT to registered child") { kill(child.id() as I32, 2) }, 0)
+    status :: child.wait().unwrap()
+    rest := String.new()
+    stdout.read_to_string(&rest).unwrap()
+    stderr := String.new()
+    child.stderr.take().unwrap().read_to_string(&stderr).unwrap()
+    assert(status.success(), "interrupt child failed: {status}")
+    assert_eq(rest, "second\n")
+    assert(stderr.contains("panic: first handler failed"), "first handler panic lost its interrupt boundary diagnostic: {stderr:?}")
+}
+// Rust: tests/corelib_parts/compile.rs:851
+#Test("core_os_interrupt_deadline_diagnostic_unwinds_inside_handler_boundary") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_corelib_interrupt_deadline_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.sys as os
+use core.process as process
+use core.time as time
+fn run() -> {
+    os.on_interrupt(() -> {
+        #Context(deadline: time.now()) { time.sleep(5ms) }
+    })
+    os.on_interrupt(() -> { print("second"); process.exit(0) })
+    print("ready")
+    loop { }
+}
+"""
+    out :: compile_temp("os_interrupt_deadline.jet", src)
+    assert(out.rust.contains("jet_interrupt_handler_panic_enter") && out.rust.contains("jet_interrupt_handler_panic_leave"), "interrupt handlers need a boundary distinct from scheduler-task identity")
+    rs :: dir.join("main.rs")
+    bin :: dir.join("interrupt-deadline")
+    command := Command.new("rustc")
+    _runtime_lease :: common.add_generated_rust(&command, &rs, &out.rust, out.ffi.is_some(), &[])
+    rustc :: command.arg("-o").arg(&bin).output().unwrap()
+    assert(rustc.status.success(), "rustc failed:\n{String.from_utf8_lossy(&rustc.stderr)}")
+    child := Command.new(&bin).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    stdout := BufReader.new(child.stdout.take().unwrap())
+    ready := String.new()
+    stdout.read_line(&ready).unwrap()
+    assert_eq(ready, "ready\n")
+    assert_eq(#Unsafe("SIGINT to child with deadline handler") { kill(child.id() as I32, 2) }, 0)
+    output :: child.wait_with_output().unwrap()
+    rest := String.new()
+    stdout.read_to_string(&rest).unwrap()
+    assert(output.status.success(), "interrupt child failed: {output.status}")
+    assert_eq(rest, "second\n")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("Error [E3003]: deadline exceeded while waiting in time sleep"))
+    assert(stderr.contains("Why: this wait point observed the task context deadline"))
+    assert(stderr.contains("Fix: raise the deadline budget or shorten the work"))
+}
+// Rust: tests/corelib_parts/compile.rs:925
+#Test("core_os_interrupt_runtime_failures_use_the_boundary_aware_helpers") {
+    task_mem :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/Prelude/CoreLib/JetStd/MathTaskMem.rs")).unwrap()
+    time :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/Prelude/CoreLib/Top/MathRandomTime.rs")).unwrap()
+    scheduler :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/Prelude/Scheduler.rs")).unwrap()
+    scheduler_host :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/SchedulerHost.rs")).unwrap()
+    stream :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/Prelude/Stream.rs")).unwrap()
+    ffi :: fs.read_to_string(env.manifest_dir().join("crates/jet-pkg-model/src/FFI.rs")).unwrap()
+    codegen :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/Codegen/mod.rs")).unwrap()
+    core :: fs.read_to_string(env.manifest_dir().join("crates/jet-codegen/src/Prelude/Core.rs")).unwrap()
+    assert(!task_mem.contains("process::exit(70)"))
+    assert(!time.contains("process::exit(70)"))
+    assert_eq(scheduler.matches("process::exit(70)").count(), 0)
+    assert_eq(scheduler_host.matches("process::exit(70)").count(), 0)
+    assert_eq(stream.matches("process::exit(70)").count(), 0)
+    assert_eq(ffi.matches("process::exit(70)").count(), 0)
+    assert_eq(codegen.matches("std::process::exit(70)").count(), 0)
+    test_path :: env.manifest_dir().join("Examples/features/tooling/bench.jet")
+    (test_rust, _) :: Driver.compile_tests(test_path.to_str().unwrap(), false).unwrap()
+    assert(test_rust.contains("jet_runtime_boundary(|| jet_runtime_stop(\"E3001\", \"\", 0, &message))"))
+    assert(scheduler_host.contains("std::panic::panic_any(rendered)"))
+    assert(task_mem.contains("super::jet_runtime_stop_with_context("))
+    // Deadline diagnostics route through the interrupt/wait/typed-task boundaries.
+    assert(time.contains("jet_runtime_diagnostic(rendered)"))
+    assert(time.contains("jet_interrupt_handler_should_unwind()"))
+    assert(time.contains("jet_scheduler_wait_boundary_should_unwind()"))
+    assert(time.contains("jet_typed_deadline_boundary_should_unwind()"))
+    assert(scheduler.contains("fn jet_scheduler_fatal(msg: &str) -> !"))
+    assert(scheduler.contains("jet_scheduler_runtime_stop(msg)"))
+    assert(scheduler.contains("jet_runtime_diagnostic(rendered)"))
+    assert(scheduler.contains("struct JetSchedulerWaitBoundary"))
+    assert(scheduler.contains("let _boundary = JetSchedulerWaitBoundary::enter()"))
+    assert(scheduler.contains("struct JetTypedDeadlineBoundary"))
+    (ordinary_task_spawn, typed_task_spawn) :: task_mem.split_once("pub(crate) fn spawn_typed_deadline").expect("typed-deadline task spawn must remain explicit")
+    assert(!ordinary_task_spawn.contains("JetTypedDeadlineBoundary::enter()"))
+    typed_body :: typed_task_spawn.split_once("pub fn pause").expect("typed-deadline task spawn boundary").0
+    assert(typed_body.contains("let _typed_deadline_boundary"))
+    assert(typed_body.contains("super::JetTypedDeadlineBoundary::enter()"))
+    assert_eq(core.matches("std::process::exit(").count(), 1)
+    assert(core.contains("fn jet_runtime_process_exit(code: i32, report: Option<&str>) -> !"))
+    assert(core.contains("Self::SchedulerFatal { msg } => jet_runtime_stop(\"E3001\", \"\", 0, &msg)"))
+    assert(core.contains("fn jet_runtime_should_unwind() -> bool"))
+    assert(core.contains("jet_scheduler_in_task()"))
+    assert(core.contains("jet_interrupt_handler_should_unwind()"))
+    assert(core.contains("if jet_runtime_should_unwind()"))
+    assert(core.contains("if jet_interrupt_handler_should_unwind()"))
+}
+// Rust: tests/corelib_parts/compile.rs:987
+// The retiring JIT's source-representation assertions become runtime-boundary behavior.
+#Test("resident_jit_terminal_helpers_do_not_bypass_the_runtime_boundary") {
+    if !common.have_rustc() { return }
+    dir :: env.temp_dir().join("jet_corelib_terminal_boundary_{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    loop (name, src, code, diagnostic) in [
+        ("panic", "fn run() -> { panic(\"boundary failure\") }", 70, "boundary failure"),
+        ("exit", "use core.process as process\nfn run() -> { process.exit(1) }", 1, "")
+    ] {
+        path :: dir.join("{name}.jet")
+        fs.write(&path, src).unwrap()
+        loop profile in ["debug", "dev", "release"] {
+            output :: Command.new(env.bin_exe("jet")).args(["run", path.to_str().unwrap(), "--profile={profile}"]).env("NO_COLOR", "1").output().unwrap()
+            assert_eq(output.status.code(), Some(code), "{profile} {name} runtime boundary exit drifted")
+            assert(String.from_utf8_lossy(&output.stderr).contains(diagnostic), "{profile} {name} runtime boundary diagnostic lost")
+        }
+    }
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/compile.rs:1013
+// #2027: identical real SIGINT, ordered handlers and single consumption across native tiers.
+#Test("core_os_interrupt_delivery_matches_aot_jit_and_interpreter") {
+    if target.selected_family() != "unix" { return }
+    src :: """
+use core.sys as os
+use core.process as process
+fn run() -> {
+    os.on_interrupt(() -> { print("first") })
+    os.on_interrupt(() -> { print("second"); process.exit(0) })
+    print("ready")
+    loop { tick :: 0 }
+}
+"""
+    dir :: env.temp_dir().join("jet_corelib_interrupt_tiers_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    source :: dir.join("interrupt_tiers.jet")
+    fs.write(&source, src).unwrap()
+    out :: compile_temp("interrupt_tiers.jet", src)
+    rs :: dir.join("main.rs")
+    bin :: dir.join("interrupt-tiers")
+    rustc := Command.new("rustc")
+    _runtime_lease :: common.add_generated_rust(&rustc, &rs, &out.rust, out.ffi.is_some(), &[])
+    built :: rustc.arg("-o").arg(&bin).output().unwrap()
+    assert(built.status.success(), "rustc failed:\n{String.from_utf8_lossy(&built.stderr)}")
+    aot :: interrupt_and_collect(Command.new(&bin).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap(), "aot")
+    assert_eq(aot, (Some(0), "ready\nfirst\nsecond\n".to_string()), "AOT interrupt delivery drifted")
+    // Signal the built binary directly: CLI-spawned grandchildren do not receive its SIGINT.
+    loop profile in ["debug", "dev", "release"] {
+        tier_bin :: dir.join("interrupt-{profile}")
+        built :: Command.new(env.bin_exe("jet")).args(["build", "interrupt_tiers.jet", "--profile={profile}", "-o", tier_bin.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").env("JET_STORE_DIR", dir.join("cache-{profile}")).env("JET_RUN_CACHE_DIR", dir.join("run-cache-{profile}")).output().unwrap()
+        assert(built.status.success(), "{profile} build failed: {String.from_utf8_lossy(&built.stderr)}")
+        observed :: interrupt_and_collect(Command.new(&tier_bin).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap(), profile)
+        assert_eq(observed, aot, "{profile} and AOT disagree about a delivered signal — tiers must share one interrupt count and one consumption rule (#2027)")
+    }
+    _ :: fs.remove_dir_all(&dir)
+}

@@ -1,0 +1,194 @@
+use ProjectCheck.*
+use jet_foundation.JSON.[json_get, json_str]
+use std.[fs, env]
+use std.process.Command
+use std.time.[Instant, SystemTime, UNIX_EPOCH]
+
+// Rust: tests/project_check.rs:269
+#Test("explicit_in_package_file_keeps_file_scope") {
+    output :: run_check("frozen_dogfood", &["check", "--verbose", "src/cli/main.jet"])
+    assert(output.status.success(), "in-package check failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("scope=explicit-file"), "explicit in-package check changed scope:\n{stdout}")
+    proof :: proof_snapshot(&output, &fixture("frozen_dogfood"))
+    rows :: proof.lines().collect()
+    assert_eq(rows.len(), 4, "explicit-file check must expose four non-project proof rows:\n{proof}")
+    assert(rows.iter().all(fn(row) { row.contains("output=not-applicable") && row.contains("[not applicable]") }), "explicit-file check exposed project proof:\n{proof}")
+}
+// Rust: tests/project_check.rs:296
+#Test("bare_project_check_enumerates_outputs_without_writing_artifacts") {
+    dir :: fixture("entry_resolution")
+    package :: dir.join("package.jet")
+    lock :: dir.join(".jet/lock")
+    generated :: dir.join(".jet/generated")
+    package_mtime :: fs.metadata(&package).unwrap_or_else(fn(error) { panic("package fixture metadata: {error}") }).modified().unwrap_or_else(fn(error) { panic("package fixture mtime: {error}") })
+    lock_mtime :: fs.metadata(&lock).ok().and_then(fn(metadata) { metadata.modified().ok() })
+    generated_mtime :: fs.metadata(&generated).ok().and_then(fn(metadata) { metadata.modified().ok() })
+    output :: run_check("entry_resolution", &["check", "--verbose"])
+    assert(output.status.success(), "bare project check failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("scope=project"), "bare check did not use project scope:\n{stdout}")
+    proof :: proof_snapshot(&output, &dir)
+    assert_project_proof_rows("entry_resolution bare", &proof)
+    assert(proof.lines().all(fn(row) { row.contains("output=release") }), "bare check did not enumerate the declared runnable output:\n{proof}")
+    after_package_mtime :: fs.metadata(&package).unwrap_or_else(fn(error) { panic("package fixture metadata after check: {error}") }).modified().unwrap_or_else(fn(error) { panic("package fixture mtime after check: {error}") })
+    after_lock_mtime :: fs.metadata(&lock).ok().and_then(fn(metadata) { metadata.modified().ok() })
+    after_generated_mtime :: fs.metadata(&generated).ok().and_then(fn(metadata) { metadata.modified().ok() })
+    assert_eq(package_mtime, after_package_mtime, "project check touched package.jet")
+    assert_eq(lock_mtime, after_lock_mtime, "project check touched .jet/lock")
+    assert_eq(generated_mtime, after_generated_mtime, "project check touched .jet/generated")
+}
+// Rust: tests/project_check.rs:346
+#Test("frozen_dogfood_and_each_project_proof_witness_are_snapshotted") {
+    for name in ["frozen_dogfood", "entry_resolution", "module_graph", "core_closure"] { assert_clean_project(name) }
+}
+// Rust: tests/project_check.rs:362
+#Test("missing_effect_facts_are_a_project_check_diagnostic") {
+    output :: run_check("effect_facts", &["check", ".", "--gate=impure=allow"])
+    assert(!output.status.success(), "E2391 witness unexpectedly passed")
+    stderr :: stderr_snapshot(&output, &fixture("effect_facts"))
+    assert(stderr.contains("Error [E2391]"), "missing E2391:\n{stderr}")
+    assert_snapshot("effect_facts", "stderr", &stderr)
+}
+// Rust: tests/project_check.rs:371
+#Test("unsupported_web_tier_is_not_reported_clean") {
+    output :: run_check("tier_lowering", &["check", ".", "--target=web"])
+    assert(!output.status.success(), "E2392 witness unexpectedly passed")
+    stderr :: stderr_snapshot(&output, &fixture("tier_lowering"))
+    assert(stderr.contains("Error [E2392]"), "missing E2392:\n{stderr}")
+    assert_snapshot("tier_lowering", "stderr", &stderr)
+}
+// Rust: tests/project_check.rs:380
+#Test("explicit_file_without_owning_project_context_teaches_missing_context") {
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).expect("system clock before Unix epoch").as_nanos()
+    root :: env.temp_dir().join("jet-project-check-missing-context-{std.process.id()}-{stamp}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).expect("create isolated missing-context fixture")
+    source :: fs.read_to_string(fixture("missing_context").join("orphan.jet")).expect("read missing-context fixture source")
+    fs.write(root.join("orphan.jet"), source).expect("write isolated missing-context source")
+    output :: Command.new(jet_bin()).args(["check", "orphan.jet"]).current_dir(&root).env("JET_RECEIPT_BYPASS", "1").env("NO_COLOR", "1").env("TERM", "dumb").output().expect("jet check missing_context failed to start")
+    assert(!output.status.success(), "E2393 witness unexpectedly passed")
+    stderr :: stderr_snapshot(&output, &root)
+    assert(stderr.contains("Error [E2393]"), "missing E2393:\n{stderr}")
+    assert(stderr.contains("Use project.<module>"), "missing canonical import teaching:\n{stderr}")
+    assert_snapshot("missing_context", "stderr", &stderr)
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/project_check.rs:416
+#Test("library_package_check_needs_no_run_entry") {
+    check :: run_uncached("library_only", &["check", "."])
+    stderr :: String.from_utf8_lossy(&check.stderr)
+    assert(check.status.success(), "a .Library package check must pass without `fn run`:\n{stderr}")
+    assert(!stderr.contains("E0101"), "library check demanded `fn run`:\n{stderr}")
+}
+// Rust: tests/project_check.rs:427
+#Test("dependency_package_members_check_clean_and_run") {
+    check :: run_uncached("dependency_members/app", &["check", "."])
+    report :: "{String.from_utf8_lossy(&check.stdout)}{String.from_utf8_lossy(&check.stderr)}"
+    assert(check.status.success(), "dependency member check failed:\n{report}")
+    for code in ["Warning", "Error", "internal"] { assert(!report.contains(code), "dependency member check reported {code}:\n{report}") }
+    run :: run_uncached("dependency_members/app", &["run"])
+    assert(run.status.success(), "dependency member run failed:\n{String.from_utf8_lossy(&run.stderr)}")
+    assert_eq(String.from_utf8_lossy(&run.stdout), "4\n5\n7\n9\n3\nwide\n4\n2\n2\ntrue\n")
+}
+// Rust: tests/project_check.rs:459
+#Test("clean_project_check_then_default_run_and_aot_build_stay_clean") {
+    for name in ["frozen_dogfood", "entry_resolution", "module_graph", "core_closure"] {
+        check :: run_uncached(name, &["check"])
+        assert(check.status.success(), "project check {name} failed:\n{String.from_utf8_lossy(&check.stderr)}")
+        run :: run_uncached(name, &["run"])
+        assert(run.status.success(), "default-tier run after project check {name} failed:\n{String.from_utf8_lossy(&run.stderr)}")
+        build :: run_uncached(name, &["build"])
+        assert(build.status.success(), "AOT build after project check {name} failed:\n{String.from_utf8_lossy(&build.stderr)}")
+    }
+}
+// Rust: tests/project_check.rs:490
+#Test("explicit_file_uses_owning_project_context") {
+    output :: run_uncached("owning_context", &["check", "--verbose", "src/main.jet"])
+    assert(output.status.success(), "explicit in-package project import failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("scope=explicit-file"), "explicit owning-context check changed scope:\n{stdout}")
+    assert(!String.from_utf8_lossy(&output.stderr).contains("E2393"), "owning project context was treated as absent:\n{String.from_utf8_lossy(&output.stderr)}")
+    proof :: proof_snapshot(&output, &fixture("owning_context"))
+    assert_snapshot("owning_context", "stdout", &proof)
+}
+// Rust: tests/project_check.rs:512
+#Test("extension_optional_check_replays_receipt") {
+    scratch :: scratch_root("extension-optional-receipt")
+    dir :: scratch.join("frozen_dogfood")
+    copy_fixture_tree(&fixture("frozen_dogfood"), &dir)
+    receipt_dir :: dir.join(".jet/receipts")
+    run :: fn() {
+        Command.new(jet_bin()).args(["check", "--verbose", "src/cli/main"]).current_dir(&dir).env("JET_RECEIPT_DIR", &receipt_dir).env_remove("JET_RECEIPT_BYPASS").env("NO_COLOR", "1").output().expect("extension-optional project check failed to start")
+    }
+    first :: run()
+    assert(first.status.success(), "extension-optional project check failed:\n{String.from_utf8_lossy(&first.stderr)}")
+    second :: run()
+    assert(second.status.success(), "replayed extension-optional project check failed:\n{String.from_utf8_lossy(&second.stderr)}")
+    assert_eq(first.stdout, second.stdout, "receipt replay changed extension-optional check output")
+    assert(String.from_utf8_lossy(&second.stderr).contains("ok: check current"), "extension-optional invocation did not replay its receipt:\n{String.from_utf8_lossy(&second.stderr)}")
+    _ :: fs.remove_dir_all(&scratch)
+}
+// Rust: tests/project_check.rs:554
+#Test("project_check_receipt_tracks_entry_and_authority_changes") {
+    root :: scratch_root("receipt-invalidation")
+    copy_receipt_fixture(&root)
+    package_root :: root.join("packages/app")
+    receipt_dir :: root.join(".jet/receipts")
+    check :: fn() { run_project_check(&package_root, &receipt_dir, &["check"]) }
+    first :: check()
+    assert_project_check_passed(&first, "initial receipt project check")
+    replay :: check()
+    assert_project_check_passed(&replay, "unchanged receipt project check")
+    assert(receipt_replayed(&replay), "unchanged project check did not replay its receipt:\n{String.from_utf8_lossy(&replay.stderr)}")
+    candidate :: package_root.join("run.jet")
+    fs.write(&candidate, "fn run() -> { print(\"candidate\") }\n").expect("write higher-priority entry candidate")
+    candidate_check :: check()
+    assert_project_check_passed(&candidate_check, "entry-candidate project check")
+    assert(!receipt_replayed(&candidate_check), "new entry candidate reused stale receipt:\n{String.from_utf8_lossy(&candidate_check.stderr)}")
+    fs.remove_file(&candidate).expect("remove higher-priority entry candidate")
+    mutations :: [("workspace", root.join("workspace.jet"), "module workspace {\n    members: [\"packages/app\"]\n}\n"), ("output", package_root.join("package.jet"), "name: \"receipt-probe\"\nversion: \"0.1.0\"\noutputs: { release_alt: .Executable{ entry: main.launch } }\ndefaults: { run: release_alt }\n"), ("lock", root.join(".jet/lock"), "workspace-lock-v2\n"), ("generated", package_root.join(".jet/generated/input.jet"), "fn generated_input_v2() -> {}\n")]
+    for (label, path, replacement) in mutations {
+        original :: fs.read(&path).unwrap_or_else(fn(error) { panic("read {label} fixture {path.display()}: {error}") })
+        mutation_check :: fn() { run_project_check(&package_root, &receipt_dir, &["check"]) }
+        clear_receipt_store(&receipt_dir)
+        baseline :: mutation_check()
+        assert_project_check_passed(&baseline, "baseline {label} project check")
+        baseline_replay :: mutation_check()
+        assert_project_check_passed(&baseline_replay, "unchanged baseline {label} project check")
+        assert(receipt_replayed(&baseline_replay), "unchanged baseline {label} check did not replay its receipt:\n{String.from_utf8_lossy(&baseline_replay.stderr)}")
+        fs.write(&path, replacement).unwrap_or_else(fn(error) { panic("mutate {label} fixture {path.display()}: {error}") })
+        changed :: mutation_check()
+        assert_project_check_passed(&changed, "changed {label} project check")
+        assert(!receipt_replayed(&changed), "{label} change reused stale receipt:\n{String.from_utf8_lossy(&changed.stderr)}")
+        fs.write(&path, original).unwrap_or_else(fn(error) { panic("restore {label} fixture {path.display()}: {error}") })
+        clear_receipt_store(&receipt_dir)
+    }
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/project_check.rs:640
+#Test("project_check_json_rows_are_versioned_and_warm_stable") {
+    scratch :: scratch_root("json-warm")
+    copy_fixture_tree(&fixture("entry_resolution"), &scratch)
+    receipt_dir :: scratch.join(".jet/receipts")
+    dir :: scratch.as_path()
+    cold_started :: Instant.now()
+    cold :: run_project_check(&dir, &receipt_dir, &["check", "--json"])
+    cold_us :: cold_started.elapsed().as_micros()
+    cold_rows :: machine_rows(&cold)
+    warm_started :: Instant.now()
+    warm :: run_project_check(&dir, &receipt_dir, &["check", "--json"])
+    warm_us :: warm_started.elapsed().as_micros()
+    warm_rows :: machine_rows(&warm)
+    assert(receipt_replayed(&warm), "warm project check did not replay its receipt:\n{String.from_utf8_lossy(&warm.stderr)}")
+    assert_eq(cold_rows, warm_rows, "warm check changed machine proof rows")
+    assert_eq(cold_rows.len(), 4, "machine output must expose all proof rows")
+    for (name, diagnostic) in [("entry resolution", "E2389"), ("module graph", "E2390"), ("Core closure", "E2391"), ("tier lowering", "E2392")] {
+        row :: cold_rows.iter().find(fn(row) { json_get(row, "name").and_then(json_str) == Some(name) }).unwrap_or_else(fn() { panic("machine output omitted {name} row") })
+        assert_eq(json_get(row, "status").and_then(json_str), Some("proven"), "machine output did not prove {name}")
+        assert_eq(json_get(row, "diagnostic").and_then(json_str), Some(diagnostic), "machine output changed diagnostic code for {name}")
+    }
+    assert(cold_us > 0 && warm_us > 0, "warm canary must record positive wall-clock cost: cold={cold_us}us warm={warm_us}us")
+    eprintln("project-check warm canary: contract=jet.check/v1 cone=D-DEVR-CONE1 rows={cold_rows.len()} cold_us={cold_us} warm_us={warm_us} rows_stable=true")
+    _ :: fs.remove_dir_all(scratch)
+}

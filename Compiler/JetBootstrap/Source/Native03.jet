@@ -1,1022 +1,517 @@
-// PORT-PENDING 2055 compiler-bootstrap-host-native-slice-3601: Compiler/Bootstrap/Host/Native.rs:3601-4618
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                 field.@f.JetEvalRuntimeField.name@.clone(),
-//RS                 __jet_bootstrap_eval_to_host_inner(&field.@f.JetEvalRuntimeField.value@, allow_foreign_handles)?,
-//RS             ))).collect::<Result<Vec<_>, String>>()?,
-//RS         }),
-//RS         @p.JetEvalRuntimeAggregate.Enum@{ type_name, variant, args } => Ok(::jet_foundation::MIR::MirRuntimeValue::Enum {
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS             args: args.iter().map(|arg| Ok((
-//RS                 (&@deref.JetEvalRuntimeEnumArg.name@arg.@f.JetEvalRuntimeEnumArg.name@).as_ref().ok().cloned(),
-//RS                 __jet_bootstrap_eval_to_host_inner(&arg.@f.JetEvalRuntimeEnumArg.value@, allow_foreign_handles)?,
-//RS             ))).collect::<Result<Vec<_>, String>>()?,
-//RS         }),
-//RS     }
-//RS }
-//RS fn __jet_bootstrap_eval_to_host_inner(
-//RS     value: &@t.JetEvalRuntimeValue@,
-//RS     allow_foreign_handles: bool,
-//RS ) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
-//RS     match value {
-//RS         @v.JetEvalRuntimeValue.Moved@ => Err("moved values cannot cross a native host boundary".to_string()),
-//RS         @p.JetEvalRuntimeValue.Data@{ value } => __jet_bootstrap_ct_to_host(value),
-//RS         @p.JetEvalRuntimeValue.Absent@{ element } => Ok(::jet_foundation::MIR::MirRuntimeValue::Absent { element: __jet_bootstrap_type_to_host(element)? }),
-//RS         @p.JetEvalRuntimeValue.Result@{ ok, value } => {
-//RS             let value = __jet_bootstrap_eval_to_host_inner(value, allow_foreign_handles)?;
-//RS             Ok(if *ok {
-//RS                 ::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(value))
-//RS             } else {
-//RS                 ::jet_foundation::MIR::MirRuntimeValue::FailedTold(Box::new(value))
-//RS             })
-//RS         }
-//RS         @p.JetEvalRuntimeValue.ForeignHandle@{ handle: _, raw, token: _ } if allow_foreign_handles => Ok(::jet_foundation::MIR::MirRuntimeValue::Int(raw.to_i64().ok_or_else(|| "foreign handle is outside i64".to_string())?)),
-//RS         @p.JetEvalRuntimeValue.ForeignHandle@{ .. } => Err("foreign handles cross only their checked C foreign-call ABI boundary".to_string()),
-//RS         @p.JetEvalRuntimeValue.Aggregate@{ value: aggregate } => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
-//RS         @p.JetEvalRuntimeValue.RuntimeFailure@{ .. } => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
-//RS         @p.JetEvalRuntimeValue.HostCursor@{ .. } | @p.JetEvalRuntimeValue.Stream@{ .. } => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
-//RS         @p.JetEvalRuntimeValue.Closure@{ .. } | @p.JetEvalRuntimeValue.Address@{ .. } | @p.JetEvalRuntimeValue.SharedCell@{ .. } | @p.JetEvalRuntimeValue.Shared@{ .. } | @p.JetEvalRuntimeValue.SharedWeak@{ .. } | @p.JetEvalRuntimeValue.SharedGuard@{ .. } | @p.JetEvalRuntimeValue.SharedSnapshot@{ .. } | @p.JetEvalRuntimeValue.Condition@{ .. } | @p.JetEvalRuntimeValue.RangeCursor@{ .. } | @p.JetEvalRuntimeValue.ListCursor@{ .. } => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
-//RS     }
-//RS }
-//RS fn __jet_bootstrap_eval_to_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
-//RS     __jet_bootstrap_eval_to_host_inner(value, false)
-//RS }
-//RS // This projection is confined to a checked MIR foreign-call row, whose parameter facts own the C ABI.
-//RS fn __jet_bootstrap_eval_to_foreign_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {
-//RS     __jet_bootstrap_eval_to_host_inner(value, true)
-//RS }
-//RS fn __jet_bootstrap_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR::MirConstKey)]) -> Result<Vec<@t.TComptimeKeyField@>, String> {
-//RS     fields.iter().map(|(name, key)| Ok(@s.TComptimeKeyField@{
-//RS         name: name.clone(),
-//RS         key: __jet_bootstrap_key_from_host(key)?,
-//RS     })).collect()
-//RS }
-//RS fn __jet_bootstrap_key_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeKey@, String> {
-//RS     match value {
-//RS         ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeKey.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
-//RS         ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeKey.String@{ value: value.clone() }),
-//RS         ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeKey.Bool@{ value: *value }),
-//RS         ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeKey.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
-//RS         ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok(@new.TComptimeKey.Tuple@{ fields: __jet_bootstrap_key_fields_from_host(fields)? }),
-//RS         ::jet_foundation::MIR::MirConstKey::Struct { type_name, fields } => Ok(@new.TComptimeKey.Struct@{
-//RS             type_name: type_name.clone(),
-//RS             fields: __jet_bootstrap_key_fields_from_host(fields)?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirConstKey::Enum { type_name, variant } => Ok(@new.TComptimeKey.Enum@{ type_name: type_name.clone(), variant: variant.clone() }),
-//RS     }
-//RS }
-//RS "#,
-//RS     );
-//RS }
-//RS 
-//RS /// Native Prelude results back into Source host values, and checked host
-//RS /// type shapes into MIR types (shapes through the `@…@` markers).
-//RS fn emit_bootstrap_host_value_codec(out: &mut String) {
-//RS     out.push_str(
-//RS         r#"
-//RS fn __jet_bootstrap_ct_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR::MirConstKey)]) -> Result<Vec<@t.TComptimeField@>, String> {
-//RS     fields.iter().map(|(name, key)| Ok(@s.TComptimeField@{
-//RS         name: name.clone(),
-//RS         value: __jet_bootstrap_ct_key_value_from_host(key)?,
-//RS     })).collect()
-//RS }
-//RS fn __jet_bootstrap_ct_key_value_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeValue@, String> {
-//RS     match value {
-//RS         ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeValue.Int@{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }),
-//RS         ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeValue.String@{ value: value.clone() }),
-//RS         ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeValue.Bool@{ value: *value }),
-//RS         ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeValue.Char@{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }),
-//RS         ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok(@new.TComptimeValue.Struct@{
-//RS             type_name: "Tuple".to_string(),
-//RS             fields: __jet_bootstrap_ct_key_fields_from_host(fields)?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirConstKey::Struct { type_name, fields } => Ok(@new.TComptimeValue.Struct@{
-//RS             type_name: type_name.clone(),
-//RS             fields: __jet_bootstrap_ct_key_fields_from_host(fields)?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirConstKey::Enum { type_name, variant } => Ok(@new.TComptimeValue.Enum@{
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS             args: Vec::<@t.TComptimeEnumArg@>::new(),
-//RS         }),
-//RS     }
-//RS }
-//RS fn __jet_bootstrap_host_value_from_runtime(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<@t.JetEvalHostValue@, String> {
-//RS     match value {
-//RS         ::jet_foundation::MIR::MirRuntimeValue::Present(value) => Ok(@new.JetEvalHostValue.Present@{ value: __jet_bootstrap_host_value_from_runtime(value)? }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok(@new.JetEvalHostValue.Failed@{ value: __jet_bootstrap_host_value_from_runtime(value)? }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::Absent { element } => Ok(@new.JetEvalHostValue.Absent@{ element: __jet_bootstrap_type_from_host(element)? }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::List(values) => Ok(@new.JetEvalHostValue.List@{
-//RS             values: values.iter().map(__jet_bootstrap_host_value_from_runtime).collect::<Result<Vec<_>, String>>()?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::Map(entries) => Ok(@new.JetEvalHostValue.Map@{
-//RS             entries: entries.iter().map(|(key, value)| Ok(@s.JetEvalHostMapEntry@{
-//RS                 key: @new.JetEvalHostValue.Data@{ value: __jet_bootstrap_ct_key_value_from_host(key)? },
-//RS                 value: __jet_bootstrap_host_value_from_runtime(value)?,
-//RS             })).collect::<Result<Vec<_>, String>>()?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::Struct { type_name, fields } => Ok(@new.JetEvalHostValue.Struct@{
-//RS             type_name: type_name.clone(),
-//RS             fields: fields.iter().map(|(name, value)| Ok(@s.JetEvalHostField@{
-//RS                 name: name.clone(),
-//RS                 value: __jet_bootstrap_host_value_from_runtime(value)?,
-//RS             })).collect::<Result<Vec<_>, String>>()?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::Enum { type_name, variant, args } => Ok(@new.JetEvalHostValue.Enum@{
-//RS             type_name: type_name.clone(),
-//RS             variant: variant.clone(),
-//RS             args: args.iter().map(|(name, value)| Ok(@s.JetEvalHostEnumArg@{
-//RS                 name: name.clone().ok_or(jet_foundation::Outcome::JetAbsent),
-//RS                 value: __jet_bootstrap_host_value_from_runtime(value)?,
-//RS             })).collect::<Result<Vec<_>, String>>()?,
-//RS         }),
-//RS         ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => Err("native runtime resource requires its checked owner packet".to_string()),
-//RS         _ => Ok(@new.JetEvalHostValue.Data@{ value: __jet_bootstrap_ct_from_host(value)? }),
-//RS     }
-//RS }
-//RS fn __jet_bootstrap_type_from_shape(shape: &@t.JetEvalHostTypeShape@) -> Result<::jet_foundation::MIR::MirType, String> {
-//RS     let root = __jet_bootstrap_source_index(&shape.@f.JetEvalHostTypeShape.root@, "host result type root")?;
-//RS     __jet_bootstrap_type_from_shape_node(shape, root, 0)
-//RS }
-//RS fn __jet_bootstrap_type_from_shape_node(
-//RS     shape: &@t.JetEvalHostTypeShape@,
-//RS     index: usize,
-//RS     depth: usize,
-//RS ) -> Result<::jet_foundation::MIR::MirType, String> {
-//RS     if depth >= shape.@f.JetEvalHostTypeShape.nodes@.len() {
-//RS         return Err("checked host type shape contains a recursive non-nominal type".to_string());
-//RS     }
-//RS     let node = shape.@f.JetEvalHostTypeShape.nodes@.get(index)
-//RS         .ok_or_else(|| "checked host type shape has an invalid node reference".to_string())?;
-//RS     let child = |node: &jet_foundation::Numeric::JetInt, label: &str| {
-//RS         __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(node, label)?, depth + 1)
-//RS     };
-//RS     match node {
-//RS         @p.JetEvalHostTypeNode.Scalar@{ ty } => __jet_bootstrap_type_to_host(ty),
-//RS         @p.JetEvalHostTypeNode.Option@{ inner } => Ok(::jet_foundation::MIR::MirType::from_kind(
-//RS             ::jet_foundation::MIR::MirTypeKind::Option(Box::new(child(inner, "option type node")?)),
-//RS         )),
-//RS         @p.JetEvalHostTypeNode.Result@{ ok, error } => Ok(::jet_foundation::MIR::MirType::from_kind(
-//RS             ::jet_foundation::MIR::MirTypeKind::Result {
-//RS                 ok: Box::new(child(ok, "result success type node")?),
-//RS                 err: Box::new(child(error, "result error type node")?),
-//RS             },
-//RS         )),
-//RS         @p.JetEvalHostTypeNode.List@{ inner } => Ok(::jet_foundation::MIR::MirType::from_kind(
-//RS             ::jet_foundation::MIR::MirTypeKind::List(Box::new(child(inner, "list element type node")?)),
-//RS         )),
-//RS         @p.JetEvalHostTypeNode.Map@{ key, value } => Ok(::jet_foundation::MIR::MirType::from_kind(
-//RS             ::jet_foundation::MIR::MirTypeKind::Map {
-//RS                 key: Box::new(child(key, "map key type node")?),
-//RS                 value: Box::new(child(value, "map value type node")?),
-//RS             },
-//RS         )),
-//RS         @p.JetEvalHostTypeNode.Tuple@{ fields } => Ok(::jet_foundation::MIR::MirType::from_kind(
-//RS             ::jet_foundation::MIR::MirTypeKind::Tuple(fields.iter().map(|field| Ok((
-//RS                 field.@f.JetEvalHostTypeFieldShape.name@.clone(),
-//RS                 child(&field.@f.JetEvalHostTypeFieldShape.node@, "tuple field type node")?,
-//RS             ))).collect::<Result<Vec<_>, String>>()?),
-//RS         )),
-//RS         @p.JetEvalHostTypeNode.Struct@{ type_id, type_name, args, fields: _ } | @p.JetEvalHostTypeNode.Enum@{ type_id, type_name, args, variants: _ } => {
-//RS             let id = ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@);
-//RS             let args = args.iter().map(|arg| child(arg, "nominal argument type node")).collect::<Result<Vec<_>, String>>()?;
-//RS             Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Apply {
-//RS                 name: ::jet_foundation::MIR::MirNominalRef { id, name: type_name.clone() },
-//RS                 args,
-//RS             }).with_identity(id))
-//RS         }
-//RS         @p.JetEvalHostTypeNode.Handle@{ ty: _, owner } => match owner {
-//RS             @p.JetEvalHostOwner.Core@{ owner } => __jet_bootstrap_type_to_host(&owner.@f.JetEvalHostCoreOwner.ty@),
-//RS             @p.JetEvalHostOwner.Declared@{ ty } => __jet_bootstrap_type_to_host(ty),
-//RS             _ => Err("cursor owner shape does not expose a native MIR type".to_string()),
-//RS         },
-//RS         @p.JetEvalHostTypeNode.Closure@{ .. } => Err("closure type shape cannot be passed to a native Prelude route".to_string()),
-//RS     }
-//RS }
-//RS "#,
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS fn emit_bootstrap_source_resource_bridge(
-//RS     out: &mut String,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let row = symbols.type_symbol("MIRPreludeCall")?;
-//RS     let eval = symbols.type_symbol("JetEvalRuntimeValue")?;
-//RS     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
-//RS     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
-//RS     let host_result = symbols.type_symbol("JetEvalHostResult")?;
-//RS     let host_outcome = symbols.type_symbol("JetEvalHostOutcome")?;
-//RS     let host_transfer = symbols.type_symbol("JetEvalHostTransfer")?;
-//RS     let host_value = symbols.type_symbol("JetEvalHostValue")?;
-//RS     let host_writeback = symbols.type_symbol("JetEvalHostWriteback")?;
-//RS     let transfer_argument = symbols.field_symbol("JetEvalHostTransfer", "argument")?;
-//RS     let transfer_path = symbols.field_symbol("JetEvalHostTransfer", "path")?;
-//RS     let transfer_token = symbols.field_symbol("JetEvalHostTransfer", "token")?;
-//RS     let transfer_handle = symbols.field_symbol("JetEvalHostTransfer", "handle")?;
-//RS     let transfer_raw = symbols.field_symbol("JetEvalHostTransfer", "raw")?;
-//RS     let host_owner = symbols.type_symbol("JetEvalHostOwner")?;
-//RS     let _host_core_owner = symbols.type_symbol("JetEvalHostCoreOwner")?;
-//RS     let host_core_owner_fact = symbols.field_symbol("JetEvalHostCoreOwner", "fact")?;
-//RS     let host_core_owner_ty = symbols.field_symbol("JetEvalHostCoreOwner", "ty")?;
-//RS     let source_handle = symbols.type_symbol("MIRHandleID")?;
-//RS     let handle_value = symbols.field_symbol("MIRHandleID", "value")?;
-//RS     let row_module = symbols.field_symbol("MIRPreludeCall", "module_name")?;
-//RS     let row_member = symbols.field_symbol("MIRPreludeCall", "member")?;
-//RS     let row_symbol = symbols.field_symbol("MIRPreludeCall", "symbol")?;
-//RS     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
-//RS     let shape_root = symbols.field_symbol("JetEvalHostTypeShape", "root")?;
-//RS     let shape_nodes = symbols.field_symbol("JetEvalHostTypeShape", "nodes")?;
-//RS     let host_owner_cursor = symbols.variant_path("JetEvalHostOwner", "Cursor")?;
-//RS     let cap_type = "::jet_jit::SourceResources::SourceResourceHandle";
-//RS     let mir_type_kind = "::jet_foundation::MIR::MirTypeKind";
-//RS     let mir_handle = "::jet_foundation::MIR::MirHandleId";
-//RS     let native_error = "::jet_foundation::MIR::MirNativeCursorError";
-//RS     let resource_key = "::jet_codegen::Codegen::NativeLoopCursor::NativeLoopResourceKey";
-//RS 
-//RS     writeln!(
-//RS         out,
-//RS r#"fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(
-//RS              outcome: {host_outcome},
-//RS              transfers: Vec<{host_transfer}>,
-//RS              writebacks: Vec<{host_writeback}>,
-//RS          ) -> {host_result} {{
-//RS              @s.JetEvalHostResult@{{
-//RS                  transfers,
-//RS                  callback_transfers: Vec::new(),
-//RS                  fixed_backing_transfers: Vec::new(),
-//RS                  writebacks,
-//RS                  outcome,
-//RS              }}
-//RS          }}
-//RS          fn __jet_bootstrap_host_reply_with_transfers(outcome: {host_outcome}, transfers: Vec<{host_transfer}>) -> {host_result} {{
-//RS              __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome, transfers, Vec::new())
-//RS          }}
-//RS          fn __jet_bootstrap_host_reply(outcome: {host_outcome}) -> {host_result} {{
-//RS              __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome, Vec::new(), Vec::new())
-//RS          }}
-//RS          fn __jet_bootstrap_shape_owner(shape: &{shape}) -> Result<{host_owner}, String> {{
-//RS              let mut node_index = __jet_bootstrap_source_index(&shape.{shape_root}, "host resource type root")?;
-//RS              for _ in 0..shape.{shape_nodes}.len() {{
-//RS                  let node = shape.{shape_nodes}.get(node_index)
-//RS                      .ok_or_else(|| "host resource type shape has an invalid node reference".to_string())?;
-//RS                  match node {{
-//RS                      @p.JetEvalHostTypeNode.Option@{{ inner }} => node_index = __jet_bootstrap_source_index(inner, "host resource type node")?,
-//RS                      @p.JetEvalHostTypeNode.Result@{{ ok, error: _ }} => node_index = __jet_bootstrap_source_index(ok, "host resource result node")?,
-//RS                      @p.JetEvalHostTypeNode.Handle@{{ ty: _, owner }} => return Ok(owner.clone()),
-//RS                      _ => return Err("checked host resource type shape is not a native handle".to_string()),
-//RS                  }}
-//RS              }}
-//RS              Err("host resource type shape cycles through result wrappers".to_string())
-//RS          }}
-//RS         fn __jet_bootstrap_core_owner_from_shape<T, P>(
-//RS             machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-//RS             shape: &{shape},
-//RS             compiler_program: &::jet_foundation::MIR::MirProgram,
-//RS             physical: &P,
-//RS         ) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_jit::SourceResources::SourceResourceKind), String>
-//RS         where
-//RS             T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
-//RS             P: crate::BootstrapEntryPhysicalBindings,
-//RS         {{
-//RS             let owner = __jet_bootstrap_shape_owner(shape)?;
-//RS             let core_owner = match &owner {{
-//RS                 @p.JetEvalHostOwner.Core@{{ owner: core_owner }} => core_owner,
-//RS                 _ => return Err("checked resource shape does not declare a Core owner".to_string()),
-//RS             }};
-//RS             let fact = __jet_bootstrap_mir_MIRCoreOwner_to_host(&core_owner.{host_core_owner_fact})?;
-//RS             let owner_type = __jet_bootstrap_type_to_host(&core_owner.{host_core_owner_ty})?;
-//RS             let {mir_type_kind}::Apply {{ name, .. }} = &owner_type.kind else {{
-//RS                 return Err("checked Core resource owner is not a nominal Apply".to_string());
-//RS             }};
-//RS             if name.id != fact.nominal_id || owner_type.identity.is_some_and(|identity| identity != fact.nominal_id) {{
-//RS                 return Err("checked Core resource type disagrees with its registered nominal identity".to_string());
-//RS             }}
-//RS             if !crate::__jet_bootstrap_entry_verify_core_owner(machine, &fact, compiler_program, physical)? {{
-//RS                 return Err("checked Core owner fact is absent from the active MIR program".to_string());
-//RS             }}
-//RS             let core_kind = ::jet_jit::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
-//RS             Ok(({mir_handle}(name.id.0), owner, fact, owner_type, core_kind))
-//RS         }}
-//RS          fn __jet_bootstrap_resource_host_handle(
-//RS              capability: &{cap_type},
-//RS              owner: {host_owner},
-//RS          ) -> Result<{host_value}, String> {{
-//RS              Ok(@new.JetEvalHostValue.Handle@{{
-//RS                  handle: {source_handle} {{ {handle_value}: capability.handle.0 }},
-//RS                  raw: jet_foundation::Numeric::JetInt::from_i64(capability.raw),
-//RS                  owner,
-//RS                  payload: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }},
-//RS              }})
-//RS          }}
-//RS          fn __jet_bootstrap_resource_factory_result(
-//RS              result: Result<{cap_type}, {native_error}>,
-//RS              owner: {host_owner},
-//RS              span: {span},
-//RS          ) -> {host_result} {{
-//RS              match result {{
-//RS                  Ok(capability) => match __jet_bootstrap_resource_host_handle(&capability, owner) {{
-//RS                     Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }}),
-//RS                      Err(detail) => __jet_bootstrap_host_failure(span, detail),
-//RS                  }},
-//RS                  Err({native_error}::Value(value)) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-//RS                     Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value: @new.JetEvalHostValue.Failed@{{ value }} }}),
-//RS                      Err(detail) => __jet_bootstrap_host_failure(span, detail),
-//RS                  }},
-//RS                  Err({native_error}::Internal(detail)) => __jet_bootstrap_host_failure(span, detail),
-//RS              }}
-//RS          }}
-//RS         fn __jet_bootstrap_cursor_error_with_transfers(
-//RS             error: {native_error},
-//RS             span: {span},
-//RS             transfers: Vec<{host_transfer}>,
-//RS         ) -> {host_result} {{
-//RS             match error {{
-//RS                 {native_error}::Value(value) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-//RS                     Ok(value) => __jet_bootstrap_host_reply_with_transfers(@new.JetEvalHostOutcome.RuntimeFailure@{{ value, span }}, transfers),
-//RS                     Err(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
-//RS                 }},
-//RS                 {native_error}::Internal(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
-//RS             }}
-//RS         }}
-//RS         fn __jet_bootstrap_host_failure_with_transfers(
-//RS             span: {span},
-//RS             detail: String,
-//RS             transfers: Vec<{host_transfer}>,
-//RS         ) -> {host_result} {{
-//RS             __jet_bootstrap_host_reply_with_transfers(__jet_bootstrap_host_failure_outcome(span, detail), transfers)
-//RS         }}
-//RS         fn __jet_bootstrap_resource_transfer_from_eval(
-//RS             value: &{eval},
-//RS             consumed: &{cap_type},
-//RS         ) -> Result<{host_transfer}, String> {{
-//RS             let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token }} = value else {{
-//RS                 return Err("committed Source resource transfer has no checked foreign-handle input".to_string());
-//RS             }};
-//RS             let handle = handle.{handle_value};
-//RS             let raw_value = raw.to_string_rep().parse::<i64>()
-//RS                 .map_err(|_| "Source resource transfer capability is outside i64".to_string())?;
-//RS             if consumed.handle != {mir_handle}(handle) || consumed.raw != raw_value {{
-//RS                 return Err("committed Source resource transfer disagrees with its checked input capability".to_string());
-//RS             }}
-//RS             Ok({host_transfer} {{
-//RS                 {transfer_argument}: jet_foundation::Numeric::JetInt::from_i64(0),
-//RS                 {transfer_path}: Vec::new(),
-//RS                 {transfer_token}: token.clone(),
-//RS                 {transfer_handle}: {source_handle} {{ {handle_value}: handle }},
-//RS                 {transfer_raw}: raw.clone(),
-//RS             }})
-//RS         }}
-//RS          fn __jet_bootstrap_cursor_error(error: {native_error}, span: {span}) -> {host_result} {{
-//RS              match error {{
-//RS                  {native_error}::Value(value) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-//RS                     Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.RuntimeFailure@{{ value, span }}),
-//RS                      Err(detail) => __jet_bootstrap_host_failure(span, detail),
-//RS                  }},
-//RS                  {native_error}::Internal(detail) => __jet_bootstrap_host_failure(span, detail),
-//RS              }}
-//RS          }}
-//RS          fn __jet_bootstrap_source_handle_from_eval(value: &{eval}) -> Result<({mir_handle}, i64), String> {{
-//RS              let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token: _ }} = value else {{
-//RS                  return Err("checked Source resource operation requires a live native handle".to_string());
-//RS              }};
-//RS              let handle = handle.{handle_value};
-//RS              let raw = raw.to_string_rep().parse::<i64>()
-//RS                  .map_err(|_| "Source resource capability is outside i64".to_string())?;
-//RS              Ok(({mir_handle}(handle), raw))
-//RS          }}
-//RS          fn __jet_bootstrap_native_source_resource_call<T, P>(
-//RS              machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-//RS              row: &{row},
-//RS             args: &[{host_argument}],
-//RS              result_shape: Option<&{shape}>,
-//RS              arg_shapes: &[{shape}],
-//RS              span: {span},
-//RS              compiler_program: &::jet_foundation::MIR::MirProgram,
-//RS              physical: &P,
-//RS          ) -> Option<Result<{host_result}, jet_foundation::Outcome::JetAbsent>>
-//RS          where
-//RS              T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
-//RS              P: crate::BootstrapEntryPhysicalBindings,
-//RS          {{
-//RS              let module = row.{row_module}.as_str();
-//RS              let member = row.{row_member}.as_str();
-//RS              let host_symbol = match __jet_bootstrap_mir_MIRSymbol_to_host(&row.{row_symbol}) {{
-//RS                  Ok(symbol) => symbol,
-//RS                  Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS              }};
-//RS              let symbol = host_symbol.name();
-//RS              if module == "core.prelude" && member == "loop_iter_init" {{
-//RS                  if symbol != "jet_loop_iter_init" || args.len() != 5 {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical native loop initializer row".to_string())));
-//RS                  }}
-//RS                 let (source_handle, source_raw) = match __jet_bootstrap_source_handle_from_eval(&args[0].{host_argument_value}) {{
-//RS                      Ok(value) => value,
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let Some(source_shape) = arg_shapes.first() else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop initializer has no checked source type shape".to_string())));
-//RS                  }};
-//RS                 let (checked_handle, _, _, _, core_kind) = match __jet_bootstrap_core_owner_from_shape(machine, source_shape, compiler_program, physical) {{
-//RS                     Ok(value) => value,
-//RS                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                 }};
-//RS                 if checked_handle != source_handle {{
-//RS                     return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source handle disagrees with its checked Core owner shape".to_string())));
-//RS                 }}
-//RS                  let step_args = match __jet_bootstrap_eval_to_host(&args[1].{host_argument_value}) {{
-//RS                      Ok(value) => value,
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let (step_value, has_step) = match step_args {{
-//RS                      ::jet_foundation::MIR::MirRuntimeValue::Unit => (1, false),
-//RS                      ::jet_foundation::MIR::MirRuntimeValue::Int(value) => (value, true),
-//RS                      _ => return Some(Ok(__jet_bootstrap_host_failure(span, "native loop step has a non-Int carrier".to_string()))),
-//RS                  }};
-//RS                  let bool_arg = |index: usize, label: &str| -> Result<bool, String> {{
-//RS                      match __jet_bootstrap_eval_to_host(&args[index].{host_argument_value})? {{
-//RS                          ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(value),
-//RS                          _ => Err(format!("native loop {{label}} has a non-Bool carrier")),
-//RS                      }}
-//RS                  }};
-//RS                  let by_value = match bool_arg(3, "ownership mode") {{
-//RS                      Ok(value) => value,
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let source_wire = match __jet_bootstrap_eval_to_host(&args[4].{host_argument_value}) {{
-//RS                      Ok(::jet_foundation::MIR::MirRuntimeValue::String(value)) => value,
-//RS                      Ok(_) => return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source kind is not a String".to_string()))),
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let source_kind = match ::jet_foundation::MIR::MirLoopSourceKind::from_wire(&source_wire) {{
-//RS                      Some(value) => value,
-//RS                      None => return Some(Ok(__jet_bootstrap_host_failure(span, "invalid checked native loop source kind".to_string()))),
-//RS                  }};
-//RS                  let key = {resource_key} {{
-//RS                      handle: source_handle,
-//RS                      raw: source_raw,
-//RS                      source_kind,
-//RS                  }};
-//RS                 let loop_kind = match ::jet_jit::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{
-//RS                     Ok(value) => value,
-//RS                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                 }};
-//RS                 if core_kind != loop_kind {{
-//RS                     return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source kind disagrees with its checked Core owner registration and type".to_string())));
-//RS                 }}
-//RS                  let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop resource has no active Source arena".to_string())));
-//RS                  }};
-//RS                 let cursor = arena.init_cursor(&key, step_value, has_step, by_value);
-//RS                 let mut transfers = Vec::<{host_transfer}>::new();
-//RS                 if let Some(consumed) = cursor.consumed.as_ref() {{
-//RS                     match __jet_bootstrap_resource_transfer_from_eval(&args[0].{host_argument_value}, consumed) {{
-//RS                         Ok(transfer) => transfers.push(transfer),
-//RS                         Err(detail) => return Some(Ok(__jet_bootstrap_host_failure_with_transfers(span, detail, transfers))),
-//RS                     }}
-//RS                 }}
-//RS                 return Some(Ok(match cursor.result {{
-//RS                     Ok((capability, _)) => match __jet_bootstrap_resource_host_handle(&capability, @v.JetEvalHostOwner.Cursor@) {{
-//RS                         Ok(value) => __jet_bootstrap_host_reply_with_transfers(@new.JetEvalHostOutcome.Value@{{ value }}, transfers),
-//RS                         Err(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
-//RS                     }},
-//RS                     Err(error) => __jet_bootstrap_cursor_error_with_transfers(error, span, transfers),
-//RS                 }}));
-//RS              }}
-//RS              if module == "core.prelude" && (member == "loop_iter_has_next" || member == "loop_iter_value" || member == "loop_iter_advance") {{
-//RS                  let expected_symbol = match member {{
-//RS                      "loop_iter_has_next" => "jet_loop_iter_has_next",
-//RS                      "loop_iter_value" => "jet_loop_iter_value",
-//RS                      _ => "jet_loop_iter_advance",
-//RS                  }};
-//RS                  if symbol != expected_symbol || args.len() != 1 {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical native loop cursor operation row".to_string())));
-//RS                  }}
-//RS                  let (handle, raw) = match __jet_bootstrap_source_handle_from_eval(&args[0].{host_argument_value}) {{
-//RS                      Ok(value) => value,
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let Some(cursor_shape) = arg_shapes.first() else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor operation has no checked receiver type shape".to_string())));
-//RS                  }};
-//RS                  let cursor_owner = match __jet_bootstrap_shape_owner(cursor_shape) {{
-//RS                      Ok(value) => value,
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  if !matches!(cursor_owner, {host_owner_cursor}) {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor receiver shape is not a Cursor owner".to_string())));
-//RS                  }}
-//RS                  let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor has no active Source arena".to_string())));
-//RS                  }};
-//RS                  let cursor = match arena.lookup_cursor(handle, raw) {{
-//RS                      Ok(value) => value,
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let value = match member {{
-//RS                      "loop_iter_has_next" => cursor.has_next().map(|value| @new.JetEvalHostValue.Data@{{ value: @new.TComptimeValue.Bool@{{ value }} }}),
-//RS                      "loop_iter_value" => cursor.value().and_then(|value| {{
-//RS                          __jet_bootstrap_host_value_from_runtime(&value)
-//RS                              .map_err(|detail| {native_error}::internal(detail))
-//RS                      }}),
-//RS                      _ => cursor.advance().map(|_| @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }}),
-//RS                  }};
-//RS                  return Some(Ok(match value {{
-//RS                     Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }}),
-//RS                      Err(error) => __jet_bootstrap_cursor_error(error, span),
-//RS                  }}));
-//RS              }}
-//RS              if module == "core.files" && (member == "open" || member == "create" || member == "append") {{
-//RS                  let expected_symbol = match member {{
-//RS                      "open" => "jet_std_files_open",
-//RS                      "create" => "jet_std_files_create",
-//RS                      _ => "jet_std_files_append",
-//RS                  }};
-//RS                  if symbol != expected_symbol || args.len() != 1 {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical Core file resource factory row".to_string())));
-//RS                  }}
-//RS                  let Some(result_shape) = result_shape else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no checked result type shape".to_string())));
-//RS                  }};
-//RS                 let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape, compiler_program, physical) {{
-//RS                     Ok(value) => value,
-//RS                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                 }};
-//RS                  let path = match __jet_bootstrap_eval_to_host(&args[0].{host_argument_value}) {{
-//RS                      Ok(::jet_foundation::MIR::MirRuntimeValue::String(value)) => value,
-//RS                      Ok(_) => return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource path is not a String".to_string()))),
-//RS                      Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                  }};
-//RS                  let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no active Source arena".to_string())));
-//RS                  }};
-//RS                  let result = match member {{
-//RS                      "open" => arena.open_file(handle, &path),
-//RS                      "create" => arena.open_file_writer(handle, &path),
-//RS                      _ => arena.append_file_writer(handle, &path),
-//RS                  }};
-//RS                  return Some(Ok(__jet_bootstrap_resource_factory_result(result, owner, span)));
-//RS              }}
-//RS              if module == "core.term" && member == "stdin" {{
-//RS                  if symbol != "jet_std_io_stdin" || !args.is_empty() {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical Core stdin resource factory row".to_string())));
-//RS                  }}
-//RS                  let Some(result_shape) = result_shape else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no checked result type shape".to_string())));
-//RS                  }};
-//RS                 let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape, compiler_program, physical) {{
-//RS                     Ok(value) => value,
-//RS                     Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))),
-//RS                 }};
-//RS                  let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
-//RS                      return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no active Source arena".to_string())));
-//RS                  }};
-//RS                  let result = arena.register_stdin(handle).map_err({native_error}::internal);
-//RS                  return Some(Ok(__jet_bootstrap_resource_factory_result(result, owner, span)));
-//RS              }}
-//RS              None
-//RS          }}
-//RS          fn __jet_bootstrap_native_handle_call<T>(
-//RS              _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-//RS              operation: &String,
-//RS              handle: &{source_handle},
-//RS              raw: &jet_foundation::Numeric::JetInt,
-//RS              span: &{span},
-//RS          ) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent> {{
-//RS              if operation != "resource_release" {{
-//RS                  return Err(jet_foundation::Outcome::JetAbsent);
-//RS              }}
-//RS              let span = span.clone();
-//RS              let handle = {mir_handle}(handle.{handle_value});
-//RS              let raw = match raw.to_string_rep().parse::<i64>() {{
-//RS                  Ok(value) => value,
-//RS                  Err(_) => return Ok(__jet_bootstrap_host_failure(span, "Source resource capability is outside i64".to_string())),
-//RS              }};
-//RS              let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{
-//RS                  return Ok(__jet_bootstrap_host_failure(span, "Source resource release has no active arena".to_string()));
-//RS              }};
-//RS              match arena.release_resource(handle, raw) {{
-//RS                 Ok(_released) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }} }})),
-//RS                  Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }}
-//RS          }}"#,
-//RS         row = row,
-//RS         eval = eval,
-//RS         host_argument = host_argument,
-//RS         host_argument_value = host_argument_value,
-//RS         host_result = host_result,
-//RS         host_writeback = host_writeback,
-//RS         host_value = host_value,
-//RS         host_owner = host_owner,
-//RS         source_handle = source_handle,
-//RS         handle_value = handle_value,
-//RS         row_module = row_module,
-//RS         row_member = row_member,
-//RS         row_symbol = row_symbol,
-//RS         host_owner_cursor = host_owner_cursor,
-//RS         host_core_owner_fact = host_core_owner_fact,
-//RS         host_core_owner_ty = host_core_owner_ty,
-//RS         shape = shape,
-//RS         shape_root = shape_root,
-//RS         shape_nodes = shape_nodes,
-//RS         cap_type = cap_type,
-//RS         mir_type_kind = mir_type_kind,
-//RS         mir_handle = mir_handle,
-//RS         native_error = native_error,
-//RS         resource_key = resource_key,
-//RS         host_outcome = host_outcome,
-//RS         host_transfer = host_transfer,
-//RS         transfer_argument = transfer_argument,
-//RS         transfer_path = transfer_path,
-//RS         transfer_token = transfer_token,
-//RS         transfer_handle = transfer_handle,
-//RS         transfer_raw = transfer_raw,
-//RS         span = symbols.type_symbol("Span")?,
-//RS     )
-//RS     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn emit_bootstrap_callback(
-//RS     out: &mut String,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let shape = symbols.type_symbol("JetEvalHostTypeShape")?;
-//RS     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
-//RS     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
-//RS     let host_result = symbols.type_symbol("JetEvalHostResult")?;
-//RS     let host_outcome = symbols.type_symbol("JetEvalHostOutcome")?;
-//RS     let span = symbols.type_symbol("Span")?;
-//RS     let internal_problem = symbols.type_symbol("JetEvalInternalProblem")?;
-//RS     let internal_problem_span = symbols.field_symbol("JetEvalInternalProblem", "span")?;
-//RS     let internal_problem_message = symbols.field_symbol("JetEvalInternalProblem", "message")?;
-//RS 
-//RS     writeln!(
-//RS         out,
-//RS         "fn __jet_bootstrap_host_failure_outcome(span: {span}, detail: String) -> {host_outcome} {{
-//RS             @new.JetEvalHostOutcome.InternalProblem@{{ problem: {internal_problem} {{
-//RS                 {internal_problem_span}: Ok(span),
-//RS                 {internal_problem_message}: detail,
-//RS             }} }}
-//RS         }}
-//RS         fn __jet_bootstrap_host_failure(span: {span}, detail: String) -> {host_result} {{
-//RS             __jet_bootstrap_host_reply(__jet_bootstrap_host_failure_outcome(span, detail))
-//RS         }}
-//RS          fn __jet_bootstrap_native_host_call<T, P>(
-//RS              machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-//RS              target: &@t.JetEvalHostCallTarget@,
-//RS              static_operand: &::std::result::Result<@t.JetEvalHostStaticOperand@, jet_foundation::Outcome::JetAbsent>,
-//RS              args: Vec<{host_argument}>,
-//RS              result_shape: &::std::result::Result<{shape}, jet_foundation::Outcome::JetAbsent>,
-//RS              arg_shapes: &Vec<{shape}>,
-//RS              span: &{span},
-//RS              compiler_program: &::jet_foundation::MIR::MirProgram,
-//RS              physical: &P,
-//RS          ) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent>
-//RS          where
-//RS              T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows,
-//RS              P: crate::BootstrapEntryPhysicalBindings,
-//RS          {{
-//RS              // The host serves plain Prelude rows; take-pattern targets and
-//RS              // static operands stay unavailable, which the evaluator reports.
-//RS              let @p.JetEvalHostCallTarget.Prelude@{{ row }} = target else {{
-//RS                  return Err(jet_foundation::Outcome::JetAbsent);
-//RS              }};
-//RS              if static_operand.is_ok() {{
-//RS                  return Err(jet_foundation::Outcome::JetAbsent);
-//RS              }}
-//RS              let row = &@deref.JetEvalHostCallTarget.Prelude.row@*row;
-//RS              let span = span.clone();
-//RS              let result_shape = result_shape.as_ref().ok();
-//RS              if let Some(outcome) = __jet_bootstrap_native_source_resource_call(machine, row, &args, result_shape, arg_shapes, span.clone(), compiler_program, physical) {{
-//RS                  return outcome;
-//RS              }}
-//RS              let native_args = match args.iter().map(|value| __jet_bootstrap_eval_to_host(&value.{host_argument_value})).collect::<Result<Vec<_>, String>>() {{
-//RS                  Ok(args) => args,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              let native_result_ty = match result_shape.map(__jet_bootstrap_type_from_shape).transpose() {{
-//RS                  Ok(value) => value,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              let native_span = match __jet_bootstrap_span_to_host(&span) {{
-//RS                  Ok(value) => value,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              let native_row = match __jet_bootstrap_mir_MIRPreludeCall_to_host(row) {{
-//RS                  Ok(row) => row,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              let outcome = crate::Codegen::NativePreludeBridge::ambient_call(
-//RS                  &native_row,
-//RS                  native_args,
-//RS                  native_result_ty,
-//RS                  native_span,
-//RS              );
-//RS              match outcome {{
-//RS                  None => Err(jet_foundation::Outcome::JetAbsent),
-//RS                 Some(Ok(crate::Comptime::AmbientMirPreludeResult::Value(value))) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-//RS                     Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }})),
-//RS                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                 }},
-//RS                 Some(Ok(crate::Comptime::AmbientMirPreludeResult::Effect {{ value, stdout, stderr }})) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-//RS                     Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Effect@{{ value, stdout, stderr }})),
-//RS                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                 }},
-//RS                 Some(Ok(crate::Comptime::AmbientMirPreludeResult::Control {{ value, stdout, stderr, exit_code }})) => match __jet_bootstrap_host_value_from_runtime(&value) {{
-//RS                     Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Control@{{ value, stdout, stderr, exit_code: jet_foundation::Numeric::JetInt::from_i64(i64::from(exit_code)) }})),
-//RS                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                 }},
-//RS                 Some(Err(error)) => match __jet_bootstrap_diagnostic_from_host(&error) {{
-//RS                     Ok(diagnostic) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Failure@{{ kind: @v.JetEvalErrorKind.Source@, diagnostic }})),
-//RS                     Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                 }},
-//RS              }}
-//RS          }}"
-//RS         ,
-//RS         host_outcome = host_outcome,
-//RS     )
-//RS     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-//RS     Ok(())
-//RS }
-//RS fn emit_bootstrap_foreign_callback(
-//RS     out: &mut String,
-//RS     symbols: &BootstrapCodecSymbols<'_>,
-//RS ) -> Result<(), BootstrapHostCodecError> {
-//RS     let foreign = symbols.type_symbol("MIRForeign")?;
-//RS     let param = symbols.type_symbol("MIRParam")?;
-//RS     let ownership = symbols.type_symbol("MIROwnership")?;
-//RS     let access = symbols.type_symbol("MIRAccess")?;
-//RS     let effects = symbols.type_symbol("MIREffectFacts")?;
-//RS     let _named_span = symbols.type_symbol("MIRNamedSpan")?;
-//RS     let _applicability = symbols.type_symbol("MIRTargetApplicability")?;
-//RS     let _eval = symbols.type_symbol("JetEvalRuntimeValue")?;
-//RS     let host_argument = symbols.type_symbol("JetEvalHostArgument")?;
-//RS     let host_argument_value = symbols.field_symbol("JetEvalHostArgument", "value")?;
-//RS     let host_result = symbols.type_symbol("JetEvalHostResult")?;
-//RS     let host_writeback = symbols.type_symbol("JetEvalHostWriteback")?;
-//RS     let host_writeback_argument = symbols.field_symbol("JetEvalHostWriteback", "argument")?;
-//RS     let host_writeback_value = symbols.field_symbol("JetEvalHostWriteback", "value")?;
-//RS     let span = symbols.type_symbol("Span")?;
-//RS     let param_index = symbols.field_symbol("MIRParam", "index")?;
-//RS     let param_name = symbols.field_symbol("MIRParam", "name")?;
-//RS     let param_span = symbols.field_symbol("MIRParam", "span")?;
-//RS     let param_ty = symbols.field_symbol("MIRParam", "ty")?;
-//RS     let param_access = symbols.field_symbol("MIRParam", "access")?;
-//RS     let param_ownership = symbols.field_symbol("MIRParam", "ownership")?;
-//RS     let param_public_label = symbols.field_symbol("MIRParam", "public_label")?;
-//RS     let param_variadic = symbols.field_symbol("MIRParam", "variadic")?;
-//RS     let param_default_present = symbols.field_symbol("MIRParam", "default_present")?;
-//RS     let ownership_mode = symbols.field_symbol("MIROwnership", "mode")?;
-//RS     let ownership_drop = symbols.field_symbol("MIROwnership", "drop")?;
-//RS     let ownership_moved = symbols.field_symbol("MIROwnership", "moved")?;
-//RS     let ownership_last_use = symbols.field_symbol("MIROwnership", "last_use")?;
-//RS     let ownership_gc_root = symbols.field_symbol("MIROwnership", "gc_root")?;
-//RS     let effects_direct = symbols.field_symbol("MIREffectFacts", "direct")?;
-//RS     let effects_solved = symbols.field_symbol("MIREffectFacts", "solved")?;
-//RS     let effects_call_edges = symbols.field_symbol("MIREffectFacts", "call_edges")?;
-//RS     let effects_maximal = symbols.field_symbol("MIREffectFacts", "maximal")?;
-//RS     let effects_direct_spans = symbols.field_symbol("MIREffectFacts", "direct_spans")?;
-//RS     let named_span_name = symbols.field_symbol("MIRNamedSpan", "name")?;
-//RS     let named_span_span = symbols.field_symbol("MIRNamedSpan", "span")?;
-//RS     let target_rust_aot = symbols.field_symbol("MIRTargetApplicability", "rust_aot")?;
-//RS     let target_cranelift = symbols.field_symbol("MIRTargetApplicability", "cranelift")?;
-//RS     let target_interpreter = symbols.field_symbol("MIRTargetApplicability", "interpreter")?;
-//RS     let target_web = symbols.field_symbol("MIRTargetApplicability", "web")?;
-//RS     let foreign_id = symbols.field_symbol("MIRForeign", "id")?;
-//RS     let foreign_module_id = symbols.field_symbol("MIRForeign", "module_id")?;
-//RS     let foreign_key = symbols.field_symbol("MIRForeign", "key")?;
-//RS     let foreign_module_name = symbols.field_symbol("MIRForeign", "module_name")?;
-//RS     let foreign_name = symbols.field_symbol("MIRForeign", "name")?;
-//RS     let foreign_span = symbols.field_symbol("MIRForeign", "span")?;
-//RS     let foreign_symbol = symbols.field_symbol("MIRForeign", "symbol")?;
-//RS     let foreign_path = symbols.field_symbol("MIRForeign", "path")?;
-//RS     let foreign_params = symbols.field_symbol("MIRForeign", "params")?;
-//RS     let foreign_bridge_eligible = symbols.field_symbol("MIRForeign", "bridge_eligible")?;
-//RS     let foreign_raw_scalar_abi = symbols.field_symbol("MIRForeign", "raw_scalar_abi")?;
-//RS     let foreign_return_type = symbols.field_symbol("MIRForeign", "return_type")?;
-//RS     let foreign_abi = symbols.field_symbol("MIRForeign", "foreign_abi")?;
-//RS     let foreign_language = symbols.field_symbol("MIRForeign", "foreign_language")?;
-//RS     let foreign_target_applicability = symbols.field_symbol("MIRForeign", "target_applicability")?;
-//RS     let foreign_effects = symbols.field_symbol("MIRForeign", "effects")?;
-//RS     let foreign_callback_transport = symbols.field_symbol("MIRForeign", "callback_transport")?;
-//RS     let foreign_callback_plan_digest = symbols.field_symbol("MIRForeign", "callback_plan_digest")?;
-//RS     let foreign_callback_identity = symbols.field_symbol("MIRForeign", "callback_identity")?;
-//RS     let foreign_link = symbols.field_symbol("MIRForeign", "link")?;
-//RS     let foreign_callback = symbols.field_symbol("MIRForeign", "callback")?;
-//RS     let foreign_handle = symbols.field_symbol("MIRForeign", "handle")?;
-//RS     let foreign_close_function = symbols.field_symbol("MIRForeign", "close_function")?;
-//RS     let foreign_close_foreign = symbols.field_symbol("MIRForeign", "close_foreign")?;
-//RS     let foreign_undo_function = symbols.field_symbol("MIRForeign", "undo_function")?;
-//RS     let foreign_id_value = symbols.field_symbol("MIRForeignID", "value")?;
-//RS     let module_id_value = symbols.field_symbol("MIRModuleID", "value")?;
-//RS     let link_unit_id_value = symbols.field_symbol("MIRLinkUnitID", "value")?;
-//RS     let callback_id_value = symbols.field_symbol("MIRCallbackID", "value")?;
-//RS     let handle_id_value = symbols.field_symbol("MIRHandleID", "value")?;
-//RS     let function_id_value = symbols.field_symbol("MIRFunctionID", "value")?;
-//RS     let foreign_abi_c = symbols.variant_path("MIRForeignABI", "C")?;
-//RS     let foreign_abi_c_unwind = symbols.variant_path("MIRForeignABI", "CUnwind")?;
-//RS     let foreign_abi_system = symbols.variant_path("MIRForeignABI", "System")?;
-//RS     let foreign_abi_stdcall = symbols.variant_path("MIRForeignABI", "Stdcall")?;
-//RS     let foreign_abi_fastcall = symbols.variant_path("MIRForeignABI", "Fastcall")?;
-//RS     let foreign_abi_vectorcall = symbols.variant_path("MIRForeignABI", "Vectorcall")?;
-//RS     let foreign_abi_rust = symbols.variant_path("MIRForeignABI", "Rust")?;
-//RS     let foreign_language_c = symbols.variant_path("MIRForeignLanguage", "C")?;
-//RS     let foreign_language_cpp = symbols.variant_path("MIRForeignLanguage", "Cpp")?;
-//RS     let foreign_language_rust = symbols.variant_path("MIRForeignLanguage", "Rust")?;
-//RS     let foreign_language_assembly = symbols.variant_path("MIRForeignLanguage", "Assembly")?;
-//RS     let ownership_mode_copy = symbols.variant_path("MIROwnershipMode", "Copy")?;
-//RS     let ownership_mode_owned = symbols.variant_path("MIROwnershipMode", "Owned")?;
-//RS     let ownership_mode_shared = symbols.variant_path("MIROwnershipMode", "Shared")?;
-//RS     let ownership_mode_read_borrow = symbols.variant_path("MIROwnershipMode", "ReadBorrow")?;
-//RS     let ownership_mode_write_borrow = symbols.variant_path("MIROwnershipMode", "WriteBorrow")?;
-//RS     let ownership_mode_move = symbols.variant_path("MIROwnershipMode", "Move")?;
-//RS     let drop_no_drop = symbols.variant_path("MIRDropKind", "NoDrop")?;
-//RS     let drop_value = symbols.variant_path("MIRDropKind", "Value")?;
-//RS     let drop_shared = symbols.variant_path("MIRDropKind", "Shared")?;
-//RS     let drop_view = symbols.variant_path("MIRDropKind", "View")?;
-//RS     let drop_foreign_handle = symbols.variant_path("MIRDropKind", "ForeignHandle")?;
-//RS     let access_read = symbols.variant_path("MIRAccess", "Read")?;
-//RS     let access_write = symbols.variant_path("MIRAccess", "Write")?;
-//RS     let access_move = symbols.variant_path("MIRAccess", "Move")?;
-//RS 
-//RS     writeln!(
-//RS         out,
-//RS         "fn __jet_bootstrap_source_index(value: &jet_foundation::Numeric::JetInt, label: &str) -> Result<usize, String> {{
-//RS              value.to_string_rep().parse::<usize>().map_err(|_| format!(\"{{label}} is not a usize\"))
-//RS          }}
-//RS          fn __jet_bootstrap_mir_access_to_host(value: &{access}) -> Result<::jet_foundation::MIR::MirAccess, String> {{
-//RS              match value {{
-//RS                  {access_read} => Ok(::jet_foundation::MIR::MirAccess::Read),
-//RS                  {access_write} => Ok(::jet_foundation::MIR::MirAccess::Write),
-//RS                  {access_move} => Ok(::jet_foundation::MIR::MirAccess::Move),
-//RS              }}
-//RS          }}
-//RS          fn __jet_bootstrap_mir_ownership_to_host(value: &{ownership}) -> Result<::jet_foundation::MIR::MirOwnership, String> {{
-//RS              let mode = match &value.{ownership_mode} {{
-//RS                  {ownership_mode_copy} => ::jet_foundation::MIR::MirOwnershipMode::Copy,
-//RS                  {ownership_mode_owned} => ::jet_foundation::MIR::MirOwnershipMode::Owned,
-//RS                  {ownership_mode_shared} => ::jet_foundation::MIR::MirOwnershipMode::Shared,
-//RS                  {ownership_mode_read_borrow} => ::jet_foundation::MIR::MirOwnershipMode::ReadBorrow,
-//RS                  {ownership_mode_write_borrow} => ::jet_foundation::MIR::MirOwnershipMode::WriteBorrow,
-//RS                  {ownership_mode_move} => ::jet_foundation::MIR::MirOwnershipMode::Move,
-//RS              }};
-//RS              let drop = match &value.{ownership_drop} {{
-//RS                  {drop_no_drop} => ::jet_foundation::MIR::MirDropKind::None,
-//RS                  {drop_value} => ::jet_foundation::MIR::MirDropKind::Value,
-//RS                  {drop_shared} => ::jet_foundation::MIR::MirDropKind::Shared,
-//RS                  {drop_view} => ::jet_foundation::MIR::MirDropKind::View,
-//RS                  {drop_foreign_handle} => ::jet_foundation::MIR::MirDropKind::ForeignHandle,
-//RS              }};
-//RS              Ok(::jet_foundation::MIR::MirOwnership {{
-//RS                  mode,
-//RS                  drop,
-//RS                  moved: value.{ownership_moved},
-//RS                  last_use: value.{ownership_last_use},
-//RS                  gc_root: value.{ownership_gc_root},
-//RS              }})
-//RS          }}
-//RS          fn __jet_bootstrap_mir_param_to_host(value: {param}) -> Result<::jet_foundation::MIR::MirParam, String> {{
-//RS              Ok(::jet_foundation::MIR::MirParam {{
-//RS                  index: __jet_bootstrap_source_index(&value.{param_index}, \"foreign parameter index\")?,
-//RS                  name: value.{param_name},
-//RS                  span: __jet_bootstrap_span_to_host(&value.{param_span})?,
-//RS                  ty: __jet_bootstrap_type_to_host(&value.{param_ty})?,
-//RS                  access: __jet_bootstrap_mir_access_to_host(&value.{param_access})?,
-//RS                  ownership: __jet_bootstrap_mir_ownership_to_host(&value.{param_ownership})?,
-//RS                  public_label: value.{param_public_label},
-//RS                  variadic: value.{param_variadic},
-//RS                  default_present: value.{param_default_present},
-//RS              }})
-//RS          }}
-//RS          fn __jet_bootstrap_mir_effects_to_host(value: {effects}) -> Result<::jet_foundation::MIR::MirEffectFacts, String> {{
-//RS              let mut direct_spans = ::std::collections::BTreeMap::new();
-//RS              for fact in value.{effects_direct_spans} {{
-//RS                  if direct_spans.insert(fact.{named_span_name}, __jet_bootstrap_span_to_host(&fact.{named_span_span})?).is_some() {{
-//RS                      return Err(\"foreign MIR effect facts contain duplicate direct span names\".to_string());
-//RS                  }}
-//RS              }}
-//RS              Ok(::jet_foundation::MIR::MirEffectFacts {{
-//RS                  direct: value.{effects_direct}.into_iter().collect(),
-//RS                  solved: value.{effects_solved}.into_iter().collect(),
-//RS                  call_edges: value.{effects_call_edges}.into_iter().collect(),
-//RS                  maximal: value.{effects_maximal},
-//RS                  direct_spans,
-//RS              }})
-//RS          }}
-//RS          fn __jet_bootstrap_foreign_to_host(value: {foreign}) -> Result<::jet_foundation::MIR::MirForeign, String> {{
-//RS              let foreign_abi = match value.{foreign_abi} {{
-//RS                  {foreign_abi_c} => ::jet_foundation::MIR::MirForeignAbi::C,
-//RS                  {foreign_abi_c_unwind} => ::jet_foundation::MIR::MirForeignAbi::CUnwind,
-//RS                  {foreign_abi_system} => ::jet_foundation::MIR::MirForeignAbi::System,
-//RS                  {foreign_abi_stdcall} => ::jet_foundation::MIR::MirForeignAbi::Stdcall,
-//RS                  {foreign_abi_fastcall} => ::jet_foundation::MIR::MirForeignAbi::Fastcall,
-//RS                  {foreign_abi_vectorcall} => ::jet_foundation::MIR::MirForeignAbi::Vectorcall,
-//RS                  {foreign_abi_rust} => ::jet_foundation::MIR::MirForeignAbi::Rust,
-//RS                  @p.MIRForeignABI.Platform@{{ name }} => ::jet_foundation::MIR::MirForeignAbi::Platform(name),
-//RS              }};
-//RS              let foreign_language = match value.{foreign_language} {{
-//RS                  {foreign_language_c} => ::jet_foundation::MIR::MirForeignLanguage::C,
-//RS                  {foreign_language_cpp} => ::jet_foundation::MIR::MirForeignLanguage::Cpp,
-//RS                  {foreign_language_rust} => ::jet_foundation::MIR::MirForeignLanguage::Rust,
-//RS                  {foreign_language_assembly} => ::jet_foundation::MIR::MirForeignLanguage::Assembly,
-//RS              }};
-//RS              let target = &value.{foreign_target_applicability};
-//RS              let target_applicability = ::jet_foundation::MIR::MirTargetApplicability {{
-//RS                  rust_aot: target.{target_rust_aot},
-//RS                  cranelift: target.{target_cranelift},
-//RS                  interpreter: target.{target_interpreter},
-//RS                  web: target.{target_web},
-//RS              }};
-//RS              let return_type = value.{foreign_return_type}.ok().map(|ty| __jet_bootstrap_type_to_host(&ty)).transpose()?;
-//RS              let link = value.{foreign_link}.ok().map(|id| ::jet_foundation::MIR::MirLinkUnitId(id.{link_unit_id_value}));
-//RS              let callback = value.{foreign_callback}.ok().map(|id| ::jet_foundation::MIR::MirCallbackId(id.{callback_id_value}));
-//RS              let handle = value.{foreign_handle}.ok().map(|id| ::jet_foundation::MIR::MirHandleId(id.{handle_id_value}));
-//RS              let close_function = value.{foreign_close_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
-//RS              let close_foreign = value.{foreign_close_foreign}.ok().map(|id| ::jet_foundation::MIR::MirForeignId(id.{foreign_id_value}));
-//RS              let undo_function = value.{foreign_undo_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
-//RS              Ok(::jet_foundation::MIR::MirForeign {{
-//RS                  id: ::jet_foundation::MIR::MirForeignId(value.{foreign_id}.{foreign_id_value}),
-//RS                  module_id: ::jet_foundation::MIR::MirModuleId(value.{foreign_module_id}.{module_id_value}),
-//RS                  key: value.{foreign_key},
-//RS                  module: value.{foreign_module_name},
-//RS                  name: value.{foreign_name},
-//RS                  span: __jet_bootstrap_span_to_host(&value.{foreign_span})?,
-//RS                  symbol: value.{foreign_symbol},
-//RS                  path: value.{foreign_path},
-//RS                  params: value.{foreign_params}.into_iter().map(__jet_bootstrap_mir_param_to_host).collect::<Result<Vec<_>, String>>()?,
-//RS                  bridge_eligible: value.{foreign_bridge_eligible},
-//RS                  raw_scalar_abi: value.{foreign_raw_scalar_abi},
-//RS                  return_type,
-//RS                  foreign_abi,
-//RS                  foreign_language,
-//RS                  target_applicability,
-//RS                  effects: __jet_bootstrap_mir_effects_to_host(value.{foreign_effects})?,
-//RS                  callback_transport: value.{foreign_callback_transport}.ok(),
-//RS                  callback_plan_digest: value.{foreign_callback_plan_digest}.ok(),
-//RS                  callback_identity: value.{foreign_callback_identity}.ok(),
-//RS                  link,
-//RS                  callback,
-//RS                  handle,
-//RS                  close_function,
-//RS                  close_foreign,
-//RS                  undo_function,
-//RS              }})
-//RS          }}
-//RS          fn __jet_bootstrap_native_foreign_call<T>(
-//RS              _machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>,
-//RS              row: &{foreign},
-//RS              args: Vec<{host_argument}>,
-//RS              span: &{span},
-//RS          ) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent> {{
-//RS              let span = span.clone();
-//RS              let native_row = match __jet_bootstrap_foreign_to_host(row.clone()) {{
-//RS                  Ok(value) => value,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              let native_args = match args.iter().map(|value| __jet_bootstrap_eval_to_foreign_host(&value.{host_argument_value})).collect::<Result<Vec<_>, String>>() {{
-//RS                  Ok(value) => value,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              let native_span = match __jet_bootstrap_span_to_host(&span) {{
-//RS                  Ok(value) => value,
-//RS                  Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS              }};
-//RS              match crate::Comptime::try_ambient_mir_extern_call(&native_row, native_args, native_span) {{
-//RS                  None => Err(jet_foundation::Outcome::JetAbsent),
-//RS                  Some(Err(error)) => match __jet_bootstrap_diagnostic_from_host(&error) {{
-//RS                     Ok(diagnostic) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Failure@{{ kind: @v.JetEvalErrorKind.Source@, diagnostic }})),
-//RS                      Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                  }},
-//RS                  Some(Ok(result)) => {{
-//RS                      let value = match __jet_bootstrap_host_value_from_runtime(&result.value) {{
-//RS                          Ok(value) => value,
-//RS                          Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                      }};
-//RS                      let writebacks = match result.writebacks.iter().map(|writeback| {{
-//RS                          let argument = i64::try_from(writeback.parameter).map_err(|_| \"foreign writeback index exceeds Jet Int\".to_string())?;
-//RS                          Ok({host_writeback} {{
-//RS                              {host_writeback_argument}: jet_foundation::Numeric::JetInt::from_i64(argument),
-//RS                              {host_writeback_value}: __jet_bootstrap_host_value_from_runtime(&writeback.value)?,
-//RS                          }})
-//RS                      }}).collect::<Result<Vec<_>, String>>() {{
-//RS                          Ok(value) => value,
-//RS                          Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)),
-//RS                      }};
-//RS                      Ok(__jet_bootstrap_host_reply_with_transfers_and_writebacks(
-//RS                          @new.JetEvalHostOutcome.Value@{{ value }},
-//RS                          Vec::new(),
-//RS                          writebacks,
-//RS                      ))
-//RS                  }}
-//RS              }}
-//RS          }}"
-//RS     )
-//RS     .map_err(|error| BootstrapHostCodecError::InvalidMetadata(error.to_string()))?;
-//RS     Ok(())
-//RS }
-//RS 
-//RS 
-// END-PORT-PENDING 2055 Compiler/Bootstrap/Host/Native.rs:3601-4618
+use JetBootstrap.CompilerBootstrapHost.[BootstrapCodecSymbols, BootstrapHostCodecError]
 
+// Rust: Compiler/Bootstrap/Host/Native.rs:3601
+// Continuation of emit_bootstrap_value_codec's generated Rust string, split by the packet boundary.
+fn emit_bootstrap_value_codec_tail(out: &String) -> Unit {
+    out += """
+                field.@f.JetEvalRuntimeField.name@.clone(),
+                __jet_bootstrap_eval_to_host_inner(&field.@f.JetEvalRuntimeField.value@, allow_foreign_handles)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        }}),
+        @p.JetEvalRuntimeAggregate.Enum@{{ type_name, variant, args }} => Ok(::jet_foundation::MIR::MirRuntimeValue::Enum {{
+            type_name: type_name.clone(), variant: variant.clone(),
+            args: args.iter().map(|arg| Ok((
+                (&@deref.JetEvalRuntimeEnumArg.name@arg.@f.JetEvalRuntimeEnumArg.name@).as_ref().ok().cloned(),
+                __jet_bootstrap_eval_to_host_inner(&arg.@f.JetEvalRuntimeEnumArg.value@, allow_foreign_handles)?,
+            ))).collect::<Result<Vec<_>, String>>()?,
+        }}),
+    }}
+}}
+fn __jet_bootstrap_eval_to_host_inner(value: &@t.JetEvalRuntimeValue@, allow_foreign_handles: bool) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{
+    match value {{
+        @v.JetEvalRuntimeValue.Moved@ => Err("moved values cannot cross a native host boundary".to_string()),
+        @p.JetEvalRuntimeValue.Data@{{ value }} => __jet_bootstrap_ct_to_host(value),
+        @p.JetEvalRuntimeValue.Absent@{{ element }} => Ok(::jet_foundation::MIR::MirRuntimeValue::Absent {{ element: __jet_bootstrap_type_to_host(element)? }}),
+        @p.JetEvalRuntimeValue.Result@{{ ok, value }} => {{
+            let value = __jet_bootstrap_eval_to_host_inner(value, allow_foreign_handles)?;
+            Ok(if *ok {{ ::jet_foundation::MIR::MirRuntimeValue::Present(Box::new(value)) }} else {{ ::jet_foundation::MIR::MirRuntimeValue::FailedTold(Box::new(value)) }})
+        }}
+        @p.JetEvalRuntimeValue.ForeignHandle@{{ handle: _, raw, token: _ }} if allow_foreign_handles => Ok(::jet_foundation::MIR::MirRuntimeValue::Int(raw.to_i64().ok_or_else(|| "foreign handle is outside i64".to_string())?)),
+        @p.JetEvalRuntimeValue.ForeignHandle@{{ .. }} => Err("foreign handles cross only their checked C foreign-call ABI boundary".to_string()),
+        @p.JetEvalRuntimeValue.Aggregate@{{ value: aggregate }} => __jet_bootstrap_eval_aggregate_to_host(aggregate, allow_foreign_handles),
+        @p.JetEvalRuntimeValue.RuntimeFailure@{{ .. }} => Err("terminal runtime failures cannot cross a native host boundary".to_string()),
+        @p.JetEvalRuntimeValue.HostCursor@{{ .. }} | @p.JetEvalRuntimeValue.Stream@{{ .. }} => Err("native iterator cursors cannot cross a serializable host boundary".to_string()),
+        @p.JetEvalRuntimeValue.Closure@{{ .. }} | @p.JetEvalRuntimeValue.Address@{{ .. }} | @p.JetEvalRuntimeValue.SharedCell@{{ .. }} | @p.JetEvalRuntimeValue.Shared@{{ .. }} | @p.JetEvalRuntimeValue.SharedWeak@{{ .. }} | @p.JetEvalRuntimeValue.SharedGuard@{{ .. }} | @p.JetEvalRuntimeValue.SharedSnapshot@{{ .. }} | @p.JetEvalRuntimeValue.Condition@{{ .. }} | @p.JetEvalRuntimeValue.RangeCursor@{{ .. }} | @p.JetEvalRuntimeValue.ListCursor@{{ .. }} => Err("runtime handles and closures cannot cross a native host boundary".to_string()),
+    }}
+}}
+fn __jet_bootstrap_eval_to_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{ __jet_bootstrap_eval_to_host_inner(value, false) }}
+// This projection is confined to a checked MIR foreign-call row, whose parameter facts own the C ABI.
+fn __jet_bootstrap_eval_to_foreign_host(value: &@t.JetEvalRuntimeValue@) -> Result<::jet_foundation::MIR::MirRuntimeValue, String> {{ __jet_bootstrap_eval_to_host_inner(value, true) }}
+fn __jet_bootstrap_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR::MirConstKey)]) -> Result<Vec<@t.TComptimeKeyField@>, String> {{
+    fields.iter().map(|(name, key)| Ok(@s.TComptimeKeyField@{{ name: name.clone(), key: __jet_bootstrap_key_from_host(key)?, }})).collect()
+}}
+fn __jet_bootstrap_key_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeKey@, String> {{
+    match value {{
+        ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeKey.Int@{{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }}),
+        ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeKey.String@{{ value: value.clone() }}),
+        ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeKey.Bool@{{ value: *value }}),
+        ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeKey.Char@{{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }}),
+        ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok(@new.TComptimeKey.Tuple@{{ fields: __jet_bootstrap_key_fields_from_host(fields)? }}),
+        ::jet_foundation::MIR::MirConstKey::Struct {{ type_name, fields }} => Ok(@new.TComptimeKey.Struct@{{ type_name: type_name.clone(), fields: __jet_bootstrap_key_fields_from_host(fields)?, }}),
+        ::jet_foundation::MIR::MirConstKey::Enum {{ type_name, variant }} => Ok(@new.TComptimeKey.Enum@{{ type_name: type_name.clone(), variant: variant.clone() }}),
+    }}
+}}
+"""
+}
+
+// Rust: Compiler/Bootstrap/Host/Native.rs:3670
+// Native Prelude results back into Source host values, and checked host type shapes into MIR types.
+fn emit_bootstrap_host_value_codec(out: &String) -> Unit {
+    out += """
+fn __jet_bootstrap_ct_key_fields_from_host(fields: &[(String, ::jet_foundation::MIR::MirConstKey)]) -> Result<Vec<@t.TComptimeField@>, String> {{
+    fields.iter().map(|(name, key)| Ok(@s.TComptimeField@{{ name: name.clone(), value: __jet_bootstrap_ct_key_value_from_host(key)?, }})).collect()
+}}
+fn __jet_bootstrap_ct_key_value_from_host(value: &::jet_foundation::MIR::MirConstKey) -> Result<@t.TComptimeValue@, String> {{
+    match value {{
+        ::jet_foundation::MIR::MirConstKey::Int(value) => Ok(@new.TComptimeValue.Int@{{ value: jet_foundation::Numeric::JetInt::from_i64(*value) }}),
+        ::jet_foundation::MIR::MirConstKey::String(value) => Ok(@new.TComptimeValue.String@{{ value: value.clone() }}),
+        ::jet_foundation::MIR::MirConstKey::Bool(value) => Ok(@new.TComptimeValue.Bool@{{ value: *value }}),
+        ::jet_foundation::MIR::MirConstKey::Char(value) => Ok(@new.TComptimeValue.Char@{{ value: jet_foundation::Numeric::JetInt::from_i64(i64::from(*value as u32)) }}),
+        ::jet_foundation::MIR::MirConstKey::Tuple(fields) => Ok(@new.TComptimeValue.Struct@{{ type_name: "Tuple".to_string(), fields: __jet_bootstrap_ct_key_fields_from_host(fields)?, }}),
+        ::jet_foundation::MIR::MirConstKey::Struct {{ type_name, fields }} => Ok(@new.TComptimeValue.Struct@{{ type_name: type_name.clone(), fields: __jet_bootstrap_ct_key_fields_from_host(fields)?, }}),
+        ::jet_foundation::MIR::MirConstKey::Enum {{ type_name, variant }} => Ok(@new.TComptimeValue.Enum@{{ type_name: type_name.clone(), variant: variant.clone(), args: Vec::<@t.TComptimeEnumArg@>::new(), }}),
+    }}
+}}
+fn __jet_bootstrap_host_value_from_runtime(value: &::jet_foundation::MIR::MirRuntimeValue) -> Result<@t.JetEvalHostValue@, String> {{
+    match value {{
+        ::jet_foundation::MIR::MirRuntimeValue::Present(value) => Ok(@new.JetEvalHostValue.Present@{{ value: __jet_bootstrap_host_value_from_runtime(value)? }}),
+        ::jet_foundation::MIR::MirRuntimeValue::FailedTold(value) => Ok(@new.JetEvalHostValue.Failed@{{ value: __jet_bootstrap_host_value_from_runtime(value)? }}),
+        ::jet_foundation::MIR::MirRuntimeValue::Absent {{ element }} => Ok(@new.JetEvalHostValue.Absent@{{ element: __jet_bootstrap_type_from_host(element)? }}),
+        ::jet_foundation::MIR::MirRuntimeValue::List(values) => Ok(@new.JetEvalHostValue.List@{{ values: values.iter().map(__jet_bootstrap_host_value_from_runtime).collect::<Result<Vec<_>, String>>()?, }}),
+        ::jet_foundation::MIR::MirRuntimeValue::Map(entries) => Ok(@new.JetEvalHostValue.Map@{{
+            entries: entries.iter().map(|(key, value)| Ok(@s.JetEvalHostMapEntry@{{
+                key: @new.JetEvalHostValue.Data@{{ value: __jet_bootstrap_ct_key_value_from_host(key)? }}, value: __jet_bootstrap_host_value_from_runtime(value)?,
+            }})).collect::<Result<Vec<_>, String>>()?,
+        }}),
+        ::jet_foundation::MIR::MirRuntimeValue::Struct {{ type_name, fields }} => Ok(@new.JetEvalHostValue.Struct@{{
+            type_name: type_name.clone(), fields: fields.iter().map(|(name, value)| Ok(@s.JetEvalHostField@{{ name: name.clone(), value: __jet_bootstrap_host_value_from_runtime(value)?, }})).collect::<Result<Vec<_>, String>>()?,
+        }}),
+        ::jet_foundation::MIR::MirRuntimeValue::Enum {{ type_name, variant, args }} => Ok(@new.JetEvalHostValue.Enum@{{
+            type_name: type_name.clone(), variant: variant.clone(),
+            args: args.iter().map(|(name, value)| Ok(@s.JetEvalHostEnumArg@{{ name: name.clone().ok_or(jet_foundation::Outcome::JetAbsent), value: __jet_bootstrap_host_value_from_runtime(value)?, }})).collect::<Result<Vec<_>, String>>()?,
+        }}),
+        ::jet_foundation::MIR::MirRuntimeValue::Moved | ::jet_foundation::MIR::MirRuntimeValue::Closure(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeCursor(_) | ::jet_foundation::MIR::MirRuntimeValue::NativeOwned(_) => Err("native runtime resource requires its checked owner packet".to_string()),
+        _ => Ok(@new.JetEvalHostValue.Data@{{ value: __jet_bootstrap_ct_from_host(value)? }}),
+    }}
+}}
+fn __jet_bootstrap_type_from_shape(shape: &@t.JetEvalHostTypeShape@) -> Result<::jet_foundation::MIR::MirType, String> {{
+    let root = __jet_bootstrap_source_index(&shape.@f.JetEvalHostTypeShape.root@, "host result type root")?;
+    __jet_bootstrap_type_from_shape_node(shape, root, 0)
+}}
+fn __jet_bootstrap_type_from_shape_node(shape: &@t.JetEvalHostTypeShape@, index: usize, depth: usize) -> Result<::jet_foundation::MIR::MirType, String> {{
+    if depth >= shape.@f.JetEvalHostTypeShape.nodes@.len() {{ return Err("checked host type shape contains a recursive non-nominal type".to_string()); }}
+    let node = shape.@f.JetEvalHostTypeShape.nodes@.get(index).ok_or_else(|| "checked host type shape has an invalid node reference".to_string())?;
+    let child = |node: &jet_foundation::Numeric::JetInt, label: &str| {{ __jet_bootstrap_type_from_shape_node(shape, __jet_bootstrap_source_index(node, label)?, depth + 1) }};
+    match node {{
+        @p.JetEvalHostTypeNode.Scalar@{{ ty }} => __jet_bootstrap_type_to_host(ty),
+        @p.JetEvalHostTypeNode.Option@{{ inner }} => Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Option(Box::new(child(inner, "option type node")?)))),
+        @p.JetEvalHostTypeNode.Result@{{ ok, error }} => Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Result {{ ok: Box::new(child(ok, "result success type node")?), err: Box::new(child(error, "result error type node")?), }})),
+        @p.JetEvalHostTypeNode.List@{{ inner }} => Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::List(Box::new(child(inner, "list element type node")?)))),
+        @p.JetEvalHostTypeNode.Map@{{ key, value }} => Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Map {{ key: Box::new(child(key, "map key type node")?), value: Box::new(child(value, "map value type node")?), }})),
+        @p.JetEvalHostTypeNode.Tuple@{{ fields }} => Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Tuple(fields.iter().map(|field| Ok(( field.@f.JetEvalHostTypeFieldShape.name@.clone(), child(&field.@f.JetEvalHostTypeFieldShape.node@, "tuple field type node")?, ))).collect::<Result<Vec<_>, String>>()?))),
+        @p.JetEvalHostTypeNode.Struct@{{ type_id, type_name, args, fields: _ }} | @p.JetEvalHostTypeNode.Enum@{{ type_id, type_name, args, variants: _ }} => {{
+            let id = ::jet_foundation::MIR::MirTypeId(type_id.@f.MIRTypeID.value@);
+            let args = args.iter().map(|arg| child(arg, "nominal argument type node")).collect::<Result<Vec<_>, String>>()?;
+            Ok(::jet_foundation::MIR::MirType::from_kind(::jet_foundation::MIR::MirTypeKind::Apply {{ name: ::jet_foundation::MIR::MirNominalRef {{ id, name: type_name.clone() }}, args, }}).with_identity(id))
+        }}
+        @p.JetEvalHostTypeNode.Handle@{{ ty: _, owner }} => match owner {{
+            @p.JetEvalHostOwner.Core@{{ owner }} => __jet_bootstrap_type_to_host(&owner.@f.JetEvalHostCoreOwner.ty@),
+            @p.JetEvalHostOwner.Declared@{{ ty }} => __jet_bootstrap_type_to_host(ty),
+            _ => Err("cursor owner shape does not expose a native MIR type".to_string()),
+        }},
+        @p.JetEvalHostTypeNode.Closure@{{ .. }} => Err("closure type shape cannot be passed to a native Prelude route".to_string()),
+    }}
+}}
+"""
+}
+
+// Rust: Compiler/Bootstrap/Host/Native.rs:3799
+fn emit_bootstrap_source_resource_bridge(out: &String, symbols: BootstrapCodecSymbols) -> Unit BootstrapHostCodecError! {
+    row := symbols.type_symbol("MIRPreludeCall")?
+    eval := symbols.type_symbol("JetEvalRuntimeValue")?
+    host_argument := symbols.type_symbol("JetEvalHostArgument")?
+    host_argument_value := symbols.field_symbol("JetEvalHostArgument", "value")?
+    host_result := symbols.type_symbol("JetEvalHostResult")?
+    host_outcome := symbols.type_symbol("JetEvalHostOutcome")?
+    host_transfer := symbols.type_symbol("JetEvalHostTransfer")?
+    host_value := symbols.type_symbol("JetEvalHostValue")?
+    host_writeback := symbols.type_symbol("JetEvalHostWriteback")?
+    transfer_argument := symbols.field_symbol("JetEvalHostTransfer", "argument")?
+    transfer_path := symbols.field_symbol("JetEvalHostTransfer", "path")?
+    transfer_token := symbols.field_symbol("JetEvalHostTransfer", "token")?
+    transfer_handle := symbols.field_symbol("JetEvalHostTransfer", "handle")?
+    transfer_raw := symbols.field_symbol("JetEvalHostTransfer", "raw")?
+    host_owner := symbols.type_symbol("JetEvalHostOwner")?
+    _host_core_owner := symbols.type_symbol("JetEvalHostCoreOwner")?
+    host_core_owner_fact := symbols.field_symbol("JetEvalHostCoreOwner", "fact")?
+    host_core_owner_ty := symbols.field_symbol("JetEvalHostCoreOwner", "ty")?
+    source_handle := symbols.type_symbol("MIRHandleID")?
+    handle_value := symbols.field_symbol("MIRHandleID", "value")?
+    row_module := symbols.field_symbol("MIRPreludeCall", "module_name")?
+    row_member := symbols.field_symbol("MIRPreludeCall", "member")?
+    row_symbol := symbols.field_symbol("MIRPreludeCall", "symbol")?
+    shape := symbols.type_symbol("JetEvalHostTypeShape")?
+    shape_root := symbols.field_symbol("JetEvalHostTypeShape", "root")?
+    shape_nodes := symbols.field_symbol("JetEvalHostTypeShape", "nodes")?
+    host_owner_cursor := symbols.variant_path("JetEvalHostOwner", "Cursor")?
+    cap_type := "::jet_jit::SourceResources::SourceResourceHandle"
+    mir_type_kind := "::jet_foundation::MIR::MirTypeKind"
+    mir_handle := "::jet_foundation::MIR::MirHandleId"
+    native_error := "::jet_foundation::MIR::MirNativeCursorError"
+    resource_key := "::jet_codegen::Codegen::NativeLoopCursor::NativeLoopResourceKey"
+    span := symbols.type_symbol("Span")?
+    // GATE #4494: emitted native resource/arena operations; the emitter itself remains Jet.
+    out += """
+fn __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome: {host_outcome}, transfers: Vec<{host_transfer}>, writebacks: Vec<{host_writeback}>) -> {host_result} {{
+    @s.JetEvalHostResult@{{ transfers, callback_transfers: Vec::new(), fixed_backing_transfers: Vec::new(), writebacks, outcome, }}
+}}
+fn __jet_bootstrap_host_reply_with_transfers(outcome: {host_outcome}, transfers: Vec<{host_transfer}>) -> {host_result} {{ __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome, transfers, Vec::new()) }}
+fn __jet_bootstrap_host_reply(outcome: {host_outcome}) -> {host_result} {{ __jet_bootstrap_host_reply_with_transfers_and_writebacks(outcome, Vec::new(), Vec::new()) }}
+fn __jet_bootstrap_shape_owner(shape: &{shape}) -> Result<{host_owner}, String> {{
+    let mut node_index = __jet_bootstrap_source_index(&shape.{shape_root}, "host resource type root")?;
+    for _ in 0..shape.{shape_nodes}.len() {{
+        let node = shape.{shape_nodes}.get(node_index).ok_or_else(|| "host resource type shape has an invalid node reference".to_string())?;
+        match node {{
+            @p.JetEvalHostTypeNode.Option@{{ inner }} => node_index = __jet_bootstrap_source_index(inner, "host resource type node")?,
+            @p.JetEvalHostTypeNode.Result@{{ ok, error: _ }} => node_index = __jet_bootstrap_source_index(ok, "host resource result node")?,
+            @p.JetEvalHostTypeNode.Handle@{{ ty: _, owner }} => return Ok(owner.clone()),
+            _ => return Err("checked host resource type shape is not a native handle".to_string()),
+        }}
+    }}
+    Err("host resource type shape cycles through result wrappers".to_string())
+}}
+fn __jet_bootstrap_core_owner_from_shape<T, P>(machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>, shape: &{shape}, compiler_program: &::jet_foundation::MIR::MirProgram, physical: &P) -> Result<({mir_handle}, {host_owner}, ::jet_foundation::MIR::MirCoreOwner, ::jet_foundation::MIR::MirType, ::jet_jit::SourceResources::SourceResourceKind), String>
+where T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows, P: crate::BootstrapEntryPhysicalBindings, {{
+    let owner = __jet_bootstrap_shape_owner(shape)?;
+    let core_owner = match &owner {{ @p.JetEvalHostOwner.Core@{{ owner: core_owner }} => core_owner, _ => return Err("checked resource shape does not declare a Core owner".to_string()), }};
+    let fact = __jet_bootstrap_mir_MIRCoreOwner_to_host(&core_owner.{host_core_owner_fact})?;
+    let owner_type = __jet_bootstrap_type_to_host(&core_owner.{host_core_owner_ty})?;
+    let {mir_type_kind}::Apply {{ name, .. }} = &owner_type.kind else {{ return Err("checked Core resource owner is not a nominal Apply".to_string()); }};
+    if name.id != fact.nominal_id || owner_type.identity.is_some_and(|identity| identity != fact.nominal_id) {{ return Err("checked Core resource type disagrees with its registered nominal identity".to_string()); }}
+    if !crate::__jet_bootstrap_entry_verify_core_owner(machine, &fact, compiler_program, physical)? {{ return Err("checked Core owner fact is absent from the active MIR program".to_string()); }}
+    let core_kind = ::jet_jit::SourceResources::SourceResourceKind::from_core_owner_type(&fact, &owner_type)?;
+    Ok(({mir_handle}(name.id.0), owner, fact, owner_type, core_kind))
+}}
+fn __jet_bootstrap_resource_host_handle(capability: &{cap_type}, owner: {host_owner}) -> Result<{host_value}, String> {{
+    Ok(@new.JetEvalHostValue.Handle@{{ handle: {source_handle} {{ {handle_value}: capability.handle.0 }}, raw: jet_foundation::Numeric::JetInt::from_i64(capability.raw), owner, payload: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }}, }})
+}}
+fn __jet_bootstrap_resource_factory_result(result: Result<{cap_type}, {native_error}>, owner: {host_owner}, span: {span}) -> {host_result} {{
+    match result {{
+        Ok(capability) => match __jet_bootstrap_resource_host_handle(&capability, owner) {{ Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }}), Err(detail) => __jet_bootstrap_host_failure(span, detail), }},
+        Err({native_error}::Value(value)) => match __jet_bootstrap_host_value_from_runtime(&value) {{ Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value: @new.JetEvalHostValue.Failed@{{ value }} }}), Err(detail) => __jet_bootstrap_host_failure(span, detail), }},
+        Err({native_error}::Internal(detail)) => __jet_bootstrap_host_failure(span, detail),
+    }}
+}}
+fn __jet_bootstrap_cursor_error_with_transfers(error: {native_error}, span: {span}, transfers: Vec<{host_transfer}>) -> {host_result} {{
+    match error {{
+        {native_error}::Value(value) => match __jet_bootstrap_host_value_from_runtime(&value) {{ Ok(value) => __jet_bootstrap_host_reply_with_transfers(@new.JetEvalHostOutcome.RuntimeFailure@{{ value, span }}, transfers), Err(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers), }},
+        {native_error}::Internal(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers),
+    }}
+}}
+fn __jet_bootstrap_host_failure_with_transfers(span: {span}, detail: String, transfers: Vec<{host_transfer}>) -> {host_result} {{ __jet_bootstrap_host_reply_with_transfers(__jet_bootstrap_host_failure_outcome(span, detail), transfers) }}
+fn __jet_bootstrap_resource_transfer_from_eval(value: &{eval}, consumed: &{cap_type}) -> Result<{host_transfer}, String> {{
+    let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token }} = value else {{ return Err("committed Source resource transfer has no checked foreign-handle input".to_string()); }};
+    let handle = handle.{handle_value};
+    let raw_value = raw.to_string_rep().parse::<i64>().map_err(|_| "Source resource transfer capability is outside i64".to_string())?;
+    if consumed.handle != {mir_handle}(handle) || consumed.raw != raw_value {{ return Err("committed Source resource transfer disagrees with its checked input capability".to_string()); }}
+    Ok({host_transfer} {{ {transfer_argument}: jet_foundation::Numeric::JetInt::from_i64(0), {transfer_path}: Vec::new(), {transfer_token}: token.clone(), {transfer_handle}: {source_handle} {{ {handle_value}: handle }}, {transfer_raw}: raw.clone(), }})
+}}
+fn __jet_bootstrap_cursor_error(error: {native_error}, span: {span}) -> {host_result} {{
+    match error {{
+        {native_error}::Value(value) => match __jet_bootstrap_host_value_from_runtime(&value) {{ Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.RuntimeFailure@{{ value, span }}), Err(detail) => __jet_bootstrap_host_failure(span, detail), }},
+        {native_error}::Internal(detail) => __jet_bootstrap_host_failure(span, detail),
+    }}
+}}
+fn __jet_bootstrap_source_handle_from_eval(value: &{eval}) -> Result<({mir_handle}, i64), String> {{
+    let @p.JetEvalRuntimeValue.ForeignHandle@{{ handle, raw, token: _ }} = value else {{ return Err("checked Source resource operation requires a live native handle".to_string()); }};
+    let handle = handle.{handle_value};
+    let raw = raw.to_string_rep().parse::<i64>().map_err(|_| "Source resource capability is outside i64".to_string())?;
+    Ok(({mir_handle}(handle), raw))
+}}
+fn __jet_bootstrap_native_source_resource_call<T, P>(machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>, row: &{row}, args: &[{host_argument}], result_shape: Option<&{shape}>, arg_shapes: &[{shape}], span: {span}, compiler_program: &::jet_foundation::MIR::MirProgram, physical: &P) -> Option<Result<{host_result}, jet_foundation::Outcome::JetAbsent>>
+where T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows, P: crate::BootstrapEntryPhysicalBindings, {{
+    let module = row.{row_module}.as_str(); let member = row.{row_member}.as_str();
+    let host_symbol = match __jet_bootstrap_mir_MIRSymbol_to_host(&row.{row_symbol}) {{ Ok(symbol) => symbol, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+    let symbol = host_symbol.name();
+    if module == "core.prelude" && member == "loop_iter_init" {{
+        if symbol != "jet_loop_iter_init" || args.len() != 5 {{ return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical native loop initializer row".to_string()))); }}
+        let (source_handle, source_raw) = match __jet_bootstrap_source_handle_from_eval(&args[0].{host_argument_value}) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let Some(source_shape) = arg_shapes.first() else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop initializer has no checked source type shape".to_string()))); }};
+        let (checked_handle, _, _, _, core_kind) = match __jet_bootstrap_core_owner_from_shape(machine, source_shape, compiler_program, physical) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        if checked_handle != source_handle {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source handle disagrees with its checked Core owner shape".to_string()))); }}
+        let step_args = match __jet_bootstrap_eval_to_host(&args[1].{host_argument_value}) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let (step_value, has_step) = match step_args {{ ::jet_foundation::MIR::MirRuntimeValue::Unit => (1, false), ::jet_foundation::MIR::MirRuntimeValue::Int(value) => (value, true), _ => return Some(Ok(__jet_bootstrap_host_failure(span, "native loop step has a non-Int carrier".to_string()))), }};
+        let bool_arg = |index: usize, label: &str| -> Result<bool, String> {{
+            match __jet_bootstrap_eval_to_host(&args[index].{host_argument_value})? {{ ::jet_foundation::MIR::MirRuntimeValue::Bool(value) => Ok(value), _ => Err(format!("native loop {{label}} has a non-Bool carrier")), }}
+        }};
+        let by_value = match bool_arg(3, "ownership mode") {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let source_wire = match __jet_bootstrap_eval_to_host(&args[4].{host_argument_value}) {{ Ok(::jet_foundation::MIR::MirRuntimeValue::String(value)) => value, Ok(_) => return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source kind is not a String".to_string()))), Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let source_kind = match ::jet_foundation::MIR::MirLoopSourceKind::from_wire(&source_wire) {{ Some(value) => value, None => return Some(Ok(__jet_bootstrap_host_failure(span, "invalid checked native loop source kind".to_string()))), }};
+        let key = {resource_key} {{ handle: source_handle, raw: source_raw, source_kind, }};
+        let loop_kind = match ::jet_jit::SourceResources::SourceResourceKind::from_loop_source(&key.source_kind) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        if core_kind != loop_kind {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop source kind disagrees with its checked Core owner registration and type".to_string()))); }}
+        let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop resource has no active Source arena".to_string()))); }};
+        let cursor = arena.init_cursor(&key, step_value, has_step, by_value);
+        let mut transfers = Vec::<{host_transfer}>::new();
+        if let Some(consumed) = cursor.consumed.as_ref() {{
+            match __jet_bootstrap_resource_transfer_from_eval(&args[0].{host_argument_value}, consumed) {{ Ok(transfer) => transfers.push(transfer), Err(detail) => return Some(Ok(__jet_bootstrap_host_failure_with_transfers(span, detail, transfers))), }}
+        }}
+        return Some(Ok(match cursor.result {{
+            Ok((capability, _)) => match __jet_bootstrap_resource_host_handle(&capability, @v.JetEvalHostOwner.Cursor@) {{ Ok(value) => __jet_bootstrap_host_reply_with_transfers(@new.JetEvalHostOutcome.Value@{{ value }}, transfers), Err(detail) => __jet_bootstrap_host_failure_with_transfers(span, detail, transfers), }},
+            Err(error) => __jet_bootstrap_cursor_error_with_transfers(error, span, transfers),
+        }}));
+    }}
+    if module == "core.prelude" && (member == "loop_iter_has_next" || member == "loop_iter_value" || member == "loop_iter_advance") {{
+        let expected_symbol = match member {{ "loop_iter_has_next" => "jet_loop_iter_has_next", "loop_iter_value" => "jet_loop_iter_value", _ => "jet_loop_iter_advance", }};
+        if symbol != expected_symbol || args.len() != 1 {{ return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical native loop cursor operation row".to_string()))); }}
+        let (handle, raw) = match __jet_bootstrap_source_handle_from_eval(&args[0].{host_argument_value}) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let Some(cursor_shape) = arg_shapes.first() else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor operation has no checked receiver type shape".to_string()))); }};
+        let cursor_owner = match __jet_bootstrap_shape_owner(cursor_shape) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        if !matches!(cursor_owner, {host_owner_cursor}) {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor receiver shape is not a Cursor owner".to_string()))); }}
+        let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "native loop cursor has no active Source arena".to_string()))); }};
+        let cursor = match arena.lookup_cursor(handle, raw) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let value = match member {{
+            "loop_iter_has_next" => cursor.has_next().map(|value| @new.JetEvalHostValue.Data@{{ value: @new.TComptimeValue.Bool@{{ value }} }}),
+            "loop_iter_value" => cursor.value().and_then(|value| {{ __jet_bootstrap_host_value_from_runtime(&value).map_err(|detail| {native_error}::internal(detail)) }}),
+            _ => cursor.advance().map(|_| @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }}),
+        }};
+        return Some(Ok(match value {{ Ok(value) => __jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }}), Err(error) => __jet_bootstrap_cursor_error(error, span), }}));
+    }}
+    if module == "core.files" && (member == "open" || member == "create" || member == "append") {{
+        let expected_symbol = match member {{ "open" => "jet_std_files_open", "create" => "jet_std_files_create", _ => "jet_std_files_append", }};
+        if symbol != expected_symbol || args.len() != 1 {{ return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical Core file resource factory row".to_string()))); }}
+        let Some(result_shape) = result_shape else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no checked result type shape".to_string()))); }};
+        let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape, compiler_program, physical) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let path = match __jet_bootstrap_eval_to_host(&args[0].{host_argument_value}) {{ Ok(::jet_foundation::MIR::MirRuntimeValue::String(value)) => value, Ok(_) => return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource path is not a String".to_string()))), Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "Core file resource factory has no active Source arena".to_string()))); }};
+        let result = match member {{ "open" => arena.open_file(handle, &path), "create" => arena.open_file_writer(handle, &path), _ => arena.append_file_writer(handle, &path), }};
+        return Some(Ok(__jet_bootstrap_resource_factory_result(result, owner, span)));
+    }}
+    if module == "core.term" && member == "stdin" {{
+        if symbol != "jet_std_io_stdin" || !args.is_empty() {{ return Some(Ok(__jet_bootstrap_host_failure(span, "non-canonical Core stdin resource factory row".to_string()))); }}
+        let Some(result_shape) = result_shape else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no checked result type shape".to_string()))); }};
+        let (handle, owner, _, _, _) = match __jet_bootstrap_core_owner_from_shape(machine, result_shape, compiler_program, physical) {{ Ok(value) => value, Err(detail) => return Some(Ok(__jet_bootstrap_host_failure(span, detail))), }};
+        let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{ return Some(Ok(__jet_bootstrap_host_failure(span, "Core stdin resource factory has no active Source arena".to_string()))); }};
+        let result = arena.register_stdin(handle).map_err({native_error}::internal);
+        return Some(Ok(__jet_bootstrap_resource_factory_result(result, owner, span)));
+    }}
+    None
+}}
+fn __jet_bootstrap_native_handle_call<T>(_machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>, operation: &String, handle: &{source_handle}, raw: &jet_foundation::Numeric::JetInt, span: &{span}) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent> {{
+    if operation != "resource_release" {{ return Err(jet_foundation::Outcome::JetAbsent); }}
+    let span = span.clone(); let handle = {mir_handle}(handle.{handle_value});
+    let raw = match raw.to_string_rep().parse::<i64>() {{ Ok(value) => value, Err(_) => return Ok(__jet_bootstrap_host_failure(span, "Source resource capability is outside i64".to_string())), }};
+    let Some(arena) = ::jet_jit::SourceResources::active_source_resource_arena() else {{ return Ok(__jet_bootstrap_host_failure(span, "Source resource release has no active arena".to_string())); }};
+    match arena.release_resource(handle, raw) {{ Ok(_released) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value: @new.JetEvalHostValue.Data@{{ value: @v.TComptimeValue.Unit@ }} }})), Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)), }}
+}}
+""" + "\n"
+}
+
+// Rust: Compiler/Bootstrap/Host/Native.rs:4239
+fn emit_bootstrap_callback(out: &String, symbols: BootstrapCodecSymbols) -> Unit BootstrapHostCodecError! {
+    shape := symbols.type_symbol("JetEvalHostTypeShape")?
+    host_argument := symbols.type_symbol("JetEvalHostArgument")?
+    host_argument_value := symbols.field_symbol("JetEvalHostArgument", "value")?
+    host_result := symbols.type_symbol("JetEvalHostResult")?
+    host_outcome := symbols.type_symbol("JetEvalHostOutcome")?
+    span := symbols.type_symbol("Span")?
+    internal_problem := symbols.type_symbol("JetEvalInternalProblem")?
+    internal_problem_span := symbols.field_symbol("JetEvalInternalProblem", "span")?
+    internal_problem_message := symbols.field_symbol("JetEvalInternalProblem", "message")?
+    out += """
+fn __jet_bootstrap_host_failure_outcome(span: {span}, detail: String) -> {host_outcome} {{
+    @new.JetEvalHostOutcome.InternalProblem@{{ problem: {internal_problem} {{ {internal_problem_span}: Ok(span), {internal_problem_message}: detail, }} }}
+}}
+fn __jet_bootstrap_host_failure(span: {span}, detail: String) -> {host_result} {{ __jet_bootstrap_host_reply(__jet_bootstrap_host_failure_outcome(span, detail)) }}
+fn __jet_bootstrap_native_host_call<T, P>(machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>, target: &@t.JetEvalHostCallTarget@, static_operand: &::std::result::Result<@t.JetEvalHostStaticOperand@, jet_foundation::Outcome::JetAbsent>, args: Vec<{host_argument}>, result_shape: &::std::result::Result<{shape}, jet_foundation::Outcome::JetAbsent>, arg_shapes: &Vec<{shape}>, span: &{span}, compiler_program: &::jet_foundation::MIR::MirProgram, physical: &P) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent>
+where T: crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineCoreOwnerRows, P: crate::BootstrapEntryPhysicalBindings, {{
+    // The host serves plain Prelude rows; take-pattern targets and static operands stay unavailable, which the evaluator reports.
+    let @p.JetEvalHostCallTarget.Prelude@{{ row }} = target else {{ return Err(jet_foundation::Outcome::JetAbsent); }};
+    if static_operand.is_ok() {{ return Err(jet_foundation::Outcome::JetAbsent); }}
+    let row = &@deref.JetEvalHostCallTarget.Prelude.row@*row;
+    let span = span.clone(); let result_shape = result_shape.as_ref().ok();
+    if let Some(outcome) = __jet_bootstrap_native_source_resource_call(machine, row, &args, result_shape, arg_shapes, span.clone(), compiler_program, physical) {{ return outcome; }}
+    let native_args = match args.iter().map(|value| __jet_bootstrap_eval_to_host(&value.{host_argument_value})).collect::<Result<Vec<_>, String>>() {{ Ok(args) => args, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    let native_result_ty = match result_shape.map(__jet_bootstrap_type_from_shape).transpose() {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    let native_span = match __jet_bootstrap_span_to_host(&span) {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    let native_row = match __jet_bootstrap_mir_MIRPreludeCall_to_host(row) {{ Ok(row) => row, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    let outcome = crate::Codegen::NativePreludeBridge::ambient_call(&native_row, native_args, native_result_ty, native_span);
+    match outcome {{
+        None => Err(jet_foundation::Outcome::JetAbsent),
+        Some(Ok(crate::Comptime::AmbientMirPreludeResult::Value(value))) => match __jet_bootstrap_host_value_from_runtime(&value) {{ Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Value@{{ value }})), Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)), }},
+        Some(Ok(crate::Comptime::AmbientMirPreludeResult::Effect {{ value, stdout, stderr }})) => match __jet_bootstrap_host_value_from_runtime(&value) {{ Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Effect@{{ value, stdout, stderr }})), Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)), }},
+        Some(Ok(crate::Comptime::AmbientMirPreludeResult::Control {{ value, stdout, stderr, exit_code }})) => match __jet_bootstrap_host_value_from_runtime(&value) {{ Ok(value) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Control@{{ value, stdout, stderr, exit_code: jet_foundation::Numeric::JetInt::from_i64(i64::from(exit_code)) }})), Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)), }},
+        Some(Err(error)) => match __jet_bootstrap_diagnostic_from_host(&error) {{ Ok(diagnostic) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Failure@{{ kind: @v.JetEvalErrorKind.Source@, diagnostic }})), Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)), }},
+    }}
+}}
+""" + "\n"
+}
+
+// Rust: Compiler/Bootstrap/Host/Native.rs:4341
+fn emit_bootstrap_foreign_callback(out: &String, symbols: BootstrapCodecSymbols) -> Unit BootstrapHostCodecError! {
+    foreign := symbols.type_symbol("MIRForeign")?
+    param := symbols.type_symbol("MIRParam")?
+    ownership := symbols.type_symbol("MIROwnership")?
+    access := symbols.type_symbol("MIRAccess")?
+    effects := symbols.type_symbol("MIREffectFacts")?
+    _named_span := symbols.type_symbol("MIRNamedSpan")?
+    _applicability := symbols.type_symbol("MIRTargetApplicability")?
+    _eval := symbols.type_symbol("JetEvalRuntimeValue")?
+    host_argument := symbols.type_symbol("JetEvalHostArgument")?
+    host_argument_value := symbols.field_symbol("JetEvalHostArgument", "value")?
+    host_result := symbols.type_symbol("JetEvalHostResult")?
+    host_writeback := symbols.type_symbol("JetEvalHostWriteback")?
+    host_writeback_argument := symbols.field_symbol("JetEvalHostWriteback", "argument")?
+    host_writeback_value := symbols.field_symbol("JetEvalHostWriteback", "value")?
+    span := symbols.type_symbol("Span")?
+    param_index := symbols.field_symbol("MIRParam", "index")?
+    param_name := symbols.field_symbol("MIRParam", "name")?
+    param_span := symbols.field_symbol("MIRParam", "span")?
+    param_ty := symbols.field_symbol("MIRParam", "ty")?
+    param_access := symbols.field_symbol("MIRParam", "access")?
+    param_ownership := symbols.field_symbol("MIRParam", "ownership")?
+    param_public_label := symbols.field_symbol("MIRParam", "public_label")?
+    param_variadic := symbols.field_symbol("MIRParam", "variadic")?
+    param_default_present := symbols.field_symbol("MIRParam", "default_present")?
+    ownership_mode := symbols.field_symbol("MIROwnership", "mode")?
+    ownership_drop := symbols.field_symbol("MIROwnership", "drop")?
+    ownership_moved := symbols.field_symbol("MIROwnership", "moved")?
+    ownership_last_use := symbols.field_symbol("MIROwnership", "last_use")?
+    ownership_gc_root := symbols.field_symbol("MIROwnership", "gc_root")?
+    effects_direct := symbols.field_symbol("MIREffectFacts", "direct")?
+    effects_solved := symbols.field_symbol("MIREffectFacts", "solved")?
+    effects_call_edges := symbols.field_symbol("MIREffectFacts", "call_edges")?
+    effects_maximal := symbols.field_symbol("MIREffectFacts", "maximal")?
+    effects_direct_spans := symbols.field_symbol("MIREffectFacts", "direct_spans")?
+    named_span_name := symbols.field_symbol("MIRNamedSpan", "name")?
+    named_span_span := symbols.field_symbol("MIRNamedSpan", "span")?
+    target_rust_aot := symbols.field_symbol("MIRTargetApplicability", "rust_aot")?
+    target_cranelift := symbols.field_symbol("MIRTargetApplicability", "cranelift")?
+    target_interpreter := symbols.field_symbol("MIRTargetApplicability", "interpreter")?
+    target_web := symbols.field_symbol("MIRTargetApplicability", "web")?
+    foreign_id := symbols.field_symbol("MIRForeign", "id")?
+    foreign_module_id := symbols.field_symbol("MIRForeign", "module_id")?
+    foreign_key := symbols.field_symbol("MIRForeign", "key")?
+    foreign_module_name := symbols.field_symbol("MIRForeign", "module_name")?
+    foreign_name := symbols.field_symbol("MIRForeign", "name")?
+    foreign_span := symbols.field_symbol("MIRForeign", "span")?
+    foreign_symbol := symbols.field_symbol("MIRForeign", "symbol")?
+    foreign_path := symbols.field_symbol("MIRForeign", "path")?
+    foreign_params := symbols.field_symbol("MIRForeign", "params")?
+    foreign_bridge_eligible := symbols.field_symbol("MIRForeign", "bridge_eligible")?
+    foreign_raw_scalar_abi := symbols.field_symbol("MIRForeign", "raw_scalar_abi")?
+    foreign_return_type := symbols.field_symbol("MIRForeign", "return_type")?
+    foreign_abi := symbols.field_symbol("MIRForeign", "foreign_abi")?
+    foreign_language := symbols.field_symbol("MIRForeign", "foreign_language")?
+    foreign_target_applicability := symbols.field_symbol("MIRForeign", "target_applicability")?
+    foreign_effects := symbols.field_symbol("MIRForeign", "effects")?
+    foreign_callback_transport := symbols.field_symbol("MIRForeign", "callback_transport")?
+    foreign_callback_plan_digest := symbols.field_symbol("MIRForeign", "callback_plan_digest")?
+    foreign_callback_identity := symbols.field_symbol("MIRForeign", "callback_identity")?
+    foreign_link := symbols.field_symbol("MIRForeign", "link")?
+    foreign_callback := symbols.field_symbol("MIRForeign", "callback")?
+    foreign_handle := symbols.field_symbol("MIRForeign", "handle")?
+    foreign_close_function := symbols.field_symbol("MIRForeign", "close_function")?
+    foreign_close_foreign := symbols.field_symbol("MIRForeign", "close_foreign")?
+    foreign_undo_function := symbols.field_symbol("MIRForeign", "undo_function")?
+    foreign_id_value := symbols.field_symbol("MIRForeignID", "value")?
+    module_id_value := symbols.field_symbol("MIRModuleID", "value")?
+    link_unit_id_value := symbols.field_symbol("MIRLinkUnitID", "value")?
+    callback_id_value := symbols.field_symbol("MIRCallbackID", "value")?
+    handle_id_value := symbols.field_symbol("MIRHandleID", "value")?
+    function_id_value := symbols.field_symbol("MIRFunctionID", "value")?
+    foreign_abi_c := symbols.variant_path("MIRForeignABI", "C")?
+    foreign_abi_c_unwind := symbols.variant_path("MIRForeignABI", "CUnwind")?
+    foreign_abi_system := symbols.variant_path("MIRForeignABI", "System")?
+    foreign_abi_stdcall := symbols.variant_path("MIRForeignABI", "Stdcall")?
+    foreign_abi_fastcall := symbols.variant_path("MIRForeignABI", "Fastcall")?
+    foreign_abi_vectorcall := symbols.variant_path("MIRForeignABI", "Vectorcall")?
+    foreign_abi_rust := symbols.variant_path("MIRForeignABI", "Rust")?
+    foreign_language_c := symbols.variant_path("MIRForeignLanguage", "C")?
+    foreign_language_cpp := symbols.variant_path("MIRForeignLanguage", "Cpp")?
+    foreign_language_rust := symbols.variant_path("MIRForeignLanguage", "Rust")?
+    foreign_language_assembly := symbols.variant_path("MIRForeignLanguage", "Assembly")?
+    ownership_mode_copy := symbols.variant_path("MIROwnershipMode", "Copy")?
+    ownership_mode_owned := symbols.variant_path("MIROwnershipMode", "Owned")?
+    ownership_mode_shared := symbols.variant_path("MIROwnershipMode", "Shared")?
+    ownership_mode_read_borrow := symbols.variant_path("MIROwnershipMode", "ReadBorrow")?
+    ownership_mode_write_borrow := symbols.variant_path("MIROwnershipMode", "WriteBorrow")?
+    ownership_mode_move := symbols.variant_path("MIROwnershipMode", "Move")?
+    drop_no_drop := symbols.variant_path("MIRDropKind", "NoDrop")?
+    drop_value := symbols.variant_path("MIRDropKind", "Value")?
+    drop_shared := symbols.variant_path("MIRDropKind", "Shared")?
+    drop_view := symbols.variant_path("MIRDropKind", "View")?
+    drop_foreign_handle := symbols.variant_path("MIRDropKind", "ForeignHandle")?
+    access_read := symbols.variant_path("MIRAccess", "Read")?
+    access_write := symbols.variant_path("MIRAccess", "Write")?
+    access_move := symbols.variant_path("MIRAccess", "Move")?
+    // GATE #4494: emitted checked C ABI invocation/writeback transport.
+    out += """
+fn __jet_bootstrap_source_index(value: &jet_foundation::Numeric::JetInt, label: &str) -> Result<usize, String> {{ value.to_string_rep().parse::<usize>().map_err(|_| format!("{{label}} is not a usize")) }}
+fn __jet_bootstrap_mir_access_to_host(value: &{access}) -> Result<::jet_foundation::MIR::MirAccess, String> {{
+    match value {{ {access_read} => Ok(::jet_foundation::MIR::MirAccess::Read), {access_write} => Ok(::jet_foundation::MIR::MirAccess::Write), {access_move} => Ok(::jet_foundation::MIR::MirAccess::Move), }}
+}}
+fn __jet_bootstrap_mir_ownership_to_host(value: &{ownership}) -> Result<::jet_foundation::MIR::MirOwnership, String> {{
+    let mode = match &value.{ownership_mode} {{
+        {ownership_mode_copy} => ::jet_foundation::MIR::MirOwnershipMode::Copy, {ownership_mode_owned} => ::jet_foundation::MIR::MirOwnershipMode::Owned,
+        {ownership_mode_shared} => ::jet_foundation::MIR::MirOwnershipMode::Shared, {ownership_mode_read_borrow} => ::jet_foundation::MIR::MirOwnershipMode::ReadBorrow,
+        {ownership_mode_write_borrow} => ::jet_foundation::MIR::MirOwnershipMode::WriteBorrow, {ownership_mode_move} => ::jet_foundation::MIR::MirOwnershipMode::Move,
+    }};
+    let drop = match &value.{ownership_drop} {{ {drop_no_drop} => ::jet_foundation::MIR::MirDropKind::None, {drop_value} => ::jet_foundation::MIR::MirDropKind::Value, {drop_shared} => ::jet_foundation::MIR::MirDropKind::Shared, {drop_view} => ::jet_foundation::MIR::MirDropKind::View, {drop_foreign_handle} => ::jet_foundation::MIR::MirDropKind::ForeignHandle, }};
+    Ok(::jet_foundation::MIR::MirOwnership {{ mode, drop, moved: value.{ownership_moved}, last_use: value.{ownership_last_use}, gc_root: value.{ownership_gc_root}, }})
+}}
+fn __jet_bootstrap_mir_param_to_host(value: {param}) -> Result<::jet_foundation::MIR::MirParam, String> {{
+    Ok(::jet_foundation::MIR::MirParam {{ index: __jet_bootstrap_source_index(&value.{param_index}, "foreign parameter index")?, name: value.{param_name}, span: __jet_bootstrap_span_to_host(&value.{param_span})?, ty: __jet_bootstrap_type_to_host(&value.{param_ty})?, access: __jet_bootstrap_mir_access_to_host(&value.{param_access})?, ownership: __jet_bootstrap_mir_ownership_to_host(&value.{param_ownership})?, public_label: value.{param_public_label}, variadic: value.{param_variadic}, default_present: value.{param_default_present}, }})
+}}
+fn __jet_bootstrap_mir_effects_to_host(value: {effects}) -> Result<::jet_foundation::MIR::MirEffectFacts, String> {{
+    let mut direct_spans = ::std::collections::BTreeMap::new();
+    for fact in value.{effects_direct_spans} {{
+        if direct_spans.insert(fact.{named_span_name}, __jet_bootstrap_span_to_host(&fact.{named_span_span})?).is_some() {{ return Err("foreign MIR effect facts contain duplicate direct span names".to_string()); }}
+    }}
+    Ok(::jet_foundation::MIR::MirEffectFacts {{ direct: value.{effects_direct}.into_iter().collect(), solved: value.{effects_solved}.into_iter().collect(), call_edges: value.{effects_call_edges}.into_iter().collect(), maximal: value.{effects_maximal}, direct_spans, }})
+}}
+fn __jet_bootstrap_foreign_to_host(value: {foreign}) -> Result<::jet_foundation::MIR::MirForeign, String> {{
+    let foreign_abi = match value.{foreign_abi} {{
+        {foreign_abi_c} => ::jet_foundation::MIR::MirForeignAbi::C, {foreign_abi_c_unwind} => ::jet_foundation::MIR::MirForeignAbi::CUnwind,
+        {foreign_abi_system} => ::jet_foundation::MIR::MirForeignAbi::System, {foreign_abi_stdcall} => ::jet_foundation::MIR::MirForeignAbi::Stdcall,
+        {foreign_abi_fastcall} => ::jet_foundation::MIR::MirForeignAbi::Fastcall, {foreign_abi_vectorcall} => ::jet_foundation::MIR::MirForeignAbi::Vectorcall,
+        {foreign_abi_rust} => ::jet_foundation::MIR::MirForeignAbi::Rust, @p.MIRForeignABI.Platform@{{ name }} => ::jet_foundation::MIR::MirForeignAbi::Platform(name),
+    }};
+    let foreign_language = match value.{foreign_language} {{ {foreign_language_c} => ::jet_foundation::MIR::MirForeignLanguage::C, {foreign_language_cpp} => ::jet_foundation::MIR::MirForeignLanguage::Cpp, {foreign_language_rust} => ::jet_foundation::MIR::MirForeignLanguage::Rust, {foreign_language_assembly} => ::jet_foundation::MIR::MirForeignLanguage::Assembly, }};
+    let target = &value.{foreign_target_applicability};
+    let target_applicability = ::jet_foundation::MIR::MirTargetApplicability {{ rust_aot: target.{target_rust_aot}, cranelift: target.{target_cranelift}, interpreter: target.{target_interpreter}, web: target.{target_web}, }};
+    let return_type = value.{foreign_return_type}.ok().map(|ty| __jet_bootstrap_type_to_host(&ty)).transpose()?;
+    let link = value.{foreign_link}.ok().map(|id| ::jet_foundation::MIR::MirLinkUnitId(id.{link_unit_id_value}));
+    let callback = value.{foreign_callback}.ok().map(|id| ::jet_foundation::MIR::MirCallbackId(id.{callback_id_value}));
+    let handle = value.{foreign_handle}.ok().map(|id| ::jet_foundation::MIR::MirHandleId(id.{handle_id_value}));
+    let close_function = value.{foreign_close_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
+    let close_foreign = value.{foreign_close_foreign}.ok().map(|id| ::jet_foundation::MIR::MirForeignId(id.{foreign_id_value}));
+    let undo_function = value.{foreign_undo_function}.ok().map(|id| ::jet_foundation::MIR::MirFunctionId(id.{function_id_value}));
+    Ok(::jet_foundation::MIR::MirForeign {{
+        id: ::jet_foundation::MIR::MirForeignId(value.{foreign_id}.{foreign_id_value}), module_id: ::jet_foundation::MIR::MirModuleId(value.{foreign_module_id}.{module_id_value}),
+        key: value.{foreign_key}, module: value.{foreign_module_name}, name: value.{foreign_name}, span: __jet_bootstrap_span_to_host(&value.{foreign_span})?, symbol: value.{foreign_symbol}, path: value.{foreign_path},
+        params: value.{foreign_params}.into_iter().map(__jet_bootstrap_mir_param_to_host).collect::<Result<Vec<_>, String>>()?, bridge_eligible: value.{foreign_bridge_eligible}, raw_scalar_abi: value.{foreign_raw_scalar_abi},
+        return_type, foreign_abi, foreign_language, target_applicability, effects: __jet_bootstrap_mir_effects_to_host(value.{foreign_effects})?, callback_transport: value.{foreign_callback_transport}.ok(), callback_plan_digest: value.{foreign_callback_plan_digest}.ok(), callback_identity: value.{foreign_callback_identity}.ok(),
+        link, callback, handle, close_function, close_foreign, undo_function,
+    }})
+}}
+fn __jet_bootstrap_native_foreign_call<T>(_machine: &mut crate::compiler_bootstrap_entry_codec::BootstrapEntryMachineAccess<'_, T>, row: &{foreign}, args: Vec<{host_argument}>, span: &{span}) -> ::std::result::Result<{host_result}, jet_foundation::Outcome::JetAbsent> {{
+    let span = span.clone();
+    let native_row = match __jet_bootstrap_foreign_to_host(row.clone()) {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    let native_args = match args.iter().map(|value| __jet_bootstrap_eval_to_foreign_host(&value.{host_argument_value})).collect::<Result<Vec<_>, String>>() {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    let native_span = match __jet_bootstrap_span_to_host(&span) {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+    match crate::Comptime::try_ambient_mir_extern_call(&native_row, native_args, native_span) {{
+        None => Err(jet_foundation::Outcome::JetAbsent),
+        Some(Err(error)) => match __jet_bootstrap_diagnostic_from_host(&error) {{ Ok(diagnostic) => Ok(__jet_bootstrap_host_reply(@new.JetEvalHostOutcome.Failure@{{ kind: @v.JetEvalErrorKind.Source@, diagnostic }})), Err(detail) => Ok(__jet_bootstrap_host_failure(span, detail)), }},
+        Some(Ok(result)) => {{
+            let value = match __jet_bootstrap_host_value_from_runtime(&result.value) {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+            let writebacks = match result.writebacks.iter().map(|writeback| {{
+                let argument = i64::try_from(writeback.parameter).map_err(|_| "foreign writeback index exceeds Jet Int".to_string())?;
+                Ok({host_writeback} {{ {host_writeback_argument}: jet_foundation::Numeric::JetInt::from_i64(argument), {host_writeback_value}: __jet_bootstrap_host_value_from_runtime(&writeback.value)?, }})
+            }}).collect::<Result<Vec<_>, String>>() {{ Ok(value) => value, Err(detail) => return Ok(__jet_bootstrap_host_failure(span, detail)), }};
+            Ok(__jet_bootstrap_host_reply_with_transfers_and_writebacks(@new.JetEvalHostOutcome.Value@{{ value }}, Vec::new(), writebacks))
+        }}
+    }}
+}}
+""" + "\n"
+}

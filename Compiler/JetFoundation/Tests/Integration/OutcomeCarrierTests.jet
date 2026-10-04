@@ -1,0 +1,563 @@
+use Compiler.JetFoundation.Tests.Integration.OutcomeCarrier.*
+use Compiler.JetFoundation.Tests.Integration.OutputCallable.*
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use jet as jet
+use jet.AST.[Expr, Item, OutputKind, Type]
+use jet.Outcome.[JetAbsent, JetOutcome, jet_require_eq_message, jet_require_message]
+use jet_foundation.CLISchema as CLISchema
+use core.fs as fs
+use std.env as env
+use std.process.[Command]
+use std.mem as mem
+use jet_jit as jit
+use jet_jit.[CraneliftBackend]
+
+// Rust: tests/outcome_carrier.rs:83
+#Test("both_views_lower_onto_one_carrier") {
+    rust :: compile("views", """
+fn lookup(id: Int) -> Int? {
+    if id == 1 { return Val(9) }
+    return None
+}
+fn parse(raw: String) -> Int Err! {
+    if raw == "" { return Err("empty") }
+    return Ok(7)
+}
+fn run() {
+    print(lookup(1) ?? 0)
+    print(parse("x") ?? 0)
+}
+""")
+    lookup :: user_body(rust, "__jet_lookup")
+    parse :: user_body(rust, "__jet_parse")
+    assert(lookup.contains("JetOutcome<i64, JetAbsent>"), "`T?` must lower onto the carrier:\n{lookup}")
+    assert(parse.contains("JetOutcome<i64, JetErr>"), "`T !E` must lower onto the same carrier:\n{parse}")
+    assert(!lookup.contains("Option<"), "no second representation may survive for `T?`:\n{lookup}")
+    assert(lookup.contains("Ok(9i64)") && lookup.contains("Err(JetAbsent)"), "the optional view builds the carrier:\n{lookup}")
+    run :: user_body(rust, "__jet_run")
+    assert(!run.contains("Some(") && !run.contains("None"), "`??` reads both views the same way:\n{run}")
+}
+
+// Rust: tests/outcome_carrier.rs:135
+#Test("or_err_lifts_a_clean_absence_into_a_failure") {
+    rust :: compile("or_err", """
+fn birth_year(book: [String:String], name: String) -> String Err! {
+    return book.get(name).or_err("nobody in the book is called that")
+}
+fn run() {
+    print(birth_year(["ada": "1815"], "ada") ?? "unknown")
+}
+""")
+    body :: user_body(rust, "__jet_birth_year")
+    assert(body.contains(".or_err(\"nobody in the book is called that\""), "`.or_err` must reach the prelude's one meaning:\n{body}")
+    assert(!body.contains("ok_or") && !body.contains("Some(") && !body.contains("None"), "the two views are one carrier, so nothing converts between them:\n{body}")
+}
+
+// Rust: tests/outcome_carrier.rs:164
+#Test("the_middle_states_read_off_the_same_carrier") {
+    rust :: compile("middle_states", """
+struct ImportErr {
+    broken: Int
+    partial: [String]
+    notes: [String]
+}
+fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
+    good :: rows.filter((row) -> row != "")
+    broken :: rows.len() - good.len()
+    if broken > 0 {
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+    }
+    return Ok(good)
+}
+fn run() {
+    people :: import_rows("people", ["ada", "", "alan"])
+    ports :: import_rows("ports", ["80", ""])
+    print(people.notes().join(""))
+    print(ports.notes().join(""))
+    print(people.notes().join(""))
+    print((&people.partial() ?? []).len())
+}
+""")
+    run :: user_body(rust, "__jet_run")
+    report :: jet.AST.mangle_generated("report")
+    partial_field :: jet.AST.mangle("partial")
+    notes_field :: jet.AST.mangle("notes")
+    partial_read :: "|{report}| {report}.{partial_field}.clone()"
+    notes_read :: "|{report}| {report}.{notes_field}.clone()"
+    assert(run.contains("jet_partial(&(") && run.contains(partial_read), "`.partial` must read the typed carrier field through `jet_partial`:\n{run}")
+    assert(run.contains("jet_notes(&(") && run.contains(notes_read), "`.notes` must read the typed carrier field through `jet_notes`:\n{run}")
+    assert(!run.contains("Partial<") && !run.contains("Noted<"), "the middle states need no third type:\n{run}")
+    out :: run_jet("middle_states_run", """
+struct ImportErr {
+    broken: Int
+    partial: [String]
+    notes: [String]
+}
+fn import_rows(label: String, rows: [String]) -> [String] ImportErr! {
+    good :: rows.filter((row) -> row != "")
+    broken :: rows.len() - good.len()
+    if broken > 0 {
+        return Err(ImportErr.{ broken: broken, partial: good, notes: [~label] })
+    }
+    return Ok(good)
+}
+fn run() {
+    people :: import_rows("people", ["ada", "", "alan"])
+    ports :: import_rows("ports", ["80", ""])
+    clean :: import_rows("clean", ["ada"])
+    print(people.notes().join(""))
+    print(ports.notes().join(""))
+    print(people.notes().join(""))
+    print((&people.partial() ?? []).join(","))
+    print((&ports.partial() ?? []).join(","))
+    print(clean.notes().len())
+    print((&clean.partial() ?? ["kept nothing"]).join(","))
+}
+""")
+    assert_eq(out, "people\nports\npeople\nada,alan\n80\n0\nkept nothing\n", "two outcomes must not share a fact, and a second read must answer the first")
+}
+
+// Rust: tests/outcome_carrier.rs:258
+#Test("the_web_tier_reads_the_same_carrier") {
+    src :: """
+#WasmExport
+fn double(n: Int) -> Int { n * 2 }
+#Target(JS)
+fn run() {
+    print(double(4))
+}
+"""
+    out :: jet.compile_web_with_path(src, "main.jet").unwrap_or_else((diags) -> panic("web fixture rejected: {diags:?}"))
+    web :: out.web.expect("web target must produce artifacts")
+    assert(web.wasm_rust.contains("pub type JetOutcome<T, E> = Result<T, E>;") && web.wasm_rust.contains("pub struct JetAbsent;"), "the wasm module must include the one carrier file:\n{web.wasm_rust}")
+    emitter :: fs.read_to_string(OSPath.from(env.manifest_dir()).join("crates/jet-codegen/src/Codegen/Web.rs")).expect("read the web emitter")
+    assert(emitter.contains("JetOutcome<{}, JetAbsent>") && emitter.contains("Err(JetAbsent)"), "the web emitter must build the one carrier")
+    assert(!emitter.contains("format!(\"Option<{}>\""), "no second representation may survive on the web tier")
+}
+
+// Rust: tests/outcome_carrier.rs:301
+#Test("the_web_tier_marshals_default_err_values") {
+    src :: """
+#Target(Wasm)
+fn run() {
+    error :: Err("bad", code: "E_BAD", cause: Err("root"))
+    print(error.message)
+}
+"""
+    out :: jet.compile_web_with_path(src, "default_err.jet").unwrap_or_else((diags) -> panic("web Err fixture rejected: {diags:?}"))
+    web :: out.web.expect("web target must produce artifacts")
+    assert(web.wasm_rust.contains("pub struct JetErr {"))
+    assert(web.wasm_rust.contains("jet_err("))
+    assert(web.wasm_rust.contains("jet_err_message"))
+    js_src :: """
+#Target(JS)
+fn run() {
+    error :: Err("bad", code: "E_BAD", cause: Err("root"))
+    print(error.message)
+}
+"""
+    js_out :: jet.compile_web_with_path(js_src, "default_err.js.jet").unwrap_or_else((diags) -> panic("web JS Err fixture rejected: {diags:?}"))
+    js :: js_out.web.expect("JS web target must produce artifacts")
+    assert(js.js_app.contains("message: \"bad\"") && js.js_app.contains("code: \"E_BAD\"") && js.js_app.contains("cause:"), "the JS tier must carry the same Err fields:\n{js.js_app}")
+}
+
+// Rust: tests/outcome_carrier.rs:339
+#Test("the_interpreter_edge_renders_default_err_through_the_prelude") {
+    src :: """
+fn run() Err! {
+    return Err("unhandled", code: "E_RUN", cause: Err("root"))
+}
+"""
+    dir :: env.temp_dir().join("jet_default_err_interpreter_{std.process.id()}")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, src).unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).expect("interpreter Err fixture should load")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().all((diagnostic) -> diagnostic.severity != jet.Diagnostics.Severity.Error), "interpreter Err fixture should type-check: {diagnostics:?}")
+    match common.run_interpreter_checked_bundle(bundle, false, jet.Interpreter.InterpreterInvocation.RunInterpret, common.development_policy()) {
+        jet.Interpreter.RunOutcome.Ran{stdout, stderr, exit_code} -> {
+            assert_eq(stdout, "")
+            assert_eq(exit_code, 1)
+            assert_eq(stderr, "Error [E_RUN]: unhandled\n  cause: root\n")
+        }
+        other -> panic("interpreter Err fixture did not run: {other:?}")
+    }
+}
+
+// Rust: tests/outcome_carrier.rs:384
+#Test("an_unread_verdict_costs_nothing") {
+    // GATE #4483: sizes are selected-target layouts, not hardcoded host sizes.
+    assert_eq(mem.size_of<JetOutcome<Int64, JetAbsent>>(), mem.size_of<Int64?>(), "a clean report is zero-sized, so `T?` carries no verdict word")
+    assert_eq(mem.size_of<JetOutcome<String, JetAbsent>>(), mem.size_of<String>(), "the payload's niche still holds the absence")
+    rust :: compile("erasure", """
+fn first_even(n: Int) -> Int? {
+    if n % 2 == 0 {
+        return Val(n)
+    }
+    return None
+}
+fn run() {
+    print(first_even(4) ?? -1)
+}
+""")
+    body :: user_body(rust, "__jet_first_even")
+    run :: user_body(rust, "__jet_run")
+    loop shape in ["Vec::", "vec!", "to_vec()", "String::new()"] {
+        assert(!body.contains(shape), "an unread verdict must allocate nothing, found `{shape}`:\n{body}")
+    }
+    assert_eq(run.matches("match ").count(), 1, "reading the payload is one branch, not one per fact:\n{run}")
+}
+
+// Rust: tests/outcome_carrier.rs:432
+#Test("shared_runtime_require_policy_preserves_empty_and_equality") {
+    assert_eq(jet_require_message(None), "condition failed")
+    assert_eq(jet_require_message(Val("")), "")
+    left :: "actual"
+    right :: "expected"
+    assert_eq(jet_require_eq_message(left, right).to_string(), "expected: expected, got: actual")
+}
+
+// Rust: tests/output_callable.rs:69
+#Test("parser_retains_typed_output_function_reference") {
+    source :: "APP :: Output.Executable{ name: \"demo\", entry: run }\nfn run() {}\n"
+    (tokens, lex) :: jet.Lexer.lex(source)
+    assert(lex.is_empty(), "{lex:#?}")
+    program :: jet.Parser.parse(tokens).expect("Output syntax parses")
+    output :: program.items.iter().find_map((item) -> match item {
+        Item.Const(value) if value.name == "app" -> Val(value)
+        _ -> None
+    }).expect("typed Output item")
+    assert(match output.ty { Val(Type.Named(name)) -> name == "Output", _ -> false })
+    assert(match output.value { Expr.EnumLit{variant, ..} -> OutputKind.from_name(variant) == Val(OutputKind.Executable), _ -> false })
+}
+
+// Rust: tests/output_callable.rs:91
+#Test("sema_resolves_sole_executable_entry_before_codegen") {
+    dir :: common.unique_tmp("jet_output_callable")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("run.jet")
+    fs.write(file, "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() {}\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    output :: bundle.modules[bundle.entry].items.iter().find_map((item) -> match item {
+        Item.Const(value) -> value.resolved_output
+        _ -> None
+    }).expect("sema resolved Output entry")
+    assert_eq(output.kind, OutputKind.Executable)
+    assert_eq(output.source_name, "start")
+    assert_eq(output.module, bundle.entry)
+}
+
+// Rust: tests/output_callable.rs:117
+#Test("inspect_output_reports_selected_callable_facts") {
+    // GATE #4494: real CLI process invocation.
+    path :: OSPath.from(env.manifest_dir()).join("Examples/features/tooling/output_callable.jet")
+    output :: Command.new(env.jet_bin()).args(["inspect", "output", path.to_str().unwrap()]).output().expect("jet inspect output")
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    loop expected in ["selected: Executable \"checked-output\"", "entry: launch", "source path: ", "callable identity: output_callable::launch", "failure contract: !Err", "implicit default !Err", "effects: IO", "selection reason: sole compatible Output"] {
+        assert(stdout.contains(expected), "missing {expected}: {stdout}")
+    }
+    json_output :: Command.new(env.jet_bin()).args(["inspect", "output", path.to_str().unwrap(), "--json"]).output().expect("jet inspect output JSON")
+    assert(json_output.status.success(), "{String.from_utf8_lossy(json_output.stderr)}")
+    json :: String.from_utf8_lossy(json_output.stdout)
+    assert(json.contains("\"failure_contract\":\"!Err\""), "{json}")
+    assert(json.contains("\"failure_source\":\"implicit default !Err\""), "{json}")
+}
+
+// Rust: tests/output_callable.rs:161
+#Test("aot_dev_and_jit_consume_the_resolved_entry") {
+    dir :: common.unique_tmp("jet_output_callable_parity")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("run.jet")
+    fs.write(file, "APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() {}\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    rust :: emit_native_aot(bundle)
+    assert(rust.contains("match __jet_start()"), "{rust}")
+    assert(match common.run_interpreter_checked_bundle(bundle, false, jet.Interpreter.InterpreterInvocation.RunInterpret, common.development_policy()) {
+        jet.Interpreter.RunOutcome.Ran{exit_code: 0, ..} -> true
+        _ -> false
+    })
+}
+
+// Rust: tests/output_callable.rs:188
+#Test("resident_jit_runs_hot_swaps_and_reports_fallible_selected_entry_without_fallback") {
+    jit.on_compiler_stack(resident_jit_hot_swap_session)
+}
+
+// Rust: tests/output_callable.rs:196
+// One sized compiler stack surrounds the complete thread-local resident session.
+// GATE #4494: native resident execution and compiler-stack boundary.
+fn resident_jit_hot_swap_session() -> {
+    if !jit.cranelift_host_supported() { return }
+    v1 :: checked_bundle("APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { print(\"v1\") }\n", "jet_output_resident_v1", jet.Sema.CompileMode.Run)
+    v2 :: checked_bundle("APP :: Output.Executable{ name: \"demo\", entry: start }\nfn start() { return Err(\"selected boom\") }\n", "jet_output_resident_v2", jet.Sema.CompileMode.Run)
+    assert(common.cranelift_resident_safe(v1))
+    assert(common.cranelift_resident_safe(v2))
+    policy :: common.development_policy()
+    backend := CraneliftBackend.new()
+    first :: common.run_cranelift_bundle(&backend, v1, false, policy)
+    assert(match first { jet.Interpreter.RunOutcome.Ran{stdout, exit_code: 0, ..} -> stdout == "v1\n", _ -> false })
+    swapped :: common.hot_swap_cranelift_bundle(&backend, "start", v2, false, policy).expect("resident hot swap")
+    assert(match swapped { jet.Interpreter.RunOutcome.Ran{stderr, exit_code: 1, ..} -> stderr == "Error: selected boom\n", _ -> false }, "{swapped:?}")
+}
+
+// Rust: tests/output_callable.rs:232
+#Test("qualified_entry_keeps_one_definition_and_effect_identity") {
+    dir :: common.unique_tmp("jet_output_callable_qualified")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("helper.jet"), "pub fn start() { print(\"ok\") }\n").unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "use \"helper\"\nAPP :: Output.Executable{ name: \"demo\", entry: helper.start }\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    (diagnostics, facts) :: jet.Sema.check_bundle_with_effect_facts(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    output :: bundle.modules[bundle.entry].items.iter().find_map((item) -> match item { Item.Const(value) -> value.resolved_output, _ -> None }).unwrap()
+    assert_eq(bundle.modules[output.module].alias, "helper")
+    assert_eq(output.source_name, "start")
+    assert(!output.effects.is_empty(), "effect row should be copied from sema")
+    assert_eq(output.authority.as_str(), "safe-jet")
+    assert(facts.name_ledger.references().values().any((anchor) -> anchor.module_path == output.source_path && anchor.def_span == output.definition))
+    rust :: emit_native_aot(bundle)
+    assert(rust.contains("__jet_helper::__jet_start()"), "{rust}")
+    assert(match common.run_interpreter_checked_bundle(bundle, false, jet.Interpreter.InterpreterInvocation.RunInterpret, common.development_policy()) { jet.Interpreter.RunOutcome.Ran{exit_code: 0, ..} -> true, _ -> false })
+}
+
+// Rust: tests/output_callable.rs:278
+#Test("qualified_entry_follows_nested_quoted_import_graph") {
+    dir :: common.unique_tmp("jet_output_callable_nested")
+    fs.create_dir_all(dir.join("src")).unwrap()
+    fs.write(dir.join("src/command.jet"), "pub fn run() { print(\"nested\") }\n").unwrap()
+    fs.write(dir.join("src/cli.jet"), "pub use \"command\" as command\npub fn run() { print(\"reexport\") }\n").unwrap()
+    fs.write(dir.join("src/app.jet"), "pub use \"cli\" as cli;\npub use cli.[run as cli_run];\n").unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "use \"src/app\" as app\nNESTED :: Output.Executable{ name: \"nested\", entry: app.cli.command.run }\nREEXPORTED :: Output.Service{ name: \"reexported\", entry: app.cli_run }\ndefaults: { run: NESTED };\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    outputs :: bundle.modules[bundle.entry].items.iter().filter_map((item) -> match item { Item.Const(value) -> value.resolved_output, _ -> None }).collect()
+    nested :: outputs.iter().find((output) -> output.address == "nested").expect("nested Output entry resolves")
+    reexported :: outputs.iter().find((output) -> output.address == "reexported").expect("re-exported Output entry resolves")
+    assert_eq(nested.source_name, "run")
+    assert_eq(nested.semantic_name, "run")
+    assert(nested.source_path.ends_with("src/command.jet"), "{nested.source_path}")
+    assert_eq(reexported.source_name, "run")
+    assert(reexported.source_path.ends_with("src/cli.jet"))
+    rust :: emit_native_aot(bundle)
+    assert(rust.contains("__jet_command::__jet_run()"), "{rust}")
+    assert(match common.run_interpreter_checked_bundle(bundle, false, jet.Interpreter.InterpreterInvocation.RunInterpret, common.development_policy()) { jet.Interpreter.RunOutcome.Ran{stdout, exit_code: 0, ..} -> stdout == "nested\n", _ -> false })
+}
+
+// Rust: tests/output_callable.rs:352
+#Test("manifest_output_root_alias_is_live_for_direct_check") {
+    dir :: common.unique_tmp("jet_manifest_output_check")
+    fs.create_dir_all(dir.join("src/cli")).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"manifest_output_check\"\nversion: \"0.1.0\"\noutputs: { dogfood: .Executable{ entry: app.run } }\n").unwrap()
+    fs.write(dir.join("run.jet"), "use \"src/cli/main\" as app\n").unwrap()
+    fs.write(dir.join("src/cli/main.jet"), "pub fn run() {}\n").unwrap()
+    output :: Command.new(env.jet_bin()).args(["check", "run.jet"]).current_dir(dir).env("NO_COLOR", "1").output().expect("jet check should execute")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert(output.status.success(), "{stderr}")
+    assert(!stderr.contains("L0103"), "{stderr}")
+}
+
+// Rust: tests/output_callable.rs:379
+#Test("nested_output_links_report_e1321_before_codegen") {
+    // Rust: tests/output_callable.rs:380
+    fn codes(tag: String, app: String, cli: String, entry: String) -> [String] {
+        dir :: common.unique_tmp(tag)
+        fs.create_dir_all(dir).unwrap()
+        fs.write(dir.join("main.jet"), "use \"app\" as app\nOUT :: Output.Executable{{ name: \"out\", entry: {entry} }}\n").unwrap()
+        fs.write(dir.join("app.jet"), app).unwrap()
+        fs.write(dir.join("cli.jet"), cli).unwrap()
+        bundle := jet.Loader.load_entry(dir.join("main.jet").to_str().unwrap()).unwrap()
+        jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Check).into_iter().map((diagnostic) -> diagnostic.code).collect()
+    }
+    missing :: codes("jet_output_nested_missing", "pub use \"cli\" as cli;\n", "pub fn run() {}\n", "app.cli.missing")
+    assert(missing.iter().any((code) -> code == "E1321"), "{missing:?}")
+    private :: codes("jet_output_nested_private", "use \"cli\" as cli;\n", "pub fn run() {}\n", "app.cli.run")
+    assert(private.iter().any((code) -> code == "E1321"), "{private:?}")
+    escaped :: codes("jet_output_nested_escape", "pub use \"cli\" as cli;\n", "fn run() {}\n", "app.cli.run")
+    assert(escaped.iter().any((code) -> code == "E1321"), "{escaped:?}")
+}
+
+// Rust: tests/output_callable.rs:435
+#Test("runnable_contracts_and_selection_fail_in_sema") {
+    // Rust: tests/output_callable.rs:436
+    fn codes(source: String, mode: jet.Sema.CompileMode) -> [String] {
+        dir :: common.unique_tmp("jet_output_callable_bad")
+        fs.create_dir_all(dir).unwrap()
+        file :: dir.join("main.jet")
+        fs.write(file, source).unwrap()
+        bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+        jet.Sema.check_bundle(&bundle, mode).into_iter().map((diagnostic) -> diagnostic.code).collect()
+    }
+    loop source in [
+        "APP :: Output.Executable{ name: \"demo\", entry: \"start\" }\nfn start() {}\n",
+        "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve(port: Int) {}\n",
+        "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() -> Int { return 1 }\n",
+        "APP :: Output.Executable{ name: \"demo\", entry: start }\n#Unsafe(\"raw boundary\") fn start() {}\n"
+    ] {
+        assert(codes(source, jet.Sema.CompileMode.Check).contains("E1321"))
+    }
+    ambiguity :: codes("ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\nfn first() {}\nfn second() {}\n", jet.Sema.CompileMode.Run)
+    assert_eq(ambiguity.iter().filter((code) -> code == "E1321").count(), 1)
+    assert(ambiguity.contains("E0101"), "{ambiguity:?}")
+    loop source in ["LIB :: Output.Library{ name: \"lib\" }\n", "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve() {}\n"] {
+        no_entry :: codes(source, jet.Sema.CompileMode.Run)
+        assert(no_entry.contains("E0101"), "{no_entry:?}")
+    }
+    dir :: common.unique_tmp("jet_output_explicit_check_bad")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() {}\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    explicit_check :: jet.Sema.check_bundle_for_output(&bundle, jet.Sema.CompileMode.Run, "release")
+    assert(explicit_check.iter().any((diagnostic) -> diagnostic.code == "E1321"), "{explicit_check:?}")
+    loop source in [
+        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\n",
+        "APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\nfn run() {}\n",
+        "APP :: Output.Executable{ name: \"app\", entry: start }\nAPI :: Output.Service{ name: \"api\", entry: serve }\ndefaults: { run: API }\nfn start() {}\nfn serve() {}\n"
+    ] {
+        stale_default :: codes(source, jet.Sema.CompileMode.Run)
+        assert(stale_default.contains("E1321"), "{stale_default:?}")
+    }
+}
+
+// Rust: tests/output_callable.rs:515
+#Test("invalid_output_selection_stops_in_jet_before_codegen") {
+    // Rust: tests/output_callable.rs:516
+    fn reject(source: String, args: [String], code: String) -> {
+        dir :: common.unique_tmp("jet_output_selection_cli_bad")
+        fs.create_dir_all(dir).unwrap()
+        file :: dir.join("main.jet")
+        fs.write(file, source).unwrap()
+        command := Command.new(env.jet_bin())
+        command.arg("run")
+        command.args(args)
+        output :: command.arg(file).output().unwrap()
+        stderr :: String.from_utf8_lossy(output.stderr)
+        assert(!output.status.success(), "{stderr}")
+        assert(stderr.contains("Error [{code}]"), "{stderr}")
+        assert(!stderr.contains("internal compiler error"), "{stderr}")
+        assert(!stderr.contains("rustc rejected"), "{stderr}")
+    }
+    reject("LIB :: Output.Library{ name: \"lib\" }\n", [], "E0101")
+    reject("API :: Output.Service{ name: \"api\", entry: serve }\nfn serve() {}\n", [], "E0101")
+    reject("RELEASE :: Output.Check{ name: \"release\", entry: verify }\nfn verify() {}\n", ["--output", "release"], "E1321")
+    reject("APP :: Output.Executable{ name: \"app\", entry: start }\ndefaults: { run: missing }\nfn start() {}\nfn run() {}\n", [], "E1321")
+}
+
+// Rust: tests/output_callable.rs:551
+#Test("checked_default_selects_one_of_multiple_executables") {
+    bundle :: checked_bundle("ONE :: Output.Executable{ name: \"one\", entry: first }\nTWO :: Output.Executable{ name: \"two\", entry: second }\ndefaults: { run: TWO }\nfn first() { print(\"first\") }\nfn second() { print(\"second\") }\n", "jet_output_checked_default", jet.Sema.CompileMode.Run)
+    selected :: bundle.modules[bundle.entry].items.iter().find_map((item) -> match item {
+        Item.Const(value) -> value.resolved_output.filter((output) -> output.selected)
+        _ -> None
+    }).expect("checked default selects one Output")
+    assert_eq(selected.address, "two")
+    rust :: emit_native_aot(bundle)
+    assert(rust.contains("match __jet_second()"), "{rust}")
+    assert(!rust.contains("match __jet_first()"), "{rust}")
+}
+
+// Rust: tests/output_callable.rs:580
+#Test("explicit_service_address_reaches_tir_and_real_cli_runtime") {
+    if !common.have_rustc() { return }
+    dir :: common.unique_tmp("jet_output_service_cli")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "APP :: Output.Executable{ name: \"app\", entry: launch }\nAPI :: Output.Service{ name: \"api\", entry: serve }\nfn launch() { print(\"app\") }\nfn serve() { print(\"service\") }\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle_for_output(&bundle, jet.Sema.CompileMode.Run, "api")
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    output :: Command.new(env.jet_bin()).args(["run", "--quiet", "--output", "api", file.to_str().unwrap()]).current_dir(dir).output().expect("run explicit Service Output")
+    assert(output.status.success(), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "service\n")
+}
+
+// Rust: tests/output_callable.rs:611
+#Test("service_edge_emits_one_structured_report_record") {
+    if !common.have_rustc() { return }
+    dir :: common.unique_tmp("jet_output_service_failure")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "API :: Output.Service{ name: \"api\", entry: serve }\nfn serve() { return Err(\"service unavailable\", code: \"SVC503\") }\n").unwrap()
+    output :: Command.new(env.jet_bin()).args(["run", "--output", "api", file.to_str().unwrap()]).current_dir(dir).output().expect("run failing Service Output")
+    stderr :: String.from_utf8_lossy(output.stderr)
+    assert_eq(output.status.code(), Val(1), "{stderr}")
+    records :: stderr.lines().filter((line) -> line.starts_with("{")).collect()
+    assert_eq(records.len(), 1, "service failure must have one structured record:\n{stderr}")
+    assert(records[0].contains("{\"target\":\"service\",\"report\":\"Error [SVC503]: service unavailable\\n\"}"), "service report lost its native report text:\n{stderr}")
+    assert(output.stdout.is_empty(), "service failure wrote stdout")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/output_callable.rs:650
+#Test("check_outputs_are_plural_real_test_harness_entries_without_test_blocks") {
+    if !common.have_rustc() { return }
+    dir :: common.unique_tmp("jet_output_check_cli")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "UNIT :: Output.Check{ name: \"unit\", entry: verify_unit }\nRELEASE :: Output.Check{ name: \"release\", entry: verify_release }\nfn verify_unit() {}\nfn verify_release() { return Err(\"release blocked\") }\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Test)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    rust :: emit_test_harness(bundle)
+    assert_eq(rust.matches("// jet-mir-output-check:").count(), 2, "{rust}")
+    assert_eq(rust.matches("fn __jet_output_check_").count(), 2, "{rust}")
+    output :: Command.new(env.jet_bin()).args(["test", "--show-default", file.to_str().unwrap()]).current_dir(dir).output().expect("run Check Output harness")
+    assert_eq(output.status.code(), Val(1), "{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("unit: pass"), "{stdout}")
+    assert(stdout.contains("release: FAIL"), "{stdout}")
+    assert(String.from_utf8_lossy(output.stderr).contains("release blocked"))
+}
+
+// Rust: tests/output_callable.rs:687
+#Test("renamed_entry_is_not_recovered_from_a_stale_lock") {
+    dir :: common.unique_tmp("jet_output_callable_stale")
+    fs.create_dir_all(dir.join(".jet")).unwrap()
+    fs.write(dir.join(".jet/lock"), "version = 1\nentry = \"helper.start\"\n").unwrap()
+    fs.write(dir.join("helper.jet"), "pub fn renamed() {}\n").unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "use \"helper\"\nAPP :: Output.Executable{ name: \"demo\", entry: helper.start }\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E1321"))
+    assert(bundle.modules[bundle.entry].items.iter().all((item) -> match item { Item.Const(value) -> value.resolved_output.is_none(), _ -> true }))
+}
+
+// Rust: tests/output_callable.rs:714
+#Test("typed_executable_output_reuses_the_checked_cli_schema") {
+    dir :: common.unique_tmp("jet_output_callable_cli")
+    fs.create_dir_all(dir).unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "#CLI\nstruct Args { value: Int }\n\nAPP :: Output.Executable{ name: \"demo\", entry: launch }\n\nfn launch(args: Args) { print(args.value) }\n").unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    schema :: CLISchema.entry_schema_for_bundle(bundle).expect("typed Output owns one checked CLI schema")
+    assert_eq(schema.entry_type, "Args")
+    rust :: emit_native_aot(bundle)
+    assert(rust.contains("jet_args_option_base"), "{rust}")
+    assert(rust.contains("__jet_launch(__jet_cli_0)"), "{rust}")
+}
+
+// Rust: tests/output_callable.rs:735
+#Test("compiled_imported_typed_fallible_entry_uses_its_defining_module") {
+    if !common.have_rustc() { return }
+    dir :: common.unique_tmp("jet_output_callable_imported_cli")
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("helper.jet"), "#CLI\npub struct Args { value: Int }\n\npub fn launch(args: Args) {\n    print(args.value)\n    return Err(\"imported boom\")\n}\n").unwrap()
+    file :: dir.join("main.jet")
+    fs.write(file, "use \"helper\"\nAPP :: Output.Executable{ name: \"demo\", entry: helper.launch }\n").unwrap()
+    output :: Command.new(env.jet_bin()).args(["run", file.to_str().unwrap(), "--", "--value", "42"]).current_dir(dir).output().expect("run imported typed Output")
+    assert_eq(output.status.code(), Val(1), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(String.from_utf8_lossy(output.stdout), "42\n", "{String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stderr).contains("imported boom"))
+}

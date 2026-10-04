@@ -1,0 +1,246 @@
+use std.[fs, env, thread]
+use std.process.[Command, Stdio]
+use std.time.[Instant, Duration]
+use jet
+use jet.DevServer.LiveInspect
+use core.sys.target
+use jet_foundation.Tests.Integration.Common
+use jet_foundation.Tests.Integration.TirSupport
+use jet_foundation.Tests.Integration.LintVisibilityWaveA.*
+
+// Rust: tests/lint_visibility_wave_a.rs:54
+#Test("check_and_build_show_advisories_while_execution_can_request_them") {
+    scratch :: Common.Scratch.new("lint-visibility-wave-a")
+    fs.write(scratch.join("main.jet"), SOURCE).expect("write lint visibility fixture")
+    allow_io(scratch.path)
+    assert_advisory_visible("check", run_jet(scratch.path, ["check", "main.jet"]))
+    assert_advisory_visible("build", run_jet(scratch.path, ["build", "--profile=debug", "main.jet"]))
+    quiet_run :: run_jet(scratch.path, ["run", "main.jet"])
+    assert(quiet_run.status.success(), "default run failed:\n{combined(quiet_run)}")
+    assert_eq(String.from_utf8_lossy(quiet_run.stdout), "ok\n", "application stdout must remain intact")
+    assert(!combined(quiet_run).contains("[L0101]"), "default run should hide ordinary advisories:\n{combined(quiet_run)}")
+    verbose_run :: run_jet(scratch.path, ["run", "--verbose", "main.jet"])
+    assert_advisory_visible("verbose run", verbose_run)
+    assert_eq(String.from_utf8_lossy(verbose_run.stdout), "ok\n")
+    program_arg_run :: run_jet(scratch.path, ["run", "main.jet", "--", "--verbose", "--json"])
+    assert(program_arg_run.status.success(), "program-argument run failed:\n{combined(program_arg_run)}")
+    assert_eq(String.from_utf8_lossy(program_arg_run.stdout), "ok\n")
+    assert(!combined(program_arg_run).contains("[L0101]"), "program arguments after -- must not enable advisories:\n{combined(program_arg_run)}")
+}
+// Rust: tests/lint_visibility_wave_a.rs:104
+#Test("dev_watch_off_hides_advisories_by_default_and_verbose_requests_them") {
+    scratch :: Common.Scratch.new("lint-visibility-wave-a-dev")
+    fs.write(scratch.join("main.jet"), SOURCE).expect("write dev lint fixture")
+    allow_io(scratch.path)
+    quiet_dev :: run_jet(scratch.path, ["dev", "main.jet", "--watch=off"])
+    assert(quiet_dev.status.success(), "default dev failed:\n{combined(quiet_dev)}")
+    assert(!combined(quiet_dev).contains("[L0101]"), "default dev should hide ordinary advisories:\n{combined(quiet_dev)}")
+    verbose_dev :: run_jet(scratch.path, ["dev", "--verbose", "main.jet", "--watch=off"])
+    assert_advisory_visible("verbose dev", verbose_dev)
+}
+// Rust: tests/lint_visibility_wave_a.rs:150
+#Test("test_hides_advisories_unless_verbose") {
+    scratch :: Common.Scratch.new("lint-visibility-wave-a-test")
+    fs.write(scratch.join("main.jet"), TESTED_SOURCE).expect("write test lint fixture")
+    allow_io(scratch.path)
+    quiet :: run_jet(scratch.path, ["test", "--capture=all", "main.jet"])
+    assert(quiet.status.success(), "default test failed:\n{combined(quiet)}")
+    assert(!combined(quiet).contains("[L0101]"), "default test should hide ordinary advisories:\n{combined(quiet)}")
+    assert(combined(quiet).contains("1 passed, 0 failed"), combined(quiet))
+    // Verbose execution must expose advisories even with the cached result.
+    verbose :: run_jet(scratch.path, ["test", "--verbose", "--capture=all", "main.jet"])
+    assert_advisory_visible("verbose test", verbose)
+    assert(combined(verbose).contains("1 passed, 0 failed"), combined(verbose))
+}
+// Rust: tests/lint_visibility_wave_a.rs:172
+#Test("enforcement_survives_hidden_advisories") {
+    deny :: Common.Scratch.new("lint-visibility-wave-a-deny")
+    fs.write(deny.join("main.jet"), TESTED_SOURCE).expect("write deny fixture")
+    package(deny.path, "IO", "policy: {{ lints: {{ deny: [unused_local_binding] }} }}\n")
+    loop args in [["run", "main.jet"], ["run", "--verbose", "main.jet"], ["test", "main.jet"], ["test", "--verbose", "main.jet"]] {
+        assert_fails_with("denied lint {args:?}", run_jet(deny.path, args), "E1293")
+    }
+    sema :: Common.Scratch.new("lint-visibility-wave-a-sema")
+    fs.write(sema.join("main.jet"), TESTED_SOURCE.replace("    print(\"ok\")", "    x :: 1 + \"a\"\n    print(\"ok\")")).expect("write sema fixture")
+    allow_io(sema.path)
+    loop args in [["run", "main.jet"], ["test", "main.jet"]] {
+        assert_fails_with("sema error {args:?}", run_jet(sema.path, args), "E0109")
+    }
+    runtime :: Common.Scratch.new("lint-visibility-wave-a-runtime")
+    fs.write(runtime.join("main.jet"), "fn boom() {{\n    panic(\"boom\")\n}}\n\nfn run() {{\n    unused_binding :: 1\n    boom()\n}}\n\n#Test(\"stops\") {{\n    boom()\n}}\n").expect("write runtime fixture")
+    allow_io(runtime.path)
+    loop args in [["run", "main.jet"], ["run", "--verbose", "main.jet"]] {
+        assert_fails_with("runtime stop {args:?}", run_jet(runtime.path, args), "E3001")
+    }
+    failing_test :: run_jet(runtime.path, ["test", "main.jet"])
+    assert(!failing_test.status.success(), combined(failing_test))
+    assert(combined(failing_test).contains("0 passed, 1 failed"), combined(failing_test))
+    authority :: Common.Scratch.new("lint-visibility-wave-a-authority")
+    fs.write(authority.join("main.jet"), TESTED_SOURCE).expect("write authority fixture")
+    package(authority.path, "", "")
+    loop args in [["run", "main.jet"], ["run", "--verbose", "main.jet"]] {
+        assert_fails_with("authority {args:?}", run_jet(authority.path, args), "E1220")
+    }
+}
+// Rust: tests/lint_visibility_wave_a.rs:223
+#Test("json_output_keeps_structure_with_hidden_advisories") {
+    scratch :: Common.Scratch.new("lint-visibility-wave-a-json")
+    fs.write(scratch.join("main.jet"), TESTED_SOURCE).expect("write json fixture")
+    allow_io(scratch.path)
+    run :: run_jet(scratch.path, ["run", "--json", "main.jet"])
+    assert(run.status.success(), combined(run))
+    assert_eq(String.from_utf8_lossy(run.stdout), "ok\n", "application stdout stays clean")
+    assert(!combined(run).contains("[L0101]"), combined(run))
+    check :: run_jet(scratch.path, ["check", "--json", "main.jet"])
+    check_stdout :: String.from_utf8_lossy(check.stdout)
+    assert(check.status.success(), combined(check))
+    assert(check_stdout.contains("L0101"), "check --json must report the advisory:\n{check_stdout}")
+    assert(check_stdout.contains("\"ok\":true") && !check_stdout.contains("\"ok\":false"), "warnings-only check --json must report ok:true:\n{check_stdout}")
+    test :: run_jet(scratch.path, ["test", "--json", "main.jet"])
+    stdout :: String.from_utf8_lossy(test.stdout)
+    assert(test.status.success(), combined(test))
+    trimmed := stdout.trim_start() // #4303
+    assert(trimmed.starts_with('{'), stdout)
+    assert(stdout.contains("\"action\":\"test\"") && stdout.contains("\"ok\":true"), stdout)
+    assert(!combined(test).contains("L0101"), combined(test))
+}
+
+// Rust: tests/live_inspect.rs:20
+#Test("live_inspector_reads_running_tasks_channels_and_resources_without_payloads") {
+    if !Common.have_rustc() { return }
+    dir :: Common.unique_tmp("jet_live_inspect")
+    fs.create_dir_all(dir).unwrap()
+    source :: dir.join("live.jet")
+    fs.write(source, LIVE_SOURCE).unwrap()
+    jet_bin :: env.var("JET_BIN").unwrap()
+    build :: Command.new(jet_bin).args(["build", source.to_str().unwrap()]).current_dir(dir).output().unwrap()
+    assert(build.status.success(), "build failed:\n{String.from_utf8_lossy(build.stderr)}")
+    // GATE #4483: selected target executable suffix.
+    suffix :: if target.selected_os() == "windows" { ".exe" } else { "" }
+    binary :: dir.join(".jet").join("build").join("live{suffix}")
+    // GATE #4494: real spawned program and attach observations.
+    child :: Command.new(binary).env("JET_OBSERVE", "1").stdout(Stdio.null()).stderr(Stdio.null()).spawn().unwrap()
+    pid :: child.id()
+    guard :: ChildGuard{child: ^child}
+    deadline :: Instant.now() + Duration.from_secs(5)
+    snapshot :: loop {
+        observed :: LiveInspect.read(pid)
+        if observed == Ok(value) {
+            if value.contains("\"wait\":\"channel receive\"") && value.contains("\"depth\":1,\"capacity\":1") { break value }
+        }
+        if Instant.now() < deadline { thread.sleep(Duration.from_millis(25)) }
+        else { panic("live scheduler snapshot never became observable: {observed:?}") }
+    }
+    assert(snapshot.contains("\"parent\":1"))
+    assert(snapshot.contains("\"label\":\"task@"))
+    assert(snapshot.contains("\"spawn_site\":"))
+    assert(snapshot.contains("\"effects\":"))
+    assert(snapshot.contains("\"arena_bytes\":"))
+    assert(!snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"))
+    assert(!snapshot.contains("payload"))
+    assert(!snapshot.contains("locals"))
+    cli :: Command.new(jet_bin).args(["inspect", "live", "--attach", pid.to_string(), "--once", "--json"]).output().unwrap()
+    assert(cli.status.success(), String.from_utf8_lossy(cli.stderr))
+    cli_snapshot :: String.from_utf8(cli.stdout).unwrap()
+    assert(cli_snapshot.contains("\"pid\":{pid}"))
+    assert(cli_snapshot.contains("\"wait\":\"channel receive\""))
+    assert(!cli_snapshot.contains("TOP_SECRET_CHANNEL_PAYLOAD"))
+    drop(^guard)
+    _ :: fs.remove_file(LiveInspect.snapshot_path(pid))
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/live_inspect.rs:185
+#Test("live_inspector_reads_default_resident_jit_tasks_without_payloads") {
+    // Default retained O0, not retiring resident JIT.
+    live_inspector_reads_tasks_without_payloads(["run", "--observe"], "jet_live_inspect_O0")
+}
+// Rust: tests/live_inspect.rs:190
+#Test("live_inspector_reads_ambient_interpreter_tasks_without_payloads") {
+    // Explicit native debug execution replaces retired interpreter execution.
+    live_inspector_reads_tasks_without_payloads(["run", "--profile=debug", "--observe"], "jet_live_inspect_debug")
+}
+
+// Rust: tests/local_cell_tiers.rs:189
+#Test("local_cell_full_surface_runs_through_aot") {
+    if !TirSupport.have_rustc() { return }
+    (code, stdout) :: TirSupport.build_and_run("local_cell_aot", LOCAL_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, LOCAL_EXPECTED)
+}
+// Rust: tests/local_cell_tiers.rs:199
+#Test("local_cell_full_surface_runs_through_default_tier") {
+    // GATE #4494: retained 2 MiB embedder stack and native tier harness.
+    thread.Builder.new().stack_size(2 * 1024 * 1024).spawn(() -> {
+        dir :: env.temp_dir().join("jet_local_cell_parity_{std.process.id()}")
+        fs.create_dir_all(dir).unwrap()
+        path :: dir.join("main.jet")
+        fs.write(path, LOCAL_SOURCE).unwrap()
+        loop tier in ["O0", "O1", "O2", "Web"] {
+            (code, stdout, stderr) :: TirSupport.run_entry_tier(path, tier)
+            assert_eq(code, 0, "{tier} exit drift: {stderr}")
+            assert_eq(stderr, "", "{tier} stderr drift")
+            assert_eq(stdout, LOCAL_EXPECTED, "{tier} output drift")
+        }
+    }).expect("spawn 2 MiB local Cell embedder").join().expect("local Cell embedder must not overflow")
+}
+// Rust: tests/local_cell_tiers.rs:245
+#Test("local_cell_generic_shapes_run_through_aot") {
+    if !TirSupport.have_rustc() { return }
+    (code, stdout) :: TirSupport.build_and_run("local_cell_generic_aot", GENERIC_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, GENERIC_EXPECTED)
+}
+// Rust: tests/local_cell_tiers.rs:255
+#Test("local_cell_generic_shapes_run_through_default_tier") {
+    thread.Builder.new().stack_size(2 * 1024 * 1024).spawn(() -> {
+        dir :: env.temp_dir().join("jet_local_cell_generic_parity_{std.process.id()}")
+        fs.create_dir_all(dir).unwrap()
+        path :: dir.join("main.jet")
+        fs.write(path, GENERIC_SOURCE).unwrap()
+        loop tier in ["O0", "O1", "O2", "Web"] {
+            (code, stdout, stderr) :: TirSupport.run_entry_tier(path, tier)
+            assert_eq(code, 0, "{tier} exit drift: {stderr}")
+            assert_eq(stderr, "", "{tier} stderr drift")
+            assert_eq(stdout, GENERIC_EXPECTED, "{tier} output drift")
+        }
+    }).expect("spawn 2 MiB generic Cell embedder").join().expect("generic Cell embedder must not overflow")
+}
+// Rust: tests/local_cell_tiers.rs:303
+#Test("local_cell_non_string_map_uses_default_evaluator") {
+    thread.Builder.new().stack_size(2 * 1024 * 1024).spawn(() -> {
+        dir :: env.temp_dir().join("jet_local_cell_int_map_{std.process.id()}")
+        fs.create_dir_all(dir).unwrap()
+        path :: dir.join("main.jet")
+        fs.write(path, INT_MAP_SOURCE).unwrap()
+        // Retiring evaluator/JIT eligibility flags become observable parity.
+        loop tier in ["O0", "O1", "O2", "Web"] {
+            (code, stdout, stderr) :: TirSupport.run_entry_tier(path, tier)
+            assert_eq(code, 0)
+            assert_eq(stderr, "")
+            assert_eq(stdout, "2\n")
+        }
+    }).expect("spawn 2 MiB non-string map Cell embedder").join().expect("non-string map Cell embedder must not overflow")
+}
+// Rust: tests/local_cell_tiers.rs:358
+#Test("local_cell_guards_are_linear_before_codegen") {
+    source :: "fn run() {{\n    cell :: Cell.new(1)\n    guard :: cell.guard_read()\n    copied :: ~guard\n    print(copied.get())\n}}\n"
+    diagnostics :: jet.compile(source).expect_err("Cell guards must be rejected by sema before codegen")
+    assert(diagnostics.iter().any(diagnostic -> diagnostic.code == "E0211"), "expected E0211 for explicit Cell guard copy: {diagnostics:?}")
+}
+// Rust: tests/local_cell_tiers.rs:378
+#Test("local_cell_guard_storage_boundary_reports_once_per_site") {
+    cases :: [
+        ("struct field", "struct Held {{\n    guard: CellReadGuard<Int>,\n}}\n\nfn run() {{}}\n"),
+        ("enum payload", "enum Held {{\n    Guard(CellReadGuard<Int>)\n}}\n\nfn run() {{}}\n"),
+        ("list binding", "fn run() {{\n    cell :: Cell.new(1)\n    guard :: cell.guard_read()\n    held :: [guard]\n}}\n"),
+        ("lambda capture", "fn hold(cell: Cell<Int>) -> fn() -> Int {{\n    guard :: cell.guard_read()\n    return () -> guard.get()\n}}\n\nfn run() {{}}\n"),
+        ("immediate lambda capture", "fn run() {{\n    cell :: Cell.new(1)\n    guard :: cell.guard_read()\n    read :: (() -> guard.get()).call()\n}}\n"),
+        ("generic struct temporary", "struct Held<T> {{\n    value: T,\n}}\n\nfn consume<T>(held: Held<T>) {{}}\n\nfn run() {{\n    cell :: Cell.new(1)\n    consume(Held<CellReadGuard<Int>>{{ value: cell.guard_read() }})\n}}\n"),
+        ("list call argument", "fn consume<T>(held: T) {{}}\n\nfn run() {{\n    cell :: Cell.new(1)\n    consume([cell.guard_read()])\n}}\n")
+    ]
+    loop (case, source) in cases {
+        diagnostics :: jet.compile(source).expect_err("unsupported Cell guard storage must be rejected before codegen")
+        count :: diagnostics.iter().filter(diagnostic -> diagnostic.code == "E0217").count()
+        assert_eq(count, 1, "{case} must report one E0217: {diagnostics:?}")
+    }
+}

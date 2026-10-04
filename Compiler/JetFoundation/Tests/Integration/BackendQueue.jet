@@ -1,0 +1,6 @@
+use jet_devserver.Devtools.[JetDevtoolsEnvelope, JetDevtoolsEvent, JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelId, JetDevtoolsJobPanelFact, JetDevtoolsJobPanelEventKind, JetDevtoolsJobPanelLifecycleState, JetDevtoolsJobPanelState]
+
+// Rust: tests/backend_queue.rs:6
+fn queue_status_event() -> JetDevtoolsEvent {
+    JetDevtoolsEvent.from_parts(42, "job-runtime", "Job", "authority:default", """{{"event":"status","state":"status","job_id":"authority:default","name":"default","queue":"default","attempts":0,"duration_ms":null,"worker":null,"request_id":null,"failure":null,"reason":null,"sequence":0,"authority":"authority","queued":1,"running":0,"retrying":0,"completed":0,"failed":0,"dead_lettered":0,"cancelled":0,"depth":1,"wait_ms":0,"throughput":0,"capacity":8,"paused":false,"freshness_ms":0,"labels":{{}}}}""").expect("queue status event must satisfy the canonical envelope contract")
+}

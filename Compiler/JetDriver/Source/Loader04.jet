@@ -1,1025 +1,166 @@
-// PORT-PENDING 2042 crates-jet-driver-src-loader-slice-5401: crates/jet-driver/src/Loader.rs:5401-6421
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                             modules,
-//RS                             members[position],
-//RS                             entry_idx,
-//RS                             Diagnostic::from_row(
-//RS                                 "E0624",
-//RS                                 &[("name", name), ("package", &package), ("other", &other)],
-//RS                                 Some(*span),
-//RS                             ),
-//RS                         ));
-//RS                     }
-//RS                     Some(_) => {}
-//RS                     None => {
-//RS                         owners.insert(name, position);
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         // A library package has no `fn run`.
-//RS         let declares_library = facts.as_ref().is_some_and(|facts| {
-//RS             facts.outputs.values().any(|output| {
-//RS                 output.kind == crate::Package::PackageOutputKind::Library
-//RS             }) && !facts.outputs.values().any(|output| {
-//RS                 output.kind == crate::Package::PackageOutputKind::Executable
-//RS             })
-//RS         });
-//RS         if declares_library {
-//RS             for (position, member_names) in names.iter().enumerate() {
-//RS                 if let Some((_, span)) = member_names.iter().find(|(name, _)| name == "run") {
-//RS                     return Err(member_error(
-//RS                         modules,
-//RS                         members[position],
-//RS                         entry_idx,
-//RS                         Diagnostic::from_row("E0625", &[], Some(*span)),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         for &member in members {
-//RS             // Each binding needs a zero-width span of its own: the name
-//RS             // ledger keys import targets and alias uses by span. A written
-//RS             // `use dep.[…]` already binds its package at the zero-width span
-//RS             // of its alias, and the Prelude binds Core at 0, so skip those.
-//RS             let mut taken: HashSet<usize> = modules[member]
-//RS                 .imports
-//RS                 .iter()
-//RS                 .filter(|import| import.span.start == import.span.end)
-//RS                 .map(|import| import.span.start)
-//RS                 .collect();
-//RS             taken.insert(0);
-//RS             let mut next_span = 0usize;
-//RS             let mut fresh_span = || {
-//RS                 while taken.contains(&next_span) {
-//RS                     next_span += 1;
-//RS                 }
-//RS                 taken.insert(next_span);
-//RS                 Span::new(next_span, next_span)
-//RS             };
-//RS             for (sibling_position, &sibling) in members.iter().enumerate() {
-//RS                 if sibling == member || names[sibling_position].is_empty() {
-//RS                     continue;
-//RS                 }
-//RS                 let alias = format!("__jet_pkg_{}", modules[sibling].alias);
-//RS                 let file_span = fresh_span();
-//RS                 let list_span = fresh_span();
-//RS                 let bound = names[sibling_position]
-//RS                     .iter()
-//RS                     .map(|(name, _)| (name.clone(), None))
-//RS                     .collect::<Vec<_>>();
-//RS                 let count = bound.len();
-//RS                 let sibling_display = modules[sibling].display.clone();
-//RS                 let imports = &mut modules[member].imports;
-//RS                 imports.push(ImportDecl {
-//RS                     kind: ImportKind::File(sibling_display, file_span),
-//RS                     alias: alias.clone(),
-//RS                     alias_span: file_span,
-//RS                     span: file_span,
-//RS                     item_spans: Vec::new(),
-//RS                     local_spans: Vec::new(),
-//RS                     is_pub: false,
-//RS                     is_package_pub: false,
-//RS                     inline_version: None,
-//RS                 });
-//RS                 imports.push(ImportDecl {
-//RS                     kind: ImportKind::Unqualified {
-//RS                         module_alias: alias.clone(),
-//RS                         module_alias_span: list_span,
-//RS                         items: bound,
-//RS                         items_span: list_span,
-//RS                         span: list_span,
-//RS                     },
-//RS                     alias,
-//RS                     alias_span: list_span,
-//RS                     span: list_span,
-//RS                     item_spans: vec![list_span; count],
-//RS                     local_spans: vec![list_span; count],
-//RS                     is_pub: false,
-//RS                     is_package_pub: false,
-//RS                     inline_version: None,
-//RS                 });
-//RS                 name_ledger.record_import_target(member, file_span, sibling);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS fn resolve_module_import(
-//RS     name: &str,
-//RS     importing: &Path,
-//RS     project_root: &Path,
-//RS     pkg_dep_dirs: &HashMap<String, DependencyDir>,
-//RS     pkg_resolution: &PkgResolution,
-//RS     span: Span,
-//RS     project_parts: &crate::ProjectParts::ProjectPartsReport,
-//RS     project_part_failures: &[crate::ProjectParts::ProjectPartScanFailure],
-//RS ) -> Result<PathBuf, Diagnostic> {
-//RS     if let Some(local_name) = name.strip_prefix(Syntax::PROJECT_IMPORT_PREFIX) {
-//RS         let matches = project_parts.named(local_name);
-//RS         let scan_failure = project_part_failures
-//RS             .iter()
-//RS             .find(|failure| failure.module_names.iter().any(|name| name == local_name));
-//RS         return match matches.as_slice() {
-//RS             [] => match scan_failure {
-//RS                 Some(failure) => Err(failure.diagnostic(local_name, project_root, span)),
-//RS                 None => Err(Diagnostic::error(
-//RS                     "E0603",
-//RS                     format!(
-//RS                         "can't find a project module named `{}{}`",
-//RS                         Syntax::PROJECT_IMPORT_PREFIX,
-//RS                         local_name,
-//RS                     ),
-//RS                     "project-local imports resolve declared module names, not filenames"
-//RS                         .to_string(),
-//RS                     format!("declare `module {local_name} {{ ... }}` under this project"),
-//RS                     Some(span),
-//RS                 )),
-//RS             },
-//RS             [part] => Ok(normalize_path(&part.path)),
-//RS             _ => Err(project_parts
-//RS                 .conflicts
-//RS                 .iter()
-//RS                 .find(|conflict| conflict.name == local_name)
-//RS                 .expect("duplicate project parts have a conflict record")
-//RS                 .diagnostic(project_root, Some(span))),
-//RS         };
-//RS     }
-//RS     // M12.1: check package dep dirs first.
-//RS     // `import words;` where "words" is a dep name → look in the dep's source root.
-//RS     let first_segment = name.split('.').next().unwrap_or(name);
-//RS     if let Some(dependency) = pkg_dep_dirs
-//RS         .get(first_segment)
-//RS         .filter(|_| dependency_visible_from(importing, first_segment, pkg_dep_dirs))
-//RS     {
-//RS         // Search within the dep's source tree for the module.
-//RS         let dep_matches = find_module_files_with_authority(name, &dependency.authority)?;
-//RS         if !dep_matches.is_empty() {
-//RS             return Ok(dep_matches[0].clone());
-//RS         }
-//RS         // If the dep root itself has the dep name as the top-level module,
-//RS         // anchor the package authority on the canonical run entry.
-//RS         if name == first_segment {
-//RS             match dependency
-//RS                 .authority
-//RS                 .checked_file(Path::new(Syntax::DEFAULT_ENTRY_FILE))
-//RS             {
-//RS                 Ok(run_jet) => {
-//RS                     dependency
-//RS                         .authority
-//RS                         .revalidate_file(&run_jet)
-//RS                         .map_err(|error| error.diagnostic())?;
-//RS                     return Ok(run_jet.path);
-//RS                 }
-//RS                 Err(error) if error.is_missing() => {
-//RS                     // D-MOD-CYCLE1=A: a dependency package is one namespace;
-//RS                     // any member file stands for it, and loading that member
-//RS                     // loads the whole package.
-//RS                     if let Some(member) = package_member_files(dependency.authority.root())?
-//RS                         .into_iter()
-//RS                         .next()
-//RS                     {
-//RS                         return Ok(member);
-//RS                     }
-//RS                 }
-//RS                 Err(error) => return Err(error.diagnostic()),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // U17: a `library` package is brought into code with the ordinary
-//RS     // `use <pkg>` form — once realized, its staged source in the shared hangar
-//RS     // is just an extra module search root. The hangar is authoritative for the
-//RS     // realized kind (empty `bin` = library, U10).
-//RS     if !pkg_resolution.is_empty() {
-//RS         // Realized library → resolve through its staged source tree.
-//RS         if pkg_resolution.realized_libs.contains_key(first_segment) {
-//RS             let authority = pkg_resolution
-//RS                 .realized_authorities
-//RS                 .get(first_segment)
-//RS                 .ok_or_else(|| {
-//RS                     Diagnostic::error(
-//RS                         "E1334",
-//RS                         format!(
-//RS                             "realized library `{first_segment}` has no held source authority"
-//RS                         ),
-//RS                         "a verified library must keep its checked source root while the loader consumes it".to_string(),
-//RS                         "re-realize the library in the shared store and retry".to_string(),
-//RS                         Some(span),
-//RS                     )
-//RS                 })?;
-//RS             let lib_matches = find_module_files_with_authority(name, authority)?;
-//RS             if !lib_matches.is_empty() {
-//RS                 return Ok(lib_matches[0].clone());
-//RS             }
-//RS             // Realized, but the named submodule isn't in the staged tree — fall
-//RS             // through to the normal not-found report below.
-//RS         }
-//RS         // Realized executable named in `use` → executables go on PATH (E0982).
-//RS         if pkg_resolution.realized_exes.contains(first_segment) {
-//RS             return Err(e0982_executable_use(first_segment, span));
-//RS         }
-//RS         // Declared as a dependency but not realized yet → run `jetpack env --prep`
-//RS         // (E0983), rather than a generic unknown-module error.
-//RS         if pkg_resolution.declared_deps.contains(first_segment)
-//RS             && find_module_files(name, project_root)?.is_empty()
-//RS             && !pkg_dep_dirs.contains_key(first_segment)
-//RS         {
-//RS             return Err(e0983_unrealized_library(first_segment, span));
-//RS         }
-//RS     }
-//RS 
-//RS     let matches = find_module_files(name, project_root)?;
-//RS     match matches.len() {
-//RS         0 => Err(Diagnostic::error(
-//RS             "E0603",
-//RS             format!("can't find a module named `{}`", name),
-//RS             format!(
-//RS                 "search from the project root for `{}.{}`, or `{}/{}/{}.{}` / `{}`",
-//RS                 name,
-//RS                 Syntax::FILE_EXT,
-//RS                 name,
-//RS                 name,
-//RS                 name,
-//RS                 Syntax::FILE_EXT,
-//RS                 Syntax::DEFAULT_ENTRY_FILE
-//RS             ),
-//RS             format!(
-//RS                 "add `{}.{}` under this project, or fix the `{}` name",
-//RS                 name,
-//RS                 Syntax::FILE_EXT,
-//RS                 Syntax::KW_USE
-//RS             ),
-//RS             Some(span),
-//RS         )),
-//RS         1 => Ok(matches[0].clone()),
-//RS         _ => {
-//RS             let list = matches
-//RS                 .iter()
-//RS                 .map(|p| relative_display(project_root, p))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ");
-//RS             Err(Diagnostic::error(
-//RS                 "E0606",
-//RS                 format!("the module name `{}` matches more than one file", name),
-//RS                 "module imports must name exactly one file under the project root".to_string(),
-//RS                 format!("pick one file and use a file import instead: {}", list),
-//RS                 Some(span),
-//RS             ))
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn find_module_files(name: &str, project_root: &Path) -> Result<Vec<PathBuf>, Diagnostic> {
-//RS     let resolver = AuthorityResolver::open(project_root).map_err(|error| error.diagnostic())?;
-//RS     find_module_files_with_authority(name, &resolver)
-//RS }
-//RS 
-//RS fn find_module_files_with_authority(
-//RS     name: &str,
-//RS     resolver: &AuthorityResolver,
-//RS ) -> Result<Vec<PathBuf>, Diagnostic> {
-//RS     let files = resolver
-//RS         .discover_source_files()
-//RS         .map_err(|error| error.diagnostic())?;
-//RS     let direct_name = format!("{name}.{}", Syntax::FILE_EXT);
-//RS     let matches = files
-//RS         .into_iter()
-//RS         .filter(|file| {
-//RS             let Some(file_name) = file.relative.file_name().and_then(|name| name.to_str()) else {
-//RS                 return false;
-//RS             };
-//RS             if file_name == direct_name {
-//RS                 return true;
-//RS             }
-//RS             file_name == Syntax::DEFAULT_ENTRY_FILE
-//RS                 && file
-//RS                     .relative
-//RS                     .parent()
-//RS                     .and_then(|parent| parent.file_name())
-//RS                     .and_then(|name| name.to_str())
-//RS                     == Some(name)
-//RS         })
-//RS         .map(|file| file.path)
-//RS         .collect::<Vec<_>>();
-//RS     let mut found = matches;
-//RS     found.sort();
-//RS     found.dedup();
-//RS     Ok(found)
-//RS }
-//RS 
-//RS /// File stems become generated Rust `mod __jet_<alias>` names, so the alias must be a
-//RS /// valid identifier: non-alphanumeric characters map to `_`, and a leading
-//RS /// digit gets a `_` prefix.
-//RS pub(crate) fn default_module_alias(path: &Path) -> String {
-//RS     let stem = path
-//RS         .file_stem()
-//RS         .and_then(|s| s.to_str())
-//RS         .unwrap_or("module");
-//RS     sanitize_alias(stem)
-//RS }
-//RS 
-//RS fn sanitize_alias(raw: &str) -> String {
-//RS     let mut out = String::with_capacity(raw.len());
-//RS     for c in raw.chars() {
-//RS         if c.is_ascii_alphanumeric() || c == '_' {
-//RS             out.push(c);
-//RS         } else {
-//RS             out.push('_');
-//RS         }
-//RS     }
-//RS     if out.is_empty() {
-//RS         out.push_str("module");
-//RS     }
-//RS     if out.chars().next().is_some_and(|c| c.is_ascii_digit()) {
-//RS         out.insert(0, '_');
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub fn resolve_import_target(
-//RS     bundle: &ProgramBundle,
-//RS     importing_idx: usize,
-//RS     imp: &ImportDecl,
-//RS ) -> Result<usize, Vec<Diagnostic>> {
-//RS     if core_module_path(imp).is_some() {
-//RS         return Err(vec![Diagnostic::error(
-//RS             "E1001",
-//RS             "core modules do not resolve to files".to_string(),
-//RS             "`core` is provided by the compiler in M10".to_string(),
-//RS             "handle this import as a compiler-known module".to_string(),
-//RS             Some(imp.span),
-//RS         )]);
-//RS     }
-//RS     let importing = &bundle.modules[importing_idx];
-//RS     // Rebuild the same dep-source dirs (M12.1) and U17 package resolution
-//RS     // (realized library staging dirs) the loader used, so a `use <pkg>`
-//RS     // re-resolves to the exact file already pulled into the bundle.
-//RS     let (pkg_dep_dirs, pkg_resolution) = project_resolution_for_bundle(bundle)?;
-//RS     let (project_parts, project_part_failures) =
-//RS         crate::ProjectParts::scan_with_diagnostics(&bundle.project_root, &[]);
-//RS     if let Some(failure) = project_part_failures
-//RS         .iter()
-//RS         .find(|failure| failure.authority)
-//RS     {
-//RS         return Err(vec![failure.problem.clone()]);
-//RS     }
-//RS     let target_path = match resolve_import(
-//RS         imp,
-//RS         &importing.path,
-//RS         &bundle.project_root,
-//RS         &pkg_dep_dirs,
-//RS         &pkg_resolution,
-//RS         &project_parts,
-//RS         &project_part_failures,
-//RS     ) {
-//RS         Ok(p) => normalize_path(&p),
-//RS         Err(d) => return Err(vec![d]),
-//RS     };
-//RS     for (i, m) in bundle.modules.iter().enumerate() {
-//RS         if normalize_path(&m.path) == target_path {
-//RS             return Ok(i);
-//RS         }
-//RS     }
-//RS     Err(vec![Diagnostic::error(
-//RS         "E0603",
-//RS         "imported file isn't part of this program".to_string(),
-//RS         "the loader should have pulled in every imported file already".to_string(),
-//RS         "report this as a compiler bug".to_string(),
-//RS         Some(imp.span),
-//RS     )])
-//RS }
-//RS 
-//RS pub fn import_alias(imp: &ImportDecl) -> String {
-//RS     imp.import_alias()
-//RS }
-//RS 
-//RS /// E0982 (U17): `use <pkg>` named a package declared `executable` in the
-//RS /// manifest. Executables go on PATH (you run them), not into code.
-//RS fn e0982_executable_use(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0982",
-//RS         format!("`{}` is an executable package, so it can't be used with `{}`", name, Syntax::KW_USE),
-//RS         "an `executable` package installs a binary on your PATH — you run it, you don't import its code; only a `library` package is brought into code with `use` (U17)"
-//RS             .to_string(),
-//RS         format!(
-//RS             "remove `{} {};` and run the `{}` binary instead, or change `{}` to `library` in `{}` if you meant to import its code",
-//RS             Syntax::KW_USE, name, name, name, Syntax::PACKAGE_FILE
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS /// E0983 (U17): `use <pkg>` named a `library` package that the manifest
-//RS /// declares but that hasn't been realized (no staged source in the hangar).
-//RS fn e0983_unrealized_library(name: &str, span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0983",
-//RS         format!("the library package `{}` hasn't been built yet", name),
-//RS         "a `library` package must be realized — its source staged in the shared store (hangar) — before `use` can find it (U17)"
-//RS             .to_string(),
-//RS         format!(
-//RS             "run `jetpack env --prep` to realize `{}`, or rerun `jet run` without `--no-prepare`; then `{} {};` will resolve it",
-//RS             name, Syntax::KW_USE, name
-//RS         ),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS fn e0602(span: Span) -> Diagnostic {
-//RS     Diagnostic::error(
-//RS         "E0602",
-//RS         "this import path escapes the package".to_string(),
-//RS         "inside a package, file imports stay in the package tree — `..` works only for loose files outside any package"
-//RS             .to_string(),
-//RS         "use a path without `..`, or move the file inside the package tree".to_string(),
-//RS         Some(span),
-//RS     )
-//RS }
-//RS 
-//RS fn relative_display(root: &Path, path: &Path) -> String {
-//RS     path.strip_prefix(root)
-//RS         .unwrap_or(path)
-//RS         .display()
-//RS         .to_string()
-//RS }
-//RS 
-//RS /// Compare existing paths by physical identity so a symlink cannot widen a
-//RS /// workspace or project boundary.
-//RS pub fn is_physically_within(root: &Path, path: &Path) -> bool {
-//RS     let Ok(root) = AuthorityResolver::open(root) else {
-//RS         return false;
-//RS     };
-//RS     let Ok(path) = AuthorityResolver::open(path) else {
-//RS         return false;
-//RS     };
-//RS     path.root().starts_with(root.root())
-//RS }
-//RS 
-//RS #[cfg(test)]
-//RS mod stale_manifest_name_tests {
-//RS     use super::*;
-//RS 
-//RS     /// Keep fixtures outside enclosing project roots; system temp can itself
-//RS     /// live inside a repository, workspace, or package.
-//RS     fn tempdir(tag: &str) -> PathBuf {
-//RS         let mut base = std::env::temp_dir();
-//RS         loop {
-//RS             let has_repository = find_repository_root(&base).is_some();
-//RS             let has_workspace = find_workspace_root_checked(&base)
-//RS                 .map(|root| root.is_some())
-//RS                 .unwrap_or(true);
-//RS             let has_package = find_package_root_checked(&base)
-//RS                 .map(|root| root.is_some())
-//RS                 .unwrap_or(true);
-//RS             if !has_repository && !has_workspace && !has_package {
-//RS                 break;
-//RS             }
-//RS             let Some(parent) = base.parent() else {
-//RS                 panic!("could not find an authority-free temp directory for loader tests");
-//RS             };
-//RS             base = parent.to_path_buf();
-//RS         }
-//RS 
-//RS         let nanos = std::time::SystemTime::now()
-//RS             .duration_since(std::time::UNIX_EPOCH)
-//RS             .unwrap()
-//RS             .as_nanos();
-//RS         let p = base.join(format!(
-//RS             "loader-stale-manifest-{tag}-{nanos}-{:?}",
-//RS             std::thread::current().id()
-//RS         ));
-//RS         std::fs::create_dir_all(&p).unwrap();
-//RS         p
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn selected_project_root_prefers_repository_over_nested_package() {
-//RS         let repository = tempdir("selected-repository");
-//RS         let source = repository.join("packages/app/src");
-//RS         fs::create_dir_all(&source).unwrap();
-//RS         fs::create_dir(repository.join(".git")).unwrap();
-//RS         fs::write(
-//RS             repository.join("packages/app").join(Syntax::PACKAGE_FILE),
-//RS             "name: \"app\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         assert_eq!(
-//RS             selected_project_root(&source).unwrap(),
-//RS             fs::canonicalize(&repository).unwrap(),
-//RS         );
-//RS         let _ = fs::remove_dir_all(repository);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn selected_project_root_preserves_nested_workspace_precedence() {
-//RS         let repository = tempdir("selected-workspace");
-//RS         let workspace = repository.join("nested");
-//RS         let source = workspace.join("packages/app/src");
-//RS         fs::create_dir_all(&source).unwrap();
-//RS         fs::create_dir(repository.join(".git")).unwrap();
-//RS         fs::write(
-//RS             repository.join(Syntax::PACKAGE_FILE),
-//RS             "name: \"repository\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             workspace.join("workspace.jet"),
-//RS             "module workspace { members: [\"./packages/app\"] }\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             workspace.join("packages/app").join(Syntax::PACKAGE_FILE),
-//RS             "name: \"app\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         assert_eq!(
-//RS             selected_project_root(&source).unwrap(),
-//RS             fs::canonicalize(&workspace).unwrap(),
-//RS         );
-//RS         let _ = fs::remove_dir_all(repository);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn selected_project_root_uses_checked_package_without_repository() {
-//RS         let root = tempdir("selected-package");
-//RS         let package = root.join("package");
-//RS         let source = package.join("src");
-//RS         fs::create_dir_all(&source).unwrap();
-//RS         fs::write(
-//RS             package.join(Syntax::PACKAGE_FILE),
-//RS             "name: \"package\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         assert_eq!(
-//RS             selected_project_root(&source).unwrap(),
-//RS             fs::canonicalize(&package).unwrap(),
-//RS         );
-//RS         let _ = fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn selected_project_root_uses_canonical_standalone_parent() {
-//RS         let root = tempdir("selected-standalone");
-//RS         let standalone = root.join("standalone");
-//RS         fs::create_dir_all(&standalone).unwrap();
-//RS         fs::write(standalone.join(Syntax::DEFAULT_ENTRY_FILE), "fn run() {}\n").unwrap();
-//RS 
-//RS         assert_eq!(
-//RS             selected_project_root(&standalone).unwrap(),
-//RS             fs::canonicalize(&standalone).unwrap(),
-//RS         );
-//RS         let _ = fs::remove_dir_all(root);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn staged_frontend_is_bounded_and_deterministic() {
-//RS         let first = PathBuf::from("/virtual/z.jet");
-//RS         let second = PathBuf::from("/virtual/a.jet");
-//RS         let overlays = [
-//RS             (first.as_path(), "fn z() -> Int { return 1 }\n"),
-//RS             (second.as_path(), "fn a() -> Int { return 2 }\n"),
-//RS         ];
-//RS         let prepared = prepare_overlay_frontend(&overlays);
-//RS 
-//RS         assert!(
-//RS             frontend_worker_count(MAX_FRONTEND_WORKERS.saturating_mul(2))
-//RS                 <= MAX_FRONTEND_WORKERS,
-//RS             "frontend fan-out must stay bounded for a source batch larger than the cap"
-//RS         );
-//RS         assert_eq!(prepared.len(), overlays.len());
-//RS         assert!(matches!(
-//RS             prepared
-//RS                 .get(&normalize_path(&first))
-//RS                 .map(|entry| &entry.module),
-//RS             Some(PreparedFrontendModule::Parsed(_, _))
-//RS         ));
-//RS         assert!(matches!(
-//RS             prepared
-//RS                 .get(&normalize_path(&second))
-//RS                 .map(|entry| &entry.module),
-//RS             Some(PreparedFrontendModule::Parsed(_, _))
-//RS         ));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn staged_frontend_production_path_preserves_success_and_failure() {
-//RS         let dir = tempdir("staged-frontend-production");
-//RS         let entry = dir.join("main.jet");
-//RS         let dependency = dir.join("dep.jet");
-//RS         let entry_source = "module dep\nfn run() -> Int { return dep.value() }\n";
-//RS         let valid_dependency = "pub fn value() -> Int { return 7 }\n";
-//RS         fs::write(&entry, entry_source).unwrap();
-//RS         fs::write(&dependency, valid_dependency).unwrap();
-//RS 
-//RS         let overlays = [
-//RS             (entry.as_path(), entry_source),
-//RS             (dependency.as_path(), valid_dependency),
-//RS         ];
-//RS         let (loaded, _, diagnostics) = load_entry_with_overlays_and_dependencies_with_diagnostics(
-//RS             entry.to_str().unwrap(),
-//RS             &overlays,
-//RS             true,
-//RS         );
-//RS         assert!(loaded.is_ok(), "valid staged batch failed: {diagnostics:?}");
-//RS         assert!(
-//RS             diagnostics.is_empty(),
-//RS             "valid staged batch diagnosed: {diagnostics:?}"
-//RS         );
-//RS 
-//RS         let invalid_dependency = "pub fn value() -> Int { return 7 }\n::\n";
-//RS         let invalid_overlays = [
-//RS             (entry.as_path(), entry_source),
-//RS             (dependency.as_path(), invalid_dependency),
-//RS         ];
-//RS         let (loaded, _, diagnostics) = load_entry_with_overlays_and_dependencies_with_diagnostics(
-//RS             entry.to_str().unwrap(),
-//RS             &invalid_overlays,
-//RS             true,
-//RS         );
-//RS         assert!(
-//RS             loaded.is_err(),
-//RS             "malformed staged batch unexpectedly loaded"
-//RS         );
-//RS         assert!(
-//RS             diagnostics
-//RS                 .iter()
-//RS                 .any(|diagnostic| diagnostic.diagnostic.code == "E0003"),
-//RS             "malformed staged batch lost parser diagnostic: {diagnostics:?}"
-//RS         );
-//RS 
-//RS         let _ = fs::remove_dir_all(dir);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn finds_pack_jet() {
-//RS         let dir = tempdir("pack");
-//RS         fs::write(dir.join("pack.jet"), "").unwrap();
-//RS         let (found_dir, name) = find_stale_manifest_name(&dir).expect("should find pack.jet");
-//RS         assert_eq!(found_dir, dir);
-//RS         assert_eq!(name, "pack.jet");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn finds_payload_jet() {
-//RS         let dir = tempdir("payload");
-//RS         fs::write(dir.join("payload.jet"), "").unwrap();
-//RS         let (_, name) = find_stale_manifest_name(&dir).expect("should find payload.jet");
-//RS         assert_eq!(name, "payload.jet");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn finds_jet_toml() {
-//RS         let dir = tempdir("jettoml");
-//RS         fs::write(dir.join("jet.toml"), "").unwrap();
-//RS         let (_, name) = find_stale_manifest_name(&dir).expect("should find jet.toml");
-//RS         assert_eq!(name, "jet.toml");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn jetpack_toml_is_not_stale() {
-//RS         // jetpack.toml is a retired config file, not a package-manifest name;
-//RS         // the package loader must not misreport it as E1226.
-//RS         let dir = tempdir("jetpacktoml");
-//RS         fs::write(dir.join("jetpack.toml"), "").unwrap();
-//RS         assert_eq!(find_stale_manifest_name(&dir), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn pkg_jet_present_means_nothing_stale() {
-//RS         let dir = tempdir("both");
-//RS         fs::write(
-//RS             dir.join(Syntax::PACKAGE_FILE),
-//RS             "name: \"fixture\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(dir.join("pack.jet"), "").unwrap();
-//RS         // package.jet exists right here — the walk stops with nothing to report,
-//RS         // even though a stale name also happens to sit alongside it.
-//RS         assert_eq!(find_stale_manifest_name(&dir), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn no_manifest_at_all_is_none() {
-//RS         let dir = tempdir("empty");
-//RS         assert_eq!(find_stale_manifest_name(&dir), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn workspace_boundary_blocks_outer_stale_manifest_lookup() {
-//RS         let outer = tempdir("workspace-boundary");
-//RS         let inner = outer.join("child");
-//RS         let source = inner.join("src");
-//RS         fs::create_dir_all(&source).unwrap();
-//RS         fs::write(outer.join("pack.jet"), "").unwrap();
-//RS         fs::write(
-//RS             inner.join("authority.jet"),
-//RS             "module workspace { policy: { deny: #(FS) } }\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         assert_eq!(find_stale_manifest_name(&source), None);
-//RS         assert_eq!(find_manifest_root(&source), None);
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn ambiguous_workspace_boundary_blocks_outer_package_authority() {
-//RS         let outer = tempdir("ambiguous-workspace-authority");
-//RS         let inner = outer.join("child");
-//RS         let source = inner.join("src");
-//RS         fs::create_dir_all(&source).unwrap();
-//RS         fs::write(
-//RS             outer.join(Syntax::PACKAGE_FILE),
-//RS             "name: \"outer\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             inner.join("a.jet"),
-//RS             "module workspace { policy: { deny: #(FS) } }\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             inner.join("b.jet"),
-//RS             "module workspace { policy: { deny: #(FS) } }\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let diagnostic = find_manifest_root_checked(&source)
-//RS             .expect_err("ambiguous inner workspace must not expose an outer Package");
-//RS         assert_eq!(diagnostic.code, "E1239");
-//RS         assert_eq!(find_manifest_root(&source), None);
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn explicit_shared_package_manifest_needs_reach_bundle_and_core_usage() {
-//RS         use std::os::unix::fs::PermissionsExt;
-//RS 
-//RS         let dir = tempdir("shared-package-authority");
-//RS         let entry = dir.join(Syntax::DEFAULT_ENTRY_FILE);
-//RS         let source = "use core.font as font\nfn run() {\n    face :: font.system(.Body)\n    _shaped :: font.shape(\"x\", face)\n}\n";
-//RS         let manifest = "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [IO] },\n    needs: [UI.FontShaping]\n}\n";
-//RS         fs::write(dir.join(Syntax::PACKAGE_FILE), manifest).unwrap();
-//RS         fs::write(&entry, source).unwrap();
-//RS         fs::set_permissions(&dir, fs::Permissions::from_mode(0o777)).unwrap();
-//RS 
-//RS         let expected_root = fs::canonicalize(&dir).unwrap();
-//RS         assert_eq!(
-//RS             find_manifest_root_checked(&dir).unwrap(),
-//RS             Some(expected_root),
-//RS         );
-//RS         let facts = package_facts_for_entry(&entry)
-//RS             .unwrap()
-//RS             .expect("explicit package manifest should load");
-//RS         assert_eq!(facts.authority.needs, vec!["UI.FontShaping"]);
-//RS 
-//RS         let mut bundle = load_entry(entry.to_str().unwrap()).expect("bundle should load");
-//RS         let bundle_facts = package_facts_for_bundle(&bundle)
-//RS             .unwrap()
-//RS             .expect("bundle package manifest should load");
-//RS         assert_eq!(bundle_facts.authority.needs, vec!["UI.FontShaping"]);
-//RS         assert_eq!(
-//RS             bundle.package_guarantees.authority_needs,
-//RS             vec!["UI.FontShaping"],
-//RS         );
-//RS         assert!(
-//RS             bundle
-//RS                 .package_guarantees
-//RS                 .application_authority
-//RS                 .granted_effects
-//RS                 .contains("IO"),
-//RS             "authority.holds.allow must remain the execution grant"
-//RS         );
-//RS         let diagnostics = crate::Sema::check_bundle(
-//RS             &mut bundle,
-//RS             crate::Sema::CompileMode::Run,
-//RS         );
-//RS         assert!(
-//RS             !diagnostics.iter().any(|diagnostic| diagnostic.code == "E2937"),
-//RS             "declared UI.FontShaping must satisfy CoreUsage: {diagnostics:?}"
-//RS         );
-//RS 
-//RS         fs::write(
-//RS             dir.join(Syntax::PACKAGE_FILE),
-//RS             "name: \"fixture\"\nversion: \"0.1.0\"\nauthority: {\n    holds: { allow: [IO] }\n}\n",
-//RS         )
-//RS         .unwrap();
-//RS         let mut omitted_bundle =
-//RS             load_entry(entry.to_str().unwrap()).expect("bundle without needs should load");
-//RS         assert!(
-//RS             omitted_bundle
-//RS                 .package_guarantees
-//RS                 .authority_needs
-//RS                 .is_empty()
-//RS         );
-//RS         let omitted_diagnostics = crate::Sema::check_bundle(
-//RS             &mut omitted_bundle,
-//RS             crate::Sema::CompileMode::Run,
-//RS         );
-//RS         assert!(
-//RS             omitted_diagnostics
-//RS                 .iter()
-//RS                 .any(|diagnostic| diagnostic.code == "E2937"),
-//RS             "omitting UI.FontShaping must retain E2937: {omitted_diagnostics:?}"
-//RS         );
-//RS 
-//RS         fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
-//RS         let _ = fs::remove_dir_all(dir);
-//RS     }
-//RS 
-//RS     #[cfg(unix)]
-//RS     #[test]
-//RS     fn file_import_rejects_physical_symlink_escape_as_e0603() {
-//RS         use std::os::unix::fs::symlink;
-//RS 
-//RS         let root = tempdir("file-import-symlink");
-//RS         let outside = tempdir("file-import-symlink-outside");
-//RS         let entry = root.join("run.jet");
-//RS         fs::write(&entry, "use \"./escape\" as escape\nfn run() {}\n").unwrap();
-//RS         fs::write(outside.join("secret.jet"), "pub fn fixture() {}\n").unwrap();
-//RS         symlink(outside.join("secret.jet"), root.join("escape.jet")).unwrap();
-//RS 
-//RS         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| {
-//RS                 diagnostic.code == "E1334"
-//RS                     && diagnostic.what.to_ascii_lowercase().contains("symlink")
-//RS                     && diagnostic.what.contains("escape.jet")
-//RS             }),
-//RS             "{diagnostics:#?}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn explicit_project_import_keeps_internal_module_available() {
-//RS         let dir = tempdir("internal-module");
-//RS         let entry = dir.join("main.jet");
-//RS         fs::write(
-//RS             &entry,
-//RS             "use project._bench as bench\nfn run() { bench.fixture() }\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             dir.join("arbitrary.jet"),
-//RS             "module _bench { }\npub fn fixture() {}\n",
-//RS         )
-//RS         .unwrap();
-//RS 
-//RS         let (diagnostics, bundle) = crate::Driver::check_file(entry.to_str().unwrap(), None, false);
-//RS         assert!(diagnostics.is_empty(), "{diagnostics:#?}");
-//RS         let bundle = bundle.unwrap();
-//RS         assert!(bundle
-//RS             .modules
-//RS             .iter()
-//RS             .any(|module| module.path == dir.join("arbitrary.jet")));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn explicit_project_import_propagates_invalid_target_diagnostics() {
-//RS         for (tag, broken) in [
-//RS             ("lex", "module _bench { }\n§\n"),
-//RS             ("parse", "module _bench { }\nfn broken(\n"),
-//RS         ] {
-//RS             let dir = tempdir(&format!("internal-module-{tag}"));
-//RS             let entry = dir.join("main.jet");
-//RS             fs::write(&entry, "use project._bench\nfn run() {}\n").unwrap();
-//RS             fs::write(dir.join("broken.jet"), broken).unwrap();
-//RS 
-//RS             let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-//RS             assert!(
-//RS                 diagnostics.iter().any(|diagnostic| {
-//RS                     diagnostic.code == "E0603"
-//RS                         && diagnostic.what.contains("project module `project._bench`")
-//RS                         && diagnostic.what.contains("broken.jet")
-//RS                         && diagnostic.span.is_some()
-//RS                 }),
-//RS                 "{diagnostics:#?}"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn unrelated_invalid_file_does_not_mask_missing_project_module() {
-//RS         let dir = tempdir("internal-module-unrelated-invalid");
-//RS         let entry = dir.join("main.jet");
-//RS         fs::write(&entry, "use project._bench\nfn run() {}\n").unwrap();
-//RS         fs::write(dir.join("broken.jet"), "module _other { }\n§\n").unwrap();
-//RS 
-//RS         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-//RS         assert!(
-//RS             diagnostics.iter().any(|diagnostic| {
-//RS                 diagnostic.code == "E0603"
-//RS                     && diagnostic.what == "Can't find a project module named `project._bench`"
-//RS             }),
-//RS             "{diagnostics:#?}"
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn explicit_project_import_rejects_duplicate_internal_declarations() {
-//RS         let dir = tempdir("internal-module-conflict");
-//RS         let entry = dir.join("main.jet");
-//RS         fs::write(&entry, "use project._bench as bench\nfn run() {}\n").unwrap();
-//RS         fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
-//RS         fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
-//RS 
-//RS         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-//RS         assert!(diagnostics
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "E0606" && diagnostic.span.is_some()));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn duplicate_internal_declarations_fail_without_an_explicit_import() {
-//RS         let dir = tempdir("internal-module-unimported-conflict");
-//RS         let entry = dir.join("main.jet");
-//RS         fs::write(&entry, "fn run() {}\n").unwrap();
-//RS         fs::write(
-//RS             dir.join(Syntax::PACKAGE_FILE),
-//RS             "name: \"fixture\"\nversion: \"0.1.0\"\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
-//RS         fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
-//RS 
-//RS         let diagnostics = load_entry(entry.to_str().unwrap()).unwrap_err();
-//RS         assert!(diagnostics.iter().any(|diagnostic| {
-//RS             diagnostic.code == "E0606"
-//RS                 && diagnostic.span.is_none()
-//RS                 && diagnostic.fix.contains("a.jet, b.jet")
-//RS         }));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn single_file_mode_ignores_unrelated_sibling_module_conflicts() {
-//RS         let dir = tempdir("single-file-unrelated-conflict");
-//RS         let entry = dir.join("fixture.jet");
-//RS         fs::write(&entry, "fn run() {}\n").unwrap();
-//RS         fs::write(dir.join("a.jet"), "module _bench { }\n").unwrap();
-//RS         fs::write(dir.join("b.jet"), "module _bench { }\n").unwrap();
-//RS 
-//RS         load_entry(entry.to_str().unwrap()).expect("single-file mode ignores siblings");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn explicit_project_import_uses_overlay_declarations() {
-//RS         let dir = tempdir("internal-module-overlay");
-//RS         let entry = dir.join("main.jet");
-//RS         let part = dir.join("part.jet");
-//RS         fs::write(&entry, "use project._bench\nfn run() {}\n").unwrap();
-//RS         fs::write(&part, "module _other { }\n").unwrap();
-//RS 
-//RS         let bundle = load_entry_with_overlay(
-//RS             entry.to_str().unwrap(),
-//RS             Some((&part, "module _bench { }\n")),
-//RS             false,
-//RS         )
-//RS         .unwrap();
-//RS         assert!(bundle.modules.iter().any(|module| module.path == part));
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn module_directory_uses_canonical_run_entry_not_main() {
-//RS         let dir = tempdir("module-directory-entry");
-//RS         let module_dir = dir.join("tool");
-//RS         fs::create_dir_all(&module_dir).unwrap();
-//RS         fs::write(module_dir.join("main.jet"), "pub fn run() {}").unwrap();
-//RS         assert!(find_module_files("tool", &dir).unwrap().is_empty());
-//RS 
-//RS         let run = module_dir.join(Syntax::DEFAULT_ENTRY_FILE);
-//RS         fs::write(&run, "pub fn run() {}\n").unwrap();
-//RS         assert_eq!(
-//RS             find_module_files("tool", &dir).unwrap(),
-//RS             vec![normalize_path(&run)]
-//RS         );
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn authority_name_uses_run_and_rejects_main_fallback() {
-//RS         let dir = tempdir("authority-entry-name");
-//RS         let main = dir.join(Syntax::LEGACY_ENTRY_FILE);
-//RS         fs::write(&main, "fn run() {}\n").unwrap();
-//RS         assert_eq!(authority_name_for_entry(&main).unwrap(), "app");
-//RS 
-//RS         let run = dir.join(Syntax::DEFAULT_ENTRY_FILE);
-//RS         fs::write(&run, "fn run() {}\n").unwrap();
-//RS         assert_eq!(authority_name_for_entry(&main).unwrap(), "run");
-//RS     }
-//RS 
-//RS     #[test]
-//RS     fn message_names_e1226_and_both_filenames() {
-//RS         let dir = tempdir("message");
-//RS         fs::write(dir.join("pack.jet"), "").unwrap();
-//RS         let msg = stale_manifest_name_message(&dir).expect("message");
-//RS         assert!(msg.contains("E1226"));
-//RS         assert!(msg.contains("pack.jet"));
-//RS         assert!(msg.contains(Syntax::PACKAGE_FILE));
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2042 crates/jet-driver/src/Loader.rs:5401-6421
+use jet_driver.Loader.*
+use jet_driver.Loader03.*
+use jet_foundation.[Diagnostic, Span, Syntax, ImportDecl]
+use jet_pkg_model.AuthorityResolver
+use jet_driver.ProjectParts.[ProjectPartsReport, ProjectPartScanFailure, scan_with_diagnostics]
+use core.path.OSPath
 
+
+// Rust: crates/jet-driver/src/Loader.rs:5507
+fn resolve_module_import(name: String, importing: OSPath, project_root: OSPath,
+    pkg_dep_dirs: [String:DependencyDir], pkg_resolution: PkgResolution, span: Span,
+    project_parts: ProjectPartsReport, project_part_failures: [ProjectPartScanFailure]) -> OSPath Diagnostic! {
+    if name.strip_prefix(Syntax.PROJECT_IMPORT_PREFIX) == Val(local_name) {
+        matches :: project_parts.named(local_name)
+        scan_failure :: project_part_failures.iter().find(fn(failure) { failure.module_names.iter().any(fn(name) { name == local_name }) })
+        if matches.len() == 0 {
+            if scan_failure == Val(failure) -> return Err(failure.diagnostic(local_name, project_root, span))
+            return Err(Diagnostic.error("E0603", "can't find a project module named `{Syntax.PROJECT_IMPORT_PREFIX}{local_name}`",
+                "project-local imports resolve declared module names, not filenames",
+                "declare `module {local_name} {{ ... }}` under this project", Val(span)))
+        }
+        if matches.len() == 1 -> return Ok(normalize_path(matches[0].path))
+        return Err(project_parts.conflicts.iter().find(fn(conflict) { conflict.name == local_name })
+            .expect("duplicate project parts have a conflict record").diagnostic(project_root, Val(span)))
+    }
+    first_segment :: name.split('.').next().unwrap_or(name)
+    if pkg_dep_dirs.get(first_segment).filter(fn(_) { dependency_visible_from(importing, first_segment, pkg_dep_dirs) }) == Val(dependency) {
+        dep_matches :: find_module_files_with_authority(name, dependency.authority)?
+        if !dep_matches.is_empty() -> return Ok(dep_matches[0])
+        if name == first_segment {
+            if dependency.authority.checked_file(OSPath.new(Syntax.DEFAULT_ENTRY_FILE)) == {
+                Ok(run_jet) -> {
+                    dependency.authority.revalidate_file(run_jet).map_err(fn(error) { error.diagnostic() })?
+                    return Ok(run_jet.path)
+                }
+                Err(error) -> {
+                    if !error.is_missing() -> return Err(error.diagnostic())
+                    // D-MOD-CYCLE1=A: any package member represents its namespace.
+                    if package_member_files(dependency.authority.root())?.iter().next() == Val(member) -> return Ok(member)
+                }
+            }
+        }
+    }
+    // U17: realized libraries resolve through their held staged source tree.
+    if !pkg_resolution.is_empty() {
+        if pkg_resolution.realized_libs.contains_key(first_segment) {
+            authority :: pkg_resolution.realized_authorities.get(first_segment).ok_or_else(fn() {
+                Diagnostic.error("E1334", "realized library `{first_segment}` has no held source authority",
+                    "a verified library must keep its checked source root while the loader consumes it",
+                    "re-realize the library in the shared store and retry", Val(span))
+            })?
+            lib_matches :: find_module_files_with_authority(name, authority)?
+            if !lib_matches.is_empty() -> return Ok(lib_matches[0])
+        }
+        if pkg_resolution.realized_exes.contains(first_segment) -> return Err(e0982_executable_use(first_segment, span))
+        if pkg_resolution.declared_deps.contains(first_segment) && find_module_files(name, project_root)?.is_empty() && !pkg_dep_dirs.contains_key(first_segment) {
+            return Err(e0983_unrealized_library(first_segment, span))
+        }
+    }
+    matches :: find_module_files(name, project_root)?
+    if matches.len() == 0 {
+        return Err(Diagnostic.error("E0603", "can't find a module named `{name}`",
+            "search from the project root for `{name}.{Syntax.FILE_EXT}`, or `{name}/{name}/{name}.{Syntax.FILE_EXT}` / `{Syntax.DEFAULT_ENTRY_FILE}`",
+            "add `{name}.{Syntax.FILE_EXT}` under this project, or fix the `{Syntax.KW_USE}` name", Val(span)))
+    }
+    if matches.len() == 1 -> return Ok(matches[0])
+    list :: matches.iter().map(fn(path) { relative_display(project_root, path) }).collect::<[String]>().join(", ")
+    Err(Diagnostic.error("E0606", "the module name `{name}` matches more than one file",
+        "module imports must name exactly one file under the project root",
+        "pick one file and use a file import instead: {list}", Val(span)))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5672
+fn find_module_files(name: String, project_root: OSPath) -> [OSPath] Diagnostic! {
+    resolver :: AuthorityResolver.open(project_root).map_err(fn(error) { error.diagnostic() })?
+    find_module_files_with_authority(name, resolver)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5677
+fn find_module_files_with_authority(name: String, resolver: AuthorityResolver) -> [OSPath] Diagnostic! {
+    files :: resolver.discover_source_files().map_err(fn(error) { error.diagnostic() })?
+    direct_name :: "{name}.{Syntax.FILE_EXT}"
+    found := [OSPath]()
+    loop file in files {
+        file_name :: file.relative.file_name().and_then(fn(name) { name.to_str() })
+        if file_name == None -> continue
+        if file_name.unwrap() == direct_name || (file_name.unwrap() == Syntax.DEFAULT_ENTRY_FILE &&
+            file.relative.parent().and_then(fn(parent) { parent.file_name() }).and_then(fn(name) { name.to_str() }) == Val(name)) {
+            found.push(file.path)
+        }
+    }
+    found.sort()
+    found.dedup()
+    Ok(found)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5713
+// Generated module aliases replace non-identifier characters and prefix digits.
+pub fn default_module_alias(path: OSPath) -> String {
+    stem :: path.file_stem().and_then(fn(stem) { stem.to_str() }).unwrap_or("module")
+    sanitize_alias(stem)
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5721
+fn sanitize_alias(raw: String) -> String {
+    out := String.with_capacity(raw.len())
+    loop c in raw.chars() { out.push(if c.is_ascii_alphanumeric() || c == '_' -> c else -> '_') }
+    if out.is_empty() { out.push_str("module") }
+    if out.chars().next().is_some_and(fn(c) { c.is_ascii_digit() }) { out.insert(0, '_') }
+    out
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5739
+pub fn resolve_import_target(bundle: ProgramBundle, importing_idx: Int, imp: ImportDecl) -> Int [Diagnostic]! {
+    if core_module_path(imp).is_some() {
+        return Err([Diagnostic.error("E1001", "core modules do not resolve to files",
+            "`core` is provided by the compiler in M10", "handle this import as a compiler-known module", Val(imp.span))])
+    }
+    importing :: bundle.modules[importing_idx]
+    (pkg_dep_dirs, pkg_resolution) :: project_resolution_for_bundle(bundle)?
+    (project_parts, project_part_failures) :: scan_with_diagnostics(bundle.project_root, [])
+    if project_part_failures.iter().find(fn(failure) { failure.authority }) == Val(failure) -> return Err([failure.problem])
+    target_path :: if resolve_import(imp, importing.path, bundle.project_root, pkg_dep_dirs, pkg_resolution, project_parts, project_part_failures) == {
+        Ok(path) -> normalize_path(path)
+        Err(diagnostic) -> return Err([diagnostic])
+    }
+    loop (i, module) in bundle.modules.iter().enumerate() {
+        if normalize_path(module.path) == target_path -> return Ok(i)
+    }
+    Err([Diagnostic.error("E0603", "imported file isn't part of this program",
+        "the loader should have pulled in every imported file already", "report this as a compiler bug", Val(imp.span))])
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5792
+pub fn import_alias(imp: ImportDecl) -> String { imp.import_alias() }
+
+// Rust: crates/jet-driver/src/Loader.rs:5798
+fn e0982_executable_use(name: String, span: Span) -> Diagnostic {
+    Diagnostic.error("E0982", "`{name}` is an executable package, so it can't be used with `{Syntax.KW_USE}`",
+        "an `executable` package installs a binary on your PATH — you run it, you don't import its code; only a `library` package is brought into code with `use` (U17)",
+        "remove `{Syntax.KW_USE} {name};` and run the `{name}` binary instead, or change `{name}` to `library` in `{Syntax.PACKAGE_FILE}` if you meant to import its code", Val(span))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5814
+fn e0983_unrealized_library(name: String, span: Span) -> Diagnostic {
+    Diagnostic.error("E0983", "the library package `{name}` hasn't been built yet",
+        "a `library` package must be realized — its source staged in the shared store (hangar) — before `use` can find it (U17)",
+        "run `jetpack env --prep` to realize `{name}`, or rerun `jet run` without `--no-prepare`; then `{Syntax.KW_USE} {name};` will resolve it", Val(span))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5828
+fn e0602(span: Span) -> Diagnostic {
+    Diagnostic.error("E0602", "this import path escapes the package",
+        "inside a package, file imports stay in the package tree — `..` works only for loose files outside any package",
+        "use a path without `..`, or move the file inside the package tree", Val(span))
+}
+
+// Rust: crates/jet-driver/src/Loader.rs:5839
+pub fn relative_display(root: OSPath, path: OSPath) -> String { path.strip_prefix(root).unwrap_or(path).display().to_string() }
+
+// Rust: crates/jet-driver/src/Loader.rs:5848
+pub fn is_physically_within(root: OSPath, path: OSPath) -> Bool {
+    held_root :: if AuthorityResolver.open(root) == { Ok(root) -> root else -> return false }
+    held_path :: if AuthorityResolver.open(path) == { Ok(path) -> path else -> return false }
+    held_path.root().starts_with(held_root.root())
+}

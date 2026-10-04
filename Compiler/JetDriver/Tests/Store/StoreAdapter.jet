@@ -1,0 +1,28 @@
+use jet_foundation.DataTree.[DataTree]
+use jet_store.ArtifactStore.[ArtifactDigest, ObjectHandle, BuildRecord, BuildNodeRecord]
+
+// Rust: crates/jet-store/src/lib.rs:17 (behavioral control; no inline Rust tests)
+#Test("store_field_returns_first_matching_field") {
+    values :: [(String, DataTree)]{("key", DataTree.Text("first")), ("key", DataTree.Text("second"))}
+    assert_eq(field(values, "key"), Val(DataTree.Text("first")))
+    assert_eq(field(values, "missing"), None)
+}
+
+// Rust: crates/jet-store/src/lib.rs:48 (behavioral control; no inline Rust tests)
+#Test("store_digest_hex_roundtrip_and_object_length") {
+    bytes :: "verified artifact".bytes()
+    object :: ObjectHandle.from_bytes(bytes)
+    assert_eq(object.length(), bytes.len())
+    assert_eq(ArtifactDigest.from_hex(object.key()).unwrap(), object.digest())
+    assert_eq(object.key().len(), 64)
+    assert(ArtifactDigest.from_hex("short").is_err())
+    assert(ArtifactDigest.from_hex("gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg").is_err())
+}
+
+// Rust: crates/jet-store/src/lib.rs:402 (behavioral control; no inline Rust tests)
+#Test("store_build_record_roundtrip_keeps_node_evidence") {
+    node :: BuildNodeRecord{kind: "compile", key: "content", subject: "a.jet", duration_ms: 12.5, why_ran: "input changed", inputs: [String]{"source", "flags"}}
+    record :: BuildRecord.new("program", [BuildNodeRecord]{node})
+    restored :: BuildRecord.from_json(record.to_json()).unwrap()
+    assert_eq(restored, record)
+}

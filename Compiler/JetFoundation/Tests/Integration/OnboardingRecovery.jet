@@ -1,0 +1,19 @@
+use std.fs
+use std.process.[Command, Output]
+// GATE #4494: real native CLI and filesystem.
+// Rust: tests/onboarding_recovery.rs:13
+fn jet(args: &[String], cwd: &OSPath) -> Output {
+    Command.new(env("CARGO_BIN_EXE_jet")).args(args).current_dir(cwd).env("NO_COLOR", "1").output().unwrap_or_else(|error| panic("jet {args:?} should start: {error}"))
+}
+// Rust: tests/onboarding_recovery.rs:22
+fn stdout(output: &Output) -> String { String.from_utf8_lossy(&output.stdout).into_owned() }
+// Rust: tests/onboarding_recovery.rs:26
+fn stderr(output: &Output) -> String { String.from_utf8_lossy(&output.stderr).into_owned() }
+// Rust: tests/onboarding_recovery.rs:30
+fn repo_text(rel: String) -> String {
+    fs.read_to_string(OSPath.from(env("CARGO_MANIFEST_DIR")).join(rel)).unwrap_or_else(|error| panic("read {rel}: {error}"))
+}
+// Rust: tests/onboarding_recovery.rs:35
+fn write_package(dir: &OSPath, name: String) -> {
+    fs.write(dir.join("package.jet"), "name: \"{name}\"\n").unwrap()
+}

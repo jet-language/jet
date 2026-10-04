@@ -1,637 +1,275 @@
-// PORT-PENDING 2018 crates-jet-codegen-src-codegen-mirrust-slice-30601: crates/jet-codegen/src/Codegen/MIRRust.rs:30601-31233
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS         self.copy_text(value, fact.as_str())
-//RS     }
-//RS 
-//RS     /// An owned read of a value the consumer keeps no hold of in MIR. A
-//RS     /// Copy-type value is a `Scalar` copy (the type decides it); any other
-//RS     /// value is a copy no MIR `Copy{fact}` backs yet (#4318 remaining), tagged
-//RS     /// `unbacked` so Tools/agent/copy-ratchet.mjs counts it.
-//RS     fn value_owned(&self, value: MirValueId) -> String {
-//RS         let scalar = self.history_current_function.get().is_some_and(|id| {
-//RS             let function = self.function_row(id);
-//RS             self.function_index(function)
-//RS                 .values
-//RS                 .get(&value)
-//RS                 .is_some_and(|row| function.values[*row].3.mode == MirOwnershipMode::Copy)
-//RS         });
-//RS         if scalar {
-//RS             self.value_copy(value, MirCopyFact::Scalar)
-//RS         } else {
-//RS             self.copy_text(value, "unbacked")
-//RS         }
-//RS     }
-//RS 
-//RS     fn copy_text(&self, value: MirValueId, tag: &str) -> String {
-//RS         let borrow = self.value_borrow(value);
-//RS         let bitwise = self.history_current_function.get().is_some_and(|id| {
-//RS             self.rust_copy_carrier(self.value_type(self.function_row(id), value))
-//RS         });
-//RS         if bitwise {
-//RS             format!("(*{borrow})")
-//RS         } else if copy_tags_enabled() {
-//RS             format!("({borrow}).clone()/*copy:{tag}*/")
-//RS         } else {
-//RS             format!("({borrow}).clone()")
-//RS         }
-//RS     }
-//RS 
-//RS     /// Whether `ty`'s Rust carrier (`rust_type`) is a `Copy` primitive.
-//RS     fn rust_copy_carrier(&self, ty: &MirType) -> bool {
-//RS         let ty = if ty.identity.is_some() { self.canonical_type(ty) } else { ty };
-//RS         match ty.kind() {
-//RS             MirTypeKind::Bool
-//RS             | MirTypeKind::Char
-//RS             | MirTypeKind::Float
-//RS             | MirTypeKind::Float32
-//RS             | MirTypeKind::Measure(_) => true,
-//RS             MirTypeKind::IntN { bits, .. } => matches!(bits, 8 | 16 | 32 | 64 | 128),
-//RS             MirTypeKind::Tagged {
-//RS                 marker: MirTagMarker::Internal(MirInternalTag::AllocatorView),
-//RS                 ..
-//RS             } => false,
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.rust_copy_carrier(base),
-//RS             _ => false,
-//RS         }
-//RS     }
-//RS 
-//RS     fn value_move(&self, value: MirValueId) -> String {
-//RS         if let Some((base, access)) = self.history_binding(value) {
-//RS             if access != MirAccess::Move {
-//RS                 return self.value_owned(value);
-//RS             }
-//RS             return self.move_base(
-//RS                 self.function_row(
-//RS                     self.history_current_function
-//RS                         .get()
-//RS                         .expect("current native function"),
-//RS                 ),
-//RS                 &base,
-//RS             );
-//RS         }
-//RS         if self.history_current_function.get().is_some_and(|id| {
-//RS             allocator_view_inner(self.value_type(self.function_row(id), value)).is_some()
-//RS         }) {
-//RS             return format!("{}.take().expect(\"MIR value\")", value_slot(value));
-//RS         }
-//RS 
-//RS         if let Some(function) = self.history_current_function.get().map(|id| self.function_row(id)) {
-//RS             if let Some(node) = self.partial_move_root(function, &MirPlaceBase::Temporary(value)) {
-//RS                 return format!("{{ {} {}.take().expect(\"MIR whole move\") }}",
-//RS                     self.restore_partial_node(node), node.slot);
-//RS             }
-//RS         }
-//RS         format!("{}.take().expect(\"MIR value\")", value_slot(value))
-//RS     }
-//RS 
-//RS     fn value_borrow_mut(&self, value: MirValueId) -> String {
-//RS         self.value_slot_reference(value, true)
-//RS     }
-//RS 
-//RS     /// The declaration a typed constant builds: the nominal's identity, then
-//RS     /// its exact key; a bare display name only when one declaration carries
-//RS     /// it, so a user `FontStyle` never renders as Core's (#4003).
-//RS     fn typed_constant_definition(&self, nominal: &MirNominalRef) -> Option<&MirTypeDef> {
-//RS         let types = &self.program.types;
-//RS         if let Some(definition) = types
-//RS             .iter()
-//RS             .find(|definition| definition.id == nominal.id)
-//RS             .or_else(|| types.iter().find(|definition| definition.key == nominal.name))
-//RS         {
-//RS             return Some(definition);
-//RS         }
-//RS         let mut named = types
-//RS             .iter()
-//RS             .filter(|definition| definition.name == nominal.name);
-//RS         let definition = named.next()?;
-//RS         named.next().is_none().then_some(definition)
-//RS     }
-//RS 
-//RS     fn typed_struct_constant(
-//RS         &self,
-//RS         nominal: &MirNominalRef,
-//RS         args: &[MirType],
-//RS         type_name: &str,
-//RS         fields: &[(String, MirConstant)],
-//RS     ) -> Option<String> {
-//RS         let definition = self.typed_constant_definition(nominal)?;
-//RS         if type_name != nominal.name.as_str()
-//RS             && type_name != definition.key.as_str()
-//RS             && type_name != definition.name.as_str()
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let MirTypeDefKind::Struct {
-//RS             fields: declared, ..
-//RS         } = &definition.kind
-//RS         else {
-//RS             return None;
-//RS         };
-//RS         let bindings = definition
-//RS             .generic_params
-//RS             .iter()
-//RS             .zip(args)
-//RS             .map(|(param, ty)| (param.name.clone(), ty.clone()))
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         let mut rendered = Vec::new();
-//RS         for field in declared.iter().filter(|field| !field.computed) {
-//RS             let (_, value) = fields.iter().find(|(name, _)| name == &field.name)?;
-//RS             let field_ty = Self::history_capture_type(&field.ty, &bindings);
-//RS             let mut value = self.constant_for_type(value, &field_ty);
-//RS             if definition
-//RS                 .boxed_edges
-//RS                 .iter()
-//RS                 .any(|edge| edge == &field.name)
-//RS             {
-//RS                 value = format!("Box::new({value})");
-//RS             }
-//RS             rendered.push(format!("{}: {value}", self.field_name(field.id)));
-//RS         }
-//RS         let mut constructor = self.rust_apply_type(nominal, args);
-//RS         if !args.is_empty() {
-//RS             let start = constructor
-//RS                 .find('<')
-//RS                 .expect("checked generic struct constructor has type arguments");
-//RS             constructor.insert_str(start, "::");
-//RS         }
-//RS         Some(format!("{} {{ {} }}", constructor, rendered.join(", "),))
-//RS     }
-//RS     fn typed_enum_constant(
-//RS         &self,
-//RS         nominal: &MirNominalRef,
-//RS         args: &[MirType],
-//RS         type_name: &str,
-//RS         variant: &str,
-//RS         values: &[(Option<String>, MirConstant)],
-//RS     ) -> Option<String> {
-//RS         let definition = self.typed_constant_definition(nominal)?;
-//RS         if type_name != nominal.name.as_str()
-//RS             && type_name != definition.key.as_str()
-//RS             && type_name != definition.name.as_str()
-//RS         {
-//RS             return None;
-//RS         }
-//RS         let MirTypeDefKind::Enum { variants, .. } = &definition.kind else {
-//RS             return None;
-//RS         };
-//RS         let native = has_native_type_projection(type_name);
-//RS         if native {
-//RS             return None;
-//RS         }
-//RS         let declared_variant = variants
-//RS             .iter()
-//RS             .find(|candidate| candidate.name == variant)
-//RS             .unwrap_or_else(|| panic!("MIR enum variant {variant:?} has no row"));
-//RS         let bindings = definition
-//RS             .generic_params
-//RS             .iter()
-//RS             .zip(args)
-//RS             .map(|(param, ty)| (param.name.clone(), ty.clone()))
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         if values.iter().any(|(field, _)| field.is_some())
-//RS             && values.iter().any(|(field, _)| field.is_none())
-//RS         {
-//RS             panic!("MIR enum constant mixes named and positional payloads");
-//RS         }
-//RS 
-//RS         let variant_name = mangle_variant(&declared_variant.name);
-//RS         let owner_name = self
-//RS             .anonymous_union_definition(&definition.key)
-//RS             .map(|canonical| mangle_path(&canonical.key))
-//RS             .unwrap_or_else(|| {
-//RS                 // A display name several declarations share renders through
-//RS                 // the resolved declaration's key, never the last same-named row.
-//RS                 let shared = self
-//RS                     .program
-//RS                     .types
-//RS                     .iter()
-//RS                     .filter(|candidate| candidate.name == definition.name)
-//RS                     .nth(1)
-//RS                     .is_some();
-//RS                 self.nominal_name(if shared { definition.key.as_str() } else { type_name })
-//RS             });
-//RS         let variant_path = format!("{owner_name}::{variant_name}");
-//RS         match &declared_variant.payload {
-//RS             MirVariantPayload::Unit => {
-//RS                 if !values.is_empty() {
-//RS                     panic!("MIR unit variant construction has payload arguments");
-//RS                 }
-//RS                 Some(variant_path)
-//RS             }
-//RS             MirVariantPayload::Single(payload) => {
-//RS                 if values.len() != 1 {
-//RS                     panic!("MIR single variant construction payload arity mismatch");
-//RS                 }
-//RS                 let (field, value) = &values[0];
-//RS                 if field.is_some() {
-//RS                     panic!("MIR single variant construction payload must be positional");
-//RS                 }
-//RS                 let payload = Self::history_capture_type(payload, &bindings);
-//RS                 let mut value = self.constant_for_type(value, &payload);
-//RS                 if definition
-//RS                     .boxed_edges
-//RS                     .iter()
-//RS                     .any(|edge| edge == &declared_variant.name)
-//RS                 {
-//RS                     value = format!("Box::new({value})");
-//RS                 }
-//RS                 Some(format!("{variant_path}({value})"))
-//RS             }
-//RS             MirVariantPayload::Named(fields) => {
-//RS                 if values.len() != fields.len() {
-//RS                     panic!("MIR named variant construction payload arity mismatch");
-//RS                 }
-//RS                 let mut seen = BTreeSet::new();
-//RS                 for (field, _) in values {
-//RS                     let field = field.as_deref().unwrap_or_else(|| {
-//RS                         panic!("MIR named variant construction requires named payload fields")
-//RS                     });
-//RS                     if !seen.insert(field) || !fields.iter().any(|declared| declared.name == field)
-//RS                     {
-//RS                         panic!("MIR named variant construction field order mismatch");
-//RS                     }
-//RS                 }
-//RS                 let rendered = fields
-//RS                     .iter()
-//RS                     .map(|field| {
-//RS                         let (_, value) = values
-//RS                             .iter()
-//RS                             .find(|(label, _)| label.as_deref() == Some(field.name.as_str()))
-//RS                             .expect("checked named enum field");
-//RS                         let field_ty = Self::history_capture_type(&field.ty, &bindings);
-//RS                         let edge = format!("{}.{}", declared_variant.name, field.name);
-//RS                         let mut value = self.constant_for_type(value, &field_ty);
-//RS                         if definition.boxed_edges.iter().any(|candidate| candidate == &edge) {
-//RS                             value = format!("Box::new({value})");
-//RS                         }
-//RS                         format!("{}: {value}", self.field_name(field.id))
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 Some(format!("{variant_path} {{ {rendered} }}"))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn constant_for_type(&self, constant: &MirConstant, ty: &MirType) -> String {
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int => match constant {
-//RS                 MirConstant::Int { value, .. } => {
-//RS                     format!("jet_foundation::Numeric::JetInt::from_i64({value})")
-//RS                 }
-//RS                 MirConstant::BigInt(value) => format!(
-//RS                     "{}jet_std::jet_int_owned_from_str({value:?}).expect(\"MIR Int\")",
-//RS                     self.config.root_prefix
-//RS                 ),
-//RS                 _ => self.constant(constant),
-//RS             },
-//RS             MirTypeKind::InlineRange { base, .. }
-//RS             | MirTypeKind::Tagged { inner: base, .. }
-//RS             | MirTypeKind::Quantity { base, .. } => self.constant_for_type(constant, base),
-//RS             MirTypeKind::IntN { signed, bits } => {
-//RS                 let value = match constant {
-//RS                     MirConstant::Int { value, .. } => {
-//RS                         if *signed {
-//RS                             value.to_string()
-//RS                         } else {
-//RS                             (*value as u64).to_string()
-//RS                         }
-//RS                     }
-//RS                     MirConstant::BigInt(value) => value.clone(),
-//RS                     _ => return self.constant(constant),
-//RS                 };
-//RS                 format!("{value}{}{bits}", if *signed { "i" } else { "u" })
-//RS             }
-//RS             MirTypeKind::Option(inner) => match constant {
-//RS                 MirConstant::Present(value) => {
-//RS                     format!("Ok({})", self.constant_for_type(value, inner))
-//RS                 }
-//RS                 _ => self.constant(constant),
-//RS             },
-//RS             MirTypeKind::Result { ok, err } => match constant {
-//RS                 MirConstant::Present(value) => {
-//RS                     format!("Ok({})", self.constant_for_type(value, ok))
-//RS                 }
-//RS                 MirConstant::Failed(MirConstReport::Told(value)) => {
-//RS                     format!("Err({})", self.constant_for_type(value, err))
-//RS                 }
-//RS                 _ => self.constant(constant),
-//RS             },
-//RS             MirTypeKind::List(inner) | MirTypeKind::FixedList { elem: inner, .. } => {
-//RS                 let MirConstant::List(values) = constant else {
-//RS                     return self.constant(constant);
-//RS                 };
-//RS                 let values = values
-//RS                     .iter()
-//RS                     .map(|value| self.constant_for_type(value, inner))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 if matches!(ty.kind(), MirTypeKind::FixedList { .. }) {
-//RS                     format!("[{values}]")
-//RS                 } else {
-//RS                     format!("vec![{values}]")
-//RS                 }
-//RS             }
-//RS             MirTypeKind::Map { key, value } => {
-//RS                 let MirConstant::Map(entries) = constant else {
-//RS                     return self.constant(constant);
-//RS                 };
-//RS                 let pairs = entries
-//RS                     .iter()
-//RS                     .map(|(entry_key, entry_value)| {
-//RS                         let key = match entry_key {
-//RS                             MirConstKey::Int(literal) => self.constant_for_type(
-//RS                                 &MirConstant::Int {
-//RS                                     value: *literal,
-//RS                                     width: None,
-//RS                                     spelling: None,
-//RS                                 },
-//RS                                 key,
-//RS                             ),
-//RS                             _ => self.const_key(entry_key),
-//RS                         };
-//RS                         format!("({key}, {})", self.constant_for_type(entry_value, value))
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ");
-//RS                 format!("[{pairs}].into_iter().collect::<{}>()", self.rust_type(ty))
-//RS             }
-//RS             MirTypeKind::Apply { name, args } => match constant {
-//RS                 MirConstant::Struct { type_name, fields } => self
-//RS                     .typed_struct_constant(name, args, type_name, fields)
-//RS                     .unwrap_or_else(|| self.constant(constant)),
-//RS                 MirConstant::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args: values,
-//RS                 } => self
-//RS                     .typed_enum_constant(name, args, type_name, variant, values)
-//RS                     .unwrap_or_else(|| self.constant(constant)),
-//RS                 _ => self.constant(constant),
-//RS             },
-//RS             MirTypeKind::Union(_) => match constant {
-//RS                 MirConstant::Enum {
-//RS                     type_name,
-//RS                     variant,
-//RS                     args: values,
-//RS                 } => {
-//RS                     let Some(definition) = self.structural_type_def_for(ty) else {
-//RS                         return self.constant(constant);
-//RS                     };
-//RS                     let nominal = MirNominalRef {
-//RS                         id: definition.id,
-//RS                         name: definition.key.clone(),
-//RS                     };
-//RS                     self.typed_enum_constant(&nominal, &[], type_name, variant, values)
-//RS                         .unwrap_or_else(|| self.constant(constant))
-//RS                 }
-//RS                 _ => self.constant(constant),
-//RS             },
-//RS             _ => self.constant(constant),
-//RS         }
-//RS     }
-//RS 
-//RS     fn constant(&self, constant: &MirConstant) -> String {
-//RS         match constant {
-//RS             MirConstant::Int {
-//RS                 value,
-//RS                 width,
-//RS                 spelling,
-//RS             } => match width {
-//RS                 Some((signed, bits)) => {
-//RS                     let value = if *signed {
-//RS                         spelling.clone().unwrap_or_else(|| value.to_string())
-//RS                     } else {
-//RS                         (*value as u64).to_string()
-//RS                     };
-//RS                     format!("{value}{}{bits}", if *signed { "i" } else { "u" })
-//RS                 }
-//RS                 None => spelling.clone().unwrap_or_else(|| value.to_string()),
-//RS             },
-//RS             MirConstant::Float {
-//RS                 value,
-//RS                 f32,
-//RS                 spelling,
-//RS             } => spelling.clone().unwrap_or_else(|| {
-//RS                 if value.is_nan() {
-//RS                     if *f32 {
-//RS                         "f32::NAN".to_string()
-//RS                     } else {
-//RS                         "f64::NAN".to_string()
-//RS                     }
-//RS                 } else if value.is_infinite() {
-//RS                     if value.is_sign_negative() {
-//RS                         if *f32 {
-//RS                             "f32::NEG_INFINITY".to_string()
-//RS                         } else {
-//RS                             "f64::NEG_INFINITY".to_string()
-//RS                         }
-//RS                     } else if *f32 {
-//RS                         "f32::INFINITY".to_string()
-//RS                     } else {
-//RS                         "f64::INFINITY".to_string()
-//RS                     }
-//RS                 } else if *f32 {
-//RS                     format!("{value:?}f32")
-//RS                 } else {
-//RS                     format!("{value:?}f64")
-//RS                 }
-//RS             }),
-//RS             MirConstant::Bool(value) => value.to_string(),
-//RS             MirConstant::Char(value) => format!("{value:?}"),
-//RS             MirConstant::String(value) => {
-//RS                 if self.is_core_layer() {
-//RS                     format!("{value:?}")
-//RS                 } else {
-//RS                     format!("{value:?}.to_string()")
-//RS                 }
-//RS             }
-//RS             MirConstant::Bytes(value) => format!(
-//RS                 "vec![{}]",
-//RS                 value
-//RS                     .iter()
-//RS                     .map(|byte| byte.to_string())
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             ),
-//RS             MirConstant::Unit => "()".to_string(),
-//RS             MirConstant::BigInt(value) => format!(
-//RS                 "{}jet_std::jet_int_owned_from_str({:?}).expect(\"MIR Int\")",
-//RS                 self.config.root_prefix, value
-//RS             ),
-//RS             MirConstant::List(values) => format!(
-//RS                 "vec![{}]",
-//RS                 values
-//RS                     .iter()
-//RS                     .map(|value| self.constant(value))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             ),
-//RS             MirConstant::Map(values) => format!(
-//RS                 "[{pairs}].into_iter().collect::<{root}JetMap<_,_>>()",
-//RS                 root = self.config.root_prefix,
-//RS                 pairs = values
-//RS                     .iter()
-//RS                     .map(|(key, value)| {
-//RS                         format!("({}, {})", self.const_key(key), self.constant(value))
-//RS                     })
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             ),
-//RS             MirConstant::Struct { type_name, fields }
-//RS                 if type_name == jet_foundation::Syntax::TYPE_FRACTION
-//RS                     && !self.types_by_name.contains_key(type_name) =>
-//RS             {
-//RS                 let part = |name: &str| {
-//RS                     let value = &fields
-//RS                         .iter()
-//RS                         .find(|(field, _)| field == name)
-//RS                         .unwrap_or_else(|| panic!("MIR Fraction has no {name}"))
-//RS                         .1;
-//RS                     if !matches!(value, MirConstant::Int { .. } | MirConstant::BigInt(_)) {
-//RS                         panic!("MIR Fraction {name} is not an Int");
-//RS                     }
-//RS                     self.constant_for_type(value, &MirType::from_kind(MirTypeKind::Int))
-//RS                 };
-//RS                 format!(
-//RS                     "{}jet_fraction_from_parts({}, {})",
-//RS                     self.config.root_prefix,
-//RS                     part("numerator"),
-//RS                     part("denominator"),
-//RS                 )
-//RS             }
-//RS             MirConstant::Struct { type_name, fields } => {
-//RS                 let native = has_native_type_projection(type_name);
-//RS                 format!(
-//RS                     "{} {{ {} }}",
-//RS                     self.nominal_name(type_name),
-//RS                     fields
-//RS                         .iter()
-//RS                         .map(|(name, value)| {
-//RS                             let name = if native { name.clone() } else { mangle(name) };
-//RS                             format!("{name}: {}", self.constant(value))
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ")
-//RS                 )
-//RS             }
-//RS             MirConstant::Enum {
-//RS                 type_name,
-//RS                 variant,
-//RS                 args,
-//RS             } => {
-//RS                 let native = has_native_type_projection(type_name);
-//RS                 let variant_name = if native {
-//RS                     variant.clone()
-//RS                 } else {
-//RS                     mangle_variant(variant)
-//RS                 };
-//RS                 let variant = format!("{}::{variant_name}", self.nominal_name(type_name));
-//RS                 if args.is_empty() {
-//RS                     variant
-//RS                 } else if args.iter().all(|(field, _)| field.is_some()) {
-//RS                     let fields = args
-//RS                         .iter()
-//RS                         .map(|(field, value)| {
-//RS                             format!(
-//RS                                 "{}: {}",
-//RS                                 if native {
-//RS                                     field.as_deref().expect("checked enum field").to_string()
-//RS                                 } else {
-//RS                                     mangle(field.as_deref().expect("checked enum field"))
-//RS                                 },
-//RS                                 self.constant(value)
-//RS                             )
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     format!("{variant} {{ {fields} }}")
-//RS                 } else if args.iter().all(|(field, _)| field.is_none()) {
-//RS                     let values = args
-//RS                         .iter()
-//RS                         .map(|(_, value)| self.constant(value))
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ");
-//RS                     format!("{variant}({values})")
-//RS                 } else {
-//RS                     panic!("MIR enum constant mixes named and positional payloads");
-//RS                 }
-//RS             }
-//RS             MirConstant::Present(value) => format!("Ok({})", self.constant(value)),
-//RS             MirConstant::Failed(report) => match report {
-//RS                 MirConstReport::Clean(_) => format!("Err({}JetAbsent)", self.config.root_prefix),
-//RS                 MirConstReport::Told(value) => format!("Err({})", self.constant(value)),
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     fn const_key(&self, key: &MirConstKey) -> String {
-//RS         match key {
-//RS             MirConstKey::Int(value) => value.to_string(),
-//RS             MirConstKey::String(value) => {
-//RS                 if self.is_core_layer() {
-//RS                     format!("{value:?}")
-//RS                 } else {
-//RS                     format!("{value:?}.to_string()")
-//RS                 }
-//RS             }
-//RS             MirConstKey::Bool(value) => value.to_string(),
-//RS             MirConstKey::Char(value) => format!("{value:?}"),
-//RS             MirConstKey::Tuple(values) => format!(
-//RS                 "({})",
-//RS                 values
-//RS                     .iter()
-//RS                     .map(|(_, value)| self.const_key(value))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             ),
-//RS             MirConstKey::Struct { type_name, fields } => {
-//RS                 let native = has_native_type_projection(type_name);
-//RS                 format!(
-//RS                     "{} {{ {} }}",
-//RS                     self.nominal_name(type_name),
-//RS                     fields
-//RS                         .iter()
-//RS                         .map(|(name, value)| {
-//RS                             let name = if native { name.clone() } else { mangle(name) };
-//RS                             format!("{name}: {}", self.const_key(value))
-//RS                         })
-//RS                         .collect::<Vec<_>>()
-//RS                         .join(", ")
-//RS                 )
-//RS             }
-//RS             MirConstKey::Enum { type_name, variant } => {
-//RS                 let native = has_native_type_projection(type_name);
-//RS                 let variant = if native {
-//RS                     variant.clone()
-//RS                 } else {
-//RS                     mangle_variant(variant)
-//RS                 };
-//RS                 format!("{}::{variant}", self.nominal_name(type_name))
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn value_slot(value: MirValueId) -> String {
-//RS     format!("__jet_v_{}", value.0)
-//RS }
-//RS 
-//RS /// The slot that parks a later payload of a moved enum subject until its own
-//RS /// binding takes it (`RustEmitter::payload_take`).
-//RS fn payload_slot(value: MirValueId) -> String {
-//RS     format!("__jet_pm_{}", value.0)
-//RS }
-//RS 
-//RS fn local_slot(local: jet_foundation::MIR::MirLocalId) -> String {
-//RS     format!("__jet_l_{}", local.0)
-//RS }
-//RS 
-//RS fn fixed_inline_backing_name(value: MirValueId) -> String {
-//RS     format!("__jet_fixed_backing_v{}", value.0)
-//RS }
-//RS 
-// END-PORT-PENDING 2018 crates/jet-codegen/src/Codegen/MIRRust.rs:30601-31233
-
+use jet_foundation.MIR.*
+use jet_foundation.Syntax.TYPE_FRACTION
+use jet_codegen.Codegen.MIRRust.[RustEmitter, copy_tags_enabled, allocator_view_inner, has_native_type_projection, mangle, mangle_path, mangle_variant]
+use std.collections.BTreeSet
+// GATE #4499: exact MIR IDs, constant integer widths, nominal identities and ordered bindings.
+// Extends the canonical RustEmitter; the preceding value_copy tail is owned by 2017.
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30608
+    // Owned scalar reads are type-backed; other copies keep the ratchet's unbacked tag.
+    fn value_owned(self, value: MirValueId) -> String {
+        scalar :: self.history_current_function.get().is_some_and((id) -> {
+            function :: self.function_row(id)
+            self.function_index(function).values.get(&value).is_some_and((row) -> function.values[row].3.mode == MirOwnershipMode.Copy)
+        })
+        if scalar -> self.value_copy(value, MirCopyFact.Scalar) else -> self.copy_text(value, "unbacked")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30623
+    fn copy_text(self, value: MirValueId, tag: String) -> String {
+        borrow :: self.value_borrow(value)
+        bitwise :: self.history_current_function.get().is_some_and((id) -> self.rust_copy_carrier(self.value_type(self.function_row(id), value)))
+        if bitwise -> "(*{borrow})" else if copy_tags_enabled() -> "({borrow}).clone()/*copy:{tag}*/" else -> "({borrow}).clone()"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30638
+    fn rust_copy_carrier(self, ty: MirType) -> Bool {
+        canonical :: if ty.identity.is_some() -> self.canonical_type(ty) else -> ty
+        if canonical.kind() == {
+            .Bool | .Char | .Float | .Float32 | .Measure(_) -> true
+            .IntN(bits: bits) -> bits == 8 || bits == 16 || bits == 32 || bits == 64 || bits == 128
+            .Tagged(marker: .Internal(.AllocatorView)) -> false
+            .InlineRange(base: base) | .Tagged(inner: base) | .Quantity(base: base) -> self.rust_copy_carrier(base)
+            else -> false
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30658
+    fn value_move(self, value: MirValueId) -> String {
+        if self.history_binding(value) == Val((base, access)) {
+            if access != MirAccess.Move { return self.value_owned(value) }
+            return self.move_base(self.function_row(self.history_current_function.get().expect("current native function")), &base)
+        }
+        if self.history_current_function.get().is_some_and((id) -> allocator_view_inner(self.value_type(self.function_row(id), value)).is_some()) { return "{value_slot(value)}.take().expect(\"MIR value\")" }
+        if self.history_current_function.get().map((id) -> self.function_row(id)) == Val(function) {
+            if self.partial_move_root(function, &MirPlaceBase.Temporary(value)) == Val(node) { return "{{ {self.restore_partial_node(node)} {node.slot}.take().expect(\"MIR whole move\") }}" }
+        }
+        "{value_slot(value)}.take().expect(\"MIR value\")"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30687
+    fn value_borrow_mut(self, value: MirValueId) -> String { self.value_slot_reference(value, true) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30694
+    // Identity first, then exact key; a bare display name is admitted only if unique.
+    fn typed_constant_definition(self, nominal: MirNominalRef) -> MirTypeDef? {
+        types :: self.program.types
+        if types.iter().find((definition) -> definition.id == nominal.id).or_else(() -> types.iter().find((definition) -> definition.key == nominal.name)) == Val(definition) { return Val(definition) }
+        named := types.iter().filter((definition) -> definition.name == nominal.name)
+        definition :: named.next() ?? return nil
+        if named.next().is_none() -> Val(definition) else -> nil
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30710
+    fn typed_struct_constant(self, nominal: MirNominalRef, args: [MirType], type_name: String, fields: [(String, MirConstant)]) -> String? {
+        definition :: self.typed_constant_definition(nominal) ?? return nil
+        if type_name != nominal.name && type_name != definition.key && type_name != definition.name { return nil }
+        declared :: if definition.kind == .Struct(fields: declared) -> declared else -> return nil
+        bindings :: definition.generic_params.iter().zip(args).map((pair) -> (pair.0.name.clone(), pair.1.clone())).collect::<[String: MirType]>()
+        rendered := [String]()
+        loop field in declared.iter().filter((field) -> !field.computed) {
+            pair :: fields.iter().find((pair) -> pair.0 == field.name) ?? return nil
+            field_ty :: Self.history_capture_type(&field.ty, &bindings)
+            value := self.constant_for_type(pair.1, &field_ty)
+            if definition.boxed_edges.iter().any((edge) -> edge == field.name) { value = "Box::new({value})" }
+            rendered.push("{self.field_name(field.id)}: {value}")
+        }
+        constructor := self.rust_apply_type(nominal, args)
+        if !args.is_empty() {
+            start :: constructor.find('<').expect("checked generic struct constructor has type arguments")
+            constructor.insert_str(start, "::")
+        }
+        Val("{constructor} {{ {rendered.join(", ")} }}")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30759
+    fn typed_enum_constant(self, nominal: MirNominalRef, args: [MirType], type_name: String, variant: String, values: [(String?, MirConstant)]) -> String? {
+        definition :: self.typed_constant_definition(nominal) ?? return nil
+        if type_name != nominal.name && type_name != definition.key && type_name != definition.name { return nil }
+        variants :: if definition.kind == .Enum(variants: variants) -> variants else -> return nil
+        if has_native_type_projection(type_name) { return nil }
+        declared_variant :: variants.iter().find((candidate) -> candidate.name == variant).unwrap_or_else(() -> panic("MIR enum variant {variant:?} has no row"))
+        bindings :: definition.generic_params.iter().zip(args).map((pair) -> (pair.0.name.clone(), pair.1.clone())).collect::<[String: MirType]>()
+        if values.iter().any((pair) -> pair.0.is_some()) && values.iter().any((pair) -> pair.0.is_none()) { panic("MIR enum constant mixes named and positional payloads") }
+        variant_name :: mangle_variant(&declared_variant.name)
+        owner_name :: self.anonymous_union_definition(&definition.key).map((canonical) -> mangle_path(&canonical.key)).unwrap_or_else(() -> {
+            shared :: self.program.types.iter().filter((candidate) -> candidate.name == definition.name).nth(1).is_some()
+            self.nominal_name(if shared -> definition.key else -> type_name)
+        })
+        variant_path :: "{owner_name}::{variant_name}"
+        if declared_variant.payload == {
+            .Unit -> {
+                if !values.is_empty() { panic("MIR unit variant construction has payload arguments") }
+                Val(variant_path)
+            }
+            .Single(payload) -> {
+                if values.len() != 1 { panic("MIR single variant construction payload arity mismatch") }
+                (field, constant) :: values[0]
+                if field.is_some() { panic("MIR single variant construction payload must be positional") }
+                payload_ty :: Self.history_capture_type(payload, &bindings)
+                value := self.constant_for_type(constant, &payload_ty)
+                if definition.boxed_edges.iter().any((edge) -> edge == declared_variant.name) { value = "Box::new({value})" }
+                Val("{variant_path}({value})")
+            }
+            .Named(fields) -> {
+                if values.len() != fields.len() { panic("MIR named variant construction payload arity mismatch") }
+                seen := BTreeSet<String>()
+                loop pair in values {
+                    field :: pair.0.as_deref().unwrap_or_else(() -> panic("MIR named variant construction requires named payload fields"))
+                    if !seen.insert(field) || !fields.iter().any((declared) -> declared.name == field) { panic("MIR named variant construction field order mismatch") }
+                }
+                rendered :: fields.iter().map((field) -> {
+                    pair :: values.iter().find((pair) -> pair.0.as_deref() == Val(field.name)).expect("checked named enum field")
+                    field_ty :: Self.history_capture_type(&field.ty, &bindings)
+                    edge :: "{declared_variant.name}.{field.name}"
+                    value := self.constant_for_type(pair.1, &field_ty)
+                    if definition.boxed_edges.iter().any((candidate) -> candidate == edge) { value = "Box::new({value})" }
+                    "{self.field_name(field.id)}: {value}"
+                }).collect::<[String]>().join(", ")
+                Val("{variant_path} {{ {rendered} }}")
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30876
+    fn constant_for_type(self, constant: MirConstant, ty: MirType) -> String {
+        if ty.kind() == {
+            .Int -> if constant == {
+                .Int(value: value) -> "jet_foundation::Numeric::JetInt::from_i64({value})"
+                .BigInt(value) -> "{self.config.root_prefix}jet_std::jet_int_owned_from_str({value:?}).expect(\"MIR Int\")"
+                else -> self.constant(constant)
+            }
+            .InlineRange(base: base) | .Tagged(inner: base) | .Quantity(base: base) -> self.constant_for_type(constant, base)
+            .IntN(signed: signed, bits: bits) -> {
+                value :: if constant == {
+                    .Int(value: value) -> if signed -> value.to_string() else -> (value as U64).to_string()
+                    .BigInt(value) -> value.clone()
+                    else -> return self.constant(constant)
+                }
+                "{value}{if signed -> "i" else -> "u"}{bits}"
+            }
+            .Option(inner) -> if constant == { .Present(value) -> "Ok({self.constant_for_type(value, inner)})"; else -> self.constant(constant) }
+            .Result(ok: ok, err: err) -> if constant == {
+                .Present(value) -> "Ok({self.constant_for_type(value, ok)})"
+                .Failed(.Told(value)) -> "Err({self.constant_for_type(value, err)})"
+                else -> self.constant(constant)
+            }
+            .List(inner) | .FixedList(elem: inner) -> {
+                constants :: if constant == .List(values) -> values else -> return self.constant(constant)
+                values :: constants.iter().map((value) -> self.constant_for_type(value, inner)).collect::<[String]>().join(", ")
+                if ty.kind() == .FixedList -> "[{values}]" else -> "vec![{values}]"
+            }
+            .Map(key: key_ty, value: value_ty) -> {
+                entries :: if constant == .Map(entries) -> entries else -> return self.constant(constant)
+                pairs :: entries.iter().map((pair) -> {
+                    key :: if pair.0 == .Int(literal) -> self.constant_for_type(&MirConstant.Int(value: literal, width: nil, spelling: nil), key_ty) else -> self.const_key(pair.0)
+                    "({key}, {self.constant_for_type(pair.1, value_ty)})"
+                }).collect::<[String]>().join(", ")
+                "[{pairs}].into_iter().collect::<{self.rust_type(ty)}>()"
+            }
+            .Apply(name: name, args: args) -> if constant == {
+                .Struct(type_name: type_name, fields: fields) -> self.typed_struct_constant(name, args, type_name, fields).unwrap_or_else(() -> self.constant(constant))
+                .Enum(type_name: type_name, variant: variant, args: values) -> self.typed_enum_constant(name, args, type_name, variant, values).unwrap_or_else(() -> self.constant(constant))
+                else -> self.constant(constant)
+            }
+            .Union(_) -> if constant == {
+                .Enum(type_name: type_name, variant: variant, args: values) -> {
+                    definition :: self.structural_type_def_for(ty) ?? return self.constant(constant)
+                    nominal :: MirNominalRef(id: definition.id, name: definition.key.clone())
+                    self.typed_enum_constant(&nominal, [], type_name, variant, values).unwrap_or_else(() -> self.constant(constant))
+                }
+                else -> self.constant(constant)
+            }
+            else -> self.constant(constant)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:30994
+    fn constant(self, constant: MirConstant) -> String {
+        if constant == {
+            .Int(value: value, width: width, spelling: spelling) -> if width == {
+                Val((signed, bits)) -> {
+                    literal :: if signed -> spelling.clone().unwrap_or_else(() -> value.to_string()) else -> (value as U64).to_string()
+                    "{literal}{if signed -> "i" else -> "u"}{bits}"
+                }
+                nil -> spelling.clone().unwrap_or_else(() -> value.to_string())
+            }
+            .Float(value: value, f32: f32, spelling: spelling) -> spelling.clone().unwrap_or_else(() -> {
+                if value.is_nan() -> (if f32 -> "f32::NAN" else -> "f64::NAN")
+                else if value.is_infinite() -> (if value.is_sign_negative() -> (if f32 -> "f32::NEG_INFINITY" else -> "f64::NEG_INFINITY") else -> (if f32 -> "f32::INFINITY" else -> "f64::INFINITY"))
+                else if f32 -> "{value:?}f32" else -> "{value:?}f64"
+            })
+            .Bool(value) -> value.to_string()
+            .Char(value) -> "{value:?}"
+            .String(value) -> if self.is_core_layer() -> "{value:?}" else -> "{value:?}.to_string()"
+            .Bytes(value) -> "vec![{value.iter().map((byte) -> byte.to_string()).collect::<[String]>().join(", ")}]"
+            .Unit -> "()"
+            .BigInt(value) -> "{self.config.root_prefix}jet_std::jet_int_owned_from_str({value:?}).expect(\"MIR Int\")"
+            .List(values) -> "vec![{values.iter().map((value) -> self.constant(value)).collect::<[String]>().join(", ")}]"
+            .Map(values) -> {
+                pairs :: values.iter().map((pair) -> "({self.const_key(pair.0)}, {self.constant(pair.1)})").collect::<[String]>().join(", ")
+                "[{pairs}].into_iter().collect::<{self.config.root_prefix}JetMap<_,_>>()"
+            }
+            .Struct(type_name: type_name, fields: fields) if type_name == TYPE_FRACTION && !self.types_by_name.contains_key(type_name) -> {
+                part :: (name: String) -> {
+                    value :: fields.iter().find((pair) -> pair.0 == name).unwrap_or_else(() -> panic("MIR Fraction has no {name}")).1
+                    if !(if value == { .Int | .BigInt(_) -> true; else -> false }) { panic("MIR Fraction {name} is not an Int") }
+                    self.constant_for_type(value, &MirType.from_kind(MirTypeKind.Int))
+                }
+                "{self.config.root_prefix}jet_fraction_from_parts({part("numerator")}, {part("denominator")})"
+            }
+            .Struct(type_name: type_name, fields: fields) -> {
+                native :: has_native_type_projection(type_name)
+                rendered :: fields.iter().map((pair) -> {
+                    name :: if native -> pair.0.clone() else -> mangle(pair.0)
+                    "{name}: {self.constant(pair.1)}"
+                }).collect::<[String]>().join(", ")
+                "{self.nominal_name(type_name)} {{ {rendered} }}"
+            }
+            .Enum(type_name: type_name, variant: variant, args: args) -> {
+                native :: has_native_type_projection(type_name)
+                variant_name :: if native -> variant.clone() else -> mangle_variant(variant)
+                path :: "{self.nominal_name(type_name)}::{variant_name}"
+                if args.is_empty() -> path
+                else if args.iter().all((pair) -> pair.0.is_some()) -> {
+                    fields :: args.iter().map((pair) -> {
+                        label :: pair.0.as_deref().expect("checked enum field")
+                        name :: if native -> label.to_string() else -> mangle(label)
+                        "{name}: {self.constant(pair.1)}"
+                    }).collect::<[String]>().join(", ")
+                    "{path} {{ {fields} }}"
+                }
+                else if args.iter().all((pair) -> pair.0.is_none()) -> {
+                    values :: args.iter().map((pair) -> self.constant(pair.1)).collect::<[String]>().join(", ")
+                    "{path}({values})"
+                }
+                else -> panic("MIR enum constant mixes named and positional payloads")
+            }
+            .Present(value) -> "Ok({self.constant(value)})"
+            .Failed(report) -> if report == { .Clean(_) -> "Err({self.config.root_prefix}JetAbsent)"; .Told(value) -> "Err({self.constant(value)})" }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:31168
+    fn const_key(self, key: MirConstKey) -> String {
+        if key == {
+            .Int(value) -> value.to_string()
+            .String(value) -> if self.is_core_layer() -> "{value:?}" else -> "{value:?}.to_string()"
+            .Bool(value) -> value.to_string()
+            .Char(value) -> "{value:?}"
+            .Tuple(values) -> "({values.iter().map((pair) -> self.const_key(pair.1)).collect::<[String]>().join(", ")})"
+            .Struct(type_name: type_name, fields: fields) -> {
+                native :: has_native_type_projection(type_name)
+                rendered :: fields.iter().map((pair) -> {
+                    name :: if native -> pair.0.clone() else -> mangle(pair.0)
+                    "{name}: {self.const_key(pair.1)}"
+                }).collect::<[String]>().join(", ")
+                "{self.nominal_name(type_name)} {{ {rendered} }}"
+            }
+            .Enum(type_name: type_name, variant: variant) -> {
+                native :: has_native_type_projection(type_name)
+                variant_name :: if native -> variant.clone() else -> mangle_variant(variant)
+                "{self.nominal_name(type_name)}::{variant_name}"
+            }
+        }
+    }
+}
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:31216
+fn value_slot(value: MirValueId) -> String { "__jet_v_{value.0}" }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:31220
+// Parks a later payload of a moved enum subject until its own binding takes it.
+fn payload_slot(value: MirValueId) -> String { "__jet_pm_{value.0}" }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:31226
+fn local_slot(local: MirLocalId) -> String { "__jet_l_{local.0}" }
+// Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:31230
+fn fixed_inline_backing_name(value: MirValueId) -> String { "__jet_fixed_backing_v{value.0}" }

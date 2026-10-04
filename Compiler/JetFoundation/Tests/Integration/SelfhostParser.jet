@@ -1,0 +1,551 @@
+use jet_codegen.MIREval.[evaluate_mir_function_with_config, MirEvalConfig, MirExecutionStatus, MirValue]
+use jet_diagnostics.[Diagnostic, Severity, Span]
+use jet_ast.[AccessConvention, CallArg, Expr, Item, Marker, MarkerCallArg, Program, ProgramBundle]
+use jet_foundation.MIR.[MirArtifactBuildMode, MirArtifactKind, MirArtifactRequest, MirArtifactTarget, MirFunctionId, MirProgram]
+use jet_sema as Sema
+use jet_codegen.TIR as TIR
+use jet_loader as Loader
+use jet_lexer as Lexer
+use jet_parser as Parser
+use jet_driver.[run_compiler_work]
+use Common as common
+use TirSupport as tir_support
+// GATE #4494: native files, processes and synchronized one-time shared ownership.
+use std.fs
+use std.process.[Command]
+use std.sync.[Shared, OnceLock]
+
+// Rust: tests/selfhost_parser.rs:13
+SOURCE_MANIFEST :: include_str("Compiler/Bootstrap/sources.list")
+// Rust: tests/selfhost_parser.rs:14
+PROBE_SOURCE :: """
+fn selfhost_parser_text(facts: &[Int], text: String) -> {
+    bytes := text.bytes()
+    &facts.push(bytes.len())
+    index := 0
+    loop index < bytes.len() {
+        &facts.push(Int.from_u8(bytes[index]))
+        index += 1
+    }
+}
+fn selfhost_parser_label(facts: &[Int], label: CallLabel?) -> {
+    if label == {
+        .Val(value) -> {
+            &facts.push(1)
+            selfhost_parser_text(&facts, value.name)
+            &facts.push(value.span.start)
+            &facts.push(value.span.end)
+        }
+        .None -> &facts.push(0)
+    }
+}
+fn selfhost_parser_expr(facts: &[Int], expression: Expr) -> {
+    if expression == {
+        .Ident(name, span) -> {
+            &facts.push(1)
+            selfhost_parser_text(&facts, name)
+            &facts.push(span.start)
+            &facts.push(span.end)
+        }
+        .Spread(value, span) -> {
+            &facts.push(2)
+            &facts.push(span.start)
+            &facts.push(span.end)
+            selfhost_parser_expr(&facts, value)
+        }
+        .Field(base, member, span) -> {
+            &facts.push(3)
+            selfhost_parser_text(&facts, member)
+            &facts.push(span.start)
+            &facts.push(span.end)
+            selfhost_parser_expr(&facts, base)
+        }
+        .OptField(base, member, member_span, _, span) -> {
+            &facts.push(5)
+            selfhost_parser_text(&facts, member)
+            &facts.push(member_span.start)
+            &facts.push(member_span.end)
+            &facts.push(span.start)
+            &facts.push(span.end)
+            selfhost_parser_expr(&facts, base)
+        }
+        .OptMethodCall(receiver, method, method_span, _, args, span) -> {
+            &facts.push(6)
+            selfhost_parser_text(&facts, method)
+            &facts.push(method_span.start)
+            &facts.push(method_span.end)
+            &facts.push(span.start)
+            &facts.push(span.end)
+            &facts.push(args.len())
+            loop argument in args -> selfhost_parser_call_arg(&facts, argument)
+            selfhost_parser_expr(&facts, receiver)
+        }
+        else -> &facts.push(0)
+    }
+}
+fn selfhost_parser_call_arg(facts: &[Int], argument: CallArg) -> {
+    convention := 0
+    if argument.convention == AccessConvention.Write -> convention = 1
+    if argument.convention == AccessConvention.Move -> convention = 2
+    &facts.push(convention)
+    &facts.push(argument.span.start)
+    &facts.push(argument.span.end)
+    spread := 0
+    if argument.spread -> spread = 1
+    &facts.push(spread)
+    selfhost_parser_label(&facts, argument.label)
+    selfhost_parser_expr(&facts, argument.expr)
+}
+fn selfhost_parser_marker(facts: &[Int], marker: Marker) -> {
+    &facts.push(marker.args.len())
+    index := 0
+    loop index < marker.args.len() {
+        label := None
+        if index < marker.arg_labels.len() -> label = marker.arg_labels[index]
+        selfhost_parser_label(&facts, label)
+        if marker.args[index] == {
+            .Expr(value) -> selfhost_parser_expr(&facts, value)
+            .EffectRow(_, span) -> {
+                &facts.push(4)
+                &facts.push(span.start)
+                &facts.push(span.end)
+            }
+        }
+        index += 1
+    }
+}
+fn selfhost_parser_diagnostic(facts: &[Int], diagnostic: Diagnostic) -> {
+    selfhost_parser_text(&facts, diagnostic.code)
+    &facts.push(diagnostic.severity)
+    selfhost_parser_text(&facts, diagnostic.what)
+    selfhost_parser_text(&facts, diagnostic.why)
+    selfhost_parser_text(&facts, diagnostic.fix)
+    if diagnostic.span == {
+        .Val(span) -> { &facts.push(1); &facts.push(span.start); &facts.push(span.end) }
+        .None -> &facts.push(0)
+    }
+    if diagnostic.edit == {
+        .Val(edit) -> {
+            &facts.push(1)
+            &facts.push(edit.span.start)
+            &facts.push(edit.span.end)
+            selfhost_parser_text(&facts, edit.new_text)
+        }
+        .None -> &facts.push(0)
+    }
+    &facts.push(diagnostic.labels.len())
+    loop label in diagnostic.labels {
+        &facts.push(label.span.start)
+        &facts.push(label.span.end)
+        selfhost_parser_text(&facts, label.message)
+    }
+}
+pub fn selfhost_parser_probe(source: [U8]) -> [Int] {
+    parsed := parse_source(source)
+    facts := [Int]{}
+    &facts.push(parsed.diagnostics.len())
+    index := 0
+    loop index < parsed.diagnostics.len() {
+        selfhost_parser_diagnostic(&facts, parsed.diagnostics[index])
+        index += 1
+    }
+    show_ast := true
+    index = 0
+    loop index < parsed.diagnostics.len() {
+        if parsed.diagnostics[index].code != "E0029" -> show_ast = false
+        index += 1
+    }
+    if !show_ast { &facts.push(0); &facts.push(0); return facts }
+    if parsed.program.script_body.len() > 0 {
+        statement := parsed.program.script_body[0]
+        if statement == {
+            .Expr(expression) -> {
+                if expression == {
+                    .Call(call) -> {
+                        &facts.push(1)
+                        &facts.push(call.args.len())
+                        index = 0
+                        loop index < call.args.len() {
+                            selfhost_parser_call_arg(&facts, call.args[index])
+                            index += 1
+                        }
+                        return facts
+                    }
+                    else -> {}
+                }
+            }
+            .Switched(marker, _, _) -> {
+                &facts.push(3)
+                selfhost_parser_marker(&facts, marker)
+                return facts
+            }
+            else -> {}
+        }
+    }
+    if parsed.program.items.len() > 0 {
+        item := parsed.program.items[0]
+        if item == {
+            .Func(function) -> {
+                if function.markers.len() > 0 {
+                    &facts.push(2)
+                    selfhost_parser_marker(&facts, function.markers[0])
+                    return facts
+                }
+            }
+            else -> {}
+        }
+    }
+    &facts.push(0)
+    &facts.push(0)
+    facts
+}
+"""
+// Rust: tests/selfhost_parser.rs:214
+CASES :: [
+    ("unmarked-read", "f(x)"),
+    ("write-marker", "f(&x)"),
+    ("move-marker", "f(^x)"),
+    ("keyword-tag-label", "f(tag: &x)"),
+    ("ordinary-name-label", "f(value: &x)"),
+    ("spread-before-label", "f(...tag: x)"),
+    ("spread-after-label-stays-in-expression", "f(tag: ...x)"),
+    ("duplicate-marker-recovers-after-label", "f(&tag: ^x)"),
+    ("projected-write-remains-an-expression", "f(&x.field)"),
+    ("missing-value-diagnostic", "f(&)"),
+    ("use-label-is-not-regular-call-syntax", "f(use: x)"),
+    ("declaration-marker-use-label", "#M(use: x) fn run() {}"),
+    ("marker-group-use-label", "#[M(use: x)] fn run() {}"),
+    ("statement-marker-use-label", "#Off(use: x) {}"),
+    ("optional-method-call", "f(a?.m(x))"),
+    ("optional-method-chain", "f(a?.b?.m())"),
+    // E0082 (#3725): mixed unparenthesized logical operators.
+    ("logic-or-then-and", "f(a || b && c)"),
+    ("logic-and-then-or", "f(a && b || c)"),
+    ("logic-grouped-and-chains", "f((a || b) && c, a || (b && c), a && b && c, a || b || c)"),
+    // E0083 (#3719): one diagnostic at the unclosed opener.
+    ("unclosed-paren-call-p16", "fn run() {\n    print(\"hello\"\n}\n"),
+    ("unclosed-bracket-list", "fn run() {\n    values :: [1, 2, 3\n    print(values.len())\n}\n"),
+    ("unclosed-brace-block", "fn run() {\n    print(\"hello\")\n"),
+    ("unclosed-brace-interpolation", "fn run() {\n    count :: 1\n    print(\"count {count\")\n}\n"),
+    ("retired-step-statement", "count++"),
+    ("retired-step-double-minus", "f(a--b)"),
+    ("retired-typed-binding", "fn run() {\n    limit: U8 :: 250\n    print(limit)\n}\n")
+]
+// Rust: tests/selfhost_parser.rs:247
+fn jet_byte_array_literal(source: String) -> String {
+    bytes := [String]{}
+    loop byte in source.bytes() { &bytes.push(byte.to_string()) }
+    "[U8]{{{bytes.join(", ")}}}"
+}
+// Rust: tests/selfhost_parser.rs:252
+fn tier_run_source() -> String {
+    source := "\nfn run() -> {\n"
+    loop (index, (_, input)) in CASES.enumerate() {
+        input_bytes :: "parser_input_{index}"
+        facts :: "parser_facts_{index}"
+        cursor :: "parser_cursor_{index}"
+        &source.push_str("    {input_bytes} :: {jet_byte_array_literal(input)}\n")
+        &source.push_str("    print({index})\n    print({input_bytes}.len())\n    {cursor} := 0\n")
+        &source.push_str("    loop {cursor} < {input_bytes}.len() {{\n")
+        &source.push_str("        print(Int.from_u8({input_bytes}[{cursor}]))\n")
+        &source.push_str("        {cursor} += 1\n    }}\n")
+        &source.push_str("    {facts} :: selfhost_parser_probe({input_bytes})\n    print({facts}.len())\n    {cursor} = 0\n")
+        &source.push_str("    loop {cursor} < {facts}.len() {{\n")
+        &source.push_str("        print({facts}[{cursor}])\n")
+        &source.push_str("        {cursor} += 1\n    }}\n")
+    }
+    &source.push_str("}\n")
+    source
+}
+// Rust: tests/selfhost_parser.rs:272
+fn expected_tier_stdout() -> String {
+    output := ""
+    loop (index, (_, input)) in CASES.enumerate() {
+        bytes :: input.bytes()
+        &output.push_str("{index}\n{bytes.len()}\n")
+        loop byte in bytes { &output.push_str("{byte}\n") }
+        facts :: native_facts(input)
+        &output.push_str("{facts.len()}\n")
+        loop fact in facts { &output.push_str("{fact}\n") }
+    }
+    output
+}
+// Rust: tests/selfhost_parser.rs:289
+fn parser_source(root: OSPath) -> (String, Int) {
+    source := ""
+    source_file_count := 0
+    loop row in SOURCE_MANIFEST.lines() {
+        path := row.trim() // #4303
+        if path.is_empty() || path.starts_with("#") { continue }
+        parser_input :: path.starts_with("Compiler/JetLexer/Source/Lexer/")
+            || path == "Compiler/JetFoundation/Source/Diagnostics/Diagnostic.jet"
+            || path == "Compiler/JetFoundation/Source/Types/Types.jet"
+            || path == "Compiler/JetFoundation/Source/Registry/Diagnostics.jet"
+            || path == "Compiler/JetFoundation/Source/Registry/DiagnosticRows.jet"
+            || path.starts_with("Compiler/JetFoundation/Source/AST/")
+            || path.starts_with("Compiler/JetParser/Source/Parser/")
+        if parser_input {
+            source_file_count += 1
+            &source.push_str("// [selfhost parser parity source: ")
+            &source.push_str(path)
+            &source.push_str("]\n")
+            text :: fs.read_to_string(root.join(path)).expect("canonical parser source")
+            &source.push_str(without_package_imports(text))
+            &source.push_str("\n")
+        }
+    }
+    &source.push_str(PROBE_SOURCE)
+    &source.push_str(tier_run_source())
+    (source, source_file_count)
+}
+// Rust: tests/selfhost_parser.rs:322
+// D-MOD-CYCLE1=A: concatenation is one namespace; dependency imports are dropped.
+fn without_package_imports(text: String) -> String {
+    kept := String.with_capacity(text.len())
+    in_import := false
+    loop line in text.split_inclusive("\n") {
+        if !in_import && (line.starts_with("use jet_") || line.starts_with("use compiler_bootstrap")) && line.contains(".[") { in_import = true }
+        if in_import { in_import = !line.contains("]"); continue }
+        &kept.push_str(line)
+    }
+    kept
+}
+// Rust: tests/selfhost_parser.rs:341
+struct Pass { mir: MirProgram; function: MirFunctionId; source: String; source_file_count: Int }
+// Rust: tests/selfhost_parser.rs:348
+fn lower_bundle(bundle: &ProgramBundle, context: String) -> MirProgram {
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors :: diagnostics.filter(fn(row) { row.severity == Severity.Error })
+    assert(errors.is_empty(), "{context}: checked parser fixture: {errors:?}")
+    request :: MirArtifactRequest.new(MirArtifactTarget.Cranelift, MirArtifactKind.NativeExecutable, MirArtifactBuildMode.Dev)
+    TIR.lower_checked_mir_program_for(bundle, request).unwrap_or_else(fn(error) { panic("{context}: canonical parser MIR: {error}") }).0
+}
+// Rust: tests/selfhost_parser.rs:362
+fn bootstrap() -> Shared<Pass> {
+    run_compiler_work(fn() {
+        scratch :: common.Scratch.new("selfhost_parser_bootstrap")
+        tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+        path :: scratch.path.join("parser.jet")
+        (source, source_file_count) :: parser_source(OSPath(env("CARGO_MANIFEST_DIR")))
+        fs.write(path, source).unwrap()
+        bundle := Loader.load_entry(path.to_str().unwrap()).expect("Rust reference bootstraps the Jet parser source")
+        mir :: lower_bundle(&bundle, "generated Jet parser")
+        function :: mir.functions.find(fn(row) { row.name == "selfhost_parser_probe" }).expect("compiled parser probe entry").id
+        Shared.new(Pass{mir: mir, function: function, source: source, source_file_count: source_file_count})
+    })
+}
+// Rust: tests/selfhost_parser.rs:378
+PASS :: OnceLock<Shared<Pass>>.new()
+fn pass() -> Shared<Pass> { PASS.get_or_init(bootstrap).clone() }
+// Rust: tests/selfhost_parser.rs:384
+impl Pass {
+    fn evaluate(self: &Pass, source: String) -> [I64] {
+        bytes := [MirValue]{}
+        loop byte in source.bytes() { &bytes.push(MirValue.Int(I64.from_u8(byte))) }
+        args :: [MirValue.List(^bytes)]
+        config := MirEvalConfig.default()
+        config.fuel = Val(U64{50000000})
+        result :: evaluate_mir_function_with_config(self.mir, self.function, args, config)
+            .unwrap_or_else(fn(error) { panic("generated Jet parser evaluation: {error.diagnostic:?}") })
+        assert_eq(result.status, MirExecutionStatus.Completed, "parser evaluator status")
+        assert_eq(result.exit_code, 0, "parser evaluator exit code")
+        assert(result.stdout.is_empty() && result.stderr.is_empty(), "parser probe must be silent")
+        value := result.value
+        if value == { .Present(inner) -> value = ^inner; else -> {} }
+        if value == {
+            .List(values) -> {
+                facts := [I64]{}
+                loop item in values {
+                    if item == { .Int(number) -> &facts.push(number); else -> panic("parser probe returned a non-integer fact: {item:?}") }
+                }
+                facts
+            }
+            else -> panic("parser probe returned a non-list carrier: {value:?}")
+        }
+    }
+}
+// Rust: tests/selfhost_parser.rs:408
+fn push_text(facts: &[I64], text: String) -> {
+    bytes :: text.bytes()
+    &facts.push(I64.try_from(bytes.len()).unwrap())
+    loop byte in bytes { &facts.push(I64.from_u8(byte)) }
+}
+// Rust: tests/selfhost_parser.rs:414
+fn push_diagnostic(facts: &[I64], diagnostic: &Diagnostic) -> {
+    push_text(&facts, diagnostic.code)
+    if diagnostic.severity == { .Error -> &facts.push(1); .Lint -> &facts.push(2) }
+    push_text(&facts, diagnostic.what)
+    push_text(&facts, diagnostic.why)
+    push_text(&facts, diagnostic.fix)
+    if diagnostic.span == {
+        .Val(span) -> &facts.extend([1, I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+        .None -> &facts.push(0)
+    }
+    if diagnostic.edit == {
+        .Val(edit) -> {
+            &facts.extend([1, I64.try_from(edit.span.start).unwrap(), I64.try_from(edit.span.end).unwrap()])
+            push_text(&facts, edit.new_text)
+        }
+        .None -> &facts.push(0)
+    }
+    &facts.push(I64.try_from(diagnostic.labels.len()).unwrap())
+    loop label in diagnostic.labels {
+        &facts.extend([I64.try_from(label.span.start).unwrap(), I64.try_from(label.span.end).unwrap()])
+        push_text(&facts, label.message)
+    }
+}
+// Rust: tests/selfhost_parser.rs:441
+fn push_expr(facts: &[I64], expression: &Expr) -> {
+    if expression == {
+        .Ident(name, span) -> {
+            &facts.push(1)
+            push_text(&facts, name)
+            &facts.extend([I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+        }
+        .Spread(value, span) -> {
+            &facts.extend([2, I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+            push_expr(&facts, value)
+        }
+        .Field(base, member, span) -> {
+            &facts.push(3)
+            push_text(&facts, member)
+            &facts.extend([I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+            push_expr(&facts, base)
+        }
+        .OptField(base, member, member_span, _, span) -> {
+            &facts.push(5)
+            push_text(&facts, member)
+            &facts.extend([I64.try_from(member_span.start).unwrap(), I64.try_from(member_span.end).unwrap(), I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+            push_expr(&facts, base)
+        }
+        // D-SUGAR6: native CallValue through OptField corresponds to OptMethodCall.
+        .CallValue(callee, args, span) -> {
+            if callee == {
+                .OptField(base, member, member_span, _, _) -> {
+                    &facts.push(6)
+                    push_text(&facts, member)
+                    &facts.extend([I64.try_from(member_span.start).unwrap(), I64.try_from(member_span.end).unwrap(), I64.try_from(base.span().start).unwrap(), I64.try_from(span.end).unwrap(), I64.try_from(args.len()).unwrap()])
+                    loop argument in args { push_call_arg(&facts, &argument) }
+                    push_expr(&facts, base)
+                }
+                else -> &facts.push(0)
+            }
+        }
+        else -> &facts.push(0)
+    }
+}
+// Rust: tests/selfhost_parser.rs:505
+fn push_label(facts: &[I64], label: (String, Span)?) -> {
+    if label == {
+        .Val((name, span)) -> {
+            &facts.push(1)
+            push_text(&facts, name)
+            &facts.extend([I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+        }
+        .None -> &facts.push(0)
+    }
+}
+// Rust: tests/selfhost_parser.rs:515
+fn push_call_arg(facts: &[I64], argument: &CallArg) -> {
+    convention :: if argument.convention == { .Read -> 0; .Write -> 1; .Move -> 2 }
+    spread :: if argument.spread -> 1 else -> 0
+    &facts.extend([convention, I64.try_from(argument.span.start).unwrap(), I64.try_from(argument.span.end).unwrap(), spread])
+    push_label(&facts, argument.label)
+    push_expr(&facts, &argument.expr)
+}
+// Rust: tests/selfhost_parser.rs:531
+fn push_marker(facts: &[I64], marker: &Marker) -> {
+    &facts.push(I64.try_from(marker.args.len()).unwrap())
+    loop (index, argument) in marker.args.enumerate() {
+        label := None
+        if index < marker.arg_labels.len() { label = marker.arg_labels[index] }
+        push_label(&facts, label)
+        if argument == {
+            .Expr(expression) -> push_expr(&facts, &expression)
+            .EffectRow(_, span) -> &facts.extend([4, I64.try_from(span.start).unwrap(), I64.try_from(span.end).unwrap()])
+        }
+    }
+}
+// Rust: tests/selfhost_parser.rs:544
+fn push_program(facts: &[I64], program: Program?, diagnostics: [Diagnostic]) -> {
+    show_ast := true
+    loop diagnostic in diagnostics { if diagnostic.code != "E0029" { show_ast = false } }
+    if !show_ast { &facts.extend([0, 0]); return }
+    if program == {
+        .Val(value) -> {
+            if value.script_body.len() > 0 {
+                if value.script_body[0] == {
+                    .Expr(expression) -> {
+                        if expression == {
+                            .Call(call) -> {
+                                &facts.extend([1, I64.try_from(call.args.len()).unwrap()])
+                                loop argument in call.args { push_call_arg(&facts, &argument) }
+                                return
+                            }
+                            else -> {}
+                        }
+                    }
+                    .Switched(marker, _, _) -> { &facts.push(3); push_marker(&facts, &marker); return }
+                    else -> {}
+                }
+            }
+            if value.items.len() > 0 {
+                if value.items[0] == {
+                    .Func(function) -> {
+                        if function.markers.len() > 0 { &facts.push(2); push_marker(&facts, &function.markers[0]); return }
+                    }
+                    else -> {}
+                }
+            }
+        }
+        .None -> {}
+    }
+    &facts.extend([0, 0])
+}
+// Rust: tests/selfhost_parser.rs:581
+fn push_diagnostics(facts: &[I64], diagnostics: [Diagnostic]) -> {
+    &facts.push(I64.try_from(diagnostics.len()).unwrap())
+    loop diagnostic in diagnostics { push_diagnostic(&facts, &diagnostic) }
+}
+// Rust: tests/selfhost_parser.rs:588
+fn native_facts(source: String) -> [I64] {
+    (tokens, lexer_diagnostics) :: Lexer.lex(source)
+    facts := [I64]{}
+    // Lexer failure stops parsing; do not append parser diagnostics.
+    if !lexer_diagnostics.is_empty() {
+        push_diagnostics(&facts, lexer_diagnostics)
+        push_program(&facts, None, lexer_diagnostics)
+        return facts
+    }
+    result :: Parser.parse_for_check_with_source(tokens, source)
+    if result == {
+        .Ok((program, diagnostics)) -> { push_diagnostics(&facts, diagnostics); push_program(&facts, Val(program), diagnostics) }
+        .Err(diagnostics) -> { push_diagnostics(&facts, diagnostics); push_program(&facts, None, diagnostics) }
+    }
+    facts
+}
+// Rust: tests/selfhost_parser.rs:613
+// Human-facing text in the diagnostic prefix of a parser fact vector.
+fn diagnostic_texts(facts: [I64]) -> [String] {
+    cursor := 0
+    next :: fn() -> I64 { cursor += 1; facts[cursor - 1] }
+    // Rust: tests/selfhost_parser.rs:619
+    text :: fn(next: () -> I64) -> String {
+        len :: Int.try_from(next()).unwrap()
+        bytes := [U8]{}
+        loop _ in 0..<len { &bytes.push(U8.truncate(next())) }
+        String.from_utf8(^bytes).expect("diagnostic text is UTF-8")
+    }
+    out := [String]{}
+    count :: next()
+    loop _ in 0..<count {
+        _ :: text(next)
+        _ :: next()
+        loop _ in 0..<3 { &out.push(text(next)) }
+        if next() == 1 { _ :: next(); _ :: next() }
+        if next() == 1 { _ :: next(); _ :: next(); &out.push(text(next)) }
+        labels :: next()
+        loop _ in 0..<labels { _ :: next(); _ :: next(); &out.push(text(next)) }
+    }
+    out
+}

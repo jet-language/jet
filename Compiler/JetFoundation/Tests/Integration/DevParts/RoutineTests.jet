@@ -1,0 +1,952 @@
+use jet_foundation.Tests.Integration.DevParts.Routine.*
+use jet_foundation.Tests.Integration.DevParts.Support.*
+use jet_foundation.Tests.Integration.DevParts.Support02.*
+use jet_foundation.Tests.Integration.DevParts.Support03.*
+use jet_foundation.Tests.Integration.Common as common
+use tir_support
+use jet
+use jet_driver
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.process.[Command, Stdio]
+use std.thread as thread
+use std.time.Duration
+use std.sync.[Arc, Mutex, mpsc]
+use std.io.[BufReader, Write]
+use std.net.[TcpStream, TcpListener]
+use core.sys.target.selected_family
+// GATE #4494: real subprocess, threads, locks/channels, pipes, filesystem and TCP/TLS fixtures.
+// GATE #4483: the original Unix-only socket-echo arm dispatches on selected family.
+// Native debug/dev/release profiles cover O0/O1/O2; eligible pure fixtures additionally use TirSupport for Web.
+
+// Rust: tests/dev_parts/routine.rs:7
+#Test("stdin_filter_default_dev_reports_jit_gap") {
+    dir :: env.temp_dir().join("jet_dev_stdin_boundary_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: example_path("io/stdin_filter")
+    compiled :: compiled_binary_output_with_stdin(&dir, "stdin_filter_aot", 0, "io/stdin_filter", &file, .Some("jet one\nnope\njet two\n"))
+    assert_eq(compiled.stdout.trim(), "jet one\njet two")
+    loop profile in ["debug", "dev", "release"] {
+        child := Command.new(common.jet_bin()).args(["run", "--profile={profile}", &file]).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+        input := child.stdin.take().unwrap()
+        input.write_all(b"jet one\nnope\njet two\n").unwrap()
+        drop(input)
+        out :: child.wait_with_output().unwrap()
+        actual :: ProgramOutput.ran(String.from_utf8_lossy(&out.stdout).into_owned(), String.from_utf8_lossy(&out.stderr).into_owned(), out.status.code().unwrap_or(1))
+        assert_eq(actual, compiled, "{profile} stdin filtering drifted")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:30
+#Test("former_parity_divergences_report_jit_gap_on_default_dev") {
+    dir :: common.unique_tmp("jet_dev_former_divergences")
+    fs.create_dir_all(&dir).unwrap()
+    loop (index, stem) in ["errors/typed_error_families", "serde/json_coerce"].iter().enumerate() {
+        file :: example_path(stem)
+        expected :: normalize_for_parity(stem, compiled_binary_output(&dir, "former_parity", index, stem, &file))
+        loop profile in ["debug", "dev", "release"] -> assert_eq(normalize_for_parity(stem, native_profile_output(&file, profile)), expected)
+    }
+}
+// Rust: tests/dev_parts/routine.rs:41
+#Test("previously_manifested_execution_reports_jit_gap_or_boundary") {
+    dir :: env.temp_dir().join("jet_dev_unmasked_fallbacks_{process.id()}")
+    rejected :: frontend_rejected_stems()
+    loop (i, stem) in ["io/db_checked_sql", "io/path", "tooling/data_pipeline"].iter().enumerate() {
+        if rejected.contains(stem) -> next
+        stats :: check_dev_default_stem(i, stem, &dir, &[])
+        assert(stats.ran == 1 || stats.boundary == 1, "{stem} must run or stop at a named boundary under native dev")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:61
+#Test("data_schema_empty_and_generic_rows_report_jit_gap_on_default_dev") {
+    dir :: common.unique_tmp("jet_dev_data_json")
+    fs.create_dir_all(&dir).unwrap()
+    file :: example_path("tooling/data_json")
+    expected :: compiled_binary_output(&dir, "data_json", 0, "tooling/data_json", &file)
+    assert_native_profiles(&file, &expected)
+}
+// Rust: tests/dev_parts/routine.rs:67
+#Test("hidden_generic_constructor_default_dev_matches_aot") {
+    dir :: env.temp_dir().join("jet_dev_generic_constructor_{process.id()}")
+    stats :: check_dev_default_stem(0, "types/generic_constructor_inference", &dir, &[])
+    assert(stats.ran == 1 || stats.boundary == 1, "expected ran or named boundary, got ran={stats.ran} boundary={stats.boundary} manifested={stats.manifested}")
+    assert_eq(stats.manifested, 0)
+}
+// Rust: tests/dev_parts/routine.rs:88
+#Test("job_runner_named_jobs_match_expected_golden") {
+    root :: OSPath(env!("CARGO_MANIFEST_DIR"))
+    check_job_runner_interpreter(&root, &example_path("devloop/job_runner"))
+}
+// Rust: tests/dev_parts/routine.rs:99
+#Test("infinite_loop_hits_e2202_fuel_stop") {
+    jet.boot_mir_eval()
+    src :: "fn run() {\n    n := 0\n    loop {\n        n = n + 1\n    }\n}\n"
+    prog :: jet.Parser.parse(&jet.Lexer.lex(src).0).expect("fixture should parse")
+    funcs := [String:&jet.AST.Func]{}
+    loop item in &prog.items {
+        if item == .Func(f) -> funcs.insert(f.name.clone(), f)
+    }
+    run :: funcs.get("run").copied().expect("fixture has run")
+    sink := jet.Comptime.DevSink.new()
+    err :: jet.Comptime.run_main_with_fuel(run, &funcs, OSPath("."), &sink, 10000).expect_err("an unbounded loop must exhaust the step budget")
+    assert_eq(err.code, "E2202", "an unbounded loop must stop with E2202, got: {err.code}")
+}
+// Rust: tests/dev_parts/routine.rs:128
+#Test("fluent_method_chain_preserves_fuel_order_and_spans") {
+    jet.boot_mir_eval()
+    run_chain :: fn(links: USize, fuel: U64) {
+        src :: "fn run() {{\n    print(\" x \"{\".trim()\".repeat(links)})\n}}\n"
+        prog :: jet.Parser.parse(&jet.Lexer.lex(&src).0).expect("fixture should parse")
+        funcs := [String:&jet.AST.Func]{}
+        loop item in &prog.items {
+            if item == .Func(f) -> funcs.insert(f.name.clone(), f)
+        }
+        run :: funcs.get("run").copied().expect("fixture has run")
+        argument :: if run.body.first() == {
+            .Some(.Expr(.Call(call))) -> &call.args[0].expr
+            other -> panic("expected print call, got {other:?}")
+        }
+        method_spans := []
+        cursor := argument
+        loop {
+            if cursor == {
+                .MethodCall{receiver, method_span, ..} -> {
+                    method_spans.push(*method_span)
+                    cursor = receiver
+                }
+                else -> break
+            }
+        }
+        expected_exhaustion_span :: method_spans.get(2).copied()
+        sink := jet.Comptime.DevSink.new()
+        result :: jet.Comptime.run_main_with_fuel(run, &funcs, OSPath("."), &sink, fuel)
+        (result, sink.stdout, expected_exhaustion_span)
+    }
+    (one, stdout, _) :: run_chain(1, 4)
+    one.expect("one method link should fit exactly inside four fuel steps")
+    assert_eq(stdout, "x\n")
+    loop links in [3, 100] {
+        (result, _, _expected_span) :: run_chain(links, 3)
+        err :: result.expect_err("the chain should exhaust three fuel steps")
+        assert_eq(err.code, "E2202")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:186
+#Test("task_programs_run_in_the_canonical_tir_interpreter") {
+    file :: "Examples/features/concurrency/tasks.jet"
+    expected :: ProgramOutput.ran("5050\npaused=false,cancel=false\n", "", 0)
+    assert_native_profiles(file, &expected)
+}
+// Rust: tests/dev_parts/routine.rs:205
+#Test("debug_keeps_the_impure_files_boundary_while_dev_reaches_the_shared_prelude") {
+    path :: env.temp_dir().join("jet_interpreter_boundary_files_{process.id()}.jet")
+    data :: path.with_extension("txt")
+    fs.write(&data, "shared-prelude").unwrap()
+    data_path :: data.to_string_lossy().replace('\\', "/")
+    fs.write(&path, "use core.files as files\nfn run() {{\n    text :: files.read(\"{data_path}\") ?? panic(\"read\")\n    print(text == \"shared-prelude\")\n}}\n").unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    bundle :: jet.Loader.load_entry(&shown).expect("files boundary fixture should load")
+    expected :: ProgramOutput.ran("true\n", "", 0)
+    assert_native_profiles(&shown, &expected)
+    // Source-debug impurity analysis is independent of the retained native O0 tier.
+    debug :: jet_driver.InterpreterBoundary.debug_boundary_scan(&bundle).expect("source debug must retain the impurity gate")
+    assert_eq(debug.code, "E2203")
+    assert(debug.what.contains("a file read or write"), "debug must still name the impure files boundary: {debug.what}")
+    _ :: fs.remove_file(path.with_extension("txt"))
+    _ :: fs.remove_file(path)
+}
+// Rust: tests/dev_parts/routine.rs:265
+#Test("task_program_runs_via_jit") {
+    file :: "Examples/features/concurrency/tasks.jet"
+    bundle := jet.Loader.load_entry(file).expect("tasks bundle should load")
+    errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter(fn(d) { d.severity == jet.Diagnostics.Severity.Error }).collect()
+    assert(errors.is_empty(), "tasks must type-check")
+    assert_native_profiles(file, &ProgramOutput.ran("5050\npaused=false,cancel=false\n", "", 0))
+}
+// Rust: tests/dev_parts/routine.rs:367
+#Test("task_surface_runs_resident_with_string_results_and_typed_failures") {
+    source :: """
+use core.time as time
+fn slow_text() -> String {
+    time.sleep(25ms)
+    return "slow"
+}
+fn late_text() -> String {
+    time.sleep(1000ms)
+    return "late"
+}
+fn failure_label(error: TaskFailure) -> String {
+    if error == {
+        .Cancelled -> { return "cancelled" }
+        .DeadlineBlown -> { return "deadline" }
+        .Panicked(_) -> { return "panicked" }
+    }
+}
+fn run() {
+    task.group workers {
+        child :: task { "child" }
+        print(child.join() ?? "child-fallback")
+        all_result :: task.all { "left", "right" } ?? []
+        print(all_result[0], all_result[1])
+        print((task.race { slow_text(), "race" }) ?? "race-fallback")
+        print((task.any { slow_text(), "any" }) ?? "any-fallback")
+        cancelled :: task late_text()
+        cancelled.cancel()
+        cancelled_result :: cancelled.join()
+        if cancelled_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong cancellation") }
+        }
+        failed :: task { panic("boom") }
+        failed_result :: failed.join()
+        if failed_result == {
+            .Err(error) -> { print(failure_label(error)) }
+            .Ok(_) -> { print("wrong panic") }
+        }
+    }
+}
+"""
+    path :: env.temp_dir().join("jet_dev_task_surface_{process.id()}.jet")
+    fs.write(&path, source).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    _ :: checked_bundle_from_path(&shown)
+    assert_native_profiles(&shown, &ProgramOutput.ran("child\nleft\nright\nrace\nany\ncancelled\npanicked\n", "", 0))
+}
+// Rust: tests/dev_parts/routine.rs:455
+#Test("caught_task_panics_keep_stderr_deterministic_under_parallel_repetition") {
+    dir :: env.temp_dir().join("jet_dev_scheduler_panic_hook_{process.id()}")
+    file :: "Examples/features/concurrency/all_failfast.jet"
+    expected_stderr :: fs.read_to_string("Examples/features/expected/concurrency/all_failfast.err.out").expect("all_failfast.err.out")
+    expected :: ProgramOutput.ran(String.new(), expected_stderr, 70)
+    first :: compiled_binary_output(&dir, "scheduler_panic_hook", 0, "all_failfast", file)
+    assert_eq(first, expected)
+    binary :: Arc.new(compiled_binary_path(&aot_scratch_dir("scheduler_panic_hook", "all_failfast"), "scheduler_panic_hook", 0, file))
+    failures :: Arc.new(Mutex.new([]))
+    workers := []
+    loop worker in 0..<8 {
+        binary :: Arc.clone(&binary)
+        failures :: Arc.clone(&failures)
+        expected :: expected.clone()
+        workers.push(thread.spawn(fn[^binary, ^failures, ^expected]() {
+            loop iteration in 0..<8 {
+                last := .None
+                loop _attempt in 0..<4 {
+                    run :: command_output_with_timeout(Command.new(binary.as_ref()), DEV_DIFF_TIMEOUT, "scheduler panic run {worker}/{iteration}")
+                    got :: ProgramOutput.ran(String.from_utf8_lossy(&run.stdout).into_owned(), String.from_utf8_lossy(&run.stderr).into_owned(), run.status.code().unwrap_or(1))
+                    if got == expected { last = .None; break }
+                    if got.exit_code == 70 && got.stderr.is_empty() && got.stdout.is_empty() { last = .Some(got); next }
+                    last = .Some(got)
+                    break
+                }
+                if last == .Some(got) -> lock_recovered(&failures, "panic-hook drift report").push("run {worker}/{iteration}: expected {expected:?}, got {got:?}")
+            }
+        }))
+    }
+    loop worker in workers -> worker.join().expect("panic-hook regression worker panicked")
+    report :: judged_report(&failures, "panic-hook drift report")
+    assert(report.is_empty(), "caught task panic stderr drifted:\n{report.join(\"\n\")}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:539
+#Test("dev_default_reports_jit_gap_for_env_program") {
+    dir :: env.temp_dir().join("jet_dev_jit_gap_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("env_gap.jet")
+    fs.write(&file, "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n").unwrap()
+    shown :: file.to_string_lossy().to_string()
+    loop profile in ["debug", "dev", "release"] {
+        out :: native_profile_output(&shown, profile)
+        assert_eq(out.exit_code, 0, "native env.current_dir failed: {out.stderr}")
+        assert(!out.stdout.is_empty(), "env.current_dir() should print a path")
+        assert(!out.stderr.contains("E2211"), "E2211 is retired: {out.stderr}")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:574
+#Test("strict_jit_traces_execution_without_fallback") {
+    file :: example_path("basics/hello")
+    dir :: common.unique_tmp("jet_dev_hello_native")
+    fs.create_dir_all(&dir).unwrap()
+    expected :: compiled_binary_output(&dir, "hello", 0, "basics/hello", &file)
+    assert_native_profiles(&file, &expected)
+}
+// Rust: tests/dev_parts/routine.rs:607
+#Test("yielding_and_result_loops_run_in_native_jit_without_fallback") {
+    dir :: common.unique_tmp("jet_dev_loop_values")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("loop_values.jet")
+    source :: """
+fn find(xs: [Int]) -> Int {
+    found :: loop {
+        loop x in xs { if x > 2 -> break(found, x) }
+        break -1
+    }
+    found
+}
+fn outer_result() -> Int {
+    result :: loop {
+        ignored :: loop { break(result, 9) }
+        break 0
+    }
+    result
+}
+fn identity(value: Int) -> Int { value }
+fn nested_binary_exit() -> Int {
+    result :: loop {
+        ignored :: (loop {
+            break(result, 11)
+            break 1
+        }) + 2
+        break 0
+    }
+    result
+}
+fn nested_call_exit() -> Int {
+    result :: loop {
+        ignored :: identity(loop {
+            break(result, 12)
+            break 1
+        })
+        break 0
+    }
+    result
+}
+fn nested_condition_exit() -> Int {
+    result :: loop {
+        if (loop {
+            break(result, 13)
+            break 1
+        }) > 0 { break 0 }
+        break -1
+    }
+    result
+}
+fn counted_init_exit() -> Int {
+    result :: loop {
+        loop i := (loop {
+            break(result, 14)
+            break 0
+        }), i < 1 { i += 1 }
+        break 0
+    }
+    result
+}
+fn counted_step_exit() -> Int {
+    result :: loop {
+        loop i := 0, i < 2 {
+            i = (loop {
+                break(result, 15)
+                break 0
+            })
+        }
+        break 0
+    }
+    result
+}
+fn value_if_exit() -> Int {
+    result :: loop {
+        ignored :: if true -> {
+            break(result, 16)
+            0
+        } else -> 0
+        break 0
+    }
+    result
+}
+fn run() {
+    xs :: [Int]{ 1, 2, 3, 4 }
+    doubled :: loop x in xs -> x * 2
+    outer :: loop x in xs {
+        ignored :: loop {
+            if x == 1 -> next(outer)
+            if x == 2 -> break(outer)
+            break 0
+        }
+        print(ignored)
+    }
+    print(find(xs))
+    print(doubled)
+    print(outer_result())
+    print(nested_binary_exit())
+    print(nested_call_exit())
+    print(nested_condition_exit())
+    print(counted_init_exit())
+    print(counted_step_exit())
+    print(value_if_exit())
+}
+"""
+    fs.write(&file, source).unwrap()
+    bundle := jet.Loader.load_entry(file.to_str().unwrap()).expect("loop-value bundle should load")
+    errors :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run).into_iter().filter(fn(diag) { diag.severity == jet.Diagnostics.Severity.Error }).collect()
+    assert(errors.is_empty(), "loop-value bundle must type-check: {errors:?}")
+    assert_native_profiles(file.to_str().unwrap(), &ProgramOutput.ran("3\n[2, 4, 6, 8]\n9\n11\n12\n13\n14\n15\n16\n", "", 0))
+    tir_support.assert_tiers_agree("loop_values", source, "3\n[2, 4, 6, 8]\n9\n11\n12\n13\n14\n15\n16\n")
+}
+// Rust: tests/dev_parts/routine.rs:777
+#Test("value_loop_named_routes_match_interpreter_default_jit_and_aot") {
+    _guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    dir :: common.unique_tmp("jet_dev_value_loop_routes")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("value_loop_routes.jet")
+    source :: """
+fn run() {
+    attempts := 0
+    retry :: loop {
+        attempts += 1
+        found :: loop value in [1] {
+            if attempts == 2 { break value }
+        } ?? next(retry)
+        print(found)
+        break(retry)
+    }
+    stop :: loop {
+        ignored :: loop value in [1] {
+            if value == 2 { break value }
+        } ?? break(stop)
+        print(ignored)
+    }
+    print("done")
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    expected :: ProgramOutput.ran("1\ndone\n", "", 0)
+    aot :: compiled_binary_output(&dir, "value_loop_routes", 0, "value_loop_routes", &shown)
+    assert_eq(aot, expected, "AOT value-loop route drift")
+    assert_native_profiles(&shown, &expected)
+    tir_support.assert_tiers_agree("value_loop_routes", source, "1\ndone\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:847
+#Test("string_field_compound_append_matches_interpreter_default_jit_and_aot") {
+    _guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    dir :: common.unique_tmp("jet_dev_string_field_compound")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("string_field_compound.jet")
+    source :: "struct Packet {\n    source: String\n    fn append(&self) {\n        self.source += \"AAA\"\n    }\n}\nfn run() {\n    p := Packet{ source: \"base\" }\n    p.append()\n    print(p.source)\n}\n"
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().into_owned()
+    expected :: ProgramOutput.ran("baseAAA\n", "", 0)
+    aot :: compiled_binary_output(&dir, "string_field_compound", 0, "string_field_compound", &shown)
+    assert_eq(aot, expected, "String field AOT route drift")
+    assert_native_profiles(&shown, &expected)
+    tir_support.assert_tiers_agree("string_field_compound", source, "baseAAA\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:907
+#Test("one_shot_dev_deopts_on_jit_gap") {
+    dir :: common.unique_tmp("jet_dev_one_shot_deopt")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("gap.jet")
+    fs.write(&file, "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n").unwrap()
+    output :: Command.new(common.jet_bin()).args(["dev", file.to_str().unwrap(), "--watch=off"]).env("NO_COLOR", "1").output().expect("one-shot jet dev")
+    assert_eq(output.status.code(), .Some(0), "stderr={String.from_utf8_lossy(&output.stderr)}")
+    combined :: "{String.from_utf8_lossy(&output.stdout)}{String.from_utf8_lossy(&output.stderr)}"
+    assert(!combined.contains("E2211"), "retired E2211 must not appear: {combined}")
+    assert(!String.from_utf8_lossy(&output.stdout).trim().is_empty(), "env.current_dir() should print a path: {combined}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:945
+#Test("watching_dev_deopts_on_gap_edit_and_recovers") {
+    dir :: env.temp_dir().join("jet_watch_deopt_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("watch_gap.jet")
+    fs.write(&file, "fn run() {\n    print(\"ok1\")\n}\n").unwrap()
+    shown :: file.to_string_lossy().to_string()
+    child := Command.new(common.jet_bin()).args(["dev", &shown]).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn watching jet dev")
+    thread.sleep(Duration.from_millis(800))
+    fs.write(&file, "use core.sys as env\nfn run() {\n    print(env.current_dir())\n}\n").unwrap()
+    thread.sleep(Duration.from_millis(800))
+    fs.write(&file, "fn run() {\n    print(\"ok2\")\n}\n").unwrap()
+    thread.sleep(Duration.from_millis(800))
+    _ :: child.kill()
+    out :: child.wait_with_output().expect("watching jet dev output")
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stdout.contains("ok1"), "stdout:\n{stdout}")
+    assert(!stderr.contains("E2211") && !stdout.contains("E2211"), "retired E2211 must not appear\nstdout:\n{stdout}\nstderr:\n{stderr}")
+    assert(stdout.contains("ok2"), "stdout:\n{stdout}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:993
+#Test("persist_example_survives_hot_reload") {
+    root :: OSPath(env!("CARGO_MANIFEST_DIR"))
+    source :: root.join("Examples/features/devloop/persist.jet")
+    dir :: common.unique_tmp("jet_dev_persist_example")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("persist.jet")
+    original :: fs.read(&source).unwrap()
+    fs.write(&file, &original).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    child := Command.new(common.jet_bin()).args(["dev", &shown, "--swap"]).env("NO_COLOR", "1").stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("spawn persist example jet dev")
+    stdout :: child.stdout.take().unwrap()
+    (lines_tx, lines_rx) :: mpsc.channel()
+    _ :: thread.spawn(fn[^stdout, ^lines_tx]() {
+        loop line in BufReader.new(stdout).lines() {
+            if lines_tx.send(line).is_err() -> break
+        }
+    })
+    wait_for :: fn(expected: &String) {
+        loop {
+            line :: lines_rx.recv_timeout(Duration.from_secs(30)).expect("persist example output").expect("persist example stdout line")
+            if line == expected -> break
+        }
+    }
+    wait_for("1")
+    compatible :: String.from_utf8(original.clone()).unwrap().replace("print(\"{counter}\")", "print(\"count={counter}\")")
+    fs.write(&file, compatible).unwrap()
+    wait_for("count=2")
+    shape_changed :: String.from_utf8(original).unwrap().replace("#Persist counter := 0", "#Persist counter := 0.0").replace("print(\"{counter}\")", "print(\"count={counter}\")")
+    fs.write(&file, shape_changed).unwrap()
+    wait_for("count=1.0")
+    _ :: child.kill()
+    _ :: child.wait_with_output().expect("stop persist example jet dev")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1055
+#Test("dev_default_runs_auth_verification_resident") {
+    dir :: env.temp_dir().join("jet_dev_auth_resident_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("auth_resident.jet")
+    fs.write(&file, """
+use core.auth as auth
+fn run() {
+    key :: [U8]{ 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102, 48, 49, 50, 51, 52, 53, 54, 55, 56, 57, 97, 98, 99, 100, 101, 102 }
+    token := "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhbGljZSIsImF1ZCI6ImdhdGV3YXkiLCJpc3MiOiJwYXJ0bmVyIiwiZXhwIjo0MTAyNDQ0ODAwLCJpYXQiOjE3MDAwMDAwMDB9.3gbnbn_u-GjiQuGusiLrnMUzlo5c9rPeqAO0iWZxhrY"
+    claims :: auth.verify_jwt(token, key: key, audience: "gateway") ?? panic("verification failed")
+    print(claims.audience)
+}
+""").unwrap()
+    shown :: file.to_string_lossy().to_string()
+    loop profile in ["debug", "dev", "release"] {
+        output :: native_profile_output(&shown, profile)
+        assert_eq(output.stdout.trim(), "gateway")
+        assert_eq(output.stderr, "")
+        assert_eq(output.exit_code, 0)
+    }
+    expected :: compiled_binary_output(&dir, "auth_resident", 0, "auth_resident", &shown)
+    assert_eq(expected.stdout.trim(), "gateway")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1115
+#Test("place_split_planner_preserves_order_and_nested_owners") {
+    dir :: env.temp_dir().join("jet_place_split_planner_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("place_split.jet")
+    source :: """
+struct Holder { values: [Int] }
+fn run() {
+    values := [1, 2, 3, 4]
+    first :: &values[0]
+    print("between root")
+    last :: &values[3]
+    first = 8
+    last = 9
+    print("root: {first},{last}")
+    adjacent := Holder{ values: [10, 11, 12, 13] }
+    adjacent_first :: &adjacent.values[0..1]
+    adjacent_last :: &adjacent.values[2..3]
+    adjacent_first[0] = 18
+    adjacent_last[0] = 19
+    print("nested adjacent: {adjacent_first[0]},{adjacent_last[0]}")
+    interleaved := Holder{ values: [20, 21, 22, 23] }
+    interleaved_first :: &interleaved.values[0..1]
+    print("between nested")
+    interleaved_last :: &interleaved.values[2..3]
+    interleaved_first[0] = 28
+    interleaved_last[0] = 29
+    print("nested interleaved: {interleaved_first[0]},{interleaved_last[0]}")
+    reused := [30, 31]
+    reused_first :: &reused[0]
+    reused_bridge :: &reused[1]
+    print("reuse first: {reused_first}")
+    reused_again :: &reused[0]
+    reused_bridge = 38
+    reused_again = 39
+    print("reuse final: {reused_again},{reused_bridge}")
+    replaced := [40, 41]
+    before_replace :: &replaced[0]
+    print("before replace: {before_replace}")
+    replaced = [42, 43]
+    after_replace :: &replaced[1]
+    #DebugOnly { print("unrelated debug") }
+    after_replace = 49
+    print("after replace: {after_replace}")
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    expected :: compiled_binary_output(&dir, "place_split", 0, "place_split", &shown)
+    assert_eq(expected.stdout, "between root\nroot: 8,9\nnested adjacent: 18,19\nbetween nested\nnested interleaved: 28,29\nreuse first: 30\nreuse final: 39,38\nbefore replace: 40\nunrelated debug\nafter replace: 49\n")
+    // Debug-only observation differs by optimization profile; compare retained O0.
+    assert_eq(native_profile_output(&shown, "debug"), expected)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1182
+#Test("returned_parameter_view_matches_aot_and_default_dev") {
+    dir :: env.temp_dir().join("jet_returned_parameter_view_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("returned_parameter_view.jet")
+    source :: """
+fn first(left: [Int], right: [Int]) -> View<Int> { return left[0..1] }
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    result :: first(left, right)
+    print(result[0])
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(&dir, "returned_parameter_view", 0, "returned_parameter_view", &shown)
+    assert_eq(aot.stdout, "7\n")
+    assert_native_profiles(&shown, &aot)
+    tir_support.assert_tiers_agree("returned_parameter_view", source, "7\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1222
+#Test("returned_view_field_matches_aot_and_default_dev") {
+    dir :: env.temp_dir().join("jet_returned_view_field_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("returned_view_field.jet")
+    source :: """
+struct Window { values: View<Int> }
+fn window(values: [Int]) -> Window {
+    selected :: values[0..1]
+    return Window{ values: selected }
+}
+fn run() {
+    values := [7, 8]
+    result :: window(values)
+    print(result.values[0])
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(&dir, "returned_view_field", 0, "returned_view_field", &shown)
+    assert_eq(aot.stdout, "7\n")
+    assert_native_profiles(&shown, &aot)
+    tir_support.assert_tiers_agree("returned_view_field", source, "7\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1261
+#Test("nested_returned_view_field_matches_aot_and_default_dev") {
+    dir :: env.temp_dir().join("jet_nested_returned_view_field_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("nested_returned_view_field.jet")
+    source :: """
+struct Inner { values: View<Int> }
+struct Outer { inner: Inner }
+fn outer(values: [Int]) -> Outer {
+    selected :: values[0..1]
+    return Outer{ inner: Inner{ values: selected } }
+}
+fn run() {
+    values := [7, 8]
+    result :: outer(values)
+    print(result.inner.values[0])
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(&dir, "nested_returned_view_field", 0, "nested_returned_view_field", &shown)
+    assert_eq(aot.stdout, "7\n")
+    assert_native_profiles(&shown, &aot)
+    tir_support.assert_tiers_agree("nested_returned_view_field", source, "7\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1304
+#Test("wrapped_returned_view_fields_match_aot_and_default_dev") {
+    dir :: env.temp_dir().join("jet_wrapped_returned_view_fields_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("wrapped_returned_view_fields.jet")
+    source :: """
+struct Window { values: View<Int> }
+struct Holder { maybe: Window? }
+struct GenericHolder<T> { value: T, maybe: Window? }
+struct Node { next: Node?, values: View<Int> }
+fn maybe(values: [Int]) -> (Window?) {
+    selected :: values[0..1]
+    return Val(Window{ values: selected })
+}
+fn result(values: [Int]) -> Window String! {
+    selected :: values[0..1]
+    return Ok(Window{ values: selected })
+}
+fn tuple(values: [Int]) -> (window: Window, count: Int) {
+    selected :: values[0..1]
+    return (window: Window{ values: selected }, count: 1)
+}
+fn node(values: [Int]) -> Node {
+    selected :: values[0..1]
+    return Node{ next: None, values: selected }
+}
+fn run() { print(0) }
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(&dir, "wrapped_returned_view_fields", 0, "wrapped_returned_view_fields", &shown)
+    assert_eq(aot.stdout, "0\n")
+    assert_native_profiles(&shown, &aot)
+    tir_support.assert_tiers_agree("wrapped_returned_view_fields", source, "0\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1360
+#Test("returned_string_view_field_matches_all_execution_tiers") {
+    dir :: env.temp_dir().join("jet_returned_string_view_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("returned_string_view.jet")
+    source :: """
+struct Parsed { source: String, head: View<str> }
+fn parse(source: String) -> Parsed {
+    head :: source.before(":")
+    return Parsed{ source: source, head: head }
+}
+fn run() {
+    left := "name"
+    right := "value"
+    source := "{left}:{right}"
+    result :: parse(source)
+    print(result.head)
+    print("wrapped: {result.head}")
+    expected :: "name"
+    print("wrapped: {expected}")
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(&dir, "returned_string_view", 0, "returned_string_view", &shown)
+    expected :: ProgramOutput.ran("name\nwrapped: name\nwrapped: name\n", "", 0)
+    assert_eq(aot, expected, "AOT View<str> interpolation drifted from String")
+    assert_native_profiles(&shown, &expected)
+    tir_support.assert_tiers_agree("returned_string_view", source, expected.stdout)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1428
+#Test("returned_view_trait_method_matches_aot_and_default_dev") {
+    dir :: env.temp_dir().join("jet_returned_view_trait_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("returned_view_trait.jet")
+    source :: """
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int>
+}
+struct First { marker: Int }
+impl First.Select {
+    fn select(self, left: [Int], right: [Int]) -> View<Int> { return left[0..1] }
+}
+fn wrapper(selector: First, left: [Int], right: [Int]) -> View<Int> {
+    return selector.select(left, right)
+}
+fn run() {
+    selector :: First{ marker: 0 }
+    left := [7, 8]
+    right := [9, 10]
+    result :: wrapper(selector, left, right)
+    print(result[0])
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(&dir, "returned_view_trait", 0, "returned_view_trait", &shown)
+    assert_eq(aot.stdout, "7\n")
+    assert_native_profiles(&shown, &aot)
+    tir_support.assert_tiers_agree("returned_view_trait", source, "7\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:1477
+#Test("aggregate_trait_returns_match_aot_and_default_dev_in_both_impl_orders") {
+    template :: """
+struct Pair { left: View<Int>, right: View<Int> }
+struct Envelope<T> { value: T, marker: Int }
+trait Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?)
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String!
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int)
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair>
+}
+fn wrapper(selector: First, left: [Int], right: [Int]) -> Pair {
+    return selector.select(left, right)
+}
+$IMPLS
+fn run() {
+    left := [7, 8]
+    right := [9, 10]
+    pair :: wrapper(First{ marker: 0 }, left, right)
+    print(pair.left[0])
+    print(pair.right[0])
+}
+"""
+    implementation :: fn(name: &String) {
+        """
+struct $TYPE { marker: Int }
+impl $TYPE.Select {
+    fn select(self, left: [Int], right: [Int]) -> Pair {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Pair{ left: left_view, right: right_view }
+    }
+    fn optional(self, left: [Int], right: [Int]) -> (Pair?) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Val(Pair{ left: left_view, right: right_view })
+    }
+    fn fallible(self, left: [Int], right: [Int]) -> Pair String! {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Ok(Pair{ left: left_view, right: right_view })
+    }
+    fn tupled(self, left: [Int], right: [Int]) -> (pair: Pair, count: Int) {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return (pair: Pair{ left: left_view, right: right_view }, count: 1)
+    }
+    fn generic(self, left: [Int], right: [Int]) -> Envelope<Pair> {
+        left_view :: left[0..1]
+        right_view :: right[0..1]
+        return Envelope<Pair>{value: Pair{ left: left_view, right: right_view }, marker: 0}
+    }
+}
+""".replace("$TYPE", name)
+    }
+    first :: implementation("First")
+    last :: implementation("Last")
+    loop (index, implementations) in ["{first}{last}", "{last}{first}"].iter().enumerate() {
+        dir :: env.temp_dir().join("jet_aggregate_trait_returns_{process.id()}_{index}")
+        fs.create_dir_all(&dir).unwrap()
+        file :: dir.join("aggregate_trait_returns.jet")
+        source :: template.replace("$IMPLS", &implementations)
+        fs.write(&file, source).unwrap()
+        shown :: file.to_string_lossy().to_string()
+        stem :: "aggregate_trait_returns_{index}"
+        aot :: compiled_binary_output(&dir, &stem, 0, &stem, &shown)
+        expected :: ProgramOutput.ran("7\n9\n", "", 0)
+        assert_eq(aot, expected, "AOT aggregate trait return drifted")
+        assert_native_profiles(&shown, &expected)
+        tir_support.assert_tiers_agree(&stem, source, "7\n9\n")
+        _ :: fs.remove_dir_all(&dir)
+    }
+}
+// Rust: tests/dev_parts/routine.rs:1584
+#Test("json_coerce_audit_reports_jit_gap_on_default_dev") {
+    dir :: env.temp_dir().join("jet_dev_json_coerce_fallback_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    stem :: "serde/json_coerce"
+    file :: example_path(stem)
+    front_end :: jet.check_with_path(&file).into_iter().filter(fn(d) { d.severity == jet.Diagnostics.Severity.Error }).collect()
+    assert(front_end.is_empty(), "{stem} must type-check before a runtime boundary means anything; untyped json.decode(text) is the ratified D-JSON3 lenient form: {front_end:?}")
+    expected :: normalize_for_parity(stem, compiled_binary_output(&dir, "json_coerce_aot", 0, stem, &file))
+    assert_eq(expected.stdout, "8081\napi\ntrue\n")
+    assert_eq(expected.exit_code, 0)
+    loop profile in ["debug", "dev", "release"] -> assert_eq(normalize_for_parity(stem, native_profile_output(&file, profile)), expected)
+}
+// Rust: tests/dev_parts/routine.rs:1623
+#Test("dev_default_socket_echo_reports_jit_gap") {
+    if selected_family() != "unix" -> return
+    dir :: common.unique_tmp("jet_dev_socket_echo")
+    fs.create_dir_all(&dir).unwrap()
+    file :: "Examples/features/net/socket_echo.jet"
+    expected :: compiled_binary_output(&dir, "socket_echo", 0, "net/socket_echo", file)
+    assert_native_profiles(file, &expected)
+}
+// Rust: tests/dev_parts/routine.rs:1629
+#Test("dev_default_tls_peer_identity_matches_aot_and_interpreter") {
+    _guard :: lock_recovered(dev_diff_lock(), "dev_diff_lock")
+    scratch :: common.Scratch.new("tls-peer-identity")
+    dir :: scratch.path.as_path()
+    fs.write(dir.join("package.jet"), "name: \"tls_peer_identity\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Net, Time.Wait] } }\n").unwrap()
+    root :: OSPath(env!("CARGO_MANIFEST_DIR"))
+    ca_cert :: root.join("tests/fixtures/tls/localhost.cert.pem")
+    ca_key :: root.join("tests/fixtures/tls/localhost.key.pem")
+    serial :: dir.join("ca.srl")
+    server_cert :: dir.join("server.cert.pem")
+    server_key :: dir.join("server.key.pem")
+    csr :: dir.join("server.csr.pem")
+    ext :: dir.join("server.ext")
+    fs.write(&ext, "basicConstraints=critical,CA:FALSE\nsubjectAltName=DNS:localhost\nextendedKeyUsage=serverAuth\n").unwrap()
+    req :: Command.new("openssl").args(["req", "-new", "-newkey", "rsa:2048", "-nodes", "-subj", "/CN=localhost", "-keyout"]).arg(&server_key).arg("-out").arg(&csr).output().unwrap()
+    assert(req.status.success(), "{String.from_utf8_lossy(&req.stderr)}")
+    sign :: Command.new("openssl").args(["x509", "-req", "-days", "1", "-CAcreateserial", "-CAserial"]).arg(&serial).arg("-CA").arg(&ca_cert).arg("-CAkey").arg(&ca_key).arg("-extfile").arg(&ext).arg("-in").arg(&csr).arg("-out").arg(&server_cert).output().unwrap()
+    assert(sign.status.success(), "{String.from_utf8_lossy(&sign.stderr)}")
+    root_bytes :: fs.read(&ca_cert).unwrap()
+    jet_bytes :: fn(bytes: &[U8]) { bytes.iter().map(fn(byte) { byte.to_string() }).collect().join(", ") }
+    source_for :: fn(port: U16) {
+        roots :: jet_bytes(&root_bytes)
+        """
+use core.net as net
+use core.net.tls as tls
+fn run() {
+    roots :: tls.RootCertificates.from_pem([U8]{ {roots} }) ?? panic("roots")
+    cfg :: tls.ClientConfig.default().with_trust(.CustomOnly(roots)) ?? panic("trust")
+    cfg2 :: cfg.with_version_bounds(min: .TLS13, max: .TLS13) ?? panic("versions")
+    tcp :: net.tcp_connect("127.0.0.1:{port}") ?? panic("tcp")
+    budget :: Duration.seconds(2) ?? panic("deadline")
+    secure := tls.client(^tcp, server_name: "localhost", config: cfg2, deadline: budget) ?? panic("tls")
+    peer :: secure.peer_identity()
+    if peer.verified_server_name != "localhost" { panic("server name") }
+    print(peer.verified_server_name)
+    print(peer.cipher_suite)
+    print(peer.tls_version)
+    if !peer.cipher_suite.starts_with("TLS13_") { panic("cipher") }
+    if peer.tls_version != .TLS13 { panic("version") }
+    crlf :: String.from_bytes([U8]{13, 10}) ?? panic("CRLF")
+    secure.write_text("GET / HTTP/1.0{crlf}Host: localhost{crlf}{crlf}") ?? panic("request")
+    response := ""
+    response_reads := 0
+    loop response_reads < 8 && !response.contains("<HTML>") {
+        chunk :: secure.read_text(512) ?? panic("response")
+        if chunk == "" -> break
+        response = "{response}{chunk}"
+        response_reads = response_reads + 1
+    }
+    if !response.contains("<HTML>") { panic("response body") }
+    print("tls-response-ok")
+    secure.close() ?? panic("close")
+}
+"""
+    }
+    wait_ready :: fn(port: U16) {
+        loop _ in 0..<50 {
+            if TcpStream.connect(("127.0.0.1", port)).is_ok() -> return
+            thread.sleep(Duration.from_millis(50))
+        }
+        panic("openssl TLS 1.3 server did not accept on 127.0.0.1:{port}")
+    }
+    start_server :: fn(port: U16) {
+        server :: TlsServer{child: Command.new("openssl").args(["s_server", "-quiet", "-www", "-tls1_3", "-accept", &port.to_string(), "-cert"]).arg(&server_cert).arg("-key").arg(&server_key).arg("-cert_chain").arg(&ca_cert).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("openssl TLS 1.3 server")}
+        wait_ready(port)
+        server
+    }
+    fresh_port :: fn() {
+        probe :: TcpListener.bind("127.0.0.1:0").unwrap()
+        port :: probe.local_addr().unwrap().port()
+        drop(probe)
+        port
+    }
+    aot_port :: fresh_port()
+    file :: dir.join("tls_peer_identity.jet")
+    fs.write(&file, source_for(aot_port)).unwrap()
+    server :: start_server(aot_port)
+    shown :: file.to_string_lossy().to_string()
+    aot :: compiled_binary_output(dir, "tls_peer_identity_aot", 0, "tls_peer_identity", &shown)
+    drop(server)
+    assert_eq(aot.exit_code, 0, "AOT stderr: {aot.stderr}")
+    loop profile in ["debug", "dev", "release"] {
+        port :: fresh_port()
+        fs.write(&file, source_for(port)).unwrap()
+        server :: start_server(port)
+        output :: native_profile_output(&shown, profile)
+        drop(server)
+        assert_eq(output.stdout, aot.stdout, "{profile} stdout differed from AOT")
+        assert_eq(output.stderr, aot.stderr, "{profile} stderr differed from AOT")
+        assert_eq(output.exit_code, 0, "{profile} stderr: {output.stderr}")
+    }
+    aot_lines := aot.stdout.lines()
+    assert_eq(aot_lines.next(), .Some("localhost"))
+    assert(aot_lines.next().is_some_and(fn(cipher) { cipher.starts_with("TLS13_") }))
+    assert_eq(aot_lines.next(), .Some("TLS13"))
+    assert_eq(aot_lines.next(), .Some("tls-response-ok"))
+    assert_eq(aot_lines.next(), .None)
+}

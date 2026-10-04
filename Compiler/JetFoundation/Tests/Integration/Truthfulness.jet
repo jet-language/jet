@@ -1,2036 +1,507 @@
-// PORT-PENDING 1180 tests-truthfulness: tests/truthfulness.rs:1-2032
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Truthfulness gate (board card c114, P0).
-//RS //!
-//RS //! Asserts currently-true alignments between docs, examples, and the
-//RS //! implementation. Fails if they regress. Gaps that exist today but are
-//RS //! not yet fixed are listed in the ACKNOWLEDGED sets below with comments.
-//RS //!
-//RS //! Run: `cargo test --test truthfulness`
-//RS 
-//RS mod common;
-//RS 
-//RS use std::collections::{BTreeMap, BTreeSet, HashSet};
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS 
-//RS fn root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//RS }
-//RS 
-//RS /// Card #1639 (D-ONCE): the one home for "does this test file bypass the
-//RS /// `have_rustc()` guard" — walks every file under `tests/` instead of a
-//RS /// hardcoded suite list, so a new test file is covered automatically.
-//RS /// `tests/common/mod.rs` and `tests/tir_support/mod.rs` are the two
-//RS /// legitimate homes that define the probe itself; `tests/truthfulness.rs`
-//RS /// is exempt because this function's own source quotes the needles.
-//RS const RUSTC_PROBE_ALLOWED_HOMES: &[&str] = &[
-//RS     "tests/common/mod.rs",
-//RS     "tests/tir_support/mod.rs",
-//RS     "tests/truthfulness.rs",
-//RS ];
-//RS 
-//RS fn collect_rs_files(dir: &Path, files: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         let Ok(metadata) = fs::symlink_metadata(&path) else {
-//RS             continue;
-//RS         };
-//RS         if metadata.file_type().is_symlink() {
-//RS             continue;
-//RS         }
-//RS         if metadata.is_dir() {
-//RS             collect_rs_files(&path, files);
-//RS         } else if path.extension().is_some_and(|extension| extension == "rs") {
-//RS             files.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// Files (relative to `root`) under `tests/` that contain `needle`, ignoring
-//RS /// whitespace (rustfmt can wrap `.arg(...)` onto its own line) and skipping
-//RS /// `RUSTC_PROBE_ALLOWED_HOMES`.
-//RS fn stray_probe_sites(root: &Path, needle: &str) -> Vec<String> {
-//RS     let mut files = Vec::new();
-//RS     collect_rs_files(&root.join("tests"), &mut files);
-//RS     files.sort();
-//RS     let mut findings = Vec::new();
-//RS     for file in files {
-//RS         let relative = file
-//RS             .strip_prefix(root)
-//RS             .expect("scanned file stays beneath repository root")
-//RS             .to_string_lossy()
-//RS             .replace('\\', "/");
-//RS         if RUSTC_PROBE_ALLOWED_HOMES.contains(&relative.as_str()) {
-//RS             continue;
-//RS         }
-//RS         let source = fs::read_to_string(&file).expect("test source is readable");
-//RS         let collapsed: String = source.chars().filter(|c| !c.is_whitespace()).collect();
-//RS         let collapsed_needle: String = needle.chars().filter(|c| !c.is_whitespace()).collect();
-//RS         if collapsed.contains(&collapsed_needle) {
-//RS             findings.push(relative);
-//RS         }
-//RS     }
-//RS     findings
-//RS }
-//RS 
-//RS #[test]
-//RS fn rustc_availability_probes_use_common_helper() {
-//RS     let root = root();
-//RS     let forbidden = [
-//RS         "Command::new(\"rustc\").arg(\"--version\")",
-//RS         "Command::new(\"rustc\").arg(\"-V\")",
-//RS     ];
-//RS     let mut violations = Vec::new();
-//RS     for needle in forbidden {
-//RS         for finding in stray_probe_sites(&root, needle) {
-//RS             violations.push(format!("{finding}: direct `{needle}` availability probe"));
-//RS         }
-//RS     }
-//RS     for suite in ["tests/archive.rs", "tests/regex.rs"] {
-//RS         let source = fs::read_to_string(root.join(suite)).unwrap();
-//RS         let helper = source
-//RS             .split("fn have_toolchain() -> bool {")
-//RS             .nth(1)
-//RS             .and_then(|tail| tail.split_once('}').map(|(body, _)| body))
-//RS             .expect("have_toolchain helper");
-//RS         let rustc_pos = helper.find("have_rustc()").expect("rustc gate");
-//RS         let cargo_pos = helper.find("Command::new(\"cargo\")").expect("cargo probe");
-//RS         if rustc_pos > cargo_pos {
-//RS             violations.push(format!(
-//RS                 "{suite}: have_rustc must run before the cargo probe so JET_REQUIRE_RUSTC=1 cannot short-circuit"
-//RS             ));
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         violations.is_empty(),
-//RS         "rustc availability must use tests/common::have_rustc so JET_REQUIRE_RUSTC cannot be bypassed:\n{}",
-//RS         violations.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn rustc_probe_scanner_detects_a_seeded_stray_probe() {
-//RS     let scratch =
-//RS         std::env::temp_dir().join(format!("jet_rustc_probe_guard_test_{}", std::process::id()));
-//RS     let seed_dir = scratch.join("tests");
-//RS     fs::create_dir_all(&seed_dir).unwrap();
-//RS     fs::write(
-//RS         seed_dir.join("seeded_probe.rs"),
-//RS         "fn f() { Command::new(\"rustc\")\n.arg(\"--version\"); }\n",
-//RS     )
-//RS     .unwrap();
-//RS     let findings = stray_probe_sites(&scratch, "Command::new(\"rustc\").arg(\"--version\")");
-//RS     fs::remove_dir_all(&scratch).unwrap();
-//RS     assert_eq!(findings, vec!["tests/seeded_probe.rs".to_string()]);
-//RS }
-//RS 
-//RS #[test]
-//RS fn llm_digest_regenerates_byte_identically() {
-//RS     let root = root();
-//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["inspect", "digest"])
-//RS         .current_dir(&root)
-//RS         .output()
-//RS         .expect("jet must run the digest command");
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "jet inspect digest failed:\n{}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     assert!(
-//RS         output.stderr.is_empty(),
-//RS         "digest wrote unexpected stderr: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     let generated = String::from_utf8(output.stdout).expect("digest is UTF-8");
-//RS     for registry_row in [
-//RS         "- fn",
-//RS         "- module",
-//RS         "active\tUnsafe\tmarker Unsafe",
-//RS         "E0001\tactive\tjet",
-//RS         "core.term\tReader, Writer",
-//RS     ] {
-//RS         assert!(
-//RS             generated.contains(registry_row),
-//RS             "digest lost registry row: {registry_row}"
-//RS         );
-//RS     }
-//RS 
-//RS     let machine = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["inspect", "digest", "--json"])
-//RS         .current_dir(&root)
-//RS         .output()
-//RS         .expect("jet must emit the digest machine form");
-//RS     assert!(
-//RS         machine.status.success(),
-//RS         "jet inspect digest --json failed:\n{}",
-//RS         String::from_utf8_lossy(&machine.stderr)
-//RS     );
-//RS     let report = jet_foundation::JSON::parse_json(
-//RS         std::str::from_utf8(&machine.stdout)
-//RS             .expect("digest machine output is UTF-8")
-//RS             .trim(),
-//RS     )
-//RS     .expect("digest machine output is JSON");
-//RS     assert_eq!(
-//RS         jet_foundation::JSON::json_get(&report, "schema").and_then(jet_foundation::JSON::json_str),
-//RS         Some("jet.status/v1")
-//RS     );
-//RS     assert_eq!(
-//RS         jet_foundation::JSON::json_get(&report, "action").and_then(jet_foundation::JSON::json_str),
-//RS         Some("inspect.digest")
-//RS     );
-//RS     assert_eq!(
-//RS         jet_foundation::JSON::json_get(&report, "digest")
-//RS             .and_then(|digest| jet_foundation::JSON::json_get(digest, "value"))
-//RS             .and_then(jet_foundation::JSON::json_str),
-//RS         Some(generated.as_str())
-//RS     );
-//RS 
-//RS     let inventory = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["inspect", "digest", "--list-topics"])
-//RS         .current_dir(&root)
-//RS         .output()
-//RS         .expect("jet must list digest topics");
-//RS     assert!(
-//RS         inventory.status.success(),
-//RS         "jet inspect digest --list-topics failed:\n{}",
-//RS         String::from_utf8_lossy(&inventory.stderr)
-//RS     );
-//RS     let topics = String::from_utf8(inventory.stdout)
-//RS         .expect("digest topic inventory is UTF-8")
-//RS         .lines()
-//RS         .map(str::to_string)
-//RS         .collect::<Vec<_>>();
-//RS     assert!(topics.iter().any(|topic| topic == "core.time"));
-//RS     assert!(topics.iter().any(|topic| topic == "diagnostics"));
-//RS     let mut composed = Vec::new();
-//RS     for topic in &topics {
-//RS         let slice = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS             .args(["inspect", "digest", "--topic", topic])
-//RS             .current_dir(&root)
-//RS             .output()
-//RS             .expect("jet must emit each digest topic");
-//RS         assert!(
-//RS             slice.status.success(),
-//RS             "digest topic `{topic}` failed:\n{}",
-//RS             String::from_utf8_lossy(&slice.stderr)
-//RS         );
-//RS         composed.extend_from_slice(&slice.stdout);
-//RS     }
-//RS     assert_eq!(
-//RS         composed,
-//RS         generated.as_bytes(),
-//RS         "digest topic slices drifted"
-//RS     );
-//RS 
-//RS     let unknown = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["inspect", "digest", "--topic", "diagnostcs"])
-//RS         .current_dir(&root)
-//RS         .output()
-//RS         .expect("jet must reject an unknown digest topic");
-//RS     assert!(!unknown.status.success());
-//RS     assert!(
-//RS         String::from_utf8_lossy(&unknown.stderr).contains("diagnostics"),
-//RS         "unknown topic did not name nearest topic:\n{}",
-//RS         String::from_utf8_lossy(&unknown.stderr)
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // ACKNOWLEDGED gaps (pre-existing doc debt, not regressions)
-//RS // ---------------------------------------------------------------------------
-//RS //
-//RS // GAP-2: `Examples/features/expected/test.out` exists with no corresponding
-//RS //        `Examples/features/test.jet` or `Examples/features/test/main.jet`.
-//RS //        The file appears to be an orphan leftover.
-//RS //
-//RS // ---------------------------------------------------------------------------
-//RS // Check 1: Every example *.jet file referenced in Docs/ actually exists
-//RS // ---------------------------------------------------------------------------
-//RS // Applies to current guidance. Audits and unresolved proposals may cite
-//RS // point-in-time example names from older repository layouts.
-//RS const PM_HISTORY_DIRS: [&str; 2] = ["audits", "proposals"];
-//RS 
-//RS #[test]
-//RS fn docs_referenced_examples_exist() {
-//RS     let root = root();
-//RS     let docs_dir = root.join("Docs");
-//RS     let readme = root.join("README.md");
-//RS 
-//RS     let mut doc_content = String::new();
-//RS     if let Ok(s) = fs::read_to_string(&readme) {
-//RS         doc_content.push_str(&s);
-//RS     }
-//RS     let Ok(entries) = fs::read_dir(&docs_dir) else {
-//RS         panic!("Docs/ missing");
-//RS     };
-//RS     let mut entries: Vec<_> = entries.flatten().collect();
-//RS     entries.sort_by_key(|e| e.path());
-//RS     for entry in entries {
-//RS         let path = entry.path();
-//RS         let name = entry.file_name().to_string_lossy().into_owned();
-//RS         if path.is_dir() {
-//RS             if PM_HISTORY_DIRS.contains(&name.as_str()) {
-//RS                 continue;
-//RS             }
-//RS             walk_md(&path, &mut |s| doc_content.push_str(s));
-//RS         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-//RS             if let Ok(s) = fs::read_to_string(&path) {
-//RS                 doc_content.push_str(&s);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut missing: Vec<String> = Vec::new();
-//RS     for cap in extract_example_paths(&doc_content) {
-//RS         let path = root.join(&cap);
-//RS         if !path.exists() {
-//RS             missing.push(cap);
-//RS         }
-//RS     }
-//RS 
-//RS     assert!(
-//RS         missing.is_empty(),
-//RS         "docs reference example files that do not exist:\n{}",
-//RS         missing.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS fn extract_example_paths(text: &str) -> Vec<String> {
-//RS     let prefix = "Examples/features/";
-//RS     let mut out = Vec::new();
-//RS     let mut rest = text;
-//RS     while let Some(pos) = rest.find(prefix) {
-//RS         rest = &rest[pos + prefix.len()..];
-//RS         let end = rest
-//RS             .find(|c: char| !c.is_alphanumeric() && c != '_' && c != '.' && c != '-' && c != '/')
-//RS             .unwrap_or(rest.len());
-//RS         let tail = &rest[..end];
-//RS         if tail.ends_with(".jet") {
-//RS             out.push(format!("{}{}", prefix, tail));
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 4: Every jet subcommand named in README/docs exists in jet-cli's registry
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn readme_subcommands_exist_in_cli() {
-//RS     let root = root();
-//RS     let cli_path = root.join("crates/jet-cli/src/CLI.rs");
-//RS     let cli_src = fs::read_to_string(&cli_path).expect("jet-cli registry missing");
-//RS 
-//RS     // Extract all known command names from the COMMANDS array in CLI.rs
-//RS     let mut known: HashSet<String> = HashSet::new();
-//RS     {
-//RS         let mut rest: &str = &cli_src;
-//RS         while let Some(pos) = rest.find("name: \"") {
-//RS             rest = &rest[pos + 7..];
-//RS             if let Some(end) = rest.find('"') {
-//RS                 known.insert(rest[..end].to_string());
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     // Subcommands the README/docs explicitly name that must exist in the CLI.
-//RS     let required_commands = [
-//RS         "run", "check", "build", "test", "fmt", "fix", "doctor", "publish", "gc",
-//RS     ];
-//RS 
-//RS     let mut missing: Vec<String> = Vec::new();
-//RS     for cmd in required_commands {
-//RS         if !known.contains(cmd) {
-//RS             missing.push(cmd.to_string());
-//RS         }
-//RS     }
-//RS 
-//RS 
-//RS     assert!(
-//RS         missing.is_empty(),
-//RS         "README/docs reference jet subcommands not present in jet-cli's registry:\n{}",
-//RS         missing.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 5: Every executable Examples/features entry has a matching expected
-//RS // output or a canonical harness proof. `expected/` mirrors the <topic>/ tree
-//RS // (D-REPO-EXAMPLES1=A). `package.jet` is a manifest, `run.jet` is the nested
-//RS // entry, and service/browser entries use the same proof paths as their real
-//RS // runners.
-//RS // ---------------------------------------------------------------------------
-//RS fn feature_source_stem(path: &Path, ex_dir: &Path) -> String {
-//RS     path.strip_prefix(ex_dir)
-//RS         .expect("feature path must be below Examples/features")
-//RS         .to_string_lossy()
-//RS         .strip_suffix(".jet")
-//RS         .expect("feature source must use the Jet extension")
-//RS         .replace('\\', "/")
-//RS }
-//RS 
-//RS fn collect_feature_golden_sources(ex_dir: &Path) -> Vec<(PathBuf, String)> {
-//RS     fn visit_project(dir: &Path, ex_dir: &Path, entries: &mut Vec<(PathBuf, String)>) {
-//RS         let Some(name) = dir.file_name().and_then(|name| name.to_str()) else {
-//RS             return;
-//RS         };
-//RS         if name.starts_with('.') || name == "expected" {
-//RS             return;
-//RS         }
-//RS 
-//RS         let run = dir.join("run.jet");
-//RS         if run.is_file() {
-//RS             let stem = dir
-//RS                 .strip_prefix(ex_dir)
-//RS                 .expect("feature project must be below Examples/features")
-//RS                 .to_string_lossy()
-//RS                 .replace('\\', "/");
-//RS             entries.push((run, stem));
-//RS             return;
-//RS         }
-//RS 
-//RS         // A package/workspace without a canonical run entry owns its
-//RS         // descendants; they are modules, build scripts, or member fixtures.
-//RS         if dir.join("package.jet").is_file() || dir.join("workspace.jet").is_file() {
-//RS             return;
-//RS         }
-//RS 
-//RS         let Ok(children) = fs::read_dir(dir) else {
-//RS             return;
-//RS         };
-//RS         for child in children.flatten() {
-//RS             let path = child.path();
-//RS             if path.is_dir() {
-//RS                 visit_project(&path, ex_dir, entries);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let mut entries = Vec::new();
-//RS     let Ok(topics) = fs::read_dir(ex_dir) else {
-//RS         return entries;
-//RS     };
-//RS     for topic in topics.flatten() {
-//RS         let topic_path = topic.path();
-//RS         let Some(topic_name) = topic_path.file_name().and_then(|name| name.to_str()) else {
-//RS             continue;
-//RS         };
-//RS         if !topic_path.is_dir() || topic_name.starts_with('.') || topic_name == "expected" {
-//RS             continue;
-//RS         }
-//RS         let Ok(children) = fs::read_dir(&topic_path) else {
-//RS             continue;
-//RS         };
-//RS         for child in children.flatten() {
-//RS             let path = child.path();
-//RS             if path.is_file()
-//RS                 && path.extension().and_then(|extension| extension.to_str()) == Some("jet")
-//RS                 && path.file_name().and_then(|name| name.to_str()) != Some("package.jet")
-//RS                 && path.file_name().and_then(|name| name.to_str()) != Some("workspace.jet")
-//RS                 && !path
-//RS                     .file_name()
-//RS                     .and_then(|name| name.to_str())
-//RS                     .is_some_and(|name| name.starts_with('.'))
-//RS             {
-//RS                 let stem = feature_source_stem(&path, ex_dir);
-//RS                 entries.push((path, stem));
-//RS             } else if path.is_dir() {
-//RS                 visit_project(&path, ex_dir, &mut entries);
-//RS             }
-//RS         }
-//RS     }
-//RS     entries.sort_by(|left, right| left.1.cmp(&right.1));
-//RS     entries
-//RS }
-//RS 
-//RS /// The same derived service fact used by the golden runner. Service entries
-//RS /// have no terminating stdout golden because they serve until stopped.
-//RS fn example_serves_until_stopped(path: &Path) -> bool {
-//RS     let Some(path) = path.to_str() else {
-//RS         return false;
-//RS     };
-//RS     let Ok(mut bundle) = jet::Loader::load_entry(path) else {
-//RS         return false;
-//RS     };
-//RS     let _ = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     jet::AST::bundle_serves_until_stopped(&bundle)
-//RS }
-//RS 
-//RS #[test]
-//RS fn every_feature_example_has_expected_output() {
-//RS     // FEATURE_CLAIM: claim.examples-spec / expected-output-pairs
-//RS     let root = root();
-//RS     let ex_dir = root.join("Examples/features");
-//RS     let expected_dir = ex_dir.join("expected");
-//RS 
-//RS     let mut missing: Vec<String> = Vec::new();
-//RS 
-//RS     let web_build = fs::read_to_string(root.join("tests/web_build.rs")).unwrap();
-//RS 
-//RS     for (path, stem) in collect_feature_golden_sources(&ex_dir) {
-//RS         let source = fs::read_to_string(&path).unwrap();
-//RS         let out = expected_dir.join(format!("{stem}.out"));
-//RS         let errout = expected_dir.join(format!("{stem}.err.out"));
-//RS         let stderrout = expected_dir.join(format!("{stem}.stderr.out"));
-//RS         let webout = expected_dir.join(format!("{stem}.web.out"));
-//RS         let harnessout = expected_dir.join(format!("{stem}.harness.out"));
-//RS         let is_service = example_serves_until_stopped(&path);
-//RS         let is_web_harness = stem == "web/web_compute_webgpu"
-//RS             && source.contains("#Target(JS)")
-//RS             && web_build.contains(
-//RS                 "include_str!(\"../Examples/features/web/web_compute_webgpu.jet\")",
-//RS             );
-//RS         if !out.is_file()
-//RS             && !errout.is_file()
-//RS             && !stderrout.is_file()
-//RS             && !webout.is_file()
-//RS             && !harnessout.is_file()
-//RS             && !is_service
-//RS             && !is_web_harness
-//RS         {
-//RS             let source_name = if path.file_name().and_then(|name| name.to_str()) == Some("run.jet")
-//RS             {
-//RS                 format!("Examples/features/{stem}/run.jet")
-//RS             } else {
-//RS                 format!("Examples/features/{stem}.jet")
-//RS             };
-//RS             missing.push(format!(
-//RS                 "{source_name} → missing expected output or canonical harness proof"
-//RS             ));
-//RS         }
-//RS     }
-//RS 
-//RS     assert!(
-//RS         missing.is_empty(),
-//RS         "feature examples without a matching expected output:\n{}",
-//RS         missing.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[derive(Debug, Clone, Copy)]
-//RS struct SurfaceUse {
-//RS     name: &'static str,
-//RS     spelling: &'static str,
-//RS }
-//RS 
-//RS /// These are the user-facing capability bits retained in AST, not derived
-//RS /// bookkeeping such as ownership facts or lowering scratch flags. A new
-//RS /// capability field must add one row here so its example reachability is
-//RS /// visible in the same guard as marker reachability.
-//RS const AST_CAPABILITY_SURFACES: &[SurfaceUse] = &[
-//RS     SurfaceUse {
-//RS         name: "is_package_pub",
-//RS         spelling: "pub(package)",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_unsafe",
-//RS         spelling: "#Unsafe",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_pure",
-//RS         spelling: "-[]>",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_sanitizer",
-//RS         spelling: "#Sanitizer",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_reactive",
-//RS         spelling: "#Reactive",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_replayable",
-//RS         spelling: "#Replayable",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_job",
-//RS         spelling: "#Job",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_must_use",
-//RS         spelling: "#MustUse",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_inline",
-//RS         spelling: "#Inline",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Func::is_inline_always",
-//RS         spelling: "#Inline(Always)",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "StructDef::is_published_schema",
-//RS         spelling: "#PublishedSchema",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "StructDef/EnumDef::is_single_use",
-//RS         spelling: "#SingleUse",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "StructDef/EnumDef::is_must_use",
-//RS         spelling: "#MustUse",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "Field::redact",
-//RS         spelling: "#Redact",
-//RS     },
-//RS     SurfaceUse {
-//RS         name: "ConstDef::is_persist",
-//RS         spelling: "#Persist",
-//RS     },
-//RS ];
-//RS 
-//RS /// Current zero-use marker inventory. Each row has a card or retirement
-//RS /// disposition; the set comparison below is the CI ratchet that rejects a
-//RS /// new zero-use marker and rejects stale inventory rows.
-//RS const MARKER_ZERO_USE_TRIAGE: &[(&str, &str)] = &[
-//RS     ("Replayable", "card #349"),
-//RS     ("Undo", "card #1820"),
-//RS     ("Close", "card #1893"),
-//RS     ("Error", "cards #2172/#2175"),
-//RS     ("Encode", "card #1830"),
-//RS     ("Equatable", "card #1300"),
-//RS     ("CodableAsBase", "card #1830"),
-//RS     ("DenyUnknownFields", "card #1818"),
-//RS     ("Discriminant", "card #1300"),
-//RS     ("Untagged", "card #1830"),
-//RS     ("Flatten", "card #1830"),
-//RS     ("Flag", "card #1277"),
-//RS     ("Local", "card #1459"),
-//RS     ("Shared", "card #1561"),
-//RS     ("allow", "card #1748"),
-//RS     ("wire", "card #1830"),
-//RS ];
-//RS 
-//RS const AST_ZERO_USE_TRIAGE: &[(&str, &str)] = &[
-//RS     ("Func::is_replayable", "card #349"),
-//RS     ("Func::is_sanitizer", "retired source surface; card #1459"),
-//RS ];
-//RS 
-//RS fn collect_feature_jet_files(dir: &Path, files: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             if path.file_name().and_then(|name| name.to_str()) != Some("expected") {
-//RS                 collect_feature_jet_files(&path, files);
-//RS             }
-//RS         } else if path.extension().and_then(|extension| extension.to_str()) == Some("jet") {
-//RS             files.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn strip_jet_comments_and_strings(source: &str) -> String {
-//RS     enum Mode {
-//RS         Normal,
-//RS         LineComment,
-//RS         BlockComment(usize),
-//RS         String { quote: char, triple: bool },
-//RS     }
-//RS 
-//RS     let mut mode = Mode::Normal;
-//RS     let mut chars = source.chars().peekable();
-//RS     let mut clean = String::with_capacity(source.len());
-//RS 
-//RS     while let Some(ch) = chars.next() {
-//RS         match &mut mode {
-//RS             Mode::Normal => match ch {
-//RS                 '/' if chars.peek() == Some(&'/') => {
-//RS                     chars.next();
-//RS                     mode = Mode::LineComment;
-//RS                     clean.push(' ');
-//RS                 }
-//RS                 '/' if chars.peek() == Some(&'*') => {
-//RS                     chars.next();
-//RS                     mode = Mode::BlockComment(1);
-//RS                     clean.push(' ');
-//RS                 }
-//RS                 '"' => {
-//RS                     let triple = if chars.peek() == Some(&'"') {
-//RS                         let mut lookahead = chars.clone();
-//RS                         lookahead.next();
-//RS                         lookahead.peek() == Some(&'"')
-//RS                     } else {
-//RS                         false
-//RS                     };
-//RS                     if triple {
-//RS                         chars.next();
-//RS                         chars.next();
-//RS                     }
-//RS                     mode = Mode::String {
-//RS                         quote: '"',
-//RS                         triple,
-//RS                     };
-//RS                     clean.push(' ');
-//RS                 }
-//RS                 '\'' => {
-//RS                     mode = Mode::String {
-//RS                         quote: '\'',
-//RS                         triple: false,
-//RS                     };
-//RS                     clean.push(' ');
-//RS                 }
-//RS                 _ => clean.push(ch),
-//RS             },
-//RS             Mode::LineComment => {
-//RS                 if ch == '\n' {
-//RS                     mode = Mode::Normal;
-//RS                     clean.push('\n');
-//RS                 }
-//RS             }
-//RS             Mode::BlockComment(depth) => {
-//RS                 if ch == '/' && chars.peek() == Some(&'*') {
-//RS                     chars.next();
-//RS                     *depth += 1;
-//RS                 } else if ch == '*' && chars.peek() == Some(&'/') {
-//RS                     chars.next();
-//RS                     *depth -= 1;
-//RS                     if *depth == 0 {
-//RS                         mode = Mode::Normal;
-//RS                     }
-//RS                 } else if ch == '\n' {
-//RS                     clean.push('\n');
-//RS                 }
-//RS             }
-//RS             Mode::String { quote, triple } => {
-//RS                 if ch == '\\' {
-//RS                     chars.next();
-//RS                 } else if ch == *quote {
-//RS                     if *triple {
-//RS                         if chars.peek() == Some(&'"') {
-//RS                             chars.next();
-//RS                             if chars.peek() == Some(&'"') {
-//RS                                 chars.next();
-//RS                                 mode = Mode::Normal;
-//RS                             }
-//RS                         }
-//RS                     } else {
-//RS                         mode = Mode::Normal;
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS     clean
-//RS }
-//RS 
-//RS fn marker_used(clean_source: &str, name: &str) -> bool {
-//RS     let needle = format!("#{name}");
-//RS     if clean_source.match_indices(&needle).any(|(offset, _)| {
-//RS         let before = clean_source[..offset].chars().next_back();
-//RS         let after = clean_source[offset + needle.len()..].chars().next();
-//RS         !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-//RS             && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-//RS     }) {
-//RS         return true;
-//RS     }
-//RS 
-//RS     // Type markers use the bracket list form: `#[Codable, RenameAll(camel)]`.
-//RS     // Count positive entries only; `!Equatable` demonstrates opt-out syntax,
-//RS     // not a corpus example of the Equatable capability itself.
-//RS     clean_source.match_indices("#[").any(|(offset, _)| {
-//RS         let list_start = offset + 2;
-//RS         let mut nested = 0;
-//RS         let list_end = clean_source[list_start..]
-//RS             .char_indices()
-//RS             .find_map(|(relative, ch)| match ch {
-//RS                 '[' => {
-//RS                     nested += 1;
-//RS                     None
-//RS                 }
-//RS                 ']' if nested == 0 => Some(list_start + relative),
-//RS                 ']' => {
-//RS                     nested -= 1;
-//RS                     None
-//RS                 }
-//RS                 _ => None,
-//RS             })
-//RS             .unwrap_or(clean_source.len());
-//RS         clean_source[list_start..list_end]
-//RS             .split(',')
-//RS             .map(str::trim)
-//RS             .filter(|entry| !entry.starts_with('!'))
-//RS             .map(|entry| {
-//RS                 entry
-//RS                     .split(|ch: char| ch == '(' || ch == ':' || ch.is_ascii_whitespace())
-//RS                     .next()
-//RS                     .unwrap_or("")
-//RS             })
-//RS             .any(|entry| entry == name)
-//RS     })
-//RS }
-//RS 
-//RS fn surface_used(clean_source: &str, spelling: &str) -> bool {
-//RS     if let Some(name) = spelling.strip_prefix('#') {
-//RS         marker_used(clean_source, name)
-//RS     } else {
-//RS         clean_source.contains(spelling)
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn ast_capabilities_and_active_markers_have_zero_use_inventories() {
-//RS     use jet_foundation::Policy::RuleStatus;
-//RS 
-//RS     let mut files = Vec::new();
-//RS     collect_feature_jet_files(&root().join("Examples/features"), &mut files);
-//RS     files.sort();
-//RS     let clean_sources: Vec<String> = files
-//RS         .iter()
-//RS         .map(|path| {
-//RS             strip_jet_comments_and_strings(
-//RS                 &fs::read_to_string(path).expect("feature source is readable"),
-//RS             )
-//RS         })
-//RS         .collect();
-//RS 
-//RS     let mut marker_use: BTreeMap<&str, bool> = BTreeMap::new();
-//RS     for row in jet_foundation::Registry::marker_rows() {
-//RS         let Some(rule) = row.rule else {
-//RS             continue;
-//RS         };
-//RS         if !matches!(rule.status, RuleStatus::Active) {
-//RS             continue;
-//RS         }
-//RS         marker_use.insert(
-//RS             rule.name,
-//RS             clean_sources.iter().any(|source| marker_used(source, rule.name)),
-//RS         );
-//RS     }
-//RS     let marker_zero: BTreeSet<_> = marker_use
-//RS         .iter()
-//RS         .filter_map(|(name, used)| (!used).then_some((*name).to_string()))
-//RS         .collect();
-//RS     let marker_triage: BTreeSet<_> = MARKER_ZERO_USE_TRIAGE
-//RS         .iter()
-//RS         .map(|(name, _)| (*name).to_string())
-//RS         .collect();
-//RS     assert_eq!(
-//RS         marker_zero, marker_triage,
-//RS         "active marker zero-use inventory changed; add a card/retirement row before adding or removing a marker"
-//RS     );
-//RS     for (name, disposition) in MARKER_ZERO_USE_TRIAGE {
-//RS         assert!(
-//RS             (*disposition).contains("card #") || (*disposition).contains("retired"),
-//RS             "marker #{name} has no triage disposition: {disposition}"
-//RS         );
-//RS     }
-//RS 
-//RS     let ast_zero: BTreeSet<_> = AST_CAPABILITY_SURFACES
-//RS         .iter()
-//RS         .filter_map(|surface| {
-//RS             (!clean_sources
-//RS                 .iter()
-//RS                 .any(|source| surface_used(source, surface.spelling)))
-//RS             .then_some(surface.name.to_string())
-//RS         })
-//RS         .collect();
-//RS     let ast_triage: BTreeSet<_> = AST_ZERO_USE_TRIAGE
-//RS         .iter()
-//RS         .map(|(name, _)| (*name).to_string())
-//RS         .collect();
-//RS     assert_eq!(
-//RS         ast_zero, ast_triage,
-//RS         "AST capability zero-use inventory changed; add a card/retirement row before adding or removing a capability"
-//RS     );
-//RS     for (name, disposition) in AST_ZERO_USE_TRIAGE {
-//RS         assert!(
-//RS             (*disposition).contains("card #") || (*disposition).contains("retired"),
-//RS             "AST capability {name} has no triage disposition: {disposition}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 6: Cargo.toml and flake.nix agree on the version
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn cargo_and_flake_versions_match() {
-//RS     let root = root();
-//RS 
-//RS     let cargo = fs::read_to_string(root.join("Cargo.toml")).expect("Cargo.toml missing");
-//RS     let flake = fs::read_to_string(root.join("flake.nix")).expect("flake.nix missing");
-//RS 
-//RS     let cargo_version = cargo
-//RS         .lines()
-//RS         .find(|l| l.starts_with("version"))
-//RS         .and_then(|l| l.split('"').nth(1))
-//RS         .expect("version not found in Cargo.toml");
-//RS 
-//RS     // flake.nix has `version = "x.y.z";` inside the buildRustPackage block
-//RS     let flake_version = flake
-//RS         .lines()
-//RS         .find(|l| l.contains("version = \"") && !l.trim_start().starts_with('#'))
-//RS         .and_then(|l| l.split('"').nth(1))
-//RS         .expect("version not found in flake.nix");
-//RS 
-//RS     assert_eq!(
-//RS         cargo_version, flake_version,
-//RS         "Cargo.toml version ({}) and flake.nix version ({}) do not match",
-//RS         cargo_version, flake_version
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 7: jet-cli owns the only in-code CLI command registry
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn cli_rs_is_declared_module() {
-//RS     let root = root();
-//RS     let lib_src = fs::read_to_string(root.join("Source/lib.rs")).expect("Source/lib.rs missing");
-//RS     assert!(
-//RS         lib_src.contains("pub use jet_cli::{CLI, Explain, Help};"),
-//RS         "Source/lib.rs must re-export the real jet-cli seam"
-//RS     );
-//RS     assert!(
-//RS         !lib_src.contains("mod CLISpec;"),
-//RS         "Source/lib.rs declares mod CLISpec — jet-cli owns the only CLI registry"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn cli_has_no_second_command_registry() {
-//RS     let root = root();
-//RS     assert!(
-//RS         !root.join("Source/CLISpec.rs").exists(),
-//RS         "Source/CLISpec.rs must not exist — jet-cli owns the single CLI registry"
-//RS     );
-//RS 
-//RS     let mut registries = Vec::new();
-//RS     for path in rs_files(&root.join("Source"))
-//RS         .into_iter()
-//RS         .chain(rs_files(&root.join("crates/jet-cli/src")))
-//RS     {
-//RS         if path.extension().and_then(|x| x.to_str()) != Some("rs") {
-//RS             continue;
-//RS         }
-//RS         let text = fs::read_to_string(&path).unwrap_or_default();
-//RS         if text.contains("pub const COMMANDS: &[CommandSpec]") {
-//RS             registries.push(path.strip_prefix(&root).unwrap().display().to_string());
-//RS         }
-//RS     }
-//RS     assert_eq!(
-//RS         registries,
-//RS         vec!["crates/jet-cli/src/CLI.rs".to_string()],
-//RS         "found a second CLI command registry:\n{}",
-//RS         registries.join("\n")
-//RS     );
-//RS 
-//RS     let main_src = fs::read_to_string(root.join("Source/main.rs")).expect("Source/main.rs missing");
-//RS     assert!(
-//RS         !main_src.contains("let known ="),
-//RS         "Source/main.rs must not rebuild the command registry; use jet::CLI::is_builtin"
-//RS     );
-//RS     assert!(
-//RS         main_src.contains("jet::CLI::is_builtin(cmd)"),
-//RS         "Source/main.rs should dispatch unknown-command checks through jet-cli"
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 8: Compiler seam crates stay dependency-clean (I6)
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn compiler_seam_crates_have_only_path_dependencies() {
-//RS     // I6 pin (card #447 / durability W2): enumerate crates/ instead of a
-//RS     // hardcoded allowlist, so a new crate is never invisible to this check.
-//RS     // Any crate below not named in EXEMPTIONS is a compiler seam and must
-//RS     // stay path-dependency-only. Exemptions require an owner-ratified
-//RS     // decision ID cited in a comment directly above the dependency line;
-//RS     // each cited ID is cross-checked against Docs/spec/syntax-decisions.md's
-//RS     // Ratified section so an exemption can never quietly outlive its
-//RS     // ratification (or cite an ID that was never ratified).
-//RS     const EXEMPTIONS: &[(&str, &[&str])] = &[
-//RS         // Root package: test-only rustls lifecycle HTTPS e2e (D-DEP1).
-//RS         ("<root>", &["D-DEP1"]),
-//RS         ("jet-jit", &["D-JITDEP1", "D-JIT2", "D-DEP1"]),
-//RS         ("jet-net", &["D-DEP1"]),
-//RS         ("jetpack", &["D-DEP-CRYPTO1=A", "D-CODECS1"]),
-//RS         // D-DX5-HOOK1: compiler-extension Wasmtime host runs only in the
-//RS         // sibling binary package; jetpack's compiler-linked library stays clean.
-//RS         ("jetpack-bin", &["D-DEP1", "D-DX5-HOOK1"]),
-//RS         // Card #367 / D-PRODUCT-SPLIT1=C: FFI.rs (the rustls test-only
-//RS         // loopback peer) moved from `jetpack` to `jet-pkg-model`.
-//RS         ("jet-pkg-model", &["D-DEP1", "D-EMAIL-DKIM-CONFIG1"]),
-//RS     ];
-//RS 
-//RS     let root = root();
-//RS     let decisions_doc = fs::read_to_string(root.join("Docs/spec/syntax-decisions.md"))
-//RS         .expect("Docs/spec/syntax-decisions.md missing");
-//RS     // Live board plus history: ratified exemptions may retire into
-//RS     // history.json while remaining law (Tower archive / #461).
-//RS     let tower_live = fs::read_to_string(root.join("Tools/tower/.tower/tower.json"))
-//RS         .expect("Tools/tower/.tower/tower.json missing");
-//RS     let tower_history =
-//RS         fs::read_to_string(root.join("Tools/tower/.tower/history.json")).unwrap_or_default();
-//RS     let tower = format!("{tower_live}\n{tower_history}");
-//RS 
-//RS     for (crate_name, ids) in EXEMPTIONS {
-//RS         for id in *ids {
-//RS             assert!(
-//RS                 ratified_decision_exists(&decisions_doc, &tower, id),
-//RS                 "I6 exemption for `{crate_name}` cites {id}, which is not ratified in \
-//RS                  Docs/spec/syntax-decisions.md or Tower (live+history) — revoke the \
-//RS                  exemption or get {id} ratified"
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     let mut crate_manifests: Vec<(String, PathBuf)> =
-//RS         vec![("<root>".to_string(), root.join("Cargo.toml"))];
-//RS     let crates_dir = root.join("crates");
-//RS     let mut dirs: Vec<_> = fs::read_dir(&crates_dir)
-//RS         .expect("crates/ missing")
-//RS         .flatten()
-//RS         .map(|e| e.path())
-//RS         .filter(|p| p.is_dir())
-//RS         .collect();
-//RS     dirs.sort();
-//RS     for dir in dirs {
-//RS         let manifest = dir.join("Cargo.toml");
-//RS         if manifest.is_file() {
-//RS             let name = dir.file_name().unwrap().to_string_lossy().into_owned();
-//RS             crate_manifests.push((name, manifest));
-//RS         }
-//RS     }
-//RS     // D-ARCH-SOURCE1=A: CLI/interactive seams are not optional aliases hidden in
-//RS     // the root crate. Their manifests must exist and therefore pass this same
-//RS     // path-only dependency audit.
-//RS     for required in [
-//RS         "jet-repl",
-//RS         "jet-debug",
-//RS         "jet-cli",
-//RS         "jet-canvas",
-//RS         "jet-devserver",
-//RS     ] {
-//RS         assert!(
-//RS             crate_manifests.iter().any(|(name, _)| name == required),
-//RS             "D-ARCH-SOURCE1 requires the {required} workspace seam"
-//RS         );
-//RS     }
-//RS     let root_lib = fs::read_to_string(root.join("Source/lib.rs")).expect("Source/lib.rs missing");
-//RS     assert!(
-//RS         root_lib.contains("pub use jet_debug as Debug;") && !root.join("Source/Debug").exists(),
-//RS         "D-ARCH-SOURCE1 requires jet-debug ownership, not a root Debug wrapper"
-//RS     );
-//RS     assert!(
-//RS         root_lib.contains("pub use jet_cli::{CLI, Explain, Help};")
-//RS             && !root.join("Source/CLI.rs").exists()
-//RS             && !root.join("Source/Explain.rs").exists()
-//RS             && !root.join("Source/Help").exists(),
-//RS         "D-ARCH-SOURCE1 requires jet-cli ownership, not root CLI/help wrappers"
-//RS     );
-//RS     assert!(
-//RS         root_lib.contains("pub use jet_devserver as DevServer;")
-//RS             && root_lib.contains("pub use jet_devserver::Canvas;")
-//RS             && !root.join("Source/Canvas.rs").exists()
-//RS             && !root.join("Source/Canvas").exists(),
-//RS         "D-ARCH-SOURCE1 requires jet-devserver ownership of Canvas semantics, not root wrappers"
-//RS     );
-//RS     let root_main =
-//RS         fs::read_to_string(root.join("Source/main.rs")).expect("Source/main.rs missing");
-//RS     let root_compile = fs::read_to_string(root.join("Source/CmdCompile.rs"))
-//RS         .expect("Source/CmdCompile.rs missing");
-//RS     let devserver = fs::read_to_string(root.join("crates/jet-devserver/src/lib.rs"))
-//RS         .expect("jet-devserver missing");
-//RS     assert!(
-//RS         !root.join("Source/CmdDevWeb.rs").exists()
-//RS             && !root_main.contains("mod CmdDevWeb;")
-//RS             && root_compile.contains("pub(crate) fn run_dev_web(")
-//RS             && root_compile.contains("jet_devserver::WebHost::WebHost::bind")
-//RS             && devserver.contains("pub mod WebHost;"),
-//RS         "D-ARCH-SOURCE1 requires inward web-host ownership with only the R5 executor in CmdCompile"
-//RS     );
-//RS     assert!(
-//RS         root_lib.contains("pub use jet_canvas as CanvasUi;")
-//RS             && !root.join("Source/Canvas/html.rs").exists()
-//RS             && !root.join("Source/Canvas/js.rs").exists()
-//RS             && !root.join("Source/Canvas/js").exists(),
-//RS         "Canvas browser projection assets must live in jet-canvas"
-//RS     );
-//RS     assert!(
-//RS         root_lib.contains("pub use jet_driver::BudgetView;")
-//RS             && root_lib.contains("pub use jet_driver::FixEngine;")
-//RS             && !root.join("Source/BudgetView.rs").exists()
-//RS             && !root.join("Source/FixEngine.rs").exists(),
-//RS         "Canvas shared compiler helpers must live inward in jet-driver"
-//RS     );
-//RS     assert!(
-//RS         root_lib.contains("pub use jet_foundation::ExitCodes;")
-//RS             && !root.join("Source/ExitCodes.rs").exists()
-//RS             && !root.join("Source/LSP/JSON.rs").exists(),
-//RS         "shared debugger/LSP policy must live in jet-foundation, not Source wrappers"
-//RS     );
-//RS 
-//RS     let mut offenders = Vec::new();
-//RS     for (name, manifest) in &crate_manifests {
-//RS         let text = fs::read_to_string(manifest)
-//RS             .unwrap_or_else(|_| panic!("{} missing", manifest.display()));
-//RS         let exemption = EXEMPTIONS.iter().find(|(n, _)| n == name);
-//RS         for (line, context, has_path) in dependency_lines_with_context(&text) {
-//RS             if has_path {
-//RS                 continue;
-//RS             }
-//RS             match exemption {
-//RS                 Some((_, ids)) if ids.iter().any(|id| exact_decision_token(&context, id)) => {
-//RS                     continue
-//RS                 }
-//RS                 Some((_, ids)) => offenders.push(format!(
-//RS                     "{name}: {} — external dep must cite one of {ids:?} in a comment \
-//RS                      directly above the dependency line",
-//RS                     line
-//RS                 )),
-//RS                 None => offenders.push(format!(
-//RS                     "{name}: {} — not an exempted crate; I6 forbids external \
-//RS                      dependencies in compiler seam crates (add to EXEMPTIONS with a \
-//RS                      ratified decision ID if this is intentional)",
-//RS                     line
-//RS                 )),
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     assert!(
-//RS         offenders.is_empty(),
-//RS         "compiler seam crates must not add unexempted external dependencies (I6):\n{}",
-//RS         offenders.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS /// Returns the `## Ratified` section of syntax-decisions.md (up to the next `## ` heading).
-//RS fn section_between_pub(docs: &str) -> &str {
-//RS     let from = docs
-//RS         .find("## Ratified")
-//RS         .expect("Docs/spec/syntax-decisions.md missing ## Ratified");
-//RS     let rest = &docs[from + "## Ratified".len()..];
-//RS     let to = rest[..].find("\n## ").unwrap_or(rest.len());
-//RS     &rest[..to]
-//RS }
-//RS 
-//RS fn ratified_decision_exists(ratified_doc: &str, tower: &str, authority: &str) -> bool {
-//RS     if section_between_pub(ratified_doc)
-//RS         .lines()
-//RS         .filter_map(|line| {
-//RS             line.trim_start()
-//RS                 .strip_prefix("- ")
-//RS                 .unwrap_or(line.trim_start())
-//RS                 .strip_prefix("**")?
-//RS                 .split_once("**")
-//RS                 .map(|(heading, _)| heading)
-//RS         })
-//RS         .any(|heading| exact_decision_token(heading, authority))
-//RS     {
-//RS         return true;
-//RS     }
-//RS     let (id, outcome) = authority
-//RS         .rsplit_once('=')
-//RS         .map_or((authority, None), |(id, outcome)| (id, Some(outcome)));
-//RS     let marker = format!("\"id\": \"{id}\"");
-//RS     let Some((_, tail)) = tower.split_once(&marker) else {
-//RS         return false;
-//RS     };
-//RS     let record_end = tail.find("\n      \"id\": \"").unwrap_or(tail.len());
-//RS     let record = &tail[..record_end];
-//RS     record.contains("\"status\": \"ratified\"")
-//RS         && outcome.map_or(true, |outcome| {
-//RS             record.contains(&format!("\"outcome\": \"{outcome}\""))
-//RS         })
-//RS }
-//RS 
-//RS fn exact_decision_token(text: &str, authority: &str) -> bool {
-//RS     text.match_indices(authority).any(|(start, _)| {
-//RS         let before = text[..start].chars().next_back();
-//RS         let after = text[start + authority.len()..].chars().next();
-//RS         before.is_none_or(|ch| !decision_id_char(ch))
-//RS             && after.is_none_or(|ch| !decision_id_char(ch))
-//RS     })
-//RS }
-//RS 
-//RS fn decision_id_char(ch: char) -> bool {
-//RS     ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_')
-//RS }
-//RS 
-//RS #[test]
-//RS fn ratified_decision_lookup_requires_exact_id_and_ratified_status() {
-//RS     let docs = "## Proposed\n**D-PENDING=A**: not law. See D-LIVE and D-CITED.\n\
-//RS                 ## Ratified\n**D-LIVE=A**: supersedes D-CITED.\n\
-//RS                 ## Declined\n**D-NOPE=A**: declined.\n";
-//RS     assert!(ratified_decision_exists(docs, "", "D-LIVE"));
-//RS     assert!(!ratified_decision_exists(docs, "", "D-LIV"));
-//RS     assert!(!ratified_decision_exists(docs, "", "D-CITED"));
-//RS     assert!(!ratified_decision_exists(docs, "", "D-PENDING=A"));
-//RS     assert!(!ratified_decision_exists(docs, "", "D-NOPE=A"));
-//RS }
-//RS 
-//RS /// Finds both ordinary Cargo dependency entries and valid dependency subtables.
-//RS fn dependency_lines_with_context(text: &str) -> Vec<(String, String, bool)> {
-//RS     let lines: Vec<_> = text.lines().collect();
-//RS     let mut out = Vec::new();
-//RS     let mut index = 0;
-//RS     while index < lines.len() {
-//RS         let Some(header) = table_header(lines[index]) else {
-//RS             index += 1;
-//RS             continue;
-//RS         };
-//RS         let end = lines[index + 1..]
-//RS             .iter()
-//RS             .position(|line| table_header(line).is_some())
-//RS             .map_or(lines.len(), |offset| index + 1 + offset);
-//RS         match dependency_table(header) {
-//RS             None => {}
-//RS             Some(DependencyTable::Entries) => {
-//RS                 let mut context = String::new();
-//RS                 for line in lines[index + 1..end].iter().map(|line| line.trim()) {
-//RS                     if line.is_empty() {
-//RS                         context.clear();
-//RS                         continue;
-//RS                     }
-//RS                     if line.starts_with('#') {
-//RS                         context.push_str(line);
-//RS                         context.push('\n');
-//RS                         continue;
-//RS                     }
-//RS                     let Some((_, value)) = line.split_once('=') else {
-//RS                         continue;
-//RS                     };
-//RS                     out.push((
-//RS                         line.to_string(),
-//RS                         std::mem::take(&mut context),
-//RS                         inline_table_has_key(value.trim(), "path"),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS             Some(DependencyTable::Detail(name)) => {
-//RS                 let fields: Vec<_> = lines[index + 1..end]
-//RS                     .iter()
-//RS                     .map(|line| line.trim())
-//RS                     .filter(|line| !line.is_empty() && !line.starts_with('#'))
-//RS                     .collect();
-//RS                 if !fields.is_empty() {
-//RS                     let first = lines[index + 1..end]
-//RS                         .iter()
-//RS                         .position(|line| {
-//RS                             let line = line.trim();
-//RS                             !line.is_empty() && !line.starts_with('#')
-//RS                         })
-//RS                         .map(|offset| index + 1 + offset)
-//RS                         .unwrap();
-//RS                     let context = preceding_comments(&lines, index);
-//RS                     out.push((
-//RS                         format!("{name}: {}", fields.join(", ")),
-//RS                         if context.is_empty() {
-//RS                             preceding_comments(&lines, first)
-//RS                         } else {
-//RS                             context
-//RS                         },
-//RS                         fields.iter().any(|field| {
-//RS                             field
-//RS                                 .split_once('=')
-//RS                                 .is_some_and(|(key, _)| key.trim() == "path")
-//RS                         }),
-//RS                     ));
-//RS                 }
-//RS             }
-//RS         }
-//RS         index = end;
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn table_header(line: &str) -> Option<&str> {
-//RS     let rest = line.trim_start().strip_prefix('[')?;
-//RS     let close = rest.find(']')?;
-//RS     let suffix = rest[close + 1..].trim_start();
-//RS     if !suffix.is_empty() && !suffix.starts_with('#') {
-//RS         return None;
-//RS     }
-//RS     let header = rest[..close].trim();
-//RS     (!header.is_empty()).then_some(header)
-//RS }
-//RS 
-//RS enum DependencyTable<'a> {
-//RS     Entries,
-//RS     Detail(&'a str),
-//RS }
-//RS 
-//RS fn dependency_table(line: &str) -> Option<DependencyTable<'_>> {
-//RS     for base in ["dependencies", "dev-dependencies", "build-dependencies"] {
-//RS         if line == base || (line.starts_with("target.") && line.ends_with(&format!(".{base}"))) {
-//RS             return Some(DependencyTable::Entries);
-//RS         }
-//RS         if let Some(name) = line.strip_prefix(&format!("{base}.")) {
-//RS             return (!name.is_empty()).then_some(DependencyTable::Detail(name));
-//RS         }
-//RS         let marker = format!(".{base}.");
-//RS         if line.starts_with("target.") {
-//RS             if let Some((_, name)) = line.rsplit_once(&marker) {
-//RS                 return (!name.is_empty()).then_some(DependencyTable::Detail(name));
-//RS             }
-//RS         }
-//RS     }
-//RS     None
-//RS }
-//RS 
-//RS fn preceding_comments(lines: &[&str], index: usize) -> String {
-//RS     let mut comments: Vec<_> = lines[..index]
-//RS         .iter()
-//RS         .rev()
-//RS         .map(|line| line.trim())
-//RS         .take_while(|line| line.starts_with('#'))
-//RS         .collect();
-//RS     comments.reverse();
-//RS     comments
-//RS         .into_iter()
-//RS         .map(|line| format!("{line}\n"))
-//RS         .collect()
-//RS }
-//RS 
-//RS fn inline_table_has_key(value: &str, wanted: &str) -> bool {
-//RS     let Some(body) = value.strip_prefix('{') else {
-//RS         return false;
-//RS     };
-//RS     let mut start = 0;
-//RS     let mut quote = None;
-//RS     let mut escaped = false;
-//RS     let mut depth = 0usize;
-//RS     for (index, ch) in body.char_indices() {
-//RS         if let Some(delimiter) = quote {
-//RS             if delimiter == '"' && ch == '\\' && !escaped {
-//RS                 escaped = true;
-//RS                 continue;
-//RS             }
-//RS             if ch == delimiter && !escaped {
-//RS                 quote = None;
-//RS             }
-//RS             escaped = false;
-//RS             continue;
-//RS         }
-//RS         match ch {
-//RS             '"' | '\'' => quote = Some(ch),
-//RS             '[' | '{' => depth += 1,
-//RS             '}' if depth == 0 => {
-//RS                 return body[start..index]
-//RS                     .split_once('=')
-//RS                     .is_some_and(|(key, _)| key.trim() == wanted);
-//RS             }
-//RS             ']' | '}' if depth > 0 => depth -= 1,
-//RS             ',' if depth == 0 => {
-//RS                 if body[start..index]
-//RS                     .split_once('=')
-//RS                     .is_some_and(|(key, _)| key.trim() == wanted)
-//RS                 {
-//RS                     return true;
-//RS                 }
-//RS                 start = index + ch.len_utf8();
-//RS             }
-//RS             _ => {}
-//RS         }
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS #[test]
-//RS fn dependency_scanner_covers_target_tables_and_one_dependency_per_comment() {
-//RS     let manifest = "[dependencies]\n\
-//RS                     # D-ONE=A\n\
-//RS                     first = \"1\"\n\
-//RS                     second = \"2\"\n\
-//RS                     [target.'cfg(unix)'.dependencies]\n\
-//RS                     # D-TWO=B\n\
-//RS                     third = \"3\"\n\
-//RS                     [target.x86_64-unknown-linux-gnu.build-dependencies]\n\
-//RS                     # D-THREE=C\n\
-//RS                     fourth = \"4\"\n\
-//RS                     # D-FOUR=D\n\
-//RS                     \t[dependencies.local]\n\
-//RS                     path = \"../local\"\n\
-//RS                     version = \"1\"\n\
-//RS                     # D-FIVE=E\n\
-//RS                     [dev-dependencies.remote]\n\
-//RS                     git = \"https://example.test/repo\"\n\
-//RS                     [target.'cfg(unix)'.dependencies.target_remote]\n\
-//RS                     version = \"2\"\n\
-//RS                     [package.metadata.dependencies]\n\
-//RS                     ignored = \"5\"\n";
-//RS     assert_eq!(
-//RS         dependency_lines_with_context(manifest),
-//RS         vec![
-//RS             ("first = \"1\"".into(), "# D-ONE=A\n".into(), false),
-//RS             ("second = \"2\"".into(), String::new(), false),
-//RS             ("third = \"3\"".into(), "# D-TWO=B\n".into(), false),
-//RS             ("fourth = \"4\"".into(), "# D-THREE=C\n".into(), false),
-//RS             (
-//RS                 "local: path = \"../local\", version = \"1\"".into(),
-//RS                 "# D-FOUR=D\n".into(),
-//RS                 true,
-//RS             ),
-//RS             (
-//RS                 "remote: git = \"https://example.test/repo\"".into(),
-//RS                 "# D-FIVE=E\n".into(),
-//RS                 false,
-//RS             ),
-//RS             (
-//RS                 "target_remote: version = \"2\"".into(),
-//RS                 String::new(),
-//RS                 false
-//RS             ),
-//RS         ]
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn dependency_scanner_does_not_confuse_values_with_path_keys() {
-//RS     let manifest = "[dependencies]\n\
-//RS                     remote = { version = \"1\", package = \"not, path = metadata\" } # external\n\
-//RS                     local = { version = \"1\", path = \"../local\" } # local\n";
-//RS     let dependencies = dependency_lines_with_context(manifest);
-//RS     assert!(!dependencies[0].2, "{dependencies:#?}");
-//RS     assert!(dependencies[1].2, "{dependencies:#?}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn dependency_scanner_accepts_commented_headers_and_rejects_junk() {
-//RS     let manifest = "[dependencies.fake] junk\n\
-//RS                     version = \"0\"\n\
-//RS                     # D-VALID=A\n\
-//RS                       [ dependencies.remote ] # valid Cargo header\n\
-//RS                     version = \"1\"\n";
-//RS     assert_eq!(
-//RS         dependency_lines_with_context(manifest),
-//RS         vec![(
-//RS             "remote: version = \"1\"".into(),
-//RS             "# D-VALID=A\n".into(),
-//RS             false,
-//RS         )]
-//RS     );
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 11 (I3 pin, card #447 / durability W2): codegen is dumb — it must not
-//RS // construct a user diagnostic. All checking lives in sema, and evaluator error
-//RS // values use the shared registered diagnostic seam.
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn codegen_never_constructs_diagnostics() {
-//RS     let root = root();
-//RS     let dir = root.join("crates/jet-codegen/src");
-//RS     let mut offenders = Vec::new();
-//RS     for path in rs_files(&dir) {
-//RS         let text = fs::read_to_string(&path).unwrap_or_default();
-//RS         for line in diagnostic_constructor_lines(&text) {
-//RS             offenders.push(format!(
-//RS                 "{}:{line}: {}",
-//RS                 path.strip_prefix(&root).unwrap().display(),
-//RS                 text.lines().nth(line - 1).unwrap_or_default().trim()
-//RS             ));
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         offenders.is_empty(),
-//RS         "jet-codegen must never reference Diagnostic (I3 — codegen is dumb, \
-//RS          all checking lives in sema):\n{}",
-//RS         offenders.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn codegen_diagnostic_scanner_rejects_constructors_without_matching_prose() {
-//RS     let forbidden = "use jet_diagnostics::Diagnostic as D;\n\
-//RS                      type D = Diagnostic;\n\
-//RS                      let d = Diagnostic { code: code };\n\
-//RS                      let d = jet::Diagnostic::error(code);\n";
-//RS     assert_eq!(diagnostic_constructor_lines(forbidden), vec![3, 4]);
-//RS 
-//RS     let allowed = r###"// Diagnostic is forbidden in codegen.
-//RS let word = "Diagnostic";
-//RS let raw = r#"Diagnostic"#;
-//RS let DiagnosticFactory = factory;
-//RS fn typed() -> Diagnostic {}
-//RS JetParaRuntimeFailure::Diagnostic { rendered }
-//RS "###;
-//RS     assert!(diagnostic_constructor_lines(allowed).is_empty());
-//RS }
-//RS 
-//RS fn diagnostic_constructor_lines(source: &str) -> Vec<usize> {
-//RS     let bytes = source.as_bytes();
-//RS     let mut lines = Vec::new();
-//RS     let mut i = 0;
-//RS     let mut line = 1;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'\n' {
-//RS             line += 1;
-//RS             i += 1;
-//RS             continue;
-//RS         }
-//RS         if bytes[i..].starts_with(b"//") {
-//RS             i += 2;
-//RS             while i < bytes.len() && bytes[i] != b'\n' {
-//RS                 i += 1;
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if bytes[i..].starts_with(b"/*") {
-//RS             i += 2;
-//RS             let mut depth = 1;
-//RS             while i < bytes.len() && depth > 0 {
-//RS                 if bytes[i..].starts_with(b"/*") {
-//RS                     depth += 1;
-//RS                     i += 2;
-//RS                 } else if bytes[i..].starts_with(b"*/") {
-//RS                     depth -= 1;
-//RS                     i += 2;
-//RS                 } else {
-//RS                     if bytes[i] == b'\n' {
-//RS                         line += 1;
-//RS                     }
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if let Some(end) = rust_raw_string_end(bytes, i) {
-//RS             line += bytes[i..end].iter().filter(|byte| **byte == b'\n').count();
-//RS             i = end;
-//RS             continue;
-//RS         }
-//RS         let string_prefix = if bytes[i..].starts_with(b"b\"") || bytes[i..].starts_with(b"c\"") {
-//RS             Some(2)
-//RS         } else if bytes[i] == b'"' {
-//RS             Some(1)
-//RS         } else {
-//RS             None
-//RS         };
-//RS         if let Some(prefix) = string_prefix {
-//RS             i += prefix;
-//RS             while i < bytes.len() {
-//RS                 if bytes[i] == b'\\' {
-//RS                     i = (i + 2).min(bytes.len());
-//RS                 } else if bytes[i] == b'"' {
-//RS                     i += 1;
-//RS                     break;
-//RS                 } else {
-//RS                     if bytes[i] == b'\n' {
-//RS                         line += 1;
-//RS                     }
-//RS                     i += 1;
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         if bytes[i] == b'_' || bytes[i].is_ascii_alphabetic() {
-//RS             let start = i;
-//RS             i += 1;
-//RS             while i < bytes.len() && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric()) {
-//RS                 i += 1;
-//RS             }
-//RS             if &source[start..i] == "Diagnostic" {
-//RS                 let mut next = i;
-//RS                 while next < bytes.len() && bytes[next].is_ascii_whitespace() {
-//RS                     next += 1;
-//RS                 }
-//RS                 let prefix = source[..start].trim_end();
-//RS                 let line_prefix = source[..start].rsplit('\n').next().unwrap_or("").trim();
-//RS                 let struct_literal = bytes[next..].starts_with(b"{")
-//RS                     && !line_prefix.is_empty()
-//RS                     && !prefix.ends_with("->")
-//RS                     && !prefix.ends_with("::");
-//RS                 if bytes[next..].starts_with(b"::") || struct_literal {
-//RS                     lines.push(line);
-//RS                 }
-//RS             }
-//RS             continue;
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     lines
-//RS }
-//RS 
-//RS fn rust_raw_string_end(bytes: &[u8], start: usize) -> Option<usize> {
-//RS     let mut i = start;
-//RS     if bytes.get(i) == Some(&b'b') || bytes.get(i) == Some(&b'c') {
-//RS         i += 1;
-//RS     }
-//RS     if bytes.get(i) != Some(&b'r') {
-//RS         return None;
-//RS     }
-//RS     i += 1;
-//RS     let hashes_start = i;
-//RS     while bytes.get(i) == Some(&b'#') {
-//RS         i += 1;
-//RS     }
-//RS     if bytes.get(i) != Some(&b'"') {
-//RS         return None;
-//RS     }
-//RS     let hashes = i - hashes_start;
-//RS     i += 1;
-//RS     while i < bytes.len() {
-//RS         if bytes[i] == b'"'
-//RS             && bytes
-//RS                 .get(i + 1..i + 1 + hashes)
-//RS                 .is_some_and(|suffix| suffix.iter().all(|byte| *byte == b'#'))
-//RS         {
-//RS             return Some(i + 1 + hashes);
-//RS         }
-//RS         i += 1;
-//RS     }
-//RS     Some(bytes.len())
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 12 (durability pin, card #452): compiler seams may splice only the
-//RS // canonical shared Prelude or a generated/host adapter source. Those are
-//RS // executable copies of one semantic source across tiers, not second
-//RS // implementations. The comptime Sync seam itself must be a module boundary;
-//RS // it must not hide a direct include in SyncLite.rs.
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn compiler_code_has_no_include_splices() {
-//RS     let root = root();
-//RS     let sync_lite = fs::read_to_string(root.join("crates/jet-comptime/src/Comptime/SyncLite.rs"))
-//RS         .expect("SyncLite.rs must be readable");
-//RS     assert!(
-//RS         !sync_lite.lines().any(is_include_macro_line),
-//RS         "SyncLite.rs must load its shared Prelude through a module seam, not include!"
-//RS     );
-//RS 
-//RS     let mut dirs = vec![root.join("Source")];
-//RS     for entry in fs::read_dir(root.join("crates"))
-//RS         .expect("crates/ missing")
-//RS         .flatten()
-//RS     {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             dirs.push(path);
-//RS         }
-//RS     }
-//RS 
-//RS     let mut offenders = Vec::new();
-//RS     for dir in dirs {
-//RS         for path in rs_files(&dir) {
-//RS             let rel = path.strip_prefix(&root).unwrap().display().to_string();
-//RS             let text = fs::read_to_string(&path).unwrap_or_default();
-//RS             for (i, line) in text.lines().enumerate() {
-//RS                 if !is_include_macro_line(line) || canonical_shared_include(&rel, line) {
-//RS                     continue;
-//RS                 }
-//RS                 offenders.push(format!("{}:{}: {}", rel, i + 1, line.trim()));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     assert!(
-//RS         offenders.is_empty(),
-//RS         "compiler code must not splice an unowned sibling .rs fragment — use the canonical \
-//RS          Prelude or a real module instead (card #452 durability pattern):\n{}",
-//RS         offenders.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS fn is_include_macro_line(line: &str) -> bool {
-//RS     let trimmed = line.trim_start();
-//RS     trimmed.starts_with("include!(") || trimmed.starts_with("include! (")
-//RS }
-//RS 
-//RS fn canonical_shared_include(relative: &str, line: &str) -> bool {
-//RS     let prelude_path = [
-//RS         "include!(\"Prelude/",
-//RS         "include! (\"Prelude/",
-//RS         "include!(\"../Prelude/",
-//RS         "include! (\"../Prelude/",
-//RS         "include!(\"../../../Prelude/",
-//RS         "include! (\"../../../Prelude/",
-//RS         "include!(\"../../jet-codegen/src/Prelude/",
-//RS         "include! (\"../../jet-codegen/src/Prelude/",
-//RS         "include!(\"../../../jet-codegen/src/Prelude/",
-//RS         "include! (\"../../../jet-codegen/src/Prelude/",
-//RS         "include!(\"../../../../jet-codegen/src/Prelude/",
-//RS         "include! (\"../../../../jet-codegen/src/Prelude/",
-//RS         "include!(\"../../jet-pkg-model/src/Prelude/",
-//RS         "include! (\"../../jet-pkg-model/src/Prelude/",
-//RS         "include!(\"../../jet-foundation/src/",
-//RS         "include! (\"../../jet-foundation/src/",
-//RS     ];
-//RS     prelude_path.iter().any(|prefix| line.contains(prefix))
-//RS         || line.contains("include!(concat!(env!(\"OUT_DIR\")")
-//RS         || line.contains("include! (concat!(env!(\"OUT_DIR\")")
-//RS         || (relative.starts_with("crates/jet-codegen/src/Prelude/")
-//RS             && (line.trim_start().starts_with("include!(")
-//RS                 || line.trim_start().starts_with("include! (")))
-//RS         || (relative == "crates/jet-codegen/src/lib.rs"
-//RS             && line.contains("include!(\"SchedulerHost.rs\")"))
-//RS         || (relative == "crates/jet-jit/src/net_http_rt.rs"
-//RS             && line.contains("include!(\"net_http_hosts.rs\")"))
-//RS }
-//RS 
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Check 11: the vocabulary page is one definition home and its doc lint is live
-//RS // ---------------------------------------------------------------------------
-//RS #[test]
-//RS fn vocabulary_page_has_one_definition_and_no_retired_senses() {
-//RS     let root = root();
-//RS     let vocabulary_path = root.join("Docs/spec/vocabulary.md");
-//RS 
-//RS     let hostile = [
-//RS         (
-//RS             "codec mode called a stream",
-//RS             "The codec mode is called a stream.",
-//RS         ),
-//RS         ("event called a stream", "The event is called a stream."),
-//RS         (
-//RS             "collecting loop called yielding",
-//RS             "The collecting loop is called yielding.",
-//RS         ),
-//RS     ];
-//RS     for (label, fixture) in hostile {
-//RS         assert!(
-//RS             retired_vocabulary_senses(fixture).contains(&label),
-//RS             "hostile fixture must be rejected: {label}"
-//RS         );
-//RS     }
-//RS 
-//RS     let docs_root = root.join("Docs");
-//RS     let mut markdown = Vec::new();
-//RS     collect_markdown_paths(&docs_root, &mut markdown);
-//RS     let vocabulary_path = fs::canonicalize(vocabulary_path).expect("vocabulary path canonical");
-//RS     let docs_root = fs::canonicalize(docs_root).expect("docs path canonical");
-//RS     let mut targets = HashSet::new();
-//RS     for source in markdown {
-//RS         let Ok(text) = fs::read_to_string(&source) else {
-//RS             continue;
-//RS         };
-//RS         for target in markdown_link_targets(&text) {
-//RS             let target = target.trim_matches('<').trim_matches('>');
-//RS             let target = target.split(['#', '?']).next().unwrap_or_default();
-//RS             if target.is_empty() || target.starts_with("/") || target.contains("://") {
-//RS                 continue;
-//RS             }
-//RS             let candidate = source.parent().unwrap_or(Path::new(".")).join(target);
-//RS             let Ok(candidate) = fs::canonicalize(candidate) else {
-//RS                 continue;
-//RS             };
-//RS             if !candidate.starts_with(&docs_root)
-//RS                 || candidate.extension().and_then(|ext| ext.to_str()) != Some("md")
-//RS             {
-//RS                 continue;
-//RS             }
-//RS             targets.insert(candidate);
-//RS         }
-//RS     }
-//RS 
-//RS     let mut violations = Vec::new();
-//RS     for target in targets {
-//RS         let Ok(text) = fs::read_to_string(&target) else {
-//RS             continue;
-//RS         };
-//RS         if target != vocabulary_path {
-//RS             let retired = retired_vocabulary_senses(&text);
-//RS             if !retired.is_empty() {
-//RS                 violations.push(format!(
-//RS                     "{}: retired senses: {}",
-//RS                     target.strip_prefix(&root).unwrap_or(&target).display(),
-//RS                     retired.join(", ")
-//RS                 ));
-//RS             }
-//RS         }
-//RS         if target != vocabulary_path
-//RS             && ["stream", "reader", "event", "collecting loop"]
-//RS                 .into_iter()
-//RS                 .any(|word| contains_word(&text, word))
-//RS             && !text.contains("vocabulary.md")
-//RS         {
-//RS             violations.push(format!(
-//RS                 "{}: uses Jet vocabulary without linking Docs/spec/vocabulary.md",
-//RS                 target.strip_prefix(&root).unwrap_or(&target).display()
-//RS             ));
-//RS         }
-//RS     }
-//RS     assert!(
-//RS         violations.is_empty(),
-//RS         "linked Markdown targets must use the vocabulary page and current senses:\n{}",
-//RS         violations.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Epoch 3 audit guards: accessibility findings and first-session evidence.
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[test]
-//RS fn accessibility_audit_findings_have_live_cards() {
-//RS     let root = root();
-//RS     let path = root.join("Docs/audits/cli-diagnostics-accessibility.md");
-//RS     let text = fs::read_to_string(&path).expect("CLI accessibility audit is readable");
-//RS     let lines: Vec<&str> = text.lines().collect();
-//RS     let expected_header = ["id", "surface", "screen_reader", "state", "card"];
-//RS     let header = lines
-//RS         .iter()
-//RS         .position(|line| {
-//RS             markdown_table_cells(*line)
-//RS                 .iter()
-//RS                 .map(String::as_str)
-//RS                 .eq(expected_header)
-//RS         })
-//RS         .expect("accessibility audit must have the machine-readable findings header");
-//RS     let separator = lines
-//RS         .get(header + 1)
-//RS         .expect("accessibility findings table needs a separator row");
-//RS     let separator_cells = markdown_table_cells(separator);
-//RS     assert_eq!(
-//RS         separator_cells.len(),
-//RS         expected_header.len(),
-//RS         "accessibility findings table separator must match its five columns"
-//RS     );
-//RS     assert!(
-//RS         separator_cells.iter().all(|cell| cell == "---"),
-//RS         "accessibility findings table needs a Markdown separator for every column"
-//RS     );
-//RS 
-//RS     let mut rows = Vec::new();
-//RS     let mut finding_ids = HashSet::new();
-//RS     for line in lines.iter().skip(header + 2) {
-//RS         if !line.trim_start().starts_with('|') {
-//RS             break;
-//RS         }
-//RS         let cells = markdown_table_cells(line);
-//RS         assert_eq!(
-//RS             cells.len(),
-//RS             expected_header.len(),
-//RS             "accessibility findings row must have id, surface, screen_reader, state, and card: {line}"
-//RS         );
-//RS         for (name, cell) in expected_header.iter().zip(&cells) {
-//RS             assert!(
-//RS                 !cell.is_empty(),
-//RS                 "accessibility finding {name} must not be empty: {line}"
-//RS             );
-//RS         }
-//RS         assert!(
-//RS             finding_ids.insert(cells[0].clone()),
-//RS             "accessibility finding IDs must be unique: {}",
-//RS             cells[0]
-//RS         );
-//RS         assert!(
-//RS             matches!(cells[3].as_str(), "pass" | "gap" | "not-proven"),
-//RS             "accessibility finding {} has an unknown state: {}",
-//RS             cells[0],
-//RS             cells[3]
-//RS         );
-//RS         rows.push(cells);
-//RS     }
-//RS     assert!(
-//RS         !rows.is_empty(),
-//RS         "accessibility audit must list at least one finding"
-//RS     );
-//RS 
-//RS     for row in rows {
-//RS         if row[3].trim().eq_ignore_ascii_case("pass") {
-//RS             assert_eq!(
-//RS                 row[4], "—",
-//RS                 "passing accessibility finding {} must not name a Tower card",
-//RS                 row[0]
-//RS             );
-//RS             continue;
-//RS         }
-//RS         let cards = audit_card_refs(&row[4]);
-//RS         assert!(
-//RS             !cards.is_empty(),
-//RS             "non-pass accessibility finding {} must name a live Tower card",
-//RS             row[0]
-//RS         );
-//RS         let mut unique_cards = HashSet::new();
-//RS         for card in cards {
-//RS             assert!(
-//RS                 unique_cards.insert(card),
-//RS                 "accessibility finding {} must list each Tower card once: {}",
-//RS                 row[0],
-//RS                 card
-//RS             );
-//RS             let output = Command::new("node")
-//RS                 .args(["Tools/tower/tower.mjs", "card", "show", card, "--json"])
-//RS                 .current_dir(&root)
-//RS                 .output()
-//RS                 .expect("Tower card lookup must run");
-//RS             assert!(
-//RS                 output.status.success(),
-//RS                 "accessibility finding {} names missing Tower card {}:\n{}",
-//RS                 row[0],
-//RS                 card,
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             let json = String::from_utf8_lossy(&output.stdout);
-//RS             let report = jet_foundation::JSON::parse_json(json.trim()).unwrap_or_else(|error| {
-//RS                 panic!(
-//RS                     "Tower lookup for {} returned invalid JSON: {:?}\n{}",
-//RS                     row[0], error, json
-//RS                 )
-//RS             });
-//RS             let resolved_num = jet_foundation::JSON::json_get(&report, "num")
-//RS                 .and_then(jet_foundation::JSON::json_int)
-//RS                 .expect("Tower card JSON must contain a numeric num");
-//RS             let expected_num = card[1..]
-//RS                 .parse::<i64>()
-//RS                 .expect("audit card reference must contain a numeric card ID");
-//RS             assert!(
-//RS                 resolved_num == expected_num,
-//RS                 "Tower lookup for {} resolved {} as card {}, not {}: {}",
-//RS                 row[0],
-//RS                 card,
-//RS                 resolved_num,
-//RS                 expected_num,
-//RS                 json
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     for law in [
-//RS         "D-REPORT-LAW1=A",
-//RS         "D-REPORT-HOME1=A",
-//RS         "D-REPORT-MACHINE1=A",
-//RS         "D-REPORT-EDITOR1=A",
-//RS         "`jet.report/v2`",
-//RS     ] {
-//RS         assert!(
-//RS             text.contains(law),
-//RS             "accessibility audit must name the canonical report law `{law}`"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS 
-//RS fn markdown_table_cells(line: &str) -> Vec<String> {
-//RS     let line = line.trim();
-//RS     let line = line.strip_prefix('|').unwrap_or(line);
-//RS     let line = line.strip_suffix('|').unwrap_or(line);
-//RS     line.split('|')
-//RS         .map(|cell| cell.trim().to_string())
-//RS         .collect()
-//RS }
-//RS 
-//RS fn audit_card_refs(cell: &str) -> Vec<&str> {
-//RS     cell.split_whitespace()
-//RS         .filter(|token| {
-//RS             token.starts_with('#')
-//RS                 && token.len() > 1
-//RS                 && token[1..].chars().all(|ch| ch.is_ascii_digit())
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn collect_markdown_paths(dir: &Path, paths: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             collect_markdown_paths(&path, paths);
-//RS         } else if path.extension().and_then(|ext| ext.to_str()) == Some("md") {
-//RS             paths.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn markdown_link_targets(text: &str) -> Vec<&str> {
-//RS     let mut targets = Vec::new();
-//RS     let mut rest = text;
-//RS     while let Some(start) = rest.find("](") {
-//RS         let after = &rest[start + 2..];
-//RS         let Some(end) = after.find(')') else { break };
-//RS         targets.push(after[..end].split_whitespace().next().unwrap_or_default());
-//RS         rest = &after[end + 1..];
-//RS     }
-//RS     targets
-//RS }
-//RS 
-//RS fn contains_word(text: &str, needle: &str) -> bool {
-//RS     let text = text.to_ascii_lowercase();
-//RS     let needle = needle.to_ascii_lowercase();
-//RS     let mut offset = 0;
-//RS     while let Some(found) = text[offset..].find(&needle) {
-//RS         let start = offset + found;
-//RS         let end = start + needle.len();
-//RS         let before = text[..start].chars().next_back();
-//RS         let after = text[end..].chars().next();
-//RS         if !before.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-//RS             && !after.is_some_and(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-//RS         {
-//RS             return true;
-//RS         }
-//RS         offset = end;
-//RS     }
-//RS     false
-//RS }
-//RS 
-//RS fn retired_vocabulary_senses(text: &str) -> Vec<&'static str> {
-//RS     let mut found = Vec::new();
-//RS     for line in text.lines() {
-//RS         let line = line.to_ascii_lowercase();
-//RS         let called = line.contains("called") || line.contains("as a");
-//RS         if called && line.contains("codec") && contains_word(&line, "stream") {
-//RS             found.push("codec mode called a stream");
-//RS         }
-//RS         if called && line.contains("event") && contains_word(&line, "stream") {
-//RS             found.push("event called a stream");
-//RS         }
-//RS         if called && line.contains("collecting loop") && line.contains("yielding") {
-//RS             found.push("collecting loop called yielding");
-//RS         }
-//RS     }
-//RS     found.sort_unstable();
-//RS     found.dedup();
-//RS     found
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Helpers
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS fn walk_md(dir: &PathBuf, cb: &mut impl FnMut(&str)) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     let mut entries: Vec<_> = entries.flatten().collect();
-//RS     entries.sort_by_key(|e| e.path());
-//RS     for entry in entries {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             walk_md(&path, cb);
-//RS         } else if path.extension().and_then(|e| e.to_str()) == Some("md") {
-//RS             if let Ok(s) = fs::read_to_string(&path) {
-//RS                 cb(&s);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS fn rs_files(dir: &PathBuf) -> Vec<PathBuf> {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return Vec::new();
-//RS     };
-//RS     let mut out = Vec::new();
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             out.extend(rs_files(&path));
-//RS         } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS     out.sort();
-//RS     out
-//RS }
-// END-PORT-PENDING 1180 tests/truthfulness.rs:1-2032
+use std.fs
+use core.path.OSPath
+use std.collections.[HashSet, BTreeSet]
+use jet
+// GATE #4494: native filesystem/child processes; repository scanners inspect Rust reference sources.
 
+// Rust: tests/truthfulness.rs:16
+pub fn root() -> OSPath { OSPath.from(env.build_var("CARGO_MANIFEST_DIR")) }
+// Rust: tests/truthfulness.rs:26
+pub const RUSTC_PROBE_ALLOWED_HOMES: [String] = ["tests/common/mod.rs", "tests/tir_support/mod.rs", "tests/truthfulness.rs"]
+// Rust: tests/truthfulness.rs:32
+pub fn collect_rs_files(dir: OSPath, files: &[OSPath]) -> {
+    entries :: fs.read_dir(dir).ok() ?? return
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        metadata :: fs.symlink_metadata(&path).ok() ?? next
+        if metadata.file_type().is_symlink() { next }
+        if metadata.is_dir() { collect_rs_files(&path, &files) }
+        else if path.extension().is_some_and((extension) -> extension == "rs") { files.push(^path) }
+    }
+}
+// Rust: tests/truthfulness.rs:55
+pub fn stray_probe_sites(root: OSPath, needle: String) -> [String] {
+    files := [OSPath]{}
+    collect_rs_files(root.join("tests"), &files)
+    files.sort()
+    findings := [String]{}
+    loop file in files {
+        relative :: file.strip_prefix(root).expect("scanned file stays beneath repository root").to_string_lossy().replace('\\', "/")
+        if RUSTC_PROBE_ALLOWED_HOMES.contains(relative) { next }
+        source :: fs.read_to_string(&file).expect("test source is readable")
+        collapsed :: source.chars().filter((c) -> !c.is_whitespace()).collect::<String>()
+        collapsed_needle :: needle.chars().filter((c) -> !c.is_whitespace()).collect::<String>()
+        if collapsed.contains(collapsed_needle) { findings.push(^relative) }
+    }
+    findings
+}
+// Rust: tests/truthfulness.rs:256
+pub const PM_HISTORY_DIRS: [String] = ["audits", "proposals"]
+// Rust: tests/truthfulness.rs:304
+pub fn extract_example_paths(text: String) -> [String] {
+    prefix :: "Examples/features/"
+    out := [String]{}
+    rest := text.as_str()
+    loop {
+        pos :: rest.find(prefix) ?? break
+        rest = rest[pos + prefix.len()..]
+        end :: rest.find((c) -> !c.is_alphanumeric() && c != '_' && c != '.' && c != '-' && c != '/').unwrap_or(rest.len())
+        tail := rest[..end] // #4303
+        if tail.ends_with(".jet") { out.push("{prefix}{tail}") }
+    }
+    out
+}
+// Rust: tests/truthfulness.rs:370
+pub fn feature_source_stem(path: OSPath, ex_dir: OSPath) -> String {
+    path.strip_prefix(ex_dir).expect("feature path must be below Examples/features").to_string_lossy().strip_suffix(".jet").expect("feature source must use the Jet extension").replace('\\', "/")
+}
+// Rust: tests/truthfulness.rs:379
+pub fn collect_feature_golden_sources(ex_dir: OSPath) -> [(OSPath, String)] {
+    // Rust: tests/truthfulness.rs:380
+    fn visit_project(dir: OSPath, ex_dir: OSPath, entries: &[(OSPath, String)]) -> {
+        name :: dir.file_name().and_then((name) -> name.to_str()) ?? return
+        if name.starts_with('.') || name == "expected" { return }
+        run :: dir.join("run.jet")
+        if run.is_file() {
+            stem :: dir.strip_prefix(ex_dir).expect("feature project must be below Examples/features").to_string_lossy().replace('\\', "/")
+            entries.push((^run, ^stem))
+            return
+        }
+        // A manifest without run.jet owns descendants as modules/build/member fixtures.
+        if dir.join("package.jet").is_file() || dir.join("workspace.jet").is_file() { return }
+        children :: fs.read_dir(dir).ok() ?? return
+        loop child in children.flatten() {
+            path :: child.path()
+            if path.is_dir() { visit_project(&path, ex_dir, &entries) }
+        }
+    }
+    entries := [(OSPath, String)]{}
+    topics :: fs.read_dir(ex_dir).ok() ?? return entries
+    loop topic in topics.flatten() {
+        topic_path :: topic.path()
+        topic_name :: topic_path.file_name().and_then((name) -> name.to_str()) ?? next
+        if !topic_path.is_dir() || topic_name.starts_with('.') || topic_name == "expected" { next }
+        children :: fs.read_dir(&topic_path).ok() ?? next
+        loop child in children.flatten() {
+            path :: child.path()
+            if path.is_file() && path.extension().and_then((extension) -> extension.to_str()) == Val("jet") && path.file_name().and_then((name) -> name.to_str()) != Val("package.jet") && path.file_name().and_then((name) -> name.to_str()) != Val("workspace.jet") && !path.file_name().and_then((name) -> name.to_str()).is_some_and((name) -> name.starts_with('.')) {
+                stem :: feature_source_stem(&path, ex_dir)
+                entries.push((^path, ^stem))
+            } else if path.is_dir() { visit_project(&path, ex_dir, &entries) }
+        }
+    }
+    entries.sort_by((left, right) -> left.1.cmp(&right.1))
+    entries
+}
+// Rust: tests/truthfulness.rs:455
+pub fn example_serves_until_stopped(path: OSPath) -> Bool {
+    shown :: path.to_str() ?? return false
+    bundle := jet.Loader.load_entry(shown).ok() ?? return false
+    _ :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    jet.AST.bundle_serves_until_stopped(&bundle)
+}
+// Rust: tests/truthfulness.rs:517
+#Derive(Debug, Clone, Copy)
+pub struct SurfaceUse { name: String, spelling: String }
+// Rust: tests/truthfulness.rs:527
+pub const AST_CAPABILITY_SURFACES: [SurfaceUse] = [
+    SurfaceUse{name: "is_package_pub", spelling: "pub(package)"},
+    SurfaceUse{name: "Func::is_unsafe", spelling: "#Unsafe"},
+    SurfaceUse{name: "Func::is_pure", spelling: "-[]>"},
+    SurfaceUse{name: "Func::is_sanitizer", spelling: "#Sanitizer"},
+    SurfaceUse{name: "Func::is_reactive", spelling: "#Reactive"},
+    SurfaceUse{name: "Func::is_replayable", spelling: "#Replayable"},
+    SurfaceUse{name: "Func::is_job", spelling: "#Job"},
+    SurfaceUse{name: "Func::is_must_use", spelling: "#MustUse"},
+    SurfaceUse{name: "Func::is_inline", spelling: "#Inline"},
+    SurfaceUse{name: "Func::is_inline_always", spelling: "#Inline(Always)"},
+    SurfaceUse{name: "StructDef::is_published_schema", spelling: "#PublishedSchema"},
+    SurfaceUse{name: "StructDef/EnumDef::is_single_use", spelling: "#SingleUse"},
+    SurfaceUse{name: "StructDef/EnumDef::is_must_use", spelling: "#MustUse"},
+    SurfaceUse{name: "Field::redact", spelling: "#Redact"},
+    SurfaceUse{name: "ConstDef::is_persist", spelling: "#Persist"}
+]
+// Rust: tests/truthfulness.rs:593
+pub const MARKER_ZERO_USE_TRIAGE: [(String, String)] = [
+    ("Replayable", "card #349"), ("Undo", "card #1820"), ("Close", "card #1893"),
+    ("Error", "cards #2172/#2175"), ("Encode", "card #1830"), ("Equatable", "card #1300"),
+    ("CodableAsBase", "card #1830"), ("DenyUnknownFields", "card #1818"), ("Discriminant", "card #1300"),
+    ("Untagged", "card #1830"), ("Flatten", "card #1830"), ("Flag", "card #1277"),
+    ("Local", "card #1459"), ("Shared", "card #1561"), ("allow", "card #1748"), ("wire", "card #1830")
+]
+// Rust: tests/truthfulness.rs:612
+pub const AST_ZERO_USE_TRIAGE: [(String, String)] = [("Func::is_replayable", "card #349"), ("Func::is_sanitizer", "retired source surface; card #1459")]
+// Rust: tests/truthfulness.rs:617
+pub fn collect_feature_jet_files(dir: OSPath, files: &[OSPath]) -> {
+    entries :: fs.read_dir(dir).ok() ?? return
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() {
+            if path.file_name().and_then((name) -> name.to_str()) != Val("expected") { collect_feature_jet_files(&path, &files) }
+        } else if path.extension().and_then((extension) -> extension.to_str()) == Val("jet") { files.push(^path) }
+    }
+}
+// Rust: tests/truthfulness.rs:633
+pub fn strip_jet_comments_and_strings(source: String) -> String {
+    // Rust: tests/truthfulness.rs:634
+    enum Mode { Normal, LineComment, BlockComment(Int), String(quote: Char, triple: Bool) }
+    mode := Mode.Normal
+    chars := source.chars().peekable()
+    clean := String.with_capacity(source.len())
+    loop {
+        ch :: chars.next() ?? break
+        if mode == {
+            .Normal -> {
+                if ch == '/' && chars.peek() == Val('/') { _ :: chars.next(); mode = Mode.LineComment; clean.push(' ') }
+                else if ch == '/' && chars.peek() == Val('*') { _ :: chars.next(); mode = Mode.BlockComment(1); clean.push(' ') }
+                else if ch == '"' {
+                    triple := false
+                    if chars.peek() == Val('"') {
+                        lookahead := chars.clone()
+                        _ :: lookahead.next()
+                        triple = lookahead.peek() == Val('"')
+                    }
+                    if triple { _ :: chars.next(); _ :: chars.next() }
+                    mode = Mode.String(quote: '"', triple: triple)
+                    clean.push(' ')
+                } else if ch == '\'' { mode = Mode.String(quote: '\'', triple: false); clean.push(' ') }
+                else { clean.push(ch) }
+            }
+            .LineComment -> { if ch == '\n' { mode = Mode.Normal; clean.push('\n') } }
+            .BlockComment(depth) -> {
+                if ch == '/' && chars.peek() == Val('*') { _ :: chars.next(); mode = Mode.BlockComment(depth + 1) }
+                else if ch == '*' && chars.peek() == Val('/') {
+                    _ :: chars.next()
+                    mode = if depth == 1 -> Mode.Normal else -> Mode.BlockComment(depth - 1)
+                } else if ch == '\n' { clean.push('\n') }
+            }
+            .String(quote, triple) -> {
+                if ch == '\\' { _ :: chars.next() }
+                else if ch == quote {
+                    if triple {
+                        if chars.peek() == Val('"') { _ :: chars.next(); if chars.peek() == Val('"') { _ :: chars.next(); mode = Mode.Normal } }
+                    } else { mode = Mode.Normal }
+                }
+            }
+        }
+    }
+    clean
+}
+// Rust: tests/truthfulness.rs:727
+pub fn marker_used(clean_source: String, name: String) -> Bool {
+    needle :: "#{name}"
+    if clean_source.match_indices(&needle).any((item) -> {
+        offset :: item.0
+        before :: clean_source[..offset].chars().next_back()
+        after :: clean_source[offset + needle.len()..].chars().next()
+        !before.is_some_and((ch) -> ch.is_ascii_alphanumeric() || ch == '_') && !after.is_some_and((ch) -> ch.is_ascii_alphanumeric() || ch == '_')
+    }) { return true }
+    // Bracket-list positive entries only; !Equatable does not exercise the capability.
+    clean_source.match_indices("#[").any((item) -> {
+        list_start :: item.0 + 2
+        nested := 0
+        list_end := clean_source.len()
+        loop (relative, ch) in clean_source[list_start..].char_indices() {
+            if ch == '[' { nested += 1 }
+            else if ch == ']' && nested == 0 { list_end = list_start + relative; break }
+            else if ch == ']' { nested -= 1 }
+        }
+        clean_source[list_start..list_end].split(',').map((entry) -> entry.trim()).filter((entry) -> !entry.starts_with('!')).map((entry) -> entry.split((ch) -> ch == '(' || ch == ':' || ch.is_ascii_whitespace()).next().unwrap_or("")).any((entry) -> entry == name)
+    })
+}
+// Rust: tests/truthfulness.rs:773
+pub fn surface_used(clean_source: String, spelling: String) -> Bool {
+    if spelling.strip_prefix('#') == Val(name) { marker_used(clean_source, name) }
+    else { clean_source.contains(spelling) }
+}
+// Rust: tests/truthfulness.rs:1111
+pub fn section_between_pub(docs: String) -> String {
+    from :: docs.find("## Ratified").expect("Docs/spec/syntax-decisions.md missing ## Ratified")
+    rest := docs[from + "## Ratified".len()..] // #4303
+    to :: rest.find("\n## ").unwrap_or(rest.len())
+    rest[..to]
+}
+// Rust: tests/truthfulness.rs:1120
+pub fn ratified_decision_exists(ratified_doc: String, tower: String, authority: String) -> Bool {
+    if section_between_pub(ratified_doc).lines().filter_map((line) -> {
+        trimmed := line.trim_start() // #4303
+        heading := trimmed.strip_prefix("- ").unwrap_or(trimmed)
+        heading.strip_prefix("**").and_then((tail) -> tail.split_once("**").map((pair) -> pair.0))
+    }).any((heading) -> exact_decision_token(heading, authority)) { return true }
+    id := authority.as_str()
+    outcome := String?.None
+    if authority.rsplit_once('=') == Val(pair) { id = pair.0; outcome = Val(pair.1) }
+    marker :: "\"id\": \"{id}\""
+    pair :: tower.split_once(&marker) ?? return false
+    tail := pair.1 // #4303
+    record_end :: tail.find("\n      \"id\": \"").unwrap_or(tail.len())
+    record := tail[..record_end] // #4303
+    record.contains("\"status\": \"ratified\"") && outcome.map_or(true, (value) -> record.contains("\"outcome\": \"{value}\""))
+}
+// Rust: tests/truthfulness.rs:1150
+pub fn exact_decision_token(text: String, authority: String) -> Bool {
+    text.match_indices(authority).any((item) -> {
+        start :: item.0
+        before :: text[..start].chars().next_back()
+        after :: text[start + authority.len()..].chars().next()
+        before.is_none_or((ch) -> !decision_id_char(ch)) && after.is_none_or((ch) -> !decision_id_char(ch))
+    })
+}
+// Rust: tests/truthfulness.rs:1159
+pub fn decision_id_char(ch: Char) -> Bool { ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' }
+// Rust: tests/truthfulness.rs:1176
+pub fn dependency_lines_with_context(text: String) -> [(String, String, Bool)] {
+    lines :: text.lines().collect::<[String]>()
+    out := [(String, String, Bool)]{}
+    index := 0
+    loop index < lines.len() {
+        header :: table_header(lines[index]) ?? { index += 1; next }
+        end :: lines[index + 1..].iter().position((line) -> table_header(line).is_some()).map_or(lines.len(), (offset) -> index + 1 + offset)
+        if dependency_table(header) == Val(table) {
+            if table == {
+                .Entries -> {
+                    context := String.new()
+                    loop raw in lines[index + 1..end] {
+                        line := raw.trim() // #4303
+                        if line.is_empty() { context.clear(); next }
+                        if line.starts_with('#') { context.push_str(line); context.push('\n'); next }
+                        pair :: line.split_once('=') ?? next
+                        out.push((line.to_string(), ^context, inline_table_has_key(pair.1.trim(), "path")))
+                        context = String.new()
+                    }
+                }
+                .Detail(name) -> {
+                    fields :: lines[index + 1..end].iter().map((line) -> line.trim()).filter((line) -> !line.is_empty() && !line.starts_with('#')).collect::<[String]>()
+                    if !fields.is_empty() {
+                        first :: lines[index + 1..end].iter().position((raw) -> { line := raw.trim(); !line.is_empty() && !line.starts_with('#') }).map((offset) -> index + 1 + offset).unwrap()
+                        context :: preceding_comments(&lines, index)
+                        out.push(("{name}: {fields.join(", ")}", if context.is_empty() -> preceding_comments(&lines, first) else -> ^context, fields.iter().any((field) -> field.split_once('=').is_some_and((pair) -> pair.0.trim() == "path"))))
+                    }
+                }
+            }
+        }
+        index = end
+    }
+    out
+}
+// Rust: tests/truthfulness.rs:1250
+pub fn table_header(line: String) -> String? {
+    rest := line.trim_start().strip_prefix('[') ?? return .None // #4303
+    close :: rest.find(']') ?? return .None
+    suffix := rest[close + 1..].trim_start() // #4303
+    if !suffix.is_empty() && !suffix.starts_with('#') { return .None }
+    header := rest[..close].trim() // #4303
+    if !header.is_empty() -> Val(header) else -> .None
+}
+// Rust: tests/truthfulness.rs:1261
+pub enum DependencyTable { Entries, Detail(String) }
+// Rust: tests/truthfulness.rs:1266
+pub fn dependency_table(line: String) -> DependencyTable? {
+    loop base in ["dependencies", "dev-dependencies", "build-dependencies"] {
+        if line == base || (line.starts_with("target.") && line.ends_with(".{base}")) { return Val(DependencyTable.Entries) }
+        if line.strip_prefix("{base}.") == Val(name) { return if !name.is_empty() -> Val(DependencyTable.Detail(name)) else -> .None }
+        marker :: ".{base}."
+        if line.starts_with("target.") {
+            if line.rsplit_once(&marker) == Val(pair) { return if !pair.1.is_empty() -> Val(DependencyTable.Detail(pair.1)) else -> .None }
+        }
+    }
+    .None
+}
+// Rust: tests/truthfulness.rs:1284
+pub fn preceding_comments(lines: [String], index: Int) -> String {
+    comments := lines[..index].iter().rev().map((line) -> line.trim()).take_while((line) -> line.starts_with('#')).collect::<[String]>()
+    comments.reverse()
+    comments.into_iter().map((line) -> "{line}\n").collect::<String>()
+}
+// Rust: tests/truthfulness.rs:1298
+pub fn inline_table_has_key(value: String, wanted: String) -> Bool {
+    body := value.strip_prefix('{') ?? return false // #4303
+    start := 0
+    quote := Char?.None
+    escaped := false
+    depth := 0
+    loop (index, ch) in body.char_indices() {
+        if quote == Val(delimiter) {
+            if delimiter == '"' && ch == '\\' && !escaped { escaped = true; next }
+            if ch == delimiter && !escaped { quote = .None }
+            escaped = false
+            next
+        }
+        if ch == '"' || ch == '\'' { quote = Val(ch) }
+        else if ch == '[' || ch == '{' { depth += 1 }
+        else if ch == '}' && depth == 0 { return body[start..index].split_once('=').is_some_and((pair) -> pair.0.trim() == wanted) }
+        else if (ch == ']' || ch == '}') && depth > 0 { depth -= 1 }
+        else if ch == ',' && depth == 0 {
+            if body[start..index].split_once('=').is_some_and((pair) -> pair.0.trim() == wanted) { return true }
+            start = index + ch.len_utf8()
+        }
+    }
+    false
+}
+// Rust: tests/truthfulness.rs:1464
+pub fn diagnostic_constructor_lines(source: String) -> [Int] {
+    bytes :: source.as_bytes()
+    lines := [Int]{}
+    i := 0
+    line := 1
+    loop i < bytes.len() {
+        if bytes[i] == b'\n' { line += 1; i += 1; next }
+        if bytes[i..].starts_with(b"//") { i += 2; loop i < bytes.len() && bytes[i] != b'\n' { i += 1 }; next }
+        if bytes[i..].starts_with(b"/*") {
+            i += 2
+            depth := 1
+            loop i < bytes.len() && depth > 0 {
+                if bytes[i..].starts_with(b"/*") { depth += 1; i += 2 }
+                else if bytes[i..].starts_with(b"*/") { depth -= 1; i += 2 }
+                else { if bytes[i] == b'\n' { line += 1 }; i += 1 }
+            }
+            next
+        }
+        if rust_raw_string_end(bytes, i) == Val(end) {
+            line += bytes[i..end].iter().filter((byte) -> byte == b'\n').count()
+            i = end
+            next
+        }
+        string_prefix :: if bytes[i..].starts_with(b"b\"") || bytes[i..].starts_with(b"c\"") -> Val(2) else if bytes[i] == b'"' -> Val(1) else -> Int?.None
+        if string_prefix == Val(prefix) {
+            i += prefix
+            loop i < bytes.len() {
+                if bytes[i] == b'\\' { i = (i + 2).min(bytes.len()) }
+                else if bytes[i] == b'"' { i += 1; break }
+                else { if bytes[i] == b'\n' { line += 1 }; i += 1 }
+            }
+            next
+        }
+        if bytes[i] == b'_' || bytes[i].is_ascii_alphabetic() {
+            start :: i
+            i += 1
+            loop i < bytes.len() && (bytes[i] == b'_' || bytes[i].is_ascii_alphanumeric()) { i += 1 }
+            if source[start..i] == "Diagnostic" {
+                next_index := i
+                loop next_index < bytes.len() && bytes[next_index].is_ascii_whitespace() { next_index += 1 }
+                prefix := source[..start].trim_end() // #4303
+                line_prefix := source[..start].rsplit('\n').next().unwrap_or("").trim() // #4303
+                struct_literal :: bytes[next_index..].starts_with(b"{") && !line_prefix.is_empty() && !prefix.ends_with("->") && !prefix.ends_with("::")
+                if bytes[next_index..].starts_with(b"::") || struct_literal { lines.push(line) }
+            }
+            next
+        }
+        i += 1
+    }
+    lines
+}
+// Rust: tests/truthfulness.rs:1558
+pub fn rust_raw_string_end(bytes: [U8], start: Int) -> Int? {
+    i := start
+    if bytes.get(i) == Val(b'b') || bytes.get(i) == Val(b'c') { i += 1 }
+    if bytes.get(i) != Val(b'r') { return .None }
+    i += 1
+    hashes_start :: i
+    loop bytes.get(i) == Val(b'#') { i += 1 }
+    if bytes.get(i) != Val(b'"') { return .None }
+    hashes :: i - hashes_start
+    i += 1
+    loop i < bytes.len() {
+        if bytes[i] == b'"' && bytes.get(i + 1..i + 1 + hashes).is_some_and((suffix) -> suffix.iter().all((byte) -> byte == b'#')) { return Val(i + 1 + hashes) }
+        i += 1
+    }
+    Val(bytes.len())
+}
+// Rust: tests/truthfulness.rs:1639
+pub fn is_include_macro_line(line: String) -> Bool {
+    trimmed := line.trim_start() // #4303
+    trimmed.starts_with("include!(") || trimmed.starts_with("include! (")
+}
+// Rust: tests/truthfulness.rs:1644
+pub fn canonical_shared_include(relative: String, line: String) -> Bool {
+    prelude_path :: ["include!(\"Prelude/", "include! (\"Prelude/", "include!(\"../Prelude/", "include! (\"../Prelude/", "include!(\"../../../Prelude/", "include! (\"../../../Prelude/", "include!(\"../../jet-codegen/src/Prelude/", "include! (\"../../jet-codegen/src/Prelude/", "include!(\"../../../jet-codegen/src/Prelude/", "include! (\"../../../jet-codegen/src/Prelude/", "include!(\"../../../../jet-codegen/src/Prelude/", "include! (\"../../../../jet-codegen/src/Prelude/", "include!(\"../../jet-pkg-model/src/Prelude/", "include! (\"../../jet-pkg-model/src/Prelude/", "include!(\"../../jet-foundation/src/", "include! (\"../../jet-foundation/src/"]
+    prelude_path.iter().any((prefix) -> line.contains(prefix)) || line.contains("include!(concat!(env!(\"OUT_DIR\")") || line.contains("include! (concat!(env!(\"OUT_DIR\")") || (relative.starts_with("crates/jet-codegen/src/Prelude/") && is_include_macro_line(line)) || (relative == "crates/jet-codegen/src/lib.rs" && line.contains("include!(\"SchedulerHost.rs\")")) || (relative == "crates/jet-jit/src/net_http_rt.rs" && line.contains("include!(\"net_http_hosts.rs\")"))
+}
+// Rust: tests/truthfulness.rs:1911
+pub fn markdown_table_cells(line: String) -> [String] {
+    trimmed := line.trim() // #4303
+    start := trimmed.strip_prefix('|').unwrap_or(trimmed)
+    body := start.strip_suffix('|').unwrap_or(start)
+    body.split('|').map((cell) -> cell.trim().to_string()).collect::<[String]>()
+}
+// Rust: tests/truthfulness.rs:1920
+pub fn audit_card_refs(cell: String) -> [String] {
+    cell.split_whitespace().filter((token) -> token.starts_with('#') && token.len() > 1 && token[1..].chars().all((ch) -> ch.is_ascii_digit())).collect::<[String]>()
+}
+// Rust: tests/truthfulness.rs:1930
+pub fn collect_markdown_paths(dir: OSPath, paths: &[OSPath]) -> {
+    entries :: fs.read_dir(dir).ok() ?? return
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() { collect_markdown_paths(&path, &paths) }
+        else if path.extension().and_then((ext) -> ext.to_str()) == Val("md") { paths.push(^path) }
+    }
+}
+// Rust: tests/truthfulness.rs:1944
+pub fn markdown_link_targets(text: String) -> [String] {
+    targets := [String]{}
+    rest := text.as_str()
+    loop {
+        start :: rest.find("](") ?? break
+        after := rest[start + 2..] // #4303
+        end :: after.find(')') ?? break
+        targets.push(after[..end].split_whitespace().next().unwrap_or_default())
+        rest = after[end + 1..]
+    }
+    targets
+}
+// Rust: tests/truthfulness.rs:1956
+pub fn contains_word(text: String, needle: String) -> Bool {
+    lower_text :: text.to_ascii_lowercase()
+    lower_needle :: needle.to_ascii_lowercase()
+    offset := 0
+    loop {
+        found :: lower_text[offset..].find(&lower_needle) ?? break
+        start :: offset + found
+        end :: start + lower_needle.len()
+        before :: lower_text[..start].chars().next_back()
+        after :: lower_text[end..].chars().next()
+        if !before.is_some_and((ch) -> ch.is_ascii_alphanumeric() || ch == '_') && !after.is_some_and((ch) -> ch.is_ascii_alphanumeric() || ch == '_') { return true }
+        offset = end
+    }
+    false
+}
+// Rust: tests/truthfulness.rs:1975
+pub fn retired_vocabulary_senses(text: String) -> [String] {
+    found := [String]{}
+    loop raw in text.lines() {
+        line :: raw.to_ascii_lowercase()
+        called :: line.contains("called") || line.contains("as a")
+        if called && line.contains("codec") && contains_word(&line, "stream") { found.push("codec mode called a stream") }
+        if called && line.contains("event") && contains_word(&line, "stream") { found.push("event called a stream") }
+        if called && line.contains("collecting loop") && line.contains("yielding") { found.push("collecting loop called yielding") }
+    }
+    found.sort_unstable()
+    found.dedup()
+    found
+}
+// Rust: tests/truthfulness.rs:1999
+pub fn walk_md(dir: OSPath, cb: &(String -> Unit)) -> {
+    reader :: fs.read_dir(dir).ok() ?? return
+    entries := reader.flatten().collect()
+    entries.sort_by_key((e) -> e.path())
+    loop entry in entries {
+        path :: entry.path()
+        if path.is_dir() { walk_md(&path, &cb) }
+        else if path.extension().and_then((e) -> e.to_str()) == Val("md") {
+            if fs.read_to_string(&path).ok() == Val(s) { cb(&s) }
+        }
+    }
+}
+// Rust: tests/truthfulness.rs:2017
+pub fn rs_files(dir: OSPath) -> [OSPath] {
+    entries :: fs.read_dir(dir).ok() ?? return [OSPath]{}
+    out := [OSPath]{}
+    loop entry in entries.flatten() {
+        path :: entry.path()
+        if path.is_dir() { out.extend(rs_files(&path)) }
+        else if path.extension().and_then((e) -> e.to_str()) == Val("rs") { out.push(^path) }
+    }
+    out.sort()
+    out
+}

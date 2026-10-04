@@ -1,0 +1,312 @@
+use std.[fs, env, process]
+use std.path.OSPath
+use std.process.Command
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet_foundation.Tests.Integration.MarkerRegistryCoverage.*
+use jet_foundation.Policy.[RuleStatus, RuleSite]
+use jet_foundation.Registry.[RowKind, RowTarget, SafeDirection]
+use jet_foundation.[Registry, Policy, Syntax]
+use jet.Comptime.CtValue
+use jet
+// Rust: tests/marker_registry_coverage.rs:224
+#Test("every_active_row_is_reachable_at_a_declared_site") {
+    ghosts := []
+    for registered in Registry.marker_rows() {
+        row :: registered.rule.expect("marker rows carry their applied rule")
+        if row.status != RuleStatus.Active { continue }
+        marker :: spelling(row)
+        renderable :: row.sites.iter().copied().filter(fn(site) { site_is_source_renderable(*site) }).collect<[RuleSite]>()
+        if renderable.is_empty() { ghosts.push("#{row.name} declares only interior sites {row.sites:?}, so no source can reach it"); continue }
+        rejections := []
+        reached := false
+        for site in renderable {
+            source :: match program_at(&marker, row, site) { Some(value) -> value, None -> continue }
+            rejected :: rejected_the_marker(&source)
+            if rejected.is_empty() { reached = true; break }
+            rejections.push("  at {site:?}: {rejected.join("; ")}")
+        }
+        if !reached { ghosts.push("`{marker}` is rejected at every site it declares:\n{rejections.join("\n")}") }
+    }
+    assert(ghosts.is_empty(), "registry rows with no reachable spelling ({ghosts.len()}):\n{ghosts.join("\n")}")
+}
+// Rust: tests/marker_registry_coverage.rs:280
+#Test("every_active_row_walks_parse_validate_format_highlight_reflect") {
+    highlighted :: Syntax.highlighted_tokens_sorted()
+    scratch :: common.Scratch.new("marker-registry-coverage")
+    validation_path :: scratch.join("main.jet")
+    for registered in Registry.marker_rows() {
+        row :: registered.rule.expect("marker rows carry their applied rule")
+        if row.status != RuleStatus.Active { continue }
+        marker :: spelling(row)
+        source :: row.sites.iter().copied().filter(fn(site) { site_is_source_renderable(*site) }).find_map(fn(site) {
+            source :: program_at(&marker, row, site)?
+            (tokens, lex_diagnostics) :: if source.contains("#Bindgen") { jet.Lexer.lex_generated(&source) } else { jet.Lexer.lex(&source) }
+            if !lex_diagnostics.is_empty() { return None }
+            parse_diagnostics :: match jet.Parser.parse_for_check(&tokens) { Ok((_, diagnostics)) -> diagnostics, Err(_) -> return None }
+            marker_rejected :: parse_diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0927" || diagnostic.code == "E0355" })
+            (!marker_rejected).then_some(source)
+        }).unwrap_or_else(fn() { panic("`{marker}` has no parseable declared site") })
+        (tokens, lex_diagnostics) :: if source.contains("#Bindgen") { jet.Lexer.lex_generated(&source) } else { jet.Lexer.lex(&source) }
+        assert(lex_diagnostics.is_empty(), "`{marker}` lex: {lex_diagnostics:?}")
+        (_, parse_diagnostics) :: jet.Parser.parse_for_check(&tokens).unwrap_or_else(fn(diagnostics) { panic("`{marker}` parse: {diagnostics:?}") })
+        assert(parse_diagnostics.iter().all(fn(diagnostic) { diagnostic.code != "E0927" && diagnostic.code != "E0355" }), "`{marker}` was rejected during validation: {parse_diagnostics:?}")
+        validation_diagnostics :: sema_diagnostics(&source, &validation_path)
+        assert(validation_diagnostics.iter().all(fn(diagnostic) { diagnostic.severity != jet.Diagnostics.Severity.Error || (source.contains("#Bindgen") && diagnostic.code == "E3201") }), "`{marker}` failed semantic validation: {validation_diagnostics:?}")
+        once :: format_for_coverage(&source).unwrap_or_else(fn(error) { panic("`{marker}` format: {error:?}") })
+        assert_eq(once, format_for_coverage(&once).expect("formatted row must round-trip"))
+        assert(highlighted.iter().any(fn(token) { token.text == row.name }), "`{marker}` is missing from the highlight registry")
+        reflected :: Registry.marker_row_and_args(row.name, false, []).unwrap_or_else(fn() { panic("`{marker}` is missing from reflection") })
+        assert_eq(reflected.row.name, row.name)
+    }
+}
+// Rust: tests/marker_registry_coverage.rs:368
+#Test("every_retired_row_teaches_a_replacement") {
+    for registered in Registry.marker_rows() {
+        row :: registered.rule.expect("marker rows carry their applied rule")
+        if RuleStatus.Retired { replacement } = row.status {
+            assert(!replacement.trim().is_empty(), "retired `#{row.name}` has no replacement to teach")
+        }
+    }
+}
+// Rust: tests/marker_registry_coverage.rs:384
+#Test("invariant_marker_is_retired_to_the_interval_range_form") {
+    rule :: Policy.applied_rule("Invariant").expect("Invariant retirement row")
+    match rule.status { RuleStatus.Retired { replacement } -> assert_eq(replacement, "distinct Int(lo..hi)"), _ -> panic("Invariant must be retired") }
+}
+// Rust: tests/marker_registry_coverage.rs:395
+#Test("repeatable_rows_are_declared_not_assumed") {
+    repeatable :: Registry.marker_rows().filter_map(fn(registered) { registered.rule }).filter(fn(row) { row.repeatable }).map(fn(row) { row.name }).collect()
+    assert_eq(repeatable, ["Pre", "Post", "allow"], "D-MARK-REPEAT1=A names exactly these repeatable rows")
+}
+// Rust: tests/marker_registry_coverage.rs:413
+#Test("the_one_table_holds_every_kind") {
+    for kind in [RowKind.Marker, RowKind.Plane, RowKind.Right, RowKind.Fact, RowKind.Truth, RowKind.Diagnostic] {
+        row :: Registry.rows().iter().find(fn(row) { row.kind() == kind }).unwrap_or_else(fn() { panic("the one table holds no {kind.name()} row") })
+        assert_eq(row.target.kind(), kind)
+    }
+    for registered in Registry.marker_rows() {
+        row :: registered.rule.expect("marker rows carry their applied rule")
+        registered :: Registry.row(row.name).unwrap_or_else(fn() { panic("`#{row.name}` is not in the one table") })
+        assert_eq(registered.target, RowTarget.Code(row.sites))
+        assert_eq(registered.rule.map(fn(rule) { rule.name }), Some(row.name))
+        assert_eq(registered.safe_direction, SafeDirection.None)
+    }
+    // Index declarations once; do not introduce per-row whole-table scans.
+    declarations := [:]
+    for declaration in Registry.fact_declarations() { declarations[declaration.name] = declaration }
+    for row in Registry.type_plane_rows() {
+        assert_eq(row.kind(), RowKind.Plane)
+        declaration :: declarations.get(row.name).unwrap_or_else(fn() { panic("type plane `{row.name}` has no Prelude declaration") })
+        assert_eq(row.identity_bearing, declaration.identity_bearing)
+        assert_eq(row.decision, declaration.decision)
+    }
+    for row in Registry.fact_rows() {
+        declaration :: declarations.get(row.name).unwrap_or_else(fn() { panic("fact `{row.name}` has no Prelude declaration") })
+        assert_eq(row.target, declaration.target)
+        assert_eq(row.identity_bearing, declaration.identity_bearing)
+    }
+}
+// Rust: tests/marker_registry_coverage.rs:465
+#Test("every_registered_plane_is_reflectable") {
+    planes :: Registry.fact_rows().filter(fn(row) { row.kind() == RowKind.Plane }).collect()
+    for row in &planes {
+        assert_eq(row.kind(), RowKind.Plane)
+        assert(Registry.row(row.name).is_some(), "plane `{row.name}` has no home")
+        read :: Registry.registered_fact_read(row.name).unwrap_or_else(fn() { panic("plane `{row.name}` has no FactRead projection") })
+        assert(read.registered_planes().any(fn(registered) { registered.name == row.name }), "plane `{row.name}` resolves to the wrong FactRead row")
+        assert_eq(read.reflection_kind(), Registry.reflection_kind(row.name))
+        info :: jet.Comptime.build_registered_fact_info(row.name).unwrap_or_else(fn() { panic("plane `{row.name}` has no typed reflection row") })
+        fields :: match &info { CtValue.Struct { fields, .. } -> fields, _ -> panic("plane `{row.name}` did not reflect as FactInfo") }
+        info_kind :: match &fields.iter().find(fn(pair) { pair.0 == "kind" }).expect("FactInfo.kind").1 {
+            CtValue.Enum { variant, .. } -> variant,
+            _ -> panic("plane `{row.name}` has an untyped FactInfo.kind"),
+        }
+        value_fields :: match &fields.iter().find(fn(pair) { pair.0 == "value" }).expect("FactInfo.value").1 {
+            CtValue.Struct { fields, .. } -> fields,
+            _ -> panic("plane `{row.name}` has an untyped FactInfo.value"),
+        }
+        value_kind :: match &value_fields.iter().find(fn(pair) { pair.0 == "kind" }).expect("FactValue.kind").1 {
+            CtValue.Enum { variant, .. } -> variant,
+            _ -> panic("plane `{row.name}` has an untyped FactValue.kind"),
+        }
+        assert_eq(info_kind, value_kind, "aggregate kind drifted for `{row.name}`")
+        assert_eq(Some(info_kind.as_str()), read.reflection_kind(), "source read and aggregate kind disagree for `{row.name}`")
+    }
+    assert_eq(planes.len(), Registry.fact_declarations().iter().filter(fn(declaration) { declaration.target == RowTarget.Value }).count())
+}
+// Rust: tests/marker_registry_coverage.rs:552
+#Test("every_row_states_the_one_way_law") {
+    violations :: Registry.law_violations()
+    assert(violations.is_empty(), "rows that break the one-way law ({violations.len()}):\n{violations.join("\n")}")
+}
+// Rust: tests/marker_registry_coverage.rs:567
+#Test("every_registered_truth_names_a_home_and_a_guard_that_exist") {
+    root :: OSPath.from(env.manifest_dir())
+    violations := []
+    for row in Registry.truths() {
+        home :: row.home.expect("law_violations refuses a truth with no home")
+        if !root.join(home).is_file() { violations.push("`{row.name}` names the home `{home}`, which is not a file") }
+        guard :: row.guard.expect("law_violations refuses a truth with no guard")
+        match fs.read_to_string(root.join(guard.file)) {
+            Ok(source) -> {
+                // Rust guards remain reference comparators; Jet guards are #Test declarations.
+                declaration :: if guard.file.ends_with(".jet") { "#Test(\"{guard.test}\")" } else { "fn {guard.test}(" }
+                if !source.contains(&declaration) { violations.push("`{row.name}` names the guard `{guard.test}`, which `{guard.file}` does not define") }
+            },
+            Err(_) -> violations.push("`{row.name}` names the guard file `{guard.file}`, which cannot be read"),
+        }
+    }
+    assert(violations.is_empty(), "registered truths whose home or guard is missing ({violations.len()}):\n{violations.join("\n")}")
+}
+// Rust: tests/marker_registry_coverage.rs:611
+#Test("a_prover_publishes_read_only_rows") {
+    for name in ["Sendability", "ViewProvenance", "Movedness"] {
+        row :: Registry.row(name).unwrap_or_else(fn() { panic("the ownership prover publishes no `{name}` row") })
+        assert(row.is_prover_supplied(), "`{name}` names no prover")
+        assert_eq(row.safe_direction, SafeDirection.None)
+        assert(row.gates.is_empty(), "`{name}` is read-only, so it has no gate")
+    }
+}
+// Rust: tests/marker_registry_coverage.rs:627
+#Test("orphan_fact_rows_have_one_home") {
+    declarations := [:]
+    for declaration in Registry.fact_declarations() { declarations[declaration.name] = declaration }
+    rows := [:]
+    for row in Registry.rows() { rows.entry(row.name).or_insert([]).push(row) }
+    for name in ["Sendability", "Attribution", "Origin", "ViewProvenance", "UnitScaleProvenance", "Maturity"] {
+        declaration :: declarations.get(name).unwrap_or_else(fn() { panic("`{name}` has no Prelude declaration") })
+        matches :: rows.get(name).unwrap_or(&[])
+        assert_eq(matches.len(), 1, "`{name}` must have one registry home")
+        row :: matches[0]
+        assert_eq(row.target, RowTarget.Value)
+        assert_eq(row.kind(), RowKind.Plane)
+        assert_eq(row.decision, declaration.decision)
+    }
+    for engine_fact in ["Uninit", "Exhaustiveness"] {
+        assert(!Registry.fact_rows().any(fn(row) { row.name == engine_fact }), "`{engine_fact}` is prover state, not a registered user fact plane")
+    }
+}
+// Rust: tests/marker_registry_coverage.rs:713
+#Test("marker_name_literals_stay_in_the_registry") {
+    root :: OSPath.from(env.manifest_dir())
+    paths := []
+    for directory in ["crates/jet-lexer/src", "crates/jet-parser/src", "crates/jet-sema/src"] { collect_source_files(&root.join(directory), &paths) }
+    marker_names :: Registry.marker_rows().filter_map(fn(registered) { registered.rule }).filter(fn(row) { row.status == RuleStatus.Active }).map(fn(row) { row.name }).collect()
+    sources :: paths.into_iter().map(fn(path) {
+        display :: path.display().to_string()
+        source :: fs.read_to_string(path).expect("read compiler source")
+        (display, source)
+    }).collect()
+    offenders :: marker_name_literal_offenders(sources, &marker_names)
+    assert(offenders.is_empty(), "marker-name literals escaped the registry:\n{offenders.join("\n")}")
+    seeded :: marker_name_literal_offenders([("synthetic.rs", "if marker_name == \"Inline\" {}")], &["Inline"])
+    assert_eq(seeded.len(), 1, "the seeded drift case must fail this guard")
+}
+// Rust: tests/nbody_witness.rs:30
+#Test("nbody_default_and_scalar_witnesses_have_identical_observable_output") {
+    assert_fixture_tiers("nbody_standard_witness", STANDARD)
+    assert_fixture_tiers("nbody_scalar_witness", SCALAR)
+}
+// Rust: tests/never_return.rs:16
+#Test("declared_never_example_is_byte_identical_on_aot_jit_and_interpreter") {
+    tir_support.assert_example_cli_tiers_agree("functions/never_return", String.from_utf8(NEVER_EXPECTED).expect("Never example golden is UTF-8"))
+}
+// Rust: tests/never_return.rs:24
+#Test("declared_never_example_is_byte_identical_through_eval") {
+    root :: OSPath.from(env.manifest_dir())
+    source :: root.join("Examples/features/functions/never_return.jet")
+    assert(source.is_file(), "missing Never return example: {source.display()}")
+    scratch :: common.test_scratch_root("never_return").join("eval-{process.id()}")
+    fs.create_dir_all(&scratch).unwrap()
+    output :: Command.new(common.jet_bin()).args(["eval", source.to_str().expect("example path is UTF-8")]).current_dir(&root).env("JET_STORE_DIR", scratch.join("store")).env("JETPACK_ROOT", scratch.join("jetpack")).env("JETPACK_ENV", "1").env("NO_COLOR", "1").output().expect("jet eval must start")
+    _ :: fs.remove_dir_all(&scratch)
+    assert(output.status.success(), "jet eval failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(output.stdout, NEVER_EXPECTED, "jet eval output changed")
+    assert(output.stderr.is_empty(), "jet eval emitted unexpected stderr: {String.from_utf8_lossy(&output.stderr)}")
+}
+// Rust: tests/numops.rs:12
+#Test("unsigned_addition_overflow_traps") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    a :: U8{{ 200 }}\n    b :: U8{{ 100 }}\n    print(a + b)\n}}\n"
+    (code, stdout, stderr) :: build_and_run("u8_add_overflow", src)
+    assert_eq(code, 70, "overflow should trap (exit 70), stdout={stdout:?} stderr={stderr:?}")
+    assert(stderr.contains("overflow"), "panic should mention overflow: {stderr}")
+    assert(!stdout.contains("44"), "must not silently wrap to 44: {stdout}")
+}
+// Rust: tests/numops.rs:33
+#Test("generic_add_bound_keeps_checked_overflow") {
+    if !common.have_rustc() { return }
+    src :: "fn add<T: Add>(left: T, right: T) -> T {{ return left + right }}\nfn run() -> {{\n    a :: U8{{ 255 }}\n    b :: U8{{ 1 }}\n    print(add(a, b))\n}}\n"
+    (code, stdout, stderr) :: build_and_run("generic_u8_add_overflow", src)
+    assert_eq(code, 70, "generic Add overflow should trap, stdout={stdout:?} stderr={stderr:?}")
+    assert(stderr.contains("overflow"), "panic should mention overflow: {stderr}")
+    assert(stderr.contains("generic_u8_add_overflow.jet:1"), "generic Add must retain the Jet operator location: {stderr}")
+    assert(!stderr.contains("<built-in Add>"), "synthetic location leaked: {stderr}")
+}
+// Rust: tests/numops.rs:58
+#Test("generic_div_bound_keeps_source_location") {
+    if !common.have_rustc() { return }
+    src :: "fn divide<T: Div>(left: T, right: T) -> T {{ return left / right }}\nfn run() -> {{\n    print(divide(1, 0))\n}}\n"
+    (code, stdout, stderr) :: build_and_run("generic_int_div_zero", src)
+    assert_eq(code, 70, "generic Div by zero should trap, stdout={stdout:?} stderr={stderr:?}")
+    assert(stderr.contains("dividing by zero"), "panic should explain division: {stderr}")
+    assert(stderr.contains("generic_int_div_zero.jet:1"), "generic Div must retain the Jet operator location: {stderr}")
+    assert(!stderr.contains("<built-in Div>"), "synthetic location leaked: {stderr}")
+}
+// Rust: tests/numops.rs:83
+#Test("default_int_multiplication_is_exact") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    big :: 9223372036854775807\n    print(big * 2)\n}}\n"
+    (code, stdout, stderr) :: build_and_run("int_mul_exact", src)
+    assert_eq(code, 0, "exact Int multiplication should run: {stderr}")
+    assert_eq(stdout.trim(), "18446744073709551614")
+}
+// Rust: tests/numops.rs:95
+#Test("default_int_addition_promotes_without_wrapping") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    big :: 9223372036854775807\n    print(big + big)\n}}\n"
+    (code, stdout, stderr) :: build_and_run("int_add_exact", src)
+    assert_eq(code, 0, "exact Int addition should run: {stderr}")
+    assert_eq(stdout.trim(), "18446744073709551614")
+}
+// Rust: tests/numops.rs:108
+#Test("arithmetic_within_range_succeeds") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    a :: U8{{ 100 }}\n    b :: U8{{ 50 }}\n    print(a + b)\n}}\n"
+    (code, stdout, _) :: build_and_run("u8_add_ok", src)
+    assert_eq(code, 0, "in-range arithmetic should succeed")
+    assert_eq(stdout.trim(), "150")
+}
+// Rust: tests/numops.rs:119
+#Test("overflow_opt_ins_do_not_trap") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    a :: U8{{ 200 }}\n    b :: U8{{ 100 }}\n    fb :: U8{{ 0 }}\n    print(wrapping(a + b))\n    print(saturating(a + b))\n    print(checked(a + b) ?? fb)\n}}\n"
+    (code, stdout, stderr) :: build_and_run("u8_opt_ins", src)
+    assert_eq(code, 0, "opt-ins must not trap: {stderr}")
+    assert_eq(stdout.lines().collect(), ["44", "255", "0"], "wrapping/saturating/checked outputs")
+}
+// Rust: tests/numops.rs:139
+#Test("fixed_width_overflow_methods_do_not_trap") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    a :: U8{{ 200 }}\n    b :: U8{{ 100 }}\n    fb :: U8{{ 0 }}\n    print(a.wrapping_add(b))\n    print(a.saturating_add(b))\n    print(a.checked_add(b) ?? fb)\n}}\n"
+    (code, stdout, stderr) :: build_and_run("u8_overflow_methods", src)
+    assert_eq(code, 0, "fixed-width methods must not trap: {stderr}")
+    assert_eq(stdout.lines().collect(), ["44", "255", "0"])
+}
+// Rust: tests/numops.rs:152
+#Test("bit_operators_and_mixed_width_shift") {
+    if !common.have_rustc() { return }
+    src :: "fn run() -> {{\n    a :: U8{{ 12 }}\n    b :: U8{{ 10 }}\n    print(a & b)\n    c := U8{{ a }}\n    c |= b\n    print(c)\n    print(a ~| b)\n    print(a << 2)\n    print(a >> 1)\n}}\n"
+    (code, stdout, stderr) :: build_and_run("u8_bitops", src)
+    assert_eq(code, 0, "bit ops should succeed: {stderr}")
+    assert_eq(stdout.lines().collect(), ["8", "14", "6", "48", "6"], "bitwise + shift outputs")
+}
+// Rust: tests/numops.rs:172
+#Test("over_width_shift_traps_cleanly") {
+    if !common.have_rustc() { return }
+    src :: "fn shift_it(a: U8, n: U8) -> U8 {{\n    r :: U8{{ a << n }}\n    return r\n}}\nfn run() -> {{\n    print(shift_it(4, 200))\n}}\n"
+    (code, _, stderr) :: build_and_run("u8_overshift", src)
+    assert_eq(code, 70, "over-width shift should trap (exit 70): {stderr}")
+    assert(stderr.contains("out of range"), "panic should explain the shift: {stderr}")
+}

@@ -1,0 +1,15 @@
+use jet_foundation.Tests.Common.CorpusPolicy.[CorpusPolicy]
+use std.env
+use std.process.[Command]
+// Rust: tests/compiled_workloads.rs:9
+#Test("compiled_workload_gate_self_check") {
+    // GATE #4494: execute the actual provisioned gate, never substitute its receipt.
+    root :: env.build_var("CARGO_MANIFEST_DIR")
+    scratch :: env.var("TMPDIR").unwrap_or_else(fn(_) -> "{env.var("HOME").unwrap()}/.cache/jet-test-scratch")
+    output :: Command.new("bash").arg("Tools/ci/test-compiled-workload-gate.sh").current_dir(root).env("TMPDIR", scratch).output().expect("compiled workload gate self-check must start")
+    assert(output.status.success(), "compiled workload gate self-check failed\nstdout:\n{String.from_utf8_lossy(output.stdout)}\nstderr:\n{String.from_utf8_lossy(output.stderr)}")
+}
+// Rust: tests/compiled_workloads.rs:28
+#Test("semantic_corpus_policy_runs_with_compiled_workloads") {
+    CorpusPolicy.load().expect("corpus manifest").check_gate("workload").expect("compiled workload corpus semantic policy")
+}

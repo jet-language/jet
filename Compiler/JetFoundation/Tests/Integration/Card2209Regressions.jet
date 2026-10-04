@@ -1,0 +1,12 @@
+use jet_driver.Driver.[compile_with_path]
+use std.[fs, env]
+// Rust: tests/card_2209_regressions.rs:3
+fn assert_fixture_rejects(name: String, code: String, expected_count: Int) -> {
+    // GATE #4494: real provisioned fixture root and filesystem.
+    root :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR"))
+    path :: root.join("tests/ui").join("{name}.jet")
+    source :: fs.read_to_string(&path).unwrap()
+    diagnostics :: if compile_with_path(source, path.to_str().unwrap()) == { Err(diagnostics) -> diagnostics Ok(_) -> panic("{name} unexpectedly compiled") }
+    actual_count :: diagnostics.iter().filter(fn(d) -> d.code == code).count()
+    assert_eq(actual_count, expected_count, "{name} must emit {expected_count} instance(s) of {code}: {diagnostics.debug()}")
+}

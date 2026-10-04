@@ -1,0 +1,54 @@
+use std.[fs, env]
+use std.process.Command
+use jet_foundation.Tests.Integration.Common as common
+// GATE #4494: native file/process/environment providers.
+// Rust: tests/data_bridges.rs:8
+pub fn build_and_run_env(dir: &OSPath, name: String, src: String, variables: &[(String, String)]) -> (Int, String, String) {
+    path :: dir.join("{name}.jet")
+    fs.write(&path, src).unwrap()
+    bin :: dir.join(name)
+    compiled :: Command.new(common.jet_bin()).args(["build", "--profile=debug"]).arg(&path).arg("-o").arg(&bin).current_dir(dir).output().unwrap()
+    assert(compiled.status.success(), "native compiler rejected fixture:\n{String.from_utf8_lossy(&compiled.stderr)}")
+    cmd := Command.new(&bin)
+    cmd.current_dir(dir)
+    for (k, v) in variables { cmd.env(k, v) }
+    out :: cmd.output().unwrap()
+    (out.status.code().unwrap_or(0), String.from_utf8_lossy(&out.stdout).into_owned(), String.from_utf8_lossy(&out.stderr).into_owned())
+}
+// Rust: tests/data_bridges.rs:63
+pub fn rscript_on_path() -> Bool {
+    path :: env.var_os("PATH") ?? return false
+    env.split_paths(&path).any(fn(dir) { dir.join("Rscript").is_file() })
+}
+// Rust: tests/data_bridges.rs:71
+pub const BRIDGE_SRC: String = """
+use core.data as data
+fn show_bridge(step: String) {
+    status :: data.status()
+    loop row in status {
+        if row.step == step {
+            print("{row.step} path={row.path} copy={row.copy} ownership={row.ownership} trust={row.trust} fallback={row.fallback} replacement={row.replacement}")
+        }
+    }
+}
+fn probe_bridge(name: String) {
+    asked := data.require_bridge(name)
+    if asked == {
+        Ok(_) -> print("{name}: available")
+        Err(error) -> print("{name}: {error}")
+    }
+}
+fn run() {
+    show_bridge("py.*")
+    show_bridge("r.*")
+    show_bridge("gpu.*")
+    probe_bridge("py")
+    probe_bridge("r")
+    probe_bridge("gpu")
+    bad := data.require_bridge("nope")
+    if bad == {
+        Ok(_) -> print("nope: unexpectedly ok")
+        Err(error) -> print("nope: {error}")
+    }
+}
+"""

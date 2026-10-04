@@ -1,0 +1,147 @@
+use jet_foundation.Tests.Integration.Common as common
+use std.fs as fs
+use std.process.[Command, Output]
+
+// Rust: tests/first_hour.rs:15
+pub const CARD: String = "#2900"
+// Rust: tests/first_hour.rs:16
+pub const OWNER_NEW: String = "#2433"
+// Rust: tests/first_hour.rs:17
+pub const OWNER_DEPS: String = "#2883"
+// Rust: tests/first_hour.rs:18
+pub const OWNER_WEB: String = "#2882"
+// Rust: tests/first_hour.rs:19
+pub const OWNER_ADVANCED: String = "#2878/#2879"
+// Rust: tests/first_hour.rs:21
+pub fn jet_bin() -> OSPath { OSPath.from(common.jet_bin()) }
+// Rust: tests/first_hour.rs:25
+pub fn prepare_environment(root: &OSPath) -> {
+    loop name in ["store", "package-store", "run-cache", "test-scratch", "oracle-cache", "tmp"] {
+        fs.create_dir_all(root.join(name)).unwrap_or_else(|error| -> panic("{CARD} environment setup (owner {CARD}) could not create {root.join(name).display()}: {error}"))
+    }
+}
+// Rust: tests/first_hour.rs:43
+pub fn command_with_environment(label: &String, owner: &String, cwd: &OSPath, environment: &OSPath, args: &[String]) -> Output {
+    // GATE #4494: actual isolated CLI child, native environment and disk-backed caches.
+    command := Command.new(jet_bin())
+    command.args(args).current_dir(cwd)
+    command.env("JET_STORE_DIR", environment.join("store")).env("JET_PACKAGE_STORE_DIR", environment.join("package-store")).env("JET_RUN_CACHE_DIR", environment.join("run-cache")).env("JET_TEST_SCRATCH_DIR", environment.join("test-scratch")).env("JET_DEV_ORACLE_CACHE_DIR", environment.join("oracle-cache")).env("TMPDIR", environment.join("tmp")).env("TMP", environment.join("tmp")).env("TEMP", environment.join("tmp")).env("NO_COLOR", "1").output().unwrap_or_else(|error| -> panic("{CARD} step `{label}` (owner {owner}) could not start in {cwd.display()}: {error}"))
+}
+// Rust: tests/first_hour.rs:71
+pub fn assert_success(label: &String, owner: &String, cwd: &OSPath, output: &Output) -> {
+    assert(output.status.success(), "{CARD} step `{label}` (owner {owner}) failed in {cwd.display()}\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+}
+// Rust: tests/first_hour.rs:81
+pub fn run_exact(label: &String, owner: &String, cwd: &OSPath, environment: &OSPath, args: &[String], expected_stdout: &String) -> {
+    output :: command_with_environment(label, owner, cwd, environment, args)
+    assert_success(label, owner, cwd, &output)
+    assert_eq(String.from_utf8_lossy(&output.stdout), expected_stdout, "{CARD} step `{label}` (owner {owner}) produced unexpected stdout")
+}
+// Rust: tests/first_hour.rs:98
+pub fn run_contains(label: &String, owner: &String, cwd: &OSPath, environment: &OSPath, args: &[String], expected_stdout: &String) -> {
+    output :: command_with_environment(label, owner, cwd, environment, args)
+    assert_success(label, owner, cwd, &output)
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains(expected_stdout), "{CARD} step `{label}` (owner {owner}) stdout did not contain `{expected_stdout}`:\n{stdout}")
+}
+// Rust: tests/first_hour.rs:115
+pub fn write_source(project: &OSPath, relative: &String, source: &String, owner: &String) -> {
+    path :: project.join(relative)
+    if parent := path.parent() {
+        fs.create_dir_all(parent).unwrap_or_else(|error| -> panic("{CARD} source step `{relative}` (owner {owner}) could not create {parent.display()}: {error}"))
+    }
+    fs.write(&path, source).unwrap_or_else(|error| -> panic("{CARD} source step `{relative}` (owner {owner}) could not write {path.display()}: {error}"))
+}
+// Rust: tests/first_hour.rs:133
+pub fn assert_file(project: &OSPath, relative: &String, owner: &String) -> {
+    path :: project.join(relative)
+    assert(path.is_file(), "{CARD} expected `{path.display()}` (owner {owner}) after the preceding step")
+}
+// Rust: tests/first_hour.rs:142
+pub const SECOND_MODULE: String = """
+pub fn message() -> String { "second" }
+"""
+// Rust: tests/first_hour.rs:145
+pub const SECOND_MODULE_RUN: String = """
+use second
+
+#CLI
+struct GreetingArgs {
+    #Doc("name to greet") name: String{"world"}
+}
+
+fn greeting(name: String) -> String { "hello, {name}" }
+
+fn run(args: GreetingArgs) {
+    print(greeting(args.name))
+    print(second.message())
+}
+
+#Test("the greeting stays stable") {
+    assert_eq(greeting("world"), "hello, world")
+}
+"""
+// Rust: tests/first_hour.rs:164
+pub const PATH_DEPENDENCY_RUN: String = """
+use second
+use lib1
+
+#CLI
+struct GreetingArgs {
+    #Doc("name to greet") name: String{"world"}
+}
+
+fn greeting(name: String) -> String { "hello, {name}" }
+
+fn run(args: GreetingArgs) {
+    print(greeting(args.name))
+    print(second.message())
+    print(lib1.answer())
+}
+
+#Test("the greeting stays stable") {
+    assert_eq(greeting("world"), "hello, world")
+}
+"""
+// Rust: tests/first_hour.rs:185
+pub const WEB_RUN: String = """
+#Target(Web)
+
+fn run() {}
+"""
+// Rust: tests/first_hour.rs:190
+pub const FINAL_RUN: String = """
+#CLI
+struct GreetingArgs {
+    #Doc("name to greet") name: String{"world"}
+}
+
+#Comparable
+struct Score {
+    value: Int
+}
+
+struct Node {
+    value: Int
+    next: Node?
+}
+
+fn comparable_max<T: Comparable>(left: T, right: T) -> T {
+    if right > left -> return right
+    left
+}
+
+fn greeting(name: String) -> String { "hello, {name}" }
+
+fn run(args: GreetingArgs) {
+    print(greeting(args.name))
+    best :: comparable_max(Score{value: 3}, Score{value: 5})
+    print(best.value)
+    node :: Node{value: 7, next: None}
+    print(node.value)
+}
+
+#Test("the greeting stays stable") {
+    assert_eq(greeting("world"), "hello, world")
+}
+"""

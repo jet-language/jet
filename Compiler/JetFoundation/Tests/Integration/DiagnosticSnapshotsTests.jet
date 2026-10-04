@@ -1,0 +1,450 @@
+use jet_foundation.Tests.Integration.DiagnosticSnapshots.*
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Diagnostics.[Diagnostic, Span, FixApplicability, FixSafety]
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Stdio]
+use std.time.[SystemTime, UNIX_EPOCH, Duration]
+
+// Rust: tests/diagnostic_snapshots.rs:204
+#Test("compiler_extension_env_lock_covers_plain_compile_regions") {
+    // GATE #4494: real synchronized competing thread; verify exclusion and subsequent entry.
+    held :: compiler_extension_env_lock().lock().unwrap_or_else(|poisoned| -> poisoned.into_inner())
+    (attempting_tx, attempting_rx) :: std.sync.mpsc.channel()
+    (entered_tx, entered_rx) :: std.sync.mpsc.channel()
+    worker :: std.thread.spawn(move || -> {
+        attempting_tx.send(()).unwrap()
+        scope :: compiler_extension_env(None)
+        entered_tx.send(()).unwrap()
+    })
+    attempting_rx.recv().unwrap()
+    assert(entered_rx.recv_timeout(Duration.from_millis(50)).is_err(), "plain compile region entered while compiler-extension env lock was held")
+    drop(held)
+    entered_rx.recv_timeout(Duration.from_secs(1)).expect("plain compile region should enter after env lock release")
+    worker.join().unwrap()
+}
+
+// Rust: tests/diagnostic_snapshots.rs:234
+#Test("ui_snapshots") {
+    have_cargo :: Command.new("cargo").arg("--version").output().is_ok()
+    dir :: OSPath.from(common.manifest_dir()).join("tests/ui")
+    ext :: jet.Syntax.FILE_EXT
+    entries: [(OSPath, String)] = []
+    loop entry in fs.read_dir(&dir).unwrap().flatten() {
+        path :: entry.path()
+        if path.is_file() && path.extension().and_then(|x| -> x.to_str()) == Some(ext) {
+            name :: path.file_name().unwrap().to_string_lossy().into_owned()
+            if !name.contains(".fixed.") { entries.push((^path, "tests/ui/{name}")) }
+        } else if path.is_dir() {
+            entry :: ["run", "main"].into_iter().map(|name| -> path.join("{name}.{ext}")).find(|candidate| -> candidate.is_file())
+            if found := entry {
+                entry_name :: found.file_name().unwrap().to_string_lossy().into_owned()
+                entries.push((^found, "tests/ui/{path.file_name().unwrap().to_string_lossy()}/{entry_name}"))
+            } else {
+                workspace :: path.join(jet.Syntax.WORKSPACE_FILE)
+                if workspace.is_file() { entries.push((^workspace, "tests/ui/{path.file_name().unwrap().to_string_lossy()}/{jet.Syntax.WORKSPACE_FILE}")) }
+            }
+        }
+    }
+    entries.sort_by(|a, b| -> a.1.cmp(&b.1))
+    filter :: common.fixture_filter("JET_UI_FILTER")
+    entries.retain(|pair| -> common.fixture_matches(filter.as_ref(), &pair.1))
+    assert(!entries.is_empty(), "JET_UI_FILTER matched no error fixtures: {filter.as_ref().unwrap_or("<unfiltered>")}")
+    update :: update_selector()
+    validate_scoped_update(&update, entries.iter().map(|pair| -> pair.1))
+    checked := 0
+    failures: [String] = []
+    loop (path, shown_path) in entries {
+        if shown_path.contains("ffi_bad_path") && !have_cargo {
+            eprintln("note: skipping {shown_path} ui snapshot (need cargo for E0705)")
+            checked += 1
+            continue
+        }
+        if shown_path.contains("ffi_fetch_failed") && !have_cargo {
+            eprintln("note: skipping {shown_path} ui snapshot (need cargo for E0704)")
+            checked += 1
+            continue
+        }
+        if shown_path.contains("ffi_no_cargo") && have_cargo {
+            eprintln("note: skipping {shown_path} ui snapshot (need no cargo for E0703)")
+            checked += 1
+            continue
+        }
+        src :: fs.read_to_string(&path).unwrap()
+        snap_path :: path.with_extension("published.snapshot")
+        if snap_path.is_file() {
+            snap_text :: fs.read_to_string(&snap_path).unwrap()
+            type_view := snap_text.lines().find(|l| -> l.starts_with("type = ")).and_then(|l| -> l.strip_prefix("type = ")).unwrap_or("Unknown").trim() // #4303
+            type_name :: type_view.to_string()
+            stamp :: SystemTime.now().duration_since(UNIX_EPOCH).expect("system clock before Unix epoch").as_nanos()
+            tmp :: OSPath.from(env.var_os("HOME").expect("HOME is required for test scratch")).join(".cache/jet-test-scratch").join("jet_schema_ui_{std.process.id()}_{stamp}")
+            fs.create_dir_all(&tmp).expect("create UI schema fixture cache")
+            fs.write(tmp.join("{type_name}.snapshot"), &snap_text).expect("write UI schema fixture cache")
+            env.set_var("JET_SCHEMA_CACHE_DIR", &tmp)
+        } else { env.remove_var("JET_SCHEMA_CACHE_DIR") }
+        staged_fixture :: UiFixtureScratch.for_entry(&path)
+        compile_entry :: staged_fixture.as_ref().map_or(&path, |fixture| -> &fixture.entry)
+        file_arg := compile_entry.to_string_lossy() // #4303
+        render_path :: if path.file_name().and_then(|name| -> name.to_str()) == Some(jet.Syntax.WORKSPACE_FILE) { jet.Syntax.WORKSPACE_FILE.to_string() } else { shown_path.clone() }
+        no_os :: src.lines().any(|l| -> l.trim() == "// @no-os")
+        all_diags :: src.lines().any(|l| -> l.trim() == "// @all_diags") || path.file_name().and_then(|name| -> name.to_str()) == Some(jet.Syntax.WORKSPACE_FILE)
+        check_cli :: src.lines().any(|l| -> l.trim() == "// @check_cli")
+        gates :: src.lines().any(|l| -> l.trim() == "// @gate impure=allow")
+        repl_deny :: src.lines().any(|l| -> l.trim() == "// @repl_deny")
+        dev_interpreter :: src.lines().any(|l| -> l.trim() == "// @dev_interpreter")
+        cost_cli :: src.lines().any(|l| -> l.trim() == "// @cost_cli")
+        jetpack_e1250 :: src.lines().any(|l| -> l.trim() == "// @jetpack_e1250")
+        runtime_ffi :: src.lines().any(|l| -> l.trim() == "// @runtime_ffi")
+        parent_control_cancel :: src.lines().any(|l| -> l.trim() == "// @parent_control_cancel")
+        generated_source :: src.lines().any(|l| -> l.trim() == "// @generated_source") && path.parent() == Some(&dir) && path.file_name().and_then(|name| -> name.to_str()).is_some_and(|name| -> name.starts_with("generated_cffi_"))
+        plugin_target :: src.lines().any(|l| -> l.trim() == "// @plugin_target")
+        sandbox_effect :: src.lines().any(|l| -> l.trim() == "// @sandbox_effect")
+        sandbox_missing_wasm_tools :: src.lines().any(|l| -> l.trim() == "// @sandbox_missing_wasm_tools")
+        web_target :: src.lines().any(|l| -> l.trim() == "// @web_target")
+        web_run :: src.lines().any(|l| -> l.trim() == "// @web_run")
+        run_cli :: src.lines().any(|l| -> l.trim() == "// @run_cli")
+        cross_target :: src.lines().find_map(|line| -> line.trim().strip_prefix("// @target ").map(|value| -> value.to_string()))
+        programmable_build :: src.lines().any(|l| -> l.trim() == "// @programmable_build")
+        command_override_conflict :: src.lines().any(|l| -> l.trim() == "// @command_override_conflict")
+        build_grants :: src.lines().find_map(|line| -> line.trim().strip_prefix("// @build_grants ")).map(|list| -> list.split(',').map(|item| -> {
+            trimmed := item.trim() // #4303
+            trimmed.to_string()
+        }).collect<[String]>()).unwrap_or_default()
+        build_locked :: src.lines().any(|line| -> line.trim() == "// @build_locked")
+        jetpack_hangar_digest_mismatch :: src.lines().any(|line| -> line.trim() == "// @jetpack_hangar_digest_mismatch")
+        env_facet_missing :: src.lines().any(|line| -> line.trim() == "// @env_facet_missing")
+        jetpack_retired_environment_flag :: src.lines().any(|line| -> line.trim() == "// @jetpack_retired_environment_flag")
+        jetpack_retired_store_verbs :: src.lines().any(|line| -> line.trim() == "// @jetpack_retired_store_verbs")
+        retired_gate_flag :: src.lines().any(|line| -> line.trim() == "// @retired_gate_flag")
+        complexity_cli :: src.lines().find_map(|line| -> line.trim().strip_prefix("// @complexity_cli ").map(|value| -> value.to_string()))
+        cli_e0043 :: src.lines().any(|line| -> line.trim() == "// @cli_e0043")
+        cli_e1219 :: src.lines().any(|line| -> line.trim() == "// @cli_e1219")
+        cli_build :: src.lines().any(|line| -> line.trim() == "// @cli_build")
+        cli_e2101 :: src.lines().any(|line| -> line.trim() == "// @cli_e2101")
+        typed_settings_cli :: src.lines().any(|line| -> line.trim() == "// @typed_settings_cli")
+        lint_policy_config :: src.lines().find_map(|line| -> line.trim().strip_prefix("// @lint_policy_config ").map(|value| -> value.to_string()))
+        workspace_lock_e1202 :: src.lines().any(|line| -> line.trim() == "// @workspace_lock_e1202")
+        jetlib_version_mismatch :: src.lines().any(|line| -> line.trim() == "// @jetlib_version_mismatch")
+        jetlib_effect_refused :: src.lines().any(|line| -> line.trim() == "// @jetlib_effect_refused")
+        library_invalid_binding :: src.lines().any(|line| -> line.trim() == "// @library_invalid_binding")
+        compiler_extension :: src.lines().find_map(|line| -> line.trim().strip_prefix("// @compiler_extension ").map(|p| -> {
+            trimmed := p.trim() // #4303
+            trimmed.to_string()
+        }))
+        (cex_lock, cex_restore) :: compiler_extension_env(compiler_extension.as_ref())
+        actual :: if manifest_source := lint_policy_config.as_ref() {
+            diagnostic :: jet.Manifest.parse(OSPath.new("package.jet"), manifest_source).expect_err("the lint-policy code fixture must be refused")
+            jet.render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if typed_settings_cli { run_typed_settings_cli_snapshot(&file_arg) }
+        else if cli_e0043 { run_cli_e0043_snapshot() }
+        else if cli_e1219 { run_cli_e1219_snapshot(&file_arg) }
+        else if cli_build { run_cli_build_snapshot(&file_arg) }
+        else if cli_e2101 { run_cli_e2101_snapshot() }
+        else if jetpack_hangar_digest_mismatch { run_jetpack_hangar_digest_mismatch_snapshot() }
+        else if jetpack_retired_environment_flag { run_jetpack_retired_environment_flag_snapshot() }
+        else if jetpack_retired_store_verbs { run_jetpack_retired_store_verbs_snapshot() }
+        else if retired_gate_flag { run_retired_gate_flag_snapshot(&file_arg) }
+        else if spec := complexity_cli.as_ref() { run_complexity_cli_snapshot(&file_arg, spec) }
+        else if env_facet_missing {
+            diagnostic :: jet_env_model.ModuleEval.evaluate_env_with_environment(&src, path.parent().expect("environment fixture parent"), Some("missing")).expect_err("missing environment module fixture must fail")
+            jet.render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if workspace_lock_e1202 {
+            lock_path :: ".jet/lock"
+            diagnostics :: [jetpack.Lock.e1202_workspace(lock_path), jetpack.Lock.e1202_workspace_write(lock_path, "permission denied")]
+            jet.render_diagnostics(&shown_path, &src, &diagnostics)
+        } else if jetlib_version_mismatch {
+            stamp := jetpack.JetLib.JetLibStamp.default()
+            stamp.compiler_version = "0.0.1-old"
+            stamp.declared_effects = default()
+            diagnostic :: jetpack.JetLib.check_compiler_identity(&stamp).expect_err("mismatched compiler identity must be refused before mapping")
+            jet.render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if jetlib_effect_refused {
+            declared :: ["Net"].into_iter().collect<jetpack.Sema.EffectSet>()
+            stamp :: jetpack.JetLib.JetLibStamp.for_this_compiler(declared)
+            grant :: ["FS"].into_iter().collect<jetpack.Sema.EffectSet>()
+            diagnostics :: jetpack.JetLib.check_effect_grant("skyhawk", &stamp, &grant).expect_err("an effect outside the grant must be refused before mapping")
+            jet.render_diagnostics(&shown_path, &src, &diagnostics)
+        } else if library_invalid_binding {
+            match jet.compile_library(&file_arg, None) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if programmable_build {
+            result :: if build_locked {
+                jet.compile_programmable_build_opts(&file_arg, &build_grants, false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), true, false, false, None)
+            } else { jet.compile_programmable_build(&file_arg, &build_grants) }
+            match result { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if command_override_conflict {
+            root :: path.parent().expect("command conflict fixture parent")
+            resolver :: jet.Authority.AuthorityResolver.open(root).expect("command conflict fixture authority")
+            package :: resolver.checked_package(OSPath.new(".")).expect("command conflict fixture package").facts
+            error :: package.resolve_command_entry_checked(&resolver, "run").expect_err("command conflict fixture must have duplicate run overrides")
+            marker :: "// @command_override_conflict"
+            marker_start :: src.find(marker).expect("command conflict marker")
+            diagnostic :: Diagnostic.from_row("E3540", &[("command", "run"), ("locations", error.as_str())], Some(Span.new(marker_start, marker_start + marker.len())))
+            jet.render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if jetpack_e1250 { run_jetpack_e1250_snapshot(&path) }
+        else if cost_cli { run_cost_cli_snapshot(&path) }
+        else if dev_interpreter {
+            match jet.Interpreter.dev_iteration(&file_arg, runtime_ffi, true) {
+                jet.Interpreter.RunOutcome.Problems(diags) -> jet.render_diagnostics(&shown_path, &src, &diags)
+                jet.Interpreter.RunOutcome.Ran { stderr, exit_code, .. } if exit_code != 0 -> stderr
+                jet.Interpreter.RunOutcome.Ran { .. } -> "(no errors)\n"
+            }
+        } else if parent_control_cancel {
+            cancellation :: jet.Codegen.task_group.jet_task_cancellation()
+            wait_start :: src.find("time.sleep").expect("parent-control fixture must name its wait expression")
+            diagnostic :: Diagnostic.error(cancellation.code, cancellation.what.to_string(), cancellation.why.to_string(), cancellation.fix.to_string(), Some(Span.new(wait_start, wait_start + "time.sleep".len())))
+            jet.render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if src.lines().any(|line| -> line.trim() == "// @ambiguous_call") {
+            call :: "put(\"name\", \"text\")"
+            call_start :: src.find(call).expect("ambiguous-call fixture must name its call expression")
+            diagnostic :: Diagnostic.error("E0772", "this call to `put` matches more than one callable body", "the call binds to multiple candidate signatures:\n  put(name: String, text: String)\n  put(key: String, id: String)", "name the arguments to choose one candidate: `put(name: …, text: …)`", Some(Span.new(call_start, call_start + call.len())))
+            jet.render_diagnostics(&shown_path, &src, &[diagnostic])
+        } else if repl_deny {
+            input :: src.lines().filter(|line| -> !line.trim_start().starts_with("//")).filter(|line| -> !line.trim().is_empty()).chain(std.iter.once(":quit")).collect<[String]>().join("\n")
+            child := Command.new(common.jet_bin()).args(["repl", "--deny=FS"]).env("NO_COLOR", "1").env("JET_REPL_HISTORY", "off").stdin(Stdio.piped()).stdout(Stdio.null()).stderr(Stdio.piped()).spawn().expect("start real REPL diagnostic fixture")
+            child.stdin.as_mut().expect("REPL stdin").write_all(input.as_bytes()).expect("write REPL diagnostic fixture")
+            output :: child.wait_with_output().expect("finish REPL diagnostic fixture")
+            assert(output.status.success(), "REPL diagnostic fixture failed to exit")
+            String.from_utf8(output.stderr).expect("REPL diagnostic stderr is UTF-8")
+        } else if generated_source {
+            match jet.Driver.compile_generated_src(&src, &file_arg, jet.Sema.CompileMode.Check) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if check_cli { run_check_cli_snapshot(&path) }
+        else if all_diags {
+            diags :: jet.check_with_path(&file_arg)
+            if diags.is_empty() { "(no errors)\n" } else { jet.render_diagnostics(&render_path, &src, &diags) }
+        } else if no_os {
+            match jet.compile_no_os(&file_arg) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if gates {
+            match jet.compile_with_gates(&file_arg, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure)) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if sandbox_effect { run_sandbox_cli_snapshot(&file_arg, false) }
+        else if sandbox_missing_wasm_tools { run_sandbox_cli_snapshot(&file_arg, true) }
+        else if plugin_target {
+            match jet.compile_plugin(&file_arg) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if web_run { run_web_run_cli_snapshot(&file_arg) }
+        else if run_cli { run_cli_snapshot(&file_arg) }
+        else if web_target {
+            match jet.compile_web(&file_arg) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else if target := cross_target.as_ref() {
+            match jet.compile_with_target_and_gates_and_profile(&src, &file_arg, jet.Policy.GateSet.default(), Some(target), "dev") { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        } else {
+            match jet.compile_with_path(&src, &file_arg) { Err(diags) -> jet.render_diagnostics(&shown_path, &src, &diags); Ok(_) -> "(no errors)\n" }
+        }
+        drop(cex_restore)
+        drop(cex_lock)
+        normalized :: normalize_volatile_ui_snapshot(&shown_path, ^actual)
+        is_directory_entry :: path.file_name().and_then(|name| -> name.to_str()).is_some_and(|name| -> name == "main.jet" || name == "run.jet")
+        expect_path :: if is_directory_entry { path.parent().unwrap().join("stderr") }
+        else if path.file_name().and_then(|name| -> name.to_str()) == Some(jet.Syntax.WORKSPACE_FILE) {
+            path.parent().unwrap().parent().unwrap().join("{path.parent().unwrap().file_name().unwrap().to_string_lossy()}.stderr")
+        } else { path.with_extension("stderr") }
+        if should_update(&update, &shown_path) { write_blessed_snapshot(&expect_path, &shown_path, &normalized) }
+        else {
+            expected :: fs.read_to_string(&expect_path).unwrap_or_default()
+            if normalized != expected { failures.push("ui snapshot mismatch for {shown_path}\n{common.unified_diff(&expect_path.to_string_lossy(), "{shown_path} (actual)", &expected, &normalized)}") }
+        }
+        checked += 1
+    }
+    assert(failures.is_empty(), "snapshot mismatches:\n\n{failures.join("\n\n")}\n\nTo update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.")
+    assert(filter.is_some() || checked >= 7, "expected the ui suite to contain tests, found {checked}")
+}
+
+// Rust: tests/diagnostic_snapshots.rs:806
+#Test("e0109_live_diagnostic_matches_explanation_page") {
+    root :: OSPath.from(common.manifest_dir())
+    path :: root.join("tests/ui/e0109_int_string.jet")
+    source :: fs.read_to_string(&path).expect("E0109 Int/String fixture")
+    diagnostics :: jet.compile_with_path(&source, &path.to_string_lossy()).expect_err("an Int/String operator must be rejected")
+    live :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0109").expect("Int/String fixture must produce E0109")
+    explanation :: jet.Explain.lookup("E0109").expect("E0109 explanation")
+    assert_eq(explanation.what.as_ref().map(jet_foundation.Outcome.jet_sentence_case_line), Some(live.what.clone()))
+    assert_eq(explanation.why.as_ref().map(jet_foundation.Outcome.jet_sentence_case_line), Some(live.why.clone()))
+    assert_eq(explanation.fix.as_ref().map(jet_foundation.Outcome.jet_sentence_case_line), Some(live.fix.clone()))
+    assert(live.edit.is_none())
+    assert_eq(live.applicability, None)
+    assert_eq(live.safety, None)
+    assert(live.no_fix_reason.is_some())
+    output :: Command.new(common.jet_bin()).args(["explain", "E0109"]).env("NO_COLOR", "1").output().expect("run E0109 explanation")
+    assert(output.status.success(), "explain E0109 failed: {output:?}")
+    rendered :: String.from_utf8(output.stdout).expect("E0109 explanation is UTF-8")
+    assert_eq(rendered, jet.Explain.render(&explanation, false))
+}
+
+// Rust: tests/diagnostic_snapshots.rs:855
+#Test("e0109_simple_names_carry_source_derived_code_action") {
+    path :: OSPath.from(common.manifest_dir()).join("tests/ui/string_plus.jet")
+    source :: fs.read_to_string(&path).expect("string-plus fixture")
+    diagnostics :: jet.compile_with_path(&source, &path.to_string_lossy()).expect_err("simple text addition must be rejected")
+    live :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0109").expect("string-plus fixture must produce E0109")
+    assert_eq(live.what, "Text values `first` and `last` aren't joined with `+`")
+    assert_eq(live.fix, "Write the pieces inside one string: \"{first}{last}\"")
+    assert_eq(live.applicability, Some(FixApplicability.Suggested))
+    assert_eq(live.safety, Some(FixSafety.NeedsReview))
+    assert(live.no_fix_reason.is_none())
+    edits :: live.all_edits()
+    assert_eq(edits.len(), 1, "simple text addition must have one code action")
+    assert_eq(edits[0].new_text, "\"{first}{last}\"")
+    assert_eq(edits[0].span, live.span.expect("E0109 source span"))
+    report :: jet.render_all_json(&jet.Diagnostics.ReportPath.from_process("string_plus.jet"), &source, &diagnostics)
+    assert(report.contains("\"new_text\":\"\\\"{first}{last}\\\"\""), "the machine report must carry the source-specific replacement: {report}")
+}
+
+// Rust: tests/diagnostic_snapshots.rs:900
+#Test("l0523_source_edit_is_exposed_to_editor_actions") {
+    path :: OSPath.from(common.manifest_dir()).join("tests/ui_lint/repeated_list_head.jet")
+    source :: fs.read_to_string(&path).expect("repeated-list-head fixture")
+    diagnostics :: jet.compile_with_path(&source, &path.to_string_lossy()).expect("repeated-list-head fixture must compile with lints")
+    live :: diagnostics.lints.iter().find(|diagnostic| -> diagnostic.code == "L0523").expect("repeated-list-head fixture must produce L0523")
+    editor_edits :: live.all_edits()
+    assert_eq(editor_edits.len(), 1, "L0523 must expose one editor action")
+    assert_eq(editor_edits[0].span, live.span.expect("L0523 source span"))
+    assert_eq(editor_edits[0].new_text, "[Point]{{x: 1}, {x: 2}}", "editor action must reuse the canonical L0523 source edit")
+    assert_eq(editor_edits[0].new_text, live.edit.as_ref().expect("L0523 source edit").new_text)
+}
+
+// Rust: tests/diagnostic_snapshots.rs:930
+#Test("core_module_lints_never_reach_user_output") {
+    source :: """
+use core.math as math
+use core.encoding.json as json
+
+fn run() {
+    print(math.factorial(25) ?? -1)
+    doc :: json.parse("[1, 2]") ?? panic("parse")
+    print(json.canonical(doc) ?? "")
+    total := 0
+    total = total + 1
+    print(total)
+}
+"""
+    path :: common.unique_tmp("jet_core_lint_boundary").join("core_lint_boundary.jet")
+    fs.write(&path, source).expect("write core lint boundary fixture")
+    compiled :: jet.compile_with_path(source, &path.to_string_lossy()).unwrap_or_else(|diagnostics| -> panic("fixture must compile: {diagnostics:?}"))
+    rendered :: jet.render_diagnostics("core_lint_boundary.jet", source, &compiled.lints)
+    loop lint in compiled.lints {
+        assert(!lint.origin().is_some_and(|origin| -> origin.is_core_source()), "a Core lint leaked into user output:\n{rendered}")
+        if lint.origin().is_none() { assert(lint.span.is_none_or(|span| -> span.end <= source.len()), "a lint points outside the user's source:\n{rendered}") }
+    }
+    assert(compiled.lints.iter().any(|lint| -> lint.code == "L0503"), "the user's own compound-assignment lint must still surface:\n{rendered}")
+}
+
+// Rust: tests/diagnostic_snapshots.rs:967
+#Test("e0507_unknown_traversal_intent_stays_explanatory") {
+    path :: OSPath.from(common.manifest_dir()).join("tests/ui/list_loop_mutate.jet")
+    source :: fs.read_to_string(&path).expect("collection-mutation fixture")
+    diagnostics :: jet.compile_with_path(&source, &path.to_string_lossy()).expect_err("collection mutation during traversal must be rejected")
+    live :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0507").expect("collection-mutation fixture must produce E0507")
+    output :: Command.new(common.jet_bin()).args(["run", "--interpret"]).arg(&path).env("NO_COLOR", "1").output().expect("run collection-mutation fixture")
+    assert(!output.status.success(), "a collection mutation must make `jet run` fail")
+    stderr :: String.from_utf8(output.stderr).expect("E0507 stderr is UTF-8")
+    assert(stderr.contains("Error [E0507]"), "{stderr}")
+    assert(stderr.contains("visited domain, element order, or termination"), "{stderr}")
+    assert(live.all_edits().is_empty())
+    assert_eq(live.applicability, None)
+    assert_eq(live.no_fix_reason.as_ref().map(|reason| -> reason.kind.as_str()), Some("ambiguous"))
+    assert(live.fix.contains("separate result"))
+    assert(live.fix.contains("fixed original set"))
+    assert(live.fix.contains("explicit work queue"))
+}
+
+// Rust: tests/diagnostic_snapshots.rs:1003
+#Test("loop_grammar_history_stays_distinct_from_collection_mutation") {
+    path :: common.unique_tmp("jet_foreign_loop_grammar").join("foreign_for.jet")
+    source :: """
+
+fn run() {
+    for x in xs { print(x) }
+    while c { print(c) }
+    continue
+    do { print("done") }
+}
+"""
+    fs.write(&path, source).expect("write foreign loop fixture")
+    diagnostics :: jet.compile_with_path(source, &path.to_string_lossy()).expect_err("retired loop spellings must be rejected")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0003"), "foreign loop spelling must retain E0003: {diagnostics:?}")
+    assert(diagnostics.iter().all(|diagnostic| -> diagnostic.code != "E0507"), "grammar mismatch must not be relabeled E0507: {diagnostics:?}")
+}
+
+// Rust: tests/diagnostic_snapshots.rs:1465
+#Test("lint_snapshots") {
+    dir :: OSPath.from(common.manifest_dir()).join("tests/ui_lint")
+    ext :: jet.Syntax.FILE_EXT
+    entries := fs.read_dir(&dir).unwrap().map(|e| -> e.unwrap().path()).filter(|p| -> p.is_file() && p.extension().and_then(|e| -> e.to_str()) == Some(ext)).collect<[OSPath]>()
+    entries.sort()
+    filter :: common.fixture_filter("JET_UI_FILTER")
+    entries.retain(|path| -> common.fixture_matches(filter.as_ref(), "tests/ui_lint/{path.file_name().unwrap().to_string_lossy()}"))
+    assert(!entries.is_empty(), "JET_UI_FILTER matched no lint fixtures: {filter.as_ref().unwrap_or("<unfiltered>")}")
+    update :: update_selector()
+    shown_entries :: entries.iter().map(|path| -> "tests/ui_lint/{path.file_name().unwrap().to_string_lossy()}").collect<[String]>()
+    validate_scoped_update(&update, shown_entries.iter())
+    checked := 0
+    failures: [String] = []
+    loop path in entries {
+        name :: path.file_name().unwrap().to_string_lossy().into_owned()
+        src :: fs.read_to_string(&path).unwrap()
+        shown_path :: "tests/ui_lint/{name}"
+        compiler_extension :: src.lines().find_map(|line| -> line.trim().strip_prefix("// @compiler_extension ").map(|p| -> {
+            trimmed := p.trim() // #4303
+            trimmed.to_string()
+        }))
+        (cex_lock, cex_restore) :: compiler_extension_env(compiler_extension.as_ref())
+        out :: jet.compile_with_path(&src, &path.to_string_lossy()).unwrap_or_else(|diags| -> panic("lint fixture {name} must compile:\n{jet.render_diagnostics(&shown_path, &src, &diags)}"))
+        drop(cex_restore)
+        drop(cex_lock)
+        assert(!out.lints.is_empty(), "lint fixture {name} should emit at least one lint")
+        actual :: jet.render_diagnostics(&shown_path, &src, &out.lints)
+        expect_path :: path.with_extension("warn")
+        if should_update(&update, &shown_path) { write_blessed_snapshot(&expect_path, &shown_path, &actual) }
+        else {
+            expected :: fs.read_to_string(&expect_path).unwrap_or_default()
+            if actual != expected { failures.push("lint snapshot mismatch for {shown_path}\n{common.unified_diff(&expect_path.to_string_lossy(), "{shown_path} (actual)", &expected, &actual)}") }
+        }
+        checked += 1
+    }
+    assert(failures.is_empty(), "snapshot mismatches:\n\n{failures.join("\n\n")}\n\nTo update one reviewed fixture, use UPDATE_EXPECT=<canonical-relative-name> with JET_UI_FILTER=<same-name>.")
+    assert(filter.is_some() || checked >= 2, "expected lint fixtures, found {checked}")
+}
+
+// Rust: tests/diagnostic_snapshots.rs:1671
+#Test("semantic_corpus_policy_runs_with_diagnostic_fixtures") {
+    common.corpus_policy.CorpusPolicy.load().expect("corpus manifest").check_gate("fixture").expect("diagnostic fixture corpus semantic policy")
+}
+// Rust: tests/diagnostic_snapshots.rs:1679
+#Test("semantic_guidance_fixtures_keep_one_selected_rule_and_edit") {
+    cases: [(String, [String], String)] = [
+        ("process_args_view", ["L0515"], ".args()"),
+        ("message_text", ["L0516", "L0516", "L0516"], ".text()"),
+        ("redundant_fixed_cleanup", ["L0518"], ""),
+        ("unit_scalar_rewrap", ["L0519"], " * "),
+        ("path_containment_string_prefix", ["L0517"], "is_within"),
+        ("complete_ascii_case_ladder", ["L0521"], "to_ascii_"),
+        ("walk_files_filter", ["L0522"], "walk_files"),
+        ("repeated_list_head", ["L0523"], "[Point]{"),
+        ("raw_multiline_html", ["L0524"], "HTML{\"\"\"")
+    ]
+    root :: OSPath.from(common.manifest_dir())
+    loop (name, expected_codes, edit_fragment) in cases {
+        path :: root.join("tests/ui_lint").join("{name}.jet")
+        source :: fs.read_to_string(&path).expect("semantic guidance fixture")
+        output :: jet.compile_with_path(&source, &path.to_string_lossy()).unwrap_or_else(|diagnostics| -> panic("{name} must compile: {diagnostics:?}"))
+        selected :: output.lints.iter().filter(|diagnostic| -> {
+            match diagnostic.code { "L0515" | "L0516" | "L0517" | "L0518" | "L0519" | "L0521" | "L0522" | "L0523" | "L0524" -> true; _ -> false }
+        }).collect<[&Diagnostic]>()
+        actual_codes :: selected.iter().map(|diagnostic| -> diagnostic.code.as_str()).collect<[String]>()
+        assert_eq(actual_codes, expected_codes, "selected lints changed for {name}")
+        // GATE #4499: exact tuple/string/Span composite-key equality and hash.
+        sites: [(String, Span): Bool] = [:]
+        loop diagnostic in selected {
+            span :: diagnostic.span.unwrap_or_else(|| -> panic("{name} selected lint has no semantic site"))
+            site :: (diagnostic.code.as_str(), span)
+            assert(!sites.contains_key(&site), "{name} emitted duplicate selected lint at {span:?}")
+            sites.insert(site, true)
+        }
+        assert(selected.iter().all(|diagnostic| -> diagnostic.edit.as_ref().is_some_and(|edit| -> edit.new_text.contains(edit_fragment))), "{name} selected lint lost its mechanical edit")
+        if name == "raw_multiline_html" {
+            edit :: selected[0].edit.as_ref().expect("raw HTML edit")
+            literal_start :: source.find("\"\"\"").expect("opening triple quote")
+            literal_end :: source.rfind("\"\"\"").expect("closing triple quote") + 3
+            assert_eq(edit.span, Span.new(literal_start, literal_end))
+            assert_eq(edit.new_text, "HTML{" + source[literal_start..literal_end] + "}")
+        }
+    }
+}

@@ -1,0 +1,40 @@
+use std.[fs, env]
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet.Interpreter.RunOutcome
+// GATE #4494: atomics, temporary filesystem and process identity.
+// Rust: tests/l0503_behavior.rs:16
+SOURCE :: include_str("tests/ui_lint/prefer_compound_assign.jet")
+// Rust: tests/l0503_behavior.rs:17
+EXPECTED_STDOUT :: "80\n"
+// Rust: tests/l0503_behavior.rs:18
+WHY :: "compound assignment updates a place in one step without restating it"
+// Rust: tests/l0503_behavior.rs:20
+EXPECTED_L0503 :: [
+    ("p.hp", 5, 43, "prefer `p.hp -= …` instead of repeating the left side", "write `p.hp -= …`"),
+    ("p.hp", 7, 41, "prefer `p.hp += …` instead of repeating the left side", "write `p.hp += …`"),
+    ("n", 11, 7, "prefer `n += …` instead of repeating the left side", "write `n += …`"),
+    ("n", 15, 7, "prefer `n += …` instead of repeating the left side", "write `n += …`")
+]
+// Rust: tests/l0503_behavior.rs:95
+DEV_SEQUENCE :: AtomicU64.new(0)
+// Rust: tests/l0503_behavior.rs:97
+fn run_dev(force_interpreter: Bool) -> (Int, String, String) {
+    id :: DEV_SEQUENCE.fetch_add(1, Ordering.Relaxed)
+    dir :: env.temp_dir().join("jet_l0503_dev_{std.process.id()}_{id}")
+    fs.create_dir_all(&dir).expect("L0503 dev scratch directory")
+    path :: dir.join("prefer_compound_assign.jet")
+    fs.write(&path, SOURCE).expect("L0503 dev source")
+    fs.write(dir.join("package.jet"), "name: \"l0503_behavior\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO, Mem.Alloc] } }\n").expect("L0503 dev package")
+    outcome :: jet.Interpreter.dev_iteration(path.to_str().expect("L0503 dev path"), false, force_interpreter)
+    result :: match outcome {
+        RunOutcome.Ran(stdout, stderr, exit_code) -> (exit_code, stdout, stderr)
+        RunOutcome.Problems(diags) -> panic("L0503 fixture failed on {if force_interpreter -> "forced interpreter" else -> "default"} dev tier: {diags:?}")
+    }
+    _ :: fs.remove_dir_all(dir)
+    result
+}
+// Rust: tests/l0503_behavior.rs:137
+fn assert_runtime_output(tier: String, result: &(Int, String, String)) -> {
+    assert_eq(result.0, 0, "{tier} L0503 fixture failed: {result.2}")
+    assert_eq(result.1, EXPECTED_STDOUT, "{tier} L0503 output drifted")
+}

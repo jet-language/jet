@@ -1,1804 +1,661 @@
-// PORT-PENDING 2021 crates-jet-driver-src-driver-mod-slice-3601: crates/jet-driver/src/Driver/mod.rs:3601-5400
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS     // entry, generated-source check, and final runtime bundle receives this
-//RS     // exact snapshot; only the lock boundary may probe the host.
-//RS     let build_stamp = build_stamp_for_facts(&bundle.project_root, inputs.locked)?;
-//RS     seed_build_facts_from_stamp(
-//RS         &mut bundle,
-//RS         &inputs.profile,
-//RS         &inputs.setting_overrides,
-//RS         &[],
-//RS         &build_stamp,
-//RS     )?;
-//RS     bundle.build_facts.artifact_build = inputs.artifact_build;
-//RS     bundle.web_partition_enforced = inputs.web_target;
-//RS     let local_build_indices = if inputs.build_override {
-//RS         bundle.modules[bundle.entry]
-//RS             .items
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter_map(|(index, item)| {
-//RS                 matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))
-//RS                     .then_some(index)
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS     } else {
-//RS         Vec::new()
-//RS     };
-//RS     if local_build_indices.len() > 1 {
-//RS         return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
-//RS     }
-//RS     let entry_module_path = bundle.modules[bundle.entry].path.clone();
-//RS     if let Some((package_path, package_source)) = package_entry.as_ref() {
-//RS         if !local_build_indices.is_empty()
-//RS             && normalize_project_path(&bundle.project_root, package_path)
-//RS                 != normalize_project_path(&bundle.project_root, &entry_module_path)
-//RS         {
-//RS             let source_span = local_build_indices.first().and_then(|index| {
-//RS                 match &bundle.modules[bundle.entry].items[*index] {
-//RS                     crate::AST::Item::Func(func) => Some(func.name_span),
-//RS                     _ => None,
-//RS                 }
-//RS             });
-//RS             let local_location = local_build_indices
-//RS                 .first()
-//RS                 .map(|index| build_function_location(&bundle.modules[bundle.entry], *index))
-//RS                 .unwrap_or_else(|| entry_module_path.display().to_string());
-//RS             let package_location = build_source_location(package_path, package_source);
-//RS             return Err(vec![build_entry_conflict(
-//RS                 "the package",
-//RS                 &local_location,
-//RS                 &package_location,
-//RS                 source_span,
-//RS             )]);
-//RS         }
-//RS     }
-//RS     if let Some((package_path, package_source)) = package_entry {
-//RS         if normalize_project_path(&bundle.project_root, &package_path)
-//RS             == normalize_project_path(&bundle.project_root, &entry_module_path)
-//RS         {
-//RS             // The selected runtime file already is the checked package build
-//RS             // entry. Keep its loader snapshot and continue through one path.
-//RS         } else {
-//RS             let mut source_closure = bundle_source_closure(&bundle);
-//RS             source_closure.push((package_path.clone(), package_source.clone()));
-//RS             source_closure.sort_by(|left, right| left.0.cmp(&right.0));
-//RS             source_closure.dedup_by(|left, right| left.0 == right.0);
-//RS             let overlays = source_closure
-//RS                 .iter()
-//RS                 .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS                 .collect::<Vec<_>>();
-//RS             runtime_bundle_for_package = Some(bundle);
-//RS             let package_path_string = package_path.to_string_lossy().into_owned();
-//RS             bundle =
-//RS                 crate::Loader::load_entry_with_overlays(&package_path_string, &overlays, false)?;
-//RS             package_build_fingerprint = Some(crate::SHA256::sha256_hex(
-//RS                 &crate::CanonicalAST::canonical_bytes(&bundle),
-//RS             ));
-//RS             bundle.active_os = active_os;
-//RS             set_bundle_target(&mut bundle, inputs.cross_target.as_deref());
-//RS             seed_build_facts_from_stamp(
-//RS                 &mut bundle,
-//RS                 &inputs.profile,
-//RS                 &inputs.setting_overrides,
-//RS                 &[],
-//RS                 &build_stamp,
-//RS             )?;
-//RS             bundle.build_facts.artifact_build = inputs.artifact_build;
-//RS             bundle.web_partition_enforced = inputs.web_target;
-//RS         }
-//RS     }
-//RS     let local_build_indices = if inputs.build_override {
-//RS         bundle.modules[bundle.entry]
-//RS             .items
-//RS             .iter()
-//RS             .enumerate()
-//RS             .filter_map(|(index, item)| {
-//RS                 matches!(item, crate::AST::Item::Func(func) if crate::Sema::is_build_entry(func))
-//RS                     .then_some(index)
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS     } else {
-//RS         Vec::new()
-//RS     };
-//RS     if local_build_indices.len() > 1 {
-//RS         return Err(vec![duplicate_build_entries(&bundle, &local_build_indices)]);
-//RS     }
-//RS     let build_index = local_build_indices.into_iter().next();
-//RS     let build_span =
-//RS         build_index.and_then(|index| match &bundle.modules[bundle.entry].items[index] {
-//RS             crate::AST::Item::Func(build) => Some(build.span),
-//RS             _ => None,
-//RS         });
-//RS     if let Some(index) = build_index {
-//RS         let crate::AST::Item::Func(build) = &bundle.modules[bundle.entry].items[index] else {
-//RS             unreachable!()
-//RS         };
-//RS         if !valid_build_signature(build) {
-//RS             return Err(vec![bad_build_signature(build.name_span)]);
-//RS         }
-//RS     }
-//RS     if build_index.is_none() {
-//RS         if let Some(entry_fn) = inputs.entry_fn.as_deref() {
-//RS             swap_entry_point(&mut bundle, entry_fn);
-//RS         }
-//RS     }
-//RS 
-//RS     // Build code is compiler-host code. Target restrictions apply only after
-//RS     // the selected runtime program replaces it.
-//RS     let mut sema_span = crate::Trace::span("sema.check");
-//RS     let (diags, effect_facts) = if build_index.is_some() {
-//RS         crate::Sema::check_bundle_with_effect_facts_for_build(&mut bundle, compile_mode)
-//RS     } else {
-//RS         crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode)
-//RS     };
-//RS     sema_span.items(bundle.modules.len());
-//RS     drop(sema_span);
-//RS     let diags = apply_package_effect_budget(&bundle, &effect_facts, diags)?;
-//RS     let extension_diags =
-//RS         crate::CompilerExtensionHook::post_sema_diagnostics(&bundle, Some(&effect_facts), &diags);
-//RS     let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS     let lints = classify_diagnostics(
-//RS         &bundle,
-//RS         parse_teaching
-//RS             .into_iter()
-//RS             .chain(diags)
-//RS             .chain(extension_diags)
-//RS             .collect(),
-//RS         build_span.is_some(),
-//RS     )?;
-//RS     let mut source_closure = bundle_source_closure(&bundle);
-//RS     if let Some(runtime) = runtime_bundle_for_package.as_ref() {
-//RS         source_closure.extend(bundle_source_closure(runtime));
-//RS     }
-//RS     source_closure.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     source_closure.dedup_by(|left, right| left.0 == right.0);
-//RS     Ok(PreparedBuildFrontEnd {
-//RS         inputs,
-//RS         bundle,
-//RS         effect_facts,
-//RS         program_value: None,
-//RS         lints,
-//RS         build_index,
-//RS         build_span,
-//RS         compile_mode,
-//RS         active_os,
-//RS         build_stamp,
-//RS         package_build_fingerprint,
-//RS         runtime_bundle_for_package,
-//RS         runtime_source_paths,
-//RS         source_closure,
-//RS     })
-//RS }
-//RS 
-//RS /// Stage two: evaluate the selected build entry, re-check the planned program,
-//RS /// and emit. Resumes the front end `prepare_build_front_end_on_compiler_stack`
-//RS /// produced — it never loads or type-checks the program a second time.
-//RS fn compile_build_from_front_end(
-//RS     file: &str,
-//RS     options: BuildRunOptions,
-//RS     dependency_boundary: Option<&str>,
-//RS     prepared: PreparedBuildFrontEnd,
-//RS     without_codegen: bool,
-//RS     project_check: bool,
-//RS ) -> Result<BuildCompileOutput, Vec<Diagnostic>> {
-//RS     let PreparedBuildFrontEnd {
-//RS         inputs: _,
-//RS         mut bundle,
-//RS         effect_facts,
-//RS         program_value,
-//RS         mut lints,
-//RS         build_index,
-//RS         build_span,
-//RS         compile_mode,
-//RS         active_os,
-//RS         build_stamp,
-//RS         package_build_fingerprint,
-//RS         mut runtime_bundle_for_package,
-//RS         runtime_source_paths,
-//RS         source_closure,
-//RS     } = prepared;
-//RS     // The checked source closure selects the target dossier before any build
-//RS     // action identity or compiler-owned package action is constructed.
-//RS     refresh_target_dossier(&mut bundle, options.no_os, options.web_target);
-//RS     // Capture lock presence before runtime reload can publish any lock update.
-//RS     // The first build must bootstrap dependency names once; later builds must
-//RS     // remain fail-closed when the manifest and lock drift.
-//RS     let lock_was_present = bundle
-//RS         .project_root
-//RS         .join(crate::Syntax::UNIFIED_LOCK_FILE)
-//RS         .exists();
-//RS     // The cache capability is constructed only after parser, sema, policy,
-//RS     // extension, and diagnostic classification have all succeeded.
-//RS     let front_end_completion = crate::Comptime::Build::FrontEndCompletion::all_complete();
-//RS 
-//RS     let mut build_run = None;
-//RS     let mut locked_provenance = Vec::<crate::AST::ComptimeInput>::new();
-//RS     let mut filesystem_transaction = None;
-//RS     if let Some(index) = build_index {
-//RS         let build = match &bundle.modules[bundle.entry].items[index] {
-//RS             crate::AST::Item::Func(func) => func,
-//RS             _ => unreachable!(),
-//RS         };
-//RS         let declared_build_effects = build
-//RS             .declared_effects
-//RS             .as_ref()
-//RS             .into_iter()
-//RS             .flatten()
-//RS             .filter_map(|(name, _)| crate::Comptime::Build::BuildCapability::parse(name))
-//RS             .collect::<std::collections::BTreeSet<_>>();
-//RS         let has_impure_gate = contains_impure_gate(&build.body);
-//RS         let build_name_span = build.name_span;
-//RS         let mut funcs = std::collections::HashMap::new();
-//RS         let error_conversions = bundle
-//RS             .modules
-//RS             .iter()
-//RS             .flat_map(|module| module.items.iter())
-//RS             .filter_map(|item| match item {
-//RS                 crate::AST::Item::ErrorConv(conversion) => Some(conversion.clone()),
-//RS                 _ => None,
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let mut methods = std::collections::HashMap::new();
-//RS         let mut structs = std::collections::HashMap::new();
-//RS         let mut enums = std::collections::HashMap::new();
-//RS         let mut migrations: std::collections::HashMap<String, Vec<&crate::AST::MigrationDecl>> =
-//RS             std::collections::HashMap::new();
-//RS         let mut computed_fields = std::collections::HashMap::new();
-//RS         let mut distinct_ranges = std::collections::HashMap::new();
-//RS         let mut distinct_bases = std::collections::HashMap::new();
-//RS         let mut function_name_counts = std::collections::HashMap::<String, usize>::new();
-//RS         let mut type_name_counts = std::collections::HashMap::<String, usize>::new();
-//RS         let mut const_name_counts = std::collections::HashMap::<String, usize>::new();
-//RS         for module in &bundle.modules {
-//RS             for item in &module.items {
-//RS                 match item {
-//RS                     crate::AST::Item::Func(func) => {
-//RS                         *function_name_counts.entry(func.name.clone()).or_default() += 1
-//RS                     }
-//RS                     crate::AST::Item::Struct(def) => {
-//RS                         *type_name_counts.entry(def.name.clone()).or_default() += 1
-//RS                     }
-//RS                     crate::AST::Item::Enum(def) => {
-//RS                         *type_name_counts.entry(def.name.clone()).or_default() += 1
-//RS                     }
-//RS                     crate::AST::Item::Const(def) if def.is_comptime && def.ct.is_some() => {
-//RS                         *const_name_counts.entry(def.name.clone()).or_default() += 1
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-FIELDPOL1: the build interpreter consumes the same source
-//RS         // expressions that sema rewrote and checked as computed getters. Keep
-//RS         // both the qualified and unique short type keys; this mirrors the
-//RS         // method/type lookup tables above and avoids a build-only reflection
-//RS         // gap for sibling-field reads.
-//RS         for module in &bundle.modules {
-//RS             for item in &module.items {
-//RS                 if let crate::AST::Item::Struct(def) = item {
-//RS                     let owner = format!("{}::{}", module.alias, def.name);
-//RS                     for field in &def.fields {
-//RS                         if let Some(expression) = &field.computed {
-//RS                             computed_fields
-//RS                                 .insert((owner.clone(), field.name.clone()), expression.as_ref());
-//RS                             if type_name_counts.get(&def.name) == Some(&1) {
-//RS                                 computed_fields.insert(
-//RS                                     (def.name.clone(), field.name.clone()),
-//RS                                     expression.as_ref(),
-//RS                                 );
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS             }
-//RS         }
-//RS         for module in &bundle.modules {
-//RS             for item in &module.items {
-//RS                 match item {
-//RS                     crate::AST::Item::Func(func) => {
-//RS                         funcs.insert(format!("{}::{}", module.alias, func.name), func);
-//RS                         if function_name_counts.get(&func.name) == Some(&1) {
-//RS                             funcs.insert(func.name.clone(), func);
-//RS                         }
-//RS                     }
-//RS                     crate::AST::Item::Struct(def) => {
-//RS                         let owner = format!("{}::{}", module.alias, def.name);
-//RS                         structs.insert(owner.clone(), def);
-//RS                         if type_name_counts.get(&def.name) == Some(&1) {
-//RS                             structs.insert(def.name.clone(), def);
-//RS                         }
-//RS                         for method in &def.methods {
-//RS                             methods.insert((owner.clone(), method.name.clone()), method);
-//RS                             if type_name_counts.get(&def.name) == Some(&1) {
-//RS                                 methods.insert((def.name.clone(), method.name.clone()), method);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     crate::AST::Item::Enum(def) => {
-//RS                         let owner = format!("{}::{}", module.alias, def.name);
-//RS                         enums.insert(owner.clone(), def);
-//RS                         if type_name_counts.get(&def.name) == Some(&1) {
-//RS                             enums.insert(def.name.clone(), def);
-//RS                         }
-//RS                         for method in &def.methods {
-//RS                             methods.insert((owner.clone(), method.name.clone()), method);
-//RS                             if type_name_counts.get(&def.name) == Some(&1) {
-//RS                                 methods.insert((def.name.clone(), method.name.clone()), method);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     crate::AST::Item::Impl(imp) => {
-//RS                         let owner = format!("{}::{}", module.alias, imp.type_name);
-//RS                         for method in &imp.methods {
-//RS                             methods.insert((owner.clone(), method.name.clone()), method);
-//RS                             if type_name_counts.get(&imp.type_name) == Some(&1) {
-//RS                                 methods
-//RS                                     .insert((imp.type_name.clone(), method.name.clone()), method);
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                     crate::AST::Item::Migration(m) => {
-//RS                         migrations.entry(m.type_name.clone()).or_default().push(m);
-//RS                     }
-//RS                     crate::AST::Item::Distinct(def) => {
-//RS                         distinct_ranges
-//RS                             .insert(def.name.clone(), def.range.map(|(lo, hi, _)| (lo, hi)));
-//RS                         distinct_bases.insert(def.name.clone(), def.base.clone());
-//RS                     }
-//RS                     crate::AST::Item::UnitFamily(family) => {
-//RS                         for def in family.distinct_defs() {
-//RS                             distinct_ranges
-//RS                                 .insert(def.name.clone(), def.range.map(|(lo, hi, _)| (lo, hi)));
-//RS                             distinct_bases.insert(def.name, def.base);
-//RS                         }
-//RS                     }
-//RS                     _ => {}
-//RS                 }
-//RS             }
-//RS         }
-//RS         // D-FIELDPOL1/D-MODCOMPUTE1: top-level immutable comptime constants
-//RS         // are real inputs to the same pure build interpreter as computed
-//RS         // fields. Keep qualified names always and expose a short name only
-//RS         // when the program has one unambiguous declaration.
-//RS         let mut globals = std::collections::HashMap::new();
-//RS         for module in &bundle.modules {
-//RS             for item in &module.items {
-//RS                 let crate::AST::Item::Const(def) = item else {
-//RS                     continue;
-//RS                 };
-//RS                 if !def.is_comptime {
-//RS                     continue;
-//RS                 }
-//RS                 let Some(value) = &def.ct else { continue };
-//RS                 globals.insert(format!("{}::{}", module.alias, def.name), value.clone());
-//RS                 if const_name_counts.get(&def.name) == Some(&1) {
-//RS                     globals.insert(def.name.clone(), value.clone());
-//RS                 }
-//RS             }
-//RS         }
-//RS         let core_imports = core_aliases(&bundle.modules[bundle.entry]);
-//RS         let info = crate::Comptime::ProgramInfo {
-//RS             globals,
-//RS             methods,
-//RS             structs,
-//RS             enums,
-//RS             computed_fields,
-//RS             distinct_ranges,
-//RS             distinct_bases,
-//RS             core_imports,
-//RS             build_facts: bundle.build_facts.clone(),
-//RS             migrations,
-//RS         };
-//RS         let program_value = program_value.unwrap_or_else(|| {
-//RS             let semantic_facts = program_semantic_facts(&bundle, &effect_facts);
-//RS             crate::Comptime::build_program_info(&bundle, &semantic_facts)
-//RS         });
-//RS         // Package and workspace entries may be selected from `src/` or from
-//RS         // a named source file. Build-relative inputs always belong to the
-//RS         // owning project root, which is also the root used by generated
-//RS         // output, action execution, and lock provenance.
-//RS         let base_dir = &bundle.project_root;
-//RS         let package = if bundle.build_facts.package_name.is_empty() {
-//RS             build_package_name(file)?
-//RS         } else {
-//RS             bundle.build_facts.package_name.clone()
-//RS         };
-//RS         let mut evaluated = crate::Comptime::Build::with_packaged_plugin_runner(
-//RS             crate::BuildPluginHook::run_packaged_build_plugin,
-//RS             || {
-//RS                 crate::Comptime::run_build_entry_with_policy(
-//RS                     build,
-//RS                     &funcs,
-//RS                     &error_conversions,
-//RS                     base_dir,
-//RS                     &info,
-//RS                     program_value,
-//RS                     &package,
-//RS                     options.gates,
-//RS                     options.policy.clone(),
-//RS                 )
-//RS             },
-//RS         )
-//RS         .map_err(|diag| vec![diag])?;
-//RS 
-//RS         if !evaluated.diagnostics.is_empty() {
-//RS             return Err(evaluated.diagnostics);
-//RS         }
-//RS 
-//RS         // Resolve computed writers through the complete fact pipeline before
-//RS         // any action or generated-source check observes the build snapshot.
-//RS         // This is both validation and finalization: there is no build-only
-//RS         // declaration/type/conflict evaluator beside the canonical resolver.
-//RS         seed_build_facts_from_stamp(
-//RS             &mut bundle,
-//RS             &options.profile,
-//RS             &options.setting_overrides,
-//RS             evaluated.plan.fact_contributions(),
-//RS             &build_stamp,
-//RS         )?;
-//RS         bundle.build_facts.artifact_build = options.artifact_build;
-//RS 
-//RS         let dependency_name = dependency_boundary.map(build_package_name).transpose()?;
-//RS         validate_build_authority(
-//RS             &evaluated.plan,
-//RS             &declared_build_effects,
-//RS             has_impure_gate,
-//RS             &options,
-//RS             dependency_name,
-//RS             build_name_span,
-//RS         )?;
-//RS         validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build_name_span)?;
-//RS 
-//RS         let package_spec_bundle = runtime_bundle_for_package.as_ref().unwrap_or(&bundle);
-//RS         let package_specs = if package_spec_bundle.dep_roots.is_empty() {
-//RS             Vec::new()
-//RS         } else {
-//RS             compiler_package_specs(
-//RS                 package_spec_bundle,
-//RS                 &package,
-//RS                 package_build_fingerprint.as_deref(),
-//RS             )
-//RS         };
-//RS         let compiler_identity = compiler_action_identity(&bundle.build_facts);
-//RS         let compiler_target = bundle.build_facts.target_triple.clone();
-//RS         let compiler_profile = options.profile.clone();
-//RS         if !package_specs.is_empty() && !evaluated.plan.targets().is_empty() {
-//RS             evaluated
-//RS                 .plan
-//RS                 .add_compiler_package_actions(
-//RS                     &package_specs,
-//RS                     compiler_identity,
-//RS                     &compiler_target,
-//RS                     &compiler_profile,
-//RS                 )
-//RS                 .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-//RS         }
-//RS         let compiler_artifacts = package_specs
-//RS             .iter()
-//RS             .map(|spec| (spec.name.clone(), spec.clone()))
-//RS             .collect::<BTreeMap<_, _>>();
-//RS         let compiler_runner =
-//RS             move |action: &crate::Comptime::Build::BuildAction,
-//RS                   snapshots: &[crate::Comptime::Build::ActionInputSnapshot]| {
-//RS                 let package_name = action
-//RS                     .labels
-//RS                     .get("compiler.package")
-//RS                     .ok_or_else(|| "compiler action has no package identity".to_string())?;
-//RS                 let spec = compiler_artifacts
-//RS                     .get(package_name)
-//RS                     .ok_or_else(|| format!("compiler package `{package_name}` was not prepared"))?;
-//RS                 let mut artifact = format!(
-//RS                 "jet.sealed-package.v1\npackage={}\nsource={}\ncompiler={}\ntarget={}\nprofile={}\n",
-//RS                 package_name,
-//RS                 spec.source_digest.as_str(),
-//RS                 action.labels.get("compiler.identity").map(String::as_str).unwrap_or_default(),
-//RS                 action.labels.get("compiler.target").map(String::as_str).unwrap_or_default(),
-//RS                 action.labels.get("compiler.profile").map(String::as_str).unwrap_or_default(),
-//RS             );
-//RS                 for snapshot in snapshots {
-//RS                     artifact.push_str("dependency=");
-//RS                     artifact.push_str(snapshot.path.as_str());
-//RS                     artifact.push('=');
-//RS                     artifact.push_str(snapshot.digest.as_str());
-//RS                     artifact.push('\n');
-//RS                 }
-//RS                 Ok(vec![artifact.into_bytes()])
-//RS             };
-//RS 
-//RS         let selected_actions = evaluated
-//RS             .plan
-//RS             .selected_action_ids()
-//RS             .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-//RS         let selected_generated = if options.emit_generated {
-//RS             evaluated.plan.generated_modules().iter().collect()
-//RS         } else {
-//RS             evaluated
-//RS                 .plan
-//RS                 .selected_generated_modules()
-//RS                 .map_err(|error| vec![build_plan_diagnostic(&error)])?
-//RS         };
-//RS         let mut existing_source_paths = runtime_source_paths.clone();
-//RS         existing_source_paths.extend(bundle.modules.iter().map(|module| module.path.clone()));
-//RS         let selected_action_outputs = evaluated
-//RS             .plan
-//RS             .actions()
-//RS             .iter()
-//RS             .filter(|action| selected_actions.contains(&action.id))
-//RS             .flat_map(|action| {
-//RS                 action
-//RS                     .outputs
-//RS                     .iter()
-//RS                     .map(|output| output.as_str().to_string())
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         validate_selected_action_outputs(
-//RS             &evaluated.plan,
-//RS             &selected_actions,
-//RS             &selected_generated,
-//RS             &bundle.project_root,
-//RS             &existing_source_paths,
-//RS             build_span,
-//RS         )?;
-//RS         let transaction_paths = selected_generated
-//RS             .iter()
-//RS             .map(|module| bundle.project_root.join(module.path.as_str()))
-//RS             .chain(
-//RS                 evaluated
-//RS                     .plan
-//RS                     .actions()
-//RS                     .iter()
-//RS                     .filter(|action| selected_actions.contains(&action.id))
-//RS                     .flat_map(|action| {
-//RS                         action
-//RS                             .outputs
-//RS                             .iter()
-//RS                             .map(|output| bundle.project_root.join(output.as_str()))
-//RS                     }),
-//RS             )
-//RS             .chain(std::iter::once(bundle.project_root.join(".jet/lock")))
-//RS             .collect::<Vec<_>>();
-//RS         if !project_check {
-//RS             filesystem_transaction = Some(
-//RS                 BuildFilesystemTransaction::new(transaction_paths).map_err(|error| {
-//RS                     vec![generated_io_diag("build filesystem transaction", &error)]
-//RS                 })?,
-//RS             );
-//RS         }
-//RS         if options.locked {
-//RS             crate::Lock::verify_locked_build_contributions(
-//RS                 &bundle.project_root,
-//RS                 &bundle.build_facts.package_name,
-//RS                 evaluated.plan.fact_contributions(),
-//RS             )
-//RS             .map_err(|diagnostic| vec![diagnostic])?;
-//RS             let planned_generated = selected_generated
-//RS                 .iter()
-//RS                 .map(|module| crate::AST::ComptimeInput {
-//RS                     path: module.path.as_str().to_string(),
-//RS                     hash: module.source_digest.as_str().to_string(),
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             crate::Lock::verify_locked_generated_inputs(&bundle.project_root, &planned_generated)
-//RS                 .map_err(|diagnostic| vec![diagnostic])?;
-//RS         }
-//RS         let mut generated = if options.execute {
-//RS             materialize_and_check_generated(
-//RS                 &selected_generated,
-//RS                 &bundle.project_root,
-//RS                 &existing_source_paths,
-//RS                 &selected_action_outputs,
-//RS                 build_span,
-//RS                 &bundle.build_facts,
-//RS             )?
-//RS         } else {
-//RS             selected_generated
-//RS                 .iter()
-//RS                 .map(|module| GeneratedSourceProvenance {
-//RS                     name: module.name.clone(),
-//RS                     path: bundle.project_root.join(module.path.as_str()),
-//RS                     digest: module.source_digest.clone(),
-//RS                     source: module.source.clone(),
-//RS                 })
-//RS                 .collect()
-//RS         };
-//RS         let executed = if options.execute {
-//RS             let execution_grants = effective_grants(&options);
-//RS             let artifact_store = BuildArtifactStoreHandle::open().map_err(|detail| {
-//RS                 vec![Diagnostic::error(
-//RS                     "E3505",
-//RS                     "build artifact store is unavailable".to_string(),
-//RS                     detail,
-//RS                     "Jet needs a writable artifact store before it can execute build actions"
-//RS                         .to_string(),
-//RS                     None,
-//RS                 )]
-//RS             })?;
-//RS             crate::Comptime::Build::execute_build_plan_with_front_end_and_remote_and_compiler(
-//RS                 &evaluated.plan,
-//RS                 &bundle.project_root,
-//RS                 &artifact_store,
-//RS                 &execution_grants,
-//RS                 front_end_completion,
-//RS                 options.remote.as_ref(),
-//RS                 Some(&compiler_runner),
-//RS             )
-//RS             .map_err(|error| vec![build_execution_diagnostic(error)])?
-//RS         } else {
-//RS             crate::Comptime::Build::BuildExecutionResult {
-//RS                 report: evaluated
-//RS                     .plan
-//RS                     .execution_report(&[])
-//RS                     .map_err(|error| vec![build_plan_diagnostic(&error)])?,
-//RS                 probes: Vec::new(),
-//RS             }
-//RS         };
-//RS         crate::Comptime::Build::install_build_execution_receipt(&evaluated.plan, &executed.report);
-//RS         if options.locked {
-//RS             crate::Loader::verify_locked_dependency_sources(file)?;
-//RS         }
-//RS         if options.execute || project_check {
-//RS             generated.extend(check_action_generated_sources(
-//RS                 &evaluated.plan,
-//RS                 &bundle.project_root,
-//RS                 &existing_source_paths,
-//RS                 build_span,
-//RS                 &bundle.build_facts,
-//RS             )?);
-//RS         }
-//RS         if options.execute {
-//RS             locked_provenance = generated
-//RS                 .iter()
-//RS                 .map(|item| crate::AST::ComptimeInput {
-//RS                     path: item
-//RS                         .path
-//RS                         .strip_prefix(&bundle.project_root)
-//RS                         .unwrap_or(&item.path)
-//RS                         .display()
-//RS                         .to_string(),
-//RS                     hash: item.digest.as_str().to_string(),
-//RS                 })
-//RS                 .collect::<Vec<_>>();
-//RS             locked_provenance.extend(evaluated.comptime_inputs.iter().cloned());
-//RS             for action in evaluated.plan.actions().iter().filter(|action| {
-//RS                 selected_actions.contains(&action.id) && !action.is_compiler_owned()
-//RS             }) {
-//RS                 for input in &action.inputs {
-//RS                     let path = normalize_project_path(
-//RS                         &bundle.project_root,
-//RS                         std::path::Path::new(input.as_str()),
-//RS                     );
-//RS                     let bytes = read_build_file(&bundle.project_root, &path)
-//RS                         .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
-//RS                     locked_provenance.push(crate::AST::ComptimeInput {
-//RS                         path: input.as_str().to_string(),
-//RS                         hash: crate::Comptime::Build::ContentDigest::from_bytes(&bytes)
-//RS                             .as_str()
-//RS                             .to_string(),
-//RS                     });
-//RS                 }
-//RS                 for output in &action.outputs {
-//RS                     let path = normalize_project_path(
-//RS                         &bundle.project_root,
-//RS                         std::path::Path::new(output.as_str()),
-//RS                     );
-//RS                     let bytes = read_build_file(&bundle.project_root, &path)
-//RS                         .map_err(|error| vec![generated_io_diag(&action.name, &error)])?;
-//RS                     locked_provenance.push(crate::AST::ComptimeInput {
-//RS                         path: output.as_str().to_string(),
-//RS                         hash: crate::Comptime::Build::ContentDigest::from_bytes(&bytes)
-//RS                             .as_str()
-//RS                             .to_string(),
-//RS                     });
-//RS                 }
-//RS             }
-//RS             locked_provenance.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.hash.cmp(&b.hash)));
-//RS             locked_provenance.dedup_by(|a, b| a.path == b.path && a.hash == b.hash);
-//RS             // Keep lock publication until the fresh selected runtime bundle has
-//RS             // passed its complete sema check. A package dependency loader may
-//RS             // run during that reload; writing a generated-only lock here would
-//RS             // make that loader see an incomplete dependency lock.
-//RS         }
-//RS         let mut planned_bundle = if options.execute || project_check {
-//RS             let project_root = bundle.project_root.clone();
-//RS             let stashed_runtime_bundle = runtime_bundle_for_package.take();
-//RS             let source_closure = source_closure.clone();
-//RS             load_planned_runtime_bundle(
-//RS                 file,
-//RS                 &evaluated.plan,
-//RS                 &generated,
-//RS                 &selected_generated,
-//RS                 &project_root,
-//RS                 &source_closure,
-//RS                 || {
-//RS                     match stashed_runtime_bundle {
-//RS                         // Stashed before the build-entry check ran, so it still
-//RS                         // holds unfolded fact reads.
-//RS                         Some(runtime) => Ok(runtime),
-//RS                         // The build entry and the runtime program share one file.
-//RS                         // The pre-build check already folded every `$build.*` read
-//RS                         // against the snapshot that had no `fn build` contribution,
-//RS                         // and a fact read is replaced in place, so that AST can no
-//RS                         // longer answer the final snapshot. Re-parse the entry and
-//RS                         None => {
-//RS                             let overlays = source_closure
-//RS                                 .iter()
-//RS                                 .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS                                 .collect::<Vec<_>>();
-//RS                             crate::Loader::load_entry_with_overlays(file, &overlays, false)
-//RS                         }
-//RS                     }
-//RS                 },
-//RS             )?
-//RS         } else {
-//RS             bundle
-//RS         };
-//RS         planned_bundle
-//RS             .comptime_inputs
-//RS             .extend(evaluated.comptime_inputs);
-//RS         build_run = Some(BuildRun {
-//RS             plan: evaluated.plan,
-//RS             execution: executed.report,
-//RS             probes: executed.probes,
-//RS             generated,
-//RS         });
-//RS         bundle = planned_bundle;
-//RS         bundle.active_os = active_os;
-//RS         set_bundle_target(&mut bundle, options.cross_target.as_deref());
-//RS         let build_run = build_run
-//RS             .as_ref()
-//RS             .expect("selected build entry produces a build run");
-//RS         seed_build_facts_from_stamp(
-//RS             &mut bundle,
-//RS             &options.profile,
-//RS             &options.setting_overrides,
-//RS             build_run.plan.fact_contributions(),
-//RS             &build_stamp,
-//RS         )?;
-//RS         bundle.build_facts.artifact_build = options.artifact_build;
-//RS         bundle.web_partition_enforced = options.web_target;
-//RS         if let Some(entry_fn) = options.entry_fn.as_deref() {
-//RS             swap_entry_point(&mut bundle, entry_fn);
-//RS         }
-//RS     }
-//RS 
-//RS     // The selected root has produced its plan and every imported build entry was
-//RS     // checked but never run. Both are build-only values and must not leak into
-//RS     // runtime codegen, so drop them through the one front-end projection.
-//RS     //
-//RS     // The re-check below runs the same projection before runtime emission and
-//RS     // for project-check; static graph queries stop before codegen.
-//RS     apply_application_authority(&mut bundle, options.application_authority.as_ref());
-//RS     crate::Sema::strip_build_only_entries(&mut bundle);
-//RS 
-//RS     // The selected target source closure and generated modules are a fresh
-//RS     // program, not syntax checked in isolation. Re-run the complete front end
-//RS     // before any runtime codegen.
-//RS     let mut runtime_effect_facts = if !project_check && build_run.is_none() {
-//RS         Some(effect_facts)
-//RS     } else {
-//RS         None
-//RS     };
-//RS     if project_check || (build_run.is_some() && options.execute) {
-//RS         let mut sema_span = crate::Trace::span("sema.check");
-//RS         let (planned_diags, planned_facts) = if options.no_os {
-//RS             let (diags, facts) =
-//RS                 crate::Sema::check_bundle_no_os_with_effect_facts(&mut bundle, compile_mode);
-//RS             (diags, Some(facts))
-//RS         } else if !options.gates.is_empty() {
-//RS             let (diags, facts) = crate::Sema::check_bundle_gates_with_effect_facts(
-//RS                 &mut bundle,
-//RS                 compile_mode,
-//RS                 options.gates,
-//RS             );
-//RS             (diags, Some(facts))
-//RS         } else {
-//RS             let (diags, facts) =
-//RS                 crate::Sema::check_bundle_with_effect_facts(&mut bundle, compile_mode);
-//RS             (diags, Some(facts))
-//RS         };
-//RS         sema_span.items(bundle.modules.len());
-//RS         drop(sema_span);
-//RS         let planned_diags = match planned_facts.as_ref() {
-//RS             Some(facts) => apply_package_effect_budget(&bundle, facts, planned_diags)?,
-//RS             None => planned_diags,
-//RS         };
-//RS         let extension_diags = crate::CompilerExtensionHook::post_sema_diagnostics(
-//RS             &bundle,
-//RS             planned_facts.as_ref(),
-//RS             &planned_diags,
-//RS         );
-//RS         let parse_teaching = std::mem::take(&mut bundle.parse_teaching);
-//RS         let planned_lints = classify_diagnostics(
-//RS             &bundle,
-//RS             parse_teaching
-//RS                 .into_iter()
-//RS                 .chain(planned_diags)
-//RS                 .chain(extension_diags)
-//RS                 .collect(),
-//RS             false,
-//RS         )?;
-//RS         lints.extend(planned_lints);
-//RS         runtime_effect_facts = planned_facts;
-//RS     }
-//RS     // Recompute after generated sources replace the runtime bundle. The final
-//RS     // source-owned closure, not the build-entry projection, is authoritative.
-//RS     refresh_target_dossier(&mut bundle, options.no_os, options.web_target);
-//RS     if let Some(target) = options.cross_target.as_deref() {
-//RS         let target_diags = crate::Sema::check_target_surface(&bundle, target);
-//RS         lints.extend(classify_diagnostics(&bundle, target_diags, false)?);
-//RS     }
-//RS 
-//RS     if options.execute {
-//RS         if let Some(build_run) = build_run.as_ref() {
-//RS             crate::Lock::record_generated_inputs_with_lock_state(
-//RS                 &bundle.project_root,
-//RS                 &locked_provenance,
-//RS                 options.locked,
-//RS                 &build_stamp,
-//RS                 lock_was_present,
-//RS             )
-//RS             .map_err(|diagnostic| vec![diagnostic])?;
-//RS             crate::Lock::record_build_contributions(
-//RS                 &bundle.project_root,
-//RS                 &bundle.build_facts.package_name,
-//RS                 build_run.plan.fact_contributions(),
-//RS                 options.locked,
-//RS                 &bundle.build_facts.stamp,
-//RS             )
-//RS             .map_err(|diagnostic| vec![diagnostic])?;
-//RS         }
-//RS     }
-//RS     // Static graph/query/explain (`execute: false`) must not codegen the
-//RS     // pre-build entry: `fn run` may call generated symbols that only exist
-//RS     // after materialization. CLI/LSP consumers need only the plan and folded
-//RS     // fact snapshot. Project check is the read-only exception: it has already
-//RS     // loaded and sema-checked the planned runtime graph in memory.
-//RS     if project_check {
-//RS         let build_facts = bundle.build_facts.clone();
-//RS         let compile = crate::CompileOutput {
-//RS             rust: String::new(),
-//RS             lints,
-//RS             ffi: None,
-//RS             clinks: Vec::new(),
-//RS             comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
-//RS             web: None,
-//RS             plugin: None,
-//RS             web_partition_report: None,
-//RS             library: None,
-//RS             library_config: None,
-//RS             inferred_layer: bundle.inferred_layer,
-//RS             layer_ceiling: bundle.layer_ceiling,
-//RS         };
-//RS         return Ok(BuildCompileOutput {
-//RS             compile,
-//RS             build: build_run,
-//RS             compiler_nodes: Vec::new(),
-//RS             runtime: Some(bundle),
-//RS             build_facts,
-//RS             runtime_effect_facts,
-//RS         });
-//RS     }
-//RS     if !options.execute {
-//RS         if let Some(transaction) = filesystem_transaction.as_mut() {
-//RS             transaction.commit();
-//RS         }
-//RS         return Ok(BuildCompileOutput {
-//RS             compile: crate::CompileOutput {
-//RS                 rust: String::new(),
-//RS                 lints,
-//RS                 ffi: None,
-//RS                 clinks: Vec::new(),
-//RS                 comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
-//RS                 web: None,
-//RS                 web_partition_report: None,
-//RS                 plugin: None,
-//RS                 library: None,
-//RS                 library_config: None,
-//RS                 inferred_layer: bundle.inferred_layer,
-//RS                 layer_ceiling: bundle.layer_ceiling,
-//RS             },
-//RS             build: build_run,
-//RS             compiler_nodes: Vec::new(),
-//RS             runtime: None,
-//RS             build_facts: bundle.build_facts.clone(),
-//RS             runtime_effect_facts: None,
-//RS         });
-//RS     }
-//RS 
-//RS     let ffi = match options.cross_target.as_deref() {
-//RS         Some(target) => crate::FFI::prepare_for_target(&bundle, target),
-//RS         None => crate::FFI::prepare(&bundle),
-//RS     }
-//RS     .map_err(|diags| diags)?;
-//RS     let without_codegen = without_codegen
-//RS         && build_run.is_none()
-//RS         && ffi.is_none()
-//RS         && bundle.cffi.libs.is_empty()
-//RS         && !options.web_target
-//RS         && !options.plugin_target
-//RS         && options.cross_target.is_none();
-//RS     if without_codegen {
-//RS         let build_facts = bundle.build_facts.clone();
-//RS         let compile = crate::CompileOutput {
-//RS             rust: String::new(),
-//RS             lints,
-//RS             ffi,
-//RS             clinks: Vec::new(),
-//RS             comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
-//RS             web: None,
-//RS             web_partition_report: None,
-//RS             plugin: None,
-//RS             library: None,
-//RS             library_config: None,
-//RS             inferred_layer: bundle.inferred_layer,
-//RS             layer_ceiling: bundle.layer_ceiling,
-//RS         };
-//RS         if let Some(transaction) = filesystem_transaction.as_mut() {
-//RS             transaction.commit();
-//RS         }
-//RS         return Ok(BuildCompileOutput {
-//RS             compile,
-//RS             build: build_run,
-//RS             compiler_nodes: Vec::new(),
-//RS             runtime: Some(bundle),
-//RS             build_facts,
-//RS             runtime_effect_facts,
-//RS         });
-//RS     }
-//RS     let plugin_name = if options.plugin_target {
-//RS         Some(crate::PluginExport::resolve_export_name(&bundle))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let request = mir_artifact_request_for_build(
-//RS         &bundle,
-//RS         compile_mode,
-//RS         &options.profile,
-//RS         options.web_target,
-//RS         options.plugin_target,
-//RS         false,
-//RS     );
-//RS     let request = match plugin_name.as_deref() {
-//RS         Some(name) => request.with_name(name),
-//RS         None => request,
-//RS     };
-//RS     let (mir, artifact) = lower_checked_mir_program_for(&bundle, request);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi.as_ref();
-//RS     execution.release_devtools_policy =
-//RS         release_devtools_policy_for_bundle(&bundle, &options.profile);
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = false;
-//RS     execution.emit_runtime = true;
-//RS     let web_release_devtools_policy = execution.release_devtools_policy.clone();
-//RS     let mut emit_span = crate::Trace::span("emit");
-//RS     let rust = crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts),
-//RS             target_kind: if options.web_target {
-//RS                 crate::Codegen::MIRRust::MirRustTarget::WebWasm
-//RS             } else {
-//RS                 crate::Codegen::MIRRust::MirRustTarget::Native
-//RS             },
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     );
-//RS     emit_span.items(mir.functions.len());
-//RS     drop(emit_span);
-//RS     let web = if options.web_target {
-//RS         Some(emit_web_from_mir(
-//RS             &bundle,
-//RS             &mir,
-//RS             artifact,
-//RS             &web_release_devtools_policy,
-//RS         ))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let plugin = if options.plugin_target {
-//RS         let errors = crate::PluginExport::validate_export_surface(&bundle);
-//RS         if !errors.is_empty() {
-//RS             return Err(errors);
-//RS         }
-//RS         let name = plugin_name
-//RS             .as_deref()
-//RS             .expect("plugin artifact request has no selected export name");
-//RS         crate::PluginExport::check_and_freeze_version(&bundle, name)?;
-//RS         Some(crate::Codegen::emit_plugin(&mir, artifact, &rust))
-//RS     } else {
-//RS         None
-//RS     };
-//RS     let compile = crate::CompileOutput {
-//RS         rust,
-//RS         lints,
-//RS         ffi,
-//RS         clinks: Vec::new(),
-//RS         comptime_inputs: std::mem::take(&mut bundle.comptime_inputs),
-//RS         web,
-//RS         web_partition_report: bundle.web_partition_report.clone(),
-//RS         plugin,
-//RS         library: None,
-//RS         library_config: None,
-//RS         inferred_layer: bundle.inferred_layer,
-//RS         layer_ceiling: bundle.layer_ceiling,
-//RS     };
-//RS     if let Some(transaction) = filesystem_transaction.as_mut() {
-//RS         transaction.commit();
-//RS     }
-//RS     let build_facts = bundle.build_facts.clone();
-//RS     Ok(BuildCompileOutput {
-//RS         compile,
-//RS         build: build_run,
-//RS         compiler_nodes: Vec::new(),
-//RS         runtime: Some(bundle),
-//RS         build_facts,
-//RS         runtime_effect_facts,
-//RS     })
-//RS }
-//RS 
-//RS /// #3953: the Rust a native `jet build` hands rustc, generated from a checked
-//RS /// runtime bundle whose build skipped code generation for the Cranelift dev
-//RS /// backend and then fell back to rustc. The lowering and emitter settings are
-//RS /// those of the native arm of `compile_build_from_front_end`.
-//RS pub fn emit_native_rust_for_checked_bundle(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     profile: &str,
-//RS     ffi: Option<&crate::FFI::FfiLink>,
-//RS ) -> String {
-//RS     let request = mir_artifact_request_for_build(
-//RS         bundle,
-//RS         crate::Sema::CompileMode::Run,
-//RS         profile,
-//RS         false,
-//RS         false,
-//RS         false,
-//RS     );
-//RS     let (mir, artifact) = lower_checked_mir_program_for(bundle, request);
-//RS     let mut execution = crate::Codegen::MIRRust::MirRustExecutionConfig::for_artifact(artifact);
-//RS     execution.ffi = ffi;
-//RS     execution.release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile);
-//RS     execution.emit_types = true;
-//RS     execution.emit_foreign = true;
-//RS     execution.emit_metadata = false;
-//RS     execution.emit_debug_linemap = false;
-//RS     execution.emit_runtime = true;
-//RS     crate::Codegen::MIRRust::emit_mir_program(
-//RS         &mir,
-//RS         &crate::Codegen::MIRRust::MirRustConfig {
-//RS             target: jet_foundation::Layout::TargetLayout::from_build_facts(&bundle.build_facts),
-//RS             target_kind: crate::Codegen::MIRRust::MirRustTarget::Native,
-//RS             root_prefix: String::new(),
-//RS             execution,
-//RS         },
-//RS     )
-//RS }
-//RS 
-//RS fn bundle_source_closure(bundle: &crate::AST::ProgramBundle) -> Vec<(std::path::PathBuf, String)> {
-//RS     let mut closure = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| (module.path.clone(), module.source.clone()))
-//RS         .collect::<Vec<_>>();
-//RS     closure.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     closure.dedup_by(|left, right| left.0 == right.0);
-//RS     closure
-//RS }
-//RS 
-//RS /// Lower a checked bundle's compiler work into the BuildPlan node vocabulary.
-//RS /// Sorting happens before key construction, so identical source trees under
-//RS /// different checkout roots receive identical node keys and ordering.
-//RS /// Lower a checked bundle using the default output stem.
-//RS pub fn compiler_nodes_for_bundle(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     plan: Option<&crate::Comptime::Build::BuildPlan>,
-//RS ) -> Vec<crate::Comptime::Build::BuildPlanNode> {
-//RS     compiler_nodes_for_bundle_with_outputs(bundle, plan, &[])
-//RS }
-//RS 
-//RS /// Lower a checked bundle's compiler work into the BuildPlan node vocabulary.
-//RS /// Sorting happens before key construction, so identical source trees under
-//RS /// different checkout roots receive identical node keys and ordering.
-//RS pub fn compiler_nodes_for_bundle_with_outputs(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     plan: Option<&crate::Comptime::Build::BuildPlan>,
-//RS     output_names: &[String],
-//RS ) -> Vec<crate::Comptime::Build::BuildPlanNode> {
-//RS     let mut modules = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| {
-//RS             let normalized = normalize_project_path(&bundle.project_root, &module.path);
-//RS             let subject = normalized
-//RS                 .strip_prefix(&bundle.project_root)
-//RS                 .unwrap_or(normalized.as_path())
-//RS                 .display()
-//RS                 .to_string()
-//RS                 .replace('\\', "/");
-//RS             (subject, module.source.as_str())
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     modules.sort_by(|left, right| left.0.cmp(&right.0));
-//RS     let mut outputs = BTreeSet::new();
-//RS     outputs.extend(output_names.iter().cloned());
-//RS     if outputs.is_empty() {
-//RS         if let Some(plan) = plan {
-//RS             let selected = plan.default_target().map(|target| target.id());
-//RS             for target in plan
-//RS                 .targets()
-//RS                 .iter()
-//RS                 .filter(|target| selected.is_none_or(|selected| target.id == selected))
-//RS             {
-//RS                 outputs.extend(
-//RS                     target
-//RS                         .outputs
-//RS                         .iter()
-//RS                         .map(|output| output.as_str().to_string()),
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS     if outputs.is_empty() {
-//RS         let fallback = bundle
-//RS             .modules
-//RS             .get(bundle.entry)
-//RS             .and_then(|module| module.path.file_stem())
-//RS             .and_then(|stem| stem.to_str())
-//RS             .filter(|stem| !stem.is_empty())
-//RS             .unwrap_or("program");
-//RS         outputs.insert(fallback.to_string());
-//RS     }
-//RS 
-//RS     let checks = modules
-//RS         .iter()
-//RS         .map(|(subject, source)| {
-//RS             let digest = crate::Comptime::Build::ContentDigest::from_bytes(source.as_bytes())
-//RS                 .as_str()
-//RS                 .to_string();
-//RS             crate::Comptime::Build::BuildPlanNode::new(
-//RS                 crate::Comptime::Build::BuildNodeKind::Check,
-//RS                 subject.clone(),
-//RS                 vec![(subject.clone(), digest)],
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     let mut nodes = checks.clone();
-//RS     for output in outputs {
-//RS         let inputs = checks
-//RS             .iter()
-//RS             .map(|check| (format!("check:{}", check.subject), check.key.clone()))
-//RS             .collect::<Vec<_>>();
-//RS         let compile = crate::Comptime::Build::BuildPlanNode::new(
-//RS             crate::Comptime::Build::BuildNodeKind::Compile,
-//RS             output.clone(),
-//RS             inputs,
-//RS         );
-//RS         let link = crate::Comptime::Build::BuildPlanNode::new(
-//RS             crate::Comptime::Build::BuildNodeKind::Link,
-//RS             output.clone(),
-//RS             vec![(format!("compile:{output}"), compile.key.clone())],
-//RS         );
-//RS         nodes.push(compile);
-//RS         nodes.push(link);
-//RS     }
-//RS     nodes.sort_by(|left, right| {
-//RS         left.kind
-//RS             .cmp(&right.kind)
-//RS             .then_with(|| left.subject.cmp(&right.subject))
-//RS             .then_with(|| left.key.cmp(&right.key))
-//RS     });
-//RS     nodes
-//RS }
-//RS 
-//RS fn generated_source_for_path<'a>(
-//RS     path: &std::path::Path,
-//RS     project_root: &std::path::Path,
-//RS     generated_sources: &'a [&crate::Comptime::Build::BuildGeneratedModule],
-//RS ) -> Option<&'a str> {
-//RS     let normalized = normalize_project_path(project_root, path);
-//RS     generated_sources
-//RS         .iter()
-//RS         .find(|module| {
-//RS             normalize_project_path(project_root, std::path::Path::new(module.path.as_str()))
-//RS                 == normalized
-//RS         })
-//RS         .map(|module| module.source.as_str())
-//RS }
-//RS 
-//RS fn load_planned_source(
-//RS     build_file: &str,
-//RS     path: &std::path::Path,
-//RS     project_root: &std::path::Path,
-//RS     generated: &[GeneratedSourceProvenance],
-//RS     generated_sources: &[&crate::Comptime::Build::BuildGeneratedModule],
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-//RS     let mut overlays = source_closure
-//RS         .iter()
-//RS         .map(|(path, source)| (path.as_path(), source.as_str()))
-//RS         .collect::<Vec<_>>();
-//RS     if let Some(source) = generated
-//RS         .iter()
-//RS         .find(|item| {
-//RS             normalize_project_path(project_root, &item.path)
-//RS                 == normalize_project_path(project_root, path)
-//RS         })
-//RS         .map(|item| item.source.as_str())
-//RS         .or_else(|| generated_source_for_path(path, project_root, generated_sources))
-//RS     {
-//RS         overlays.push((path, source));
-//RS     }
-//RS     crate::Loader::load_entry_with_overlays(path.to_str().unwrap_or(build_file), &overlays, false)
-//RS }
-//RS fn load_planned_runtime_bundle(
-//RS     build_file: &str,
-//RS     plan: &crate::Comptime::Build::BuildPlan,
-//RS     generated: &[GeneratedSourceProvenance],
-//RS     generated_sources: &[&crate::Comptime::Build::BuildGeneratedModule],
-//RS     project_root: &std::path::Path,
-//RS     source_closure: &[(std::path::PathBuf, String)],
-//RS     fallback_bundle: impl FnOnce() -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>>,
-//RS ) -> Result<crate::AST::ProgramBundle, Vec<Diagnostic>> {
-//RS     let sources = plan
-//RS         .selected_sources()
-//RS         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-//RS     let resolve = |path: &str| {
-//RS         let path = std::path::Path::new(path);
-//RS         if path.is_absolute() {
-//RS             path.to_path_buf()
-//RS         } else {
-//RS             project_root.join(path)
-//RS         }
-//RS     };
-//RS     // An empty/default BuildPlan augments the package's batteries program; it
-//RS     // does not select a synthetic target with no sources. `fallback_bundle`
-//RS     // then supplies the runtime program, and it is a thunk for two reasons: a
-//RS     // selected target never needs it, and the caller must hand over a freshly
-//RS     // parsed bundle. Every fact read has to still be foldable, because the one
-//RS     // complete front-end pass after this reload is what folds the final
-//RS     // `$build.*` snapshot.
-//RS     // A package build may list generated roots before its runtime source after
-//RS     // materialization. Keep the canonical `fn run` source as the bundle entry;
-//RS     // every other selected root is promoted below.
-//RS     let (entry_index, mut bundle) = if sources.is_empty() {
-//RS         (0, fallback_bundle()?)
-//RS     } else {
-//RS         let first = load_planned_source(
-//RS             build_file,
-//RS             &resolve(sources[0].as_str()),
-//RS             project_root,
-//RS             generated,
-//RS             generated_sources,
-//RS             source_closure,
-//RS         )?;
-//RS         let has_run = |bundle: &crate::AST::ProgramBundle| {
-//RS             bundle.modules.get(bundle.entry).is_some_and(|module| {
-//RS                 module.items.iter().any(|item| {
-//RS                         matches!(item, crate::AST::Item::Func(function) if function.name == "run")
-//RS                     })
-//RS             })
-//RS         };
-//RS         if has_run(&first) {
-//RS             (0, first)
-//RS         } else {
-//RS             let mut selected = (0, first);
-//RS             for (index, entry_source) in sources.iter().enumerate().skip(1) {
-//RS                 let candidate = load_planned_source(
-//RS                     build_file,
-//RS                     &resolve(entry_source.as_str()),
-//RS                     project_root,
-//RS                     generated,
-//RS                     generated_sources,
-//RS                     source_closure,
-//RS                 )?;
-//RS                 if has_run(&candidate) {
-//RS                     selected = (index, candidate);
-//RS                     break;
-//RS                 }
-//RS             }
-//RS             selected
-//RS         }
-//RS     };
-//RS 
-//RS     // Additional selected roots and generated modules merge before the one
-//RS     // complete sema pass, so runtime code can call generated declarations.
-//RS     let mut additions = sources
-//RS         .iter()
-//RS         .enumerate()
-//RS         .filter(|(index, _)| *index != entry_index)
-//RS         .map(|(_, path)| ("selected source", resolve(path.as_str())))
-//RS         .chain(
-//RS             generated
-//RS                 .iter()
-//RS                 .map(|item| (item.name.as_str(), item.path.clone())),
-//RS         )
-//RS         .collect::<Vec<_>>();
-//RS     additions.sort_by(|a, b| a.1.cmp(&b.1));
-//RS     additions.dedup_by(|a, b| a.1 == b.1);
-//RS     let selected_paths = additions
-//RS         .iter()
-//RS         .map(|(_, path)| normalize_project_path(project_root, path))
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     let already_loaded = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| normalize_project_path(project_root, &module.path))
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     let mut loaded_by_path = std::collections::BTreeMap::new();
-//RS     for (generator, path) in additions {
-//RS         let loaded = load_planned_source(
-//RS             build_file,
-//RS             &path,
-//RS             project_root,
-//RS             generated,
-//RS             generated_sources,
-//RS             source_closure,
-//RS         )
-//RS         .map_err(|mut diagnostics| {
-//RS             for diagnostic in &mut diagnostics {
-//RS                 diagnostic.what = format!("generated by `{generator}`: {}", diagnostic.what);
-//RS             }
-//RS             diagnostics
-//RS         })?;
-//RS         for module in loaded.modules {
-//RS             let key = normalize_project_path(project_root, &module.path);
-//RS             loaded_by_path.entry(key).or_insert(module);
-//RS         }
-//RS     }
-//RS 
-//RS     // Selected roots are promoted into the runtime entry below. Their file
-//RS     // imports cannot be copied verbatim: those paths are relative to the
-//RS     // generated file, while the promoted functions now live in the entry
-//RS     // module. Keep each loaded import target as an inline code module so the
-//RS     // promoted functions retain their namespace without a second loader pass.
-//RS     let mut inline_imports = std::collections::BTreeMap::new();
-//RS     for module in loaded_by_path.values() {
-//RS         for import in &module.imports {
-//RS             let crate::AST::ImportKind::File(import_path, _) = &import.kind else {
-//RS                 continue;
-//RS             };
-//RS             let mut target_path = module
-//RS                 .path
-//RS                 .parent()
-//RS                 .unwrap_or_else(|| std::path::Path::new("."))
-//RS                 .to_path_buf();
-//RS             for part in import_path.split('/') {
-//RS                 if !part.is_empty() && part != "." {
-//RS                     target_path.push(part);
-//RS                 }
-//RS             }
-//RS             target_path.set_extension(crate::Syntax::FILE_EXT);
-//RS             let target_path = normalize_project_path(project_root, &target_path);
-//RS             let Some(target) = loaded_by_path.get(&target_path) else {
-//RS                 continue;
-//RS             };
-//RS             let alias = import.import_alias();
-//RS             inline_imports
-//RS                 .entry(alias)
-//RS                 .or_insert_with(|| (target.items.clone(), target.web_target_ceiling));
-//RS         }
-//RS     }
-//RS 
-//RS     // Promote every selected root exactly once. A selected module can also be
-//RS     // discovered transitively while loading another selected root; collecting
-//RS     // first prevents that module from being both an inline import and a second
-//RS     // top-level declaration set.
-//RS     for path in &selected_paths {
-//RS         if already_loaded.contains(path) {
-//RS             continue;
-//RS         }
-//RS         if let Some(module) = loaded_by_path.remove(path) {
-//RS             bundle.modules[bundle.entry].items.extend(module.items);
-//RS         }
-//RS     }
-//RS 
-//RS     let inline_aliases = inline_imports
-//RS         .keys()
-//RS         .cloned()
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     for (alias, (items, web_target)) in inline_imports {
-//RS         bundle.modules[bundle.entry]
-//RS             .items
-//RS             .push(crate::AST::Item::CodeModule(crate::AST::CodeModule {
-//RS                 name: alias,
-//RS                 name_span: crate::Diagnostics::Span::new(0, 0),
-//RS                 is_pub: false,
-//RS                 is_package_pub: false,
-//RS                 body: Some(items),
-//RS                 imports: Vec::new(),
-//RS                 web_target,
-//RS                 instance_identity: None,
-//RS                 span: crate::Diagnostics::Span::new(0, 0),
-//RS             }));
-//RS     }
-//RS 
-//RS     // Keep quoted imports from selected/generated roots available after their
-//RS     // top-level declarations are merged into the runtime entry. The ordinary
-//RS     // loader already checked these modules; wrapping their items as inline
-//RS     // CodeModules preserves the imported alias without teaching the runtime
-//RS     // bundle a second file-resolution mechanism.
-//RS     for (path, module) in loaded_by_path {
-//RS         if already_loaded.contains(&path)
-//RS             || selected_paths.contains(&path)
-//RS             || inline_aliases.contains(&module.alias)
-//RS         {
-//RS             continue;
-//RS         }
-//RS         let alias = module.alias.clone();
-//RS         bundle.modules[bundle.entry]
-//RS             .items
-//RS             .push(crate::AST::Item::CodeModule(crate::AST::CodeModule {
-//RS                 name: alias,
-//RS                 name_span: crate::Diagnostics::Span::new(0, 0),
-//RS                 is_pub: false,
-//RS                 is_package_pub: false,
-//RS                 body: Some(module.items),
-//RS                 imports: module.imports,
-//RS                 web_target: module.web_target_ceiling,
-//RS                 instance_identity: None,
-//RS                 span: crate::Diagnostics::Span::new(0, 0),
-//RS             }));
-//RS     }
-//RS     Ok(bundle)
-//RS }
-//RS 
-//RS fn check_action_generated_sources(
-//RS     plan: &crate::Comptime::Build::BuildPlan,
-//RS     root: &std::path::Path,
-//RS     existing_source_paths: &[std::path::PathBuf],
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS     build_facts: &jet_foundation::Facts::BuildFactSnapshot,
-//RS ) -> Result<Vec<GeneratedSourceProvenance>, Vec<Diagnostic>> {
-//RS     let registered = plan
-//RS         .generated_modules()
-//RS         .iter()
-//RS         .map(|module| module.path.as_str())
-//RS         .collect::<std::collections::HashSet<_>>();
-//RS     let mut out = Vec::new();
-//RS     let selected = plan
-//RS         .selected_action_ids()
-//RS         .map_err(|error| vec![build_plan_diagnostic(&error)])?;
-//RS     for action in plan
-//RS         .actions()
-//RS         .iter()
-//RS         .filter(|action| selected.contains(&action.id))
-//RS     {
-//RS         for output in &action.outputs {
-//RS             if !output.as_str().ends_with(".jet") || registered.contains(output.as_str()) {
-//RS                 continue;
-//RS             }
-//RS             let path = normalize_project_path(root, std::path::Path::new(output.as_str()));
-//RS             if has_symlinked_component(root, &path)
-//RS                 || std::fs::symlink_metadata(&path)
-//RS                     .is_ok_and(|metadata| metadata.file_type().is_symlink())
-//RS             {
-//RS                 return Err(vec![generated_collision_diag(
-//RS                     &action.name,
-//RS                     output.as_str(),
-//RS                     span,
-//RS                 )]);
-//RS             }
-//RS             let source_path = existing_source_paths
-//RS                 .iter()
-//RS                 .map(|source| normalize_project_path(root, source))
-//RS                 .any(|source| source == path);
-//RS             if source_path {
-//RS                 return Err(vec![generated_collision_diag(
-//RS                     &action.name,
-//RS                     output.as_str(),
-//RS                     span,
-//RS                 )]);
-//RS             }
-//RS             let source = String::from_utf8(
-//RS                 read_build_file(root, &path)
-//RS                     .map_err(|error| vec![generated_io_diag(&action.name, &error)])?,
-//RS             )
-//RS             .map_err(|error| {
-//RS                 vec![generated_io_diag(
-//RS                     &action.name,
-//RS                     &std::io::Error::new(std::io::ErrorKind::InvalidData, error),
-//RS                 )]
-//RS             })?;
-//RS             let mut generated_bundle = crate::Loader::load_entry_with_overlay(
-//RS                 path.to_str().unwrap_or(output.as_str()),
-//RS                 Some((&path, &source)),
-//RS                 false,
-//RS             )
-//RS             .map_err(|mut diags| {
-//RS                 for diag in &mut diags {
-//RS                     diag.what = format!("generated action `{}`: {}", action.name, diag.what);
-//RS                 }
-//RS                 diags
-//RS             })?;
-//RS             generated_bundle.build_facts = build_facts.clone();
-//RS             generated_bundle.active_os = build_facts.os;
-//RS             let generated_diags =
-//RS                 crate::Sema::check_bundle(&mut generated_bundle, crate::Sema::CompileMode::Check);
-//RS             let mut diags = apply_package_lint_policy(&generated_bundle, generated_diags)?;
-//RS             diags.retain(|diag| diag.severity == Severity::Error);
-//RS             if !diags.is_empty() {
-//RS                 for diag in &mut diags {
-//RS                     diag.what = format!("generated action `{}`: {}", action.name, diag.what);
-//RS                 }
-//RS                 return Err(diags);
-//RS             }
-//RS             out.push(GeneratedSourceProvenance {
-//RS                 name: action.name.clone(),
-//RS                 path,
-//RS                 digest: crate::Comptime::Build::ContentDigest::from_bytes(source.as_bytes()),
-//RS                 source,
-//RS             });
-//RS         }
-//RS     }
-//RS     Ok(out)
-//RS }
-//RS 
-//RS fn validate_selected_action_outputs(
-//RS     plan: &crate::Comptime::Build::BuildPlan,
-//RS     selected_actions: &std::collections::BTreeSet<crate::Comptime::Build::ActionId>,
-//RS     generated: &[&crate::Comptime::Build::BuildGeneratedModule],
-//RS     root: &std::path::Path,
-//RS     existing_source_paths: &[std::path::PathBuf],
-//RS     span: Option<crate::Diagnostics::Span>,
-//RS ) -> Result<(), Vec<Diagnostic>> {
-//RS     let source_paths = existing_source_paths
-//RS         .iter()
-//RS         .map(|source| normalize_project_path(root, source))
-//RS         .collect::<std::collections::BTreeSet<_>>();
-//RS     for action in plan
-//RS         .actions()
-//RS         .iter()
-//RS         .filter(|action| selected_actions.contains(&action.id))
-//RS     {
-//RS         for output in &action.outputs {
-//RS             let path = normalize_project_path(root, std::path::Path::new(output.as_str()));
-//RS             if has_symlinked_component(root, &path) {
-//RS                 return Err(vec![Diagnostic::error(
-//RS                     "E3505",
-//RS                     format!(
-//RS                         "build action `{}` cannot write output `{}` through a symlink",
-//RS                         action.name,
-//RS                         output.as_str()
-//RS                     ),
-//RS                     "sandboxed build outputs must stay inside the project and must not follow symlinks".to_string(),
-//RS                     "remove the symlink or choose a real output directory inside the project".to_string(),
-//RS                     None,
-//RS                 )]);
-//RS             }
-//RS             if source_paths.contains(&path) {
-//RS                 return Err(vec![generated_collision_diag(
-//RS                     &action.name,
-//RS                     output.as_str(),
-//RS                     span,
-//RS                 )]);
-//RS             }
-//RS             if generated.iter().any(|module| {
-//RS                 normalize_project_path(root, std::path::Path::new(module.path.as_str())) == path
-//RS             }) {
-//RS                 return Err(vec![generated_cycle_diag(
-//RS                     &action.name,
-//RS                     output.as_str(),
-//RS                     "a selected build action and a generated module both own this path",
-//RS                     span,
-//RS                 )]);
-//RS             }
-//RS         }
-//RS     }
-//RS     Ok(())
-//RS }
-//RS 
-//RS /// D-BUILDENTRY1: `E3501`'s contract, held in one place. Entry identity (the
-//RS /// `build` name plus its `BuildContext` parameter) and the typed
-//RS /// `BuildPlan` result facts are graded by the same sema predicates that
-//RS /// `Sema::strip_build_only_entries` uses to keep the entry out of runtime
-//RS /// codegen, so selection, rejection, and removal cannot drift apart (I8).
-//RS fn valid_build_signature(func: &crate::AST::Func) -> bool {
-//RS     crate::Sema::build_entry_signature_is_valid(func)
-//RS }
-//RS 
-//RS fn contains_impure_gate(stmts: &[crate::AST::Stmt]) -> bool {
-//RS     stmts.iter().any(|stmt| match stmt {
-//RS         crate::AST::Stmt::Impure { .. } => true,
-//RS         crate::AST::Stmt::While { body, .. }
-//RS         | crate::AST::Stmt::For { body, .. }
-//RS         | crate::AST::Stmt::Loop { body, .. }
-//RS         | crate::AST::Stmt::Reactive { body, .. }
-//RS         | crate::AST::Stmt::Shield { body, .. }
-//RS         | crate::AST::Stmt::Switched { body, .. }
-//RS         | crate::AST::Stmt::Region { body, .. }
-//RS         | crate::AST::Stmt::Policy { body, .. }
-//RS         | crate::AST::Stmt::TaskGroup { body, .. }
-//RS         | crate::AST::Stmt::Layout { body, .. }
-//RS         | crate::AST::Stmt::AuthorityScope { body, .. }
-//RS         | crate::AST::Stmt::ComptimeBlock { body, .. }
-//RS         | crate::AST::Stmt::Live { body, .. }
-//RS         | crate::AST::Stmt::Transact { body, .. }
-//RS         | crate::AST::Stmt::Unsafe { body, .. }
-//RS         | crate::AST::Stmt::ScopeMember { body, .. } => contains_impure_gate(body),
-//RS         crate::AST::Stmt::Switch {
-//RS             arms, else_body, ..
-//RS         }
-//RS         | crate::AST::Stmt::ComptimeSwitch {
-//RS             arms, else_body, ..
-//RS         } => {
-//RS             arms.iter().any(|arm| contains_impure_gate(&arm.body))
-//RS                 || else_body.as_deref().is_some_and(contains_impure_gate)
-//RS         }
-//RS         crate::AST::Stmt::CountedLoop { step, body, .. } => {
-//RS             step.as_deref()
-//RS                 .is_some_and(|step| contains_impure_gate(std::slice::from_ref(step)))
-//RS                 || contains_impure_gate(body)
-//RS         }
-//RS         crate::AST::Stmt::ComptimeIf {
-//RS             then_body,
-//RS             else_body,
-//RS             ..
-//RS         } => {
-//RS             contains_impure_gate(then_body)
-//RS                 || else_body.as_deref().is_some_and(contains_impure_gate)
-//RS         }
-//RS         crate::AST::Stmt::ContextBlock { body, .. } | crate::AST::Stmt::AssumeDet { body, .. } => {
-//RS             contains_impure_gate(body)
-//RS         }
-//RS         _ => false,
-//RS     })
-//RS }
-//RS 
-//RS /// Package source ownership follows the nearest declared dependency root
-//RS /// inside the active project boundary. The root package stays last so a
-//RS /// dependency directory cannot be swallowed by the project-root prefix.
-//RS fn compiler_package_specs(
-//RS     bundle: &crate::AST::ProgramBundle,
-//RS     root_name: &str,
-//RS     package_build_fingerprint: Option<&str>,
-//RS ) -> Vec<crate::Comptime::Build::CompilerPackageSpec> {
-//RS     let root = normalize_project_path(&bundle.project_root, &bundle.project_root);
-//RS     let mut roots = vec![(root_name.to_string(), root.clone())];
-//RS     let mut dependency_roots = bundle
-//RS         .dep_roots
-//RS         .iter()
-//RS         .map(|(name, path)| {
-//RS             (
-//RS                 name.clone(),
-//RS                 normalize_project_path(&bundle.project_root, path),
-//RS             )
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS     dependency_roots.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
-//RS     for (name, path) in dependency_roots {
-//RS         if path != root && !roots.iter().any(|(_, known)| known == &path) {
-//RS             roots.push((name, path));
-//RS         }
-//RS     }
-//RS     roots.sort_by(|left, right| left.1.cmp(&right.1).then_with(|| left.0.cmp(&right.0)));
-//RS     if let Some(root_index) = roots.iter().position(|(_, path)| path == &root) {
-//RS         let root_entry = roots.remove(root_index);
-//RS         roots.push(root_entry);
-//RS     }
-//RS 
-//RS     let module_packages = bundle
-//RS         .modules
-//RS         .iter()
-//RS         .map(|module| {
-//RS             let path = normalize_project_path(&bundle.project_root, &module.path);
-//RS             roots
-//RS                 .iter()
-//RS                 .filter(|(_, package_root)| path.strip_prefix(package_root).is_ok())
-//RS                 .max_by_key(|(_, package_root)| package_root.components().count())
-//RS                 .map(|(name, _)| name.clone())
-//RS         })
-//RS         .collect::<Vec<_>>();
-//RS 
-//RS     let mut source_parts = BTreeMap::<String, Vec<(String, Vec<u8>)>>::new();
-//RS     for (index, module) in bundle.modules.iter().enumerate() {
-//RS         let Some(package_name) = module_packages[index].as_ref() else {
-//RS             continue;
-//RS         };
-//RS         let normalized_path = normalize_project_path(&bundle.project_root, &module.path);
-//RS         let package_root = roots
-//RS             .iter()
-//RS             .find(|(name, _)| name == package_name)
-//RS             .map(|(_, path)| path);
-//RS         let relative = package_root
-//RS             .and_then(|path| normalized_path.strip_prefix(path).ok())
-//RS             .unwrap_or(normalized_path.as_path())
-//RS             .display()
-//RS             .to_string();
-//RS         source_parts.entry(package_name.clone()).or_default().push((
-//RS             relative,
-//RS             crate::CanonicalAST::canonical_module_bytes(module),
-//RS         ));
-//RS     }
-//RS 
-//RS     let mut dependencies = roots
-//RS         .iter()
-//RS         .map(|(name, _)| (name.clone(), BTreeSet::new()))
-//RS         .collect::<BTreeMap<_, _>>();
-//RS     for (module_index, module) in bundle.modules.iter().enumerate() {
-//RS         let Some(owner) = module_packages[module_index].as_ref() else {
-//RS             continue;
-//RS         };
-//RS         for import in &module.imports {
-//RS             let Some(target_index) = bundle.name_ledger.import_target(module_index, import.span)
-//RS             else {
-//RS                 continue;
-//RS             };
-//RS             let Some(Some(target)) = module_packages.get(target_index) else {
-//RS                 continue;
-//RS             };
-//RS             if target != owner {
-//RS                 dependencies
-//RS                     .entry(owner.clone())
-//RS                     .or_default()
-//RS                     .insert(target.clone());
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     roots
-//RS         .into_iter()
-//RS         .map(|(name, _)| {
-//RS             let mut bytes = b"jet.package-source.v2\0".to_vec();
-//RS             let mut parts = source_parts.remove(&name).unwrap_or_default();
-//RS             parts.sort_by(|left, right| left.0.cmp(&right.0));
-//RS             if parts.is_empty() {
-//RS                 bytes.extend_from_slice(name.as_bytes());
-//RS             } else {
-//RS                 for (path, semantic) in parts {
-//RS                     bytes.extend_from_slice(&(path.len() as u64).to_be_bytes());
-//RS                     bytes.extend_from_slice(path.as_bytes());
-//RS                     bytes.extend_from_slice(&(semantic.len() as u64).to_be_bytes());
-//RS                     bytes.extend_from_slice(&semantic);
-//RS                 }
-//RS             }
-//RS             if name == root_name {
-//RS                 if let Some(fingerprint) = package_build_fingerprint {
-//RS                     bytes.extend_from_slice(b"build-entry\0");
-//RS                     bytes.extend_from_slice(&(fingerprint.len() as u64).to_be_bytes());
-//RS                     bytes.extend_from_slice(fingerprint.as_bytes());
-//RS                 }
-//RS             }
-//RS             let package_dependencies = dependencies
-//RS                 .remove(&name)
-//RS                 .unwrap_or_default()
-//RS                 .into_iter()
-//RS                 .collect();
-//RS             crate::Comptime::Build::CompilerPackageSpec::new(
-//RS                 name,
-//RS                 crate::Comptime::Build::ContentDigest::from_bytes(&bytes),
-//RS                 package_dependencies,
-//RS             )
-//RS         })
-//RS         .collect()
-//RS }
-//RS 
-//RS fn build_package_name(file: &str) -> Result<String, Vec<Diagnostic>> {
-//RS 
-//RS     let entry = std::path::Path::new(file);
-//RS     let absolute = if entry.is_absolute() {
-//RS         entry.to_path_buf()
-//RS     } else {
-//RS         std::env::current_dir()
-//RS             .map(|directory| directory.join(entry))
-//RS             .unwrap_or_else(|_| entry.to_path_buf())
-//RS     };
-//RS     let parent = absolute.parent().unwrap_or(std::path::Path::new("."));
-//RS     let workspace_root = crate::Loader::find_workspace_root_checked(parent)
-//RS         .map_err(|diagnostic| vec![diagnostic])?;
-//RS     let package_root = crate::Loader::find_package_root_checked(parent)
-//RS         .map_err(|diagnostic| vec![diagnostic])?
-//RS         .filter(|root| {
-//RS             workspace_root
-//RS                 .as_ref()
-//RS                 .is_none_or(|workspace| crate::Loader::is_physically_within(workspace, root))
-//RS         });
-//RS     if let Some(root) = package_root {
-//RS         if let Some(package) = crate::Loader::package_facts_for_root(&root)? {
-//RS             if !package.name.is_empty() {
-//RS                 return Ok(package.name);
-// END-PORT-PENDING 2021 crates/jet-driver/src/Driver/mod.rs:3601-5400
+use jet_driver.Driver.*
+use jet_driver.Driver.Driver02.[FrontEndInputs, PreparedBuildFrontEnd, BuildRunOptions, BuildRun, BuildCompileOutput, GeneratedSourceProvenance, BuildFilesystemTransaction]
+use jet_driver.Driver.Driver04.*
+use jet_driver.[AST, Loader, Sema, Trace, Lock, Comptime, CanonicalAST, CompilerExtensionHook, BuildPluginHook, FFI, PluginExport, Codegen, Syntax, CompileOutput]
+use jet_foundation.Diagnostics.[Diagnostic, Severity, Span]
+use jet_foundation.Facts.[BuildFactSnapshot, BuildStamp]
+use jet_foundation.Layout.TargetLayout
+use jet_foundation.TEXT_NUL
+use jet_codegen.Codegen.MIRRust.[MirRustExecutionConfig, MirRustConfig, MirRustTarget, emit_mir_program]
+use jet_comptime.Build.*
+use std.[fs, env, io]
+use core.sys.OSPath
+use core.collections.Set
+// GATE #4494: native filesystem transactions, retained build-file reads and foreign links.
+// GATE #4483: cross-target selection uses the checked BuildFacts TargetLayout dossier.
+// GATE #4499: OSPath/tuple key equality and canonical sorted digest framing.
 
+// Rust: crates/jet-driver/src/Driver/mod.rs:3601
+// The head captures the loader bundle and target once; only the stamp lock probes.
+fn prepare_build_front_end_finish(inputs: FrontEndInputs, bundle: AST.ProgramBundle, package_entry: (OSPath, String)?, active_os: Syntax.OSTarget, compile_mode: Sema.CompileMode, package_build_fingerprint: String?, runtime_bundle_for_package: AST.ProgramBundle?, runtime_source_paths: [OSPath]) -> PreparedBuildFrontEnd [Diagnostic]! {
+    bundle := bundle
+    package_build_fingerprint := package_build_fingerprint
+    runtime_bundle_for_package := runtime_bundle_for_package
+    build_stamp :: build_stamp_for_facts(&bundle.project_root, inputs.locked)?
+    seed_build_facts_from_stamp(&bundle, &inputs.profile, &inputs.setting_overrides, &[], &build_stamp)?
+    bundle.build_facts.artifact_build = inputs.artifact_build
+    bundle.web_partition_enforced = inputs.web_target
+    local_build_indices :: if inputs.build_override {
+        bundle.modules[bundle.entry].items.iter().enumerate().filter_map(fn((index, item)) { item == { .Func(func) -> if Sema.is_build_entry(func) { Some(index) } else { None }, _ -> None } }).collect[[USize]]()
+    } else { [] }
+    if local_build_indices.len() > 1 { return Err([duplicate_build_entries(&bundle, &local_build_indices)]) }
+    entry_module_path :: bundle.modules[bundle.entry].path.clone()
+    if package_entry.is_some() {
+        (package_path, package_source) :: package_entry.unwrap()
+        if !local_build_indices.is_empty() && normalize_project_path(&bundle.project_root, package_path) != normalize_project_path(&bundle.project_root, &entry_module_path) {
+            source_span :: local_build_indices.first().and_then(fn(index) { bundle.modules[bundle.entry].items[index] == { .Func(func) -> Some(func.name_span), _ -> None } })
+            local_location :: local_build_indices.first().map(fn(index) { build_function_location(&bundle.modules[bundle.entry], index) }).unwrap_or_else(fn() { entry_module_path.display().to_string() })
+            package_location :: build_source_location(package_path, package_source)
+            return Err([build_entry_conflict("the package", &local_location, &package_location, source_span)])
+        }
+    }
+    if package_entry.is_some() {
+        (package_path, package_source) :: package_entry.unwrap()
+        if normalize_project_path(&bundle.project_root, &package_path) != normalize_project_path(&bundle.project_root, &entry_module_path) {
+            source_closure := bundle_source_closure(&bundle)
+            source_closure.push((package_path.clone(), package_source.clone()))
+            source_closure.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+            source_closure.dedup_by(fn(left, right) { left.0 == right.0 })
+            overlays :: source_closure.iter().map(fn((path, source)) { (path, source) }).collect()
+            runtime_bundle_for_package = Some(bundle)
+            package_path_string :: package_path.to_string_lossy().into_owned()
+            bundle = Loader.load_entry_with_overlays(&package_path_string, &overlays, false)?
+            package_build_fingerprint = Some(jet_foundation.SHA256.sha256_hex(&CanonicalAST.canonical_bytes(&bundle)))
+            bundle.active_os = active_os
+            set_bundle_target(&bundle, inputs.cross_target.as_deref())
+            seed_build_facts_from_stamp(&bundle, &inputs.profile, &inputs.setting_overrides, &[], &build_stamp)?
+            bundle.build_facts.artifact_build = inputs.artifact_build
+            bundle.web_partition_enforced = inputs.web_target
+        }
+    }
+    local_build_indices :: if inputs.build_override {
+        bundle.modules[bundle.entry].items.iter().enumerate().filter_map(fn((index, item)) { item == { .Func(func) -> if Sema.is_build_entry(func) { Some(index) } else { None }, _ -> None } }).collect[[USize]]()
+    } else { [] }
+    if local_build_indices.len() > 1 { return Err([duplicate_build_entries(&bundle, &local_build_indices)]) }
+    build_index :: local_build_indices.into_iter().next()
+    build_span :: build_index.and_then(fn(index) { bundle.modules[bundle.entry].items[index] == { .Func(build) -> Some(build.span), _ -> None } })
+    if build_index.is_some() {
+        build :: bundle.modules[bundle.entry].items[build_index.unwrap()] == { .Func(build) -> build, _ -> panic("unreachable") }
+        if !valid_build_signature(build) { return Err([bad_build_signature(build.name_span)]) }
+    }
+    if build_index.is_none() && inputs.entry_fn.is_some() { swap_entry_point(&bundle, inputs.entry_fn.unwrap()) }
+    // Build code is host code; target restrictions apply to its selected runtime.
+    sema_span := Trace.span("sema.check")
+    (diags, effect_facts) :: if build_index.is_some() { Sema.check_bundle_with_effect_facts_for_build(&bundle, compile_mode) } else { Sema.check_bundle_with_effect_facts(&bundle, compile_mode) }
+    sema_span.items(bundle.modules.len())
+    drop(sema_span)
+    diags :: apply_package_effect_budget(&bundle, &effect_facts, diags)?
+    extension_diags :: CompilerExtensionHook.post_sema_diagnostics(&bundle, Some(&effect_facts), &diags)
+    parse_teaching :: bundle.parse_teaching.take()
+    lints :: classify_diagnostics(&bundle, parse_teaching.into_iter().chain(diags).chain(extension_diags).collect(), build_span.is_some())?
+    source_closure := bundle_source_closure(&bundle)
+    if runtime_bundle_for_package.is_some() { source_closure.extend(bundle_source_closure(runtime_bundle_for_package.unwrap())) }
+    source_closure.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+    source_closure.dedup_by(fn(left, right) { left.0 == right.0 })
+    Ok(PreparedBuildFrontEnd { inputs: inputs, bundle: bundle, effect_facts: effect_facts, program_value: None, lints: lints, build_index: build_index, build_span: build_span, compile_mode: compile_mode, active_os: active_os, build_stamp: build_stamp, package_build_fingerprint: package_build_fingerprint, runtime_bundle_for_package: runtime_bundle_for_package, runtime_source_paths: runtime_source_paths, source_closure: source_closure })
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:3775
+// Stage two resumes the checked front end: evaluate plan, recheck runtime, emit.
+fn compile_build_from_front_end(file: &String, options: BuildRunOptions, dependency_boundary: String?, prepared: PreparedBuildFrontEnd, without_codegen: Bool, project_check: Bool) -> BuildCompileOutput [Diagnostic]! {
+    bundle := prepared.bundle
+    effect_facts :: prepared.effect_facts
+    program_value :: prepared.program_value
+    lints := prepared.lints
+    build_index :: prepared.build_index
+    build_span :: prepared.build_span
+    compile_mode :: prepared.compile_mode
+    active_os :: prepared.active_os
+    build_stamp :: prepared.build_stamp
+    package_build_fingerprint :: prepared.package_build_fingerprint
+    runtime_bundle_for_package := prepared.runtime_bundle_for_package
+    runtime_source_paths :: prepared.runtime_source_paths
+    source_closure :: prepared.source_closure
+    refresh_target_dossier(&bundle, options.no_os, options.web_target)
+    lock_was_present :: bundle.project_root.join(Syntax.UNIFIED_LOCK_FILE).exists()
+    front_end_completion :: FrontEndCompletion.all_complete()
+    build_run := None as BuildRun?
+    locked_provenance := [AST.ComptimeInput].new()
+    filesystem_transaction := None as BuildFilesystemTransaction?
+    if build_index.is_some() {
+        build :: bundle.modules[bundle.entry].items[build_index.unwrap()] == { .Func(func) -> func, _ -> panic("unreachable") }
+        declared_build_effects :: build.declared_effects.iter().flatten().filter_map(fn((name, _)) { BuildCapability.parse(name) }).collect[Set[BuildCapability]]()
+        has_impure_gate :: contains_impure_gate(&build.body)
+        build_name_span :: build.name_span
+        funcs := [String:&AST.Func].new()
+        error_conversions :: bundle.modules.iter().flat_map(fn(module) { module.items.iter() }).filter_map(fn(item) { item == { .ErrorConv(conversion) -> Some(conversion.clone()), _ -> None } }).collect()
+        methods := [(String, String):&AST.Func].new()
+        structs := [String:&AST.StructDef].new()
+        enums := [String:&AST.EnumDef].new()
+        migrations := [String:[&AST.MigrationDecl]].new()
+        computed_fields := [(String, String):&AST.Expr].new()
+        distinct_ranges := [String:(I64, I64)?].new()
+        distinct_bases := [String:AST.Type].new()
+        function_name_counts := [String:USize].new()
+        type_name_counts := [String:USize].new()
+        const_name_counts := [String:USize].new()
+        for module in bundle.modules {
+            for item in module.items {
+                item == {
+                    .Func(func) -> { function_name_counts.entry(func.name.clone()).or_default() += 1 }
+                    .Struct(def) -> { type_name_counts.entry(def.name.clone()).or_default() += 1 }
+                    .Enum(def) -> { type_name_counts.entry(def.name.clone()).or_default() += 1 }
+                    .Const(def) -> { if def.is_comptime && def.ct.is_some() { const_name_counts.entry(def.name.clone()).or_default() += 1 } }
+                    _ -> {}
+                }
+            }
+        }
+        // Computed getters consume sema-rewritten source, with qualified and unique short keys.
+        for module in bundle.modules {
+            for item in module.items {
+                item == {
+                    .Struct(def) -> {
+                        owner :: "{module.alias}::{def.name}"
+                        for field in def.fields {
+                            if field.computed.is_some() {
+                                expression :: field.computed.unwrap()
+                                computed_fields.insert((owner.clone(), field.name.clone()), expression)
+                                if type_name_counts.get(&def.name) == Some(&1) { computed_fields.insert((def.name.clone(), field.name.clone()), expression) }
+                            }
+                        }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        for module in bundle.modules {
+            for item in module.items {
+                item == {
+                    .Func(func) -> {
+                        funcs.insert("{module.alias}::{func.name}", func)
+                        if function_name_counts.get(&func.name) == Some(&1) { funcs.insert(func.name.clone(), func) }
+                    }
+                    .Struct(def) -> {
+                        owner :: "{module.alias}::{def.name}"
+                        structs.insert(owner.clone(), def)
+                        if type_name_counts.get(&def.name) == Some(&1) { structs.insert(def.name.clone(), def) }
+                        for method in def.methods { methods.insert((owner.clone(), method.name.clone()), method); if type_name_counts.get(&def.name) == Some(&1) { methods.insert((def.name.clone(), method.name.clone()), method) } }
+                    }
+                    .Enum(def) -> {
+                        owner :: "{module.alias}::{def.name}"
+                        enums.insert(owner.clone(), def)
+                        if type_name_counts.get(&def.name) == Some(&1) { enums.insert(def.name.clone(), def) }
+                        for method in def.methods { methods.insert((owner.clone(), method.name.clone()), method); if type_name_counts.get(&def.name) == Some(&1) { methods.insert((def.name.clone(), method.name.clone()), method) } }
+                    }
+                    .Impl(imp) -> {
+                        owner :: "{module.alias}::{imp.type_name}"
+                        for method in imp.methods { methods.insert((owner.clone(), method.name.clone()), method); if type_name_counts.get(&imp.type_name) == Some(&1) { methods.insert((imp.type_name.clone(), method.name.clone()), method) } }
+                    }
+                    .Migration(m) -> migrations.entry(m.type_name.clone()).or_default().push(m)
+                    .Distinct(def) -> { distinct_ranges.insert(def.name.clone(), def.range.map(fn((lo, hi, _)) { (lo, hi) })); distinct_bases.insert(def.name.clone(), def.base.clone()) }
+                    .UnitFamily(family) -> {
+                        for def in family.distinct_defs() { distinct_ranges.insert(def.name.clone(), def.range.map(fn((lo, hi, _)) { (lo, hi) })); distinct_bases.insert(def.name, def.base) }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        // Immutable comptime constants are real inputs to the same pure interpreter.
+        globals := [String:Comptime.CtValue].new()
+        for module in bundle.modules {
+            for item in module.items {
+                item == {
+                    .Const(def) -> {
+                        if !def.is_comptime || def.ct.is_none() { continue }
+                        value :: def.ct.unwrap()
+                        globals.insert("{module.alias}::{def.name}", value.clone())
+                        if const_name_counts.get(&def.name) == Some(&1) { globals.insert(def.name.clone(), value.clone()) }
+                    }
+                    _ -> {}
+                }
+            }
+        }
+        core_imports :: core_aliases(&bundle.modules[bundle.entry])
+        info :: Comptime.ProgramInfo { globals: globals, methods: methods, structs: structs, enums: enums, computed_fields: computed_fields, distinct_ranges: distinct_ranges, distinct_bases: distinct_bases, core_imports: core_imports, build_facts: bundle.build_facts.clone(), migrations: migrations }
+        program_value :: program_value.unwrap_or_else(fn() { semantic_facts :: program_semantic_facts(&bundle, &effect_facts); Comptime.build_program_info(&bundle, &semantic_facts) })
+        base_dir :: &bundle.project_root
+        package :: if bundle.build_facts.package_name.is_empty() { build_package_name(file)? } else { bundle.build_facts.package_name.clone() }
+        evaluated := with_packaged_plugin_runner(BuildPluginHook.run_packaged_build_plugin, fn() {
+            Comptime.run_build_entry_with_policy(build, &funcs, &error_conversions, base_dir, &info, program_value, &package, options.gates, options.policy.clone())
+        }).map_err(fn(diag) { [diag] })?
+        if !evaluated.diagnostics.is_empty() { return Err(evaluated.diagnostics) }
+        // Computed writers finalize through the canonical fact pipeline before actions.
+        seed_build_facts_from_stamp(&bundle, &options.profile, &options.setting_overrides, evaluated.plan.fact_contributions(), &build_stamp)?
+        bundle.build_facts.artifact_build = options.artifact_build
+        dependency_name :: dependency_boundary.map(build_package_name).transpose()?
+        validate_build_authority(&evaluated.plan, &declared_build_effects, has_impure_gate, &options, dependency_name, build_name_span)?
+        validate_legacy_project_imports(&evaluated.plan, &bundle.project_root, build_name_span)?
+        package_spec_bundle :: runtime_bundle_for_package.as_ref().unwrap_or(&bundle)
+        package_specs :: if package_spec_bundle.dep_roots.is_empty() { [] } else { compiler_package_specs(package_spec_bundle, &package, package_build_fingerprint.as_deref()) }
+        compiler_identity :: compiler_action_identity(&bundle.build_facts)
+        compiler_target :: bundle.build_facts.target_triple.clone()
+        compiler_profile :: options.profile.clone()
+        if !package_specs.is_empty() && !evaluated.plan.targets().is_empty() {
+            evaluated.plan.add_compiler_package_actions(&package_specs, compiler_identity, &compiler_target, &compiler_profile).map_err(fn(error) { [build_plan_diagnostic(&error)] })?
+        }
+        compiler_artifacts :: package_specs.iter().map(fn(spec) { (spec.name.clone(), spec.clone()) }).collect[[String:CompilerPackageSpec]]()
+        compiler_runner :: fn(action: &BuildAction, snapshots: &[ActionInputSnapshot]) -> [[U8]] Err! {
+            package_name :: action.labels.get("compiler.package").ok_or_else(fn() { "compiler action has no package identity" })?
+            spec :: compiler_artifacts.get(package_name).ok_or_else(fn() { "compiler package `{package_name}` was not prepared" })?
+            artifact := "jet.sealed-package.v1\npackage={package_name}\nsource={spec.source_digest.as_str()}\ncompiler={action.labels.get("compiler.identity").map(fn(s) { s.as_str() }).unwrap_or_default()}\ntarget={action.labels.get("compiler.target").map(fn(s) { s.as_str() }).unwrap_or_default()}\nprofile={action.labels.get("compiler.profile").map(fn(s) { s.as_str() }).unwrap_or_default()}\n"
+            for snapshot in snapshots { artifact.push_str("dependency="); artifact.push_str(snapshot.path.as_str()); artifact.push('='); artifact.push_str(snapshot.digest.as_str()); artifact.push('\n') }
+            Ok([artifact.into_bytes()])
+        }
+        selected_actions :: evaluated.plan.selected_action_ids().map_err(fn(error) { [build_plan_diagnostic(&error)] })?
+        selected_generated :: if options.emit_generated { evaluated.plan.generated_modules().iter().collect() } else { evaluated.plan.selected_generated_modules().map_err(fn(error) { [build_plan_diagnostic(&error)] })? }
+        existing_source_paths := runtime_source_paths.clone()
+        existing_source_paths.extend(bundle.modules.iter().map(fn(module) { module.path.clone() }))
+        selected_action_outputs :: evaluated.plan.actions().iter().filter(fn(action) { selected_actions.contains(&action.id) }).flat_map(fn(action) { action.outputs.iter().map(fn(output) { output.as_str().to_string() }) }).collect[[String]]()
+        validate_selected_action_outputs(&evaluated.plan, &selected_actions, &selected_generated, &bundle.project_root, &existing_source_paths, build_span)?
+        transaction_paths := selected_generated.iter().map(fn(module) { bundle.project_root.join(module.path.as_str()) }).chain(evaluated.plan.actions().iter().filter(fn(action) { selected_actions.contains(&action.id) }).flat_map(fn(action) { action.outputs.iter().map(fn(output) { bundle.project_root.join(output.as_str()) }) })).collect[[OSPath]]()
+        transaction_paths.push(bundle.project_root.join(".jet/lock"))
+        if !project_check { filesystem_transaction = Some(BuildFilesystemTransaction.new(transaction_paths).map_err(fn(error) { [generated_io_diag("build filesystem transaction", &error)] })?) }
+        if options.locked {
+            Lock.verify_locked_build_contributions(&bundle.project_root, &bundle.build_facts.package_name, evaluated.plan.fact_contributions()).map_err(fn(diagnostic) { [diagnostic] })?
+            planned_generated :: selected_generated.iter().map(fn(module) { AST.ComptimeInput { path: module.path.as_str().to_string(), hash: module.source_digest.as_str().to_string() } }).collect()
+            Lock.verify_locked_generated_inputs(&bundle.project_root, &planned_generated).map_err(fn(diagnostic) { [diagnostic] })?
+        }
+        generated := if options.execute { materialize_and_check_generated(&selected_generated, &bundle.project_root, &existing_source_paths, &selected_action_outputs, build_span, &bundle.build_facts)? } else {
+            selected_generated.iter().map(fn(module) { GeneratedSourceProvenance { name: module.name.clone(), path: bundle.project_root.join(module.path.as_str()), digest: module.source_digest.clone(), source: module.source.clone() } }).collect()
+        }
+        executed :: if options.execute {
+            execution_grants :: effective_grants(&options)
+            artifact_store :: BuildArtifactStoreHandle.open().map_err(fn(detail) { [Diagnostic.error("E3505", "build artifact store is unavailable", detail, "Jet needs a writable artifact store before it can execute build actions", None)] })?
+            execute_build_plan_with_front_end_and_remote_and_compiler(&evaluated.plan, &bundle.project_root, &artifact_store, &execution_grants, front_end_completion, options.remote.as_ref(), Some(&compiler_runner)).map_err(fn(error) { [build_execution_diagnostic(error)] })?
+        } else { BuildExecutionResult { report: evaluated.plan.execution_report(&[]).map_err(fn(error) { [build_plan_diagnostic(&error)] })?, probes: [] } }
+        install_build_execution_receipt(&evaluated.plan, &executed.report)
+        if options.locked { Loader.verify_locked_dependency_sources(file)? }
+        if options.execute || project_check { generated.extend(check_action_generated_sources(&evaluated.plan, &bundle.project_root, &existing_source_paths, build_span, &bundle.build_facts)?) }
+        if options.execute {
+            locked_provenance = generated.iter().map(fn(item) { AST.ComptimeInput { path: item.path.strip_prefix(&bundle.project_root).unwrap_or(&item.path).display().to_string(), hash: item.digest.as_str().to_string() } }).collect()
+            locked_provenance.extend(evaluated.comptime_inputs.iter().cloned())
+            for action in evaluated.plan.actions().iter().filter(fn(action) { selected_actions.contains(&action.id) && !action.is_compiler_owned() }) {
+                for input in action.inputs {
+                    path :: normalize_project_path(&bundle.project_root, OSPath.new(input.as_str()))
+                    bytes :: read_build_file(&bundle.project_root, &path).map_err(fn(error) { [generated_io_diag(&action.name, &error)] })?
+                    locked_provenance.push(AST.ComptimeInput { path: input.as_str().to_string(), hash: ContentDigest.from_bytes(&bytes).as_str().to_string() })
+                }
+                for output in action.outputs {
+                    path :: normalize_project_path(&bundle.project_root, OSPath.new(output.as_str()))
+                    bytes :: read_build_file(&bundle.project_root, &path).map_err(fn(error) { [generated_io_diag(&action.name, &error)] })?
+                    locked_provenance.push(AST.ComptimeInput { path: output.as_str().to_string(), hash: ContentDigest.from_bytes(&bytes).as_str().to_string() })
+                }
+            }
+            locked_provenance.sort_by(fn(a, b) { a.path.cmp(&b.path).then_with(fn() { a.hash.cmp(&b.hash) }) })
+            locked_provenance.dedup_by(fn(a, b) { a.path == b.path && a.hash == b.hash })
+            // Publication waits for the fresh runtime's complete sema check.
+        }
+        planned_bundle := if options.execute || project_check {
+            project_root :: bundle.project_root.clone()
+            stashed_runtime_bundle :: runtime_bundle_for_package.take()
+            source_closure :: source_closure.clone()
+            load_planned_runtime_bundle(file, &evaluated.plan, &generated, &selected_generated, &project_root, &source_closure, fn() {
+                if stashed_runtime_bundle.is_some() { Ok(stashed_runtime_bundle.unwrap()) } else {
+                    // Folded pre-build AST cannot answer the final snapshot; reparse overlays.
+                    overlays :: source_closure.iter().map(fn((path, source)) { (path, source) }).collect()
+                    Loader.load_entry_with_overlays(file, &overlays, false)
+                }
+            })?
+        } else { bundle }
+        planned_bundle.comptime_inputs.extend(evaluated.comptime_inputs)
+        build_run = Some(BuildRun { plan: evaluated.plan, execution: executed.report, probes: executed.probes, generated: generated })
+        bundle = planned_bundle
+        bundle.active_os = active_os
+        set_bundle_target(&bundle, options.cross_target.as_deref())
+        selected_build :: build_run.as_ref().expect("selected build entry produces a build run")
+        seed_build_facts_from_stamp(&bundle, &options.profile, &options.setting_overrides, selected_build.plan.fact_contributions(), &build_stamp)?
+        bundle.build_facts.artifact_build = options.artifact_build
+        bundle.web_partition_enforced = options.web_target
+        if options.entry_fn.is_some() { swap_entry_point(&bundle, options.entry_fn.unwrap()) }
+    }
+    // Build entries are inert after planning and must not leak into runtime emission.
+    apply_application_authority(&bundle, options.application_authority.as_ref())
+    Sema.strip_build_only_entries(&bundle)
+    runtime_effect_facts := if !project_check && build_run.is_none() { Some(effect_facts) } else { None }
+    if project_check || (build_run.is_some() && options.execute) {
+        sema_span := Trace.span("sema.check")
+        (planned_diags, planned_facts) :: if options.no_os {
+            (diags, facts) :: Sema.check_bundle_no_os_with_effect_facts(&bundle, compile_mode); (diags, Some(facts))
+        } else if !options.gates.is_empty() {
+            (diags, facts) :: Sema.check_bundle_gates_with_effect_facts(&bundle, compile_mode, options.gates); (diags, Some(facts))
+        } else { (diags, facts) :: Sema.check_bundle_with_effect_facts(&bundle, compile_mode); (diags, Some(facts)) }
+        sema_span.items(bundle.modules.len())
+        drop(sema_span)
+        planned_diags :: if planned_facts.is_some() { apply_package_effect_budget(&bundle, planned_facts.as_ref().unwrap(), planned_diags)? } else { planned_diags }
+        extension_diags :: CompilerExtensionHook.post_sema_diagnostics(&bundle, planned_facts.as_ref(), &planned_diags)
+        parse_teaching :: bundle.parse_teaching.take()
+        planned_lints :: classify_diagnostics(&bundle, parse_teaching.into_iter().chain(planned_diags).chain(extension_diags).collect(), false)?
+        lints.extend(planned_lints)
+        runtime_effect_facts = planned_facts
+    }
+    refresh_target_dossier(&bundle, options.no_os, options.web_target)
+    if options.cross_target.is_some() { target_diags :: Sema.check_target_surface(&bundle, options.cross_target.unwrap()); lints.extend(classify_diagnostics(&bundle, target_diags, false)?) }
+    if options.execute && build_run.is_some() {
+        selected_build :: build_run.as_ref().unwrap()
+        Lock.record_generated_inputs_with_lock_state(&bundle.project_root, &locked_provenance, options.locked, &build_stamp, lock_was_present).map_err(fn(diagnostic) { [diagnostic] })?
+        Lock.record_build_contributions(&bundle.project_root, &bundle.build_facts.package_name, selected_build.plan.fact_contributions(), options.locked, &bundle.build_facts.stamp).map_err(fn(diagnostic) { [diagnostic] })?
+    }
+    if project_check {
+        build_facts :: bundle.build_facts.clone()
+        compile :: CompileOutput { rust: "", lints: lints, ffi: None, clinks: [], comptime_inputs: bundle.comptime_inputs.take(), web: None, plugin: None, web_partition_report: None, library: None, library_config: None, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling }
+        return Ok(BuildCompileOutput { compile: compile, build: build_run, compiler_nodes: [], runtime: Some(bundle), build_facts: build_facts, runtime_effect_facts: runtime_effect_facts })
+    }
+    // Static graph queries need only the plan; no generated runtime exists yet.
+    if !options.execute {
+        if filesystem_transaction.is_some() { filesystem_transaction.as_mut().unwrap().commit() }
+        return Ok(BuildCompileOutput { compile: CompileOutput { rust: "", lints: lints, ffi: None, clinks: [], comptime_inputs: bundle.comptime_inputs.take(), web: None, web_partition_report: None, plugin: None, library: None, library_config: None, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling }, build: build_run, compiler_nodes: [], runtime: None, build_facts: bundle.build_facts.clone(), runtime_effect_facts: None })
+    }
+    ffi :: if options.cross_target.is_some() { FFI.prepare_for_target(&bundle, options.cross_target.unwrap()) } else { FFI.prepare(&bundle) }?
+    without_codegen :: without_codegen && build_run.is_none() && ffi.is_none() && bundle.cffi.libs.is_empty() && !options.web_target && !options.plugin_target && options.cross_target.is_none()
+    if without_codegen {
+        build_facts :: bundle.build_facts.clone()
+        compile :: CompileOutput { rust: "", lints: lints, ffi: ffi, clinks: [], comptime_inputs: bundle.comptime_inputs.take(), web: None, web_partition_report: None, plugin: None, library: None, library_config: None, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling }
+        if filesystem_transaction.is_some() { filesystem_transaction.as_mut().unwrap().commit() }
+        return Ok(BuildCompileOutput { compile: compile, build: build_run, compiler_nodes: [], runtime: Some(bundle), build_facts: build_facts, runtime_effect_facts: runtime_effect_facts })
+    }
+    plugin_name :: if options.plugin_target { Some(PluginExport.resolve_export_name(&bundle)) } else { None }
+    request :: mir_artifact_request_for_build(&bundle, compile_mode, &options.profile, options.web_target, options.plugin_target, false)
+    request :: if plugin_name.is_some() { request.with_name(plugin_name.unwrap()) } else { request }
+    (mir, artifact) :: lower_checked_mir_program_for(&bundle, request)
+    execution := MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi.as_ref()
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(&bundle, &options.profile)
+    execution.emit_types = true
+    execution.emit_foreign = true
+    execution.emit_metadata = false
+    execution.emit_debug_linemap = false
+    execution.emit_runtime = true
+    web_release_devtools_policy :: execution.release_devtools_policy.clone()
+    emit_span := Trace.span("emit")
+    rust :: emit_mir_program(&mir, &MirRustConfig { target: TargetLayout.from_build_facts(&bundle.build_facts), target_kind: if options.web_target { MirRustTarget.WebWasm } else { MirRustTarget.Native }, root_prefix: "", execution: execution })
+    emit_span.items(mir.functions.len())
+    drop(emit_span)
+    web :: if options.web_target { Some(emit_web_from_mir(&bundle, &mir, artifact, &web_release_devtools_policy)) } else { None }
+    plugin :: if options.plugin_target {
+        errors :: PluginExport.validate_export_surface(&bundle)
+        if !errors.is_empty() { return Err(errors) }
+        name :: plugin_name.as_deref().expect("plugin artifact request has no selected export name")
+        PluginExport.check_and_freeze_version(&bundle, name)?
+        Some(Codegen.emit_plugin(&mir, artifact, &rust))
+    } else { None }
+    compile :: CompileOutput { rust: rust, lints: lints, ffi: ffi, clinks: [], comptime_inputs: bundle.comptime_inputs.take(), web: web, web_partition_report: bundle.web_partition_report.clone(), plugin: plugin, library: None, library_config: None, inferred_layer: bundle.inferred_layer, layer_ceiling: bundle.layer_ceiling }
+    if filesystem_transaction.is_some() { filesystem_transaction.as_mut().unwrap().commit() }
+    build_facts :: bundle.build_facts.clone()
+    Ok(BuildCompileOutput { compile: compile, build: build_run, compiler_nodes: [], runtime: Some(bundle), build_facts: build_facts, runtime_effect_facts: runtime_effect_facts })
+}
+
+// Rust: crates/jet-driver/src/Driver/mod.rs:4646
+// Emit the native AOT artifact from an already checked runtime bundle.
+pub fn emit_native_rust_for_checked_bundle(bundle: &AST.ProgramBundle, profile: &String, ffi: FFI.FfiLink?) -> String {
+    request :: mir_artifact_request_for_build(bundle, Sema.CompileMode.Run, profile, false, false, false)
+    (mir, artifact) :: lower_checked_mir_program_for(bundle, request)
+    execution := MirRustExecutionConfig.for_artifact(artifact)
+    execution.ffi = ffi
+    execution.release_devtools_policy = release_devtools_policy_for_bundle(bundle, profile)
+    execution.emit_types = true
+    execution.emit_foreign = true
+    execution.emit_metadata = false
+    execution.emit_debug_linemap = false
+    execution.emit_runtime = true
+    emit_mir_program(&mir, &MirRustConfig { target: TargetLayout.from_build_facts(&bundle.build_facts), target_kind: MirRustTarget.Native, root_prefix: "", execution: execution })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:4679
+fn bundle_source_closure(bundle: &AST.ProgramBundle) -> [(OSPath, String)] {
+    closure := bundle.modules.iter().map(fn(module) { (module.path.clone(), module.source.clone()) }).collect()
+    closure.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+    closure.dedup_by(fn(left, right) { left.0 == right.0 })
+    closure
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:4694
+pub fn compiler_nodes_for_bundle(bundle: &AST.ProgramBundle, plan: BuildPlan?) -> [BuildPlanNode] { compiler_nodes_for_bundle_with_outputs(bundle, plan, &[]) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:4704
+// Sort before key construction so source trees receive root-independent node keys.
+pub fn compiler_nodes_for_bundle_with_outputs(bundle: &AST.ProgramBundle, plan: BuildPlan?, output_names: &[String]) -> [BuildPlanNode] {
+    modules := bundle.modules.iter().map(fn(module) {
+        normalized :: normalize_project_path(&bundle.project_root, &module.path)
+        subject :: normalized.strip_prefix(&bundle.project_root).unwrap_or(&normalized).display().to_string().replace('\\', "/")
+        (subject, &module.source)
+    }).collect()
+    modules.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+    outputs := Set[String].new()
+    outputs.extend(output_names.iter().cloned())
+    if outputs.is_empty() && plan.is_some() {
+        plan :: plan.unwrap()
+        selected :: plan.default_target().map(fn(target) { target.id() })
+        for target in plan.targets().iter().filter(fn(target) { selected.is_none_or(fn(selected) { target.id == selected }) }) { outputs.extend(target.outputs.iter().map(fn(output) { output.as_str().to_string() })) }
+    }
+    if outputs.is_empty() {
+        fallback :: bundle.modules.get(bundle.entry).and_then(fn(module) { module.path.file_stem() }).and_then(fn(stem) { stem.to_str() }).filter(fn(stem) { !stem.is_empty() }).unwrap_or("program")
+        _ :: outputs.insert(fallback.to_string())
+    }
+    checks :: modules.iter().map(fn((subject, source)) {
+        digest :: ContentDigest.from_bytes(source.as_bytes()).as_str().to_string()
+        BuildPlanNode.new(BuildNodeKind.Check, subject.clone(), [(subject.clone(), digest)])
+    }).collect[[BuildPlanNode]]()
+    nodes := checks.clone()
+    sorted_outputs := outputs.into_iter().collect[[String]]()
+    sorted_outputs.sort()
+    for output in sorted_outputs {
+        inputs :: checks.iter().map(fn(check) { ("check:{check.subject}", check.key.clone()) }).collect()
+        compile :: BuildPlanNode.new(BuildNodeKind.Compile, output.clone(), inputs)
+        link :: BuildPlanNode.new(BuildNodeKind.Link, output.clone(), [("compile:{output}", compile.key.clone())])
+        nodes.push(compile)
+        nodes.push(link)
+    }
+    nodes.sort_by(fn(left, right) { left.kind.cmp(&right.kind).then_with(fn() { left.subject.cmp(&right.subject) }).then_with(fn() { left.key.cmp(&right.key) }) })
+    nodes
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:4795
+fn generated_source_for_path(path: &OSPath, project_root: &OSPath, generated_sources: &[&BuildGeneratedModule]) -> String? {
+    normalized :: normalize_project_path(project_root, path)
+    generated_sources.iter().find(fn(module) { normalize_project_path(project_root, OSPath.new(module.path.as_str())) == normalized }).map(fn(module) { &module.source })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:4810
+fn load_planned_source(build_file: &String, path: &OSPath, project_root: &OSPath, generated: &[GeneratedSourceProvenance], generated_sources: &[&BuildGeneratedModule], source_closure: &[(OSPath, String)]) -> AST.ProgramBundle [Diagnostic]! {
+    overlays := source_closure.iter().map(fn((path, source)) { (path, source) }).collect()
+    source :: generated.iter().find(fn(item) { normalize_project_path(project_root, &item.path) == normalize_project_path(project_root, path) }).map(fn(item) { &item.source }).or_else(fn() { generated_source_for_path(path, project_root, generated_sources) })
+    if source.is_some() { overlays.push((path, source.unwrap())) }
+    Loader.load_entry_with_overlays(path.to_str().unwrap_or(build_file), &overlays, false)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:4835
+fn load_planned_runtime_bundle(build_file: &String, plan: &BuildPlan, generated: &[GeneratedSourceProvenance], generated_sources: &[&BuildGeneratedModule], project_root: &OSPath, source_closure: &[(OSPath, String)], fallback_bundle: fn() -> AST.ProgramBundle [Diagnostic]!) -> AST.ProgramBundle [Diagnostic]! {
+    sources :: plan.selected_sources().map_err(fn(error) { [build_plan_diagnostic(&error)] })?
+    resolve :: fn(path: &String) { path :: OSPath.new(path); if path.is_absolute() { path.to_path_buf() } else { project_root.join(path) } }
+    // Fallback is lazy and fresh: final $build reads must remain foldable.
+    (entry_index, bundle) := if sources.is_empty() { (0, fallback_bundle()?) } else {
+        first :: load_planned_source(build_file, &resolve(sources[0].as_str()), project_root, generated, generated_sources, source_closure)?
+        has_run :: fn(bundle: &AST.ProgramBundle) { bundle.modules.get(bundle.entry).is_some_and(fn(module) { module.items.iter().any(fn(item) { item == { .Func(function) -> function.name == "run", _ -> false } }) }) }
+        if has_run(&first) { (0, first) } else {
+            selected := (0, first)
+            for (index, entry_source) in sources.iter().enumerate().skip(1) {
+                candidate :: load_planned_source(build_file, &resolve(entry_source.as_str()), project_root, generated, generated_sources, source_closure)?
+                if has_run(&candidate) { selected = (index, candidate); break }
+            }
+            selected
+        }
+    }
+    additions := sources.iter().enumerate().filter(fn((index, _)) { index != entry_index }).map(fn((_, path)) { ("selected source", resolve(path.as_str())) }).chain(generated.iter().map(fn(item) { (&item.name, item.path.clone()) })).collect()
+    additions.sort_by(fn(a, b) { a.1.cmp(&b.1) })
+    additions.dedup_by(fn(a, b) { a.1 == b.1 })
+    selected_paths :: additions.iter().map(fn((_, path)) { normalize_project_path(project_root, path) }).collect[Set[OSPath]]()
+    already_loaded :: bundle.modules.iter().map(fn(module) { normalize_project_path(project_root, &module.path) }).collect[Set[OSPath]]()
+    loaded_by_path := [OSPath:AST.Module].new()
+    for (generator, path) in additions {
+        loaded :: load_planned_source(build_file, &path, project_root, generated, generated_sources, source_closure).map_err(fn(diagnostics) {
+            diagnostics := diagnostics
+            for diagnostic in &diagnostics { diagnostic.what = "generated by `{generator}`: {diagnostic.what}" }
+            diagnostics
+        })?
+        for module in loaded.modules { key :: normalize_project_path(project_root, &module.path); loaded_by_path.entry(key).or_insert(module) }
+    }
+    // Preserve selected-root import aliases as inline modules before promotion.
+    inline_imports := [String:([AST.Item], AST.WebTarget?)].new()
+    loaded_keys := loaded_by_path.keys().cloned().collect[[OSPath]]()
+    loaded_keys.sort()
+    for key in loaded_keys {
+        module :: loaded_by_path[&key]
+        for import in module.imports {
+            import_path_opt :: import.kind == { .File(import_path, _) -> Some(import_path), _ -> None }
+            if import_path_opt.is_none() { continue }
+            target_path := module.path.parent().unwrap_or_else(fn() { OSPath.new(".") }).to_path_buf()
+            for part in import_path_opt.unwrap().split('/') { if !part.is_empty() && part != "." { target_path.push(part) } }
+            target_path.set_extension(Syntax.FILE_EXT)
+            target_path :: normalize_project_path(project_root, &target_path)
+            target :: loaded_by_path.get(&target_path)
+            if target.is_none() { continue }
+            alias :: import.import_alias()
+            inline_imports.entry(alias).or_insert_with(fn() { (target.unwrap().items.clone(), target.unwrap().web_target_ceiling) })
+        }
+    }
+    sorted_selected := selected_paths.iter().cloned().collect[[OSPath]]()
+    sorted_selected.sort()
+    for path in sorted_selected {
+        if already_loaded.contains(&path) { continue }
+        module :: loaded_by_path.remove(&path)
+        if module.is_some() { bundle.modules[bundle.entry].items.extend(module.unwrap().items) }
+    }
+    inline_aliases :: inline_imports.keys().cloned().collect[Set[String]]()
+    sorted_aliases := inline_imports.keys().cloned().collect[[String]]()
+    sorted_aliases.sort()
+    for alias in sorted_aliases {
+        (items, web_target) :: inline_imports.remove(&alias).unwrap()
+        bundle.modules[bundle.entry].items.push(AST.Item.CodeModule(AST.CodeModule { name: alias, name_span: Span.new(0, 0), is_pub: false, is_package_pub: false, body: Some(items), imports: [], web_target: web_target, instance_identity: None, span: Span.new(0, 0) }))
+    }
+    remaining_keys := loaded_by_path.keys().cloned().collect[[OSPath]]()
+    remaining_keys.sort()
+    for path in remaining_keys {
+        module :: loaded_by_path.remove(&path).unwrap()
+        if already_loaded.contains(&path) || selected_paths.contains(&path) || inline_aliases.contains(&module.alias) { continue }
+        alias :: module.alias.clone()
+        bundle.modules[bundle.entry].items.push(AST.Item.CodeModule(AST.CodeModule { name: alias, name_span: Span.new(0, 0), is_pub: false, is_package_pub: false, body: Some(module.items), imports: module.imports, web_target: module.web_target_ceiling, instance_identity: None, span: Span.new(0, 0) }))
+    }
+    Ok(bundle)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5047
+fn check_action_generated_sources(plan: &BuildPlan, root: &OSPath, existing_source_paths: &[OSPath], span: Span?, build_facts: &BuildFactSnapshot) -> [GeneratedSourceProvenance] [Diagnostic]! {
+    registered :: plan.generated_modules().iter().map(fn(module) { module.path.as_str() }).collect[Set[String]]()
+    out := [GeneratedSourceProvenance].new()
+    selected :: plan.selected_action_ids().map_err(fn(error) { [build_plan_diagnostic(&error)] })?
+    for action in plan.actions().iter().filter(fn(action) { selected.contains(&action.id) }) {
+        for output in action.outputs {
+            if !output.as_str().ends_with(".jet") || registered.contains(output.as_str()) { continue }
+            path :: normalize_project_path(root, OSPath.new(output.as_str()))
+            if has_symlinked_component(root, &path) || fs.symlink_metadata(&path).is_ok_and(fn(metadata) { metadata.file_type().is_symlink() }) { return Err([generated_collision_diag(&action.name, output.as_str(), span)]) }
+            source_path :: existing_source_paths.iter().map(fn(source) { normalize_project_path(root, source) }).any(fn(source) { source == path })
+            if source_path { return Err([generated_collision_diag(&action.name, output.as_str(), span)]) }
+            source :: String.from_utf8(read_build_file(root, &path).map_err(fn(error) { [generated_io_diag(&action.name, &error)] })?).map_err(fn(error) { [generated_io_diag(&action.name, &io.Error.new(io.ErrorKind.InvalidData, error))] })?
+            generated_bundle := Loader.load_entry_with_overlay(path.to_str().unwrap_or(output.as_str()), Some((&path, &source)), false).map_err(fn(diags) {
+                diags := diags
+                for diag in &diags { diag.what = "generated action `{action.name}`: {diag.what}" }
+                diags
+            })?
+            generated_bundle.build_facts = build_facts.clone()
+            generated_bundle.active_os = build_facts.os
+            generated_diags :: Sema.check_bundle(&generated_bundle, Sema.CompileMode.Check)
+            diags := apply_package_lint_policy(&generated_bundle, generated_diags)?
+            diags.retain(fn(diag) { diag.severity == Severity.Error })
+            if !diags.is_empty() { for diag in &diags { diag.what = "generated action `{action.name}`: {diag.what}" }; return Err(diags) }
+            out.push(GeneratedSourceProvenance { name: action.name.clone(), path: path, digest: ContentDigest.from_bytes(source.as_bytes()), source: source })
+        }
+    }
+    Ok(out)
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5138
+fn validate_selected_action_outputs(plan: &BuildPlan, selected_actions: &Set[ActionId], generated: &[&BuildGeneratedModule], root: &OSPath, existing_source_paths: &[OSPath], span: Span?) -> Unit [Diagnostic]! {
+    source_paths :: existing_source_paths.iter().map(fn(source) { normalize_project_path(root, source) }).collect[Set[OSPath]]()
+    for action in plan.actions().iter().filter(fn(action) { selected_actions.contains(&action.id) }) {
+        for output in action.outputs {
+            path :: normalize_project_path(root, OSPath.new(output.as_str()))
+            if has_symlinked_component(root, &path) { return Err([Diagnostic.error("E3505", "build action `{action.name}` cannot write output `{output.as_str()}` through a symlink", "sandboxed build outputs must stay inside the project and must not follow symlinks", "remove the symlink or choose a real output directory inside the project", None)]) }
+            if source_paths.contains(&path) { return Err([generated_collision_diag(&action.name, output.as_str(), span)]) }
+            if generated.iter().any(fn(module) { normalize_project_path(root, OSPath.new(module.path.as_str())) == path }) { return Err([generated_cycle_diag(&action.name, output.as_str(), "a selected build action and a generated module both own this path", span)]) }
+        }
+    }
+    Ok(())
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5197
+// Same sema predicate selects, rejects and strips BuildContext/BuildPlan entries.
+fn valid_build_signature(func: &AST.Func) -> Bool { Sema.build_entry_signature_is_valid(func) }
+// Rust: crates/jet-driver/src/Driver/mod.rs:5201
+fn contains_impure_gate(stmts: &[AST.Stmt]) -> Bool {
+    stmts.iter().any(fn(stmt) {
+        stmt == {
+            .Impure(..) -> true
+            .While(body: body, ..), .For(body: body, ..), .Loop(body: body, ..), .Reactive(body: body, ..), .Shield(body: body, ..), .Switched(body: body, ..), .Region(body: body, ..), .Policy(body: body, ..), .TaskGroup(body: body, ..), .Layout(body: body, ..), .AuthorityScope(body: body, ..), .ComptimeBlock(body: body, ..), .Live(body: body, ..), .Transact(body: body, ..), .Unsafe(body: body, ..), .ScopeMember(body: body, ..) -> contains_impure_gate(body)
+            .Switch(arms: arms, else_body: else_body, ..), .ComptimeSwitch(arms: arms, else_body: else_body, ..) -> arms.iter().any(fn(arm) { contains_impure_gate(&arm.body) }) || else_body.is_some_and(contains_impure_gate)
+            .CountedLoop(step: step, body: body, ..) -> step.is_some_and(fn(step) { contains_impure_gate(&[step]) }) || contains_impure_gate(body)
+            .ComptimeIf(then_body: then_body, else_body: else_body, ..) -> contains_impure_gate(then_body) || else_body.is_some_and(contains_impure_gate)
+            .ContextBlock(body: body, ..), .AssumeDet(body: body, ..) -> contains_impure_gate(body)
+            _ -> false
+        }
+    })
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5252
+// Nearest dependency root owns each module; root package remains last.
+fn compiler_package_specs(bundle: &AST.ProgramBundle, root_name: &String, package_build_fingerprint: String?) -> [CompilerPackageSpec] {
+    root :: normalize_project_path(&bundle.project_root, &bundle.project_root)
+    roots := [(root_name.to_string(), root.clone())]
+    dependency_roots := bundle.dep_roots.iter().map(fn((name, path)) { (name.clone(), normalize_project_path(&bundle.project_root, path)) }).collect()
+    dependency_roots.sort_by(fn(left, right) { left.1.cmp(&right.1).then_with(fn() { left.0.cmp(&right.0) }) })
+    known_roots := Set[OSPath].new()
+    _ :: known_roots.insert(root.clone())
+    for (name, path) in dependency_roots { if known_roots.insert(path.clone()) { roots.push((name, path)) } }
+    roots.sort_by(fn(left, right) { left.1.cmp(&right.1).then_with(fn() { left.0.cmp(&right.0) }) })
+    root_index :: roots.iter().position(fn((_, path)) { path == root })
+    if root_index.is_some() { root_entry :: roots.remove(root_index.unwrap()); roots.push(root_entry) }
+    module_packages :: bundle.modules.iter().map(fn(module) {
+        path :: normalize_project_path(&bundle.project_root, &module.path)
+        roots.iter().filter(fn((_, package_root)) { path.strip_prefix(package_root).is_ok() }).max_by_key(fn((_, package_root)) { package_root.components().count() }).map(fn((name, _)) { name.clone() })
+    }).collect[[String?]]()
+    source_parts := [String:[(String, [U8])]].new()
+    package_roots :: roots.iter().map(fn((name, path)) { (name.clone(), path) }).collect[[String:&OSPath]]()
+    for (index, module) in bundle.modules.iter().enumerate() {
+        if module_packages[index].is_none() { continue }
+        package_name :: module_packages[index].as_ref().unwrap()
+        normalized_path :: normalize_project_path(&bundle.project_root, &module.path)
+        package_root :: package_roots.get(package_name)
+        relative :: package_root.and_then(fn(path) { normalized_path.strip_prefix(path).ok() }).unwrap_or(&normalized_path).display().to_string()
+        source_parts.entry(package_name.clone()).or_default().push((relative, CanonicalAST.canonical_module_bytes(module)))
+    }
+    dependencies := roots.iter().map(fn((name, _)) { (name.clone(), Set[String].new()) }).collect[[String:Set[String]]]()
+    for (module_index, module) in bundle.modules.iter().enumerate() {
+        if module_packages[module_index].is_none() { continue }
+        owner :: module_packages[module_index].as_ref().unwrap()
+        for import in module.imports {
+            target_index :: bundle.name_ledger.import_target(module_index, import.span)
+            if target_index.is_none() { continue }
+            target :: module_packages.get(target_index.unwrap()).and_then(fn(target) { target.as_ref() })
+            if target.is_none() { continue }
+            target :: target.unwrap()
+            if target != owner { _ :: dependencies.entry(owner.clone()).or_default().insert(target.clone()) }
+        }
+    }
+    roots.into_iter().map(fn((name, _)) {
+        bytes := "jet.package-source.v2".as_bytes().to_vec()
+        bytes.extend_from_slice(TEXT_NUL.as_bytes())
+        parts := source_parts.remove(&name).unwrap_or_default()
+        parts.sort_by(fn(left, right) { left.0.cmp(&right.0) })
+        if parts.is_empty() { bytes.extend_from_slice(name.as_bytes()) } else {
+            for (path, semantic) in parts {
+                bytes.extend_from_slice(&U64.from(path.len()).to_be_bytes())
+                bytes.extend_from_slice(path.as_bytes())
+                bytes.extend_from_slice(&U64.from(semantic.len()).to_be_bytes())
+                bytes.extend_from_slice(&semantic)
+            }
+        }
+        if name == root_name && package_build_fingerprint.is_some() {
+            fingerprint :: package_build_fingerprint.unwrap()
+            bytes.extend_from_slice("build-entry".as_bytes())
+            bytes.extend_from_slice(TEXT_NUL.as_bytes())
+            bytes.extend_from_slice(&U64.from(fingerprint.len()).to_be_bytes())
+            bytes.extend_from_slice(fingerprint.as_bytes())
+        }
+        package_dependencies := dependencies.remove(&name).unwrap_or_default().into_iter().collect[[String]]()
+        package_dependencies.sort()
+        CompilerPackageSpec.new(name, ContentDigest.from_bytes(&bytes), package_dependencies)
+    }).collect()
+}
+// Rust: crates/jet-driver/src/Driver/mod.rs:5377
+fn build_package_name(file: &String) -> String [Diagnostic]! {
+    entry :: OSPath.new(file)
+    absolute :: if entry.is_absolute() { entry.to_path_buf() } else { env.current_dir().map(fn(directory) { directory.join(entry) }).unwrap_or_else(fn(_) { entry.to_path_buf() }) }
+    parent :: absolute.parent().unwrap_or(OSPath.new("."))
+    workspace_root :: Loader.find_workspace_root_checked(parent).map_err(fn(diagnostic) { [diagnostic] })?
+    package_root :: Loader.find_package_root_checked(parent).map_err(fn(diagnostic) { [diagnostic] })?.filter(fn(root) { workspace_root.as_ref().is_none_or(fn(workspace) { Loader.is_physically_within(workspace, root) }) })
+    if package_root.is_some() {
+        package :: Loader.package_facts_for_root(package_root.unwrap())?
+        if package.is_some() && !package.unwrap().name.is_empty() { return Ok(package.unwrap().name) }
+    }
+    if workspace_root.is_some() { return Loader.authority_name_for_entry(&absolute).map_err(fn(diagnostic) { [diagnostic] }) }
+    Ok(absolute.file_stem().and_then(fn(name) { name.to_str() }).filter(fn(name) { !name.is_empty() }).unwrap_or("app").to_string())
+}

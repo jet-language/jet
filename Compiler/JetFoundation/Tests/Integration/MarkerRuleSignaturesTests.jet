@@ -1,0 +1,326 @@
+use std.[fs, env, process]
+use jet
+use jet_foundation.Tests.Integration.MarkerRuleSignatures.*
+// GATE #4494: actual filesystem/process identity, not a mocked loader.
+// Rust: tests/marker_rule_signatures.rs:51
+#Test("core_lang_marker_enums_accept_dot_literals_without_imports") {
+    ds :: codes("#Inline(.Always)\nfn helper() -> Int { 1 }\nfn run() {}")
+    assert(ds.is_empty(), "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:57
+#Test("arithmetic_policy_accepts_only_declared_sites_and_modes") {
+    valid :: codes("""
+#Arithmetic(.Checked) fn checked() {}
+struct Accumulator { value: U8 }
+impl Accumulator {
+    #Arithmetic(.Wrapping) fn step(self) {}
+}
+fn run() {
+    #Arithmetic(.Saturating) {}
+}
+""")
+    assert(valid.is_empty(), "{valid:?}")
+    wrong_site :: codes("#Arithmetic(.Wrapping) struct Bad { value: U8 }\nfn run() {}")
+    assert(wrong_site.iter().any(|code| code == "E0355"), "{wrong_site:?}")
+    wrong_mode :: codes("#Arithmetic(.Other) fn bad() {}\nfn run() {}")
+    assert(wrong_mode.iter().any(|code| code == "E0930"), "{wrong_mode:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:86
+#Test("job_scope_and_reserved_names_use_the_job_diagnostic") {
+    // D-JOB-NAMES1=A: only lifecycle entries, help and version are reserved.
+    valid :: codes("#Job(.Ship) fn ship() {}\n#Job(.Internal) fn inspect_job() {}\n#Job fn output() {}\n#Job fn serve() {}\n#Job fn lint() {}\nfn run() {}")
+    assert(valid.is_empty(), "{valid:?}")
+    loop reserved in ["run", "dev", "build", "test", "help", "version"] {
+        ds :: codes("#Job fn {reserved}() {{}}\nfn main() {{}}")
+        assert(ds.iter().any(|code| code == "E0928"), "{reserved}: {ds:?}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:105
+#Test("qualified_core_lang_hierarchical_marker_enums_use_the_variant_root") {
+    ds :: codes("""
+use core.compiler.lang as lang
+
+#Target(lang.Target.Web)
+fn helper() {}
+
+fn run() {
+    #FX(lang.Effect.Net) {}
+    #FX(grant: lang.Effect.Net) {}
+}
+""")
+    assert(ds.is_empty(), "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:123
+#Test("qualified_state_namespace_is_valid_and_not_a_value") {
+    valid :: codes("struct Door { state { Closed, Open }\n#State(Door.State.Closed) fn close(self) {}\n#Transition(Door.State.Closed, Door.State.Open) fn open(self) {}\n}\nfn run() {}")
+    assert(!valid.iter().any(|code| code == "E0151"), "{valid:?}")
+    value :: codes("struct Door { state { Closed, Open } }\nfn run() { print(Door.State.Open) }")
+    assert(value.iter().any(|code| code == "E0302"), "{value:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:135
+#Test("retired_bench_marker_teaches_measured_test") {
+    ds :: codes("#Bench(\"old\") { assert(true) }\nfn run() {}\n")
+    assert(ds.iter().any(|code| code == "E0927"), "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:144
+#Test("signed_auto_derive_markers_parse_on_types") {
+    loop source in ["#!Printable\nstruct Quiet { value: Int }\nfn run() {}", "#[!Debug, !Equatable, Printable]\nstruct Mixed { value: Int }\nfn run() {}", "#!Codable\nstruct QuietCodec { value: Int }\nfn run() {}", "#!Encode\nstruct QuietEncoder { value: Int }\nfn run() {}", "#!Decode\nstruct QuietDecoder { value: Int }\nfn run() {}", "#!Comparable\nstruct QuietOrder { value: Int }\nfn run() {}"] {
+        ds :: parse_codes(source)
+        assert(ds.is_empty(), "{ds:?}\n{source}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:159
+#Test("negative_sign_is_reserved_for_auto_derive_traits") {
+    loop source in ["#!Pure\nfn run() {}", "#[!Inline]\nfn run() {}"] {
+        ds :: parse_codes(source)
+        assert_eq(ds, ["E0931"], "{ds:?}\n{source}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:167
+#Test("field_and_variant_sites_reject_every_non_applicable_example") {
+    loop source in ["#[Job, Static] struct Bad { value: Int }\nfn run() {}", "enum Bad { #Comparable Value }\nfn run() {}", "enum Bad { #Skip Value }\nfn run() {}"] {
+        ds :: parse_codes(source)
+        assert_eq(ds.iter().filter(|code| code == "E0355").count(), 1, "{ds:?}\n{source}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:183
+#Test("method_markers_share_the_ordered_registry_collector") {
+    source :: """
+struct Door {
+    state { Ready }
+    #[Inline, State(Ready)]
+    fn open(self) {}
+}
+fn run() {}
+"""
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(source)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    program :: jet.Parser.parse(&tokens).expect("method marker list should parse")
+    door :: match &program.items[0] {
+        jet.AST.Item.Struct(door) -> door
+        _ -> panic("Door struct")
+    }
+    assert(door.methods[0].is_inline)
+    assert_eq(door.methods[0].state_requires.as_ref().map(|state| state.0.as_str()), Some("Ready"))
+    wrong :: parse_codes("struct Bad { #Job fn work(self) {} }\nfn run() {}")
+    assert_eq(wrong.iter().filter(|code| code == "E0355").count(), 1)
+}
+// Rust: tests/marker_rule_signatures.rs:212
+#Test("parser_binds_the_authoritative_declaration_site_matrix") {
+    fixtures :: [
+        ("#allow(float_money) price: Float", "struct Money { #allow(float_money) price: Float }\nfn run() {}", jet.Policy.RuleSite.Field),
+        ("#Rename on enum variant", "enum Status { #Rename(\"ready\") Ready }\nfn run() {}", jet.Policy.RuleSite.Variant),
+        ("#Inline on method", "struct Box { #Inline fn open(self) {} }\nfn run() {}", jet.Policy.RuleSite.Method),
+        ("#HTML on file", "#HTML(\"index.html\")\nfn run() {}", jet.Policy.RuleSite.File),
+        ("#Test declaration", "#Test(\"works\") {}\nfn run() {}", jet.Policy.RuleSite.Test),
+        ("#Job on function", "#Job fn work() {}\nfn run() {}", jet.Policy.RuleSite.Function),
+        // D-CONSTMARK1: the constant site is the marked comptime binding.
+        ("#Static on a marked constant", "#Static LIMIT :: prep { 10 }\nfn run() {}", jet.Policy.RuleSite.Constant)
+    ]
+    loop (label, source, expected_site) in fixtures {
+        (tokens, lexer_diagnostics) :: jet.Lexer.lex(source)
+        assert(lexer_diagnostics.is_empty(), "{label}: {lexer_diagnostics:?}")
+        program :: jet.Parser.parse(&tokens).unwrap_or_else(|ds| panic("{label}: {ds:?}"))
+        assert(program.rule_facts.iter().any(|application| application.site == Some(expected_site)), "{label}: {program.rule_facts:?}")
+    }
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex("#Policy(copies: .Explicit)\nfn run() {}")
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    program :: jet.Parser.parse(&tokens).unwrap_or_else(|ds| panic("#Policy module declaration: {ds:?}"))
+    assert(program.policy_declarations.iter().any(|d| d.scope == jet.Policy.PolicyScope.Module), "#Policy module declaration: {program.policy_declarations:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:290
+#Test("a_constant_only_row_teaches_the_marked_binding") {
+    unmarked :: parse_diagnostics("#Static limit :: 10\nfn run() {}")
+    wrong_site :: unmarked.iter().find(|d| d.code == "E0355").unwrap_or_else(|| panic("expected the wrong-site report: {unmarked:?}"))
+    assert(wrong_site.fix.contains("`#Static NAME :: prep { value }`"), wrong_site.fix)
+    elsewhere :: parse_diagnostics("#Off\nfn run() {}")
+    assert(elsewhere.iter().any(|d| d.code == "E0355" && d.fix == "move `#Off` to one of its registered sites"), "{elsewhere:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:313
+#Test("task_metadata_binds_typed_platform_skip_limits_and_formats_stably") {
+    loop (platform, spelling) in [("Linux", ".Linux"), ("MacOS", ".MacOS")] {
+        source :: "#Job(.Dev, skip: .Unless(.Platform({spelling})), limits: [\"cpu\": 2]) fn build() {{}}\nfn run() {{}}\n"
+        (tokens, lexer_diagnostics) :: jet.Lexer.lex(&source)
+        assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+        program :: jet.Parser.parse(&tokens).expect("typed task skip should parse")
+        function :: program.items.iter().find_map(|item| match item {
+            jet.AST.Item.Func(function) if function.name == "build" -> Some(function)
+            _ -> None
+        }).expect("build task")
+        actual_skip :: function.job_metadata.as_ref().and_then(|metadata| metadata.skip.as_ref())
+        assert(match actual_skip {
+            Some(jet.AST.JobSkip.UnlessPlatform(actual)) -> actual == platform
+            _ -> false
+        })
+        assert_eq(function.job_metadata.as_ref().and_then(|metadata| metadata.limits.get("cpu")).map(|s| s.as_str()), Some("2"))
+        skip :: actual_skip.expect("typed task skip")
+        assert_eq(skip.reason_for_host("aarch64-macos").is_none(), platform == "MacOS")
+        assert_eq(skip.reason_for_host("x86_64-linux").is_none(), platform == "Linux")
+        formatted :: jet.format_source(&source).expect("typed task skip should format")
+        assert(formatted.contains("skip: .Unless(.Platform({spelling}))"), formatted)
+        assert_eq(formatted, jet.format_source(&formatted).unwrap())
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:369
+#Test("adjacent_method_markers_keep_the_shared_e0999_rewrite") {
+    source :: "struct Door { state { Ready } #Inline #State(Ready) fn open(self) {} }\nfn run() {}"
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(source)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    (_, ds) :: jet.Parser.parse_for_check(&tokens).expect("adjacent method markers recover")
+    diagnostic :: ds.iter().find(|d| d.code == "E0999").expect("shared adjacent-marker diagnostic")
+    assert_eq(diagnostic.edit.as_ref().map(|edit| edit.new_text.as_str()), Some("#[Inline, State(Ready)]"))
+}
+// Rust: tests/marker_rule_signatures.rs:387
+#Test("string_and_bool_rule_arguments_use_local_semantic_types") {
+    valid :: codes("""
+fn run() {
+    category :: "Movement"
+    enabled :: true
+    #Meta(category: category, tunable: enabled) speed :: 1
+}
+""")
+    assert(!valid.iter().any(|code| code == "E0930" || code == "E3112" || code == "L3102"), "{valid:?}")
+    wrong :: codes("""
+fn run() {
+    category :: 42
+    enabled :: 1
+    #Meta(category: category, tunable: enabled) speed :: 1
+}
+""")
+    assert_eq(wrong.iter().filter(|code| code == "E0930").count(), 1, "{wrong:?}")
+    assert(!wrong.iter().any(|code| code == "E0345" || code == "E0347"))
+}
+// Rust: tests/marker_rule_signatures.rs:424
+#Test("int_rule_arguments_use_local_semantic_types") {
+    valid :: codes("\nfn run() {\n    deadline :: 42\n    #Context(deadline: deadline) {}\n}\n")
+    assert(!valid.iter().any(|code| code == "E0930" || code == "E0762"))
+    wrong :: codes("\nfn run() {\n    deadline :: \"soon\"\n    #Context(deadline: deadline) {}\n}\n")
+    assert_eq(wrong.iter().filter(|code| code == "E0930").count(), 1, "{wrong:?}")
+    assert(!wrong.iter().any(|code| code == "E0762"))
+}
+// Rust: tests/marker_rule_signatures.rs:454
+#Test("duration_rule_arguments_use_function_parameter_types") {
+    valid :: codes("\n#[Job, Every(schedule)]\nfn tick(schedule: Duration) {}\nfn run() {}\n")
+    assert(!valid.iter().any(|code| code == "E0930" || code == "E3112" || code == "L3102"), "{valid:?}")
+    assert(valid.iter().any(|code| code == "E0926"), "{valid:?}")
+    wrong :: codes("\n#[Job, Every(schedule)]\nfn tick(schedule: Int) {}\nfn run() {}\n")
+    assert_eq(wrong.iter().filter(|code| code == "E0930").count(), 1, "{wrong:?}")
+    assert(!wrong.iter().any(|code| code == "E0926"))
+}
+// Rust: tests/marker_rule_signatures.rs:486
+#Test("block_string_rules_use_local_semantic_types") {
+    valid :: codes("\nfn run() {\n    reason :: \"audited\"\n    #Unsafe(reason) {}\n    #Impure(reason) {}\n    #Nondeterministic(reason) {}\n}\n")
+    assert(!valid.iter().any(|code| code == "E0930" || code == "E3112" || code == "L3102"), "{valid:?}")
+    wrong :: codes("\nfn run() {\n    reason :: 42\n    #Unsafe(reason) {}\n    #Impure(reason) {}\n    #Nondeterministic(reason) {}\n}\n")
+    assert_eq(wrong.iter().filter(|code| code == "E0930").count(), 3, "{wrong:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:522
+#Test("contract_messages_use_function_parameter_types") {
+    valid :: codes("\n#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: String) -> Int {\n    return value\n}\nfn run() {}\n")
+    assert(!valid.iter().any(|code| code == "E0930"), "{valid:?}")
+    wrong :: codes("\n#[Pre(value > 0, message), Post(result > 0, message)]\nfn positive(value: Int, message: Int) -> Int {\n    return value\n}\nfn run() {}\n")
+    assert_eq(wrong.iter().filter(|code| code == "E0930").count(), 2, "{wrong:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:551
+#Test("static_string_products_resolve_before_consumers") {
+    source :: "\nLABEL :: prep { \"shared\" }\nPAGE :: prep { \"index.html\" }\n#HTML(PAGE)\nTiny :: distinct Int(0..3)\n#Test(LABEL) {}\nfn run() {}\n"
+    (bundle, ds) :: checked(source, jet.Sema.CompileMode.Check)
+    assert(!ds.iter().any(|code| code == "E0930"), "{ds:?}")
+    module :: &bundle.modules[bundle.entry]
+    assert_eq(module.html_path.as_deref(), Some("index.html"))
+    saw_test := false
+    saw_range := false
+    loop item in &module.items {
+        match item {
+            jet.AST.Item.Test(test) -> saw_test = test.name.as_deref() == Some("shared")
+            jet.AST.Item.Distinct(distinct) if distinct.name == "Tiny" -> saw_range = distinct.range.is_some_and(|(low, high, _)| low == 0 && high == 3)
+            _ -> {}
+        }
+    }
+    assert(saw_test && saw_range)
+}
+// Rust: tests/marker_rule_signatures.rs:584
+#Test("html_marker_uses_typed_path_signature") {
+    (bundle, valid_diagnostics) :: checked("#HTML(Path{\"index.html\"})\nfn run() {}", jet.Sema.CompileMode.Check)
+    assert(!valid_diagnostics.iter().any(|code| code == "E0930"), "{valid_diagnostics:?}")
+    assert_eq(bundle.modules[bundle.entry].html_path.as_deref(), Some("index.html"))
+    parser_diagnostics :: parse_diagnostics("#HTML(\"index.html\")\nfn run() {}")
+    assert(!parser_diagnostics.iter().any(|d| d.code == "E0930"), "{parser_diagnostics:?}")
+    invalid :: diagnostics("#HTML(\"index.html\")\nfn run() {}")
+    errors: [jet.Diagnostics.Diagnostic] :: invalid.iter().filter(|d| d.code == "E0930").collect()
+    assert_eq(errors.len(), 1, "{invalid:?}")
+    assert_eq(errors[0].what, "`#HTML` arguments do not match `HTML(page: Path)`")
+}
+// Rust: tests/marker_rule_signatures.rs:614
+#Test("static_string_products_report_one_shared_type_error_each") {
+    loop source in ["VALUE :: prep { 42 }\n#HTML(VALUE)\nfn run() {}", "VALUE :: prep { 42 }\n#Test(VALUE) {}\nfn run() {}"] {
+        ds :: codes(source)
+        assert_eq(ds.iter().filter(|code| code == "E0930").count(), 1, "{ds:?}\n{source}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:632
+#Test("static_type_and_field_strings_use_the_same_signature_gate") {
+    valid :: codes("\nTAG_NAME :: prep { \"kind\" }\nFIELD_NAME :: prep { \"identifier\" }\nVARIANT_NAME :: prep { \"ready\" }\n#[Codable, Discriminant(TAG_NAME)]\nenum Event { #Rename(VARIANT_NAME) Ready }\n#Codable\nstruct Row { #Rename(FIELD_NAME) id: Int }\nfn run() {}\n")
+    assert(!valid.iter().any(|code| code == "E0930"), "{valid:?}")
+    loop source in ["VALUE :: prep { 42 }\n#[Codable, Discriminant(VALUE)] enum Event { Ready }\nfn run() {}", "VALUE :: prep { 42 }\n#Codable struct Row { #Rename(VALUE) id: Int }\nfn run() {}", "VALUE :: prep { 42 }\n#Codable enum Event { #Rename(VALUE) Ready }\nfn run() {}"] {
+        ds :: codes(source)
+        assert_eq(ds.iter().filter(|code| code == "E0930").count(), 1, "{ds:?}\n{source}")
+        assert(!ds.iter().any(|code| code == "E2407" || code == "E2409"), "{ds:?}\n{source}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:668
+#Test("static_string_products_reject_nonstatic_expressions_once") {
+    loop source in ["#HTML(runtime_name)\nfn run() {}", "#Test(runtime_name) {}\nfn run() {}"] {
+        ds :: codes(source)
+        assert_eq(ds.iter().filter(|code| code == "E0930").count(), 1, "{ds:?}\n{source}")
+    }
+}
+// Rust: tests/marker_rule_signatures.rs:686
+#Test("invariant_marker_is_retired_in_favor_of_range_types") {
+    source :: "#Invariant(\"value >= 0 && value < 4\") Index4 :: distinct Int\nfn run() {}"
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(source)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    ds :: jet.Parser.parse(&tokens).expect_err("retired marker must not parse")
+    assert(ds.iter().any(|d| d.code == "E0927" && d.what.contains("#Invariant") && d.fix.contains("distinct Int(lo..hi)")), "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:702
+#Test("sized_and_named_range_failures_share_the_index_error_shape") {
+    ds :: diagnostics("\nDie :: distinct Int(1..6)\nfn sized(faces: [Int#6], index: U8) -> Int { return faces[index] }\nfn named(faces: [Int#6], index: Die) -> Int { return faces[index] }\nfn run() {}\n")
+    errors: [jet.Diagnostics.Diagnostic] :: ds.iter().filter(|d| d.code == "E0965").collect()
+    assert_eq(errors.len(), 2, "{ds:?}")
+    assert_eq(errors[0].why, errors[1].why, "{ds:?}")
+    assert_eq(errors[0].fix, errors[1].fix, "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:721
+#Test("duplicate_html_markers_still_fail_before_resolution") {
+    source :: "\nFIRST :: prep { \"first.html\" }\nSECOND :: prep { \"second.html\" }\n#HTML(FIRST)\n#HTML(SECOND)\nfn run() {}\n"
+    dir :: env.temp_dir().join("jet_marker_rule_signatures_duplicate_html_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("main.jet")
+    fs.write(&path, source).unwrap()
+    ds :: jet.Loader.load_entry(path.to_str().unwrap()).expect_err("duplicate HTML markers must fail during loading")
+    assert_eq(ds.iter().filter(|d| d.code == "E0003").count(), 1, "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:749
+#Test("generic_instances_materialize_distinct_test_names") {
+    (bundle, ds) :: checked("\nmodule suite(label: String) {\n    #Test(label) {}\n}\nmodule first :: suite(\"case\")\nmodule second :: suite(\"other\")\nfn run() {}\n", jet.Sema.CompileMode.Check)
+    assert(!ds.iter().any(|code| code == "E0105" || code == "E0930"), "{ds:?}")
+    names: [String] := bundle.modules[bundle.entry].items.iter().filter_map(|item| match item {
+        jet.AST.Item.Test(test) -> test.name.clone()
+        _ -> None
+    }).collect()
+    names.sort()
+    assert_eq(names, ["first_case", "second_other"])
+}
+// Rust: tests/marker_rule_signatures.rs:780
+#Test("resolved_test_names_keep_duplicate_identity") {
+    ds :: codes("\nNAME :: prep { \"same\" }\n#Test(NAME) {}\n#Test(\"same\") {}\nfn run() {}\n")
+    assert_eq(ds.iter().filter(|code| code == "E0105").count(), 1, "{ds:?}")
+}
+// Rust: tests/marker_rule_signatures.rs:800
+#Test("formatter_preserves_static_rule_expressions") {
+    source :: "NAME :: prep { \"case\" }\n#Test(NAME) {}\n#HTML(NAME)\nfn run() {}\n"
+    formatted :: jet.format_source(source).expect("static rule expressions should format")
+    assert(formatted.contains("#Test(NAME)"), formatted)
+    assert(formatted.contains("#HTML(NAME)"), formatted)
+}

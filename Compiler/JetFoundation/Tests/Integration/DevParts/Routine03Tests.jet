@@ -1,0 +1,316 @@
+use std.[fs, env, process, thread]
+use std.process.Command
+use std.time.Duration
+use jet.[Loader, Sema, Diagnostics]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.DevParts.Routine03.[routine03_output, routine03_fixture, routine03_golden]
+use jet_foundation.Tests.Integration.DevParts.Support.[example_path, command_output_with_timeout]
+use jet_foundation.Tests.Integration.DevParts.Support02.[golden_stdout, checked_bundle_from_path]
+use core.sys.target.selected_family
+// GATE #4494: filesystem, thread, process, raw environment bytes and execution providers.
+// GATE #4483: selected-family Unix test dispatch.
+// Resident JIT ABI/verifier/trace assertions migrate to observable O0/O1/O2/Web semantics.
+// Rust: tests/dev_parts/routine.rs:3658
+#Test("resident_jit_result_abi_covers_calls_ok_err_try_and_entry") {
+    success :: "\nfn choose_ok() -> Float String! {{\n    return Ok(0.25)\n}}\n\nfn choose_err() -> Float String! {{\n    return Err(\"typed boom\")\n}}\n\nfn forward() -> Float String! {{\n    value :: choose_ok()\n    return Ok(value + 0.25)\n}}\n\nfn run() {{\n    print(forward())\n}}\n"
+    failure :: success.replace("choose_ok()", "choose_err()")
+    for (source, tag) in [(success, "result_success"), (failure, "result_failure")] {
+        file :: env.temp_dir().join("jet_jit_result_{tag}.jet")
+        fs.write(&file, source).unwrap()
+        shown :: file.to_string_lossy().into_owned()
+        if tag == "result_success" {
+            routine03_golden(file.clone(), "0.5\n", "", 0)
+        } else {
+            // D-FAIL-CTX1: same fixture path on every tier, origin first, two automatic crossings.
+            routine03_golden(file.clone(), "", "Error: typed boom\n Trail [E3002] (2 hops via ?, origin first):\n  1. forward ({shown}:11)\n  2. run ({shown}:16)\n", 1)
+        }
+        _ :: fs.remove_file(file)
+    }
+}
+// Rust: tests/dev_parts/routine.rs:3746
+#Test("resident_jit_fallible_void_cfg_fallthrough_matches_aot") {
+    one_arm :: "\nfn direct_ok() -> Int {{\n    return Ok(7)\n}}\n\nfn run() {{\n    print(direct_ok())\n    stop :: false\n    if stop {{\n        return Err(\"one-arm stopped\")\n    }}\n    print(\"one-arm fallthrough\")\n}}\n"
+    nested :: "\nfn direct_ok() -> Int {{\n    return Ok(7)\n}}\n\nfn run() {{\n    print(direct_ok())\n    outer :: true\n    inner :: false\n    if outer {{\n        if inner {{\n            return Err(\"nested stopped\")\n        }}\n    }}\n    print(\"nested fallthrough\")\n}}\n"
+    neither :: "\nfn direct_ok() -> Int {{\n    return Ok(7)\n}}\n\nfn run() {{\n    print(direct_ok())\n    if true {{\n        print(\"left continues\")\n    }} else {{\n        print(\"right continues\")\n    }}\n    print(\"neither terminated\")\n}}\n"
+    both :: "\nfn direct_ok() -> Int {{\n    return Ok(7)\n}}\n\nfn run() {{\n    print(direct_ok())\n    if true {{\n        return Err(\"left branch\")\n    }} else {{\n        return Err(\"right branch\")\n    }}\n}}\n"
+    for (tag, source, stdout, stderr, exit_code) in [
+        ("one_arm_fallthrough", one_arm, "7\none-arm fallthrough\n", "", 0),
+        ("nested_fallthrough", nested, "7\nnested fallthrough\n", "", 0),
+        ("neither_arm_terminates", neither, "7\nleft continues\nneither terminated\n", "", 0),
+        ("both_arms_terminate", both, "7\n", "Error: left branch\n", 1)
+    ] {
+        file :: routine03_fixture(tag, source)
+        routine03_golden(file.clone(), stdout, stderr, exit_code)
+        _ :: fs.remove_dir_all(file.parent().unwrap())
+    }
+}
+// Rust: tests/dev_parts/routine.rs:3865
+#Test("resident_jit_fidelity_matches_runtime_contract") {
+    valid :: "\nuse core.perf as perf\n\nfn run() {{\n    perf.reset_fidelity()\n    print(perf.default_fidelity())\n    perf.override_fidelity(0.25)\n    print(perf.fidelity())\n    perf.reset_fidelity()\n    print(perf.fidelity())\n}}\n"
+    file :: routine03_fixture("fidelity_valid", valid)
+    routine03_golden(file.clone(), "1.0\n0.25\n1.0\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+    for (value, tag) in [("-0.01", "negative"), ("1.01", "above_one"), ("(1.0 / 0.0)", "infinite"), ("(0.0 / 0.0)", "nan")] {
+        source :: "use core.perf as perf\nfn run() {{\n    perf.reset_fidelity()\n    perf.override_fidelity(0.375)\n    perf.override_fidelity({value})\n}}"
+        file :: routine03_fixture(tag, source)
+        // Run the state assertion in the same invocation so native/Web process isolation cannot reset fidelity.
+        read_file :: routine03_fixture("{tag}_state", "use core.perf as perf\nfn run() {{\n    perf.reset_fidelity()\n    perf.override_fidelity(0.375)\n    if perf.override_fidelity({value}) == {{\n        .Err(_) -> print(perf.fidelity())\n        .Ok(_) -> panic(\"invalid fidelity unexpectedly accepted\")\n    }}\n}}")
+        for tier in ["O0", "O1", "O2", "Web"] {
+            (exit_code, _, stderr) :: routine03_output(file.clone(), tier)
+            assert_eq(exit_code, 1, "{tag} must fail")
+            assert(stderr.contains("OutOfRange") && stderr.contains("PerfError"), "{tag}: {stderr:Debug}")
+            assert_eq(routine03_output(read_file.clone(), tier), (0, "0.375\n", ""), "{tag} changed fidelity before returning Err")
+        }
+        _ :: fs.remove_dir_all(file.parent().unwrap())
+        _ :: fs.remove_dir_all(read_file.parent().unwrap())
+    }
+}
+// Rust: tests/dev_parts/routine.rs:3945
+#Test("unsafe_blocks_are_evaluated_by_canonical_mir_with_live_sentries") {
+    raw :: Loader.load_entry(&example_path("memory/rawptr")).expect("rawptr example should load")
+    fault_path :: env.temp_dir().join("jet_unsafe_mir_runtime_{process.id()}.jet")
+    fs.write(&fault_path, "use core.mem\nfn run() {{\n    #Unsafe(\"mapped address is valid and aligned\") {{\n        p :: mem.Ptr<Int>.from_addr(0x40000100)\n        print(p.*)\n    }}\n}}\n").unwrap()
+    fault_file :: fault_path.to_string_lossy().into_owned()
+    fault_bundle :: Loader.load_entry(&fault_file).expect("pointer cast example should load")
+    for tier in ["O0", "O1", "O2", "Web"] {
+        (exit_code, stdout, stderr) :: routine03_output(fault_path.clone(), tier)
+        assert_eq(exit_code, 70, "a raw read with no allocation provenance is a program-side stop: {stderr}")
+        assert(stdout.is_empty(), "the refused deref must not have printed: {stdout:Debug}")
+        for marker in ["Runtime fault [R0801]", "mapped address is valid and aligned", "no live allocation contains this address", "obligation `valid_ptr` was not met on this run"] {
+            assert(stderr.contains(marker), "{tier} sentry report is missing `{marker}`: {stderr}")
+        }
+    }
+    _ :: fs.remove_file(fault_path)
+}
+// Rust: tests/dev_parts/routine.rs:3996
+#Test("io_style_raw_nonunicode_no_color_uses_presence_semantics") {
+    if selected_family() != "unix" { return }
+    // The raw presence seam is essential: captured stdout alone cannot establish NO_COLOR handling.
+    // Rust generated-program peer comparator retained; never a production Rust callback.
+    thread.Builder.new().spawn(() -> {
+        source :: "use core.term as io\nfn run() {{\n    print(io.style(\"red\", \"plain\"))\n}}\n"
+        dir :: common.unique_tmp("jet_raw_no_color")
+        fs.create_dir_all(&dir).unwrap()
+        input :: dir.join("raw_no_color.jet")
+        fs.write(&input, source).unwrap()
+        compiled :: jet.compile_with_path(source, input.to_str().unwrap()).expect("raw NO_COLOR fixture must compile")
+        rust :: dir.join("raw_no_color.rs")
+        bin :: dir.join("raw_no_color_test")
+        probe :: "\nfn jet_probe_no_color_presence() {{\n    assert!(jet_env_value_raw(\"NO_COLOR\").is_some());\n    assert!(jet_std_env_get(&\"NO_COLOR\".to_string()).is_none());\n    let no_color = jet_env_value_raw(\"NO_COLOR\").is_some();\n    let force_color = jet_env_value_raw(\"FORCE_COLOR\").is_some();\n    assert!(no_color, \"set-but-non-Unicode NO_COLOR must register as present\");\n    assert!(!jet_term_style_enabled(no_color, force_color, true));\n    let styled = jet_std_io_style(&\"red\".to_string(), &\"plain\".to_string());\n    assert_eq!(styled, \"plain\");\n}}\n"
+        MAIN_ANCHOR :: "fn main() {{\n    jet_std_env_init();"
+        assert_eq(compiled.rust.matches(MAIN_ANCHOR).count(), 1, "generated `main` no longer starts with `jet_std_env_init();` -- re-anchor this probe, do not skip it")
+        hooked :: compiled.rust.replacen(MAIN_ANCHOR, "{MAIN_ANCHOR}\n    jet_probe_no_color_presence();", 1)
+        generated :: "{hooked}{probe}"
+        assert(compiled.ffi.is_none(), "raw NO_COLOR fixture must not need FFI")
+        fs.write(&rust, &generated).unwrap()
+        built :: Command.new("rustc").args(["--edition", "2021", "--crate-name", "raw_no_color"]).arg(&rust).arg("-o").arg(&bin).output().unwrap()
+        assert(built.status.success(), "rustc rejected raw NO_COLOR probe:\n{String.from_utf8_lossy(&built.stderr)}")
+        run :: Command.new(&bin).env("NO_COLOR", std.ffi.OsString.from_vec([U8{0xff}])).output().unwrap()
+        assert(run.status.success(), "raw NO_COLOR presence probe failed:\nstdout:\n{String.from_utf8_lossy(&run.stdout)}\nstderr:\n{String.from_utf8_lossy(&run.stderr)}")
+        assert_eq(String.from_utf8_lossy(&run.stdout), "plain\n")
+        _ :: fs.remove_dir_all(dir)
+    }).unwrap().join().unwrap()
+}
+// Rust: tests/dev_parts/routine.rs:4128
+#Test("jit_1216_adversarial_regressions") {
+    CASE :: "JET_1216_ADVERSARIAL_CASE"
+    if env.var(CASE) == {
+        .Ok(case) -> {
+            source :: if case == {
+                "oob" -> "fn run() {{ xs := [1]\n xs[4] = 2 }}\n"
+                "stm_return" -> "\nstruct Slot {{ value: Int }}\nfn rollback(cell: Shared<Slot>) {{\n    #Transact(tx) {{\n        cell.value = 9\n        return\n    }}\n}}\nfn run() {{\n    cell :: shared Slot{{value: 1}}\n    rollback(cell)\n    print(cell.value)\n}}\n"
+                "generator" -> "\nfn stopped() -> Stream<Int> {{\n    yield 1\n    yield 2\n}}\nfn closes() -> Stream<Int> {{\n    yield 3\n    return\n}}\nfn run() {{\n    loop value in stopped() {{\n        print(value)\n        break\n    }}\n    loop value in closes() {{ print(value) }}\n    print(\"done\")\n}}\n"
+                "raw_alias" -> "\nuse core.mem\nfn run() {{\n    value := 4\n    #Unsafe(\"the pointer stays inside this stack frame\") {{\n        pointer :: *Int{{*value}}\n        mem.volatile_write(pointer, 9)\n        print(value)\n    }}\n}}\n"
+                "option_minus_one" -> "\nfn run() {{\n    queue := PriorityQueue.from([-1])\n    print(&queue.pop())\n    print(&queue.pop())\n}}\n"
+                "sum_bigint" -> "\nfn run() {{\n    print([Int.MAX, 1].sum())\n}}\n"
+                else -> panic("unknown #1216 adversarial case `{case}`")
+            }
+            file :: routine03_fixture("1216_{case}", source)
+            for tier in ["O0", "O1", "O2", "Web"] {
+                (exit_code, stdout, stderr) :: routine03_output(file.clone(), tier)
+                if case == "oob" {
+                    assert_eq(exit_code, 70, "`{case}` must exit 70: err={stderr}")
+                    assert(stderr.contains("Stop [E3010]"), "`{case}` must use the E3010 stop, got: {stderr}")
+                    assert(!stderr.contains("E0953") && !stderr.contains("comptime"), "`{case}` must not use comptime voice: {stderr}")
+                    assert(stderr.contains("the list has 1 items, so position 4 doesn't exist"), "`oob` trap wording: {stderr}")
+                } else {
+                    expected :: if case == {
+                        "stm_return" -> "1\n"
+                        "generator" -> "1\n3\ndone\n"
+                        "raw_alias" -> "9\n"
+                        "option_minus_one" -> "-1\nnull\n"
+                        "sum_bigint" -> "9223372036854775808\n"
+                        else -> panic("unknown adversarial case")
+                    }
+                    assert_eq(stdout, expected, "{tier}: {case}")
+                }
+            }
+            _ :: fs.remove_dir_all(file.parent().unwrap())
+            return
+        }
+        .Err(_) -> {}
+    }
+    for case in ["oob", "stm_return", "generator", "raw_alias", "option_minus_one", "sum_bigint"] {
+        command := Command.new(env.current_exe().expect("current dev test binary"))
+        command.args(["--exact", "jit_1216_adversarial_regressions", "--nocapture"]).env(CASE, case).env("NO_COLOR", "1")
+        output :: command_output_with_timeout(^command, Duration.from_secs(10), "#1216 adversarial `{case}`")
+        assert(output.status.success(), "{case}: stdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    }
+}
+// Rust: tests/dev_parts/routine.rs:4304
+#Test("uninit_fixed_mutating_borrow_matches_interpreter_resident_jit_and_aot") {
+    source :: "\nuse core.mem\n\nfn set_first(bytes: &[U8#2]) {{\n    bytes[0] = 8\n}}\n\nfn first(bytes: [U8#2]) -> U8 {{\n    index :: 0\n    return bytes[index]\n}}\n\nfn run() {{\n    bytes := [U8#2]{{ uninit }}\n    bytes[0] = 1\n    bytes[1] = 2\n    set_first(&bytes)\n    print(bytes[0])\n    print(first(bytes))\n}}\n"
+    file :: routine03_fixture("uninit_fixed_mutating_borrow", source)
+    routine03_golden(file.clone(), "8\n8\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:4383
+#Test("uninit_fixed_dynamic_oob_uses_the_resident_jit_trap_path") {
+    source :: "\nuse core.mem\n\nfn outside() -> Int {{\n    return 2\n}}\n\nfn run() {{\n    bytes := [U8#2]{{ uninit }}\n    bytes[0] = 1\n    bytes[1] = 2\n    print(bytes[outside()])\n}}\n"
+    file :: routine03_fixture("uninit_fixed_dynamic_oob", source)
+    bundle := Loader.load_entry(file.to_str().unwrap()).unwrap()
+    diagnostics :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    errors :: diagnostics.iter().filter((diagnostic) -> diagnostic.severity == Diagnostics.Severity.Error).collect()
+    assert(errors.is_empty(), "{errors:Debug}")
+    for tier in ["O0", "O1", "O2", "Web"] {
+        (exit_code, stdout, stderr) :: routine03_output(file.clone(), tier)
+        assert_eq(exit_code, 70, "dynamic OOB must exit 70: out={stdout} err={stderr}")
+        assert(stderr.contains("Stop [E3010]") && stderr.contains("the list has 2 items") && stderr.contains("doesn't exist"), "dynamic OOB trap wording: {stderr}")
+        assert(!stderr.contains("E0953") && !stderr.contains("comptime"), "dynamic OOB must not use comptime voice: {stderr}")
+    }
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:4446
+#Test("shared_scalar_edit_matches_interpreter_resident_jit_and_aot") {
+    source :: "\nstruct Counter {{ value: Int }}\nfn run() {{\n    counter :: shared Counter{{value: 0}}\n    counter.value += 1\n    print(counter.value)\n}}\n"
+    file :: routine03_fixture("shared_scalar_edit", source)
+    routine03_golden(file.clone(), "1\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:4502
+#Test("comptime_scalar_examples_match_interpreter_resident_jit_and_aot") {
+    for stem in ["comptime/comptime_core", "comptime/comptime_tiers"] {
+        routine03_golden(OSPath(example_path(stem)), golden_stdout(stem), "", 0)
+    }
+    source :: "\nF32_NAN :: prep {{ F32.NAN }}\nF32_INF :: prep {{ F32.INFINITY }}\nF32_NEG_INF :: prep {{ F32.NEG_INFINITY }}\nF64_NAN :: prep {{ Float.NAN }}\nF64_INF :: prep {{ Float.INFINITY }}\nF64_NEG_INF :: prep {{ Float.NEG_INFINITY }}\n\nfn run() {{\n    print(F32_NAN)\n    print(F32_INF)\n    print(F32_NEG_INF)\n    print(F64_NAN)\n    print(F64_INF)\n    print(F64_NEG_INF)\n}}\n"
+    file :: routine03_fixture("comptime_nonfinite", source)
+    routine03_golden(file.clone(), "NaN\ninf\n-inf\nNaN\ninf\n-inf\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:4597
+#Test("generic_modules_full_example_matches_resident_jit_and_aot") {
+    dir :: common.unique_tmp("jet_generic_modules_full_example")
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("generic_modules.jet")
+    fs.copy("Examples/features/modules/generic_modules.jet", &file).unwrap()
+    routine03_golden(file, golden_stdout("modules/generic_modules"), "", 0)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dev_parts/routine.rs:4607
+#Test("array_of_structs_field_mutation_three_way") {
+    routine03_golden(OSPath("Examples/features/collections/struct_list_mutation.jet"), golden_stdout("collections/struct_list_mutation"), "", 0)
+}
+// Rust: tests/dev_parts/routine.rs:4618
+#Test("place_windows_matches_resident_jit_and_aot_without_fallback") {
+    stem :: "memory/place_windows"
+    routine03_golden(OSPath(example_path(stem)), golden_stdout(stem), "", 0)
+}
+// Rust: tests/dev_parts/routine.rs:4669
+#Test("fixed_width_integers_match_interpreter_resident_jit_default_and_aot") {
+    source :: "\nfn i8_id(value: I8) -> I8 {{ return value }}\nfn i16_id(value: I16) -> I16 {{ return value }}\nfn i32_id(value: I32) -> I32 {{ return value }}\nfn i64_id(value: I64) -> I64 {{ return value }}\nfn u8_id(value: U8) -> U8 {{ return value }}\nfn u16_id(value: U16) -> U16 {{ return value }}\nfn u32_id(value: U32) -> U32 {{ return value }}\nfn u64_id(value: U64) -> U64 {{ return value }}\nfn pass_u64(value: U64?) -> (U64?) {{ return ~value }}\n\nfn run() {{\n    print(i8_id(I8{{-8}}))\n    print(i16_id(I16{{-1600}}))\n    print(i32_id(I32{{-320000}}))\n    print(i64_id(-6400000000))\n    print(u8_id(U8{{8}}))\n    print(u16_id(U16{{1600}}))\n    print(u32_id(U32{{320000}}))\n    maximum :: u64_id(U64.MAX)\n    print(maximum)\n    print(\"{{maximum}}\")\n    print(maximum.to_string())\n    print(\"{{maximum:Debug}}\")\n    print([maximum, U64{{1}}])\n    print([U64#2]{{maximum, U64{{1}}}})\n    print(-i8_id(I8{{8}}))\n    print(-i16_id(I16{{16}}))\n    print(-i32_id(I32{{32}}))\n    print(-i64_id(64))\n\n    print(i8_id(I8{{10}}) + I8{{5}})\n    print(i16_id(I16{{100}}) - I16{{40}})\n    print(i32_id(I32{{7}}) * I32{{6}})\n    print(i64_id(84) / 2)\n    print(19 % 4)\n    print(i8_id(I8{{7}}) % I8{{3}})\n    flags :: u8_id(U8{{13}})\n    mask :: U8{{10}}\n    print(flags & mask)\n    combined := U8{{flags}}\n    combined |= mask\n    print(combined)\n    print(flags ~| mask)\n    print(flags << 1)\n    print(u8_id(U8.MAX) << 1)\n    print(i8_id(I8{{64}}) << 1)\n    print(flags >> 2)\n    print(u16_id(U16.MAX) > U16{{1}})\n    print(u32_id(U32.MAX) > U32{{1}})\n    print(maximum > U64{{1}})\n    print(maximum >> 63)\n    print(flags.count_ones())\n    print(flags.count_zeros())\n    print(flags.leading_zeros())\n    print(flags.trailing_zeros())\n\n    i8_max :: I8.MAX\n    i8_one :: I8{{1}}\n    i8_zero :: I8{{0}}\n    print(wrapping(i8_max + i8_one))\n    print(saturating(i8_max + i8_one))\n    print(checked(i8_max + i8_zero) ?? i8_zero)\n    print(checked(i8_max + i8_one) ?? i8_zero)\n    i16_max :: I16.MAX\n    i16_one :: I16{{1}}\n    i16_zero :: I16{{0}}\n    print(wrapping(i16_max + i16_one))\n    print(saturating(i16_max + i16_one))\n    print(checked(i16_max + i16_zero) ?? i16_zero)\n    print(checked(i16_max + i16_one) ?? i16_zero)\n    i32_max :: I32.MAX\n    i32_one :: I32{{1}}\n    i32_zero :: I32{{0}}\n    print(wrapping(i32_max + i32_one))\n    print(saturating(i32_max + i32_one))\n    print(checked(i32_max + i32_zero) ?? i32_zero)\n    print(checked(i32_max + i32_one) ?? i32_zero)\n    i64_max :: I64{{9223372036854775807}}\n    i64_one :: I64{{1}}\n    i64_zero :: I64{{0}}\n    print(wrapping(i64_max + i64_one))\n    print(saturating(i64_max + i64_one))\n    print(checked(i64_max + i64_zero) ?? i64_zero)\n    print(checked(i64_max + i64_one) ?? i64_zero)\n    u8_max :: U8.MAX\n    u8_one :: U8{{1}}\n    u8_zero :: U8{{0}}\n    print(wrapping(u8_max + u8_one))\n    print(saturating(u8_max + u8_one))\n    print(checked(u8_max + u8_zero) ?? u8_zero)\n    print(checked(u8_max + u8_one) ?? u8_zero)\n    u16_max :: U16.MAX\n    u16_one :: U16{{1}}\n    u16_zero :: U16{{0}}\n    print(wrapping(u16_max + u16_one))\n    print(saturating(u16_max + u16_one))\n    print(checked(u16_max + u16_zero) ?? u16_zero)\n    print(checked(u16_max + u16_one) ?? u16_zero)\n    u32_max :: U32.MAX\n    u32_one :: U32{{1}}\n    u32_zero :: U32{{0}}\n    print(wrapping(u32_max + u32_one))\n    print(saturating(u32_max + u32_one))\n    print(checked(u32_max + u32_zero) ?? u32_zero)\n    print(checked(u32_max + u32_one) ?? u32_zero)\n    u64_one :: U64{{1}}\n    u64_zero :: U64{{0}}\n    print(wrapping(maximum + u64_one))\n    print(saturating(maximum + u64_one))\n    print(checked(maximum + u64_zero) ?? u64_zero)\n    print(checked(maximum + u64_one) ?? u64_zero)\n    print(pass_u64(checked(maximum + u64_zero)))\n    print(pass_u64(checked(maximum + u64_one)))\n    print(pass_u64(checked(maximum + u64_zero)) ?? u64_zero)\n    print(checked(u64_zero - u64_one) ?? maximum)\n    print(checked(maximum / u64_one) ?? u64_zero)\n    print(checked(maximum / u64_zero) ?? u64_zero)\n    i8_negative :: I8{{-1}}\n    print(checked(i8_negative + i8_zero) ?? i8_zero)\n}}\n"
+    expected :: "-8\n-1600\n-320000\n-6400000000\n8\n1600\n320000\n18446744073709551615\n18446744073709551615\n18446744073709551615\n18446744073709551615\n[18446744073709551615, 1]\n[18446744073709551615, 1]\n-8\n-16\n-32\n-64\n15\n60\n42\n42\n3\n1\n8\n15\n7\n26\n254\n-128\n3\ntrue\ntrue\ntrue\n1\n3\n5\n4\n0\n-128\n127\n127\n0\n-32768\n32767\n32767\n0\n-2147483648\n2147483647\n2147483647\n0\n-9223372036854775808\n9223372036854775807\n9223372036854775807\n0\n0\n255\n255\n0\n0\n65535\n65535\n0\n0\n4294967295\n4294967295\n0\n0\n18446744073709551615\n18446744073709551615\n0\n18446744073709551615\nnull\n18446744073709551615\n18446744073709551615\n18446744073709551615\n0\n-1\n"
+    file :: routine03_fixture("fixed_width_integers", source)
+    bundle :: checked_bundle_from_path(file.to_string_lossy())
+    routine03_golden(file.clone(), expected, "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+    for stem in ["lowlevel/sized_integers", "types/typed_literal_forms"] {
+        routine03_golden(OSPath(example_path(stem)), golden_stdout(stem), "", 0)
+    }
+}
+// Rust: tests/dev_parts/routine.rs:4881
+#Test("fixed_width_signed_remainder_overflow_traps_across_tiers") {
+    source :: "\nfn remainder(value: I8, divisor: I8) -> I8 {{\n    return value % divisor\n}}\n\nfn run() {{\n    print(remainder(I8.MIN, I8{{-1}}))\n}}\n"
+    file :: routine03_fixture("fixed_width_remainder_trap", source)
+    bundle :: checked_bundle_from_path(file.to_string_lossy())
+    // D-MODSEM1: MIN % -1 is zero and fits; no trap is expected.
+    routine03_golden(file.clone(), "0\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:4953
+#Test("fixed_width_and_plain_int_remainder_zero_traps_across_tiers") {
+    for (tag, source) in [
+        ("fixed_width", "\nfn remainder(value: I8, divisor: I8) -> I8 {{\n    return value % divisor\n}}\n\nfn run() {{\n    print(remainder(I8{{7}}, I8{{0}}))\n}}\n"),
+        ("plain_int", "\nfn remainder(value: Int, divisor: Int) -> Int {{\n    return value % divisor\n}}\n\nfn run() {{\n    print(remainder(19, 0))\n}}\n")
+    ] {
+        file :: routine03_fixture("remainder_zero_{tag}", source)
+        bundle :: checked_bundle_from_path(file.to_string_lossy())
+        baseline: String? := None
+        for tier in ["O0", "O1", "O2", "Web"] {
+            (exit_code, stdout, stderr) :: routine03_output(file.clone(), tier)
+            assert_eq(exit_code, 70, "{tag} {tier} must exit 70: out={stdout} err={stderr}")
+            assert(stderr.contains("Stop [E3010]") && stderr.contains("divided by zero"), "{tag} {tier} trap wording: {stderr}")
+            assert(!stderr.contains("E0953") && !stderr.contains("comptime"), "{tag} {tier} must not use comptime voice: {stderr}")
+            assert(!stderr.contains("panicked at"), "{tag} leaked a raw Rust panic")
+            if baseline == { .Val(expected) -> assert_eq(stdout, expected, "{tag} stdout tier drift") .None -> baseline = Val(stdout) }
+        }
+        _ :: fs.remove_dir_all(file.parent().unwrap())
+    }
+}
+// Rust: tests/dev_parts/routine.rs:5080
+#Test("fixed_width_mixed_sign_shift_counts_trap_across_tiers") {
+    cases :: [
+        ("shl_negative", "U8", "I8", "U8{{1}}", "I8{{-1}}", "<<", "shifting left by -1 bits is out of range (this type is 8 bits wide)"),
+        ("shr_negative", "U8", "I8", "U8{{1}}", "I8{{-1}}", ">>", "shifting right by -1 bits is out of range (this type is 8 bits wide)"),
+        ("shl_huge", "I8", "U64", "I8{{1}}", "U64.MAX", "<<", "shifting left by 18446744073709551615 bits is out of range (this type is 8 bits wide)"),
+        ("shr_width", "U8", "U8", "U8{{1}}", "U8{{8}}", ">>", "shifting right by 8 bits is out of range (this type is 8 bits wide)")
+    ]
+    for (tag, value_ty, count_ty, value, count, operator, trap) in cases {
+        source :: "fn shift(value: {value_ty}, count: {count_ty}) -> {value_ty} {{\n    return value {operator} count\n}}\n\nfn run() {{\n    print(shift({value}, {count}))\n}}\n"
+        file :: routine03_fixture(tag, source)
+        bundle :: checked_bundle_from_path(file.to_string_lossy())
+        baseline: String? := None
+        for tier in ["O0", "O1", "O2", "Web"] {
+            (exit_code, stdout, stderr) :: routine03_output(file.clone(), tier)
+            assert_eq(exit_code, 70, "{tag} {tier} must exit 70: out={stdout} err={stderr}")
+            assert(stderr.contains("Stop [E3010]") && stderr.contains(trap), "{tag} {tier} trap wording: {stderr}")
+            assert(!stderr.contains("E0953") && !stderr.contains("comptime"), "{tag} {tier} must not use comptime voice: {stderr}")
+            assert(!stderr.contains("panicked at"), "{tag} leaked a raw Rust panic")
+            if baseline == { .Val(expected) -> assert_eq(stdout, expected, "{tag} stdout tier drift") .None -> baseline = Val(stdout) }
+        }
+        _ :: fs.remove_dir_all(file.parent().unwrap())
+    }
+}
+// Rust: tests/dev_parts/routine.rs:5223
+#Test("numeric_singleton_splits_match_resident_jit_and_aot_without_fallback") {
+    source :: "\nfn run() {{\n    values := [1.5, 2.5, 3.5]\n    first :: &values[0]\n    last :: &values[2]\n    first = 4.5\n    last = 6.5\n    first += 1.25\n    last += 0.25\n    print(first)\n    print(last)\n    print(values[0])\n    print(values[2])\n\n    counts := [1, 2, 3]\n    low :: &counts[0]\n    high :: &counts[2]\n    low += 4\n    high += 6\n    low &= 6\n    low <<= 1\n    high ~|= 10\n    high |= 8\n    print(low)\n    print(high)\n    print(counts[0])\n    print(counts[2])\n}}\n"
+    file :: routine03_fixture("numeric_singleton_splits", source)
+    bundle :: checked_bundle_from_path(file.to_string_lossy())
+    routine03_golden(file.clone(), "5.75\n6.75\n5.75\n6.75\n8\n11\n8\n11\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:5326
+#Test("resident_jit_1989_print_and_decode_host_types_pass_the_verifier") {
+    source :: "use core.ui as ui\n\nfn run() {{\n    backend :: ui.null_backend()\n    node :: ui.node(\"hello\", 100.0, 20.0)\n    constraint :: ui.constraint(0.0, 0.0, 200.0, 100.0)\n    size :: backend.measure(node, constraint)\n    print(size.width)\n    print(size.height)\n}}\n"
+    file :: routine03_fixture("1989_core_struct_float_field_print", source)
+    routine03_golden(file.clone(), "100.0\n20.0\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+    // Exercise the generated Frame decoder behavior instead of counting a retired CLIF function.
+    source :: "struct Frame {{\n    values: [Float#4]\n}}\n\nfn run() {{\n    frame :: Frame{{values: [Float#4]{{1.5, 2.5, 3.5, 4.5}}}}\n    print(frame.values[3])\n    decoded :: Frame.decode(frame.encode())\n    print(decoded.values[3])\n}}\n"
+    file :: routine03_fixture("1989_fixed_float_list_decode_push", source)
+    routine03_golden(file.clone(), "4.5\n4.5\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:5378
+#Test("resident_jit_1990_bool_core_call_args_pass_the_verifier") {
+    source :: "use core.regex as re\n\nfn run() {{\n    flag_set :: re.flags(true, true, false)\n    rx :: re.compile_with(\"[a-z]+\", flag_set) ?? panic(\"bad pattern\")\n    print(rx.flags())\n    print(rx.count(\"A\"))\n}}\n"
+    file :: routine03_fixture("1990_bool_core_call_args", source)
+    routine03_golden(file.clone(), "im\n1\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}
+// Rust: tests/dev_parts/routine.rs:5407
+#Test("resident_jit_1991_dead_edge_zero_passes_the_verifier") {
+    source :: "enum Shape {{\n    Circle(Float)\n    Square(Float)\n    Empty\n}}\n\nfn area(s: Shape) -> Float {{\n    return if s == {{\n        .Circle(r) -> r * r\n        .Square(side) -> side * side\n        .Empty -> 0.0\n    }}\n}}\n\nfn run() {{\n    print(area(.Circle(3.0)))\n    print(area(.Square(4.0)))\n    print(area(.Empty))\n}}\n"
+    file :: routine03_fixture("1991_dead_edge_zero_merge_type", source)
+    routine03_golden(file.clone(), "9.0\n16.0\n0.0\n", "", 0)
+    _ :: fs.remove_dir_all(file.parent().unwrap())
+}

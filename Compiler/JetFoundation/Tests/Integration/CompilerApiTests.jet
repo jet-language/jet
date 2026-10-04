@@ -1,0 +1,484 @@
+use std.[fs, env, process]
+use std.process.Command
+use std.time.[SystemTime, UNIX_EPOCH]
+use jet.[Compiler, Diagnostics, Comptime, SHA256, Policy, compile, check_project_build_for_tier]
+use jet.AST.CtValue
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.CompilerApi.fixture_file
+use jet_semindex.SCHEMA_VERSION
+// GATE #4494: actual filesystem, clock, native process spawn and environment.
+// Rust: tests/compiler_api.rs:8
+#Test("lexer_api_returns_stable_value_tokens") {
+    src :: "fn run() {{\n    print(\"hi\")\n}}\n"
+    lexed :: Compiler.lex_source(src)
+    assert_eq(lexed.api_version, Compiler.API_VERSION)
+    assert(lexed.diagnostics.is_empty())
+    assert(lexed.tokens.iter().any((t) -> t.kind == "keyword.fn" && t.text == "fn" && t.start.line == 1 && t.start.column == 1))
+    assert(lexed.tokens.iter().any((t) -> t.kind == "identifier" && t.text == "run"))
+    assert_eq(lexed.tokens.last().map((t) -> t.kind), Val("eof"))
+}
+// Rust: tests/compiler_api.rs:24
+#Test("lexer_api_positions_match_canonical_unicode_newline_and_long_line") {
+    source :: "fn α() {{\r\n    value :: π\r\n}}\n"
+    lexed :: Compiler.lex_source(source)
+    assert(lexed.diagnostics.is_empty(), "unexpected lexer diagnostics: {lexed.diagnostics:Debug}")
+    for token in &lexed.tokens {
+        assert_eq((token.start.line, token.start.column), Diagnostics.span_line_col(source, token.span.start), "start position for {token.kind} {token.span:Debug}")
+        assert_eq((token.end.line, token.end.column), Diagnostics.span_line_col(source, token.span.end), "end position for {token.kind} {token.span:Debug}")
+    }
+    eof :: lexed.tokens.last().expect("lexer always emits eof")
+    assert_eq(eof.kind, "eof")
+    assert_eq(eof.text, "")
+    assert_eq(eof.span.start, source.len())
+    assert_eq(eof.span.end, source.len())
+    long_line := String.with_capacity(4_096 * 5)
+    for index in 0..4_096 {
+        if index != 0 { long_line.push(' ') }
+        long_line.push_str("item")
+    }
+    long :: Compiler.lex_source(&long_line)
+    assert(long.diagnostics.is_empty(), "unexpected long-line lexer diagnostics: {long.diagnostics:Debug}")
+    assert_eq(long.tokens.iter().filter((token) -> token.kind == "identifier").count(), 4_096)
+    for token in &long.tokens {
+        assert_eq((token.start.line, token.start.column), Diagnostics.span_line_col(&long_line, token.span.start), "long-line start position for {token.kind} {token.span:Debug}")
+        assert_eq((token.end.line, token.end.column), Diagnostics.span_line_col(&long_line, token.span.end), "long-line end position for {token.kind} {token.span:Debug}")
+    }
+}
+// Rust: tests/compiler_api.rs:93
+#Test("postfix_in_lexes_as_a_member_identifier") {
+    lexed :: Compiler.lex_source("fn run() {{\n    value :: duration.in(.Seconds)\n    loop item in [1] -> print(item)\n}}\n")
+    assert(lexed.diagnostics.is_empty(), "unexpected lexer diagnostics: {lexed.diagnostics:Debug}")
+    assert(lexed.tokens.iter().any((token) -> token.kind == "identifier" && token.text == "in"))
+    assert(lexed.tokens.iter().any((token) -> token.kind == "keyword.in" && token.text == "in"))
+}
+// Rust: tests/compiler_api.rs:109
+#Test("parser_api_returns_read_only_syntax_summary") {
+    src :: "struct User {{\n    name: String\n}}\n\nfn run() {{\n    print(\"ok\")\n}}\n"
+    tree :: Compiler.parse_source(src)
+    assert(tree.diagnostics.is_empty())
+    assert(tree.items.iter().any((n) -> n.kind == Compiler.SyntaxNodeKind.Struct && n.name == Val("User")))
+    assert(tree.items.iter().any((n) -> n.kind == Compiler.SyntaxNodeKind.Function && n.name == Val("run")))
+}
+// Rust: tests/compiler_api.rs:122
+#Test("parser_api_reports_diagnostics_as_values") {
+    tree :: Compiler.parse_source("fn run( {{\n")
+    assert(!tree.diagnostics.is_empty())
+    assert(tree.diagnostics.iter().any((d) -> d.code == "E0003"))
+}
+// Rust: tests/compiler_api.rs:129
+#Test("reserved_in_diagnostic_teaches_postfix_member_carve_out") {
+    tree :: Compiler.parse_source("fn run() {{\n    in :: 1\n}}\n")
+    diagnostic :: tree.diagnostics.iter().find((diagnostic) -> diagnostic.code == "E0003").expect("bare `in` should remain reserved")
+    assert(diagnostic.fix.contains("after `.` it is allowed as a member name"), "diagnostic must teach D-TIME-IN1=C: {diagnostic.fix}")
+}
+// Rust: tests/compiler_api.rs:144
+#Test("single_bar_is_bitwise_or") {
+    parsed :: Compiler.parse_source("fn run() {{\n    left :: 1\n    right :: 2\n    value :: left | right\n}}\n")
+    assert(parsed.diagnostics.is_empty(), "D-BITOREXPR1=A admits value `|` as bitwise OR: {parsed.diagnostics:Debug}")
+}
+// Rust: tests/compiler_api.rs:156
+#Test("pipe_closure_shape_has_no_foreign_guess") {
+    parsed :: Compiler.parse_source("fn run() {{\n    f :: |x| x + 1\n}}\n")
+    assert(parsed.diagnostics.iter().any((diag) -> diag.code == "E0003") && parsed.diagnostics.iter().all((diag) -> diag.code != "E0033"), "pipe-closure-shaped input must be ordinary E0003: {parsed.diagnostics:Debug}")
+}
+// Rust: tests/compiler_api.rs:167
+#Test("flow_pipe_shape_has_no_foreign_guess") {
+    diagnostics :: compile("fn run() {{\n    value :: 1 |> print\n}}\n").expect_err("`|>` stays unassigned")
+    assert(diagnostics.iter().any((diag) -> diag.code == "E0003"), "{diagnostics:Debug}")
+    assert(diagnostics.iter().all((diag) -> diag.code != "E0033"), "{diagnostics:Debug}")
+    assert(diagnostics.iter().all((diag) -> !diag.what.contains("pipeline") && !diag.why.contains("pipeline") && !diag.fix.contains("pipeline")), "an unassigned token must not advertise a future flow alias: {diagnostics:Debug}")
+}
+// Rust: tests/compiler_api.rs:189
+#Test("pattern_alternatives_keep_single_bar") {
+    parsed :: Compiler.parse_source("enum State {{ Ready Waiting Done }}\nfn run() {{\n    state :: State.Ready\n    if state == {{\n        .Ready | .Waiting -> {{ print(\"open\") }}\n        .Done -> {{ print(\"done\") }}\n    }}\n}}\n")
+    assert(parsed.diagnostics.is_empty(), "pattern alternatives remain legal: {parsed.diagnostics:Debug}")
+}
+// Rust: tests/compiler_api.rs:201
+#Test("double_bar_keeps_boolean_or") {
+    parsed :: Compiler.parse_source("fn run() {{\n    if true || false {{ print(\"ok\") }}\n}}\n")
+    assert(parsed.diagnostics.is_empty(), "`||` keeps its boolean-or meaning: {parsed.diagnostics:Debug}")
+}
+// Rust: tests/compiler_api.rs:212
+#Test("check_file_api_includes_semindex_for_clean_program") {
+    source :: "fn helper() -[]> Int {{\n    return 41\n}}\n\nfn run() {{\n    print(helper() + 1)\n}}\n"
+    path :: fixture_file("compiler_api_clean.jet", source)
+    checked :: Compiler.check_file(&path)
+    assert(checked.diagnostics.is_empty(), "unexpected diagnostics: {checked.diagnostics:Debug}")
+    sem :: checked.semantic_index.expect("clean file has semindex")
+    assert_eq(sem.schema_version, SCHEMA_VERSION)
+    assert_eq(sem.source_digest, SHA256.sha256_hex(source.as_bytes()))
+    assert(sem.definitions.iter().any((d) -> d.name == "run"))
+    assert(sem.definitions.iter().any((d) -> d.name == "helper"))
+    assert(sem.calls.iter().any((c) -> c.callee == "helper"))
+}
+// Rust: tests/compiler_api.rs:237
+#Test("check_file_api_projects_arithmetic_policy_and_scope") {
+    source :: "fn run() {{\n    #Arithmetic(.Wrapping) {{\n        value :: U8{{250}} + U8{{10}}\n        print(value)\n    }}\n}}\n"
+    path :: fixture_file("compiler_api_arithmetic.jet", source)
+    checked :: Compiler.check_file(&path)
+    assert(checked.diagnostics.is_empty(), "{checked.diagnostics:Debug}")
+    sem :: checked.semantic_index.expect("arithmetic semindex")
+    operation :: sem.arithmetic.first().expect("arithmetic operation")
+    assert_eq(operation.operation, "add")
+    assert_eq(operation.policy, "Wrapping")
+    assert(operation.scope_span.start < operation.operation_span.start)
+    assert(operation.scope_span.end > operation.operation_span.end)
+}
+// Rust: tests/compiler_api.rs:251
+#Test("check_file_api_keeps_semindex_absent_when_errors_exist") {
+    path :: fixture_file("compiler_api_bad.jet", "fn run() {{\n    missing_name()\n}}\n")
+    checked :: Compiler.check_file(&path)
+    assert(checked.diagnostics.iter().any((d) -> d.severity == Compiler.DiagnosticSeverity.Error))
+    assert(checked.semantic_index.is_none())
+}
+// Rust: tests/compiler_api.rs:265
+#Test("source_map_api_reads_generated_rust_markers") {
+    rust :: "// jet:source-map source=input.jet\nfn main() {{\n    // jet:line 7\n    let x = 1;\n    // jet:line 8\n}}\n"
+    map :: Compiler.source_map_from_generated_rust(rust)
+    assert_eq(map.sources, ["input.jet"])
+    assert_eq(map.generated_lines.len(), 2)
+    assert_eq(map.generated_lines[0].generated_line, 3)
+    assert_eq(map.generated_lines[0].source, Val("input.jet"))
+    assert_eq(map.generated_lines[0].source_line, 7)
+}
+// Rust: tests/compiler_api.rs:276
+#Test("compiler_api_json_mirrors_are_schema_versioned") {
+    source :: "fn run() {{ print(\"ok\") }}\n"
+    lex :: Compiler.lex_source_json(source)
+    assert(lex.starts_with("{{\"schema\":\"jet.status/v1\""))
+    assert(lex.contains("\"compiler\":{{\"schema_version\":1,\"api_version\":1,\"operation\":\"lex\""))
+    assert(lex.contains("\"tokens\":["))
+    parse :: Compiler.parse_source_json(source)
+    assert(parse.contains("\"operation\":\"parse\""))
+    assert(parse.contains("\"kind\":\"function\""))
+    path :: fixture_file("compiler_api_json.jet", source)
+    check :: Compiler.check_file_json(&path)
+    assert(check.contains("\"operation\":\"check\""))
+    assert(check.contains("\"semantic_index\":{{\"schema_version\":1"))
+    assert(!check.contains("semantic_index\\\""), "semantic facts must not be JSON strings")
+    map :: Compiler.source_map_json("// jet:source-map source=input.jet\n// jet:line 3\n")
+    assert(map.contains("\"operation\":\"source_map\""))
+    assert(map.contains("\"generated_line\":2"))
+}
+// Rust: tests/compiler_api.rs:302
+#Test("compiler_check_json_is_the_typed_value_not_a_second_shape") {
+    source :: "fn run() {{ print(\"same\") }}\n"
+    path :: fixture_file("compiler_api_check_shape.jet", source)
+    parsed_result :: Compiler.eval_core_call("core.compiler", "parse", [CtValue.Str(source)], Diagnostics.Span.new(0, 0)).unwrap().unwrap()
+    parsed :: if parsed_result == { .Present(value) -> value else -> panic("parse must return a typed success value") }
+    checked_result :: Compiler.eval_core_call("core.compiler", "check", [^parsed], Diagnostics.Span.new(0, 0)).unwrap().unwrap()
+    checked :: if checked_result == { .Present(value) -> value else -> panic("check must return a typed success value") }
+    typed_json :: checked.to_json()
+    cli_json :: Compiler.check_file_json(&path)
+    assert(cli_json.contains("\"value\":{typed_json}"), "CLI check must serialize the exact typed CompilerChecked value: {cli_json}")
+    assert(typed_json.contains("\"functions\":"))
+    assert(typed_json.contains("\"effects\":"))
+    assert(typed_json.contains("\"semantic_index\":{{"))
+}
+// Rust: tests/compiler_api.rs:339
+#Test("compiler_check_failure_keeps_semantic_index_absent") {
+    source :: "fn run() {{ missing_name() }}\n"
+    result :: Compiler.eval_core_call("core.compiler", "check", [CtValue.Struct{type_name: "CompilerSyntaxTree", fields: [("schema_version", CtValue.Int(1)), ("source", CtValue.Str(source))]}], Diagnostics.Span.new(0, 0)).unwrap().unwrap()
+    checked :: if result == { .Present(value) -> value else -> panic("check must return a typed success value") }
+    assert(checked.to_json().contains("\"semantic_index\":null"))
+}
+// Rust: tests/compiler_api.rs:365
+#Test("compiler_api_cli_returns_the_same_json_envelope") {
+    path :: fixture_file("compiler_api_cli.jet", "fn run() {{ print(\"cli\") }}\n")
+    output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["inspect", "compiler", "parse", path.to_str().unwrap()]).output().expect("run compiler inspection command")
+    assert(output.status.success(), "{String.from_utf8_lossy(&output.stderr)}")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("\"schema\":\"jet.status/v1\""))
+    assert(stdout.contains("\"operation\":\"parse\""))
+    assert(stdout.contains("\"name\":\"run\""))
+    actual := stdout.trim() // #4303
+    assert_eq(actual, Compiler.parse_source_json("fn run() {{ print(\"cli\") }}\n"))
+}
+// Rust: tests/compiler_api.rs:387
+#Test("compiler_cli_mirrors_each_read_only_operation_exactly") {
+    source :: "fn run() {{ print(\"same\") }}\n"
+    path :: fixture_file("compiler_api_differential.jet", source)
+    for operation in ["lex", "parse", "check", "source-map"] {
+        output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["inspect", "compiler", operation, path.to_str().unwrap()]).output().expect("run compiler inspection command")
+        assert(output.status.success(), "{operation}: {String.from_utf8_lossy(&output.stderr)}")
+        actual :: String.from_utf8(output.stdout).expect("compiler JSON is UTF-8")
+        expected :: if operation == {
+            "lex" -> Compiler.lex_source_json(source)
+            "parse" -> Compiler.parse_source_json(source)
+            "check" -> Compiler.check_file_json(&path)
+            "source-map" -> Compiler.source_map_json(source)
+            else -> panic("unreachable compiler operation")
+        }
+        trimmed := actual.trim() // #4303
+        assert_eq(trimmed, expected, "{operation}")
+    }
+}
+// Rust: tests/compiler_api.rs:413
+#Test("compiler_api_is_compile_time_only") {
+    diagnostics :: compile("use core.compiler as compiler\nfn run() {{ compiler.lex(\"fn run() {{{{}}}}\") }}\n").expect_err("the compiler API must not become a runtime capability")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0956"), "expected compile-time-only diagnostic, got {diagnostics:Debug}")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.what.contains("compile-time only")), "diagnostic must teach the phase boundary: {diagnostics:Debug}")
+}
+// Rust: tests/compiler_api.rs:433
+#Test("compiler_api_rejects_zero_and_extra_arguments_at_checking") {
+    for operation in ["lex", "parse", "check", "source_map"] {
+        zero :: "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}() }}\n"
+        diagnostics :: compile(&zero).expect_err("zero-argument call must be rejected")
+        assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0104"), "{operation} zero-argument call must fail at checking: {diagnostics:Debug}")
+        extra :: "use core.compiler as compiler\nVALUE :: prep {{ compiler.{operation}(\"source\", \"extra\") }}\n"
+        extra_diagnostics :: compile(&extra).expect_err("extra-argument call must be rejected")
+        assert(extra_diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0104"), "{operation} extra-argument call must fail at checking: {extra_diagnostics:Debug}")
+    }
+}
+// Rust: tests/compiler_api.rs:457
+#Test("compiler_api_failures_are_typed_and_schema_checked") {
+    bad_shape :: Compiler.eval_core_call("core.compiler", "check", [CtValue.Str("not-a-syntax-tree")], Diagnostics.Span.new(0, 1)).expect("compiler callback handles its module").expect("failure is a typed Result value, not a host diagnostic")
+    error :: if bad_shape == { .Failed(.Told(error)) -> error else -> panic("expected CompilerError result, got {bad_shape:Debug}") }
+    assert(if error == {
+        .Struct{type_name, fields} -> type_name == "CompilerError" && fields.iter().any(((name, value)) -> name == "code" && value == CtValue.Str("E0956"))
+        else -> false
+    })
+    stale_tree :: CtValue.Struct{type_name: "CompilerSyntaxTree", fields: [("schema_version", CtValue.Int(999)), ("source", CtValue.Str("fn run() {{}}"))]}
+    stale :: Compiler.eval_core_call("core.compiler", "check", [^stale_tree], Diagnostics.Span.new(0, 1)).unwrap().unwrap()
+    assert(if stale == { .Failed(.Told(_)) -> true else -> false })
+}
+// Rust: tests/compiler_api.rs:500
+#Test("package_views_read_real_inputs_through_comptime_and_match_goldens") {
+    root :: env.temp_dir().join("jet_compiler_package_views_{process.id()}")
+    fs.create_dir_all(root.join(".jet")).expect("create package view fixture")
+    fs.create_dir_all(root.join("config")).expect("create package config fixture")
+    fs.write(root.join("package.jet"), "\nname: \"demo\"\nversion: \"1.2.3\"\nedition: \"2028\"\ndescription: \"typed package\"\nlicense: \"MIT\"\nrepository: \"https://example.test/demo\"\nruntime: \"hosted\"\ntarget: \"native\"\nconfigs: [\"config/build.jet\"]\ndeps: {{\n    gitdep: {{\n        git: \"https://build-user:build-secret@example.test/acme/tool?token=query-secret#private\",\n        tag: \"v1\",\n    }},\n    local: ./deps/local,\n}}\n").expect("write package manifest fixture")
+    fs.write(root.join("config/build.jet"), "pub build :: Config{{\n    outputs: {{ app: Executable{{ entry: run }} }}\n}}\n").expect("write package config fixture")
+    fs.write(root.join(".jet/lock"), "\nversion = 1\n[root]\ndependencies = [\"gitdep\"]\n[[package]]\nname = \"gitdep\"\nversion = \"1.0.0\"\nsource = {{ git = \"https://lock-user:lock-secret@example.test/acme/tool?token=lock-secret\", tag = \"v1\" }}\nlocked = {{ rev = \"deadbeef\", tree-hash = \"tree\", last-modified = 42 }}\nfingerprint = \"lock-fp\"\ncontent-hash = \"lock-hash\"\ndependencies = []\nlayer = \"hosted\"\ninferred-layer = \"hosted\"\n").expect("write lock fixture")
+    fs.write(root.join("env.jet"), "\nmodule profile.base {{\n    packages: []\n}}\nmodule profile.dev {{\n    extends: [\"base\"],\n    packages: [],\n    collisions: {{ \"bin/editor\": \"editor@default\" }}\n}}\n").expect("write profile fixture")
+    manifest :: Compiler.read_manifest(&root).expect("read manifest view")
+    package :: Compiler.read_package(&root).expect("read package view")
+    lock :: Compiler.read_lock(&root).expect("read lock view")
+    profiles :: Compiler.read_profiles(&root).expect("read profile view")
+    assert_eq(manifest.dependencies, package.dependencies)
+    assert(manifest.outputs.is_empty(), "manifest must stay uncomposed")
+    assert_eq(package.outputs.len(), 1, "package must include Config outputs")
+    assert_eq(package.outputs[0].name, "app")
+    assert_eq(package.outputs[0].kind, "executable")
+    assert_eq(package.outputs[0].entry, Val("run"))
+    assert_eq(manifest.dependencies[0].source, "{{ git: \"https://example.test/acme/tool\", tag: \"v1\" }}")
+    assert_eq(lock.packages[0].source_kind, "git")
+    assert_eq(profiles.profiles.len(), 2)
+    read :: (operation) -> Compiler.eval_core_call("core.compiler", operation, [], Diagnostics.Span.new(0, 0)).expect("compiler callback handles package view").expect("package view is present")
+    (values, inputs) :: Comptime.with_package_read_context(&root, () -> (read("manifest"), read("package"), read("lock"), read("profiles")))
+    json :: (value: CtValue) -> if value == { .Present(value) -> value.to_json() else -> panic("expected a present package view, got {value:Debug}") }
+    (manifest_value, package_value, lock_value, profiles_value) :: ^values
+    manifest_json :: json(^manifest_value)
+    package_json :: json(^package_value)
+    lock_json :: json(^lock_value)
+    profiles_json :: json(^profiles_value)
+    assert_eq(manifest_json, "{{\"schema_version\":1,\"file\":\"package.jet\",\"jet\":null,\"edition\":\"2028\",\"description\":\"typed package\",\"license\":\"MIT\",\"repository\":\"https://example.test/demo\",\"layer\":\"hosted\",\"target\":\"native\",\"dependencies\":[{{\"name\":\"gitdep\",\"source\":\"{{ git: \\\"https://example.test/acme/tool\\\", tag: \\\"v1\\\" }}\"}},{{\"name\":\"local\",\"source\":\"./deps/local\"}}],\"packages\":[],\"outputs\":[],\"build_profiles\":[]}}")
+    assert_eq(package_json, "{{\"schema_version\":1,\"file\":\"package.jet\",\"jet\":null,\"edition\":\"2028\",\"description\":\"typed package\",\"license\":\"MIT\",\"repository\":\"https://example.test/demo\",\"layer\":\"hosted\",\"target\":\"native\",\"dependencies\":[{{\"name\":\"gitdep\",\"source\":\"{{ git: \\\"https://example.test/acme/tool\\\", tag: \\\"v1\\\" }}\"}},{{\"name\":\"local\",\"source\":\"./deps/local\"}}],\"packages\":[],\"outputs\":[{{\"name\":\"app\",\"kind\":\"executable\",\"entry\":\"run\"}}],\"build_profiles\":[]}}")
+    assert_eq(lock_json, "{{\"schema_version\":1,\"file\":\".jet/lock\",\"version\":1,\"root_dependencies\":[\"gitdep\"],\"packages\":[{{\"name\":\"gitdep\",\"version\":\"1.0.0\",\"source_kind\":\"git\",\"source\":\"tag = \\\"v1\\\"\",\"revision\":\"deadbeef\",\"fingerprint\":\"lock-fp\",\"content_hash\":\"lock-hash\",\"dependencies\":[],\"layer\":\"hosted\",\"inferred_layer\":\"hosted\"}}]}}")
+    assert_eq(profiles_json, "{{\"schema_version\":1,\"file\":\"env.jet\",\"profiles\":[{{\"name\":\"base\",\"extends\":[],\"packages\":[],\"collisions\":[],\"sources\":[\"profile.base\"]}},{{\"name\":\"dev\",\"extends\":[\"base\"],\"packages\":[],\"collisions\":[{{\"key\":\"bin/editor\",\"value\":\"editor@default\"}}],\"sources\":[\"profile.dev\"]}}]}}")
+    for projection in [&manifest_json, &package_json, &lock_json, &profiles_json] {
+        for secret in ["build-user", "build-secret", "query-secret", "lock-user", "lock-secret"] {
+            assert(!projection.contains(secret), "projection leaked {secret}: {projection}")
+        }
+        assert(!projection.contains(root.to_str().unwrap()), "projection leaked authority path: {projection}")
+    }
+    expected_inputs :: [("package.jet", root.join("package.jet")), ("config/build.jet", root.join("config/build.jet")), (".jet/lock", root.join(".jet/lock")), ("env.jet", root.join("env.jet"))]
+    assert_eq(inputs.len(), expected_inputs.len())
+    for (relative, absolute) in expected_inputs {
+        input :: inputs.iter().find((input) -> input.path == relative).unwrap_or_else(() -> panic("missing consumed package input {relative}"))
+        assert_eq(input.hash, SHA256.sha256_hex(&fs.read(absolute).expect("read consumed input")))
+    }
+}
+// Rust: tests/compiler_api.rs:666
+#Test("inline_and_extracted_package_views_are_equivalent") {
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    base :: env.temp_dir().join("jet_compiler_inline_carrier_equivalence_{process.id()}_{stamp}")
+    inline_root :: base.join("inline")
+    extracted_root :: base.join("extracted")
+    body :: "\nname: \"carrier-equivalence\"\nversion: \"1.2.3\"\njet: \">=0.1.0\"\nedition: \"2028\"\ndescription: \"same typed facts\"\nlicense: \"MIT\"\nrepository: \"https://example.test/carrier\"\nruntime: \"hosted\"\ntarget: \"native\"\nconfigs: [\"config/build.jet\"]\n"
+    for root in [&inline_root, &extracted_root] {
+        fs.create_dir_all(root.join("config")).expect("create carrier fixture")
+        fs.write(root.join("config/build.jet"), "pub build :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}\n").expect("write carrier config")
+    }
+    fs.write(inline_root.join("run.jet"), "package {{{body}}}\nfn run() {{}}\n").expect("write inline carrier")
+    fs.write(extracted_root.join("package.jet"), body).expect("write extracted manifest")
+    inline_manifest :: Compiler.read_manifest(&inline_root).expect("read inline manifest")
+    extracted_manifest :: Compiler.read_manifest(&extracted_root).expect("read extracted manifest")
+    assert_eq(inline_manifest, extracted_manifest)
+    assert(inline_manifest.outputs.is_empty())
+    inline_package :: Compiler.read_package(&inline_root).expect("read inline package")
+    extracted_package :: Compiler.read_package(&extracted_root).expect("read extracted package")
+    assert_eq(inline_package, extracted_package)
+    assert_eq(inline_package.outputs.len(), 1)
+    assert_eq(inline_package.outputs[0].name, "app")
+}
+// Rust: tests/compiler_api.rs:720
+#Test("inline_package_config_inputs_invalidate_package_views") {
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet_compiler_inline_config_invalidation_{process.id()}_{stamp}")
+    fs.create_dir_all(root.join("config")).expect("create inline invalidation fixture")
+    fs.write(root.join("run.jet"), "package {{\nname: \"inline-invalidation\"\nversion: \"1.0.0\"\nconfigs: [\"config/build.jet\"]\n}}\nfn run() {{}}\n").expect("write inline package")
+    config :: root.join("config/build.jet")
+    fs.write(&config, "pub build :: Config{{ outputs: {{ app: Executable{{ entry: run }} }} }}\n").expect("write first package config")
+    (first_result, first_inputs) :: Comptime.with_package_read_context(&root, () -> Compiler.read_package(&root))
+    first :: first_result.expect("read first inline package")
+    fs.write(&config, "pub build :: Config{{ outputs: {{ app: Executable{{ entry: check }} }} }}\n").expect("write changed package config")
+    (second_result, second_inputs) :: Comptime.with_package_read_context(&root, () -> Compiler.read_package(&root))
+    second :: second_result.expect("read changed inline package")
+    assert_ne(first, second, "a Config edit must change completed package facts")
+    input_hash :: (inputs: [jet.AST.ComptimeInput], path: String) -> inputs.iter().find((input) -> input.path == path).map((input) -> input.hash.clone()).unwrap_or_else(() -> panic("missing package input {path}: {inputs:Debug}"))
+    assert_ne(input_hash(&first_inputs, "config/build.jet"), input_hash(&second_inputs, "config/build.jet"))
+    for inputs in [&first_inputs, &second_inputs] {
+        assert(inputs.iter().any((input) -> input.path == "run.jet"))
+        assert(inputs.iter().any((input) -> input.path == "config/build.jet"))
+    }
+}
+// Rust: tests/compiler_api.rs:780
+#Test("inline_package_authority_errors_redact_absolute_paths") {
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet_compiler_inline_authority_redaction_{process.id()}_{stamp}")
+    fs.create_dir_all(&root).expect("create inline authority fixture")
+    fs.write(root.join("run.jet"), "package {{\nname: \"inline-authority-error\"\nversion: \"1.0.0\"\nconfigs: [\"missing-config\"]\n}}\nfn run() {{}}\n").expect("write invalid inline package")
+    error :: Compiler.read_package(&root).expect_err("missing inline Config must fail closed")
+    assert_eq(error.code, "E0956")
+    assert_eq(error.file, "package.jet")
+    assert(error.cause.contains("E1334") && error.cause.contains("invalid"), "inline authority failure must use the typed redacted cause: {error:Debug}")
+    assert(!error.cause.contains(root.to_str().unwrap()), "inline authority failure leaked the root path: {error:Debug}")
+}
+// Rust: tests/compiler_api.rs:818
+#Test("inline_package_parse_errors_preserve_registered_diagnostic") {
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet_compiler_inline_parse_error_{process.id()}_{stamp}")
+    fs.create_dir_all(&root).expect("create inline parse fixture")
+    fs.write(root.join("run.jet"), "package {{\nversion: \"1.0.0\"\nunknown: \"value\"\n}}\nfn run() {{}}\n").expect("write malformed inline package")
+    error :: Compiler.read_package(&root).expect_err("malformed inline package must fail closed")
+    assert_eq(error.code, "E0956")
+    assert_eq(error.file, "package.jet")
+    assert(error.cause.contains("E1206") && error.cause.contains("unknown"), "inline parse failure must preserve the registered typed cause: {error:Debug}")
+    assert(!error.cause.contains("E1362"), "inline parse failure must not replace the registered cause with a generic code: {error:Debug}")
+    assert(!error.cause.contains(root.to_str().unwrap()), "inline parse failure leaked the authority root: {error:Debug}")
+}
+// Rust: tests/compiler_api.rs:859
+#Test("package_views_redact_repository_credentials_and_queries") {
+    stamp :: SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()
+    root :: env.temp_dir().join("jet_compiler_repository_redaction_{process.id()}_{stamp}")
+    fs.create_dir_all(&root).expect("create repository redaction fixture")
+    fs.write(root.join("package.jet"), "name: \"repository-redaction\"\nversion: \"1.0.0\"\nrepository: \"https://repo-user:repo-secret@example.test/acme/repo?token=repo-query#private\"\n").expect("write hostile repository")
+    manifest :: Compiler.read_manifest(&root).expect("read redacted manifest")
+    package :: Compiler.read_package(&root).expect("read redacted package")
+    assert_eq(manifest.repository, Val("https://example.test/acme/repo"))
+    assert_eq(package.repository, Val("https://example.test/acme/repo"))
+    for value in [manifest.repository, package.repository] {
+        value :: value.expect("repository remains present")
+        assert(!value.contains("repo-user"))
+        assert(!value.contains("repo-secret"))
+        assert(!value.contains("repo-query"))
+    }
+    fs.write(root.join("package.jet"), "name: \"repository-safe\"\nversion: \"1.0.0\"\nrepository: \"https://example.test/acme/repo\"\n").expect("write safe repository")
+    assert_eq(Compiler.read_manifest(&root).expect("read safe repository").repository, Val("https://example.test/acme/repo"))
+}
+// Rust: tests/compiler_api.rs:911
+#Test("package_api_example_checks_and_runs_through_the_shared_evaluator") {
+    source_root :: OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/tooling/compiler_api_package")
+    assert(!source_root.join(".jet").exists(), "checked-in compiler API example already has generated `.jet` state")
+    staged :: common.ProjectScratch.for_project(&source_root, "compiler-api-package")
+    root :: staged.path.clone()
+    assert(root.join(".jet/lock").is_file(), "staged compiler API project did not map fixture-state to `.jet`")
+    expected :: fs.read_to_string(OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()).join("Examples/features/expected/tooling/compiler_api_package.out")).expect("read compiler API package expected output")
+    entry :: root.join("run.jet")
+    entry_string :: entry.to_string_lossy().into_owned()
+    project :: check_project_build_for_tier(&entry_string, Policy.GateSet.default(), "dev", [:], None, None).expect("package project build check should start").expect("package Config should select the project build")
+    assert(project.build.is_some(), "project build check lost its BuildPlan")
+    assert(project.runtime.is_some(), "project build check lost the resolved runtime graph")
+    assert(project.runtime_effect_facts.is_some(), "project build check lost runtime effect facts")
+    // Explicit-file scope witnesses the source carrier; Config app output belongs to the build path above.
+    for target in [entry] {
+        output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["check", target.to_str().expect("UTF-8 package target")]).current_dir(&root).env("NO_COLOR", "1").env("TERM", "dumb").output().expect("compiler API package check should start")
+        assert(output.status.success(), "compiler API package check failed for {target.display()}:\n{String.from_utf8_lossy(&output.stderr)}")
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert(!stderr.contains("E0956"), "{target:Debug} emitted E0956: {stderr}")
+        assert(!stderr.contains("unbound"), "{target:Debug} emitted an unbound follow-on: {stderr}")
+        assert(!stderr.contains("L0103"), "{target:Debug} reported a qualified compiler alias as unused: {stderr}")
+    }
+    for args in [["run"], ["run", "--interpret"]] {
+        output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(&args).current_dir(&root).env("NO_COLOR", "1").env("TERM", "dumb").output().expect("compiler API package run should start")
+        assert(output.status.success(), "compiler API package run {args:Debug} failed:\n{String.from_utf8_lossy(&output.stderr)}")
+        assert_eq(String.from_utf8_lossy(&output.stdout), expected, "compiler API package output diverged for {args:Debug}")
+    }
+    if common.have_rustc() {
+        build_dir :: root.join(".jet").join("build")
+        _ :: fs.remove_dir_all(&build_dir)
+        output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).arg("build").current_dir(&root).env("NO_COLOR", "1").env("TERM", "dumb").output().expect("compiler API package AOT build should start")
+        assert(output.status.success(), "compiler API package AOT build failed:\n{String.from_utf8_lossy(&output.stderr)}")
+        assert(!String.from_utf8_lossy(&output.stderr).contains("L0103"), "compiler API package AOT build reported its qualified alias as unused:\n{String.from_utf8_lossy(&output.stderr)}")
+        binary :: build_dir.join("compiler_api_package")
+        run :: Command.new(&binary).output().expect("compiler API package AOT binary should start")
+        assert(run.status.success(), "compiler API package AOT binary failed:\n{String.from_utf8_lossy(&run.stderr)}")
+        assert_eq(String.from_utf8_lossy(&run.stdout), expected, "compiler API package AOT output diverged")
+        _ :: fs.remove_dir_all(build_dir)
+    }
+    assert(!source_root.join(".jet").exists(), "compiler API package commands created `.jet` in the checked-in project")
+}
+// Rust: tests/compiler_api.rs:1044
+#Test("package_views_remain_compile_time_only") {
+    for operation in ["manifest", "package", "lock", "profiles"] {
+        source :: "use core.compiler as compiler\nfn run() {{ compiler.{operation}() }}\n"
+        diagnostics :: compile(&source).expect_err("package views must not become runtime capabilities")
+        assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0956"), "{operation} should report E0956: {diagnostics:Debug}")
+        assert(diagnostics.iter().any((diagnostic) -> diagnostic.what.contains("compile-time only")), "{operation} must teach the phase boundary: {diagnostics:Debug}")
+    }
+}
+// Rust: tests/compiler_api.rs:1065
+#Test("package_views_reject_config_paths_outside_the_pinned_root") {
+    root :: env.temp_dir().join("jet_compiler_package_view_escape_{process.id()}")
+    fs.create_dir_all(&root).expect("create package escape fixture")
+    fs.write(root.join("package.jet"), "name: \"escape\"\nversion: \"1.0.0\"\nconfigs: [\"../outside.jet\"]\n").expect("write escaping package fixture")
+    error :: Compiler.read_package(&root).expect_err("package view must reject escaping config")
+    assert_eq(error.code, "E0956")
+    assert_eq(error.file, "package.jet")
+    assert(error.cause.contains("E1334") && error.cause.contains("invalid"), "refusal must preserve a typed, actionable authority cause: {error:Debug}")
+    assert(!error.cause.contains(root.to_str().unwrap()), "refusal cause leaked the authority root: {error:Debug}")
+}
+// Rust: tests/compiler_api.rs:1092
+#Test("package_views_report_malformed_lock_as_typed_file_cause") {
+    root :: env.temp_dir().join("jet_compiler_package_view_malformed_lock_{process.id()}")
+    fs.create_dir_all(root.join(".jet")).expect("create malformed lock fixture")
+    fs.write(root.join("package.jet"), "name: \"malformed-lock\"\nversion: \"1.0.0\"\n").expect("write malformed lock package")
+    fs.write(root.join(".jet/lock"), "version = 1\n[[package]]\nversion = \"1.0.0\"\n").expect("write malformed lock")
+    error :: Compiler.read_lock(&root).expect_err("malformed lock must fail closed")
+    assert_eq(error.code, "E0956")
+    assert_eq(error.file, ".jet/lock")
+    assert(!error.message.is_empty())
+    assert(!error.cause.is_empty())
+    (value, inputs) :: Comptime.with_package_read_context(&root, () -> Compiler.eval_core_call("core.compiler", "lock", [], Diagnostics.Span.new(0, 0)).expect("compiler callback handles malformed package input").expect("dispatcher returns a typed failure value"))
+    payload :: if value == { .Failed(.Told(payload)) -> payload else -> panic("malformed lock must be a told typed failure: {value:Debug}") }
+    payload_json :: payload.to_json()
+    assert(payload_json.contains("\"code\":\"E0956\""), "{payload_json}")
+    assert(payload_json.contains("\"file\":\".jet/lock\""), "{payload_json}")
+    assert(payload_json.contains("\"cause\":\""), "{payload_json}")
+    assert(inputs.iter().any((input) -> input.path == ".jet/lock"))
+}
+// Rust: tests/compiler_api.rs:1136
+#Test("package_views_reject_profile_imports_outside_the_pinned_root") {
+    root :: env.temp_dir().join("jet_compiler_package_view_profile_escape_{process.id()}")
+    fs.create_dir_all(&root).expect("create profile escape fixture")
+    fs.write(root.join("env.jet"), "\nmodule profile.base {{\n    imports: find(\"../outside\")\n    packages: []\n}}\n").expect("write escaping profile fixture")
+    error :: Compiler.read_profiles(&root).expect_err("profile imports must stay below root")
+    assert_eq(error.code, "E0956")
+    assert_eq(error.file, "env.jet")
+    assert(error.cause.contains("E1331") || error.cause.contains("root"), "refusal must preserve the authority cause: {error:Debug}")
+    assert(!error.cause.contains(root.to_str().unwrap()), "profile refusal cause leaked the authority root: {error:Debug}")
+}
+// Rust: tests/compiler_api.rs:1168
+#Test("compiler_cli_unknown_operation_uses_structured_error_object") {
+    output :: Command.new(env.var("CARGO_BIN_EXE_jet").unwrap()).args(["inspect", "compiler", "unknown", "missing.jet"]).output().expect("run compiler operation error")
+    assert(output.status.success())
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("\"error\":{{\"code\":\"E0956\""))
+    assert(!stdout.contains("\"error\":\""), "error must be an object")
+}
+// Rust: tests/compiler_api.rs:1180
+#Test("an_unselected_runtime_named_build_cannot_use_the_compiler_api") {
+    diagnostics :: compile("use core.compiler as compiler\nfn build() {{ print(compiler.lex(\"fn run() {{{{}}}}\")) }}\nfn run() {{}}\n").expect_err("an ordinary runtime function named build must not gain build authority")
+    assert(diagnostics.iter().any((diagnostic) -> diagnostic.code == "E0956"), "expected compile-time-only diagnostic, got {diagnostics:Debug}")
+}

@@ -1,0 +1,456 @@
+// Original QueryService tests. Query publication reconciles these Rust spellings to the sole resident owner.
+use jet_driver.QueryService.[CompilerQueries, CheckedQuery, canonical_path]
+use jet_driver.Diagnostics.[Diagnostic, Span]
+use jet_queries.[FileKey, QueryKey]
+use jet_foundation.PerformanceBudget.[CanonicalJson]
+use std.[fs, env, process]
+
+// Rust: crates/jet-driver/src/QueryService.rs:668
+fn checked_key(path: OSPath) -> QueryKey { QueryKey.for_file("checked.lsp", FileKey.new(canonical_path(&path).to_string_lossy())) }
+// Rust: crates/jet-driver/src/QueryService.rs:675
+fn batch_checked_key(path: OSPath) -> QueryKey { QueryKey.for_file("checked", FileKey.new(canonical_path(&path).to_string_lossy())) }
+// Rust: crates/jet-driver/src/QueryService.rs:682
+fn diagnostic_summary(diagnostics: &[Diagnostic]) -> [(String, String, String, String, Span?)] {
+    loop d in diagnostics -> (d.code.clone(), d.what.clone(), d.why.clone(), d.fix.clone(), d.span)
+}
+
+// Rust: crates/jet-driver/src/QueryService.rs:706
+#Test("check_and_lsp_share_one_authoritative_query") {
+    service := CompilerQueries.new()
+    source :: "fn beta() -> Int { return 1 }\nfn alpha() -> String { return beta() }\n"
+    check :: service.check_text("shared.jet", source, true)
+    lsp :: service.check_text("shared.jet", source, true)
+    assert_eq(diagnostic_summary(&check.diagnostics), diagnostic_summary(&lsp.diagnostics))
+    assert(!check.diagnostics.is_empty())
+    assert_eq(service.recompute_count(&checked_key(OSPath.new("shared.jet"))), 1)
+    assert_eq(service.stats().hits, 1)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:722
+#Test("changed_import_invalidates_cached_importer") {
+    // GATE #4494: real host filesystem/temp-dir/process-id bindings, no simulated provider.
+    root :: env.temp_dir().join("jet-query-import-{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); dependency :: root.join("b.jet")
+    main_source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    first_dependency :: "pub fn value() -> Int { return 1 }\n"
+    second_dependency :: "pub fn value() -> String { return \"changed\" }\n"
+    fs.write(&main, main_source)!; fs.write(&dependency, first_dependency)!
+    service := CompilerQueries.new()
+    first :: service.check_disk(main.to_string_lossy(), true)
+    assert(first.diagnostics.is_empty(), "{first.diagnostics:Debug}")
+    fs.write(&dependency, second_dependency)!
+    changed :: service.check_disk(main.to_string_lossy(), true)
+    assert(!changed.diagnostics.is_empty(), "changed dependency must not leave importer diagnostics cached")
+    assert_eq(service.recompute_count(&checked_key(main)), 2)
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:748
+#Test("batch_disk_interface_change_keeps_unrelated_module_warm") {
+    root :: env.temp_dir().join("jet-query-batch-interface-{process.id()}")
+    _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); dependency :: root.join("b.jet"); unrelated :: root.join("c.jet"); lock_dir :: root.join(".jet")
+    main_source :: "module b\nmodule c\nfn run() { print(b.value() + c.other()) }\n"
+    dependency_source :: "pub fn value() -> Int { return 1 }\n"
+    changed_dependency :: "pub fn value() -> String { return \"changed\" }\n"
+    unrelated_source :: "pub fn other() -> Int { return 2 }\n"
+    fs.write(&main, main_source)!; fs.write(&dependency, dependency_source)!; fs.write(&unrelated, unrelated_source)!
+    fs.create_dir_all(&lock_dir)!
+    fs.write(lock_dir.join("lock"), "version = 1\n\n[build.stamp]\ndirty = false\ntoolchain = \"test\"\nat = \"test\"\n")!
+    service := CompilerQueries.new()
+    first :: service.check_disk(main.to_string_lossy(), false)
+    assert(first.diagnostics.is_empty(), "{first.diagnostics:Debug}")
+    assert_eq(service.recompute_count(&batch_checked_key(main)), 1, "the first disk batch check must compute the root")
+    discovered :: service.check_disk(main.to_string_lossy(), false)
+    assert(discovered.diagnostics.is_empty())
+    assert_eq(service.recompute_count(&batch_checked_key(main)), 2, "the first dependency discovery must settle the external input set")
+    cold :: service.stats()
+    unchanged :: service.check_disk(main.to_string_lossy(), false)
+    assert(unchanged.diagnostics.is_empty())
+    assert_eq(service.recompute_count(&batch_checked_key(main)), 2, "an unchanged disk batch must reuse the checked query")
+    assert(service.stats().hits > cold.hits, "an unchanged disk batch must record a query hit")
+    before_change :: service.stats()
+    fs.write(&dependency, changed_dependency)!
+    changed :: service.check_disk(main.to_string_lossy(), false)
+    assert(!changed.diagnostics.is_empty(), "a changed imported interface must recheck the real batch path")
+    warm :: service.stats()
+    assert_eq(warm.item_recomputes - before_change.item_recomputes, 2, "only the changed dependency and its importer may recheck")
+    assert(warm.item_hits > cold.item_hits, "an unrelated module must remain reusable after dependency invalidation: cold={cold:Debug}, warm={warm:Debug}")
+    fresh_service := CompilerQueries.new()
+    fresh :: fresh_service.check_disk(main.to_string_lossy(), false)
+    assert_eq(diagnostic_summary(&changed.diagnostics), diagnostic_summary(&fresh.diagnostics), "batch invalidation must preserve fresh-check diagnostics")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:833
+#Test("hostile_world_edit_rechecks_only_changed_module") {
+    root :: env.temp_dir().join("jet-query-hostile-world-{process.id()}")
+    _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); lock_dir :: root.join(".jet"); module_count :: 32
+    names := [String]{"changed"}
+    loop index in 0..<module_count - 1 { names.push("stable{index}") }
+    declarations :: (loop name in names -> "module {name}\n").join("")
+    calls :: (loop name in names -> "{name}.value()").join(" + ")
+    main_source :: "{declarations}fn run() \u{007b} print({calls}) \u{007d}\n"
+    fs.write(&main, &main_source)!
+    loop (index, name) in names.enumerate() {
+        fs.write(root.join("{name}.jet"), "pub fn value() -> Int \u{007b} return {index + 1} \u{007d}\n")!
+    }
+    fs.create_dir_all(&lock_dir)!
+    fs.write(lock_dir.join("lock"), "version = 1\n\n[build.stamp]\ndirty = false\ntoolchain = \"test\"\nat = \"test\"\n")!
+    service := CompilerQueries.new()
+    first :: service.check_disk(main.to_string_lossy(), false)
+    assert(first.diagnostics.is_empty(), "{first.diagnostics:Debug}")
+    discovered :: service.check_disk(main.to_string_lossy(), false)
+    assert(discovered.diagnostics.is_empty(), "{discovered.diagnostics:Debug}")
+    fs.write(root.join("changed.jet"), "pub fn value() -> Int { return 99 }\n")!
+    (checked, receipt) :: service.check_text_with_receipt(main.to_string_lossy(), &main_source, false)
+    assert(checked.diagnostics.is_empty(), "{checked.diagnostics:Debug}")
+    assert_eq(receipt.program_items, module_count + 1)
+    assert_eq(receipt.item_recomputes, 1)
+    assert_eq(receipt.blast_radius(), 1)
+    assert(receipt.item_hits >= module_count as U64, "unchanged modules must remain warm: {receipt:Debug}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:901
+#Test("local_body_edit_rechecks_only_changed_item") {
+    service := CompilerQueries.new()
+    before :: "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 2 }\nfn run() { print(alpha() + beta()) }\n"
+    after :: "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return 3 }\nfn run() { print(alpha() + beta()) }\n"
+    path :: env.temp_dir().join("jet-query-items-{process.id()}.jet").to_string_lossy()
+    initial :: service.check_text(&path, before, true)
+    assert(initial.diagnostics.is_empty(), "{initial.diagnostics:Debug}")
+    cold :: service.stats()
+    assert_eq(cold.item_hits, 0, "{cold:Debug}")
+    assert_eq(cold.item_recomputes, 3, "{cold:Debug}")
+    assert_eq(cold.live_items, 3, "{cold:Debug}")
+    warm_checked :: service.check_text(&path, after, true)
+    assert(warm_checked.diagnostics.is_empty(), "{warm_checked.diagnostics:Debug}")
+    warm :: service.stats()
+    assert_eq(warm.item_hits, 2, "unchanged alpha and run must reuse checked bodies: {warm:Debug}")
+    assert_eq(warm.item_recomputes, 4, "only changed beta may recheck: {warm:Debug}")
+    assert_eq(warm.live_items, 3, "{warm:Debug}")
+    assert(warm.live_item_bytes > before.len())
+}
+// Rust: crates/jet-driver/src/QueryService.rs:934
+#Test("cached_caller_observes_changed_callee_effects") {
+    before :: "fn alpha() -[]> Int { return beta() }\nfn beta() -> Int { return 2 }\nfn run() { print(alpha()) }\n"
+    after :: "fn alpha() -[]> Int { return beta() }\nfn beta() -> Int { print(\"x\")\nreturn 2 }\nfn run() { print(alpha()) }\n"
+    incremental := CompilerQueries.new()
+    before_checked :: incremental.check_text("effects.jet", before, true)
+    assert(before_checked.diagnostics.is_empty(), "{before_checked.diagnostics:Debug}")
+    changed :: incremental.check_text("effects.jet", after, true)
+    fresh :: CompilerQueries.new().check_text("effects.jet", after, true)
+    assert_eq(diagnostic_summary(&changed.diagnostics), diagnostic_summary(&fresh.diagnostics), "incremental diagnostics must be byte-for-byte equivalent to a fresh check")
+    assert(changed.diagnostics.iter().any(fn(d) -> d.code == "E3401"), "{changed.diagnostics:Debug}")
+    stats :: incremental.stats()
+    assert_eq(stats.item_hits, 2)
+    assert_eq(stats.item_recomputes, 4)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:965
+#Test("cached_nonce_diagnostic_tracks_callee_effect_precedence") {
+    source :: fn(next_body: String, marker: U8) -> String {
+        """
+use core.crypto.expert as expert
+
+fn protect() -[]> Int CryptoError! \u{007b}
+    #Unsafe("fixed interop vector") \u{007b}
+        _sealed :: expert.xchacha20poly1305_seal(
+            [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [next_byte()],
+            [],
+            []
+        )
+    \u{007d}
+    return 0
+\u{007d}
+
+fn next_byte() -> U8 \u{007b}
+    {next_body}
+    return 0
+\u{007d}
+
+fn _marker() -> Int \u{007b} return {marker} \u{007d}
+fn run() \u{007b} print(protect() ?? 0) \u{007d}
+"""
+    }
+    pure_body :: "               "
+    codes :: fn(checked: &CheckedQuery) -> [String] { loop d in checked.diagnostics -> d.code.clone() }
+    incremental := CompilerQueries.new()
+    cold_source :: source(pure_body, 0)
+    cold :: incremental.check_text("crypto-cache.jet", &cold_source, true)
+    assert_eq(codes(&cold), [String]{"E2702"}, "{cold.diagnostics:Debug}")
+    cold_stats :: incremental.stats()
+    warm_source :: source(pure_body, 1)
+    warm :: incremental.check_text("crypto-cache.jet", &warm_source, true)
+    warm_fresh :: CompilerQueries.new().check_text("crypto-cache.jet", &warm_source, true)
+    assert_eq(diagnostic_summary(&warm.diagnostics), diagnostic_summary(&warm_fresh.diagnostics))
+    assert_eq(codes(&warm), [String]{"E2702"})
+    warm_stats :: incremental.stats()
+    assert_eq(warm_stats.item_hits - cold_stats.item_hits, 3)
+    impure_source :: source("print(\"effect\")", 1)
+    impure :: incremental.check_text("crypto-cache.jet", &impure_source, true)
+    impure_fresh :: CompilerQueries.new().check_text("crypto-cache.jet", &impure_source, true)
+    assert_eq(diagnostic_summary(&impure.diagnostics), diagnostic_summary(&impure_fresh.diagnostics))
+    assert_eq(codes(&impure), [String]{"E3401"})
+    impure_stats :: incremental.stats()
+    restored_source :: source(pure_body, 2)
+    restored :: incremental.check_text("crypto-cache.jet", &restored_source, true)
+    restored_fresh :: CompilerQueries.new().check_text("crypto-cache.jet", &restored_source, true)
+    assert_eq(diagnostic_summary(&restored.diagnostics), diagnostic_summary(&restored_fresh.diagnostics))
+    assert_eq(codes(&restored), [String]{"E2702"})
+    restored_stats :: incremental.stats()
+    assert_eq(restored_stats.item_hits - impure_stats.item_hits, 2)
+    assert_eq(restored_stats.live_items, 4)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1044
+#Test("whitespace_edit_recomputes_span_bearing_diagnostics") {
+    before :: "fn beta() -> Int { return \"x\" }\n"
+    after :: "fn beta() -> Int {  return \"x\" }\n"
+    incremental := CompilerQueries.new()
+    _ :: incremental.check_text("spans.jet", before, true)
+    changed :: incremental.check_text("spans.jet", after, true)
+    fresh :: CompilerQueries.new().check_text("spans.jet", after, true)
+    assert_eq(diagnostic_summary(&changed.diagnostics), diagnostic_summary(&fresh.diagnostics), "cached diagnostics must never retain pre-edit source spans")
+    assert_eq(incremental.stats().item_hits, 0)
+    assert_eq(incremental.stats().item_recomputes, 2)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1062
+#Test("unrelated_roots_remain_warm") {
+    root :: env.temp_dir().join("jet-query-roots-{process.id()}")
+    left :: root.join("left/main.jet"); right :: root.join("right/main.jet")
+    fs.create_dir_all(left.parent().unwrap())!; fs.create_dir_all(right.parent().unwrap())!
+    service := CompilerQueries.new()
+    left_before :: "fn left() -> Int { return 1 }\n"
+    left_after :: "fn left() -> Int { return 2 }\n"
+    right_source :: "fn right() -> Int { return 3 }\n"
+    _ :: service.check_text(left.to_string_lossy(), left_before, true)
+    _ :: service.check_text(right.to_string_lossy(), right_source, true)
+    _ :: service.check_text(left.to_string_lossy(), left_after, true)
+    hits :: service.stats().hits
+    _ :: service.check_text(right.to_string_lossy(), right_source, true)
+    assert_eq(service.recompute_count(&checked_key(left)), 2)
+    assert_eq(service.recompute_count(&checked_key(right)), 1)
+    assert_eq(service.stats().hits, hits + 1, "right root must stay warm")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1086
+#Test("overlay_tracks_imported_disk_inputs") {
+    root :: env.temp_dir().join("jet-query-overlay-{process.id()}")
+    _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); dependency :: root.join("b.jet")
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    fs.write(&dependency, "pub fn value() -> Int { return 1 }\n")!
+    service := CompilerQueries.new()
+    overlay_first :: service.check_text(main.to_string_lossy(), source, true)
+    assert(overlay_first.diagnostics.is_empty(), "{overlay_first.diagnostics:Debug}")
+    fs.write(&dependency, "pub fn value() -> String { return \"changed\" }\n")!
+    assert(!service.check_text(main.to_string_lossy(), source, true).diagnostics.is_empty())
+    assert_eq(service.recompute_count(&checked_key(main)), 2)
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1112
+#Test("repaired_import_invalidates_cached_load_failure") {
+    root :: env.temp_dir().join("jet-query-repair-{process.id()}")
+    _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); dependency :: root.join("b.jet")
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    dependency_source :: "pub fn value() -> Int { return 1 }\n"
+    fs.write(&dependency, dependency_source)!
+    service := CompilerQueries.new()
+    overlay_first :: service.check_text(main.to_string_lossy(), source, true)
+    assert(overlay_first.diagnostics.is_empty(), "{overlay_first.diagnostics:Debug}")
+    fs.write(&dependency, "pub fn value() -> Int { return 1 }\n::\n")!
+    broken :: service.check_text(main.to_string_lossy(), source, true)
+    assert(broken.diagnostics.iter().any(fn(d) -> d.code == "E0003"))
+    recomputes :: service.recompute_count(&checked_key(main))
+    broken_again :: service.check_text(main.to_string_lossy(), source, true)
+    assert_eq(diagnostic_summary(&broken.diagnostics), diagnostic_summary(&broken_again.diagnostics))
+    assert_eq(service.recompute_count(&checked_key(main)), recomputes)
+    fs.write(&dependency, dependency_source)!
+    repaired :: service.check_text(main.to_string_lossy(), source, true)
+    fresh :: CompilerQueries.new().check_text(main.to_string_lossy(), source, true)
+    assert_eq(diagnostic_summary(&repaired.diagnostics), diagnostic_summary(&fresh.diagnostics))
+    assert(!repaired.diagnostics.iter().any(fn(d) -> d.code == "E0003"))
+    assert(repaired.diagnostics.is_empty(), "{repaired.diagnostics:Debug}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1159
+#Test("first_load_failure_tracks_import_for_repair") {
+    root :: env.temp_dir().join("jet-query-first-repair-{process.id()}")
+    _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); dependency :: root.join("b.jet")
+    source :: "module b\nfn run() { print(b.value() + 0) }\n"
+    dependency_source :: "pub fn value() -> Int { return 1 }\n"
+    fs.write(&dependency, "pub fn value() -> Int { return 1 }\n::\n")!
+    service := CompilerQueries.new()
+    broken :: service.check_text(main.to_string_lossy(), source, true)
+    assert(broken.diagnostics.iter().any(fn(d) -> d.code == "E0003"))
+    fs.write(&dependency, dependency_source)!
+    repaired :: service.check_text(main.to_string_lossy(), source, true)
+    fresh :: CompilerQueries.new().check_text(main.to_string_lossy(), source, true)
+    assert_eq(diagnostic_summary(&repaired.diagnostics), diagnostic_summary(&fresh.diagnostics))
+    assert(repaired.diagnostics.is_empty(), "{repaired.diagnostics:Debug}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1192
+#Test("missing_first_import_tracks_both_module_candidates") {
+    loop nested in [Bool]{false, true} {
+        root :: env.temp_dir().join("jet-query-missing-repair-{process.id()}-{nested}")
+        _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+        main :: root.join("main.jet")
+        source :: "module b\nfn run() { print(b.value() + 0) }\n"
+        service := CompilerQueries.new()
+        missing :: service.check_text(main.to_string_lossy(), source, true)
+        assert(missing.diagnostics.iter().any(fn(d) -> d.code == "E0607"))
+        dependency :: if nested {
+            directory :: root.join("b"); fs.create_dir(&directory)!
+            directory.join("module.jet")
+        } else -> root.join("b.jet")
+        fs.write(&dependency, "pub fn value() -> Int { return 1 }\n")!
+        repaired :: service.check_text(main.to_string_lossy(), source, true)
+        fresh :: CompilerQueries.new().check_text(main.to_string_lossy(), source, true)
+        assert_eq(diagnostic_summary(&repaired.diagnostics), diagnostic_summary(&fresh.diagnostics))
+        assert(repaired.diagnostics.is_empty(), "{repaired.diagnostics:Debug}")
+        _ :: fs.remove_dir_all(root)
+    }
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1233
+#Test("comptime_local_disables_replay") {
+    service := CompilerQueries.new()
+    source :: "fn run() {\n    _value :: prep { 1 }\n}\n"
+    checked :: service.check_text("comptime.jet", source, true)
+    assert(checked.diagnostics.is_empty(), "{checked.diagnostics:Debug}")
+    assert(service.check_text("comptime.jet", source, true).diagnostics.is_empty())
+    assert_eq(service.recompute_count(&checked_key(OSPath.new("comptime.jet"))), 2)
+    assert_eq(service.stats().item_hits, 0)
+    assert_eq(service.stats().live_items, 0)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1252
+#Test("changed_embed_input_is_never_replayed") {
+    root :: env.temp_dir().join("jet-query-embed-{process.id()}")
+    _ :: fs.remove_dir_all(&root); fs.create_dir_all(&root)!
+    main :: root.join("main.jet"); asset :: root.join("message.txt")
+    source :: "MESSAGE :: prep { embed_file(\"message.txt\") }\nfn run() { print(\"{MESSAGE}\") }\n"
+    fs.write(&asset, "first")!; fs.write(&main, source)!
+    service := CompilerQueries.new()
+    first :: service.check_text(main.to_string_lossy(), source, true)
+    assert(first.diagnostics.is_empty(), "{first.diagnostics:Debug}")
+    assert("{first.bundle:Debug}".contains("first"))
+    fs.write(&asset, "second")!
+    second :: service.check_text(main.to_string_lossy(), source, true)
+    assert(second.diagnostics.is_empty())
+    assert("{second.bundle:Debug}".contains("second"))
+    assert_eq(service.recompute_count(&checked_key(main)), 2)
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1278
+#Test("retained_item_bytes_grow_with_retained_payloads") {
+    service := CompilerQueries.new()
+    one :: "fn alpha() -> Int { return 1 }\n"
+    two :: "fn alpha() -> Int { return 1 }\nfn beta() -> Int { return \"a deliberately long wrong value\" }\n"
+    _ :: service.check_text("memory.jet", one, true)
+    before :: service.stats()
+    _ :: service.check_text("memory.jet", two, true)
+    after :: service.stats()
+    assert_eq(after.live_items, 2)
+    assert(after.live_item_bytes >= before.live_item_bytes + (two.len() - one.len()), "retained-byte total must cover the added key, function, and diagnostic payload")
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1297
+fn cone_source(functions: USize) -> String {
+    // ONE-arrow ruling: migrate the old fixture's `() Int ->` to `() -> Int`.
+    source := ""
+    loop index in 0..<functions { source.push_str("fn _helper_{index}() -> Int \u{007b} return {index} \u{007d}\n") }
+    source.push_str("fn target() -> Int { return 1 }\nfn run() { print(target()) }\n")
+    ^source
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1306
+#Test("hostile_no_change_corpus_reuses_every_item") {
+    source :: cone_source(256)
+    service := CompilerQueries.new()
+    (cold, cold_receipt) :: service.check_text_with_receipt("hostile-no-change.jet", &source, false)
+    assert(cold.diagnostics.is_empty(), "{cold.diagnostics:Debug}")
+    assert_eq(cold_receipt.program_items, 258)
+    assert_eq(cold_receipt.item_recomputes, 258)
+    (warm, warm_receipt) :: service.check_text_with_receipt("hostile-no-change.jet", &source, false)
+    assert(warm.diagnostics.is_empty(), "{warm.diagnostics:Debug}")
+    assert_eq(warm_receipt.edit_bytes, 0)
+    assert_eq(warm_receipt.query_recomputes, 0)
+    assert_eq(warm_receipt.item_recomputes, 0)
+    assert_eq(warm_receipt.blast_radius(), 0)
+    assert_eq(warm_receipt.program_items, cold_receipt.program_items)
+    assert(service.stats().hits > 0, "the unchanged query must be a hit")
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1328
+fn nested_typecheck_source(depth: USize, leaf: String) -> String {
+    expression := leaf
+    loop _ in 0..<depth { expression = "id({expression})" }
+    "fn id(value: Int) -> Int \u{007b} return value \u{007d}\nfn run() \u{007b}\n    print({expression})\n\u{007d}\n"
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1339
+#Test("hostile_typecheck_cliff_keeps_pinpoint_fresh_diagnostic") {
+    before :: nested_typecheck_source(96, "1")
+    after :: nested_typecheck_source(96, "\"bad\"")
+    incremental := CompilerQueries.new()
+    valid :: incremental.check_text("hostile-typecheck.jet", &before, false)
+    assert(valid.diagnostics.is_empty(), "{valid.diagnostics:Debug}")
+    changed :: incremental.check_text("hostile-typecheck.jet", &after, false)
+    fresh :: CompilerQueries.new().check_text("hostile-typecheck.jet", &after, false)
+    assert_eq(diagnostic_summary(&changed.diagnostics), diagnostic_summary(&fresh.diagnostics), "the hostile diagnostic must match a fresh batch check")
+    diagnostic :: changed.diagnostics.iter().find(fn(d) -> d.code == "E0112").expect("the deep wrong-type call must retain E0112")
+    span :: diagnostic.span.expect("the wrong argument needs a span")
+    assert_eq(after[span.start..<span.end], "\"bad\"")
+    assert(diagnostic.what.contains("Int"))
+    assert(diagnostic.what.contains("String"))
+    assert(!diagnostic.why.is_empty())
+    assert(!diagnostic.fix.is_empty())
+    assert(!diagnostic.what.to_ascii_lowercase().contains("guess"))
+    assert(!diagnostic.what.to_ascii_lowercase().contains("reasonable time"))
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1371
+#Test("reverdict_receipt_reports_the_edited_function_and_is_canonical") {
+    before :: cone_source(8)
+    after :: before.replace("fn target() -> Int { return 1 }", "fn target() -> Int { return 2 }")
+    service := CompilerQueries.new()
+    (cold, _) :: service.check_text_with_receipt("cone.jet", &before, true)
+    assert(cold.diagnostics.is_empty(), "{cold.diagnostics:Debug}")
+    (checked, receipt) :: service.check_text_with_receipt("cone.jet", &after, true)
+    assert(checked.diagnostics.is_empty(), "{checked.diagnostics:Debug}")
+    assert_eq(receipt.program_items, 10)
+    assert_eq(receipt.item_recomputes, 1)
+    assert_eq(receipt.blast_radius(), 1)
+    assert(receipt.reverified_items[0].contains("fn:target"))
+    assert(receipt.callable_contracts.iter().any(fn(c) -> c.failure_source == "implicit default !Err"))
+    assert_eq(receipt.edit_bytes, 2)
+    json :: receipt.to_json()
+    envelope :: if CanonicalJson.parse_canonical(json.as_bytes())! == { .Object(envelope) -> envelope else -> panic("re-verdict receipt envelope") }
+    assert_eq(envelope["schema"], CanonicalJson.String("jet.reverdict-receipt"))
+    assert(if envelope["receipt_id"] == { .String(_) -> true else -> false })
+    content :: if envelope["content"] == { .Object(content) -> content else -> panic("re-verdict receipt content") }
+    assert(if content["callable_contracts"] == { .Array(values) -> !values.is_empty() else -> false })
+    dependency_scope :: if content["dependency_scope"] == { .Object(scope) -> scope else -> panic("re-verdict dependency scope") }
+    assert_eq(dependency_scope["kind"], CanonicalJson.String("checked_semantic"))
+    blast_radius :: if content["blast_radius"] == { .Object(radius) -> radius else -> panic("re-verdict blast radius") }
+    assert_eq(blast_radius["count"], CanonicalJson.Integer("1"))
+    assert_eq(content["claim"], CanonicalJson.String("D-DEVR-CONE1=A"))
+}
+// Rust: crates/jet-driver/src/QueryService.rs:1430
+#Test("cone_benchmark_keeps_one_function_edit_flat_as_program_grows") {
+    measurements := []
+    loop functions in [USize]{16, 128} {
+        before :: cone_source(functions)
+        after :: before.replace("fn target() -> Int { return 1 }", "fn target() -> Int { return 2 }")
+        service := CompilerQueries.new()
+        (cold, _) :: service.check_text_with_receipt("cone-bench.jet", &before, true)
+        assert(cold.diagnostics.is_empty(), "{cold.diagnostics:Debug}")
+        (checked, receipt) :: service.check_text_with_receipt("cone-bench.jet", &after, true)
+        assert(checked.diagnostics.is_empty(), "{checked.diagnostics:Debug}")
+        measurements.push(receipt)
+    }
+    assert_eq(measurements.len(), 2, "cone benchmark measurements")
+    small :: measurements[0]; large :: measurements[1]
+    assert(large.program_items > small.program_items)
+    assert_eq(small.item_recomputes, 1)
+    assert_eq(large.item_recomputes, 1)
+    assert_eq(small.blast_radius(), large.blast_radius())
+    assert_eq(small.reverified_items, large.reverified_items)
+}

@@ -1,0 +1,190 @@
+use SelfhostTerminators.[pass, bootstrap, lower_bundle, decode_events, WITNESSES, PASS_SOURCE, assert_lex_equal, compiler_must_fail, golden_program, lexer_payload_golden_program]
+use jet_lexer as Lexer
+use jet_lexer.[TerminatorDriver, TerminatorEvent]
+use jet_parser as Parser
+use jet_loader as Loader
+use jet_codegen.MIREval.[evaluate_mir_function_with_config, MirEvalConfig, MirExecutionStatus, MirValue]
+use jet_driver.[run_compiler_work]
+use Common as common
+use TirSupport as tir_support
+// GATE #4494: native files, shared mutex/atomic state and real unwind scope restoration.
+use std.fs
+use std.panic.[catch_unwind, AssertUnwindSafe]
+use std.sync.[Shared, Mutex]
+use std.sync.atomic.[AtomicUsize, Ordering]
+
+// Rust: tests/selfhost_terminators.rs:187
+#Test("jet_policy_matches_bounded_reference_and_downstream_parser") {
+    compiled :: pass()
+    run_compiler_work(fn() {
+        loop witness in WITNESSES {
+            expected :: Lexer.lex(witness.source)
+            actual :: Lexer.with_terminator_driver(Val(compiled.driver()), fn() { Lexer.lex(witness.source) })
+            assert_lex_equal(witness.name, actual, expected)
+            reference_parse :: Parser.parse_with_source(expected.0, witness.source)
+            candidate_parse :: Parser.parse_with_source(actual.0, witness.source)
+            assert_eq("{candidate_parse:?}", "{reference_parse:?}", "{witness.name}: downstream parser")
+            if witness.name == "split-arrow" || witness.name == "split-block-crlf" || witness.name == "split-retired-arrow" || witness.name == "split-effect-spellings" {
+                assert(actual.1.any(fn(diagnostic) { diagnostic.code == "E0986" }), "{witness.name}: invalid split header must retain E0986")
+            }
+            if witness.parses {
+                assert(actual.1.is_empty(), "{witness.name}: unexpected lexer diagnostic")
+                assert(candidate_parse.is_ok(), "{witness.name}: complete program must parse")
+            }
+        }
+        variants :: [
+            ("own-source", PASS_SOURCE, Lexer.lex),
+            ("config-url", "url: https://example.test/a\nname: \"probe\"\n", Lexer.lex_config),
+            ("generated-name", "fn __generated() {\n    return 1\n}\n", Lexer.lex_generated)
+        ]
+        loop (name, source, lex) in variants {
+            expected :: lex(source)
+            actual :: Lexer.with_terminator_driver(Val(compiled.driver()), fn() { lex(source) })
+            assert_lex_equal(name, actual, expected)
+            assert_eq("{Parser.parse_with_source(actual.0, source):?}", "{Parser.parse_with_source(expected.0, source):?}", "{name}: parser")
+        }
+    })
+}
+// Rust: tests/selfhost_terminators.rs:221
+#Test("scoped_candidate_reaches_overlay_loader_parser_and_checked_mir") {
+    compiled :: pass()
+    scratch :: common.Scratch.new("selfhost_terminator_overlay")
+    tir_support.write_test_package(scratch.path, tir_support.TIR_TEST_PACKAGE)
+    entry :: scratch.path.join("run.jet")
+    helper :: scratch.path.join("helper.jet")
+    entry_source :: "use helper as h\nfn observed() -> Int { return h.answer() }\nfn run() { print(observed()) }\n"
+    helper_source :: "pub fn answer() -> Int {\n    return 42\n}\n"
+    fs.write(entry, "fn run() {}\n").unwrap()
+    fs.write(helper, helper_source).unwrap()
+    seen :: Shared.new(Mutex.new([[U8]]{}))
+    observed :: seen.clone()
+    driver: TerminatorDriver :: Shared.new(fn(source, facts) -> [TerminatorEvent] Err! {
+        events :: compiled.evaluate(source, facts, U64{50000000})?
+        observed.lock().unwrap().push(source.to_vec())
+        events
+    })
+    Lexer.with_terminator_driver(Val(driver), fn() {
+        run_compiler_work(fn() {
+            bundle := Loader.load_entry_with_overlays(entry.to_str().unwrap(), [(entry, entry_source), (helper, helper_source)], false)
+                .expect("candidate lexer must feed the real overlay Loader")
+            mir :: lower_bundle(&bundle, "overlay terminator fixture")
+            function :: mir.functions.find(fn(row) { row.name == "observed" }).unwrap().id
+            result :: evaluate_mir_function_with_config(mir, function, [MirValue]{}, MirEvalConfig.default()).expect("checked imported value executes")
+            assert_eq(result.status, MirExecutionStatus.Completed)
+            if result.value == {
+                .Present(value) -> { if value == { .Int(42) -> {}; else -> assert(false, "scoped compiler must preserve the imported function's result") } }
+                else -> assert(false, "scoped compiler must preserve the imported function's result")
+            }
+        })
+    })
+    sources :: seen.lock().unwrap()
+    assert(sources.any(fn(source) { source == entry_source.bytes() }), "entry overlay bypassed candidate")
+    assert(sources.any(fn(source) { source == helper_source.bytes() }), "import overlay worker bypassed candidate")
+    assert(Lexer.terminator_driver().is_none())
+}
+// Rust: tests/selfhost_terminators.rs:269
+#Test("callback_evaluator_and_event_abi_failures_are_not_reference_fallbacks") {
+    compiled :: pass()
+    compiler_must_fail(Shared.new(fn(_, _) { Err("deliberate callback failure") }), "deliberate callback failure")
+    compiler_must_fail(Shared.new(fn(source, facts) { compiled.evaluate(source, facts, U64{0}) }), "exhausted its fuel")
+    compiler_must_fail(Shared.new(fn(_, _) { decode_events(MirValue.String("wrong ABI")) }), "non-list carrier")
+    compiler_must_fail(Shared.new(fn(_, _) { [TerminatorEvent.InsertSemi{before: Int.MAX, at: 0}] }), "invalid raw-token index")
+    compiler_must_fail(Shared.new(fn(_, _) { [TerminatorEvent.InsertSemi{before: 0, at: 0}, TerminatorEvent.InsertSemi{before: 0, at: 0}] }), "event order")
+}
+// Rust: tests/selfhost_terminators.rs:282
+#Test("scoped_driver_restores_outer_candidate_after_nested_unwind") {
+    compiled :: pass()
+    calls :: Shared.new(AtomicUsize.new(0))
+    observed :: calls.clone()
+    driver: TerminatorDriver :: Shared.new(fn(source, facts) -> [TerminatorEvent] Err! {
+        result :: compiled.evaluate(source, facts, U64{50000000})?
+        _ :: observed.fetch_add(1, Ordering.Relaxed)
+        result
+    })
+    run_compiler_work(fn() {
+        Lexer.with_terminator_driver(Val(driver), fn() {
+            expected :: Lexer.lex("x")
+            failed :: catch_unwind(AssertUnwindSafe(fn() {
+                Lexer.with_terminator_driver(Val(Shared.new(fn(_, _) { Err("nested candidate") })), fn() { Lexer.lex("x") })
+            }))
+            assert(failed.is_err())
+            assert_lex_equal("restored outer driver", Lexer.lex("x"), expected)
+        })
+    })
+    assert_eq(calls.load(Ordering.Relaxed), 2, "nested unwind lost the real evaluator")
+    assert(Lexer.terminator_driver().is_none())
+}
+// Rust: tests/selfhost_terminators.rs:304
+#Test("six_policy_mutations_are_killed_through_candidate_event_application") {
+    mutations :: [
+        ("omit-eof", "if ends_statement(previous) && previous != K_RBRACE {", "if false {", "x"),
+        ("minus-boundary", "|| kind == K_MINUS || kind == K_STAR", "|| kind == K_STAR", "x\n-y"),
+        ("comment-last-code", "if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT -> index += 1 else {", "if kind == K_LINE_COMMENT || kind == K_BLOCK_COMMENT {\n            last_code = index\n            index += 1\n        } else {", "x // c\ny"),
+        ("guard-newline", "return !newline_between(source, guard_start, facts[cursor * 4 + 1])", "return true", "x\n.Key && ready\n-> 1"),
+        ("unary-not-suppression", "return kind_at(facts, index) == K_BANG && kind_at(facts, index + 1) == K_IDENT && kind_at(facts, index + 2) == K_UNIFIED_ARROW", "return kind_at(facts, index) == K_BANG", "x\n!y"),
+        ("shift-synthetic-span", "events.push(end)", "events.push(end + 1)", "x\ny")
+    ]
+    loop (name, before, after, source) in mutations {
+        assert_eq(PASS_SOURCE.matches(before).count(), 1, "mutation {name} must target one decision")
+        mutant :: bootstrap(name, PASS_SOURCE.replacen(before, after, 1))
+        run_compiler_work(fn() {
+            reference :: Lexer.lex(source)
+            changed :: Lexer.with_terminator_driver(Val(mutant.driver()), fn() { Lexer.lex(source) })
+            assert_ne(changed.0, reference.0, "{name} survived: candidate driver/application was bypassed")
+        })
+    }
+}
+// Rust: tests/selfhost_terminators.rs:356
+#Test("same_jet_pass_golden_executes_aot_default_interpreter_and_awaited_web") {
+    assert(tir_support.have_rustc(), "AOT proof is required, never skipped")
+    (source, expected) :: golden_program()
+    // Retired tier1/deopt representation assertions are replaced by execution parity.
+    tir_support.assert_tiers_agree("selfhost_terminators_golden", source, expected)
+    (native_code, native_stdout, stderr) :: tir_support.jit_run("selfhost_terminators_golden", source)
+    assert_eq(native_code, 0, "default run failed:\n{stderr}")
+    assert_eq(native_stdout, expected, "default pass changed the golden:\n{stderr}")
+    tir_support.assert_awaited_web_tier("selfhost_terminators_web", source, expected)
+}
+// Rust: tests/selfhost_terminators.rs:421
+#Test("jet_lexer_payload_golden_covers_whitespace_exponents_and_shifted_spans") {
+    assert(tir_support.have_rustc(), "AOT proof is required, never skipped")
+    (source, expected) :: lexer_payload_golden_program()
+    tir_support.assert_tiers_agree("selfhost_lexer_payload_golden", source, expected)
+    tir_support.assert_awaited_web_tier("selfhost_lexer_payload_web", source, expected)
+}
+// Rust: tests/selfhost_terminators.rs:429
+#Test("jet_lexer_exports_parser_ready_tokens_spans_payloads_and_diagnostics") {
+    source :: "{PASS_SOURCE}\nfn run() -> {{\n    result :: lex_payload(\"Name 500ms 1.25 true \\\"ok\\\" 'x'\", false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.text)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.integer ?? -1)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[2].kind)\n    print(result.tokens[2].payload.decimal ?? Float{{0}})\n    print(result.tokens[3].kind)\n    print(result.tokens[4].kind)\n    print(result.tokens[4].payload.decoded)\n    print(result.tokens[5].kind)\n    print(result.tokens[5].payload.decoded)\n    print(result.tokens[6].kind)\n    print(result.diagnostics.len())\n    interpolated :: lex_payload(\"\\\"a{{value + 1}}b\\\"\".bytes(), false)\n    print(interpolated.tokens[0].payload.string_parts.len())\n    print(interpolated.tokens[0].payload.string_parts[0].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens.len())\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[0].span.start)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].kind)\n    print(interpolated.tokens[0].payload.string_parts[1].tokens[3].span.start)\n    terminated :: lex(\"fn f() {{\\n    value\\n}}\".bytes())\n    print(terminated.tokens[6].kind)\n    print(terminated.tokens[6].span.start)\n    print(terminated.tokens[6].span.end)\n    bad :: lex_payload(\"§§\".bytes(), false)\n    print(bad.diagnostics.len())\n    print(bad.diagnostics[0].span.start)\n    print(bad.diagnostics[1].span.start)\n    prefix :: lex_payload(\"r\\\"bad\\\"\".bytes(), false)\n    print(prefix.diagnostics[0].code)\n    print(prefix.diagnostics[0].span.end)\n}}\n"
+    (code, stdout, stderr) :: tir_support.jit_run("selfhost_parser_ready_lexer", source)
+    assert_eq(code, 0, "lexer interface run failed:\n{stderr}")
+    assert_eq(stdout, "1\nName\n6\n500\nms\n5\n1.25\n8\n3\nok\n7\nx\n49\n0\n3\n1\n2\n4\n3\n49\n12\n86\n18\n18\n2\n0\n2\nE0003\n1\n")
+}
+// Rust: tests/selfhost_terminators.rs:442
+#Test("jet_lexer_scans_inline_foreign_bodies_and_interpolations") {
+    source := PASS_SOURCE
+    &source.push_str("\nfn run() -> {\n")
+    &source.push_str("    foreign :: lex_payload(`#FFI(C) fn f() { \"\"\"int f() { return \"x\"; }\"\"\" }`.bytes(), false)\n")
+    &source.push_str("    print(foreign.tokens[10].payload.decoded)\n    print(foreign.tokens[10].payload.string_parts[0].kind)\n    print(foreign.diagnostics.len())\n")
+    &source.push_str("    missing :: lex_payload(`#FFI(C) fn bad() { \"\"\"int f() {`.bytes(), false)\n")
+    &source.push_str("    print(missing.diagnostics.len())\n    print(missing.diagnostics[0].code)\n    diagnostic_span :: missing.diagnostics[0].span ?? return\n    print(diagnostic_span.start)\n")
+    &source.push_str("    commented :: lex_payload(`\"a{ /* } */ value + 1}b\"`.bytes(), false)\n    print(commented.tokens[0].payload.string_parts[1].tokens[1].payload.text)\n    print(commented.tokens[0].payload.string_parts[1].tokens[1].span.start)\n}\n")
+    (code, stdout, stderr) :: tir_support.jit_run("selfhost_inline_foreign_lexer", source)
+    assert_eq(code, 0, "inline foreign lexer run failed:\n{stderr}")
+    assert_eq(stdout, "int f() { return \"x\"; }\n1\n0\n1\nE0002\n19\nvalue\n12\n")
+}
+// Rust: tests/selfhost_terminators.rs:467
+#Test("jet_lexer_keeps_unicode_alphanumeric_unit_suffixes") {
+    source := PASS_SOURCE
+    &source.push_str("\nfn run() -> {\n    result :: lex_payload(`12msμ 3usd٢`.bytes(), false)\n    print(result.tokens[0].kind)\n    print(result.tokens[0].payload.suffix)\n    print(result.tokens[0].span.end)\n    print(result.tokens[1].kind)\n    print(result.tokens[1].payload.suffix)\n    print(result.tokens[1].span.end)\n    print(result.tokens[2].kind)\n}\n")
+    (code, stdout, stderr) :: tir_support.jit_run("selfhost_unicode_unit_suffixes", source)
+    assert_eq(code, 0, "unicode unit suffix lexer run failed:\n{stderr}")
+    assert_eq(stdout, "6\nmsμ\n6\n6\nusd٢\n13\n49\n")
+}
+// Rust: tests/selfhost_terminators.rs:488
+#Test("jet_lexer_uses_zero_for_integer_payload_overflow") {
+    source := PASS_SOURCE
+    &source.push_str("\nfn run() -> {\n    values :: lex_payload(`9223372036854775807 9223372036854775808 0x7fffffffffffffff 0x8000000000000000`.bytes(), false)\n    print(values.tokens[0].payload.integer ?? -1)\n    print(values.tokens[1].payload.integer ?? -1)\n    print(values.tokens[2].payload.integer ?? -1)\n    print(values.tokens[3].payload.integer ?? -1)\n    print(values.diagnostics.len())\n    print(values.tokens[4].kind)\n}\n")
+    (code, stdout, stderr) :: tir_support.jit_run("selfhost_integer_payload_overflow", source)
+    assert_eq(code, 0, "integer overflow lexer run failed:\n{stderr}")
+    assert_eq(stdout, "9223372036854775807\n0\n9223372036854775807\n0\n0\n49\n")
+}

@@ -1,0 +1,343 @@
+use jet_foundation.Tests.Integration.CliParts.Support.*
+use jet_foundation.Registry
+use jet.Explain
+use jet.CLI
+use std.fs
+use std.env
+use std.process.Command // GATE #4494: native command output and filesystem fixtures.
+
+// Rust: tests/cli_parts/surface.rs:1811
+#Test("clean_check_json_golden") {
+    dir :: isolated_cwd("check_json_clean")
+    fs.write(dir.join("clean.jet"), "fn run() -> {}\n").unwrap()
+    out :: Command.new(jet()).args(["check", "clean.jet", "--json"]).current_dir(&dir).output().unwrap()
+    assert_eq(out.status.code(), Some(0))
+    assert(out.stderr.is_empty(), "clean JSON check wrote stderr: {out.stderr:?}")
+    check_snapshot("check_json_clean.txt", scrub(String.from_utf8_lossy(&out.stdout), &dir.join("clean.jet")))
+}
+// Rust: tests/cli_parts/surface.rs:1835
+#Test("build_json_golden") {
+    p :: bad_file("1835")
+    out :: Command.new(jet()).arg("build").arg(&p).arg("--json").output().unwrap()
+    stderr :: scrub(String.from_utf8_lossy(&out.stderr), &p)
+    check_snapshot("build_json.txt", stderr)
+}
+// Rust: tests/cli_parts/surface.rs:1848
+#Test("test_json_golden") {
+    p :: bad_file("1848")
+    out :: Command.new(jet()).arg("test").arg("--show-default").arg(&p).arg("--json").output().unwrap()
+    stderr :: scrub(String.from_utf8_lossy(&out.stderr), &p)
+    check_snapshot("test_json.txt", stderr)
+}
+// Rust: tests/cli_parts/surface.rs:1862
+#Test("ci_output_is_ansi_free_when_piped") {
+    p :: bad_file("1862")
+    piped :: Command.new(jet()).arg("check").arg(&p).output().unwrap()
+    s :: String.from_utf8_lossy(&piped.stderr)
+    assert(!s.contains('\x1b'), "piped output must be ANSI-free:\n{s}")
+    no_color :: Command.new(jet()).arg("check").arg(&p).env("NO_COLOR", "1").output().unwrap()
+    nc :: String.from_utf8_lossy(&no_color.stderr)
+    assert(!nc.contains('\x1b'), "NO_COLOR output must be ANSI-free")
+    assert_eq(s, nc, "piped and NO_COLOR output must match exactly")
+}
+// Rust: tests/cli_parts/surface.rs:1888
+#Test("color_always_adds_ansi_but_flag_wins_over_no_color") {
+    p :: bad_file("1888")
+    out :: Command.new(jet()).arg("check").arg(&p).arg("--color=always").env("NO_COLOR", "1").output().unwrap()
+    s :: String.from_utf8_lossy(&out.stderr)
+    assert(s.contains('\x1b'), "--color=always must win over NO_COLOR and emit ANSI")
+}
+// Rust: tests/cli_parts/surface.rs:1905
+#Test("every_registered_code_has_an_explain_entry") {
+    codes :: Registry.diagnostic_rows().iter().map(fn(row) -> row.code.to_string()).collect()
+    assert(codes.len() > 150, "expected the full code registry, found {codes.len()}")
+    index :: Explain.index()
+    loop code in &codes {
+        assert(index.contains_key(code), "code {code} is registered in typed diagnostic rows but has no explain entry")
+        out :: Command.new(jet()).arg("explain").arg(code).output().unwrap()
+        assert_eq(out.status.code(), Some(0), "`jet explain {code}` should succeed")
+        assert(String.from_utf8_lossy(&out.stdout).contains(code.as_str()), "`jet explain {code}` output should name the code")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:1944
+#Test("explain_golden") {
+    out :: Command.new(jet()).arg("explain").arg("E2001").output().unwrap()
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    check_snapshot("explain_E2001.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:1955
+#Test("cost_cli_surfaces_hot_loop_rows_and_optimizer_proofs") {
+    root :: env.manifest_dir()
+    semantic :: root.join("tests/cli/cost_rows.jet")
+    lint :: Command.new(jet()).args(["lint", "--cost", semantic.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(lint.status.code(), Some(1), "semantic hot-loop costs must fail the opt-in lint: {String.from_utf8_lossy(&lint.stderr)}")
+    check :: Command.new(jet()).args(["check", semantic.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert(check.status.success(), "check should report cost lints without failing: {String.from_utf8_lossy(&check.stderr)}")
+    check_stderr :: String.from_utf8_lossy(&check.stderr)
+    assert_eq(check_stderr.matches("Warning [L2510] (hidden_cost_in_loop):").count(), 5, "check must deduplicate one diagnostic per semantic cost kind:\n{check_stderr}")
+    assert_eq(check_stderr.matches("view into an owned slot").count(), 1, "check must emit the sema view-copy diagnostic once:\n{check_stderr}")
+    lint_stderr :: String.from_utf8_lossy(&lint.stderr)
+    assert(lint_stderr.contains("L2510") && lint_stderr.contains("Why:") && lint_stderr.contains("Fix:"), "semantic cost lint lost its registered What/Why/Fix surface:\n{lint_stderr}")
+    loop operation in ["Editing a shared map backing store", "An exact Int operation may spill to bigint", "Using a generic collection representation", "Constructing an Outcome carrier"] {
+        assert_eq(lint_stderr.matches(operation).count(), 1, "semantic cost lint must emit `{operation}` once:\n{lint_stderr}")
+    }
+    assert_eq(lint_stderr.matches("view into an owned slot").count(), 1, "lint must emit the sema view-copy diagnostic once:\n{lint_stderr}")
+    assert_eq(lint_stderr.matches("Warning [L2510] (hidden_cost_in_loop):").count(), 5, "lint must deduplicate one diagnostic per semantic cost kind:\n{lint_stderr}")
+    explain :: Command.new(jet()).args(["explain", "--cost", semantic.to_str().unwrap(), "--json"]).env("NO_COLOR", "1").output().unwrap()
+    assert(explain.status.success(), "semantic cost explanation failed: {String.from_utf8_lossy(&explain.stderr)}")
+    explain_stdout :: String.from_utf8_lossy(&explain.stdout)
+    loop kind in ["view materialization", "map copy-on-write", "exact Int spill", "outcome construction", "generic representation fallback"] {
+        assert(explain_stdout.contains("\"kind\":\"{kind}\""), "cost explanation omitted `{kind}`:\n{explain_stdout}")
+    }
+    assert(explain_stdout.contains("\"state\":\"semantic remainder\""), "cost explanation omitted semantic remainder state:\n{explain_stdout}")
+    assert_eq(explain_stdout.matches("\"tier\":\"shared-tir\"").count(), 5, "each explained cost row must carry one shared TIR tier label:\n{explain_stdout}")
+    assert(!explain_stdout.contains("\"source\":\"shared-tir\""), "explain must not add a redundant shared TIR source field:\n{explain_stdout}")
+    explain_human :: Command.new(jet()).args(["explain", "--cost", semantic.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert(explain_human.status.success(), "human cost explanation failed: {String.from_utf8_lossy(&explain_human.stderr)}")
+    explain_human_stdout :: String.from_utf8_lossy(&explain_human.stdout)
+    assert(explain_human_stdout.lines().filter(fn(line) -> !line.trim().is_empty()).all(fn(line) -> line.contains("tier=shared-tir")), "human explain rows must identify the shared TIR tier:\n{explain_human_stdout}")
+    removed :: root.join("tests/cli/cost_removed.jet")
+    removed_lint :: Command.new(jet()).args(["lint", "--cost", removed.to_str().unwrap()]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(removed_lint.status.code(), Some(0), "optimizer-proven exact Int removal must not lint: {String.from_utf8_lossy(&removed_lint.stderr)}")
+    removed_out :: String.from_utf8_lossy(&removed_lint.stdout)
+    removed_err :: String.from_utf8_lossy(&removed_lint.stderr)
+    assert(removed_out.contains("no hidden dynamic costs in loops") && !removed_out.contains("L2510") && !removed_err.contains("L2510"), "optimizer-proven removal unexpectedly emitted a lint:\nstdout={removed_out}\nstderr={removed_err}")
+    removed_explain :: Command.new(jet()).args(["explain", "--cost", removed.to_str().unwrap(), "--json"]).env("NO_COLOR", "1").output().unwrap()
+    assert(removed_explain.status.success(), "removed cost explanation failed: {String.from_utf8_lossy(&removed_explain.stderr)}")
+    removed_stdout :: String.from_utf8_lossy(&removed_explain.stdout)
+    assert(removed_stdout.contains("\"kind\":\"exact Int spill\"") && removed_stdout.contains("\"state\":\"optimizer-proven removed\""), "explain omitted optimizer proof for exact Int:\n{removed_stdout}")
+}
+// Rust: tests/cli_parts/surface.rs:2134
+#Test("cost_cli_rejects_incomplete_reachable_tir_projection") {
+    root :: env.manifest_dir()
+    loop (fixture, surface) in [("cost_incomplete_generic.jet", "identity"), ("cost_incomplete_foreign.jet", "value")] {
+        file :: root.join("tests/cli").join(fixture)
+        loop args in [["check", file.to_str().unwrap()], ["lint", "--cost", file.to_str().unwrap()], ["explain", "--cost", file.to_str().unwrap(), "--json"]] {
+            output :: Command.new(jet()).args(args).env("NO_COLOR", "1").output().unwrap()
+            stderr :: String.from_utf8_lossy(&output.stderr)
+            assert(!output.status.success() && stderr.contains("E2104") && stderr.contains("cost projection") && stderr.contains("incomplete") && stderr.contains(surface), "{fixture} must reject the omitted reachable {surface} surface:\n{stderr}")
+        }
+    }
+}
+// Rust: tests/cli_parts/surface.rs:2165
+#Test("explain_golden_e1803_application_authority") {
+    out :: Command.new(jet()).arg("explain").arg("E1803").output().unwrap()
+    assert(out.status.success(), "jet explain E1803 should succeed")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    assert(stdout.contains("Application authority is undecided or denies a required effect"), "{stdout}")
+    assert(!stdout.contains("REPL host effects"), "{stdout}")
+    check_snapshot("explain_E1803.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2182
+#Test("explain_build_fact_golden") {
+    dir :: isolated_cwd("explain_build_fact")
+    file :: dir.join("fact.jet")
+    fs.write(&file, "fn run() -> {}\n").unwrap()
+    out :: Command.new(jet()).args(["explain", "Build.Package.Name", file.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "build fact explain failed: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    check_snapshot("explain_build_fact.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2202
+#Test("explain_typed_build_setting_golden") {
+    dir :: env.manifest_dir().join("Examples/features/packages/typed_settings")
+    out :: Command.new(jet()).args(["explain", "build.settings.tls", "run.jet", "--profile=release", "--set", "tls=true"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert(out.status.success(), "typed setting explain failed: {String.from_utf8_lossy(&out.stderr)}")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    check_snapshot("explain_build_setting.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2228
+#Test("explain_runtime_stop_golden") {
+    loop code in ["E3001", "E3002", "E3003", "E3004", "E3005", "E3010", "E3011", "E3012", "E3014"] {
+        out :: Command.new(jet()).arg("explain").arg(code).output().unwrap()
+        assert(out.status.success(), "jet explain {code} should succeed")
+        stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+        check_snapshot("explain_{code}.txt", stdout)
+    }
+}
+// Rust: tests/cli_parts/surface.rs:2245
+#Test("explain_golden_e0003") {
+    out :: Command.new(jet()).arg("explain").arg("E0003").output().unwrap()
+    assert(out.status.success(), "jet explain E0003 should succeed")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    assert(stdout.contains("What this means:"), "{stdout}")
+    assert(stdout.contains("Why Jet enforces it:"), "{stdout}")
+    assert(stdout.contains("How to fix it:"), "{stdout}")
+    assert(stdout.contains("Example:"), "{stdout}")
+    assert(!stdout.contains("longer explanation will land"), "{stdout}")
+    check_snapshot("explain_E0003.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2262
+#Test("explain_e2211_golden") {
+    out :: Command.new(jet()).arg("explain").arg("E2211").output().unwrap()
+    assert(out.status.success(), "jet explain E2211 should succeed")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    assert(stdout.contains("This code is retired"), "{stdout}")
+    check_snapshot("explain_E2211.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2275
+#Test("default_jet_run_deopts_jit_gap_silently") {
+    dir :: isolated_cwd("jit_gap_run")
+    file :: dir.join("env.jet")
+    fs.write(&file, "use core.sys as env\nfn run() -> {\n    print(env.current_dir())\n}\n").unwrap()
+    output :: Command.new(jet()).args(["run", file.to_str().unwrap()]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(0), "stderr={String.from_utf8_lossy(&output.stderr)}\nstdout={String.from_utf8_lossy(&output.stdout)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(!stderr.contains("E2211"), "E2211 retired: {stderr}")
+    assert(!String.from_utf8_lossy(&output.stdout).is_empty(), "deopted env.current_dir() should print a path")
+}
+// Rust: tests/cli_parts/surface.rs:2305
+#Test("malformed_advisory_database_is_e2607_snapshot") {
+    dir :: isolated_cwd("audit_e2607")
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.create_dir(dir.join(".jet")).unwrap()
+    fs.write(dir.join(".jet/lock"), "version = 1\n").unwrap()
+    advisory_db :: dir.join("advisories.txt")
+    fs.write(&advisory_db, "missing|fields|only\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "audit", "--advisory-db"]).arg(&advisory_db).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(1))
+    assert(output.stdout.is_empty())
+    check_snapshot("audit_malformed_e2607.txt", String.from_utf8(output.stderr).unwrap())
+}
+// Rust: tests/cli_parts/surface.rs:2333
+#Test("audit_missing_advisory_database_fails_closed") {
+    dir :: isolated_cwd("audit_missing_e2611")
+    fs.write(dir.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.create_dir(dir.join(".jet")).unwrap()
+    fs.write(dir.join(".jet/lock"), "version = 1\n").unwrap()
+    output :: Command.new(jet()).args(["inspect", "audit"]).current_dir(&dir).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(output.status.code(), Some(1))
+    assert(output.stdout.is_empty())
+    check_snapshot("audit_missing_e2611.txt", String.from_utf8(output.stderr).unwrap())
+}
+// Rust: tests/cli_parts/surface.rs:2358
+#Test("jetpack_missing_build_log_golden") {
+    cwd :: isolated_cwd("2358")
+    root :: cwd.join("jetpack-root")
+    out :: Command.new(jet()).args(["inspect", "logs", "definitely_missing", "--no-color"]).current_dir(&cwd).env("JETPACK_ROOT", &root).output().unwrap()
+    assert_eq(out.status.code(), Some(2), "missing log is usage-class error")
+    stderr :: String.from_utf8_lossy(&out.stderr).into_owned()
+    check_snapshot("e1274_missing_build_log.txt", stderr)
+}
+// Rust: tests/cli_parts/surface.rs:2377
+#Test("jetpack_missing_package_explain_golden") {
+    cwd :: isolated_cwd("2377")
+    root :: cwd.join("jetpack-root")
+    out :: Command.new(jet()).args(["explain", "definitely_missing", "--no-color"]).current_dir(&cwd).env("JETPACK_ROOT", &root).output().unwrap()
+    assert_eq(out.status.code(), Some(2), "missing package is an explain error")
+    stderr :: String.from_utf8_lossy(&out.stderr).into_owned()
+    check_snapshot("e1274_missing_package_explain.txt", stderr)
+}
+// Rust: tests/cli_parts/surface.rs:2396
+#Test("no_args_repl_banner_golden") {
+    out :: Command.new(jet()).env("NO_COLOR", "1").output().unwrap()
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    check_snapshot("no_args_repl_banner.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2403
+#Test("question_mark_is_help_golden") {
+    out :: Command.new(jet()).arg("?").env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), Some(0), "`jet ?` should exit 0")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    check_snapshot("question_mark_help.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2417
+// D-FE-HELP1=D: piped query prints best matches once, without raw mode.
+#Test("question_mark_query_prints_matches_non_interactively") {
+    out :: Command.new(jet()).args(["?", "run"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), Some(0), "`jet ? run` should exit 0")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    assert(stdout.contains("jet run"), "expected a `run` match, got:\n{stdout}")
+}
+// Rust: tests/cli_parts/surface.rs:2433
+#Test("question_mark_language_symbol_uses_shared_semantic_index") {
+    output :: Command.new(env.bin_exe("jet")).args(["?", "List.filter"]).env("NO_COLOR", "1").output().expect("run jet ! List.filter")
+    assert(output.status.success(), "status: {output.status:?}")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("List.filter(f: fn(T) -> Bool) -> List<T>"), "signature missing: {stdout}")
+    assert(stdout.contains("Keeps items where f(item) is true."), "summary missing: {stdout}")
+    assert(stdout.contains("Example:"), "example missing: {stdout}")
+    assert(stdout.contains("core.collections"), "provenance missing: {stdout}")
+}
+// Rust: tests/cli_parts/surface.rs:2461
+// Per-command summary, usage and flags, never the global inventory.
+#Test("help_run_is_per_command_not_the_global_screen") {
+    out :: Command.new(jet()).args(["help", "run"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), Some(0), "`jet help run` should exit 0")
+    stdout :: String.from_utf8_lossy(&out.stdout).into_owned()
+    assert(!stdout.contains("Welcome to"), "`jet help run` must not dump the global usage screen:\n{stdout}")
+    check_snapshot("help_run.txt", stdout)
+}
+// Rust: tests/cli_parts/surface.rs:2479
+// Both spellings use command_help and cannot drift.
+#Test("help_command_and_command_help_flag_render_identically") {
+    loop command in ["run", "build", "test", "check", "repl", "eval", "fuzz"] {
+        via_help :: Command.new(jet()).args(["help", command]).env("NO_COLOR", "1").output().unwrap()
+        via_flag :: Command.new(jet()).args([command, "--help"]).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(String.from_utf8_lossy(&via_help.stdout), String.from_utf8_lossy(&via_flag.stdout), "`jet help {command}` and `jet {command} --help` disagree")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:2502
+#Test("bare_target_requiring_verbs_print_targeted_usage") {
+    out :: Command.new(jet()).arg("fix").env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), Some(2), "bare `jet fix` should exit 2")
+    stderr :: String.from_utf8_lossy(&out.stderr).into_owned()
+    check_snapshot("fix_bare_usage.txt", stderr)
+    loop verb in ["fix", "lint", "fuzz"] {
+        out :: Command.new(jet()).arg(verb).env("NO_COLOR", "1").output().unwrap()
+        assert_eq(out.status.code(), Some(2), "bare `jet {verb}` should exit 2")
+        stderr :: String.from_utf8_lossy(&out.stderr)
+        assert(!stderr.contains("Welcome to"), "bare `jet {verb}` must not dump the global screen:\n{stderr}")
+        assert(stderr.contains("jet {verb}"), "bare `jet {verb}` should show its own usage line:\n{stderr}")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:2538
+#Test("per_command_help_shows_real_argument_shapes") {
+    loop (command, shape) in [("repl", "jet repl [<file.jet>]"), ("eval", "jet eval <file.jet|expression>"), ("lint", "jet lint --a11y <file.jet>"), ("fuzz", "jet fuzz <file.jet> [<test>]")] {
+        out :: Command.new(jet()).args([command, "--help"]).env("NO_COLOR", "1").output().unwrap()
+        stdout :: String.from_utf8_lossy(&out.stdout)
+        assert(stdout.contains(shape), "`jet {command} --help` should show `{shape}`, got:\n{stdout}")
+        assert(!stdout.contains("jet {command} [args]"), "`jet {command} --help` still shows the placeholder shape:\n{stdout}")
+    }
+}
+// Rust: tests/cli_parts/surface.rs:2567
+#Test("eval_accepts_an_expression_argument") {
+    json :: Command.new(jet()).args(["eval", "1 + 2", "--json"]).env("NO_COLOR", "1").output().unwrap()
+    stderr :: String.from_utf8_lossy(&json.stderr)
+    assert_eq(json.status.code(), Some(0), "stderr: {stderr}")
+    assert(!stderr.contains("E2105"), "expression was read as a path: {stderr}")
+    value := String.from_utf8_lossy(&json.stdout).trim() // #4303
+    assert_eq(value, "3")
+    pretty :: Command.new(jet()).args(["eval", "1 + 2"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(pretty.status.code(), Some(0))
+    pretty_value := String.from_utf8_lossy(&pretty.stdout).trim() // #4303
+    assert_eq(pretty_value, "3")
+}
+// Rust: tests/cli_parts/surface.rs:2593
+#Test("eval_missing_jet_file_still_reports_not_found") {
+    out :: Command.new(jet()).args(["eval", "no_such_program.jet"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(out.status.code(), Some(1))
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E2105"), "expected a read failure, got: {stderr}")
+}
+// Rust: tests/cli_parts/surface.rs:2611
+// Human output includes print then value; JSON forwards program output to stderr.
+#Test("eval_file_forwards_print_output_alongside_the_value") {
+    dir :: isolated_cwd("eval_print_output")
+    file :: dir.join("printer.jet")
+    fs.write(&file, "fn run() -> {\n    print(\"hi\")\n}\n").unwrap()
+    human :: Command.new(jet()).args(["eval", file.to_string_lossy()]).env("NO_COLOR", "1").output().unwrap()
+    stdout :: String.from_utf8_lossy(&human.stdout)
+    assert_eq(human.status.code(), Some(0), "{String.from_utf8_lossy(&human.stderr)}")
+    assert(stdout.contains("hi"), "print output was swallowed: {stdout:?}")
+    assert(stdout.contains("()"), "the run value should still render: {stdout:?}")
+    json :: Command.new(jet()).args(["eval", file.to_string_lossy(), "--json"]).env("NO_COLOR", "1").output().unwrap()
+    assert_eq(json.status.code(), Some(0))
+    assert(!String.from_utf8_lossy(&json.stdout).contains("hi"), "--json stdout must stay one JSON document: {String.from_utf8_lossy(&json.stdout):?}")
+    assert(String.from_utf8_lossy(&json.stderr).contains("hi"), "--json should forward program output to stderr: {String.from_utf8_lossy(&json.stderr):?}")
+}
+// Rust: tests/cli_parts/surface.rs:2656
+#Test("parser_registry_has_no_dispatch_drift") {
+    violations :: CLI.parser_inventory_violations()
+    assert(violations.is_empty(), "CLI parser registry drift: {violations:?}")
+}

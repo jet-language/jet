@@ -1,863 +1,177 @@
-// PORT-PENDING 1168 tests-terminal-module-group: tests/terminal.rs:1-762
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Cross-tier differential for the shared terminal Prelude path: default
-//RS //! `jet run`, AOT (`--release`), and the interpreter must answer the same, on a
-//RS //! PTY and off it, and must end when the input stream is closed.
-//RS 
-//RS #![cfg(unix)]
-//RS 
-//RS use std::fs::{self, OpenOptions};
-//RS use std::io::Write;
-//RS use std::process::{Command, Stdio};
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS mod common;
-//RS 
-//RS const EXAMPLE: &str = concat!(
-//RS     env!("CARGO_MANIFEST_DIR"),
-//RS     "/Examples/features/io/terminal_parity.jet"
-//RS );
-//RS 
-//RS /// The answers this example needs, from their one home in `tests/common`.
-//RS /// `tests/golden.rs`, `tests/corelib_parts/http_data.rs` and `tests/dev.rs`
-//RS /// read the same entry, so a change to the transcript reaches every tier at
-//RS /// once instead of leaving one harness answering an older program.
-//RS fn answers() -> &'static common::ExampleStdin {
-//RS     common::example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers")
-//RS }
-//RS 
-//RS /// A differential means nothing until we know which tier answered. The resident
-//RS /// tier has to compile `run` itself: a silent deopt would let tier0 answer for
-//RS /// every "tier" under test, and the transcripts would then agree for the wrong
-//RS /// reason.
-//RS fn assert_resident_tier_compiles_run() {
-//RS     let mut bundle = jet::Loader::load_entry(EXAMPLE).expect("terminal_parity loads");
-//RS     let diags = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     assert!(
-//RS         !diags
-//RS             .iter()
-//RS             .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
-//RS         "terminal_parity must check: {diags:?}"
-//RS     );
-//RS     let plan = common::cranelift_tier_plan(&bundle);
-//RS     assert!(
-//RS         !plan.whole_interp,
-//RS         "the whole program deopted to the interpreter: {plan:?}"
-//RS     );
-//RS     assert!(
-//RS         plan.native.contains("run"),
-//RS         "`run` must select the native tier; native={:?} deopt={:?}",
-//RS         plan.native,
-//RS         plan.deopt
-//RS     );
-//RS }
-//RS 
-//RS /// The same proof against a real default `jet run`: the tier rows must name a
-//RS /// natively compiled function and no deopt. Stdin is fed so the run completes,
-//RS /// and the trace lands on stderr, so this run stays out of the stream-order
-//RS /// comparison below.
-//RS fn assert_default_run_traces_native_tier() {
-//RS     // A warm run cache would answer from a published artifact and print no tier
-//RS     // rows, which would read as "no deopt" without proving anything. Point the
-//RS     // cache at a fresh directory so this run plans its tiers.
-//RS     let cache = std::env::temp_dir().join(format!(
-//RS         "jet_terminal_parity_trace_cache_{}",
-//RS         std::process::id()
-//RS     ));
-//RS     let _ = fs::remove_dir_all(&cache);
-//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "--quiet", "--trace-tiers", EXAMPLE])
-//RS         .env("NO_COLOR", "1")
-//RS         .env("JET_RUN_CACHE_DIR", &cache)
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .expect("traced jet run must start");
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .expect("traced stdin")
-//RS         .write_all(answers().piped.as_bytes())
-//RS         .expect("write traced answers");
-//RS     let output = child.wait_with_output().expect("collect tier trace");
-//RS     let trace = String::from_utf8_lossy(&output.stderr).into_owned();
-//RS     let _ = fs::remove_dir_all(&cache);
-//RS     assert!(output.status.success(), "traced run failed: {trace}");
-//RS     assert!(
-//RS         trace.contains("tier1 native"),
-//RS         "no function reached the native tier: {trace}"
-//RS     );
-//RS     assert!(
-//RS         !trace.contains("tier0 interp"),
-//RS         "default `jet run` silently deopted: {trace}"
-//RS     );
-//RS     assert!(!trace.contains("E0956"), "{trace}");
-//RS }
-//RS 
-//RS fn shell_quote(value: &str) -> String {
-//RS     format!("'{}'", value.replace('\'', "'\\''"))
-//RS }
-//RS 
-//RS fn run_pty(mode: &str) -> String {
-//RS     let jet = shell_quote(env!("CARGO_BIN_EXE_jet"));
-//RS     let example = shell_quote(EXAMPLE);
-//RS     let profile = match mode {
-//RS         "default" => "",
-//RS         "release" => " --release",
-//RS         "interpret" => " --interpret",
-//RS         _ => panic!("unknown PTY mode: {mode}"),
-//RS     };
-//RS     let shell_line = format!("stty rows 24 cols 100; exec {jet} run --quiet{profile} {example}");
-//RS     let mut child = Command::new("script")
-//RS         .args(["-qfec", &shell_line, "/dev/null"])
-//RS         .env("NO_COLOR", "1")
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .expect("util-linux script must allocate a real PTY");
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .expect("PTY stdin")
-//RS         .write_all(answers().tty().as_bytes())
-//RS         .expect("write terminal answers");
-//RS     let output = child.wait_with_output().expect("collect PTY transcript");
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "PTY child failed with {}\nstdout: {:?}\nstderr: {:?}",
-//RS         output.status,
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     String::from_utf8_lossy(&output.stdout).into_owned()
-//RS }
-//RS 
-//RS struct NonPtyOutput {
-//RS     stdout: String,
-//RS     stderr: String,
-//RS }
-//RS 
-//RS fn run_non_pty(mode: &str) -> NonPtyOutput {
-//RS     let mut args = vec!["run", "--quiet"];
-//RS     match mode {
-//RS         "default" => {}
-//RS         "release" => args.push("--release"),
-//RS         "interpret" => args.push("--interpret"),
-//RS         _ => panic!("unknown non-PTY mode: {mode}"),
-//RS     }
-//RS     args.push(EXAMPLE);
-//RS     let output = common::jet_cli_output_with_stdin(&args, answers().piped);
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "non-PTY child failed: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     NonPtyOutput {
-//RS         stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
-//RS         stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
-//RS     }
-//RS }
-//RS 
-//RS fn run_non_pty_merged(mode: &str) -> String {
-//RS     let jet = env!("CARGO_BIN_EXE_jet");
-//RS     let example = EXAMPLE;
-//RS     let mut args = vec!["run", "--quiet"];
-//RS     match mode {
-//RS         "default" => {}
-//RS         "release" => args.push("--release"),
-//RS         "interpret" => args.push("--interpret"),
-//RS         _ => panic!("unknown merged non-PTY mode: {mode}"),
-//RS     }
-//RS     args.push(example);
-//RS     let path = std::env::temp_dir().join(format!(
-//RS         "jet_terminal_parity_merged_{}_{}",
-//RS         std::process::id(),
-//RS         mode
-//RS     ));
-//RS     let sink = OpenOptions::new()
-//RS         .create(true)
-//RS         .truncate(true)
-//RS         .write(true)
-//RS         .open(&path)
-//RS         .expect("merged output file");
-//RS     let stderr = sink.try_clone().expect("clone merged output file");
-//RS     let mut child = Command::new(jet)
-//RS         .args(args)
-//RS         .env("NO_COLOR", "1")
-//RS         .stdin(Stdio::piped())
-//RS         .stdout(Stdio::from(sink))
-//RS         .stderr(Stdio::from(stderr))
-//RS         .spawn()
-//RS         .expect("merged non-PTY jet run must start");
-//RS     child
-//RS         .stdin
-//RS         .take()
-//RS         .expect("merged non-PTY stdin")
-//RS         .write_all(answers().piped.as_bytes())
-//RS         .expect("write merged non-PTY answers");
-//RS     let status = child.wait().expect("collect merged non-PTY status");
-//RS     assert!(status.success(), "merged non-PTY child failed: {status}");
-//RS     let merged = fs::read_to_string(&path).expect("read merged non-PTY output");
-//RS     let _ = fs::remove_file(path);
-//RS     merged
-//RS }
-//RS 
-//RS fn marker_positions(transcript: &str) -> Vec<usize> {
-//RS     let transcript = transcript.replace('\r', "");
-//RS     [
-//RS         "Continue? [y/N]",
-//RS         "Choose a target:",
-//RS         "choice: production",
-//RS         "Secret: ",
-//RS         "secret length: 6",
-//RS         "progress",
-//RS         "stderr stream",
-//RS     ]
-//RS     .into_iter()
-//RS     .map(|marker| {
-//RS         transcript
-//RS             .find(marker)
-//RS             .unwrap_or_else(|| panic!("PTY transcript missing {marker:?}: {transcript}"))
-//RS     })
-//RS     .collect()
-//RS }
-//RS 
-//RS #[test]
-//RS fn terminal_parity_uses_tty_prompt_and_progress_order() {
-//RS     assert_resident_tier_compiles_run();
-//RS     let default = run_pty("default");
-//RS     let release = run_pty("release");
-//RS     let interpreter = run_pty("interpret");
-//RS     let normalized = |transcript: &str| transcript.replace('\r', "");
-//RS     assert_eq!(normalized(&default), normalized(&release));
-//RS     assert_eq!(normalized(&default), normalized(&interpreter));
-//RS     for transcript in [&default, &release, &interpreter] {
-//RS         let positions = marker_positions(transcript);
-//RS         assert!(
-//RS             positions.windows(2).all(|pair| pair[0] < pair[1]),
-//RS             "PTY program order changed: {transcript}"
-//RS         );
-//RS         assert!(
-//RS             transcript.contains("\rprogress"),
-//RS             "progress must redraw on a TTY: {transcript:?}"
-//RS         );
-//RS         assert!(
-//RS             !transcript.contains("secret: non-tty"),
-//RS             "PTY secret read was treated as non-TTY: {transcript:?}"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn terminal_parity_matches_non_tty_golden_and_stream_order() {
-//RS     assert_resident_tier_compiles_run();
-//RS     assert_default_run_traces_native_tier();
-//RS     let expected_stdout = include_str!("../Examples/features/expected/io/terminal_parity.out");
-//RS     let expected_stderr =
-//RS         include_str!("../Examples/features/expected/io/terminal_parity.stderr.out");
-//RS     let mut expected_merged = expected_stdout.to_string();
-//RS     expected_merged.push_str(expected_stderr);
-//RS 
-//RS     for mode in ["default", "release", "interpret"] {
-//RS         let output = run_non_pty(mode);
-//RS         assert_eq!(
-//RS             output.stdout, expected_stdout,
-//RS             "non-PTY stdout drifted in {mode} mode"
-//RS         );
-//RS         assert_eq!(
-//RS             output.stderr, expected_stderr,
-//RS             "non-PTY stderr drifted in {mode} mode"
-//RS         );
-//RS         assert_eq!(
-//RS             run_non_pty_merged(mode),
-//RS             expected_merged,
-//RS             "non-PTY stream order drifted in {mode} mode"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn stdin_lines_emit_before_eof_and_stop_at_blank() {
-//RS     for mode in ["default", "release", "interpret"] {
-//RS         let scratch = common::Scratch::new("stdin-lines-live");
-//RS         let source = scratch.path.join("sentinel.jet");
-//RS         fs::write(
-//RS             scratch.path.join("package.jet"),
-//RS             "name: \"stdin_stream\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             &source,
-//RS             r#"use core.term as io
-//RS fn run() {
-//RS     loop line in io.stdin().lines() {
-//RS         if line == "" { break }
-//RS         print(line)
-//RS     }
-//RS     print(io.readline())
-//RS }
-//RS "#,
-//RS         )
-//RS         .unwrap();
-//RS         let stdout_path = scratch.path.join("stdout");
-//RS         let stderr_path = scratch.path.join("stderr");
-//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
-//RS         command.args(["run", "--quiet"]);
-//RS         match mode {
-//RS             "release" => { command.arg("--release"); }
-//RS             "interpret" => { command.arg("--interpret"); }
-//RS             _ => {}
-//RS         }
-//RS         let mut child = command
-//RS             .arg(&source)
-//RS             .current_dir(&scratch.path)
-//RS             .env("NO_COLOR", "1")
-//RS             .stdin(Stdio::piped())
-//RS             .stdout(Stdio::from(fs::File::create(&stdout_path).unwrap()))
-//RS             .stderr(Stdio::from(fs::File::create(&stderr_path).unwrap()))
-//RS             .spawn()
-//RS             .expect("start live stdin program");
-//RS         let mut input = child.stdin.take().expect("live stdin pipe");
-//RS         let result = (|| -> Result<(), String> {
-//RS             input.write_all(b"a\n").map_err(|error| error.to_string())?;
-//RS             let started = Instant::now();
-//RS             loop {
-//RS                 let output = fs::read_to_string(&stdout_path).map_err(|error| error.to_string())?;
-//RS                 if output == "a\n" {
-//RS                     break;
-//RS                 }
-//RS                 if child.try_wait().map_err(|error| error.to_string())?.is_some() {
-//RS                     return Err(format!("exited before echoing the first line: {output:?}"));
-//RS                 }
-//RS                 if started.elapsed() >= Duration::from_secs(120) {
-//RS                     return Err(format!("withheld first-line output while stdin stayed open: {output:?}"));
-//RS                 }
-//RS                 std::thread::sleep(Duration::from_millis(10));
-//RS             }
-//RS             input.write_all(b"b\nc\n\nremainder\n").map_err(|error| error.to_string())?;
-//RS             let started = Instant::now();
-//RS             loop {
-//RS                 if let Some(status) = child.try_wait().map_err(|error| error.to_string())? {
-//RS                     if !status.success() {
-//RS                         return Err(format!("sentinel run exited with {status}"));
-//RS                     }
-//RS                     let output = fs::read_to_string(&stdout_path).map_err(|error| error.to_string())?;
-//RS                     return if output == "a\nb\nc\nremainder\n" {
-//RS                         Ok(())
-//RS                     } else {
-//RS                         Err(format!("lost, duplicated, or consumed input past the sentinel: {output:?}"))
-//RS                     };
-//RS                 }
-//RS                 if started.elapsed() >= Duration::from_secs(10) {
-//RS                     return Err("blank sentinel did not stop the loop without EOF".to_string());
-//RS                 }
-//RS                 std::thread::sleep(Duration::from_millis(10));
-//RS             }
-//RS         })();
-//RS         drop(input);
-//RS         let _ = child.kill();
-//RS         let _ = child.wait();
-//RS         assert!(
-//RS             result.is_ok(),
-//RS             "{mode}: {result:?}\n{}",
-//RS             fs::read_to_string(stderr_path).unwrap_or_default(),
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// `Stdout.write_bytes` is binary output: bytes that are not UTF-8, a NUL, and
-//RS /// a CR LF pair must reach the stream unchanged, in order with `print`, with no
-//RS /// newline added. The golden harness compares text, so the exact bytes are
-//RS /// pinned here.
-//RS #[test]
-//RS fn stdout_write_bytes_is_byte_exact_and_ordered_with_print() {
-//RS     for mode in ["default", "release"] {
-//RS         let scratch = common::Scratch::new("stdout-write-bytes");
-//RS         let source = scratch.path.join("bytes.jet");
-//RS         fs::write(
-//RS             scratch.path.join("package.jet"),
-//RS             "name: \"stdout_bytes\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n",
-//RS         )
-//RS         .unwrap();
-//RS         fs::write(
-//RS             &source,
-//RS             r#"use core.term as term
-//RS fn run() {
-//RS     out :: term.stdout()
-//RS     print("a")
-//RS     out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
-//RS     out.write_bytes([U8]{0xC3}) ?? panic("write")
-//RS     term.stdout().write_bytes([U8]{0x28}) ?? panic("write")
-//RS     print("z")
-//RS }
-//RS "#,
-//RS         )
-//RS         .unwrap();
-//RS         let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
-//RS         command.args(["run", "--quiet"]);
-//RS         if mode == "release" {
-//RS             command.arg("--release");
-//RS         }
-//RS         let output = command
-//RS             .arg(&source)
-//RS             .current_dir(&scratch.path)
-//RS             .env("NO_COLOR", "1")
-//RS             .stdin(Stdio::null())
-//RS             .output()
-//RS             .expect("run write_bytes program");
-//RS         assert!(
-//RS             output.status.success(),
-//RS             "{mode}: write_bytes program failed:\n{}",
-//RS             String::from_utf8_lossy(&output.stderr)
-//RS         );
-//RS         assert_eq!(
-//RS             output.stdout,
-//RS             b"a\nBM\xff\x00\x80\r\n\xc3(z\n",
-//RS             "{mode}: stdout bytes changed on the way out",
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS /// A closed stdin is what every harness, CI job, and piped invocation gives an
-//RS /// interactive program. `choose` must stop there instead of re-prompting, so the
-//RS /// run has to end, stay small, and answer the same on all three tiers.
-//RS struct ClosedInputRun {
-//RS     code: Option<i32>,
-//RS     timed_out: bool,
-//RS     elapsed: Duration,
-//RS     stdout_bytes: u64,
-//RS     stdout: String,
-//RS     stderr: String,
-//RS }
-//RS 
-//RS /// Output goes to files, not pipes. A re-prompt loop would fill a pipe and stall
-//RS /// against an unread reader, which reads as a hang for the wrong reason, and the
-//RS /// size is taken before the text so a regression reports one number instead of
-//RS /// replaying a 512MB prompt log.
-//RS fn run_without_input(mode: &str) -> ClosedInputRun {
-//RS     let mut args = vec!["run", "--quiet"];
-//RS     match mode {
-//RS         "default" => {}
-//RS         "release" => args.push("--release"),
-//RS         "interpret" => args.push("--interpret"),
-//RS         _ => panic!("unknown closed-input mode: {mode}"),
-//RS     }
-//RS     args.push(EXAMPLE);
-//RS     let base = std::env::temp_dir().join(format!(
-//RS         "jet_terminal_parity_closed_{}_{mode}",
-//RS         std::process::id()
-//RS     ));
-//RS     let out_path = base.with_extension("out");
-//RS     let err_path = base.with_extension("err");
-//RS     let sink = |path: &std::path::Path| {
-//RS         OpenOptions::new()
-//RS             .create(true)
-//RS             .truncate(true)
-//RS             .write(true)
-//RS             .open(path)
-//RS             .expect("closed-input output file")
-//RS     };
-//RS     let started = Instant::now();
-//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(args)
-//RS         .env("NO_COLOR", "1")
-//RS         .stdin(Stdio::null())
-//RS         .stdout(Stdio::from(sink(&out_path)))
-//RS         .stderr(Stdio::from(sink(&err_path)))
-//RS         .spawn()
-//RS         .expect("closed-input jet run must start");
-//RS     let deadline = Duration::from_secs(120);
-//RS     let (code, timed_out) = loop {
-//RS         match child.try_wait().expect("poll closed-input child") {
-//RS             Some(status) => break (status.code(), false),
-//RS             None if started.elapsed() >= deadline => {
-//RS                 let _ = child.kill();
-//RS                 let _ = child.wait();
-//RS                 break (None, true);
-//RS             }
-//RS             None => std::thread::sleep(Duration::from_millis(20)),
-//RS         }
-//RS     };
-//RS     let elapsed = started.elapsed();
-//RS     let stdout_bytes = fs::metadata(&out_path)
-//RS         .expect("closed-input stdout metadata")
-//RS         .len();
-//RS     let stdout = if stdout_bytes <= 64 * 1024 {
-//RS         fs::read_to_string(&out_path).expect("read closed-input stdout")
-//RS     } else {
-//RS         String::new()
-//RS     };
-//RS     let stderr = fs::read_to_string(&err_path).unwrap_or_default();
-//RS     let _ = fs::remove_file(&out_path);
-//RS     let _ = fs::remove_file(&err_path);
-//RS     ClosedInputRun {
-//RS         code,
-//RS         timed_out,
-//RS         elapsed,
-//RS         stdout_bytes,
-//RS         stdout,
-//RS         stderr,
-//RS     }
-//RS }
-//RS 
-//RS /// The closed-input transcript is the checked-in golden with exactly two
-//RS /// differences: nothing rejects an answer, so both retry lines are gone, and the
-//RS /// documented default answers the stop, so the choice is `staging`.
-//RS fn expected_closed_input_stdout() -> String {
-//RS     let golden = include_str!("../Examples/features/expected/io/terminal_parity.out");
-//RS     let retry = "> Enter a number from 1 to 2.\n";
-//RS     assert_eq!(
-//RS         golden.matches(retry).count(),
-//RS         2,
-//RS         "the golden no longer shows two rejected answers, so this derivation is stale"
-//RS     );
-//RS     golden
-//RS         .lines()
-//RS         .filter(|line| *line != retry.trim_end())
-//RS         .fold(String::new(), |mut out, line| {
-//RS             out.push_str(&line.replace("> choice: production", "> choice: staging"));
-//RS             out.push('\n');
-//RS             out
-//RS         })
-//RS }
-//RS 
-//RS /// One expectation for all three tiers is the differential: each mode is
-//RS /// compared to the same derived transcript, so any tier that answers differently
-//RS /// names itself.
-//RS #[test]
-//RS fn terminal_parity_ends_on_closed_input_on_every_tier() {
-//RS     assert_resident_tier_compiles_run();
-//RS     let expected = expected_closed_input_stdout();
-//RS     for mode in ["default", "release", "interpret"] {
-//RS         let run = run_without_input(mode);
-//RS         assert!(
-//RS             !run.timed_out,
-//RS             "{mode} mode never ended on a closed stdin after {:?}, and wrote {} bytes: {}",
-//RS             run.elapsed, run.stdout_bytes, run.stderr
-//RS         );
-//RS         assert!(
-//RS             run.stdout_bytes <= 64 * 1024,
-//RS             "{mode} mode wrote an unbounded prompt log: {} bytes",
-//RS             run.stdout_bytes
-//RS         );
-//RS         assert_eq!(
-//RS             run.code,
-//RS             Some(0),
-//RS             "{mode} mode did not finish cleanly on a closed stdin: {} {}",
-//RS             run.stdout,
-//RS             run.stderr
-//RS         );
-//RS         assert!(
-//RS             !run.stdout.contains("Enter a number from 1 to 2."),
-//RS             "{mode} mode retried a closed stream instead of stopping: {}",
-//RS             run.stdout
-//RS         );
-//RS         assert_eq!(
-//RS             run.stdout, expected,
-//RS             "{mode} mode drifted from the closed-input transcript every tier must produce"
-//RS         );
-//RS     }
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // The runtime error report's terminal state matrix (card #2044 criterion 2).
-//RS //
-//RS // One renderer owns the report (jet-foundation's `jet_journey_trail`), and
-//RS // `JetReportStyle::for_stderr` is the one place that reads the terminal. Its
-//RS // four cells are unit-pinned against explicit facts in that file; these tests
-//RS // prove the detection itself against a real PTY and a real pipe, through the
-//RS // same `script -qfec` mechanism the parity tests above use.
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS /// Relative on purpose: the trail prints the source path a frame recorded, so a
-//RS /// relative invocation keeps these fixtures free of this machine's checkout.
-//RS const FAILING_EXAMPLE: &str = "Examples/features/errors/error_context.jet";
-//RS 
-//RS fn repo_root() -> &'static str {
-//RS     env!("CARGO_MANIFEST_DIR")
-//RS }
-//RS 
-//RS /// A PTY transcript is line-ending noise plus the report. Strip `\r`, and strip
-//RS /// this checkout's path if a frame ever records an absolute one, so the fixture
-//RS /// is the report and nothing else.
-//RS fn normalize_report(text: &str) -> String {
-//RS     text.replace('\r', "")
-//RS         .replace(&format!("{}/", repo_root()), "")
-//RS }
-//RS 
-//RS fn strip_sgr(text: &str) -> String {
-//RS     let mut out = String::with_capacity(text.len());
-//RS     let mut chars = text.chars();
-//RS     while let Some(ch) = chars.next() {
-//RS         if ch != '\x1b' {
-//RS             out.push(ch);
-//RS             continue;
-//RS         }
-//RS         for ch in chars.by_ref() {
-//RS             if ch == 'm' {
-//RS                 break;
-//RS             }
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS struct ReportCell {
-//RS     text: String,
-//RS     code: Option<i32>,
-//RS }
-//RS 
-//RS /// The report as a terminal sees it. `script` gives the child a real PTY and
-//RS /// merges its streams; the example prints nothing on stdout, so the transcript
-//RS /// is the report. The child fails on purpose, so its status is recorded, never
-//RS /// asserted successful.
-//RS fn report_on_pty(setup: &str, env: &[(&str, &str)]) -> ReportCell {
-//RS     let jet = shell_quote(env!("CARGO_BIN_EXE_jet"));
-//RS     let example = shell_quote(FAILING_EXAMPLE);
-//RS     let shell_line = format!("{setup} exec {jet} run --quiet {example}");
-//RS     let mut command = Command::new("script");
-//RS     command
-//RS         .args(["-qfec", &shell_line, "/dev/null"])
-//RS         .current_dir(repo_root())
-//RS         .env_remove("NO_COLOR")
-//RS         .env_remove("FORCE_COLOR")
-//RS         .env_remove("COLUMNS")
-//RS         .stdin(Stdio::null());
-//RS     for (name, value) in env {
-//RS         command.env(name, value);
-//RS     }
-//RS     let output = command
-//RS         .output()
-//RS         .expect("util-linux script must allocate a real PTY");
-//RS     ReportCell {
-//RS         text: normalize_report(&String::from_utf8_lossy(&output.stdout)),
-//RS         code: output.status.code(),
-//RS     }
-//RS }
-//RS 
-//RS /// The same report down a pipe: no PTY anywhere, and neither `NO_COLOR` nor
-//RS /// `FORCE_COLOR` set, so the stream itself is the only thing that can decide.
-//RS fn report_on_pipe() -> ReportCell {
-//RS     let output = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(["run", "--quiet", FAILING_EXAMPLE])
-//RS         .current_dir(repo_root())
-//RS         .env_remove("NO_COLOR")
-//RS         .env_remove("FORCE_COLOR")
-//RS         .env("COLUMNS", "40")
-//RS         .stdin(Stdio::null())
-//RS         .output()
-//RS         .expect("piped jet run must start");
-//RS     ReportCell {
-//RS         text: normalize_report(&String::from_utf8_lossy(&output.stderr)),
-//RS         code: output.status.code(),
-//RS     }
-//RS }
-//RS 
-//RS /// Compare against `tests/cli/<name>`; bless with `UPDATE_EXPECT=1`, the same
-//RS /// convention every other fixture in that directory uses.
-//RS fn check_report_fixture(name: &str, actual: &str) {
-//RS     let path = std::path::PathBuf::from(repo_root())
-//RS         .join("tests/cli")
-//RS         .join(name);
-//RS     if std::env::var_os("UPDATE_EXPECT").is_some() {
-//RS         fs::write(&path, actual).expect("write report fixture");
-//RS         return;
-//RS     }
-//RS     let expected = fs::read_to_string(&path).unwrap_or_else(|_| {
-//RS         panic!(
-//RS             "missing snapshot {}; run UPDATE_EXPECT=1 cargo test --test terminal",
-//RS             path.display()
-//RS         )
-//RS     });
-//RS     assert_eq!(actual, expected, "report fixture drifted: tests/cli/{name}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn error_report_matrix_tty_pipe_no_color_and_narrow_widths() {
-//RS     // Cell 1 — a pipe. No columns, so whole paths survive for the log, the
-//RS     // editor and CI that read them.
-//RS     let pipe = report_on_pipe();
-//RS     // Cell 2 — a real terminal, nothing set. Colour comes from the stream.
-//RS     let tty_ansi = report_on_pty("stty rows 24 cols 80;", &[]);
-//RS     // Cell 3 — the same terminal with `NO_COLOR` set to nothing at all:
-//RS     // presence disables colour whatever it holds.
-//RS     let tty_plain = report_on_pty("stty rows 24 cols 80;", &[("NO_COLOR", "")]);
-//RS     // Cell 4 — a 40-column terminal. `COLUMNS` is exported because a
-//RS     // non-interactive shell does not export it, and the report does not shell
-//RS     // out to `stty` on the failing path.
-//RS     let tty_narrow = report_on_pty(
-//RS         "stty rows 24 cols 40; export COLUMNS=40;",
-//RS         &[("NO_COLOR", "")],
-//RS     );
-//RS 
-//RS     check_report_fixture("error_report_pipe.txt", &pipe.text);
-//RS     check_report_fixture("error_report_tty_ansi.txt", &tty_ansi.text);
-//RS     check_report_fixture("error_report_tty_no_color.txt", &tty_plain.text);
-//RS     check_report_fixture("error_report_tty_narrow40.txt", &tty_narrow.text);
-//RS 
-//RS     // A pipe is never painted, and `COLUMNS` alone never paints or wraps it:
-//RS     // the pipe cell above ran with `COLUMNS=40` and must be the full-width,
-//RS     // ANSI-free form. Columns belong to terminals.
-//RS     assert!(
-//RS         !pipe.text.contains('\x1b'),
-//RS         "a pipe must carry no ANSI: {:?}",
-//RS         pipe.text
-//RS     );
-//RS     assert!(
-//RS         pipe.text
-//RS             .contains("Examples/features/errors/error_context.jet:7"),
-//RS         "a pipe must keep whole paths: {:?}",
-//RS         pipe.text
-//RS     );
-//RS 
-//RS     // A terminal is painted, and `NO_COLOR` is the only thing that changes:
-//RS     // colour and width are separate capabilities, so the two 80-column cells
-//RS     // are the same layout with and without the SGR pairs.
-//RS     assert!(
-//RS         tty_ansi.text.contains('\x1b'),
-//RS         "a terminal must be painted: {:?}",
-//RS         tty_ansi.text
-//RS     );
-//RS     assert_eq!(
-//RS         strip_sgr(&tty_ansi.text),
-//RS         tty_plain.text,
-//RS         "NO_COLOR changed more than the colour"
-//RS     );
-//RS 
-//RS     // The root failure is the same first line in every cell — that is the
-//RS     // point of the card, and no terminal state may touch it.
-//RS     let first = |cell: &ReportCell| {
-//RS         strip_sgr(&cell.text)
-//RS             .lines()
-//RS             .next()
-//RS             .expect("every cell reports a root failure")
-//RS             .to_string()
-//RS     };
-//RS     assert_eq!(first(&pipe), "Error: file not found");
-//RS     for cell in [&tty_ansi, &tty_plain, &tty_narrow] {
-//RS         assert_eq!(first(cell), first(&pipe), "the root failure moved");
-//RS         assert_eq!(cell.code, pipe.code, "terminal state changed the exit code");
-//RS     }
-//RS 
-//RS     // Narrow degrades legibly: nothing overflows, every hop still names its
-//RS     // function and its `file:line`, and the file name itself is never cut.
-//RS     for line in tty_narrow.text.lines() {
-//RS         assert!(
-//RS             line.chars().count() <= 40,
-//RS             "a 40-column terminal must not be overflowed: {line:?}"
-//RS         );
-//RS     }
-//RS     for (number, function, line_number) in [
-//RS         (1, "parse_config", 7),
-//RS         (2, "load_config", 12),
-//RS         (3, "run", 16),
-//RS     ] {
-//RS         let hop = format!("  {number}. {function} (error_context.jet:{line_number})");
-//RS         assert!(
-//RS             tty_narrow.text.contains(&hop),
-//RS             "a narrow terminal dropped a location: want {hop:?} in {:?}",
-//RS             tty_narrow.text
-//RS         );
-//RS     }
-//RS }
-// END-PORT-PENDING 1168 tests/terminal.rs:1-762
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use core.fs.[OpenOptions]
+use std.[env, process, thread]
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant]
+use jet
 
-// PORT-PENDING 1168 tests-terminal-module-group: tests/terminal_default_single_home.rs:1-93
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Card #1751: the 80x24 terminal default is one fact,
-//RS //! `crates/jet-codegen/src/Prelude/TerminalDefault.rs`'s
-//RS //! `JET_TERMINAL_DEFAULT_COLS`/`JET_TERMINAL_DEFAULT_ROWS`. `TerminalPolicy::default`
-//RS //! (Prelude/CoreLib/JetStd/CommonTypes.rs) and `PtyConfig::default`
-//RS //! (Prelude/CoreLib/ProcessPty.rs, dual-compiled for the resident JIT host)
-//RS //! both read it instead of hand-typing `80`/`24`. This guard fails if a
-//RS //! second hand-typed `cols: 80` / `rows: 24` pair reappears anywhere under
-//RS //! `crates/` outside the one home.
-//RS 
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::{Path, PathBuf};
-//RS 
-//RS fn root() -> PathBuf {
-//RS     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-//RS }
-//RS 
-//RS const TERMINAL_DEFAULT_HOME: &str = "crates/jet-codegen/src/Prelude/TerminalDefault.rs";
-//RS 
-//RS fn collect_rs_files(dir: &Path, out: &mut Vec<PathBuf>) {
-//RS     let Ok(entries) = fs::read_dir(dir) else {
-//RS         return;
-//RS     };
-//RS     for entry in entries.flatten() {
-//RS         let path = entry.path();
-//RS         if path.is_dir() {
-//RS             collect_rs_files(&path, out);
-//RS         } else if path.extension().is_some_and(|e| e == "rs") {
-//RS             out.push(path);
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn no_hand_typed_80x24_terminal_default_outside_the_one_home() {
-//RS     let root = root();
-//RS     let mut files = Vec::new();
-//RS     collect_rs_files(&root.join("crates"), &mut files);
-//RS 
-//RS     let mut violations = Vec::new();
-//RS     for file in files {
-//RS         let rel = file
-//RS             .strip_prefix(&root)
-//RS             .unwrap_or(&file)
-//RS             .display()
-//RS             .to_string();
-//RS         if rel == TERMINAL_DEFAULT_HOME {
-//RS             continue;
-//RS         }
-//RS         let text = fs::read_to_string(&file).unwrap_or_default();
-//RS         for (n, line) in text.lines().enumerate() {
-//RS             let has_cols_80 = line.contains("cols: 80") || line.contains("cols:80");
-//RS             let has_rows_24 = line.contains("rows: 24") || line.contains("rows:24");
-//RS             if has_cols_80 || has_rows_24 {
-//RS                 violations.push(format!("{rel}:{}: {}", n + 1, line.trim()));
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     assert!(
-//RS         violations.is_empty(),
-//RS         "hand-typed 80x24 terminal default outside the one home ({TERMINAL_DEFAULT_HOME}):\n{}",
-//RS         violations.join("\n")
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn common_types_and_process_pty_read_the_one_home() {
-//RS     let root = root();
-//RS     let common_types = fs::read_to_string(
-//RS         root.join("crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs"),
-//RS     )
-//RS     .unwrap();
-//RS     assert!(
-//RS         common_types.contains("super::terminal_default::JET_TERMINAL_DEFAULT_COLS")
-//RS             && common_types.contains("super::terminal_default::JET_TERMINAL_DEFAULT_ROWS"),
-//RS         "TerminalPolicy::default must read Prelude/TerminalDefault.rs, not a literal"
-//RS     );
-//RS     let process_pty =
-//RS         fs::read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs"))
-//RS             .unwrap();
-//RS     assert!(
-//RS         process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_COLS")
-//RS             && process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_ROWS"),
-//RS         "PtyConfig::default must read Prelude/TerminalDefault.rs, not a literal"
-//RS     );
-//RS     let jit_process = fs::read_to_string(root.join("crates/jet-jit/src/Process.rs")).unwrap();
-//RS     assert!(
-//RS         jit_process.contains("PtyConfig::default()"),
-//RS         "jet_jit_process_spec_terminal must build PtyConfig::default(), not a hand-typed literal"
-//RS     );
-//RS }
-// END-PORT-PENDING 1168 tests/terminal_default_single_home.rs:1-93
-
+// GATE #4494: real PTY via script, native process/stream/descriptor/clock providers.
+// Unix-only tests dispatch on selected_family in the paired suite.
+// Rust: tests/terminal.rs:14
+EXAMPLE :: "{env.manifest_dir().display()}/Examples/features/io/terminal_parity.jet"
+// Rust: tests/terminal.rs:23
+fn answers() -> &common.ExampleStdin {
+    common.example_stdin("io/terminal_parity").expect("io/terminal_parity has stdin answers")
+}
+// Rust: tests/terminal.rs:31
+fn assert_resident_tier_compiles_run() -> {
+    bundle := jet.Loader.load_entry(EXAMPLE).expect("terminal_parity loads")
+    diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(!diags.iter().any((d) -> d.severity == jet.Diagnostics.Severity.Error), "terminal_parity must check: {diags:?}")
+    // Canonical tier-plan owner must prove native selection, not silent deopt.
+    plan :: common.cranelift_tier_plan(&bundle)
+    assert(!plan.whole_interp, "the whole program deopted to the interpreter: {plan:?}")
+    assert(plan.native.contains("run"), "`run` must select the native tier; native={plan.native:?} deopt={plan.deopt:?}")
+}
+// Rust: tests/terminal.rs:57
+fn assert_default_run_traces_native_tier() -> {
+    cache :: env.temp_dir().join("jet_terminal_parity_trace_cache_{process.id()}")
+    _ :: fs.remove_dir_all(&cache)
+    child := Command.new(env.jet_bin()).args(["run", "--quiet", "--trace-tiers", EXAMPLE]).env("NO_COLOR", "1").env("JET_RUN_CACHE_DIR", &cache).stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("traced jet run must start")
+    child.stdin.take().expect("traced stdin").write_all(answers().piped.as_bytes()).expect("write traced answers")
+    output :: child.wait_with_output().expect("collect tier trace")
+    trace :: String.from_utf8_lossy(&output.stderr).into_owned()
+    _ :: fs.remove_dir_all(&cache)
+    assert(output.status.success(), "traced run failed: {trace}")
+    assert(trace.contains("tier1 native"), "no function reached the native tier: {trace}")
+    assert(!trace.contains("tier0 interp"), "default `jet run` silently deopted: {trace}")
+    assert(!trace.contains("E0956"), "{trace}")
+}
+// Rust: tests/terminal.rs:96
+fn shell_quote(value: String) -> String { "'{value.replace('\'', "'\\''")}'" }
+// Rust: tests/terminal.rs:100
+fn run_pty(mode: String) -> String {
+    assert(["O0", "O1", "O2", "Web"].contains(mode), "unknown PTY mode: {mode}")
+    jet_bin :: shell_quote(env.jet_bin())
+    example :: shell_quote(EXAMPLE)
+    shell_line :: "stty rows 24 cols 100; exec {jet_bin} run --quiet --tier {mode} {example}"
+    child := Command.new("script").args(["-qfec", &shell_line, "/dev/null"]).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("util-linux script must allocate a real PTY")
+    child.stdin.take().expect("PTY stdin").write_all(answers().tty().as_bytes()).expect("write terminal answers")
+    output :: child.wait_with_output().expect("collect PTY transcript")
+    assert(output.status.success(), "PTY child failed with {output.status}\nstdout: {String.from_utf8_lossy(&output.stdout):?}\nstderr: {String.from_utf8_lossy(&output.stderr):?}")
+    String.from_utf8_lossy(&output.stdout).into_owned()
+}
+// Rust: tests/terminal.rs:135
+struct NonPtyOutput { stdout: String, stderr: String }
+// Rust: tests/terminal.rs:140
+fn run_non_pty(mode: String) -> NonPtyOutput {
+    assert(["O0", "O1", "O2", "Web"].contains(mode), "unknown non-PTY mode: {mode}")
+    args :: ["run", "--quiet", "--tier", mode, EXAMPLE]
+    output :: common.jet_cli_output_with_stdin(&args, answers().piped)
+    assert(output.status.success(), "non-PTY child failed: {String.from_utf8_lossy(&output.stderr)}")
+    NonPtyOutput{stdout: String.from_utf8_lossy(&output.stdout).into_owned(), stderr: String.from_utf8_lossy(&output.stderr).into_owned()}
+}
+// Rust: tests/terminal.rs:161
+fn run_non_pty_merged(mode: String) -> String {
+    assert(["O0", "O1", "O2", "Web"].contains(mode), "unknown merged non-PTY mode: {mode}")
+    args :: ["run", "--quiet", "--tier", mode, EXAMPLE]
+    path :: env.temp_dir().join("jet_terminal_parity_merged_{process.id()}_{mode}")
+    sink :: OpenOptions.new().create(true).truncate(true).write(true).open(&path).expect("merged output file")
+    stderr :: sink.try_clone().expect("clone merged output file")
+    child := Command.new(env.jet_bin()).args(args).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.from(sink)).stderr(Stdio.from(stderr)).spawn().expect("merged non-PTY jet run must start")
+    child.stdin.take().expect("merged non-PTY stdin").write_all(answers().piped.as_bytes()).expect("write merged non-PTY answers")
+    status :: child.wait().expect("collect merged non-PTY status")
+    assert(status.success(), "merged non-PTY child failed: {status}")
+    merged :: fs.read_to_string(&path).expect("read merged non-PTY output")
+    _ :: fs.remove_file(path)
+    merged
+}
+// Rust: tests/terminal.rs:205
+fn marker_positions(transcript: String) -> [USize] {
+    clean :: transcript.replace('\r', "")
+    ["Continue? [y/N]", "Choose a target:", "choice: production", "Secret: ", "secret length: 6", "progress", "stderr stream"].into_iter().map((marker) -> clean.find(marker).unwrap_or_else(() -> panic("PTY transcript missing {marker:?}: {clean}"))).collect()
+}
+// Rust: tests/terminal.rs:424
+struct ClosedInputRun {
+    code: I32?, timed_out: Bool, elapsed: Duration, stdout_bytes: U64,
+    stdout: String, stderr: String
+}
+// Rust: tests/terminal.rs:437
+fn run_without_input(mode: String) -> ClosedInputRun {
+    assert(["O0", "O1", "O2", "Web"].contains(mode), "unknown closed-input mode: {mode}")
+    args :: ["run", "--quiet", "--tier", mode, EXAMPLE]
+    base :: env.temp_dir().join("jet_terminal_parity_closed_{process.id()}_{mode}")
+    out_path :: base.with_extension("out")
+    err_path :: base.with_extension("err")
+    sink :: (path: OSPath) -> OpenOptions.new().create(true).truncate(true).write(true).open(path).expect("closed-input output file")
+    started :: Instant.now()
+    child := Command.new(env.jet_bin()).args(args).env("NO_COLOR", "1").stdin(Stdio.null()).stdout(Stdio.from(sink(&out_path))).stderr(Stdio.from(sink(&err_path))).spawn().expect("closed-input jet run must start")
+    deadline :: Duration.from_secs(120)
+    code := null
+    timed_out := false
+    loop {
+        status :: child.try_wait().expect("poll closed-input child")
+        if status is finished { code = finished.code(); break }
+        if started.elapsed() >= deadline {
+            _ :: child.kill()
+            _ :: child.wait()
+            timed_out = true
+            break
+        }
+        thread.sleep(Duration.from_millis(20))
+    }
+    elapsed :: started.elapsed()
+    stdout_bytes :: fs.metadata(&out_path).expect("closed-input stdout metadata").len()
+    stdout :: if stdout_bytes <= 64 * 1024 { fs.read_to_string(&out_path).expect("read closed-input stdout") } else { "" }
+    stderr :: fs.read_to_string(&err_path).unwrap_or_default()
+    _ :: fs.remove_file(&out_path)
+    _ :: fs.remove_file(&err_path)
+    ClosedInputRun{code: code, timed_out: timed_out, elapsed: elapsed, stdout_bytes: stdout_bytes, stdout: stdout, stderr: stderr}
+}
+// Rust: tests/terminal.rs:506
+fn expected_closed_input_stdout() -> String {
+    golden :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/io/terminal_parity.out")).unwrap()
+    retry :: "> Enter a number from 1 to 2.\n"
+    assert_eq(golden.matches(retry).count(), 2, "the golden no longer shows two rejected answers, so this derivation is stale")
+    trimmed := retry.trim_end() // #4303
+    out := ""
+    for line in golden.lines() {
+        if line == trimmed { continue }
+        out.push_str(&line.replace("> choice: production", "> choice: staging"))
+        out.push('\n')
+    }
+    ^out
+}
+// Rust: tests/terminal.rs:574
+FAILING_EXAMPLE :: "Examples/features/errors/error_context.jet"
+// Rust: tests/terminal.rs:576
+fn repo_root() -> OSPath { env.manifest_dir() }
+// Rust: tests/terminal.rs:583
+fn normalize_report(text: String) -> String { text.replace('\r', "").replace("{repo_root().display()}/", "") }
+// Rust: tests/terminal.rs:588
+fn strip_sgr(text: String) -> String {
+    out := String.with_capacity(text.len())
+    chars := text.chars()
+    loop {
+        ch :: chars.next() ?? break
+        if ch != '\x1b' { out.push(ch); continue }
+        for escaped in chars.by_ref() { if escaped == 'm' { break } }
+    }
+    ^out
+}
+// Rust: tests/terminal.rs:605
+struct ReportCell { text: String, code: I32? }
+// Rust: tests/terminal.rs:614
+fn report_on_pty(setup: String, environment: [(String, String)]) -> ReportCell {
+    jet_bin :: shell_quote(env.jet_bin())
+    example :: shell_quote(FAILING_EXAMPLE)
+    shell_line :: "{setup} exec {jet_bin} run --quiet {example}"
+    command := Command.new("script")
+    command.args(["-qfec", &shell_line, "/dev/null"]).current_dir(repo_root()).env_remove("NO_COLOR").env_remove("FORCE_COLOR").env_remove("COLUMNS").stdin(Stdio.null())
+    for (name, value) in environment { command.env(name, value) }
+    output :: command.output().expect("util-linux script must allocate a real PTY")
+    ReportCell{text: normalize_report(&String.from_utf8_lossy(&output.stdout)), code: output.status.code()}
+}
+// Rust: tests/terminal.rs:640
+fn report_on_pipe() -> ReportCell {
+    output :: Command.new(env.jet_bin()).args(["run", "--quiet", FAILING_EXAMPLE]).current_dir(repo_root()).env_remove("NO_COLOR").env_remove("FORCE_COLOR").env("COLUMNS", "40").stdin(Stdio.null()).output().expect("piped jet run must start")
+    ReportCell{text: normalize_report(&String.from_utf8_lossy(&output.stderr)), code: output.status.code()}
+}
+// Rust: tests/terminal.rs:658
+fn check_report_fixture(name: String, actual: String) -> {
+    path :: repo_root().join("tests/cli").join(name)
+    if env.var_os("UPDATE_EXPECT").is_some() { fs.write(&path, actual).expect("write report fixture"); return }
+    expected :: fs.read_to_string(&path).unwrap_or_else((_) -> panic("missing snapshot {path.display()}; run UPDATE_EXPECT=1 cargo test --test terminal"))
+    assert_eq(actual, expected, "report fixture drifted: tests/cli/{name}")
+}

@@ -1,0 +1,32 @@
+// D-TAINT1: Input facts, Scrub contracts and sink diagnostics are compile-time only.
+use jet.compile
+
+// Rust: tests/taint.rs:7
+pub fn codes(src: String) -> [String] {
+    if compile(src) is .Err(diags) {
+        diags.iter().map(d -> d.code.clone()).collect()
+    } else { [] }
+}
+// Rust: tests/taint.rs:530
+// The reference's zero-filled entropy test substitute and Prelude include! seams
+// are replaced by the real canonical provider; no production mock or Rust bridge.
+// Auth boundary assertions use the shared provider API directly in the paired suite.
+
+// Rust: tests/taint.rs:582
+pub fn b64url(bytes: [U8]) -> String {
+    // Rust: tests/taint.rs:583
+    ALPHABET :: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_".bytes()
+    out := String.new()
+    index := 0
+    loop index < bytes.len() {
+        first := bytes[index] as UInt
+        second := bytes.get(index + 1).copied().unwrap_or(0) as UInt
+        third := bytes.get(index + 2).copied().unwrap_or(0) as UInt
+        out.push(ALPHABET[first >> 2] as Char)
+        out.push(ALPHABET[((first & 3) << 4) | (second >> 4)] as Char)
+        if index + 1 < bytes.len() { out.push(ALPHABET[((second & 15) << 2) | (third >> 6)] as Char) }
+        if index + 2 < bytes.len() { out.push(ALPHABET[third & 63] as Char) }
+        index += 3
+    }
+    out
+}

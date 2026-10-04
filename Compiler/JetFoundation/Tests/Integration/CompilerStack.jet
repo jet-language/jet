@@ -1,1104 +1,122 @@
-// PORT-PENDING 1004 tests-compiler-stack-module-group: tests/compiler_stack.rs:1-360
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS const SHARED_SOURCE: &str = r#"
-//RS struct Counter { value: Int }
-//RS fn run() {
-//RS     counter := shared Counter{ value: 0 }
-//RS     handle :: task {
-//RS         counter.value += 1
-//RS     }
-//RS     handle.join() ?? panic("task failed")
-//RS     print(counter.value)
-//RS }
-//RS "#;
-//RS 
-//RS const COMPOSITE_IF_SOURCE: &str = r#"
-//RS struct Work { callback: fn() -> Int }
-//RS fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
-//RS fn run() {
-//RS     values := [1, 2]
-//RS     both(&values, if true -> {
-//RS         work :: Work{ callback: () -> values.len() }
-//RS         work
-//RS     } else -> {
-//RS         Work{ callback: () -> 0 }
-//RS     })
-//RS }
-//RS "#;
-//RS 
-//RS const COMPOSITE_FALLBACK_SOURCE: &str = r#"
-//RS fn both(values: &[Int], callback: fn() -> Int) { &values.push(callback()) }
-//RS fn run() {
-//RS     values := [1, 2]
-//RS     both(&values, Val(() -> values.len()) ?? () -> 0)
-//RS }
-//RS "#;
-//RS 
-//RS const LOCAL_CELL_SOURCE: &str = r#"
-//RS struct Pair {
-//RS     left: Int,
-//RS     right: Int,
-//RS }
-//RS 
-//RS struct ValueCache {
-//RS     value: Cell<String?>,
-//RS }
-//RS 
-//RS struct LineCache {
-//RS     value: Cell<[Int]?>,
-//RS }
-//RS 
-//RS fn mapped_read(cell: Cell<Pair>) {
-//RS     left :: cell.guard_read().map(pair -> pair.left)
-//RS     print(left.get())
-//RS }
-//RS 
-//RS fn split_read(cell: Cell<Pair>) {
-//RS     (left, right) :: cell.guard_read().split(
-//RS         pair -> pair.left,
-//RS         pair -> pair.right
-//RS     )
-//RS     print(left.get() + right.get())
-//RS }
-//RS 
-//RS fn mapped_edit(cell: Cell<Pair>) {
-//RS     left :: cell.guard_edit().map(pair -> pair.left)
-//RS     &left.set(9)
-//RS }
-//RS 
-//RS fn split_edit(cell: Cell<Pair>) {
-//RS     (left, right) :: cell.guard_edit().split(
-//RS         pair -> pair.left,
-//RS         pair -> pair.right
-//RS     )
-//RS     &left.set(10)
-//RS     &right.set(11)
-//RS }
-//RS 
-//RS fn make_edit_guards(cell: Cell<Pair>) -> (
-//RS     first: CellEditGuard<Int>,
-//RS     second: CellEditGuard<Int>
-//RS ) -> {
-//RS     return cell.guard_edit().split(
-//RS         pair -> pair.left,
-//RS         pair -> pair.right
-//RS     )
-//RS }
-//RS 
-//RS fn edit_returned_split(cell: Cell<Pair>) {
-//RS     (left, right) :: make_edit_guards(cell)
-//RS     &left.set(12)
-//RS     &right.set(13)
-//RS }
-//RS 
-//RS fn edit_then_return(cell: Cell<Int>) {
-//RS     guard :: cell.guard_edit()
-//RS     &guard.set(4)
-//RS     return
-//RS }
-//RS 
-//RS fn run() {
-//RS     cell :: Cell.new(Pair{ left: 1, right: 2 })
-//RS     print(cell.read(pair -> pair.left + pair.right))
-//RS     &cell.edit(pair -> pair.left += 3)
-//RS     print(cell.get().left)
-//RS     old :: &cell.replace(Pair{ left: 5, right: 6 })
-//RS     print(old.left)
-//RS     &cell.set(Pair{ left: 7, right: 8 })
-//RS     mapped_read(cell)
-//RS     split_read(cell)
-//RS     mapped_edit(cell)
-//RS     print(cell.get().left)
-//RS     split_edit(cell)
-//RS     print(cell.get().left + cell.get().right)
-//RS     edit_returned_split(cell)
-//RS     print(cell.get().left + cell.get().right)
-//RS 
-//RS     cache :: ValueCache{ value: Cell.new(None) }
-//RS     print(cache.value.get_or_set(() -> "built"))
-//RS     print(cache.value.get_or_set(() -> "unused"))
-//RS 
-//RS     lines :: LineCache{ value: Cell.new(None) }
-//RS     print(lines.value.get_or_set(() -> [0, 8, 15]).len())
-//RS     print(lines.value.get_or_set(() -> [99]).len())
-//RS 
-//RS     early :: Cell.new(1)
-//RS     edit_then_return(early)
-//RS     print(early.get())
-//RS     &early.edit(value -> value += 1)
-//RS     print(early.get())
-//RS }
-//RS "#;
-//RS 
-//RS fn compile_on_two_mib_stack(
-//RS     source: &'static str,
-//RS ) -> Result<jet::CompileOutput, Vec<jet::Diagnostics::Diagnostic>> {
-//RS     std::thread::Builder::new()
-//RS         .stack_size(2 * 1024 * 1024)
-//RS         .spawn(move || jet::compile(source))
-//RS         .expect("spawn the embedder thread")
-//RS         .join()
-//RS         .expect("the compiler must not overflow the embedder thread")
-//RS }
-//RS 
-//RS #[test]
-//RS fn compile_owns_enough_stack_for_a_two_mib_embedder_thread() {
-//RS     compile_on_two_mib_stack(SHARED_SOURCE).expect("the Shared control program must compile");
-//RS }
-//RS 
-//RS #[test]
-//RS fn known_regressions_keep_their_results_on_a_two_mib_embedder_stack() {
-//RS     for source in [COMPOSITE_IF_SOURCE, COMPOSITE_FALLBACK_SOURCE] {
-//RS         let diagnostics =
-//RS             compile_on_two_mib_stack(source).expect_err("the capture conflict must remain E0204");
-//RS         assert!(
-//RS             diagnostics
-//RS                 .iter()
-//RS                 .any(|diagnostic| diagnostic.code == "E0204"),
-//RS             "{diagnostics:?}"
-//RS         );
-//RS     }
-//RS     compile_on_two_mib_stack(LOCAL_CELL_SOURCE)
-//RS         .expect("the full local Cell surface must still compile");
-//RS }
-//RS 
-//RS const JIT_ENTRY_SOURCE: &str = r#"
-//RS fn twice(n: Int) -> Int {
-//RS     return n + n
-//RS }
-//RS fn run() {
-//RS     print(twice(21))
-//RS }
-//RS "#;
-//RS 
-//RS const PACKAGE_EDITION_PROGRAM: &str = r#"
-//RS use core.data as data
-//RS 
-//RS #Codable
-//RS struct Sale {
-//RS     month: String
-//RS     value: Float
-//RS }
-//RS 
-//RS fn run() {
-//RS     rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0") ?? panic("csv")
-//RS     groups :: data.query(rows)
-//RS         .group_by(sale -> sale.month)
-//RS         .mean(sale -> sale.value)
-//RS         .collect() ?? panic("groups")
-//RS     if groups.len() == 2 {
-//RS         print("checked")
-//RS     }
-//RS     print("edition-sentinel")
-//RS }
-//RS "#;
-//RS 
-//RS const PACKAGE_EDITION_MANIFEST: &str =
-//RS     "name: \"tir_eval_edition\"\nversion: \"0.1.0\"\nedition: \"2027\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Panic] } }\n";
-//RS 
-//RS #[test]
-//RS fn package_edition_survives_tir_eval_worker() {
-//RS     let dir = common::unique_tmp("jet_compiler_stack_package_edition");
-//RS     std::fs::create_dir_all(&dir).expect("create the fixture directory");
-//RS     std::fs::write(dir.join("package.jet"), PACKAGE_EDITION_MANIFEST)
-//RS         .expect("write the package manifest");
-//RS     let file = dir.join("main.jet");
-//RS     std::fs::write(&file, PACKAGE_EDITION_PROGRAM).expect("write the fixture");
-//RS     let path = file.to_string_lossy().into_owned();
-//RS 
-//RS     for (tier, outcome) in [
-//RS         (
-//RS             "forced interpreter",
-//RS             jet::Interpreter::run_interpreter_once_with_args(&path, &[]),
-//RS         ),
-//RS         (
-//RS             "default JIT",
-//RS             jet::Interpreter::run_jit_once_with_args(&path, &[]),
-//RS         ),
-//RS     ] {
-//RS         match outcome {
-//RS             jet::Interpreter::RunOutcome::Ran {
-//RS                 exit_code,
-//RS                 stdout,
-//RS                 stderr,
-//RS             } => {
-//RS                 assert_eq!(exit_code, 0, "{tier} must run: {stderr}");
-//RS                 assert!(stderr.is_empty(), "{tier} emitted diagnostics: {stderr}");
-//RS                 assert_eq!(
-//RS                     stdout, "checked\nedition-sentinel\n",
-//RS                     "{tier} lost the package edition"
-//RS                 );
-//RS             }
-//RS             jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS                 panic!("{tier} rejected the edition fixture: {diagnostics:?}");
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS /// An embedder holding a checked bundle reaches the JIT without ever touching
-//RS /// the driver's compile entries, so the Cranelift backend has to own the same
-//RS /// sized stack they own: MIR lowering and the whole-program interpreter on the
-//RS /// deopt route are the same unbounded-depth recursive descent, and either tier
-//RS /// alone exhausts a 2 MiB embedder thread.
-//RS #[test]
-//RS fn the_jit_backend_owns_enough_stack_for_a_two_mib_embedder_thread() {
-//RS     let dir = common::unique_tmp("jet_compiler_stack_jit_entry");
-//RS     std::fs::create_dir_all(&dir).expect("create the fixture directory");
-//RS     let file = dir.join("main.jet");
-//RS     std::fs::write(&file, JIT_ENTRY_SOURCE).expect("write the fixture");
-//RS     let path = file.to_string_lossy().into_owned();
-//RS 
-//RS     let outcome = std::thread::Builder::new()
-//RS         .stack_size(2 * 1024 * 1024)
-//RS         .spawn(move || {
-//RS             let bundle = jet::run_compiler_work(move || {
-//RS                 let mut bundle = jet::Loader::load_entry(&path).expect("the fixture should load");
-//RS                 let diagnostics = jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS                 assert!(
-//RS                     !diagnostics
-//RS                         .iter()
-//RS                         .any(|d| matches!(d.severity, jet::Diagnostics::Severity::Error)),
-//RS                     "{diagnostics:?}"
-//RS                 );
-//RS                 bundle
-//RS             });
-//RS             let mut backend = jet_jit::CraneliftBackend::new();
-//RS             let policy = common::development_policy();
-//RS             common::run_cranelift_bundle(&mut backend, &bundle, false, &policy)
-//RS         })
-//RS         .expect("spawn the embedder thread")
-//RS         .join()
-//RS         .expect("the JIT backend must not overflow the embedder thread");
-//RS 
-//RS     match outcome {
-//RS         jet::Interpreter::RunOutcome::Ran { stdout, .. } => assert_eq!(stdout, "42\n"),
-//RS         jet::Interpreter::RunOutcome::Problems(diagnostics) => {
-//RS             panic!("the fixture must run on one of the two tiers: {diagnostics:?}")
-//RS         }
-//RS     }
-//RS 
-//RS     let _ = std::fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS /// The boundary is installed at both the driver's entries and the JIT's, so it
-//RS /// has to be re-entrant in both directions or a nested entry would spawn a
-//RS /// worker inside a worker. The thread id is the proof: an inner entry that
-//RS /// stays on the outer worker's thread did not spawn.
-//RS #[test]
-//RS fn the_compiler_boundary_never_nests_a_second_worker() {
-//RS     assert!(
-//RS         !jet_foundation::CompilerStack::on_compiler_worker(),
-//RS         "a test thread is not a compiler worker"
-//RS     );
-//RS 
-//RS     let (worker, driver_inside_driver, jit_inside_driver) = jet::run_compiler_work(|| {
-//RS         assert!(
-//RS             jet_foundation::CompilerStack::on_compiler_worker(),
-//RS             "the flag must be set on the worker, not on the thread that spawned it"
-//RS         );
-//RS         (
-//RS             std::thread::current().id(),
-//RS             jet::run_compiler_work(|| std::thread::current().id()),
-//RS             jet_jit::on_compiler_stack(|| std::thread::current().id()),
-//RS         )
-//RS     });
-//RS     assert_eq!(
-//RS         worker, driver_inside_driver,
-//RS         "a nested driver entry must reuse the active worker"
-//RS     );
-//RS     assert_eq!(
-//RS         worker, jit_inside_driver,
-//RS         "a JIT entry inside a driver entry must reuse the active worker"
-//RS     );
-//RS 
-//RS     let (worker, driver_inside_jit) = jet_jit::on_compiler_stack(|| {
-//RS         (
-//RS             std::thread::current().id(),
-//RS             jet::run_compiler_work(|| std::thread::current().id()),
-//RS         )
-//RS     });
-//RS     assert_eq!(
-//RS         worker, driver_inside_jit,
-//RS         "a driver entry inside a JIT entry must reuse the active worker"
-//RS     );
-//RS 
-//RS     assert_ne!(
-//RS         worker,
-//RS         std::thread::current().id(),
-//RS         "an outermost entry must actually leave the caller's thread"
-//RS     );
-//RS     assert!(
-//RS         !jet_foundation::CompilerStack::on_compiler_worker(),
-//RS         "the flag must not leak back onto the caller"
-//RS     );
-//RS }
-//RS 
-//RS fn parenthesized_source(levels: usize) -> String {
-//RS     format!(
-//RS         "fn nested() -> Int {{\n    return {}1{}\n}}\nfn run() {{ print(nested()) }}\n",
-//RS         "(".repeat(levels),
-//RS         ")".repeat(levels)
-//RS     )
-//RS }
-//RS 
-//RS #[test]
-//RS fn public_compile_accepts_depth_256_and_reports_depth_257() {
-//RS     jet::compile(&parenthesized_source(254)).expect("source nesting at the limit must compile");
-//RS 
-//RS     let diagnostics = jet::compile(&parenthesized_source(255))
-//RS         .expect_err("source nesting past the limit must fail");
-//RS     let diagnostic = diagnostics
-//RS         .iter()
-//RS         .find(|diagnostic| diagnostic.code == "E1403")
-//RS         .expect("source nesting must use the registered diagnostic");
-//RS     assert!(diagnostic.what.contains("257 levels deep"));
-//RS     assert!(diagnostic.what.contains("limit is 256"));
-//RS }
-//RS 
-// END-PORT-PENDING 1004 tests/compiler_stack.rs:1-360
-
-// PORT-PENDING 1004 tests-compiler-stack-module-group: tests/compute_cuda.rs:1-231
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Focused production-path proof for the CUDA core.compute seam.
-//RS 
-//RS // `tir_support` re-exports a helper from `common`, so every binary that
-//RS // includes it must declare `common` too.
-//RS #[path = "common/mod.rs"]
-//RS mod common;
-//RS 
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS use tir_support::{
-//RS     assert_example_cli_tiers_agree, build_and_run_full, have_rustc, interpreter_run, jit_run,
-//RS };
-//RS 
-//RS #[test]
-//RS fn cuda_public_precision_gate_is_identical_on_all_tiers() {
-//RS     assert_example_cli_tiers_agree("tooling/compute_cuda", "cuda:f64:rejected\n");
-//RS }
-//RS 
-//RS #[test]
-//RS fn cuda_f32_backend_runs_or_fails_closed_across_all_tiers() {
-//RS     let source = r#"
-//RS use core.compute as compute
-//RS 
-//RS fn cuda_loss(value: Tensor) -> Tensor {
-//RS     rooted :: compute.sqrt(value) ?? panic("sqrt")
-//RS     return compute.sum_axis(rooted, 1) ?? panic("sum")
-//RS }
-//RS 
-//RS fn cuda_mse(value: Tensor, target: Tensor) -> Tensor -> compute.mse_loss(value, target) ?? panic("mse")
-//RS 
-//RS fn run() {
-//RS     seed :: compute.matrix(1, 1, 2.0) ?? panic("seed")
-//RS     row :: compute.matrix(1, 257, 3.0) ?? panic("row")
-//RS     f32_row :: compute.matmul_f32_tile(seed, row) ?? panic("f32_row")
-//RS     f32_column :: compute.transpose(f32_row) ?? panic("f32_column")
-//RS     target_seed :: compute.matrix(1, 257, 1.0) ?? panic("target_seed")
-//RS     target :: compute.matmul_f32_tile(seed, target_seed) ?? panic("target")
-//RS     zero_seed :: compute.matrix(1, 257, 0.0) ?? panic("zero_seed")
-//RS     zero :: compute.matmul_f32_tile(seed, zero_seed) ?? panic("zero")
-//RS     one_seed :: compute.matrix(1, 1, 1.0) ?? panic("one_seed")
-//RS     one :: compute.matmul_f32_tile(one_seed, one_seed) ?? panic("one")
-//RS     cpu_gradient_input :: compute.full([1, 1], 6.0) ?? panic("cpu_gradient_input")
-//RS     cpu_gradient_result :: compute.gradient(cuda_loss, ~cpu_gradient_input)
-//RS     cpu_gradient :: cpu_gradient_result.value
-//RS     cpu_gradient_tail :: compute.get(cpu_gradient, [0, 0]) ?? panic("cpu_gradient_tail")
-//RS     request :: compute.on_device(f32_row, compute.device_cuda())
-//RS     column_request :: compute.on_device(f32_column, compute.device_cuda())
-//RS     target_request :: compute.on_device(target, compute.device_cuda())
-//RS     zero_request :: compute.on_device(zero, compute.device_cuda())
-//RS     one_request :: compute.on_device(one, compute.device_cuda())
-//RS     if request == {
-//RS         .Err(_) -> {
-//RS             print("cuda:unavailable")
-//RS             stream :: compute.stream_new_on(compute.device_cuda())
-//RS             if stream == {
-//RS                 .Ok(_) -> panic("cuda stream unexpectedly accepted")
-//RS                 .Err(_) -> { print("cuda:stream:rejected") }
-//RS             }
-//RS         }
-//RS         .Ok(cuda_row) -> {
-//RS             cuda_column :: column_request ?? panic("cuda_column")
-//RS             cuda_target :: target_request ?? panic("cuda_target")
-//RS             cuda_zero :: zero_request ?? panic("cuda_zero")
-//RS             cuda_one :: one_request ?? panic("cuda_one")
-//RS             if !compute.placement(cuda_row).contains("backend=cuda") -> panic("cuda backend")
-//RS             if !compute.placement(cuda_row).contains("profile=F32Strict+Reproducible") -> panic("cuda profile")
-//RS             product :: compute.matmul(cuda_column, cuda_row) ?? panic("matmul")
-//RS             doubled :: compute.add(product, product) ?? panic("add")
-//RS             negated :: compute.negate(doubled) ?? panic("negate")
-//RS             print("cuda:available")
-//RS             tail :: compute.get(doubled, [256, 256]) ?? panic("tail")
-//RS             negative_tail :: compute.get(negated, [256, 256]) ?? panic("negative_tail")
-//RS             if tail < 35.999 || tail > 36.001 -> panic("cuda add parity")
-//RS             if negative_tail < -36.001 || negative_tail > -35.999 -> panic("cuda negate parity")
-//RS             print("cuda:tail:{tail}")
-//RS             print("cuda:negative_tail:{negative_tail}")
-//RS 
-//RS             total :: compute.sum_axis(doubled, 1) ?? panic("sum_axis")
-//RS             sum_tail :: compute.get(total, [256]) ?? panic("sum_tail")
-//RS             if sum_tail < 9251.999 || sum_tail > 9252.001 -> panic("cuda sum parity")
-//RS             print("cuda:sum_tail:{sum_tail}")
-//RS 
-//RS             gradient_result :: compute.gradient(cuda_loss, ~cuda_row)
-//RS             gradient :: gradient_result.value
-//RS             gradient_tail :: compute.get(gradient, [0, 256]) ?? panic("gradient_tail")
-//RS             if gradient_tail < cpu_gradient_tail - 0.001 || gradient_tail > cpu_gradient_tail + 0.001 -> panic("cuda gradient parity")
-//RS             print("cuda:sqrt_gradient:{gradient_tail}")
-//RS 
-//RS             mse :: cuda_mse(cuda_row, cuda_target)
-//RS             mse_value :: compute.get(mse, [0]) ?? panic("mse_value")
-//RS             if mse_value < 15.999 || mse_value > 16.001 -> panic("cuda mse parity")
-//RS             (mse_gradient, mse_target_gradient) :: compute.gradient(cuda_mse, ~cuda_row, ~cuda_target)
-//RS             mse_gradient_tail :: compute.get(mse_gradient, [0, 256]) ?? panic("mse_gradient_tail")
-//RS             mse_target_gradient_tail :: compute.get(mse_target_gradient, [0, 256]) ?? panic("mse_target_gradient_tail")
-//RS             if mse_gradient_tail < 0.030 || mse_gradient_tail > 0.032 -> panic("cuda mse gradient")
-//RS             if mse_target_gradient_tail > -0.030 || mse_target_gradient_tail < -0.032 -> panic("cuda mse target gradient")
-//RS 
-//RS             mse_jvp :: compute.jvp(cuda_mse)
-//RS             (mse_jvp_value, mse_jvp_tangent) :: mse_jvp(cuda_row, cuda_target, cuda_row, cuda_zero)
-//RS             mse_jvp_value_tail :: compute.get(mse_jvp_value, [0]) ?? panic("mse_jvp_value")
-//RS             mse_jvp_tangent_tail :: compute.get(mse_jvp_tangent, [0]) ?? panic("mse_jvp_tangent")
-//RS             if mse_jvp_value_tail < 15.999 || mse_jvp_value_tail > 16.001 -> panic("cuda mse jvp value")
-//RS             if mse_jvp_tangent_tail < 47.999 || mse_jvp_tangent_tail > 48.001 -> panic("cuda mse jvp")
-//RS 
-//RS             vjp_run :: compute.vjp(cuda_mse, ~cuda_row, ~cuda_target)
-//RS             (vjp_gradient, vjp_target_gradient) :: vjp_run.grads
-//RS             vjp_gradient_tail :: compute.get(vjp_gradient, [0, 256]) ?? panic("vjp_gradient_tail")
-//RS             vjp_target_gradient_tail :: compute.get(vjp_target_gradient, [0, 256]) ?? panic("vjp_target_gradient_tail")
-//RS             if vjp_gradient_tail < 0.030 || vjp_gradient_tail > 0.032 -> panic("cuda vjp")
-//RS             if vjp_target_gradient_tail > -0.030 || vjp_target_gradient_tail < -0.032 -> panic("cuda vjp target")
-//RS             pull_fn :: vjp_run.pull
-//RS             (pull_gradient, _) :: pull_fn(~cuda_one)
-//RS             pull_gradient_tail :: compute.get(pull_gradient, [0, 256]) ?? panic("pull_gradient_tail")
-//RS             if pull_gradient_tail < 0.030 || pull_gradient_tail > 0.032 -> panic("cuda vjp pull")
-//RS 
-//RS             updated :: compute.sgd_step(cuda_row, mse_gradient, 0.5) ?? panic("sgd")
-//RS             updated_tail :: compute.get(updated, [0, 256]) ?? panic("updated_tail")
-//RS             if updated_tail < 5.983 || updated_tail > 5.986 -> panic("cuda sgd")
-//RS 
-//RS             stream :: compute.stream_new_on(compute.device_cuda()) ?? panic("stream")
-//RS             compute.stream_sync(stream) ?? panic("stream_sync")
-//RS             print("cuda:stream:ok")
-//RS 
-//RS             cpu :: compute.transfer(negated, compute.device_cpu()) ?? panic("transfer")
-//RS             if !compute.transfer_show(cpu).contains("from=CUDA") -> panic("transfer source")
-//RS             if !compute.transfer_show(cpu).contains("to=CPU") -> panic("transfer destination")
-//RS             print("cuda:transfer:{compute.transfer_show(cpu)}")
-//RS             unsupported :: compute.det(product)
-//RS             if unsupported == {
-//RS                 .Ok(_) -> panic("cuda det unexpectedly accepted")
-//RS                 .Err(_) -> { print("cuda:det:rejected") }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS     let (jit_code, jit_stdout, jit_stderr) = jit_run("compute_cuda_backend", source);
-//RS     assert_eq!(jit_code, 0, "default jet run failed: {jit_stderr}");
-//RS     assert!(
-//RS         jit_stdout.contains("cuda:unavailable") || jit_stdout.contains("cuda:available"),
-//RS         "CUDA branch did not execute: {jit_stdout}"
-//RS     );
-//RS 
-//RS     let (interpreter_code, interpreter_stdout, interpreter_stderr) =
-//RS         interpreter_run("compute_cuda_backend", source);
-//RS     assert_eq!(
-//RS         interpreter_code, jit_code,
-//RS         "interpreter/JIT exit drift: {interpreter_stderr}"
-//RS     );
-//RS     assert_eq!(
-//RS         interpreter_stdout, jit_stdout,
-//RS         "interpreter/JIT output drift"
-//RS     );
-//RS     assert_eq!(
-//RS         interpreter_stderr, jit_stderr,
-//RS         "interpreter/JIT diagnostics drift"
-//RS     );
-//RS 
-//RS     if have_rustc() {
-//RS         let (aot_code, aot_stdout, aot_stderr) =
-//RS             build_and_run_full("jet_tir_test", "compute_cuda_backend", source);
-//RS         assert_eq!(aot_code, jit_code, "AOT/JIT exit drift: {aot_stderr}");
-//RS         assert_eq!(aot_stdout, jit_stdout, "AOT/JIT output drift");
-//RS         assert_eq!(aot_stderr, jit_stderr, "AOT/JIT diagnostics drift");
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn cuda_prelude_uses_global_thread_indices_and_real_driver_launches() {
-//RS     let prelude = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/Top/Compute.rs");
-//RS     assert!(prelude.contains("cuLaunchKernel"));
-//RS     assert!(prelude.contains("mod jet_compute_cuda"));
-//RS     let cuda = prelude
-//RS         .split("// JET_VETTED_UNSAFE_BEGIN: jet_compute_cuda\n")
-//RS         .nth(1)
-//RS         .and_then(|section| {
-//RS             section
-//RS                 .split("// JET_VETTED_UNSAFE_END: jet_compute_cuda")
-//RS                 .next()
-//RS         })
-//RS         .expect("CUDA vetted module must be present");
-//RS     assert!(cuda.contains("const RTLD_LOCAL: c_int = 0;"));
-//RS     assert!(
-//RS         prelude
-//RS             .matches("mad.lo.u32 %r0, %r0, %ntid.x, %tid.x")
-//RS             .count()
-//RS             >= 10,
-//RS         "per-element CUDA kernels must use global block-aware indices"
-//RS     );
-//RS     for entry in [
-//RS         "jet_copy",
-//RS         "jet_binary",
-//RS         "jet_unary",
-//RS         "jet_matmul",
-//RS         "jet_sum",
-//RS         "jet_mse",
-//RS         "jet_mse_grad",
-//RS         "jet_mse_jvp",
-//RS         "jet_sgd",
-//RS         "jet_scale",
-//RS     ] {
-//RS         let needle = format!(".visible .entry {entry}");
-//RS         assert!(
-//RS             prelude.contains(needle.as_str()),
-//RS             "missing CUDA kernel {entry}"
-//RS         );
-//RS     }
-//RS     for operation in [
-//RS         "jet_compute_cuda::copy",
-//RS         "jet_compute_cuda::binary",
-//RS         "jet_compute_cuda::unary",
-//RS         "jet_compute_cuda::matmul",
-//RS         "jet_compute_cuda::sum",
-//RS         "jet_compute_cuda::mse",
-//RS         "jet_compute_cuda::mse_grad",
-//RS         "jet_compute_cuda::mse_jvp",
-//RS         "jet_compute_cuda::sgd",
-//RS         "jet_compute_cuda::scale",
-//RS         "jet_compute_cuda::stream_new",
-//RS         "jet_compute_cuda::stream_sync",
-//RS     ] {
-//RS         assert!(
-//RS             prelude.contains(operation),
-//RS             "missing CUDA dispatch {operation}"
-//RS         );
-//RS     }
-//RS     assert!(prelude.contains("check(unsafe { (api.init)(0) }, \"driver initialization\")"));
-//RS     assert!(prelude.contains("no CPU fallback was selected"));
-//RS }
-// END-PORT-PENDING 1004 tests/compute_cuda.rs:1-231
-
-// PORT-PENDING 1004 tests-compiler-stack-module-group: tests/compute_extended.rs:1-501
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Focused parity checks for the remaining CPU compute slices.
-//RS 
-//RS mod common;
-//RS 
-//RS #[path = "tir_support/mod.rs"]
-//RS mod tir_support;
-//RS 
-//RS use tir_support::{
-//RS     assert_example_cli_tiers_agree_with_package, assert_tiers_agree, build_and_run,
-//RS     jit_run_traced, run_default_multi,
-//RS };
-//RS 
-//RS fn assert_aot_and_default_parity(name: &str, source: &str, required: &[&str]) {
-//RS     let (aot_code, aot_stdout) = build_and_run(name, source);
-//RS     assert_eq!(aot_code, 0, "AOT failed for {name}: {aot_stdout}");
-//RS     for needle in required {
-//RS         assert!(
-//RS             aot_stdout.contains(needle),
-//RS             "{name} missing `{needle}`: {aot_stdout}"
-//RS         );
-//RS     }
-//RS     let (jit_code, jit_stdout, stderr) =
-//RS         run_default_multi(&format!("{name}_jit"), "main.jet", &[("main.jet", source)]);
-//RS     assert_eq!(jit_code, 0, "default jet run failed for {name}: {stderr}");
-//RS     assert_eq!(jit_stdout, aot_stdout, "AOT/JIT drift for {name}");
-//RS }
-//RS 
-//RS #[test]
-//RS fn linalg_and_fft_use_the_cpu_oracle() {
-//RS     assert_example_cli_tiers_agree_with_package(
-//RS         "tooling/compute_linalg",
-//RS         None,
-//RS         |stdout| {
-//RS             assert_eq!(
-//RS                 stdout,
-//RS                 include_str!("../Examples/features/expected/tooling/compute_linalg.out")
-//RS             );
-//RS         },
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn fft_preserves_prime_and_composite_length_inputs() {
-//RS     assert_tiers_agree(
-//RS         "compute_fft_arbitrary_lengths",
-//RS         r#"
-//RS use core.compute as compute
-//RS use core.math as math
-//RS 
-//RS fn verify(input: [Float], expected: [Float]) {
-//RS     tensor :: compute.from_list(input) ?? panic("input")
-//RS     spectrum :: compute.fft(tensor) ?? panic("fft")
-//RS     actual :: compute.to_list(spectrum)
-//RS     error := Float{0.0}
-//RS     loop index in 0..<expected.len() {
-//RS         error += math.abs(actual[index] - expected[index])
-//RS     }
-//RS     print(actual.len() == expected.len() && error < 0.00001)
-//RS }
-//RS 
-//RS fn run() {
-//RS     verify([Float{1.0}, Float{2.0}, Float{3.0}], [Float{6.0}, Float{0.0}, Float{-1.5}, Float{0.866025403784}, Float{-1.5}, Float{-0.866025403784}])
-//RS     verify([Float{1.0}, Float{0.0}, Float{0.0}, Float{0.0}, Float{0.0}, Float{0.0}], [Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}, Float{1.0}, Float{0.0}])
-//RS }
-//RS "#,
-//RS         "true\ntrue\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn autodiff_sparse_simd_and_streams_use_real_paths() {
-//RS     let source = include_str!("../Examples/features/tooling/compute_autodiff.jet");
-//RS     let expected = include_str!("../Examples/features/expected/tooling/compute_autodiff.out");
-//RS     let mut bundle = jet::Loader::load_entry("Examples/features/tooling/compute_autodiff.jet")
-//RS         .expect("load compute autodiff example");
-//RS     jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run);
-//RS     assert_tiers_agree("compute_autodiff_targeted", source, expected);
-//RS     let (code, stdout, stderr) = jit_run_traced("compute_autodiff_targeted_trace", source);
-//RS     assert_eq!(code, 0, "traced default jet run failed: {stderr}");
-//RS     assert_eq!(stdout, expected, "traced default output drifted: {stderr}");
-//RS     assert!(
-//RS         stderr.contains("tier1 native"),
-//RS         "autodiff did not stay resident:\n{stderr}"
-//RS     );
-//RS     assert!(
-//RS         !stderr.contains("tier0 interp"),
-//RS         "autodiff deopted:\n{stderr}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn curried_autodiff_shapes_share_the_prelude_handle() {
-//RS     assert_tiers_agree(
-//RS         "compute_curried_autodiff_shapes",
-//RS         r#"
-//RS use core.compute as compute
-//RS 
-//RS fn loss(w: Tensor, x: Tensor) -> Tensor -> compute.mul(w, x) ?? panic("loss")
-//RS 
-//RS fn run() {
-//RS     w :: compute.from_list([2.0]) ?? panic("w")
-//RS     x :: compute.from_list([4.0]) ?? panic("x")
-//RS     tangent_w :: compute.ones([1]) ?? panic("tangent_w")
-//RS     tangent_x :: compute.ones([1]) ?? panic("tangent_x")
-//RS 
-//RS     value_and_gradient :: compute.value_and_gradient(loss)
-//RS     (value, gradients) :: value_and_gradient(w, x)
-//RS     print("value:{compute.to_list(value)}")
-//RS     print("value_gradient_w:{compute.to_list(gradients.w)}")
-//RS 
-//RS     jvp :: compute.jvp(loss)
-//RS     (jvp_value, jvp_tangent) :: jvp(w, x, tangent_w, tangent_x)
-//RS     print("jvp_value:{compute.to_list(jvp_value)}")
-//RS     print("jvp_tangent:{compute.to_list(jvp_tangent)}")
-//RS 
-//RS     vjp :: compute.vjp(loss)
-//RS     vjp_run :: vjp(w, x)
-//RS     pull_fn :: vjp_run.pull
-//RS     pull :: pull_fn(~tangent_w)
-//RS     print("vjp_pull_w:{compute.to_list(pull.w)}")
-//RS     print("vjp_grads_x:{compute.to_list(vjp_run.grads.x)}")
-//RS }
-//RS "#,
-//RS         "value:[8.0]\nvalue_gradient_w:[4.0]\njvp_value:[8.0]\njvp_tangent:[6.0]\nvjp_pull_w:[4.0]\nvjp_grads_x:[2.0]\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn autodiff_purity_keeps_compute_failure_fallback_but_rejects_effectful_loss() {
-//RS     let pure = r#"
-//RS use core.compute as compute
-//RS 
-//RS fn loss(value: Tensor) -> Tensor {
-//RS     return compute.mul(value, value) ?? panic("loss")
-//RS }
-//RS 
-//RS fn run() {
-//RS     value :: compute.ones([1]) ?? panic("value")
-//RS     gradient :: compute.gradient(loss, ~value)
-//RS }
-//RS "#;
-//RS     jet::compile(pure).expect("a checked compute failure fallback must remain differentiable");
-//RS 
-//RS     let impure = r#"
-//RS use core.compute as compute
-//RS 
-//RS fn loss(value: Tensor) -> Tensor {
-//RS     print("side effect")
-//RS     return compute.mul(value, value) ?? panic("loss")
-//RS }
-//RS 
-//RS fn run() {
-//RS     value :: compute.ones([1]) ?? panic("value")
-//RS     gradient :: compute.gradient(loss, ~value)
-//RS     print(compute.to_list(gradient))
-//RS }
-//RS "#;
-//RS     let diagnostics = jet::compile(impure).expect_err("an effectful loss must be rejected");
-//RS     assert!(
-//RS         diagnostics
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.what.contains("needs a pure Tensor function")),
-//RS         "missing autodiff purity diagnostic: {diagnostics:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn f32_simd_matmul_keeps_vjp_and_jvp_on_the_cpu_oracle() {
-//RS     assert_tiers_agree(
-//RS         "compute_f32_simd_autodiff",
-//RS         r#"
-//RS use core.compute as compute
-//RS 
-//RS fn tiled_loss(left: Tensor, right: Tensor) -> Tensor {
-//RS     return compute.matmul_f32_tile(left, right) ?? panic("tiled_loss")
-//RS }
-//RS 
-//RS fn run() {
-//RS     left :: compute.full([1, 1], 2.0) ?? panic("left")
-//RS     right :: compute.full([1, 1], 3.0) ?? panic("right")
-//RS     (grad_left, grad_right) :: compute.gradient(tiled_loss, ~left, ~right)
-//RS     print("grad_left:{compute.to_list(grad_left)}")
-//RS     print("grad_right:{compute.to_list(grad_right)}")
-//RS 
-//RS     tangent_left :: compute.full([1, 1], 1.0) ?? panic("tangent_left")
-//RS     tangent_right :: compute.full([1, 1], 1.0) ?? panic("tangent_right")
-//RS     tiled_jvp :: compute.jvp(tiled_loss)
-//RS     (value, tangent) :: tiled_jvp(left, right, tangent_left, tangent_right)
-//RS     print("value:{compute.to_list(value)}")
-//RS     print("tangent:{compute.to_list(tangent)}")
-//RS }
-//RS "#,
-//RS         "grad_left:[3.0]\ngrad_right:[2.0]\nvalue:[6.0]\ntangent:[5.0]\n",
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn ml_serialization_and_placement_failures_stay_in_the_same_tier() {
-//RS     let ml_source = include_str!("../Examples/features/tooling/compute_ml.jet");
-//RS     let ml_output = include_str!("../Examples/features/expected/tooling/compute_ml.out");
-//RS     assert_tiers_agree("compute_ml_targeted", ml_source, ml_output);
-//RS     let (resident_code, resident_stdout, resident_stderr) = run_default_multi(
-//RS         "compute_ml_resident",
-//RS         "main.jet",
-//RS         &[("main.jet", ml_source)],
-//RS     );
-//RS     assert_eq!(
-//RS         resident_code, 0,
-//RS         "resident ML `jet run` failed: {resident_stderr}"
-//RS     );
-//RS     assert_eq!(
-//RS         resident_stdout, ml_output,
-//RS         "resident ML output drifted: {resident_stderr}"
-//RS     );
-//RS     assert!(
-//RS         resident_stderr.contains("tier1 native"),
-//RS         "ML training/inference did not execute in resident JIT:\n{resident_stderr}"
-//RS     );
-//RS     assert!(
-//RS         !resident_stderr.contains("tier0 interp"),
-//RS         "ML training/inference fell back to the interpreter:\n{resident_stderr}"
-//RS     );
-//RS     assert_tiers_agree(
-//RS         "compute_ml_f32_wire",
-//RS         r#"
-//RS use core.compute as compute
-//RS 
-//RS fn run() {
-//RS     left :: compute.matrix(1, 1, 2.0) ?? panic("left")
-//RS     right :: compute.matrix(1, 1, 3.0) ?? panic("right")
-//RS     model :: compute.matmul_f32_tile(left, right) ?? panic("model")
-//RS     wire :: compute.serialize(model) ?? panic("wire")
-//RS     print("wire:{wire}")
-//RS     round :: compute.deserialize(wire) ?? panic("round")
-//RS     print("round:{compute.to_list(round)}")
-//RS }
-//RS "#,
-//RS         "wire:shape=1,1;data=6.0;profile=F32Strict+Reproducible;checksum=4593129c0b16d781\nround:[6.0]\n",
-//RS     );
-//RS     assert_aot_and_default_parity(
-//RS         "compute_device_targeted",
-//RS         include_str!("../Examples/features/tooling/compute_device.jet"),
-//RS         &["device:CPU", "placement:Placement", "transfer:Transfer("],
-//RS     );
-//RS     assert_aot_and_default_parity(
-//RS         "compute_metal_targeted",
-//RS         include_str!("../Examples/features/tooling/compute_metal.jet"),
-//RS         &["metal:f64:rejected", "stream:cpu-ok"],
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn metal_public_path_matches_cpu_oracle_and_declared_failure() {
-//RS     let source = include_str!("../Examples/features/tooling/compute_metal.jet");
-//RS     let expected = include_str!("../Examples/features/expected/tooling/compute_metal.out");
-//RS     assert_tiers_agree("compute_metal_public_path", source, expected);
-//RS }
-//RS 
-//RS #[test]
-//RS fn safe_kernel_boundary_and_f32_profile_are_explicit() {
-//RS     assert_aot_and_default_parity(
-//RS         "compute_kernel_targeted",
-//RS         include_str!("../Examples/features/tooling/compute_kernel.jet"),
-//RS         &["kernel:42", "bounds:true"],
-//RS     );
-//RS     assert_aot_and_default_parity(
-//RS         "compute_simd_targeted",
-//RS         include_str!("../Examples/features/tooling/compute_simd.jet"),
-//RS         &[
-//RS             "profile=F32Strict+Reproducible",
-//RS             "tile:[19.0, 22.0, 43.0, 50.0]",
-//RS         ],
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn f32_tile_matches_cpu_oracle_on_tails_and_rejects_hostile_matrices() {
-//RS     let source = r#"
-//RS use core.compute as compute
-//RS 
-//RS fn run() {
-//RS     left :: compute.full([3, 13], 1.0) ?? panic("left")
-//RS     right :: compute.full([13, 7], 2.0) ?? panic("right")
-//RS     scalar :: compute.matmul(left, right) ?? panic("scalar")
-//RS     tiled :: compute.matmul_f32_tile(left, right) ?? panic("tiled")
-//RS     print("scalar:{compute.to_list(scalar)}")
-//RS     print("tiled:{compute.to_list(tiled)}")
-//RS 
-//RS     wrong :: compute.full([14, 7], 2.0) ?? panic("wrong")
-//RS     if compute.matmul_f32_tile(left, wrong) == {
-//RS         .Ok(_) -> { print("bad_shape:accepted") }
-//RS         .Err(_) -> { print("bad_shape:rejected") }
-//RS     }
-//RS 
-//RS     wide :: compute.full([1, 1], 1e40) ?? panic("wide")
-//RS     if compute.matmul_f32_tile(wide, wide) == {
-//RS         .Ok(_) -> { print("bad_f32:accepted") }
-//RS         .Err(_) -> { print("bad_f32:rejected") }
-//RS     }
-//RS 
-//RS     if compute.matrix(9223372036854775807, 2, 0.0) == {
-//RS         .Ok(_) -> { print("overflow:accepted") }
-//RS         .Err(_) -> { print("overflow:rejected") }
-//RS     }
-//RS }
-//RS "#;
-//RS     assert_tiers_agree(
-//RS         "compute_f32_tile_hostile",
-//RS         source,
-//RS         concat!(
-//RS             "scalar:[26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0]\n",
-//RS             "tiled:[26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0, 26.0]\n",
-//RS             "bad_shape:rejected\n",
-//RS             "bad_f32:rejected\n",
-//RS             "overflow:rejected\n",
-//RS         ),
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn safe_kernel_rejects_effectful_bodies_before_codegen() {
-//RS     let diagnostics = jet::compile(
-//RS         "#Kernel(.parallel) fn noisy(value: Int) -[IO]> Int { print(value)\n    return value }\n",
-//RS     )
-//RS     .expect_err("a safe kernel must not lower an effectful body");
-//RS     assert!(
-//RS         diagnostics
-//RS             .iter()
-//RS             .any(|diagnostic| diagnostic.code == "E1102"),
-//RS         "missing E1102: {diagnostics:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn raw_kernel_contract_cannot_be_forged_without_a_provider() {
-//RS     let diagnostics = jet::compile(
-//RS         "use core.compute as compute\nfn run() { compute.raw_kernel_contract(\"no gate\", 1) }\n",
-//RS     )
-//RS     .expect_err("the CPU compute module must not expose a raw-contract constructor");
-//RS     assert!(
-//RS         diagnostics.iter().any(|diagnostic| {
-//RS             diagnostic.what.contains("raw_kernel_contract")
-//RS                 || diagnostic.fix.contains("core.compute")
-//RS         }),
-//RS         "missing provider-boundary diagnostic: {diagnostics:?}"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn data_series_feeds_the_same_compute_tensor_path() {
-//RS     assert_aot_and_default_parity(
-//RS         "compute_data_integration",
-//RS         r#"
-//RS use core.compute as compute
-//RS 
-//RS fn run() {
-//RS     values :: [Float]{1.0, 2.0, 3.0}
-//RS     tensor :: compute.from_list(values) ?? panic("tensor")
-//RS     doubled :: compute.mul(tensor, compute.full([3], 2.0) ?? panic("factor")) ?? panic("doubled")
-//RS     print("data_tensor:{compute.to_list(doubled)}")
-//RS }
-//RS 
-//RS "#,
-//RS         &["data_tensor:[2.0, 4.0, 6.0]"],
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn portable_accelerator_devices_are_registered_at_the_compute_seam() {
-//RS     jet::compile(
-//RS         r#"
-//RS use core.compute as compute
-//RS 
-//RS fn run() {
-//RS     vulkan :: compute.device_vulkan()
-//RS     webgpu :: compute.device_webgpu()
-//RS     tensor :: compute.full([1], 1.0) ?? panic("tensor")
-//RS     vulkan_tensor :: compute.on_device(tensor, vulkan) ?? panic("vulkan")
-//RS     webgpu_tensor :: compute.on_device(tensor, webgpu) ?? panic("webgpu")
-//RS     print(compute.device(vulkan_tensor))
-//RS     print(compute.device(webgpu_tensor))
-//RS }
-//RS "#,
-//RS     )
-//RS     .expect("Vulkan and WebGPU devices must be public core.compute seams");
-//RS }
-//RS 
-//RS #[test]
-//RS fn portable_accelerator_example_uses_vulkan_and_fails_closed_for_native_webgpu() {
-//RS     assert_example_cli_tiers_agree_with_package(
-//RS         "tooling/compute_vulkan_webgpu",
-//RS         Some(tir_support::TIR_TEST_PACKAGE),
-//RS         |stdout| {
-//RS             let lines: Vec<_> = stdout.lines().collect();
-//RS             assert_eq!(
-//RS                 lines.len(),
-//RS                 2,
-//RS                 "unexpected accelerator example output: {stdout:?}"
-//RS             );
-//RS             assert!(
-//RS                 matches!(lines[0], "vulkan:accepted" | "vulkan:rejected"),
-//RS                 "Vulkan must report its real availability: {stdout:?}"
-//RS             );
-//RS             assert_eq!(lines[1], "webgpu:rejected");
-//RS         },
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn portable_accelerator_vulkan_operations_match_cpu_across_tiers() {
-//RS     let source = r#"
-//RS use core.compute as compute
-//RS 
-//RS fn loss(left: Tensor, right: Tensor) -> Tensor -> compute.mse_loss(left, right) ?? panic("loss")
-//RS 
-//RS fn run() {
-//RS     left_cpu :: compute.full([2, 2], 2.0) ?? panic("left")
-//RS     right_cpu :: compute.full([2, 2], 3.0) ?? panic("right")
-//RS     left_f32 :: compute.matmul_f32_tile(left_cpu, compute.eye(2) ?? panic("eye")) ?? panic("left f32")
-//RS     right_f32 :: compute.matmul_f32_tile(right_cpu, compute.eye(2) ?? panic("eye")) ?? panic("right f32")
-//RS     if compute.on_device(left_f32, compute.device_vulkan()) == {
-//RS         .Err(_) -> print("vulkan:unavailable")
-//RS         .Ok(left) -> {
-//RS             right :: compute.on_device(right_f32, compute.device_vulkan()) ?? panic("right Vulkan")
-//RS             if !compute.placement(left).contains("backend=vulkan") -> panic("Vulkan receipt")
-//RS             print("receipt:vulkan")
-//RS             added :: compute.add(left, right) ?? panic("add")
-//RS             print("add:{compute.to_list(added)}")
-//RS             reduced :: compute.sum_axis(right, 1) ?? panic("sum")
-//RS             print("sum:{compute.to_list(reduced)}")
-//RS             prediction :: compute.mse_loss(left, right) ?? panic("mse")
-//RS             print("mse:{compute.to_list(prediction)}")
-//RS             (gradient_left, gradient_right) :: compute.gradient(loss, ~left, ~right)
-//RS             print("grad:{compute.to_list(gradient_left)}:{compute.to_list(gradient_right)}")
-//RS             tangent_cpu :: compute.ones([2, 2]) ?? panic("tangent")
-//RS             tangent :: compute.on_device(compute.matmul_f32_tile(tangent_cpu, compute.eye(2) ?? panic("eye")) ?? panic("tangent f32"), compute.device_vulkan()) ?? panic("tangent Vulkan")
-//RS             jvp :: compute.jvp(loss)
-//RS             (jvp_value, jvp_tangent) :: jvp(left, right, tangent, tangent)
-//RS             print("jvp:{compute.to_list(jvp_value)}:{compute.to_list(jvp_tangent)}")
-//RS             stream :: compute.stream_new_on(compute.device_vulkan()) ?? panic("stream")
-//RS             compute.stream_sync(stream) ?? panic("sync")
-//RS             cpu :: compute.transfer(left, compute.device_cpu()) ?? panic("transfer")
-//RS             if !compute.transfer_show(cpu).contains("from=Vulkan") -> panic("transfer receipt")
-//RS             print("receipt:transfer")
-//RS             print("transfer:{compute.to_list(cpu)}")
-//RS         }
-//RS     }
-//RS }
-//RS "#;
-//RS     let (code, stdout, stderr) =
-//RS         run_default_multi("compute_vulkan_probe", "main.jet", &[("main.jet", source)]);
-//RS     assert_eq!(code, 0, "Vulkan probe failed: {stderr}");
-//RS     if stdout == "vulkan:unavailable\n" {
-//RS         if std::env::var_os("JET_REQUIRE_VULKAN").is_some() {
-//RS             panic!("Vulkan production path was not available: {stderr}");
-//RS         }
-//RS         return;
-//RS     }
-//RS     let expected = "receipt:vulkan\nadd:[5.0, 5.0, 5.0, 5.0]\nsum:[6.0, 6.0]\nmse:[1.0]\ngrad:[-0.5, -0.5, -0.5, -0.5]:[0.5, 0.5, 0.5, 0.5]\njvp:[1.0]:[0.0]\nreceipt:transfer\ntransfer:[2.0, 2.0, 2.0, 2.0]\n";
-//RS     assert_eq!(
-//RS         stdout, expected,
-//RS         "Vulkan result drifted from the CPU oracle"
-//RS     );
-//RS     assert_tiers_agree("compute_vulkan_operations", source, expected);
-//RS }
-//RS 
-//RS #[test]
-//RS fn portable_accelerator_vulkan_rejects_nonfinite_kernel_output() {
-//RS     let source = r#"
-//RS use core.compute as compute
-//RS 
-//RS fn run() {
-//RS     seed :: compute.matrix(1, 1, 100.0) ?? panic("seed")
-//RS     one :: compute.matrix(1, 1, 1.0) ?? panic("one")
-//RS     f32_seed :: compute.matmul_f32_tile(seed, one) ?? panic("f32")
-//RS     if compute.on_device(f32_seed, compute.device_vulkan()) == {
-//RS         .Err(_) -> print("vulkan:unavailable")
-//RS         .Ok(value) -> {
-//RS             if compute.exp(value) == {
-//RS                 .Ok(_) -> print("nonfinite:accepted")
-//RS                 .Err(_) -> print("nonfinite:rejected")
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS "#;
-//RS     let (code, stdout, stderr) = run_default_multi(
-//RS         "compute_vulkan_nonfinite",
-//RS         "main.jet",
-//RS         &[("main.jet", source)],
-//RS     );
-//RS     assert_eq!(code, 0, "Vulkan non-finite probe failed: {stderr}");
-//RS     if stdout == "vulkan:unavailable\n" {
-//RS         if std::env::var_os("JET_REQUIRE_VULKAN").is_some() {
-//RS             panic!("Vulkan production path was not available: {stderr}");
-//RS         }
-//RS         return;
-//RS     }
-//RS     assert_eq!(stdout, "nonfinite:rejected\n");
-//RS     assert_tiers_agree("compute_vulkan_nonfinite", source, &stdout);
-//RS }
-// END-PORT-PENDING 1004 tests/compute_extended.rs:1-501
-
+use std.thread
+use jet.[compile, CompileOutput]
+use jet.Diagnostics.Diagnostic
+// GATE #4494: real thread stack-size and join primitives.
+// Rust: tests/compiler_stack.rs:3
+pub const SHARED_SOURCE: String = """
+struct Counter { value: Int }
+fn run() {
+    counter := shared Counter{ value: 0 }
+    handle :: task { counter.value += 1 }
+    handle.join() ?? panic("task failed")
+    print(counter.value)
+}
+"""
+// Rust: tests/compiler_stack.rs:15
+pub const COMPOSITE_IF_SOURCE: String = """
+struct Work { callback: fn() -> Int }
+fn both(values: &[Int], work: Work) { &values.push(work.callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, if true -> {
+        work :: Work{ callback: () -> values.len() }
+        work
+    } else -> { Work{ callback: () -> 0 } })
+}
+"""
+// Rust: tests/compiler_stack.rs:29
+pub const COMPOSITE_FALLBACK_SOURCE: String = """
+fn both(values: &[Int], callback: fn() -> Int) { &values.push(callback()) }
+fn run() {
+    values := [1, 2]
+    both(&values, Val(() -> values.len()) ?? () -> 0)
+}
+"""
+// Rust: tests/compiler_stack.rs:37
+pub const LOCAL_CELL_SOURCE: String = """
+struct Pair { left: Int, right: Int }
+struct ValueCache { value: Cell<String?> }
+struct LineCache { value: Cell<[Int]?> }
+fn mapped_read(cell: Cell<Pair>) {
+    left :: cell.guard_read().map(pair -> pair.left)
+    print(left.get())
+}
+fn split_read(cell: Cell<Pair>) {
+    (left, right) :: cell.guard_read().split(pair -> pair.left, pair -> pair.right)
+    print(left.get() + right.get())
+}
+fn mapped_edit(cell: Cell<Pair>) {
+    left :: cell.guard_edit().map(pair -> pair.left)
+    &left.set(9)
+}
+fn split_edit(cell: Cell<Pair>) {
+    (left, right) :: cell.guard_edit().split(pair -> pair.left, pair -> pair.right)
+    &left.set(10)
+    &right.set(11)
+}
+fn make_edit_guards(cell: Cell<Pair>) -> (first: CellEditGuard<Int>, second: CellEditGuard<Int>) {
+    return cell.guard_edit().split(pair -> pair.left, pair -> pair.right)
+}
+fn edit_returned_split(cell: Cell<Pair>) {
+    (left, right) :: make_edit_guards(cell)
+    &left.set(12)
+    &right.set(13)
+}
+fn edit_then_return(cell: Cell<Int>) {
+    guard :: cell.guard_edit()
+    &guard.set(4)
+    return
+}
+fn run() {
+    cell :: Cell.new(Pair{ left: 1, right: 2 })
+    print(cell.read(pair -> pair.left + pair.right))
+    &cell.edit(pair -> pair.left += 3)
+    print(cell.get().left)
+    old :: &cell.replace(Pair{ left: 5, right: 6 })
+    print(old.left)
+    &cell.set(Pair{ left: 7, right: 8 })
+    mapped_read(cell)
+    split_read(cell)
+    mapped_edit(cell)
+    print(cell.get().left)
+    split_edit(cell)
+    print(cell.get().left + cell.get().right)
+    edit_returned_split(cell)
+    print(cell.get().left + cell.get().right)
+    cache :: ValueCache{ value: Cell.new(None) }
+    print(cache.value.get_or_set(() -> "built"))
+    print(cache.value.get_or_set(() -> "unused"))
+    lines :: LineCache{ value: Cell.new(None) }
+    print(lines.value.get_or_set(() -> [0, 8, 15]).len())
+    print(lines.value.get_or_set(() -> [99]).len())
+    early :: Cell.new(1)
+    edit_then_return(early)
+    print(early.get())
+    &early.edit(value -> value += 1)
+    print(early.get())
+}
+"""
+// Rust: tests/compiler_stack.rs:133
+pub fn compile_on_two_mib_stack(source: String) -> CompileOutput ![Diagnostic] {
+    thread.Builder.new().stack_size(2 * 1024 * 1024).spawn(fn() { compile(source) }).expect("spawn the embedder thread").join().expect("the compiler must not overflow the embedder thread")
+}
+// Rust: tests/compiler_stack.rs:165
+pub const JIT_ENTRY_SOURCE: String = "fn twice(n: Int) -> Int { return n + n }\nfn run() { print(twice(21)) }\n"
+// Rust: tests/compiler_stack.rs:174
+pub const PACKAGE_EDITION_PROGRAM: String = """
+use core.data as data
+#Codable
+struct Sale { month: String, value: Float }
+fn run() {
+    rows :: data.csv<Sale>("month,value\nJan,4.0\nFeb,6.0") ?? panic("csv")
+    groups :: data.query(rows).group_by(sale -> sale.month).mean(sale -> sale.value).collect() ?? panic("groups")
+    if groups.len() == 2 { print("checked") }
+    print("edition-sentinel")
+}
+"""
+// Rust: tests/compiler_stack.rs:196
+pub const PACKAGE_EDITION_MANIFEST: String = "name: \"tir_eval_edition\"\nversion: \"0.1.0\"\nedition: \"2027\"\nauthority: {{ holds: {{ allow: [IO, Mem.Alloc, Panic] }} }}\n"
+// Rust: tests/compiler_stack.rs:339
+pub fn parenthesized_source(levels: UInt) -> String {
+    "fn nested() -> Int {{\n    return {"(".repeat(levels)}1{")".repeat(levels)}\n}}\nfn run() {{ print(nested()) }}\n"
+}

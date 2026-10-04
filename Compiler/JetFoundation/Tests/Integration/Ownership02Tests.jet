@@ -1,0 +1,489 @@
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet.[compile, compile_with_path]
+use std.fs
+use std.process.Command
+
+// Rust: tests/ownership.rs:1812
+#Test("whole_place_alias_blocks_overlapping_write_argument") {
+    src :: "\nfn both(a: &[Int], b: [Int]) {{\n    a[0] = b[0]\n}}\n\nfn run() {{\n    xs := [1, 2, 3]\n    alias :: xs\n    both(&xs, alias)\n}}\n"
+    diags :: compile(src).expect_err("whole-place read alias must fail in sema before rustc")
+    diag :: diags.iter().find(|diag| -> diag.code == "E0204")
+    assert(diag.is_some(), "expected the call-alias diagnostic: {diags:?}")
+    diagnostic :: diag.unwrap()
+    assert(diagnostic.what.starts_with("`xs`"), "the alias must resolve through the view fact graph to its owner: {diagnostic:?}")
+}
+
+// Rust: tests/ownership.rs:1839
+#Test("rustc_oracle_rejects_the_hostile_borrow_shapes") {
+    if !common.have_rustc() { return }
+    root :: common.unique_tmp("jet_call_place_rustc_oracle")
+    fs.create_dir_all(&root).unwrap()
+    cases :: [
+        ("nested.rs", "\nfn see(x: i64) -> i64 {{ x }}\nfn both(a: &mut i64, b: i64) {{ *a += b }}\nfn main() {{\n    let mut x = 1;\n    both(&mut x, see(x));\n}}\n", "E0503"),
+        ("alias.rs", "\nfn both(a: &mut Vec<i64>, b: &Vec<i64>) {{ a[0] = b[0] }}\nfn main() {{\n    let mut xs = vec![1, 2, 3];\n    let alias = &xs;\n    both(&mut xs, alias);\n}}\n", "E0502"),
+        ("lambda.rs", "\nfn both<F: FnOnce() -> String>(a: &mut String, callback: F) {{\n    println!(\"{{a}}\");\n    println!(\"{{}}\", callback());\n}}\nfn main() {{\n    let mut x = String::from(\"jet\");\n    both(&mut x, move || x);\n}}\n", "E0505"),
+        ("constructor.rs", "\nstruct Pair<T>(T);\nimpl<T> Pair<T> {{\n    fn new(_first: &mut T, second: T) -> Self {{ Self(second) }}\n}}\nfn see(value: i64) -> i64 {{ value }}\nfn main() {{\n    let mut x = 1;\n    let _ = Pair::new(&mut x, see(x));\n}}\n", "E0503"),
+        ("mutable_capture_lifetime.rs", "\nfn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {{\n    callback();\n    println!(\"{{}}\", values.len());\n}}\nfn main() {{\n    let mut values = vec![1, 2];\n    both(|| values.push(3), &values);\n}}\n", "E0502"),
+        ("composite_lambda.rs", "\nstruct Work<F> {{ callback: F }}\nfn both<F: Fn() -> usize>(values: &mut Vec<i64>, work: Work<F>) {{\n    values.push((work.callback)() as i64);\n}}\nfn main() {{\n    let mut values = vec![1, 2];\n    both(&mut values, Work {{ callback: move || values.len() }});\n}}\n", "E0505"),
+        ("immediate_lambda_callee.rs", "\nfn both(values: &mut Vec<i64>, count: usize) {{ &values.push(count as i64) }}\nfn main() {{\n    let mut values = vec![1, 2];\n    both(&mut values, (move || values.len())());\n}}\n", "E0505"),
+        ("conflicting_capture_field.rs", "\nstruct Pair {{ left: Vec<i64>, right: Vec<i64> }}\nfn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {{\n    callback();\n    println!(\"{{}}\", values.len());\n}}\nfn main() {{\n    let mut pair = Pair {{ left: vec![1], right: vec![2] }};\n    both(|| pair.right.push(3), &pair.right);\n}}\n", "E0502"),
+        ("builtin_receiver.rs", "\nfn main() {{\n    let mut values = vec![1, 2];\n    values.insert(0, values.remove(0));\n}}\n", "E0499"),
+        ("if_prefix_write.rs", "\nfn both(values: &Vec<i64>, count: i64) {{ println!(\"{{}}\", values.len() as i64 + count) }}\nfn main() {{\n    let mut values = vec![1, 2];\n    both(&values, {{ values = vec![3]; 1 }});\n}}\n", "E0506"),
+        ("transitive_lambda.rs", "\nfn both<F, G>(value: &mut String, callback: F)\nwhere F: FnOnce() -> G, G: FnOnce() -> String\n{{\n    println!(\"{{value}}\");\n    println!(\"{{}}\", callback()());\n}}\nfn main() {{\n    let mut value = String::from(\"jet\");\n    both(&mut value, move || move || value);\n}}\n", "E0505"),
+        ("eager_helper_receiver.rs", "\nfn advance(clock: &mut i64, to: i64) {{ *clock = to; }}\nfn now(clock: &i64) -> i64 {{ *clock }}\nfn main() {{\n    let mut clock = 0;\n    advance(&mut clock, now(&clock));\n}}\n", "E0502"),
+        ("eager_sort_capture.rs", "\nfn sort_by<F: Fn(i64) -> i64>(values: &mut Vec<i64>, key: F) {{\n    values.sort_by_key(|value| key(*value));\n}}\nfn main() {{\n    let mut values = vec![2, 1];\n    sort_by(&mut values, |value| value + values.len() as i64);\n}}\n", "E0502"),
+        ("wrapped_returned_view.rs", "\nfn first(values: &Vec<i64>) -> &[i64] {{ &values[0..1] }}\nfn both(view: &[i64], values: &mut Vec<i64>) {{ &values.push(view[0]); }}\nfn main() {{\n    let mut values = vec![1, 2];\n    both((first(&values)), &mut values);\n}}\n", "E0502"),
+        ("pattern_value_capture.rs", "\nstruct Incident {{ count: usize }}\nfn both<F: FnMut()>(values: &mut Vec<i64>, mut callback: F) {{\n    values.push(3);\n    callback();\n}}\nfn main() {{\n    let mut values = vec![1, 2];\n    let mut changed = vec![0];\n    let incident = Incident {{ count: 2 }};\n    both(&mut values, || {{\n        changed.push(1);\n        if incident.count == values.len() {{}}\n    }});\n}}\n", "E0502"),
+        ("reactive_whole_root_clone.rs", "\n#[derive(Clone)]\nstruct Pair {{ left: Vec<i64>, right: Vec<i64> }}\nfn both<F: FnMut()>(values: &mut Vec<i64>, mut callback: F) {{\n    values.push(3);\n    callback();\n}}\nfn main() {{\n    let mut pair = Pair {{ left: vec![1], right: vec![2] }};\n    let mut changed = vec![0];\n    both(&mut pair.right, || {{\n        changed.push(1);\n        let captured_pair = pair.clone();\n        let _effect = move || println!(\"{{}}\", captured_pair.left.len());\n    }});\n}}\n", "E0502"),
+        ("move_capture_before_read.rs", "\nfn both<F: Fn() -> usize>(callback: F, values: &Vec<i64>) {{\n    println!(\"{{}} {{}}\", callback(), values.len());\n}}\nfn main() {{\n    let values = vec![1, 2];\n    both(move || values.len(), &values);\n}}\n", "E0382"),
+        ("read_before_move_capture.rs", "\nfn both<F: Fn() -> usize>(values: &Vec<i64>, callback: F) {{\n    println!(\"{{}} {{}}\", values.len(), callback());\n}}\nfn main() {{\n    let values = vec![1, 2];\n    both(&values, move || values.len());\n}}\n", "E0505"),
+        ("same_move_capture_field.rs", "\nstruct Pair {{ left: String, right: Vec<i64> }}\nfn both<F: Fn()>(callback: F, text: String) {{ callback(); println!(\"{{text}}\"); }}\nfn main() {{\n    let pair = Pair {{ left: \"jet\".to_string(), right: vec![1] }};\n    both(move || println!(\"{{}}\", pair.left), pair.left);\n}}\n", "E0382"),
+        ("captured_view_vs_write.rs", "\nfn both<F: Fn()>(values: &mut Vec<i64>, callback: F) {{ &values.push(3); callback(); }}\nfn main() {{\n    let mut values = vec![1, 2];\n    let first = &values[0..1];\n    both(&mut values, move || println!(\"{{}}\", first.len()));\n}}\n", "E0502"),
+        ("captured_view_vs_later_write.rs", "\nfn both<F: Fn() -> usize>(callback: F, values: &mut Vec<i64>) {{\n    values.push(callback() as i64);\n}}\nfn main() {{\n    let mut values = vec![1, 2];\n    let first = &values[0..1];\n    both(move || first.len(), &mut values);\n}}\n", "E0502"),
+        ("indexed_move_capture.rs", "\nfn call<F: Fn()>(callback: F) {{ callback(); }}\nfn main() {{\n    let values = vec![1, 2];\n    call(move || println!(\"{{}}\", values[0]));\n    println!(\"{{}}\", values.len());\n}}\n", "E0382"),
+        ("sliced_move_capture.rs", "\nfn call<F: Fn()>(callback: F) {{ callback(); }}\nfn main() {{\n    let values = vec![1, 2];\n    call(move || println!(\"{{}}\", values[0..1].len()));\n    println!(\"{{}}\", values.len());\n}}\n", "E0382"),
+        ("if_prefix.rs", "\nfn both(value: &mut i64, count: i64) {{ *value += count }}\nfn main() {{\n    let mut value = 1;\n    both(&mut value, if true {{ let seen = value; seen }} else {{ 0 }});\n}}\n", "E0503"),
+        ("composite_receiver.rs", "\nfn both(value: &mut i64, count: usize) {{ *value += count as i64 }}\nfn main() {{\n    let mut value = 1;\n    both(&mut value, vec![value].len());\n}}\n", "E0503"),
+        ("dynamic_index.rs", "\nfn both(index: &mut usize, value: i64) {{ *index += value as usize }}\nfn main() {{\n    let values = [10, 20];\n    let mut index = 0;\n    both(&mut index, values[index]);\n}}\n", "E0503"),
+        ("slice_bound.rs", "\nfn both(end: &mut usize, values: &[i64]) {{ *end += values.len() }}\nfn main() {{\n    let values = [10, 20];\n    let mut end = 1;\n    both(&mut end, &values[0..end]);\n}}\n", "E0503")
+    ]
+    for (name, source, expected) in cases {
+        path :: root.join(name)
+        fs.write(&path, source).unwrap()
+        // GATE #4494: native process invocation retained for the independent rustc oracle.
+        output :: Command.new("rustc").arg("--edition=2021").arg(&path).arg("-o").arg(root.join("{name}.bin")).output().unwrap()
+        stderr :: String.from_utf8_lossy(&output.stderr)
+        assert(!output.status.success() && stderr.contains(expected), "native oracle must reject {name} with {expected}: {stderr}")
+    }
+}
+
+// Rust: tests/ownership.rs:2222
+#Test("rustc_oracle_accepts_move_copy_and_disjoint_field_captures") {
+    if !common.have_rustc() { return }
+    root :: common.unique_tmp("jet_call_place_rustc_positive_oracle")
+    fs.create_dir_all(&root).unwrap()
+    cases :: [
+        ("copy_move.rs", "\nfn both<F: Fn() -> i64>(callback: F, value: &mut i64) {{ *value += callback() }}\nfn main() {{\n    let mut value = 1;\n    both(move || value, &mut value);\n}}\n"),
+        ("disjoint_field.rs", "\nstruct Pair {{ left: Vec<i64>, right: Vec<i64> }}\nfn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {{\n    callback();\n    println!(\"{{}}\", values.len());\n}}\nfn main() {{\n    let mut pair = Pair {{ left: vec![1], right: vec![2] }};\n    both(|| pair.right.push(3), &pair.left);\n}}\n"),
+        ("two_phase_receiver.rs", "\nfn main() {{\n    let mut values = vec![1_i64, 2];\n    values.push(values.len() as i64);\n}}\n"),
+        ("mixed_projection_capture.rs", "\nstruct Pair {{ left: Vec<i64>, right: Vec<i64> }}\nfn both<F: FnMut()>(mut callback: F, values: &Vec<i64>) {{\n    callback();\n    println!(\"{{}}\", values.len());\n}}\nfn main() {{\n    let mut pair = Pair {{ left: vec![1], right: vec![2] }};\n    both(|| {{\n        println!(\"{{}}\", pair.left.len());\n        pair.right.push(3);\n    }}, &pair.left);\n}}\n"),
+        ("move_owned_field.rs", "\nstruct Pair {{ left: String, right: Vec<i64> }}\nfn both<F: Fn()>(callback: F, values: Vec<i64>) {{ callback(); println!(\"{{}}\", values.len()); }}\nfn main() {{\n    let pair = Pair {{ left: \"jet\".to_string(), right: vec![1] }};\n    both(move || println!(\"{{}}\", pair.left), pair.right);\n}}\n"),
+        ("copy_field_owner.rs", "\nstruct Pair {{ count: i64, values: Vec<i64> }}\nfn both<F: Fn()>(callback: F, pair: Pair) {{ callback(); println!(\"{{}}\", pair.count); }}\nfn main() {{\n    let pair = Pair {{ count: 2, values: vec![1] }};\n    both(move || println!(\"{{}}\", pair.count), pair);\n}}\n"),
+        ("view_alias_capture.rs", "\nfn call<F: Fn()>(callback: F) {{ callback(); }}\nfn main() {{\n    let values = vec![1, 2];\n    let first = &values[0..1];\n    call(move || println!(\"{{}}\", first.len()));\n    println!(\"{{}}\", values.len());\n}}\n"),
+        ("indexed_disjoint_field.rs", "\nstruct Pair {{ left: Vec<i64>, right: Vec<i64> }}\nfn call<F: Fn()>(callback: F) {{ callback(); }}\nfn main() {{\n    let pair = Pair {{ left: vec![1], right: vec![2] }};\n    call(move || println!(\"{{}}\", pair.left[0]));\n    println!(\"{{}}\", pair.right.len());\n}}\n")
+    ]
+    for (name, source) in cases {
+        path :: root.join(name)
+        fs.write(&path, source).unwrap()
+        // GATE #4494: native process invocation retained for the independent rustc oracle.
+        output :: Command.new("rustc").arg("--edition=2021").arg(&path).arg("-o").arg(root.join("{name}.bin")).output().unwrap()
+        assert(output.status.success(), "native oracle must accept {name}: {String.from_utf8_lossy(&output.stderr)}")
+    }
+}
+
+// Rust: tests/ownership.rs:2345
+#Test("imported_call_uses_the_same_place_access_rule") {
+    root :: common.unique_tmp("jet_imported_call_place_access")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("helper.jet"), "pub fn both(a: &Int, b: Int) {{ a += b }}\n").unwrap()
+    entry :: root.join("main.jet")
+    src :: "\nuse \"./helper\" as helper\n\nfn run() {{\n    x := 1\n    helper.both(&x, x)\n}}\n"
+    fs.write(&entry, src).unwrap()
+    diags :: compile_with_path(src, entry.to_str().unwrap()).expect_err("imported call alias must fail in sema before rustc")
+    assert(diags.iter().any(|diag| -> diag.code == "E0204"), "expected the call-alias diagnostic: {diags:?}")
+}
+
+// Rust: tests/ownership.rs:2372
+#Test("generic_method_trait_and_function_value_calls_share_place_access") {
+    hostile :: [
+        "\nfn both<T>(a: &T, b: T) {{ print(0) }}\nfn run() {{\n    value := 1\n    both(&value, value)\n}}\n",
+        "\nstruct Editor {{ id: Int }}\nimpl Editor {{\n    fn clash(self, other: &Editor) {{ print(other.id) }}\n}}\nfn run() {{\n    editor := Editor{{ id: 1 }}\n    editor.clash(&editor)\n}}\n",
+        "\ntrait Edit {{\n    fn clash(self, other: &Edit)\n}}\nfn conflict(editor: &Edit) {{\n    editor.clash(&editor)\n}}\nfn run() {{}}\n",
+        "\nfn length(value: String) -[]> Int {{ return value.len() }}\nfn both(value: &String, count: Int) {{\n    print(value)\n    print(count)\n}}\nfn run() {{\n    callback :: length\n    value := \"hello\"\n    both(&value, callback(value))\n}}\n",
+        "\nmodule helper {{\n    pub fn both(a: &Int, b: Int) {{ a += b }}\n}}\nfn run() {{\n    value := 1\n    helper.both(&value, value)\n}}\n"
+    ]
+    for src in hostile {
+        diags :: compile(src).expect_err("every call form must reject one aliased place")
+        assert(diags.iter().any(|diag| -> diag.code == "E0204"), "expected the shared call-place diagnostic: {diags:?}")
+    }
+}
+
+// Rust: tests/ownership.rs:2432
+#Test("trait_object_mut_self_calls_use_receiver_change_rules_inside_callbacks") {
+    rejected :: "\ntrait Edit {{\n    fn change(&self)\n}}\nfn call(callback: fn()) {{ callback() }}\nfn invoke(editor: Edit) {{\n    call(() -> {{ editor.change() }})\n}}\nfn run() {{}}\n"
+    diags :: compile(rejected).expect_err("a trait-object mut-self callback capture needs edit access")
+    assert(diags.iter().any(|diag| -> diag.code == "E0202"), "{diags:?}")
+    accepted :: "\ntrait Edit {{\n    fn change(&self)\n}}\nfn call(callback: fn()) {{ callback() }}\nfn invoke(editor: &Edit) {{\n    call(() -> {{ editor.change() }})\n}}\nfn run() {{}}\n"
+    _ :: compile(accepted).expect("an editable trait-object callback capture is valid")
+}
+
+// Rust: tests/ownership.rs:2461
+#Test("multi_trait_receiver_access_follows_first_match_dispatch_order") {
+    read_first :: "\ntrait Inspect {{\n    fn touch(self)\n}}\ntrait Edit {{\n    fn touch(&self)\n}}\nfn call(callback: fn()) {{ callback() }}\nfn inspect_all(items: ...[Inspect, Edit]) {{\n    loop item in items {{\n        call(() -> {{ item.touch() }})\n    }}\n}}\nfn run() {{}}\n"
+    _ :: compile(read_first).expect("the first matching read-self method controls dispatch and capture access")
+    write_first :: "\ntrait Inspect {{\n    fn touch(self)\n}}\ntrait Edit {{\n    fn touch(&self)\n}}\nfn call(callback: fn()) {{ callback() }}\nfn edit_all(items: ...[Edit, Inspect]) {{\n    loop item in items {{\n        call(() -> {{ item.touch() }})\n    }}\n}}\nfn run() {{}}\n"
+    diags :: compile(write_first).expect_err("the first matching write-self method needs edit access")
+    assert(diags.iter().any(|diag| -> diag.code == "E0202"), "{diags:?}")
+}
+
+// Rust: tests/ownership.rs:2501
+#Test("implicit_borrows_persist_but_finished_scalar_reads_do_not") {
+    borrowed :: "\nfn inspect_then_edit(values: [Int], edited: &[Int]) {{ print(values.len() + edited.len()) }}\nfn run() {{\n    values := [1, 2, 3]\n    inspect_then_edit(values, &values)\n}}\n"
+    diags :: compile(borrowed).expect_err("implicit read borrow must remain active")
+    assert(diags.iter().any(|diag| -> diag.code == "E0204"), "{diags:?}")
+    ordered :: "\nfn read_then_edit(value: Int, edited: &Int) {{ edited += value }}\nfn run() {{\n    value := 1\n    read_then_edit(value, &value)\n}}\n"
+    _ :: compile(ordered).expect("a completed scalar read may precede a write borrow")
+}
+
+// Rust: tests/ownership.rs:2523
+#Test("call_access_frames_do_not_leak_across_control_flow_or_disjoint_places") {
+    src :: "\nfn both(a: &Int, b: Int) {{ a += b }}\nfn run() {{\n    left := 1\n    right := 2\n    if true {{\n        both(&left, right)\n    }}\n    both(&right, left)\n}}\n"
+    _ :: compile(src).expect("separate calls on disjoint places must not share access frames")
+}
+
+// Rust: tests/ownership.rs:2542
+// E0209 remains a hard error; live-after values get the reorder/copy menu.
+#Test("implicit_clone_errors_with_reorder_menu_when_live_after_call") {
+    src :: "\nfn consume(s: ^String) {{\n    print(s)\n}}\n\nfn run() {{\nmsg :: \"hello\"\n    consume(msg)\n    print(msg)\n}}\n"
+    diags :: compile(src).expect_err("should error")
+    d :: diags.iter().find(|d| -> d.code == "E0209").expect("expected E0209 implicit-clone hard error")
+    assert(d.fix.contains("reorder"), "live-after fix menu should suggest reordering, got: {d.fix}")
+}
+
+// Rust: tests/ownership.rs:2569
+// At last use, the fix menu can safely lead with the move sigil.
+#Test("implicit_clone_errors_with_move_menu_when_dead_after_call") {
+    src :: "\nfn consume(s: ^String) {{\n    print(s)\n}}\n\nfn run() {{\nmsg :: \"hello\"\n    consume(msg)\n}}\n"
+    diags :: compile(src).expect_err("should error")
+    d :: diags.iter().find(|d| -> d.code == "E0209").expect("expected E0209 implicit-clone hard error")
+    assert(d.fix.contains("^msg"), "dead-after fix menu should lead with `^msg`, got: {d.fix}")
+}
+
+// Rust: tests/ownership.rs:2593
+#Test("deref_outside_unsafe_is_error") {
+    src :: "\nfn run() {{\nx :: 1\n    print(*x)\n}}\n"
+    diags :: compile(src).expect_err("should error")
+    assert(diags.iter().any(|d| -> d.code == "E0208"))
+}
+
+// Rust: tests/ownership.rs:2611
+// Liveness includes the enclosing block, not just the current block's tail.
+#Test("implicit_clone_uses_reorder_menu_when_live_in_enclosing_block") {
+    src :: "\nfn consume(s: ^String) {{\n    print(s)\n}}\n\nfn maybe(b: Bool) -[]> Bool {{ return b }}\n\nfn run() {{\nmsg :: \"hello\"\n    if maybe(true) {{\n        consume(msg)\n    }}\n    print(msg)\n}}\n"
+    diags :: compile(src).expect_err("should error")
+    d :: diags.iter().find(|d| -> d.code == "E0209").expect("expected E0209 implicit-clone hard error")
+    assert(d.fix.contains("reorder"), "live-in-enclosing-block fix menu should suggest reordering, got: {d.fix}")
+}
+
+// Rust: tests/ownership.rs:2643
+#Test("implicit_clone_uses_move_menu_when_dead_in_all_enclosing_blocks") {
+    src :: "\nfn consume(s: ^String) {{\n    print(s)\n}}\n\nfn maybe(b: Bool) -[]> Bool {{ return b }}\n\nfn run() {{\nmsg :: \"hello\"\n    if maybe(true) {{\n        consume(msg)\n    }}\n}}\n"
+    diags :: compile(src).expect_err("should error")
+    d :: diags.iter().find(|d| -> d.code == "E0209").expect("expected E0209 implicit-clone hard error")
+    assert(d.fix.contains("^msg"), "dead-in-all-enclosing-blocks fix menu should lead with `^msg`, got: {d.fix}")
+}
+
+// Rust: tests/ownership.rs:2673
+// D-MEM1 S9 / #649: a read view prevents moving its owner.
+#Test("moving_list_owner_with_live_view_is_error") {
+    src :: "\nfn consume(xs: ^[Int]) {{\n    print(xs.len())\n}}\n\nfn run() {{\n    xs := [1, 2, 3]\n    window :: xs[0..1]\n    consume(^xs)\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("moving a viewed owner must fail")
+    assert(diags.iter().any(|d| -> d.code == "E0212"))
+}
+
+// Rust: tests/ownership.rs:2693
+// D-SHAPE-PLACE1=A: a bare range place is a read window.
+#Test("moving_list_owner_with_bare_range_window_is_error") {
+    src :: "\nfn consume(xs: ^[Int]) {{\n    print(xs.len())\n}}\n\nfn run() {{\n    xs := [1, 2, 3]\n    window :: xs[0..1]\n    consume(^xs)\n    print(window.len())\n}}\n"
+    diags :: compile(src).expect_err("moving a windowed owner must fail")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "got {diags:?}")
+}
+
+// Rust: tests/ownership.rs:2713
+// Exclusive write windows conflict with overlapping read windows.
+#Test("write_range_window_conflicts_with_overlapping_read_window") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    edit :: &xs[0..1]\n    read :: xs[1..2]\n    print(edit.len() + read.len())\n}}\n"
+    diags :: compile(src).expect_err("overlapping write/read windows must fail")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "got {diags:?}")
+}
+
+// Rust: tests/ownership.rs:2727
+#Test("bare_range_window_lowers_without_copy") {
+    src :: "\nfn run() {{\n    xs :: [1, 2, 3]\n    band :: 0..1\n    window :: xs[band]\n    print(window[1])\n}}\n"
+    out :: compile(src).expect("bare range window must compile")
+    assert(out.rust.contains("let __jet_window = jet_view_range_new"), "range acquisition must lower to a view: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:2745
+#Test("whole_place_window_lowers_as_borrow") {
+    src :: "\nfn run() {{\n    xs :: [1, 2, 3]\n    all :: xs\n    print(all.len())\n}}\n"
+    out :: compile(src).expect("whole place window must compile")
+    assert(out.rust.contains("let __jet_all = &(__jet_xs)"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:2762
+#Test("copied_range_is_owned_and_does_not_borrow_owner") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    copied :: ~xs[0..1]\n    &xs.push(4)\n    print(copied.len() + xs.len())\n}}\n"
+    _ :: compile(src).expect("`~range` must stay an independent owned copy")
+}
+
+// Rust: tests/ownership.rs:2775
+#Test("write_range_window_edits_owner") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    band :: 0..1\n    edit :: &xs[band]\n    edit[1] = 9\n    print(xs[1])\n}}\n"
+    out :: compile(src).expect("write range window must compile")
+    assert(out.rust.contains("jet_view_mut_range_new"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:2790
+#Test("write_windows_edit_whole_field_and_index_places") {
+    src :: "\nstruct Slot {{ value: Int }}\nfn run() {{\n    whole := 1\n    whole_edit :: &whole\n    whole_edit = 2\n\n    cell := Slot{{ value: 3 }}\n    field_edit :: &cell.value\n    field_edit = 4\n\n    xs := [5, 6]\n    index_edit :: &xs[0]\n    index_edit = 7\n    print(whole + cell.value + xs[0])\n}}\n"
+    out :: compile(src).expect("write windows must write through to each owner place")
+    assert(out.rust.contains("(*__jet_whole_edit) = 2i64"), "{out.rust}")
+    assert(out.rust.contains("(*__jet_field_edit) = 4i64"), "{out.rust}")
+    assert(out.rust.contains("(*__jet_index_edit) = 7i64"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:2827
+#Test("named_write_windows_forward_to_helpers_and_mutate_owners") {
+    src :: "\nstruct Slot {{ value: Int }}\n\nfn bump(value: &Int, amount: Int) {{\n    value += amount\n}}\n\nfn inspect(first: Slot, second: Slot) {{\n    print(first.value + second.value)\n}}\n\nfn run() {{\n    whole := 1\n    whole_window :: &whole\n    bump(&whole_window, 2)\n\n    slot := Slot{{ value: 3 }}\n    field_window :: &slot.value\n    bump(&field_window, 4)\n\n    values := [5, 6]\n    index_window :: &values[0]\n    bump(&index_window, 6)\n\n    read_slot := Slot{{ value: 9 }}\n    read_window :: &read_slot\n    inspect(read_window, read_window)\n\n    print(whole)\n    print(slot.value)\n    print(values[0])\n}}\n"
+    _ :: compile(src).expect("named write windows must forward to helpers")
+    expected :: "3\n7\n11\n18\n"
+    assert(common.have_rustc(), "named write-window forwarding requires the AOT proof toolchain")
+    tir_support.assert_tiers_agree("named_write_window_forward", src, expected)
+    tir_support.assert_awaited_web_tier("named_write_window_forward", src, expected)
+}
+
+// Rust: tests/ownership.rs:2872
+#Test("named_write_window_calls_keep_alias_and_read_view_checks") {
+    overlapping :: "\nfn both(first: &Int, second: Int) {{\n    first += second\n}}\n\nfn run() {{\n    value := 1\n    window :: &value\n    both(&window, value)\n}}\n"
+    diags :: compile(overlapping).expect_err("same-call named-window alias must fail")
+    assert(diags.iter().any(|diag| -> diag.code == "E0204"), "expected E0204 for an overlapping named-window call: {diags:?}")
+    read_view :: "\nfn bump(value: &Int) {{\n    value += 1\n}}\n\nfn run() {{\n    values := [1, 2]\n    read :: values[0]\n    bump(&read)\n}}\n"
+    read_diags :: compile(read_view).expect_err("a read view cannot enter a write helper")
+    assert(read_diags.iter().any(|diag| -> diag.code == "E0212"), "expected E0212 for a write through a read view: {read_diags:?}")
+}
+
+// Rust: tests/ownership.rs:2909
+#Test("named_write_window_call_preserves_scoped_loan_rejection") {
+    src :: "\nfn bump(value: &Int) {{\n    value += 1\n}}\n\nfn run() {{\n    values := [1]\n    task.group g {{\n        edit :: &values[0]\n        child :: task {{ edit }}\n        bump(&edit)\n    }}\n}}\n"
+    diags :: compile(src).expect_err("a scoped loan must outlive the named write call")
+    diagnostic :: diags.iter().find(|diag| -> diag.code == "E1101").expect("expected the scoped-loan diagnostic")
+    assert(diagnostic.what.contains("cannot be passed with write access"), "the protected call change must be the reported action: {diagnostic:?}")
+}
+
+// Rust: tests/ownership.rs:2936
+#Test("write_window_requires_mutable_owner_or_write_parameter") {
+    local :: "\nfn run() {{\n    xs :: [1, 2]\n    edit :: &xs[0]\n    print(edit)\n}}\n"
+    diags :: compile(local).expect_err("immutable local must reject write window")
+    assert(diags.iter().any(|d| -> d.code == "E0202"), "{diags:?}")
+    parameter :: "\nfn edit(xs: [Int]) {{\n    window :: &xs[0]\n    print(window)\n}}\nfn run() {{ print(0) }}\n"
+    parameter_diags :: compile(parameter).expect_err("read parameter must reject write window")
+    assert(parameter_diags.iter().any(|d| -> d.code == "E0205"), "{parameter_diags:?}")
+}
+
+// Rust: tests/ownership.rs:2959
+#Test("indexed_window_conflict_ends_at_last_use") {
+    src :: "\nfn run() {{\n    xs := [1, 2]\n    read :: xs[0..0]\n    print(read[0])\n    edit :: &xs[0..0]\n    edit[0] = 9\n    print(xs[0])\n}}\n"
+    _ :: compile(src).expect("last use must end the earlier window conflict")
+}
+
+// Rust: tests/ownership.rs:2974
+#Test("write_mark_stops_at_maximal_place_before_method_chain") {
+    src :: "\nfn run() {{\n    xs := [1, 2]\n    n :: &xs[0..1].len()\n    print(n)\n}}\n"
+    out :: compile(src).expect("method must receive the maximal write-window place")
+    assert(out.rust.contains("jet_view_mut_new"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:2987
+#Test("write_window_rejects_call_result_place") {
+    src :: "\nfn make() -[]> [Int] {{ return [1, 2] }}\nfn run() {{\n    edit :: &make()[0]\n    print(edit)\n}}\n"
+    diags :: compile(src).expect_err("call result has no stable owner place")
+    assert(diags.iter().any(|d| -> d.code == "E0213"), "{diags:?}")
+}
+
+// Rust: tests/ownership.rs:3000
+#Test("disjoint_read_write_ranges_lower_to_safe_split") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3, 4]\n    edit :: &xs[0..1]\n    read :: xs[2..3]\n    edit[0] = 9\n    print(read[0])\n}}\n"
+    out :: compile(src).expect("disjoint read/write windows must compile")
+    assert(out.rust.contains("split_at_mut"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:3015
+#Test("disjoint_write_ranges_lower_to_safe_split") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3, 4]\n    left :: &xs[0..1]\n    right :: &xs[2..3]\n    left[0] = 8\n    right[0] = 9\n    print(left[0] + right[0])\n}}\n"
+    out :: compile(src).expect("disjoint write windows must compile")
+    assert(out.rust.matches("split_at_mut").count() >= 2, "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:3035
+#Test("disjoint_write_indexes_lower_to_safe_split") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    left :: &xs[0]\n    right :: &xs[2]\n    print(left + right)\n}}\n"
+    out :: compile(src).expect("disjoint constant indexes must compile")
+    assert_eq(out.rust.matches(").split_at_mut(").count(), 4, "{out.rust}")
+    assert(out.rust.contains("let __jet_left = &mut __jet___place_plan_") && out.rust.contains("let __jet_right = &mut __jet___place_plan_"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:3069
+// #1162: statically disjoint particle windows use safe structural splits.
+// The owner is not read alongside its exclusive windows (I2 / E0220).
+#Test("indexed_simulation_static_update_lowers_to_safe_splits") {
+    src :: "\nstruct Particle {{ position: Int, velocity: Int }}\nstruct Tile {{ force: Int }}\n\nfn run() {{\n    particles := [Particle]{{\n        Particle{{ position: 10, velocity: 2 }},\n        Particle{{ position: 20, velocity: 3 }},\n        Particle{{ position: 30, velocity: 4 }}\n    }}\n    grid :: [Tile]{{\n        Tile{{ force: 5 }},\n        Tile{{ force: 7 }},\n        Tile{{ force: 11 }}\n    }}\n\n    middle_before :: ~particles[1]\n    left :: &particles[0]\n    right :: &particles[2]\n    left.velocity += grid[0].force\n    right.velocity += grid[2].force\n    left.position += left.velocity\n    right.position += right.velocity\n    print(\"{{left.position}},{{middle_before.position}},{{right.position}}\")\n}}\n"
+    out :: compile(src).expect("static particle indexes must compile")
+    assert(out.rust.matches(".split_at_mut(").count() >= 4, "particle edit windows must use safe structural splits: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:3107
+// Runtime index inequality is not a static place-disjointness proof.
+#Test("indexed_simulation_rejects_dynamic_disjointness_claim") {
+    src :: "\nstruct Particle {{ position: Int }}\n\nfn update_pair(particles: &[Particle], left_index: Int, right_index: Int) {{\n    left :: &particles[left_index]\n    right :: &particles[right_index]\n    left.position += 1\n    right.position += 1\n}}\n\nfn run() {{\n    particles := [Particle]{{\n        Particle{{ position: 10 }},\n        Particle{{ position: 20 }}\n    }}\n    update_pair(&particles, 0, 1)\n}}\n"
+    diags :: compile(src).expect_err("runtime indexes stay conservatively overlapping until #1198")
+    diag :: diags.iter().find(|diag| -> diag.code == "E0212").unwrap_or_else(|| -> panic("expected the overlapping-window error: {diags:?}"))
+    assert_eq(diag.what, "`particles[…]` already has a live view that conflicts with `right`")
+    assert(diag.why.contains("exclusive mutable view"), "{diag:?}")
+}
+
+// Rust: tests/ownership.rs:3142
+#Test("indexed_simulation_rejects_hostile_overlap") {
+    src :: "\nstruct Particle {{ position: Int }}\n\nfn run() {{\n    particles := [Particle]{{\n        Particle{{ position: 10 }},\n        Particle{{ position: 20 }}\n    }}\n    first :: &particles[0]\n    duplicate :: &particles[0]\n    first.position += 1\n    duplicate.position += 1\n}}\n"
+    diags :: compile(src).expect_err("overlapping particle edits must fail")
+    diag :: diags.iter().find(|diag| -> diag.code == "E0212").unwrap_or_else(|| -> panic("expected the overlapping-window error: {diags:?}"))
+    assert_eq(diag.what, "`particles[…]` already has a live view that conflicts with `duplicate`")
+    assert(diag.why.contains("exclusive mutable view"), "{diag:?}")
+}
+
+// Rust: tests/ownership.rs:3172
+#Test("indexed_simulation_example_runs_production_pipeline") {
+    // GATE #4494: native CLI process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", "--release", "Examples/features/memory/place_windows.jet"]).current_dir(env("CARGO_MANIFEST_DIR")).output().expect("run the indexed simulation through the production native CLI path")
+    assert(output.status.success(), "native indexed simulation failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).expect("example stdout must be UTF-8"), "17,20,45\n")
+}
+
+// Rust: tests/ownership.rs:3196
+// #1163: read and write views return provenance rooted in the owner's list field.
+#Test("owner_backed_collection_returns_element_views") {
+    src :: "\nstruct Book {{\n    title: String,\n    pages: Int\n}}\n\nstruct Library {{\n    books: [Book]\n}}\n\nfn book_at(lib: Library, i: Int) -> View<Book> {{ lib.books[i..i] }}\n\nfn edit_at(lib: &Library, i: Int) -[]> ViewMut<Book> {{\n    return &lib.books[i..i]\n}}\n\nfn run() {{\n    lib := Library{{\n        books: [\n            Book{{ title: \"Dune\", pages: 412 }},\n            Book{{ title: \"Neuromancer\", pages: 271 }}\n        ]\n    }}\n    first :: book_at(lib, 0)\n    print(first[0].title)\n    dune :: edit_at(&lib, 0)\n    dune[0].pages += 10\n    print(lib.books[0].pages)\n}}\n"
+    out :: compile(src).expect("owner-backed collection views must compile")
+    assert(out.rust.contains("fn __jet_book_at<'__jet___view>(__jet_lib: &'__jet___view __jet_Library, __jet_i: i64) -> JetOutcome<&'__jet___view [__jet_Book], JetErr>"), "read view must tie to parameter 0: {out.rust}")
+    assert(out.rust.contains("fn __jet_edit_at<'__jet___view>(__jet_lib: &'__jet___view mut __jet_Library, __jet_i: i64) -> JetOutcome<&'__jet___view mut [__jet_Book], JetErr>"), "write view must tie to parameter 0: {out.rust}")
+    // A compound field write borrows the ViewMut element once and updates it;
+    // no cloned temporary may stand between the target and its owner.
+    assert(out.rust.contains("&mut (__jet_dune)[0i64 as usize].__jet_pages"), "field write must assign through the ViewMut element, not a cloned temporary: {out.rust}")
+    assert(!out.rust.contains("(__jet_dune).clone()"), "the write must not go through a cloned view: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:3260
+#Test("owner_backed_collection_rejects_resize_while_view_live") {
+    src :: "\nstruct Book {{\n    title: String,\n    pages: Int\n}}\n\nstruct Library {{\n    books: [Book]\n}}\n\nfn book_at(lib: Library, i: Int) -> View<Book> {{ lib.books[i..i] }}\n\nfn run() {{\n    lib := Library{{\n        books: [\n            Book{{ title: \"Dune\", pages: 412 }},\n            Book{{ title: \"Neuromancer\", pages: 271 }}\n        ]\n    }}\n    first :: book_at(lib, 0)\n    &lib.books.push(Book{{ title: \"Snow Crash\", pages: 480 }})\n    print(first[0].title)\n}}\n"
+    diags :: compile(src).expect_err("resize while view live must fail")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "expected E0212, got {diags:?}")
+}
+
+// Rust: tests/ownership.rs:3295
+// #1163 / #1164: plain owned String is not a tracked View<str>.
+#Test("owner_backed_collection_rejects_plain_string_as_view_str_field") {
+    src :: "\nstruct Book {{\n    title: String,\n    pages: Int\n}}\n\nstruct Library {{\n    books: [Book]\n}}\n\nstruct TitleView {{\n    value: View<str>\n}}\n\nfn first_title(lib: Library) -[]> TitleView {{\n    value :: lib.books[0].title\n    return TitleView{{ value: value }}\n}}\n\nfn run() {{\n    lib :: Library{{\n        books: [Book{{ title: \"Dune\", pages: 412 }}]\n    }}\n    print(first_title(lib).value)\n}}\n"
+    diags :: compile(src).expect_err("plain String into View<str> must fail")
+    e2307 :: diags.iter().filter(|d| -> d.code == "E2307").collect()
+    assert_eq(e2307.len(), 1, "expected one E2307, got {diags:?}")
+    assert(e2307[0].what.contains("owned `String` cannot fill a `View<str>`"), "teaching must name the owned-String ceiling, got {e2307[0]:?}")
+    assert(e2307[0].why.contains(".trim()") || e2307[0].fix.contains(".trim()"), "fix must teach trim/after/before or element View, got {e2307[0]:?}")
+}
+
+// Rust: tests/ownership.rs:3342
+// Aggregate and direct return paths must not duplicate E2305.
+#Test("local_owned_view_return_reports_e2305_once") {
+    src :: "\nfn make() -[]> View<Int> {{\n    incidents := [Int]{{1, 2, 3, 4, 5}}\n    return incidents[0..2]\n}}\n\nfn run() {{\n    make()\n    print(0)\n}}\n"
+    diags :: compile(src).expect_err("local-owned view return must fail")
+    e2305 :: diags.iter().filter(|d| -> d.code == "E2305").collect()
+    assert_eq(e2305.len(), 1, "expected exactly one E2305, got {diags:?}")
+    assert(e2305[0].what.contains("this function owns"), "expected owns-return teaching, got {e2305[0]:?}")
+}
+
+// Rust: tests/ownership.rs:3367
+#Test("string_view_as_owned_return_materializes_copy_once") {
+    src :: "\nfn make() -[]> String {{\n    email := \"nate@jet-lang.dev\"\n    d :: email.after(\"@\")\n    return d\n}}\n\nfn run() {{\n    print(make())\n}}\n"
+    compiled :: compile(src).expect("string view as String must materialize")
+    assert(compiled.rust.contains("jet_string_view_copy"), "{compiled.rust}")
+}
+
+// Rust: tests/ownership.rs:3390
+#Test("owner_backed_collection_example_runs_production_pipeline") {
+    // GATE #4494: native CLI process invocation.
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["run", "--release", "Examples/features/memory/owner_backed_views.jet"]).current_dir(env("CARGO_MANIFEST_DIR")).output().expect("run the owner-backed collection through the production native CLI path")
+    assert(output.status.success(), "native owner-backed collection failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(String.from_utf8(output.stdout).expect("example stdout must be UTF-8"), "Dune\n412\n422\n280\n")
+}
+
+// Rust: tests/ownership.rs:3412
+#Test("disjoint_place_split_plans_follow_source_order") {
+    src :: "\nfn run() {{\n    first_owner := [1, 2]\n    first_left :: &first_owner[0]\n    first_right :: &first_owner[1]\n    print(first_left + first_right)\n\n    second_owner := [3, 4]\n    second_left :: &second_owner[0]\n    second_right :: &second_owner[1]\n    print(second_left + second_right)\n}}\n"
+    out :: compile(src).expect("disjoint place plans must compile deterministically")
+    assert(out.rust.contains("let __jet___place_plan_0_root = &mut (__jet_first_owner)"), "{out.rust}")
+    assert(out.rust.contains("let __jet___place_plan_1_root = &mut (__jet_second_owner)"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:3442
+#Test("disjoint_struct_fields_use_native_structural_borrows") {
+    src :: "\nstruct Pair {{ left: Int, right: Int }}\nfn run() {{\n    pair := Pair{{ left: 1, right: 2 }}\n    left :: &pair.left\n    right :: &pair.right\n    left = 3\n    right = 4\n    print(pair.left + pair.right)\n}}\n"
+    out :: compile(src).expect("different fields are structurally disjoint")
+    assert(out.rust.contains("&mut ((__jet_pair).__jet_left)"), "{out.rust}")
+    assert(out.rust.contains("&mut ((__jet_pair).__jet_right)"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:3468
+#Test("place_window_last_use_inside_branch_releases_owner") {
+    src :: "\nfn run() {{\n    xs := [1, 2]\n    read :: xs[0..0]\n    if true {{\n        print(read[0])\n    }}\n    &xs.push(3)\n}}\n"
+    _ :: compile(src).expect("branch-local last use must release the owner")
+}
+
+// Rust: tests/ownership.rs:3483
+#Test("place_write_window_is_scoped_per_loop_iteration") {
+    src :: "\nfn run() {{\n    xs := [1, 2]\n    loop i in 0..1 {{\n        edit :: &xs[0]\n        edit = edit + 1\n    }}\n    print(xs[0])\n}}\n"
+    _ :: compile(src).expect("loop-local write window must end each iteration")
+}
+
+// Rust: tests/ownership.rs:3498
+#Test("generic_place_range_is_a_read_window") {
+    src :: "\nfn inspect<T>(xs: [T]) -[]> Int {{\n    window :: xs[0..0]\n    return window.len()\n}}\nfn run() {{ print(inspect([1, 2])) }}\n"
+    out :: compile(src).expect("generic range window must compile")
+    assert(out.rust.contains("jet_view_new"), "{out.rust}")
+}
+
+// Rust: tests/ownership.rs:3515
+// D-MEM-COPYSEM1: owning assignments copy indexed String views without consuming them.
+#Test("indexed_read_window_string_materializes_owned_assignment") {
+    src :: "\nfn run() {{\n    values := [\"first\", \"last\"]\n    stamp :: values[0]\n    first := \"\"\n    last := \"\"\n    first = stamp\n    last = stamp\n    print(first)\n    print(last)\n}}\n"
+    _ :: compile(src).expect("indexed String read windows must materialize on owning assignment")
+}
+
+// Rust: tests/ownership.rs:3532
+#Test("range_window_checks_bounds_before_borrowing") {
+    src :: "\nfn run() {{\n    xs := [1, 2]\n    window :: xs[0..1]\n    print(window.len())\n}}\n"
+    out :: compile(src).expect("range window must compile")
+    check :: out.rust.find(" = jet_view_range_new").expect("view helper call")
+    helper :: out.rust.find("fn jet_view_range_new").expect("view helper definition")
+    assert(helper < check, "bounds-checking helper must exist before use")
+    // AOT, resident JIT and interpreter share window -> bounds -> range policy.
+    // The bounds check is inside the helper and must precede its borrow.
+    assert(out.rust.contains("fn jet_checked_view_bounds"), "the shared view-bounds rule must be emitted: {out.rust}")
+    helper_body :: out.rust[helper..]
+    bounds :: helper_body.find("jet_checked_view_window(").expect("the view helper must check bounds")
+    borrow :: helper_body.find("&xs[start as usize..end as usize]").expect("the view helper must borrow the checked window")
+    assert(bounds < borrow, "bounds must be checked before the window is borrowed: {out.rust}")
+}
+
+// Rust: tests/ownership.rs:3577
+#Test("touching_write_ranges_are_rejected_before_codegen") {
+    src :: "\nfn run() {{\n    xs := [1, 2, 3]\n    left :: &xs[0..1]\n    right :: &xs[1..2]\n    print(left.len() + right.len())\n}}\n"
+    diags :: compile(src).expect_err("inclusive ranges sharing an index overlap")
+    assert(diags.iter().any(|d| -> d.code == "E0212"), "{diags:?}")
+}
+
+// Rust: tests/ownership.rs:3591
+#Test("write_window_return_uses_mutable_parameter_provenance") {
+    src :: "\nfn edit_first(xs: &[Int]) -[]> ViewMut<Int> {{\n    return &xs[0..1]\n}}\nfn run() {{ print(0) }}\n"
+    out :: compile(src).expect("parameter-rooted write view return must compile")
+    assert(out.rust.contains("fn __jet_edit_first<'__jet___view>(__jet_xs: &'__jet___view mut Vec<i64>) -> JetOutcome<&'__jet___view mut [i64], JetErr>"), "generated lifetime must tie the mutable view to parameter 0: {out.rust}")
+}

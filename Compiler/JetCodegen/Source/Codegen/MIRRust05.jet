@@ -1,1804 +1,680 @@
-// PORT-PENDING 2005 crates-jet-codegen-src-codegen-mirrust-slice-7201: crates/jet-codegen/src/Codegen/MIRRust.rs:7201-9000
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS                 if !implementation
-//RS                     .associated_types
-//RS                     .iter()
-//RS                     .any(|associated| associated.name == declared.name)
-//RS                     && !(rust_operator.is_some() && declared.name == "Output")
-//RS                 {
-//RS                     panic!(
-//RS                         "MIR implementation {:?} omits associated type {}",
-//RS                         implementation.id, declared.name
-//RS                     );
-//RS                 }
-//RS             }
-//RS         } else if !implementation.associated_types.is_empty() {
-//RS             panic!(
-//RS                 "MIR inherent implementation {:?} has associated types",
-//RS                 implementation.id
-//RS             );
-//RS         }
-//RS         for associated in &implementation.associated_types {
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "    type {} = {};",
-//RS                 mangle(&associated.name),
-//RS                 self.rust_type(&associated.ty)
-//RS             );
-//RS         }
-//RS 
-//RS         let mut functions = Vec::with_capacity(implementation.methods.len());
-//RS         for function_id in &implementation.methods {
-//RS             let function = self.function_row(*function_id);
-//RS             if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
-//RS                 panic!(
-//RS                     "MIR implementation {:?} method {:?} is not selected for the emitted artifact",
-//RS                     implementation.id, function.id
-//RS                 );
-//RS             }
-//RS             functions.push(function);
-//RS         }
-//RS         let mut operator_return: Option<MirType> = None;
-//RS         for function in functions.iter().copied() {
-//RS             match (&implementation.trait_ref, &function.form) {
-//RS                 (
-//RS                     None,
-//RS                     MirFunctionForm::Method {
-//RS                         owner: declared_owner,
-//RS                         ..
-//RS                     },
-//RS                 ) => {
-//RS                     if !declared_owner.same_checked_type(&implementation.self_type) {
-//RS                         panic!(
-//RS                             "MIR inherent implementation {:?} method {:?} owner mismatch",
-//RS                             implementation.id, function.id
-//RS                         );
-//RS                     }
-//RS                     if !self.owner_independent_static(function) {
-//RS                         self.emit_method(function, out);
-//RS                     }
-//RS                 }
-//RS                 (
-//RS                     Some(trait_ref),
-//RS                     MirFunctionForm::TraitMethod {
-//RS                         owner: declared_owner,
-//RS                         trait_ref: declared_trait,
-//RS                         self_access,
-//RS                         serde,
-//RS                     },
-//RS                 ) => {
-//RS                     if !declared_owner.same_checked_type(&implementation.self_type)
-//RS                         || declared_trait.id != trait_ref.id
-//RS                         || declared_trait.name != trait_ref.name
-//RS                     {
-//RS                         panic!(
-//RS                             "MIR trait implementation {:?} method {:?} declaration mismatch",
-//RS                             implementation.id, function.id
-//RS                         );
-//RS                     }
-//RS                     let codec = implementation.serde;
-//RS                     if codec != *serde {
-//RS                         panic!(
-//RS                             "MIR trait implementation {:?} method {:?} codec mismatch",
-//RS                             implementation.id, function.id
-//RS                         );
-//RS                     }
-//RS                     if let Some(codec) = codec {
-//RS                         let expected_name = match codec {
-//RS                             MirSerdeCodec::Encode => "encode",
-//RS                             MirSerdeCodec::Decode => "decode",
-//RS                         };
-//RS                         if self.function_leaf_name(function) != expected_name
-//RS                             || function.capture_params.len() != 0
-//RS                         {
-//RS                             panic!(
-//RS                                 "MIR serde implementation {:?} method {:?} has invalid codec shape",
-//RS                                 implementation.id, function.id
-//RS                             );
-//RS                         }
-//RS                         match codec {
-//RS                             MirSerdeCodec::Encode
-//RS                                 if *self_access != Some(MirAccess::Read)
-//RS                                     || !self.declared_params(function).is_empty() =>
-//RS                             {
-//RS                                 panic!(
-//RS                                     "MIR Encode implementation {:?} method {:?} must be an instance method without arguments",
-//RS                                     implementation.id, function.id
-//RS                                 );
-//RS                             }
-//RS                             MirSerdeCodec::Decode
-//RS                                 if self_access.is_some()
-//RS                                     || self.declared_params(function).len() != 1 =>
-//RS                             {
-//RS                                 panic!(
-//RS                                     "MIR Decode implementation {:?} method {:?} must be static with one argument",
-//RS                                     implementation.id, function.id
-//RS                                 );
-//RS                             }
-//RS                             MirSerdeCodec::Encode | MirSerdeCodec::Decode => {}
-//RS                         }
-//RS                     }
-//RS                     if let Some(trait_definition) = trait_definition {
-//RS                         // Compiler-owned trait rows carry identity only; sema
-//RS                         // checked their signatures against the Prelude registry.
-//RS                         if codec.is_none()
-//RS                             && !implementation.compiler_generated
-//RS                             && !crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
-//RS                                 &trait_definition.name,
-//RS                             )
-//RS                         {
-//RS                             self.validate_trait_method_signature(
-//RS                                 implementation,
-//RS                                 trait_definition,
-//RS                                 function,
-//RS                                 *self_access,
-//RS                             );
-//RS                         }
-//RS                     } else if codec.is_none() {
-//RS                         panic!(
-//RS                             "MIR trait implementation {:?} method {:?} has no trait declaration",
-//RS                             implementation.id, function.id
-//RS                         );
-//RS                     }
-//RS                     let (name, return_override) = match codec {
-//RS                         Some(MirSerdeCodec::Encode) => (
-//RS                             Some("jet_encode"),
-//RS                             Some(format!("{}jet_std::DataTree", self.config.root_prefix)),
-//RS                         ),
-//RS                         Some(MirSerdeCodec::Decode) => (
-//RS                             Some("jet_decode"),
-//RS                             Some(format!(
-//RS                                 "Result<Self, Vec<{}jet_std::FieldError>>",
-//RS                                 self.config.root_prefix
-//RS                             )),
-//RS                         ),
-//RS                         None => (None, None),
-//RS                     };
-//RS                     let native = match codec {
-//RS                         Some(MirSerdeCodec::Encode) => {
-//RS                             self.emit_native_derived_encode(implementation, function, out)
-//RS                         }
-//RS                         Some(MirSerdeCodec::Decode) => {
-//RS                             self.emit_native_derived_decode(implementation, function, out)
-//RS                         }
-//RS                         None => {
-//RS                             self.emit_native_derived_equal(implementation, function, out)
-//RS                                 || self.emit_native_derived_compare(implementation, function, out)
-//RS                         }
-//RS                     };
-//RS                     if !native {
-//RS                         self.emit_callable_named(
-//RS                             function,
-//RS                             out,
-//RS                             Some(&function.form),
-//RS                             name,
-//RS                             codec,
-//RS                             return_override,
-//RS                         );
-//RS                     }
-//RS                     if rust_operator.is_some() {
-//RS                         if let Some(previous) = &operator_return {
-//RS                             if !previous.same_checked_type(&function.return_type) {
-//RS                                 panic!(
-//RS                                     "MIR operator implementation {:?} methods disagree on Output",
-//RS                                     implementation.id
-//RS                                 );
-//RS                             }
-//RS                         } else {
-//RS                             operator_return = Some(function.return_type.clone());
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 (None, MirFunctionForm::TopLevel)
-//RS                 | (None, MirFunctionForm::TraitMethod { .. })
-//RS                 | (Some(_), MirFunctionForm::TopLevel)
-//RS                 | (Some(_), MirFunctionForm::Method { .. }) => panic!(
-//RS                     "MIR implementation {:?} method {:?} has incompatible function form",
-//RS                     implementation.id, function.id
-//RS                 ),
-//RS             }
-//RS             if !emitted_methods.insert(function.id) {
-//RS                 panic!(
-//RS                     "MIR implementation method {:?} was emitted more than once",
-//RS                     function.id
-//RS                 );
-//RS             }
-//RS         }
-//RS         if implementation.trait_ref.is_some() {
-//RS             if let Some(trait_definition) = trait_definition {
-//RS                 for method in &trait_definition.methods {
-//RS                     if implementation.serde.is_none()
-//RS                         && (method.default.is_none() || implementation.delegation.is_some())
-//RS                         && !functions
-//RS                             .iter()
-//RS                             .any(|function| self.function_leaf_name(function) == method.name)
-//RS                     {
-//RS                         panic!(
-//RS                             "MIR implementation {:?} omits required trait method {}",
-//RS                             implementation.id, method.name
-//RS                         );
-//RS                     }
-//RS                 }
-//RS             }
-//RS             if rust_operator.is_some() {
-//RS                 let output = operator_return.unwrap_or_else(|| {
-//RS                     panic!(
-//RS                         "MIR operator implementation {:?} has no materialized method",
-//RS                         implementation.id
-//RS                     )
-//RS                 });
-//RS                 if let Some(associated) = implementation
-//RS                     .associated_types
-//RS                     .iter()
-//RS                     .find(|associated| associated.name == "Output")
-//RS                 {
-//RS                     if !associated.ty.same_checked_type(&output) {
-//RS                         panic!(
-//RS                             "MIR operator implementation {:?} Output type disagrees with method return",
-//RS                             implementation.id
-//RS                         );
-//RS                     }
-//RS                 } else {
-//RS                     let _ = writeln!(out, "    type Output = {};", self.rust_type(&output));
-//RS                 }
-//RS             }
-//RS         }
-//RS         let methods_end = out.len();
-//RS         let _ = writeln!(out, "}}\n");
-//RS         if let Some(carrier_trait) = &carrier_trait {
-//RS             let signatures = carrier_trait_signatures(&out[methods_start..methods_end]);
-//RS             let _ = writeln!(out, "trait {carrier_trait} {{\n{signatures}}}\n");
-//RS         }
-//RS         self.pop_generic_scope();
-//RS         for function in functions {
-//RS             if self.owner_independent_static(function) {
-//RS                 self.emit_function(function, out);
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn arithmetic_trait_method(&self, function: &MirFunction) -> bool {
-//RS         matches!(
-//RS             &function.form,
-//RS             MirFunctionForm::TraitMethod { trait_ref, .. }
-//RS                 if matches!(trait_ref.name.as_str(), "Add" | "Sub" | "Mul" | "Div")
-//RS         )
-//RS     }
-//RS 
-//RS     fn function_leaf_name(&self, function: &MirFunction) -> String {
-//RS         if let MirFunctionForm::TraitMethod { trait_ref, .. } = &function.form {
-//RS             if matches!(
-//RS                 trait_ref.name.as_str(),
-//RS                 crate::Syntax::TRAIT_ADD
-//RS                     | crate::Syntax::TRAIT_SUB
-//RS                     | crate::Syntax::TRAIT_MUL
-//RS                     | crate::Syntax::TRAIT_DIV
-//RS                     | crate::Syntax::TRAIT_EQUATABLE
-//RS                     | crate::Syntax::TRAIT_COMPARABLE
-//RS             ) {
-//RS                 // operator_method_identity appends the checked RHS after `<`.
-//RS                 // Remove that suffix before splitting the qualified owner.
-//RS                 return function
-//RS                     .name
-//RS                     .split('<')
-//RS                     .next()
-//RS                     .unwrap()
-//RS                     .rsplit("::")
-//RS                     .next()
-//RS                     .unwrap()
-//RS                     .to_string();
-//RS             }
-//RS         }
-//RS         function
-//RS             .name
-//RS             .rsplit("::")
-//RS             .next()
-//RS             .unwrap_or_else(|| panic!("MIR function {:?} has an empty name", function.id))
-//RS             .to_string()
-//RS     }
-//RS 
-//RS     /// Inherent methods live in `impl Type` as `__jet_<leaf>`. Compiler-owned
-//RS     /// trait methods keep the source leaf (`equal`, `compare`, `display`)
-//RS     /// because the cached runtime traits declare those names unmangled.
-//RS     fn rust_method_symbol(&self, function: &MirFunction) -> String {
-//RS         let leaf = self.function_leaf_name(function);
-//RS         match &function.form {
-//RS             MirFunctionForm::TraitMethod {
-//RS                 serde: Some(MirSerdeCodec::Encode),
-//RS                 ..
-//RS             } => "jet_encode".to_string(),
-//RS             MirFunctionForm::TraitMethod {
-//RS                 serde: Some(MirSerdeCodec::Decode),
-//RS                 ..
-//RS             } => "jet_decode".to_string(),
-//RS             MirFunctionForm::TraitMethod { trait_ref, .. }
-//RS                 if crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_trait(
-//RS                     &trait_ref.name,
-//RS                 ) =>
-//RS             {
-//RS                 compiler_trait_method_symbol(&trait_ref.name, &leaf)
-//RS             }
-//RS             MirFunctionForm::TraitMethod { .. }
-//RS             | MirFunctionForm::Method { .. }
-//RS             | MirFunctionForm::TopLevel => mangle(&leaf),
-//RS         }
-//RS     }
-//RS 
-//RS     // A bare generic owner is only a namespace for a checked static method.
-//RS     // Its unused owner parameters must not become Rust inference obligations.
-//RS     fn owner_independent_static(&self, function: &MirFunction) -> bool {
-//RS         matches!(
-//RS             &function.form,
-//RS             MirFunctionForm::Method { owner, self_access: None }
-//RS                 if matches!(owner.kind(), MirTypeKind::Apply { args, .. } if args.is_empty())
-//RS                     && !self.generic_params_for_type(owner).is_empty()
-//RS         )
-//RS     }
-//RS 
-//RS     fn normalize_trait_type(&self, ty: &MirType, owner: &MirType) -> MirType {
-//RS         if ty.nominal_name() == Some("Self") {
-//RS             return owner.clone();
-//RS         }
-//RS         let mut normalized = ty.clone();
-//RS         match &mut normalized.kind {
-//RS             MirTypeKind::Int
-//RS             | MirTypeKind::Float
-//RS             | MirTypeKind::Float32
-//RS             | MirTypeKind::Bool
-//RS             | MirTypeKind::String
-//RS             | MirTypeKind::Char
-//RS             | MirTypeKind::TraitObject(_)
-//RS             | MirTypeKind::IntN { .. }
-//RS             | MirTypeKind::Measure(_) => {}
-//RS             MirTypeKind::List(inner) | MirTypeKind::Shared(inner) | MirTypeKind::Option(inner) => {
-//RS                 **inner = self.normalize_trait_type(inner, owner);
-//RS             }
-//RS             MirTypeKind::Map { key, value } => {
-//RS                 **key = self.normalize_trait_type(key, owner);
-//RS                 **value = self.normalize_trait_type(value, owner);
-//RS             }
-//RS             MirTypeKind::Result { ok, err } => {
-//RS                 **ok = self.normalize_trait_type(ok, owner);
-//RS                 **err = self.normalize_trait_type(err, owner);
-//RS             }
-//RS             MirTypeKind::Fn(signature) => {
-//RS                 for parameter in &mut signature.params {
-//RS                     *parameter = self.normalize_trait_type(parameter, owner);
-//RS                 }
-//RS                 if let Some(ret) = &mut signature.ret {
-//RS                     **ret = self.normalize_trait_type(ret, owner);
-//RS                 }
-//RS             }
-//RS             MirTypeKind::SendFn { params, ret, .. } => {
-//RS                 for parameter in params {
-//RS                     *parameter = self.normalize_trait_type(parameter, owner);
-//RS                 }
-//RS                 if let Some(ret) = ret {
-//RS                     **ret = self.normalize_trait_type(ret, owner);
-//RS                 }
-//RS             }
-//RS             MirTypeKind::Apply { args, .. } => {
-//RS                 for argument in args {
-//RS                     *argument = self.normalize_trait_type(argument, owner);
-//RS                 }
-//RS             }
-//RS             MirTypeKind::Tuple(fields) => {
-//RS                 for (_, field) in fields {
-//RS                     *field = self.normalize_trait_type(field, owner);
-//RS                 }
-//RS             }
-//RS             MirTypeKind::FixedList { elem, .. } => {
-//RS                 **elem = self.normalize_trait_type(elem, owner);
-//RS             }
-//RS             MirTypeKind::InlineRange { base, .. } => {
-//RS                 **base = self.normalize_trait_type(base, owner);
-//RS             }
-//RS             MirTypeKind::Tagged { inner, .. } => {
-//RS                 **inner = self.normalize_trait_type(inner, owner);
-//RS             }
-//RS             MirTypeKind::Union(members) => {
-//RS                 for member in members {
-//RS                     *member = self.normalize_trait_type(member, owner);
-//RS                 }
-//RS             }
-//RS             MirTypeKind::Quantity { base, .. } => {
-//RS                 **base = self.normalize_trait_type(base, owner);
-//RS             }
-//RS         }
-//RS         normalized.identity = None;
-//RS         normalized
-//RS     }
-//RS 
-//RS     fn validate_trait_method_signature(
-//RS         &self,
-//RS         implementation: &MirImplDef,
-//RS         definition: &MirTraitDef,
-//RS         function: &MirFunction,
-//RS         self_access: Option<MirAccess>,
-//RS     ) {
-//RS         let name = self.function_leaf_name(function);
-//RS         let method = definition
-//RS             .methods
-//RS             .iter()
-//RS             .find(|method| method.name == name)
-//RS             .unwrap_or_else(|| {
-//RS                 panic!(
-//RS                     "MIR implementation {:?} method {:?} is not declared by trait {}",
-//RS                     implementation.id, function.id, definition.name
-//RS                 )
-//RS             });
-//RS         let receiver_differs = method.self_access != self_access;
-//RS         let has_captures = !function.capture_params.is_empty();
-//RS         let arity_differs = self.declared_params(function).len() != method.params.len();
-//RS         let params_differ = self
-//RS             .declared_params(function)
-//RS             .iter()
-//RS             .zip(&method.params)
-//RS             .any(|(actual, expected)| {
-//RS                 actual.index != expected.index + usize::from(self_access.is_some())
-//RS                     || actual.name != expected.name
-//RS                     || actual.access != expected.access
-//RS                     || !self
-//RS                         .normalize_trait_type(&actual.ty, &implementation.self_type)
-//RS                         .same_checked_type(
-//RS                             &self.normalize_trait_type(&expected.ty, &implementation.self_type),
-//RS                         )
-//RS             });
-//RS         let return_differs = !self
-//RS             .normalize_trait_type(&function.return_type, &implementation.self_type)
-//RS             .same_checked_type(
-//RS                 &self.normalize_trait_type(&method.return_type, &implementation.self_type),
-//RS             );
-//RS         let failure_differs = function.failure != method.failure;
-//RS         if receiver_differs
-//RS             || has_captures
-//RS             || arity_differs
-//RS             || params_differ
-//RS             || return_differs
-//RS             || failure_differs
-//RS         {
-//RS             panic!(
-//RS                 "MIR implementation {:?} method {:?} signature disagrees with trait {} \
-//RS                  (receiver={receiver_differs} captures={has_captures} arity={arity_differs} \
-//RS                  params={params_differ} return={return_differs} failure={failure_differs}): \
-//RS                  receiver {:?}/{:?}, captures {:?}, params {:?}/{:?}, return {:?}/{:?}, failure {:?}/{:?}",
-//RS                 implementation.id, function.id, definition.name,
-//RS                 self_access, method.self_access,
-//RS                 function.capture_params,
-//RS                 self.declared_params(function), method.params,
-//RS                 function.return_type, self.normalize_trait_type(&method.return_type, &implementation.self_type),
-//RS                 function.failure, method.failure,
-//RS             );
-//RS         }
-//RS     }
-//RS 
-//RS     fn validate_derived_trait(&self, def: &MirTypeDef, trait_id: MirTraitId, trait_name: &str) {
-//RS         let definition = self
-//RS             .program
-//RS             .traits
-//RS             .iter()
-//RS             .find(|definition| definition.id == trait_id && definition.name == trait_name)
-//RS             .unwrap_or_else(|| panic!("MIR derive trait ID {:?} has no row", trait_id));
-//RS         let implementation = self
-//RS             .program
-//RS             .impls
-//RS             .iter()
-//RS             .find(|implementation| {
-//RS                 implementation.trait_ref.as_ref().is_some_and(|trait_ref| {
-//RS                     trait_ref.id == trait_id && trait_ref.name == trait_name
-//RS                 }) && self.type_identity(&implementation.self_type) == def.id
-//RS                     && self.module_selected(implementation.module)
-//RS                     && self.impl_selected_for_target(implementation)
-//RS             })
-//RS             .unwrap_or_else(|| {
-//RS                 panic!(
-//RS                     "MIR type {:?} derives {} without a selected implementation",
-//RS                     def.id, trait_name
-//RS                 )
-//RS             });
-//RS         for method in &definition.methods {
-//RS             if method.default.is_none()
-//RS                 && !implementation.methods.iter().any(|function_id| {
-//RS                     self.function_leaf_name(self.function_row(*function_id)) == method.name
-//RS                 })
-//RS             {
-//RS                 panic!(
-//RS                     "MIR derived implementation {:?} omits required method {}",
-//RS                     implementation.id, method.name
-//RS                 );
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn selected_trait_impl_for_type(&self, def: &MirTypeDef, trait_name: &str) -> bool {
-//RS         self.program.impls.iter().any(|implementation| {
-//RS             implementation
-//RS                 .trait_ref
-//RS                 .as_ref()
-//RS                 .is_some_and(|trait_ref| trait_ref.name == trait_name)
-//RS                 && self.module_selected(implementation.module)
-//RS                 && self.impl_selected_for_target(implementation)
-//RS                 && self.type_identity(&implementation.self_type) == def.id
-//RS         })
-//RS     }
-//RS 
-//RS     fn structural_generics(&self, def: &MirTypeDef, trait_name: &str) -> String {
-//RS         if def.generic_params.is_empty() {
-//RS             return String::new();
-//RS         }
-//RS         let required_bound = match crate::Generics::rust_trait_bound(trait_name) {
-//RS             Some(bound) => bound,
-//RS             None => trait_name,
-//RS         };
-//RS         let params = def
-//RS             .generic_params
-//RS             .iter()
-//RS             .map(|param| {
-//RS                 let mut bounds = param
-//RS                     .bounds
-//RS                     .iter()
-//RS                     .map(|bound| {
-//RS                         crate::Generics::rust_trait_bound(&bound.name)
-//RS                             .map(str::to_string)
-//RS                             .unwrap_or_else(|| self.trait_nominal_name(bound))
-//RS                     })
-//RS                     .collect::<Vec<_>>();
-//RS                 if !bounds.iter().any(|bound| bound == required_bound) {
-//RS                     bounds.push(required_bound.to_string());
-//RS                 }
-//RS                 format!("{}: {}", mangle(&param.name), bounds.join(" + "))
-//RS             })
-//RS             .collect::<Vec<_>>()
-//RS             .join(", ");
-//RS         format!("<{params}>")
-//RS     }
-//RS 
-//RS     fn structural_field_value(
-//RS         &self,
-//RS         def: &MirTypeDef,
-//RS         edge: &str,
-//RS         receiver: &str,
-//RS         field: &MirField,
-//RS         method: &str,
-//RS     ) -> String {
-//RS         let value = format!("({receiver}.{})", self.field_name(field.id));
-//RS         if def.boxed_edges.iter().any(|candidate| candidate == edge) {
-//RS             format!("{value}.as_ref().{method}()")
-//RS         } else {
-//RS             format!("{value}.{method}()")
-//RS         }
-//RS     }
-//RS 
-//RS     fn derives_trait(&self, def: &MirTypeDef, trait_name: &str) -> bool {
-//RS         def.derives.iter().any(|trait_id| {
-//RS             self.program
-//RS                 .traits
-//RS                 .iter()
-//RS                 .any(|definition| definition.id == *trait_id && definition.name == trait_name)
-//RS         })
-//RS     }
-//RS     fn structural_derives_allowed(&self, def: &MirTypeDef) -> bool {
-//RS         match &def.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => fields
-//RS                 .iter()
-//RS                 .filter(|field| !field.computed)
-//RS                 .all(|field| !mir_type_has_inline_nominal_word(&field.ty)),
-//RS             MirTypeDefKind::Enum { variants, .. } => variants.iter().all(|variant| {
-//RS                 match &variant.payload {
-//RS                     MirVariantPayload::Unit => true,
-//RS                     MirVariantPayload::Single(ty) => !mir_type_has_inline_nominal_word(ty),
-//RS                     MirVariantPayload::Named(fields) => fields
-//RS                         .iter()
-//RS                         .all(|field| !mir_type_has_inline_nominal_word(&field.ty)),
-//RS                 }
-//RS             }),
-//RS             MirTypeDefKind::Distinct { base, .. } => !mir_type_has_inline_nominal_word(base),
-//RS             MirTypeDefKind::Alias { target } => !mir_type_has_inline_nominal_word(target),
-//RS             MirTypeDefKind::UnitFamily { .. } => true,
-//RS         }
-//RS     }
-//RS     /// Project the checked Rust capability of one MIR type for the standard
-//RS     /// derives emitted on nominal rows. This is deliberately representation-
-//RS     /// based: a dynamic trait object has no implicit Rust `Clone`/`Debug`
-//RS     /// bound, while `JetShared<T>` and the checked callable carriers clone
-//RS     /// their handles without cloning the payload.
-//RS     fn type_derive_capability(
-//RS         &self,
-//RS         ty: &MirType,
-//RS         trait_name: &str,
-//RS         visiting: &mut Vec<MirTypeId>,
-//RS         bindings: &BTreeMap<String, MirType>,
-//RS         generic_params: &BTreeSet<String>,
-//RS     ) -> bool {
-//RS         if let MirTypeKind::Apply { name, args } = ty.kind() {
-//RS             if args.is_empty() {
-//RS                 if let Some(bound) = bindings.get(&name.name) {
-//RS                     return self.type_derive_capability(
-//RS                         bound,
-//RS                         trait_name,
-//RS                         visiting,
-//RS                         bindings,
-//RS                         generic_params,
-//RS                     );
-//RS                 }
-//RS                 if generic_params.contains(&name.name) {
-//RS                     // `#[derive]` supplies the conditional Rust bound on a
-//RS                     // declaration's own generic parameter.
-//RS                     return true;
-//RS                 }
-//RS             }
-//RS         }
-//RS 
-//RS         let ty = if ty.identity.is_some() {
-//RS             self.canonical_type(ty)
-//RS         } else {
-//RS             ty
-//RS         };
-//RS         match ty.kind() {
-//RS             MirTypeKind::Int
-//RS             | MirTypeKind::Float
-//RS             | MirTypeKind::Bool
-//RS             | MirTypeKind::String
-//RS             | MirTypeKind::Char
-//RS             | MirTypeKind::IntN { .. }
-//RS             | MirTypeKind::Float32
-//RS             | MirTypeKind::Measure(_) => true,
-//RS             MirTypeKind::Shared(_) | MirTypeKind::Fn(_) | MirTypeKind::SendFn { .. } => {
-//RS                 trait_name == "Clone"
-//RS             }
-//RS             // Only `Clone`, and only through the clone-box supertrait that
-//RS             // `emit_trait_def` gives every trait used as a single-bound object.
-//RS             MirTypeKind::TraitObject(bounds) => {
-//RS                 trait_name == "Clone"
-//RS                     && matches!(bounds.as_slice(), [bound] if self
-//RS                         .traits_by_name
-//RS                         .get(&bound.name)
-//RS                         .is_some_and(|symbol| self.dyn_clone_traits.contains(symbol)))
-//RS             }
-//RS             MirTypeKind::List(inner)
-//RS             | MirTypeKind::Option(inner)
-//RS             | MirTypeKind::FixedList { elem: inner, .. }
-//RS             | MirTypeKind::InlineRange { base: inner, .. }
-//RS             | MirTypeKind::Quantity { base: inner, .. } => self.type_derive_capability(
-//RS                 inner,
-//RS                 trait_name,
-//RS                 visiting,
-//RS                 bindings,
-//RS                 generic_params,
-//RS             ),
-//RS             MirTypeKind::Tagged { marker, inner } => {
-//RS                 if matches!(
-//RS                     marker,
-//RS                     MirTagMarker::Internal(MirInternalTag::CppCallbackAbi)
-//RS                 ) {
-//RS                     true
-//RS                 } else {
-//RS                     self.type_derive_capability(
-//RS                         inner,
-//RS                         trait_name,
-//RS                         visiting,
-//RS                         bindings,
-//RS                         generic_params,
-//RS                     )
-//RS                 }
-//RS             }
-//RS             MirTypeKind::Map { key, value }
-//RS             | MirTypeKind::Result {
-//RS                 ok: key,
-//RS                 err: value,
-//RS             } => {
-//RS                 self.type_derive_capability(
-//RS                     key,
-//RS                     trait_name,
-//RS                     visiting,
-//RS                     bindings,
-//RS                     generic_params,
-//RS                 ) && self.type_derive_capability(
-//RS                     value,
-//RS                     trait_name,
-//RS                     visiting,
-//RS                     bindings,
-//RS                     generic_params,
-//RS                 )
-//RS             }
-//RS             MirTypeKind::Tuple(fields) => fields.iter().all(|(_, field)| {
-//RS                 self.type_derive_capability(
-//RS                     field,
-//RS                     trait_name,
-//RS                     visiting,
-//RS                     bindings,
-//RS                     generic_params,
-//RS                 )
-//RS             }),
-//RS             // Union values are spelled as the synthetic `__JetUnion_*` carrier,
-//RS             // which has no sema `Equatable` derive and so no Rust `PartialEq`.
-//RS             MirTypeKind::Union(members) => {
-//RS                 trait_name != "PartialEq"
-//RS                     && members.iter().all(|member| {
-//RS                         self.type_derive_capability(
-//RS                             member,
-//RS                             trait_name,
-//RS                             visiting,
-//RS                             bindings,
-//RS                             generic_params,
-//RS                         )
-//RS                     })
-//RS             }
-//RS             MirTypeKind::Apply { name, args } => {
-//RS                 // These checked aliases are references, not owned payloads.
-//RS                 // The Rust representation makes the capability boundary
-//RS                 // explicit instead of guessing from a source declaration.
-//RS                 if name.name == jet_foundation::Syntax::TYPE_PTR {
-//RS                     return true;
-//RS                 }
-//RS                 if name.name == "View" {
-//RS                     return trait_name == "Clone"
-//RS                         || args.first().is_some_and(|inner| {
-//RS                             self.type_derive_capability(
-//RS                                 inner,
-//RS                                 trait_name,
-//RS                                 visiting,
-//RS                                 bindings,
-//RS                                 generic_params,
-//RS                             )
-//RS                         });
-//RS                 }
-//RS                 if name.name == "ViewMut" {
-//RS                     return trait_name != "Clone"
-//RS                         && args.first().is_some_and(|inner| {
-//RS                             self.type_derive_capability(
-//RS                                 inner,
-//RS                                 trait_name,
-//RS                                 visiting,
-//RS                                 bindings,
-//RS                                 generic_params,
-//RS                             )
-//RS                         });
-//RS                 }
-//RS                 if self.selected_user_capability_impl(ty, trait_name) {
-//RS                     return true;
-//RS                 }
-//RS                 let Some(def) = self.structural_type_def_for(ty) else {
-//RS                     return args.iter().all(|arg| {
-//RS                         self.type_derive_capability(
-//RS                             arg,
-//RS                             trait_name,
-//RS                             visiting,
-//RS                             bindings,
-//RS                             generic_params,
-//RS                         )
-//RS                     });
-//RS                 };
-//RS                 if !self.structural_derives_allowed(def) {
-//RS                     return false;
-//RS                 }
-//RS                 // A nominal field compares through Rust `PartialEq` only when
-//RS                 // its own row carries sema's structural `Equatable` derive (a
-//RS                 // user `Equatable` impl has no Rust `PartialEq`); an alias is
-//RS                 // transparent and answers for its target. A union row is
-//RS                 // spelled as its synthetic carrier (see `Union` above).
-//RS                 if trait_name == "PartialEq"
-//RS                     && !matches!(&def.kind, MirTypeDefKind::Alias { .. })
-//RS                     && (!self.derives_trait(def, crate::Generics::EQUATABLE)
-//RS                         || self.selected_user_capability_impl(ty, crate::Generics::EQUATABLE)
-//RS                         || def.name.starts_with("__JetUnion_"))
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 if trait_name == "Clone"
-//RS                     && def.ownership == MirOwnershipMode::Move
-//RS                 {
-//RS                     return false;
-//RS                 }
-//RS                 if let Some(position) = visiting.iter().position(|id| *id == def.id) {
-//RS                     self.derive_capability_cycle_floor
-//RS                         .set(self.derive_capability_cycle_floor.get().min(position));
-//RS                     return true;
-//RS                 }
-//RS                 // A closed row's answer depends on the row alone: `false` means
-//RS                 // an incapable leaf is reachable, and `true` is final once no
-//RS                 // cycle assumption above this frame was used.
-//RS                 let cacheable = args.is_empty()
-//RS                     && def.generic_params.is_empty()
-//RS                     && bindings.is_empty()
-//RS                     && generic_params.is_empty();
-//RS                 if cacheable {
-//RS                     if let Some(cached) = self
-//RS                         .derive_capability_cache
-//RS                         .borrow()
-//RS                         .get(trait_name)
-//RS                         .and_then(|rows| rows.get(&def.id))
-//RS                     {
-//RS                         return *cached;
-//RS                     }
-//RS                 }
-//RS                 let depth = visiting.len();
-//RS                 let outer_floor = self.derive_capability_cycle_floor.replace(usize::MAX);
-//RS                 let mut next_bindings = bindings.clone();
-//RS                 let mut next_generic_params = generic_params.clone();
-//RS                 next_generic_params.extend(
-//RS                     def.generic_params
-//RS                         .iter()
-//RS                         .map(|parameter| parameter.name.clone()),
-//RS                 );
-//RS                 if let MirTypeKind::Apply { args, .. } = ty.kind() {
-//RS                     next_bindings.extend(
-//RS                         def.generic_params
-//RS                             .iter()
-//RS                             .zip(args)
-//RS                             .map(|(parameter, argument)| {
-//RS                                 (parameter.name.clone(), argument.clone())
-//RS                             }),
-//RS                     );
-//RS                 }
-//RS                 visiting.push(def.id);
-//RS                 let result = match &def.kind {
-//RS                     MirTypeDefKind::Struct { fields, .. } => fields
-//RS                         .iter()
-//RS                         .filter(|field| !field.computed)
-//RS                         .all(|field| {
-//RS                             self.type_derive_capability(
-//RS                                 &field.ty,
-//RS                                 trait_name,
-//RS                                 visiting,
-//RS                                 &next_bindings,
-//RS                                 &next_generic_params,
-//RS                             )
-//RS                         }),
-//RS                     MirTypeDefKind::Enum { variants, .. } => {
-//RS                         variants.iter().all(|variant| match &variant.payload {
-//RS                             MirVariantPayload::Unit => true,
-//RS                             MirVariantPayload::Single(payload) => self.type_derive_capability(
-//RS                                 payload,
-//RS                                 trait_name,
-//RS                                 visiting,
-//RS                                 &next_bindings,
-//RS                                 &next_generic_params,
-//RS                             ),
-//RS                             MirVariantPayload::Named(fields) => fields.iter().all(|field| {
-//RS                                 self.type_derive_capability(
-//RS                                     &field.ty,
-//RS                                     trait_name,
-//RS                                     visiting,
-//RS                                     &next_bindings,
-//RS                                     &next_generic_params,
-//RS                                 )
-//RS                             }),
-//RS                         })
-//RS                     }
-//RS                     MirTypeDefKind::Distinct { base, .. } => self.type_derive_capability(
-//RS                         base,
-//RS                         trait_name,
-//RS                         visiting,
-//RS                         &next_bindings,
-//RS                         &next_generic_params,
-//RS                     ),
-//RS                     MirTypeDefKind::Alias { target } => self.type_derive_capability(
-//RS                         target,
-//RS                         trait_name,
-//RS                         visiting,
-//RS                         &next_bindings,
-//RS                         &next_generic_params,
-//RS                     ),
-//RS                     MirTypeDefKind::UnitFamily { .. } => true,
-//RS                 };
-//RS                 visiting.pop();
-//RS                 let floor = self.derive_capability_cycle_floor.get();
-//RS                 self.derive_capability_cycle_floor.set(outer_floor.min(floor));
-//RS                 if cacheable && (!result || floor >= depth) {
-//RS                     self.derive_capability_cache
-//RS                         .borrow_mut()
-//RS                         .entry(trait_name.to_string())
-//RS                         .or_default()
-//RS                         .insert(def.id, result);
-//RS                 }
-//RS                 result
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn selected_user_capability_impl(&self, ty: &MirType, trait_name: &str) -> bool {
-//RS         self.user_impls_by_trait
-//RS             .get(trait_name)
-//RS             .is_some_and(|implementations| {
-//RS                 implementations.iter().any(|implementation| {
-//RS                     self.module_selected(implementation.module)
-//RS                         && self.impl_selected_for_target(implementation)
-//RS                         && (implementation.self_type.same_checked_type(ty)
-//RS                             || implementation
-//RS                                 .self_type
-//RS                                 .nominal_name()
-//RS                                 .zip(ty.nominal_name())
-//RS                                 .is_some_and(|(left, right)| left == right))
-//RS                 })
-//RS             })
-//RS     }
-//RS 
-//RS     /// D-DISPLAYDBG1: a plain enum (every case a unit case) is admitted by bare
-//RS     /// `{value}`, and every tier renders it as its case name: the resident
-//RS     /// engine's nominal display host prints the MIR variant name. AOT's
-//RS     /// `jet_fmt_display<T: JetDisplay>` needs that same render as a
-//RS     /// `JetDisplay` impl on the emitted enum (I9). A user `Display` impl is
-//RS     /// called directly by interpolation and keeps its own rendering.
-//RS     fn emit_plain_enum_display_impl(&self, def: &MirTypeDef, out: &mut String) {
-//RS         let MirTypeDefKind::Enum { variants, .. } = &def.kind else {
-//RS             return;
-//RS         };
-//RS         if !def.generic_params.is_empty()
-//RS             || variants.is_empty()
-//RS             || is_source_owned_core_web_query_enum(&def.key)
-//RS             || !variants
-//RS                 .iter()
-//RS                 .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
-//RS             || self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY)
-//RS         {
-//RS             return;
-//RS         }
-//RS         let name = self.type_name(def.id);
-//RS         let _ = writeln!(out, "impl JetDisplay for {name} {{");
-//RS         let _ = writeln!(out, "    fn jet_display(&self) -> String {{");
-//RS         let _ = writeln!(out, "        match self {{");
-//RS         for variant in variants {
-//RS             let variant_name = quote_rust_string(
-//RS                 variant
-//RS                     .name
-//RS                     .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                     .unwrap_or(variant.name.as_str()),
-//RS             );
-//RS             let _ = writeln!(
-//RS                 out,
-//RS                 "            Self::{} => {variant_name}.to_string(),",
-//RS                 mangle_variant(&variant.name)
-//RS             );
-//RS         }
-//RS         let _ = writeln!(out, "        }}");
-//RS         let _ = writeln!(out, "    }}\n}}\n");
-//RS     }
-//RS 
-//RS     /// D-CAPBUNDLE1: `#Printable` on a distinct type admits bare `{value}`
-//RS     /// and renders the base value on every tier. AOT's
-//RS     /// `jet_fmt_display<T: JetDisplay>` needs that render as a `JetDisplay`
-//RS     /// impl forwarding to the base; a user `Display` impl keeps its own.
-//RS     fn emit_printable_distinct_display_impl(&self, def: &MirTypeDef, out: &mut String) {
-//RS         if !matches!(&def.kind, MirTypeDefKind::Distinct { .. })
-//RS             || !def.auto_printable
-//RS             || self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY)
-//RS         {
-//RS             return;
-//RS         }
-//RS         let name = self.type_name(def.id);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        self.0.jet_display()\n    }}\n}}\n"
-//RS         );
-//RS     }
-//RS 
-//RS     /// D-FAIL-CONV2=A: `Prelude/Errors.jet` converts each Core error family
-//RS     /// member onto `Err` with `Err("{self}")`, and every Prelude-owned member
-//RS     /// renders that text through its `JetShow`. A member declared in Core Jet
-//RS     /// source (`UUIDError`) is emitted from MIR instead, so it needs the same
-//RS     /// `JetDisplay` forwarding its Prelude-owned siblings carry (I9: the
-//RS     /// resident engine shows the same record). A unit-only enum keeps the
-//RS     /// case-name display above; a user `Display` impl keeps its own.
-//RS     fn emit_core_error_family_display_impl(&self, def: &MirTypeDef, out: &mut String) {
-//RS         let unit_enum = matches!(
-//RS             &def.kind,
-//RS             MirTypeDefKind::Enum { variants, .. }
-//RS                 if variants
-//RS                     .iter()
-//RS                     .all(|variant| matches!(&variant.payload, MirVariantPayload::Unit))
-//RS         );
-//RS         if !def.key.starts_with("<corelib>/")
-//RS             || !crate::Sema::is_core_error_family_type(&def.key)
-//RS             || !def.generic_params.is_empty()
-//RS             || unit_enum
-//RS             || matches!(
-//RS                 &def.kind,
-//RS                 MirTypeDefKind::Distinct { .. } | MirTypeDefKind::Alias { .. }
-//RS             )
-//RS             || self.selected_trait_impl_for_type(def, crate::Generics::DISPLAY)
-//RS         {
-//RS             return;
-//RS         }
-//RS         let name = self.type_name(def.id);
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n"
-//RS         );
-//RS     }
-//RS 
-//RS     fn emit_structural_show_impl(&self, def: &MirTypeDef, out: &mut String) {
-//RS         let emit_show = def.auto_printable
-//RS             && !self.selected_trait_impl_for_type(def, crate::Generics::PRINTABLE);
-//RS         let emit_debug = self.derives_trait(def, crate::Generics::DEBUG)
-//RS             && !self.selected_trait_impl_for_type(def, crate::Generics::DEBUG);
-//RS         self.emit_plain_enum_display_impl(def, out);
-//RS         self.emit_printable_distinct_display_impl(def, out);
-//RS         if emit_show {
-//RS             self.emit_core_error_family_display_impl(def, out);
-//RS         }
-//RS         if (!emit_show && !emit_debug) || matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
-//RS             return;
-//RS         }
-//RS         if is_source_owned_core_web_query_enum(&def.key) {
-//RS             if let MirTypeDefKind::Enum { variants, .. } = &def.kind {
-//RS                 if variants
-//RS                     .iter()
-//RS                     .all(|variant| matches!(&variant.payload, &MirVariantPayload::Unit))
-//RS                 {
-//RS                     let name = self.type_name(def.id);
-//RS                     if emit_show {
-//RS                         out.push_str(&native_core_query_enum_trait_impl(
-//RS                             &name,
-//RS                             "JetShow",
-//RS                             "jet_show",
-//RS                             variants.iter().map(|variant| variant.name.as_str()),
-//RS                         ));
-//RS                     }
-//RS                     if emit_debug {
-//RS                         out.push_str(&native_core_query_enum_trait_impl(
-//RS                             &name,
-//RS                             "JetDebug",
-//RS                             "jet_debug",
-//RS                             variants.iter().map(|variant| variant.name.as_str()),
-//RS                         ));
-//RS                     }
-//RS                     return;
-//RS                 }
-//RS             }
-//RS         }
-//RS         if emit_show {
-//RS             self.emit_structural_impl(def, crate::Generics::PRINTABLE, "JetShow", "jet_show", out);
-//RS         }
-//RS         if emit_debug {
-//RS             self.emit_structural_impl(def, crate::Generics::DEBUG, "JetDebug", "jet_debug", out);
-//RS         }
-//RS     }
-//RS 
-//RS     fn emit_structural_impl(
-//RS         &self,
-//RS         def: &MirTypeDef,
-//RS         trait_name: &str,
-//RS         rust_trait: &str,
-//RS         value_method: &str,
-//RS         out: &mut String,
-//RS     ) {
-//RS         let debug = value_method == "jet_debug";
-//RS         let name = self.type_name(def.id);
-//RS         let type_args = if def.generic_params.is_empty() {
-//RS             String::new()
-//RS         } else {
-//RS             format!(
-//RS                 "<{}>",
-//RS                 def.generic_params
-//RS                     .iter()
-//RS                     .map(|param| mangle(&param.name))
-//RS                     .collect::<Vec<_>>()
-//RS                     .join(", ")
-//RS             )
-//RS         };
-//RS         let impl_generics = self.structural_generics(def, trait_name);
-//RS         let source_name = quote_rust_string(
-//RS             def.name
-//RS                 .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                 .unwrap_or(def.name.as_str()),
-//RS         );
-//RS         let _ = writeln!(
-//RS             out,
-//RS             "impl{impl_generics} {rust_trait} for {name}{type_args} {{"
-//RS         );
-//RS         let _ = writeln!(out, "    fn {value_method}(&self) -> String {{");
-//RS         match &def.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => {
-//RS                 let record = if debug {
-//RS                     "jet_debug_record_fields"
-//RS                 } else {
-//RS                     "jet_debug_record"
-//RS                 };
-//RS                 let _ = writeln!(out, "        {record}({source_name}, [");
-//RS                 for (storage_index, field) in fields.iter().enumerate() {
-//RS                     if field.computed {
-//RS                         continue;
-//RS                     }
-//RS                     let field_name = quote_rust_string(
-//RS                         field
-//RS                             .name
-//RS                             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                             .unwrap_or(field.name.as_str()),
-//RS                     );
-//RS                     let value =
-//RS                         self.structural_field_value(def, &field.name, "self", field, value_method);
-//RS                     if debug {
-//RS                         let _ = writeln!(
-//RS                             out,
-//RS                             "            JetDebugField {{ name: {field_name}.to_string(), value: {value}, storage_index: {storage_index}, redacted: {} }},",
-//RS                             field.redact
-//RS                         );
-//RS                     } else {
-//RS                         let _ = writeln!(out, "            ({field_name}.to_string(), {value}),");
-//RS                     }
-//RS                 }
-//RS                 let _ = writeln!(out, "        ])");
-//RS             }
-//RS             MirTypeDefKind::Enum { variants, .. } => {
-//RS                 let _ = writeln!(out, "        match self {{");
-//RS                 for variant in variants {
-//RS                     let variant_name = quote_rust_string(
-//RS                         variant
-//RS                             .name
-//RS                             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                             .unwrap_or(variant.name.as_str()),
-//RS                     );
-//RS                     let variant_path = if is_source_owned_core_web_query_enum(&def.key) {
-//RS                         format!("Self::{}", native_core_query_enum_variant_name(&variant.name))
-//RS                     } else {
-//RS                         format!("Self::{}", mangle_variant(&variant.name))
-//RS                     };
-//RS                     match &variant.payload {
-//RS                         MirVariantPayload::Unit => {
-//RS                             let _ = writeln!(
-//RS                                 out,
-//RS                                 "            {variant_path} => jet_debug_variant({variant_name}, None),"
-//RS                             );
-//RS                         }
-//RS                         MirVariantPayload::Single(_) => {
-//RS                             let value = if def
-//RS                                 .boxed_edges
-//RS                                 .iter()
-//RS                                 .any(|candidate| candidate == &variant.name)
-//RS                             {
-//RS                                 format!("payload.as_ref().{value_method}()")
-//RS                             } else {
-//RS                                 format!("payload.{value_method}()")
-//RS                             };
-//RS                             let _ = writeln!(
-//RS                                 out,
-//RS                                 "            {variant_path}(payload) => jet_debug_variant({variant_name}, Some({value})),"
-//RS                             );
-//RS                         }
-//RS                         MirVariantPayload::Named(fields) => {
-//RS                             let visible = fields
-//RS                                 .iter()
-//RS                                 .enumerate()
-//RS                                 .filter(|(_, field)| !field.computed)
-//RS                                 .collect::<Vec<_>>();
-//RS                             let pattern = if visible.is_empty() {
-//RS                                 format!("{variant_path} {{ .. }}")
-//RS                             } else {
-//RS                                 let bindings = visible
-//RS                                     .iter()
-//RS                                     .enumerate()
-//RS                                     .map(|(index, (_, field))| {
-//RS                                         format!(
-//RS                                             "{}: __jet_show_field_{index}",
-//RS                                             self.field_name(field.id)
-//RS                                         )
-//RS                                     })
-//RS                                     .collect::<Vec<_>>()
-//RS                                     .join(", ");
-//RS                                 format!("{variant_path} {{ {bindings}, .. }}")
-//RS                             };
-//RS                             if visible.is_empty() {
-//RS                                 let _ = writeln!(
-//RS                                     out,
-//RS                                     "            {pattern} => jet_debug_record({variant_name}, []),"
-//RS                                 );
-//RS                             } else {
-//RS                                 let values = visible
-//RS                                     .iter()
-//RS                                     .enumerate()
-//RS                                     .map(|(index, (storage_index, field))| {
-//RS                                         let edge = format!("{}.{}", variant.name, field.name);
-//RS                                         let value = if def
-//RS                                             .boxed_edges
-//RS                                             .iter()
-//RS                                             .any(|candidate| candidate == &edge)
-//RS                                         {
-//RS                                             format!(
-//RS                                                 "__jet_show_field_{index}.as_ref().{value_method}()"
-//RS                                             )
-//RS                                         } else {
-//RS                                             format!(
-//RS                                                 "__jet_show_field_{index}.{value_method}()"
-//RS                                             )
-//RS                                         };
-//RS                                         let field_name = quote_rust_string(
-//RS                                             field
-//RS                                                 .name
-//RS                                                 .strip_prefix(
-//RS                                                     jet_foundation::Syntax::GENERATED_NAME_PREFIX,
-//RS                                                 )
-//RS                                                 .unwrap_or(field.name.as_str()),
-//RS                                         );
-//RS                                         if debug {
-//RS                                             format!(
-//RS                                                 "JetDebugField {{ name: {field_name}.to_string(), value: {value}, storage_index: {storage_index}, redacted: {} }}",
-//RS                                                 field.redact
-//RS                                             )
-//RS                                         } else {
-//RS                                             format!("({field_name}.to_string(), {value})")
-//RS                                         }
-//RS                                     })
-//RS                                     .collect::<Vec<_>>()
-//RS                                     .join(", ");
-//RS                                 let record = if debug {
-//RS                                     "jet_debug_record_fields"
-//RS                                 } else {
-//RS                                     "jet_debug_record"
-//RS                                 };
-//RS                                 let _ = writeln!(
-//RS                                     out,
-//RS                                     "            {pattern} => {record}({variant_name}, [{values}]),"
-//RS                                 );
-//RS                             }
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let _ = writeln!(out, "        }}");
-//RS             }
-//RS             MirTypeDefKind::Distinct { .. } => {
-//RS                 let _ = writeln!(out, "        self.0.{value_method}()");
-//RS             }
-//RS             MirTypeDefKind::UnitFamily { members } => {
-//RS                 let _ = writeln!(out, "        match self {{");
-//RS                 for member in members {
-//RS                     let member_name = quote_rust_string(
-//RS                         member
-//RS                             .strip_prefix(jet_foundation::Syntax::GENERATED_NAME_PREFIX)
-//RS                             .unwrap_or(member.as_str()),
-//RS                     );
-//RS                     let member_path = format!("Self::{}", mangle(member));
-//RS                     let _ = writeln!(
-//RS                         out,
-//RS                         "            {member_path} => jet_debug_variant({member_name}, None),"
-//RS                     );
-//RS                 }
-//RS                 let _ = writeln!(out, "        }}");
-//RS             }
-//RS             MirTypeDefKind::Alias { .. } => {
-//RS                 unreachable!("aliases do not own Printable implementations")
-//RS             }
-//RS         }
-//RS         let _ = writeln!(out, "    }}\n}}\n");
-//RS     }
-//RS 
-//RS     /// Type rows declared once by the cached runtime instead of per program:
-//RS     /// handles and compiler-owned rows (`Ordering`, default `Err`) exist so
-//RS     /// every adapter constructs variants and fields from one checked
-//RS     /// declaration.
-//RS     fn runtime_declares_type(&self, def: &MirTypeDef) -> bool {
-//RS         self.is_handle_name(&def.name)
-//RS             || self.is_handle_name(&def.key)
-//RS             || crate::Codegen::TIR::tir_to_mir_types::is_compiler_owned_type(&def.key)
-//RS     }
-//RS 
-//RS     /// Type rows whose Rust declaration this artifact emits. Runtime-declared
-//RS     /// rows, canonical Core native carriers and native history types already
-//RS     /// have their Rust spelling in the runtime or Prelude.
-//RS     fn declares_type_def(&self, def: &MirTypeDef) -> bool {
-//RS         self.module_selected(def.module)
-//RS             && !self.runtime_declares_type(def)
-//RS             && !is_canonical_core_native_type(&def.key)
-//RS             && self.history_native_type_name(&def.key).is_none()
-//RS     }
-//RS 
-//RS     fn emit_type_def(&self, def: &'a MirTypeDef, out: &mut String) {
-//RS         self.push_generic_scope(&def.generic_params);
-//RS         let name = self.type_name(def.id);
-//RS         let generics = self.generic_params_from(&def.generic_params);
-//RS         let visibility = self.visibility(if def.public {
-//RS             MirVisibility::Public
-//RS         } else if def.package_public {
-//RS             MirVisibility::Package
-//RS         } else {
-//RS             MirVisibility::Private
-//RS         });
-//RS         if let Some(layout) = def.layout {
-//RS             match layout {
-//RS                 MirStructLayout::C => {
-//RS                     if matches!(&def.kind, MirTypeDefKind::Enum { .. })
-//RS                         && def.c_layout_tag.is_some()
-//RS                     {
-//RS                         self.c_abi_enum_facts(def);
-//RS                         if let Some(tag) = self.c_abi_enum_repr_tag(def) {
-//RS                             let _ = writeln!(out, "#[repr(C, {tag})]");
-//RS                         } else {
-//RS                             let _ = writeln!(out, "#[repr(C)]");
-//RS                         }
-//RS                     } else {
-//RS                         let _ = writeln!(out, "#[repr(C)]");
-//RS                     }
-//RS                 }
-//RS                 MirStructLayout::CAligned { alignment, .. } => {
-//RS                     let fact = def.layout_alignment.as_ref().unwrap_or_else(|| {
-//RS                         panic!(
-//RS                             "MIR aligned type {:?} has no sema layout alignment fact",
-//RS                             def.id
-//RS                         )
-//RS                     });
-//RS                     if fact.requested_alignment != alignment {
-//RS                         panic!(
-//RS                             "MIR aligned type {:?} fact/request mismatch: {} != {}",
-//RS                             def.id, fact.requested_alignment, alignment
-//RS                         );
-//RS                     }
-//RS                     let _ = writeln!(out, "#[repr(C, align({}))]", fact.effective_alignment);
-//RS                 }
-//RS                 MirStructLayout::Columnar => {}
-//RS             }
-//RS         }
-//RS         let derives_allowed = self.structural_derives_allowed(def);
-//RS         let declared_ty = self
-//RS             .type_instances
-//RS             .get(&def.id)
-//RS             .copied()
-//RS             .unwrap_or_else(|| panic!("MIR type {:?} has no canonical instance", def.id));
-//RS         let clone_capable = derives_allowed
-//RS             && self.type_derive_capability(
-//RS                 declared_ty,
-//RS                 "Clone",
-//RS                 &mut Vec::new(),
-//RS                 &BTreeMap::new(),
-//RS                 &BTreeSet::new(),
-//RS             );
-//RS         let debug_capable = derives_allowed
-//RS             && self.type_derive_capability(
-//RS                 declared_ty,
-//RS                 "Debug",
-//RS                 &mut Vec::new(),
-//RS                 &BTreeMap::new(),
-//RS                 &BTreeSet::new(),
-//RS             );
-//RS         let clone_user_impl = self.selected_user_capability_impl(declared_ty, "Clone");
-//RS         let debug_user_impl = self.selected_user_capability_impl(declared_ty, "Debug");
-//RS         let mut derives = Vec::new();
-//RS         if clone_capable && !clone_user_impl {
-//RS             derives.push("Clone");
-//RS         }
-//RS         if debug_capable && !debug_user_impl {
-//RS             derives.push("Debug");
-//RS         }
-//RS         for trait_id in &def.derives {
-//RS             let trait_name = self
-//RS                 .program
-//RS                 .traits
-//RS                 .iter()
-//RS                 .find(|trait_def| trait_def.id == *trait_id)
-//RS                 .map(|trait_def| trait_def.name.as_str())
-//RS                 .unwrap_or_else(|| panic!("MIR derive trait ID {:?} has no row", trait_id));
-//RS             if trait_name == "Clone" && !clone_capable && !clone_user_impl {
-//RS                 panic!(
-//RS                     "MIR type {:?} derives Clone without a checked Rust Clone capability or user implementation",
-//RS                     def.id
-//RS                 );
-//RS             }
-//RS             if trait_name == "Debug" && !debug_capable && !debug_user_impl {
-//RS                 panic!(
-//RS                     "MIR type {:?} derives Debug without a checked Rust Debug capability or user implementation",
-//RS                     def.id
-//RS                 );
-//RS             }
-//RS             if matches!(
-//RS                 trait_name,
-//RS                 "Clone"
-//RS                     | "Copy"
-//RS                     | "Debug"
-//RS                     | "Default"
-//RS                     | "Eq"
-//RS                     | "Hash"
-//RS                     | "Ord"
-//RS                     | "PartialEq"
-//RS                     | "PartialOrd"
-//RS             ) {
-//RS                 let capability = match trait_name {
-//RS                     "Clone" => clone_capable && !clone_user_impl,
-//RS                     "Debug" => debug_capable && !debug_user_impl,
-//RS                     _ => derives_allowed,
-//RS                 };
-//RS                 if capability && !derives.contains(&trait_name) {
-//RS                     derives.push(trait_name);
-//RS                 }
-//RS             } else {
-//RS                 self.validate_derived_trait(def, *trait_id, trait_name);
-//RS                 // Sema's structural `Equatable` derive is the checked fact
-//RS                 // behind Rust `PartialEq` (`jet_eq` for `assert_eq`); every
-//RS                 // nominal field must carry the same fact to derive it.
-//RS                 if trait_name == crate::Generics::EQUATABLE
-//RS                     && derives_allowed
-//RS                     && !derives.contains(&"PartialEq")
-//RS                     && self.type_derive_capability(
-//RS                         declared_ty,
-//RS                         "PartialEq",
-//RS                         &mut Vec::new(),
-//RS                         &BTreeMap::new(),
-//RS                         &BTreeSet::new(),
-//RS                     )
-//RS                 {
-//RS                     derives.push("PartialEq");
-//RS                 }
-//RS             }
-//RS         }
-//RS         if !derives.is_empty() && !matches!(&def.kind, MirTypeDefKind::Alias { .. }) {
-//RS             let _ = writeln!(out, "#[derive({})]", derives.join(", "));
-//RS         }
-//RS         if def.must_use {
-//RS             let _ = writeln!(out, "#[must_use]");
-//RS         }
-//RS         for attribute in &def.serde {
-//RS             match (&attribute.kind, &attribute.value) {
-//RS                 (MirSerdeAttributeKind::RenameAll, Some(_))
-//RS                 | (MirSerdeAttributeKind::Tag, Some(_))
-//RS                 | (MirSerdeAttributeKind::Untagged, None)
-//RS                 | (MirSerdeAttributeKind::DenyUnknownFields, None) => {}
-//RS                 (MirSerdeAttributeKind::RenameAll, None)
-//RS                 | (MirSerdeAttributeKind::Tag, None)
-//RS                 | (MirSerdeAttributeKind::Untagged, Some(_))
-//RS                 | (MirSerdeAttributeKind::DenyUnknownFields, Some(_)) => {
-//RS                     panic!("MIR serde attribute has an invalid payload");
-//RS                 }
-//RS             }
-//RS         }
-//RS         match &def.kind {
-//RS             MirTypeDefKind::Struct { fields, .. } => {
-//RS                 let _ = writeln!(out, "{visibility}struct {name}{generics} {{");
-//RS                 for field in fields.iter().filter(|field| !field.computed) {
-//RS                     let _ = writeln!(
-//RS                         out,
-//RS                         "    {}{}: {},",
-//RS                         self.field_visibility(field),
-//RS                         self.field_name(field.id),
-//RS                         self.rust_decl_type(def, &field.name, &field.ty)
-//RS                     );
-//RS                 }
-//RS                 let _ = writeln!(out, "}}\n");
-//RS             }
-//RS             MirTypeDefKind::Enum { variants, .. } => {
-//RS                 let _ = writeln!(out, "{visibility}enum {name}{generics} {{");
-//RS                 for variant in variants {
-//RS                     match &variant.payload {
-//RS                         MirVariantPayload::Unit => {
-//RS                             let _ = writeln!(out, "    {},", mangle_variant(&variant.name));
-//RS                         }
-//RS                         MirVariantPayload::Single(ty) => {
-//RS                             let _ = writeln!(
-//RS                                 out,
-//RS                                 "    {}({}),",
-//RS                                 mangle_variant(&variant.name),
-//RS                                 self.rust_decl_type(def, &variant.name, ty)
-//RS                             );
-//RS                         }
-//RS                         MirVariantPayload::Named(fields) => {
-//RS                             let _ = writeln!(out, "    {} {{", mangle_variant(&variant.name));
-//RS                             for field in fields {
-//RS                                 let edge = format!("{}.{}", variant.name, field.name);
-//RS                                 let _ = writeln!(
-//RS                                     out,
-//RS                                     "        {}: {},",
-//RS                                     self.field_name(field.id),
-//RS                                     self.rust_decl_type(def, &edge, &field.ty)
-//RS                                 );
-//RS                             }
-//RS                             let _ = writeln!(out, "    }},");
-//RS                         }
-//RS                     }
-//RS                 }
-//RS                 let _ = writeln!(out, "}}\n");
-//RS             }
-//RS             MirTypeDefKind::Distinct { base, .. } => {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "#[repr(transparent)]\n{visibility}struct {name}{generics}(pub {});\n",
-//RS                     self.rust_type(base)
-//RS                 );
-//RS             }
-//RS             MirTypeDefKind::Alias { target } => {
-//RS                 let _ = writeln!(
-//RS                     out,
-//RS                     "{visibility}type {name}{generics} = {};\n",
-//RS                     self.rust_type(target)
-//RS                 );
-//RS             }
-//RS             MirTypeDefKind::UnitFamily { members } => {
-//RS                 let _ = writeln!(out, "{visibility}enum {name}{generics} {{");
-//RS                 for member in members {
-//RS                     let _ = writeln!(out, "    {},", mangle(member));
-//RS                 }
-//RS                 let _ = writeln!(out, "}}\n");
-//RS             }
-//RS         }
-//RS         self.emit_structural_show_impl(def, out);
-//RS         if matches!(def.layout, Some(MirStructLayout::Columnar)) {
-//RS             match &def.kind {
-//RS                 MirTypeDefKind::Struct { fields, .. } => {
-//RS                     self.emit_columnar_row_adapter(def, fields, out);
-//RS                 }
-//RS                 MirTypeDefKind::Enum { .. }
-//RS                 | MirTypeDefKind::Distinct { .. }
-//RS                 | MirTypeDefKind::Alias { .. }
-//RS                 | MirTypeDefKind::UnitFamily { .. } => {
-//RS                     panic!("MIR columnar layout requires a struct type definition");
-//RS                 }
-//RS             }
-//RS         }
-//RS         self.pop_generic_scope();
-//RS     }
-//RS     fn history_generate_expression(&self, ty: &MirType) -> Option<String> {
-//RS         let (kind, range) = self.history_scalar_spec(ty)?;
-//RS         match kind {
-//RS             HistoryScalarKind::Boolean => Some("rng.below(2) != 0".to_string()),
-//RS             HistoryScalarKind::Text => Some("format!(\"history-{}\", rng.below(17))".to_string()),
-//RS             HistoryScalarKind::Char => {
-//RS                 Some("char::from_u32('a' as u32 + rng.below(26) as u32).unwrap_or('a')".to_string())
-//RS             }
-//RS             HistoryScalarKind::Integer
-//RS             | HistoryScalarKind::SignedInteger
-//RS             | HistoryScalarKind::UnsignedInteger => {
-//RS                 let (mut lo, hi) = range.unwrap_or(match kind {
-//RS                     HistoryScalarKind::UnsignedInteger => (0, 16),
-//RS                     _ => (-8, 8),
-//RS                 });
-//RS                 if matches!(kind, HistoryScalarKind::UnsignedInteger) {
-//RS                     lo = lo.max(0);
-//RS                 }
-//RS                 let span = u64::try_from(i128::from(hi) - i128::from(lo) + 1).ok()?;
-//RS                 let value = format!(
-//RS                     "i64::try_from({lo}i128 + (rng.below({span}) as i128)).ok()?"
-//RS                 );
-//RS                 let generated = if matches!(kind, HistoryScalarKind::Integer) {
-//RS                     format!(
-//RS                         "jet_foundation::Numeric::JetInt::try_from_i64({value}).ok()?"
-//RS                     )
-//RS                 } else {
-//RS                     format!("<{}>::try_from({value}).ok()?", self.rust_type(ty))
-//RS                 };
-//RS                 Some(generated)
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_value_expression(kind: HistoryScalarKind, value: &str) -> String {
-//RS         match kind {
-//RS             HistoryScalarKind::Integer => {
-//RS                 format!("HistoryValue::Integer({value}.to_i64()?)")
-//RS             }
-//RS             HistoryScalarKind::SignedInteger | HistoryScalarKind::UnsignedInteger => {
-//RS                 format!("HistoryValue::Integer(i64::try_from({value}).ok()?)")
-//RS             }
-//RS             HistoryScalarKind::Boolean => format!("HistoryValue::Boolean({value})"),
-//RS             HistoryScalarKind::Text => format!("HistoryValue::Text({value}.clone())"),
-//RS             HistoryScalarKind::Char => format!("HistoryValue::Text({value}.to_string())"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_tree_expression(kind: Option<HistoryScalarKind>, value: &str) -> String {
-//RS         match kind {
-//RS             Some(HistoryScalarKind::Integer) => {
-//RS                 format!("jet_std::DataTree::Number(({value}).to_string_rep())")
-//RS             }
-//RS             Some(HistoryScalarKind::SignedInteger | HistoryScalarKind::UnsignedInteger) => {
-//RS                 format!("jet_std::DataTree::Number(({value}).to_string())")
-//RS             }
-//RS             Some(HistoryScalarKind::Boolean) => {
-//RS                 format!("jet_std::DataTree::Bool({value})")
-//RS             }
-//RS             Some(HistoryScalarKind::Text) => {
-//RS                 format!("jet_std::DataTree::Text({value}.clone())")
-//RS             }
-//RS             Some(HistoryScalarKind::Char) => {
-//RS                 format!("jet_std::DataTree::Text({value}.to_string())")
-//RS             }
-//RS             None => "jet_std::DataTree::Null".to_string(),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_command_tree_expression(&self, field: &MirType, value: &str) -> String {
-//RS         if let Some((kind, _)) = self.history_scalar_spec(field) {
-//RS             return Self::history_tree_expression(Some(kind), value);
-//RS         }
-//RS         let nominal_name = field.nominal_name().unwrap_or_default();
-//RS         let nominal_name = nominal_name
-//RS             .rsplit_once("::")
-//RS             .or_else(|| nominal_name.rsplit_once('.'))
-//RS             .map_or(nominal_name, |(_, leaf)| leaf);
-//RS         match nominal_name {
-//RS             "HandleID" | "TaskID" | "EventID" => {
-//RS                 format!("jet_std::DataTree::Int({value}.value as i64)")
-//RS             }
-//RS             _ => format!("{value}.jet_encode()"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_rebuild_expression(
-//RS         &self,
-//RS         ty: &MirType,
-//RS         kind: HistoryScalarKind,
-//RS         index: usize,
-//RS     ) -> String {
-//RS         let rust_ty = self.rust_type(ty);
-//RS         let (_, range) = self
-//RS             .history_scalar_spec(ty)
-//RS             .unwrap_or_else(|| panic!("unsupported generated history field"));
-//RS         let argument = format!("&__history_arguments[{index}]");
-//RS         match kind {
-//RS             HistoryScalarKind::Integer
-//RS             | HistoryScalarKind::SignedInteger
-//RS             | HistoryScalarKind::UnsignedInteger => {
-//RS                 let mut bounds = String::new();
-//RS                 if let Some((lo, hi)) = range {
-//RS                     bounds.push_str(&format!(
-//RS                         "if *value < {lo} || *value > {hi} {{ return None; }}"
-//RS                     ));
-//RS                 }
-//RS                 if matches!(kind, HistoryScalarKind::UnsignedInteger) {
-//RS                     bounds.push_str("if *value < 0 { return None; }");
-//RS                 }
-//RS                 let conversion = if matches!(kind, HistoryScalarKind::Integer) {
-//RS                     "jet_foundation::Numeric::JetInt::try_from_i64(*value).ok()?".to_string()
-//RS                 } else {
-//RS                     format!("<{rust_ty}>::try_from(*value).ok()?")
-//RS                 };
-//RS                 format!(
-//RS                     "match {argument} {{ HistoryValue::Integer(value) => {{ {bounds} {conversion} }}, _ => return None }}"
-//RS                 )
-//RS             }
-//RS             HistoryScalarKind::Boolean => {
-//RS                 format!("match {argument} {{ HistoryValue::Boolean(value) => *value, _ => return None }}")
-//RS             }
-//RS             HistoryScalarKind::Text => {
-//RS                 format!("match {argument} {{ HistoryValue::Text(value) => value.clone(), _ => return None }}")
-//RS             }
-//RS             HistoryScalarKind::Char => format!(
-//RS                 "match {argument} {{ HistoryValue::Text(value) => {{ let mut chars = value.chars(); let value = chars.next()?; if chars.next().is_some() {{ return None; }} value }}, _ => return None }}"
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_valid_expression(kind: HistoryScalarKind, index: usize, value: &str) -> String {
-//RS         match kind {
-//RS             HistoryScalarKind::Integer
-//RS             | HistoryScalarKind::SignedInteger
-//RS             | HistoryScalarKind::UnsignedInteger => {
-//RS                 let conversion = if matches!(kind, HistoryScalarKind::Integer) {
-//RS                     format!("{value}.to_i64()")
-//RS                 } else {
-//RS                     format!("i64::try_from(*{value}).ok()")
-//RS                 };
-//RS                 format!(
-//RS                     "matches!(__history_arguments.get({index}), Some(HistoryValue::Integer(raw)) if {conversion} == Some(*raw))"
-//RS                 )
-//RS             }
-//RS             HistoryScalarKind::Boolean => format!(
-//RS                 "matches!(__history_arguments.get({index}), Some(HistoryValue::Boolean(raw)) if *raw == *{value})"
-//RS             ),
-//RS             HistoryScalarKind::Text => format!(
-//RS                 "matches!(__history_arguments.get({index}), Some(HistoryValue::Text(raw)) if raw == {value})"
-//RS             ),
-//RS             HistoryScalarKind::Char => format!(
-//RS                 "matches!(__history_arguments.get({index}), Some(HistoryValue::Text(raw)) if raw == &(*{value}).to_string())"
-//RS             ),
-//RS         }
-//RS     }
-//RS 
-//RS     fn history_base_provenance(&self) -> (String, String, String) {
-//RS         let source = self.artifact_identity.identity_digest();
-//RS         let tool = format!(
-//RS             "{}:{}",
-//RS             jet_foundation::TestingHistory::HISTORY_ENGINE,
-//RS             self.program.facts.target_dossier.compiler_identity
-//RS         );
-//RS         let target = jet_foundation::SHA256::sha256_hex(
-//RS             &self
-//RS                 .program
-//RS                 .facts
-//RS                 .target_dossier
-//RS                 .cache_bytes(&self.config.target.triple),
-//RS         );
-//RS         (source, tool, target)
-//RS     }
-//RS 
-//RS     /// History metadata is emitted only for programs that call
-//RS     /// `core.testing.histories`. `program.core_calls` is the whole checked
-//RS     /// registry, so a row there is not a use: the instructions decide.
-//RS     fn history_runtime_metadata_enabled(&self) -> bool {
-//RS         *self.history_runtime_metadata.get_or_init(|| {
-//RS             let histories = self
-//RS                 .program
-//RS                 .core_calls
-//RS                 .iter()
-//RS                 .filter(|row| row.module == "core.testing" && row.member == "histories")
-//RS                 .map(|row| row.id)
-//RS                 .collect::<BTreeSet<_>>();
-//RS             !histories.is_empty()
-//RS                 && self.program.functions.iter().any(|function| {
-//RS                     function.blocks.iter().flat_map(|block| &block.instructions).any(
-//RS                         |instruction| match &instruction.operation {
-//RS                             MirOperation::CoreCall { call, .. }
-//RS                             | MirOperation::Call { callee: MirCallee::Core(call), .. } => {
-//RS                                 histories.contains(call)
-//RS                             }
-//RS                             _ => false,
-//RS                         },
-//RS                     )
-//RS                 })
-//RS         })
-//RS     }
-//RS 
-//RS     fn history_native_type_name(&self, name: &str) -> Option<String> {
-//RS         let name = crate::Codegen::history_rust_type_name(name)?;
-//RS         Some(match name {
-//RS             "HistoryStrategy" => format!("{}JetHistoryStrategy", self.config.root_prefix),
-//RS             "HistoryRNG" => format!("{}JetHistoryRng", self.config.root_prefix),
-//RS             _ => format!("crate::jet_testing_history_foundation::{name}"),
-//RS         })
-//RS     }
-//RS 
-//RS     fn history_call_expression(
-//RS         &self,
-//RS         function: &MirFunction,
-//RS         args: &[MirCallArg],
-//RS         type_args: &[MirType],
-//RS         borrow_mask: &[bool],
-//RS     ) -> String {
-//RS         let [command_type] = type_args else {
-//RS             panic!("MIR histories requires one checked command type");
-//RS         };
-//RS         if args.len() != 6 {
-//RS             panic!("MIR histories requires six checked arguments");
-//RS         }
-//RS         let values = args
-//RS             .iter()
-//RS             .enumerate()
-//RS             .map(|(index, arg)| {
-//RS                 self.call_arg_for_function(
-//RS                     function,
-//RS                     arg,
-//RS                     borrow_mask.get(index).copied().unwrap_or(false),
-//RS                 )
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let command_type_rust = self.rust_type(command_type);
-//RS         let strategy = if matches!(
-//RS             self.value_definition(function, args[2].value),
-//RS             Some(MirOperation::Absent)
-//RS         ) {
-//RS             "None".to_string()
-//RS         } else {
-//RS             let MirTypeKind::Option(strategy_type) =
-//RS                 self.value_type(function, args[2].value).kind()
-//RS             else {
-//RS                 panic!("MIR histories strategy argument is not optional");
-//RS             };
-//RS             let MirTypeKind::Apply {
-//RS                 name,
-//RS                 args: strategy_type_args,
-//RS             } = strategy_type.kind()
-//RS             else {
-//RS                 panic!("MIR histories strategy argument has no checked type identity");
-//RS             };
-//RS             let Some(strategy_def) = self.history_type_def(name.id) else {
-//RS                 panic!("MIR histories strategy type has no checked declaration");
-//RS             };
-//RS             if strategy_def.name != "HistoryStrategy"
-//RS                 || self.module_row(strategy_def.module).name != "core.testing"
-//RS                 || strategy_type_args.len() != 1
-//RS                 || !strategy_type_args[0].same_checked_type(command_type)
-//RS             {
-//RS                 panic!("MIR histories strategy argument has the wrong checked type");
-//RS             }
-//RS             format!(
-//RS                 "match ({}).as_ref() {{ Ok(strategy) => Some((*strategy).clone()), Err(_) => None }}",
-//RS                 values[2]
-//RS             )
-//RS         };
-//RS         let model = format!("(*({})).clone()", values[3]);
-//RS         let actual = format!("(*({})).clone()", values[4]);
-//RS         let observe = format!("(*({})).clone()", values[5]);
-//RS         let call = format!(
-//RS             "{}jet_testing_histories_with_provenance::<{command_type_rust}>(__jet_history_seed, __jet_history_cases, {strategy}, {model}, {actual}, {observe}, {})",
-//RS             self.config.root_prefix,
-//RS             self.history_provenance_expression()
-//RS         );
-//RS         format!(
-//RS             "{{ match (({}).to_i64(), ({}).to_i64()) {{ (Some(__jet_history_seed), Some(__jet_history_cases)) => {call}, (None, _) => Err(\"history seed is invalid\".to_string()), (_, None) => Err(\"history case bound is invalid\".to_string()) }} }}",
-// END-PORT-PENDING 2005 crates/jet-codegen/src/Codegen/MIRRust.rs:7201-9000
+use jet_foundation.MIR.*
+use jet_foundation.Syntax.[GENERATED_NAME_PREFIX, TYPE_PTR]
+use jet_foundation.TestingHistory.HISTORY_ENGINE
+use jet_foundation.SHA256.sha256_hex
+use jet_codegen.Codegen as codegen
+use jet_codegen.Codegen.MIRRust.*
+use jet_codegen.Codegen.TIR.tir_to_mir_types.[is_compiler_owned_trait, is_compiler_owned_type]
+use jet_codegen.Generics
+use jet_codegen.Sema.is_core_error_family_type
+// GATE #4499: checked MIR identities, ordered maps/sets and capability cache cell semantics.
 
+impl RustEmitter {
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7201
+    // The previous slice owns validation and the opening implementation.
+    fn emit_impl(implementation: &MirImplDef, emitted_methods: &Set[MirFunctionId], out: &String) -> {
+        (_, _, _, carrier_trait, trait_definition, rust_operator, methods_start) :: self.emit_impl_head(implementation, out)
+        if trait_definition.is_some() {
+            for declared in trait_definition.unwrap().associated_types {
+                if !implementation.associated_types.iter().any(fn(associated) { associated.name == declared.name }) && !(rust_operator.is_some() && declared.name == "Output") {
+                    panic("MIR implementation {implementation.id:?} omits associated type {declared.name}")
+                }
+            }
+        } else if !implementation.associated_types.is_empty() {
+            panic("MIR inherent implementation {implementation.id:?} has associated types")
+        }
+        for associated in implementation.associated_types {
+            out.push_str(&"    type {mangle(&associated.name)} = {self.rust_type(&associated.ty)};\n")
+        }
+        functions := [&MirFunction].with_capacity(implementation.methods.len())
+        for function_id in implementation.methods {
+            function :: self.function_row(function_id)
+            if !self.module_selected(function.module_id) || !self.selected_for_target(function) {
+                panic("MIR implementation {implementation.id:?} method {function.id:?} is not selected for the emitted artifact")
+            }
+            functions.push(function)
+        }
+        operator_return := None as MirType?
+        for function in functions {
+            (implementation.trait_ref, function.form) == {
+                (.None, .Method(owner: declared_owner, ..)) -> {
+                    if !declared_owner.same_checked_type(&implementation.self_type) { panic("MIR inherent implementation {implementation.id:?} method {function.id:?} owner mismatch") }
+                    if !self.owner_independent_static(function) { self.emit_method(function, out) }
+                }
+                (.Some(trait_ref), .TraitMethod(owner: declared_owner, trait_ref: declared_trait, self_access: self_access, serde: serde)) -> {
+                    if !declared_owner.same_checked_type(&implementation.self_type) || declared_trait.id != trait_ref.id || declared_trait.name != trait_ref.name {
+                        panic("MIR trait implementation {implementation.id:?} method {function.id:?} declaration mismatch")
+                    }
+                    codec :: implementation.serde
+                    if codec != serde { panic("MIR trait implementation {implementation.id:?} method {function.id:?} codec mismatch") }
+                    if codec.is_some() {
+                        expected_name :: if codec.unwrap() == .Encode { "encode" } else { "decode" }
+                        if self.function_leaf_name(function) != expected_name || function.capture_params.len() != 0 { panic("MIR serde implementation {implementation.id:?} method {function.id:?} has invalid codec shape") }
+                        codec.unwrap() == {
+                            .Encode -> { if self_access != Some(MirAccess.Read) || !self.declared_params(function).is_empty() { panic("MIR Encode implementation {implementation.id:?} method {function.id:?} must be an instance method without arguments") } }
+                            .Decode -> { if self_access.is_some() || self.declared_params(function).len() != 1 { panic("MIR Decode implementation {implementation.id:?} method {function.id:?} must be static with one argument") } }
+                        }
+                    }
+                    if trait_definition.is_some() {
+                        // Compiler-owned rows carry identity; sema checked Prelude signatures.
+                        definition :: trait_definition.unwrap()
+                        if codec.is_none() && !implementation.compiler_generated && !is_compiler_owned_trait(&definition.name) { self.validate_trait_method_signature(implementation, definition, function, self_access) }
+                    } else if codec.is_none() { panic("MIR trait implementation {implementation.id:?} method {function.id:?} has no trait declaration") }
+                    (name, return_override) :: codec == {
+                        .Some(.Encode) -> (Some("jet_encode"), Some("{self.config.root_prefix}jet_std::DataTree"))
+                        .Some(.Decode) -> (Some("jet_decode"), Some("Result<Self, Vec<{self.config.root_prefix}jet_std::FieldError>>"))
+                        .None -> (None, None)
+                    }
+                    native :: codec == {
+                        .Some(.Encode) -> self.emit_native_derived_encode(implementation, function, out)
+                        .Some(.Decode) -> self.emit_native_derived_decode(implementation, function, out)
+                        .None -> self.emit_native_derived_equal(implementation, function, out) || self.emit_native_derived_compare(implementation, function, out)
+                    }
+                    if !native { self.emit_callable_named(function, out, Some(&function.form), name, codec, return_override) }
+                    if rust_operator.is_some() {
+                        if operator_return.is_some() {
+                            if !operator_return.unwrap().same_checked_type(&function.return_type) { panic("MIR operator implementation {implementation.id:?} methods disagree on Output") }
+                        } else { operator_return = Some(function.return_type.clone()) }
+                    }
+                }
+                _ -> panic("MIR implementation {implementation.id:?} method {function.id:?} has incompatible function form")
+            }
+            if !emitted_methods.insert(function.id) { panic("MIR implementation method {function.id:?} was emitted more than once") }
+        }
+        if implementation.trait_ref.is_some() {
+            if trait_definition.is_some() {
+                for method in trait_definition.unwrap().methods {
+                    if implementation.serde.is_none() && (method.default.is_none() || implementation.delegation.is_some()) && !functions.iter().any(fn(function) { self.function_leaf_name(function) == method.name }) {
+                        panic("MIR implementation {implementation.id:?} omits required trait method {method.name}")
+                    }
+                }
+            }
+            if rust_operator.is_some() {
+                output :: operator_return.unwrap_or_else(fn() { panic("MIR operator implementation {implementation.id:?} has no materialized method") })
+                associated :: implementation.associated_types.iter().find(fn(associated) { associated.name == "Output" })
+                if associated.is_some() {
+                    if !associated.unwrap().ty.same_checked_type(&output) { panic("MIR operator implementation {implementation.id:?} Output type disagrees with method return") }
+                } else { out.push_str(&"    type Output = {self.rust_type(&output)};\n") }
+            }
+        }
+        methods_end :: out.len()
+        out.push_str("}\n\n")
+        if carrier_trait.is_some() {
+            signatures :: carrier_trait_signatures(&out[methods_start..methods_end])
+            out.push_str(&"trait {carrier_trait.unwrap()} {{\n{signatures}}}\n\n")
+        }
+        self.pop_generic_scope()
+        for function in functions { if self.owner_independent_static(function) { self.emit_function(function, out) } }
+    }
+
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7458
+    fn arithmetic_trait_method(function: &MirFunction) -> Bool {
+        function.form == { .TraitMethod(trait_ref: trait_ref, ..) -> ["Add", "Sub", "Mul", "Div"].contains(&trait_ref.name), _ -> false }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7466
+    fn function_leaf_name(function: &MirFunction) -> String {
+        if function.form == {
+            .TraitMethod(trait_ref: trait_ref, ..) -> ["Add", "Sub", "Mul", "Div", "Equatable", "Comparable"].contains(&trait_ref.name)
+            _ -> false
+        } {
+            // Checked operator identity appends RHS after '<', before owner splitting.
+            return function.name.split('<').next().unwrap().rsplit("::").next().unwrap().to_string()
+        }
+        function.name.rsplit("::").next().unwrap_or_else(fn() { panic("MIR function {function.id:?} has an empty name") }).to_string()
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7501
+    // Inherent methods use __jet_<leaf>; compiler-owned traits keep registry names.
+    fn rust_method_symbol(function: &MirFunction) -> String {
+        leaf :: self.function_leaf_name(function)
+        function.form == {
+            .TraitMethod(serde: .Some(.Encode), ..) -> "jet_encode"
+            .TraitMethod(serde: .Some(.Decode), ..) -> "jet_decode"
+            .TraitMethod(trait_ref: trait_ref, ..) -> {
+                if is_compiler_owned_trait(&trait_ref.name) { compiler_trait_method_symbol(&trait_ref.name, &leaf) } else { mangle(&leaf) }
+            }
+            .Method(..), .TopLevel -> mangle(&leaf)
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7527
+    // A bare generic owner is a namespace, not an inference obligation.
+    fn owner_independent_static(function: &MirFunction) -> Bool {
+        function.form == {
+            .Method(owner: owner, self_access: .None) -> {
+                owner.kind() == { .Apply(args: args, ..) -> args.is_empty() && !self.generic_params_for_type(owner).is_empty(), _ -> false }
+            }
+            _ -> false
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7536
+    fn normalize_trait_type(ty: &MirType, owner: &MirType) -> MirType {
+        if ty.nominal_name() == Some("Self") { return owner.clone() }
+        normalized := ty.clone()
+        normalized.kind == {
+            .Int, .Float, .Float32, .Bool, .String, .Char, .TraitObject(_), .IntN(..), .Measure(_) -> {}
+            .List(inner), .Shared(inner), .Option(inner) -> { inner = self.normalize_trait_type(&inner, owner) }
+            .Map(key: key, value: value) -> { key = self.normalize_trait_type(&key, owner); value = self.normalize_trait_type(&value, owner) }
+            .Result(ok: ok, err: err) -> { ok = self.normalize_trait_type(&ok, owner); err = self.normalize_trait_type(&err, owner) }
+            .Fn(signature) -> {
+                for parameter in &signature.params { parameter = self.normalize_trait_type(&parameter, owner) }
+                if signature.ret.is_some() { signature.ret = Some(self.normalize_trait_type(&signature.ret.unwrap(), owner)) }
+            }
+            .SendFn(params: params, ret: ret, ..) -> {
+                for parameter in &params { parameter = self.normalize_trait_type(&parameter, owner) }
+                if ret.is_some() { ret = Some(self.normalize_trait_type(&ret.unwrap(), owner)) }
+            }
+            .Apply(args: args, ..) -> { for argument in &args { argument = self.normalize_trait_type(&argument, owner) } }
+            .Tuple(fields) -> { for (_, field) in &fields { field = self.normalize_trait_type(&field, owner) } }
+            .FixedList(elem: elem, ..) -> { elem = self.normalize_trait_type(&elem, owner) }
+            .InlineRange(base: base, ..) -> { base = self.normalize_trait_type(&base, owner) }
+            .Tagged(inner: inner, ..) -> { inner = self.normalize_trait_type(&inner, owner) }
+            .Union(members) -> { for member in &members { member = self.normalize_trait_type(&member, owner) } }
+            .Quantity(base: base, ..) -> { base = self.normalize_trait_type(&base, owner) }
+        }
+        normalized.identity = None
+        normalized
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7610
+    fn validate_trait_method_signature(implementation: &MirImplDef, definition: &MirTraitDef, function: &MirFunction, self_access: MirAccess?) -> {
+        name :: self.function_leaf_name(function)
+        method :: definition.methods.iter().find(fn(method) { method.name == name }).unwrap_or_else(fn() { panic("MIR implementation {implementation.id:?} method {function.id:?} is not declared by trait {definition.name}") })
+        receiver_differs :: method.self_access != self_access
+        has_captures :: !function.capture_params.is_empty()
+        arity_differs :: self.declared_params(function).len() != method.params.len()
+        params_differ :: self.declared_params(function).iter().zip(&method.params).any(fn((actual, expected)) {
+            actual.index != expected.index + USize.from(self_access.is_some()) || actual.name != expected.name || actual.access != expected.access || !self.normalize_trait_type(&actual.ty, &implementation.self_type).same_checked_type(&self.normalize_trait_type(&expected.ty, &implementation.self_type))
+        })
+        return_differs :: !self.normalize_trait_type(&function.return_type, &implementation.self_type).same_checked_type(&self.normalize_trait_type(&method.return_type, &implementation.self_type))
+        failure_differs :: function.failure != method.failure
+        if receiver_differs || has_captures || arity_differs || params_differ || return_differs || failure_differs {
+            panic("MIR implementation {implementation.id:?} method {function.id:?} signature disagrees with trait {definition.name} (receiver={receiver_differs} captures={has_captures} arity={arity_differs} params={params_differ} return={return_differs} failure={failure_differs}): receiver {self_access:?}/{method.self_access:?}, captures {function.capture_params:?}, params {self.declared_params(function):?}/{method.params:?}, return {function.return_type:?}/{self.normalize_trait_type(&method.return_type, &implementation.self_type):?}, failure {function.failure:?}/{method.failure:?}")
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7673
+    fn validate_derived_trait(def: &MirTypeDef, trait_id: MirTraitId, trait_name: &String) -> {
+        definition :: self.program.traits.iter().find(fn(definition) { definition.id == trait_id && definition.name == trait_name }).unwrap_or_else(fn() { panic("MIR derive trait ID {trait_id:?} has no row") })
+        implementation :: self.program.impls.iter().find(fn(implementation) {
+            implementation.trait_ref.is_some_and(fn(trait_ref) { trait_ref.id == trait_id && trait_ref.name == trait_name }) && self.type_identity(&implementation.self_type) == def.id && self.module_selected(implementation.module) && self.impl_selected_for_target(implementation)
+        }).unwrap_or_else(fn() { panic("MIR type {def.id:?} derives {trait_name} without a selected implementation") })
+        for method in definition.methods {
+            if method.default.is_none() && !implementation.methods.iter().any(fn(function_id) { self.function_leaf_name(self.function_row(function_id)) == method.name }) { panic("MIR derived implementation {implementation.id:?} omits required method {method.name}") }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7711
+    fn selected_trait_impl_for_type(def: &MirTypeDef, trait_name: &String) -> Bool {
+        self.program.impls.iter().any(fn(implementation) {
+            implementation.trait_ref.is_some_and(fn(trait_ref) { trait_ref.name == trait_name }) && self.module_selected(implementation.module) && self.impl_selected_for_target(implementation) && self.type_identity(&implementation.self_type) == def.id
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7723
+    fn structural_generics(def: &MirTypeDef, trait_name: &String) -> String {
+        if def.generic_params.is_empty() { return "" }
+        required_bound :: Generics.rust_trait_bound(trait_name).unwrap_or(trait_name)
+        params :: def.generic_params.iter().map(fn(param) {
+            bounds := param.bounds.iter().map(fn(bound) { Generics.rust_trait_bound(&bound.name).map(fn(text) { text.to_string() }).unwrap_or_else(fn() { self.trait_nominal_name(bound) }) }).collect[[String]]()
+            if !bounds.iter().any(fn(bound) { bound == required_bound }) { bounds.push(required_bound.to_string()) }
+            "{mangle(&param.name)}: {bounds.join(" + ")}"
+        }).collect[[String]]().join(", ")
+        "<{params}>"
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7754
+    fn structural_field_value(def: &MirTypeDef, edge: &String, receiver: &String, field: &MirField, method: &String) -> String {
+        value :: "({receiver}.{self.field_name(field.id)})"
+        if def.boxed_edges.iter().any(fn(candidate) { candidate == edge }) { "{value}.as_ref().{method}()" } else { "{value}.{method}()" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7770
+    fn derives_trait(def: &MirTypeDef, trait_name: &String) -> Bool {
+        def.derives.iter().any(fn(trait_id) { self.program.traits.iter().any(fn(definition) { definition.id == trait_id && definition.name == trait_name }) })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7778
+    fn structural_derives_allowed(def: &MirTypeDef) -> Bool {
+        def.kind == {
+            .Struct(fields: fields, ..) -> fields.iter().filter(fn(field) { !field.computed }).all(fn(field) { !mir_type_has_inline_nominal_word(&field.ty) })
+            .Enum(variants: variants, ..) -> variants.iter().all(fn(variant) {
+                variant.payload == { .Unit -> true, .Single(ty) -> !mir_type_has_inline_nominal_word(ty), .Named(fields) -> fields.iter().all(fn(field) { !mir_type_has_inline_nominal_word(&field.ty) }) }
+            })
+            .Distinct(base: base, ..) -> !mir_type_has_inline_nominal_word(base)
+            .Alias(target: target) -> !mir_type_has_inline_nominal_word(target)
+            .UnitFamily(..) -> true
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:7803
+    // Representation capability: callable/shared handles clone without payload;
+    // dynamic objects only clone through the checked clone-box supertrait.
+    fn type_derive_capability(ty: &MirType, trait_name: &String, visiting: &[MirTypeId], bindings: &[String:MirType], generic_params: &Set[String]) -> Bool {
+        ty.kind() == {
+            .Apply(name: name, args: args) -> {
+                if args.is_empty() {
+                    if bindings.contains_key(&name.name) { return self.type_derive_capability(bindings.get(&name.name).unwrap(), trait_name, visiting, bindings, generic_params) }
+                    if generic_params.contains(&name.name) { return true }
+                }
+            }
+            _ -> {}
+        }
+        ty :: if ty.identity.is_some() { self.canonical_type(ty) } else { ty }
+        ty.kind() == {
+            .Int, .Float, .Bool, .String, .Char, .IntN(..), .Float32, .Measure(_) -> true
+            .Shared(_), .Fn(_), .SendFn(..) -> trait_name == "Clone"
+            .TraitObject(bounds) -> trait_name == "Clone" && bounds.len() == 1 && self.traits_by_name.get(&bounds[0].name).is_some_and(fn(symbol) { self.dyn_clone_traits.contains(symbol) })
+            .List(inner), .Option(inner), .FixedList(elem: inner, ..), .InlineRange(base: inner, ..), .Quantity(base: inner, ..) -> self.type_derive_capability(inner, trait_name, visiting, bindings, generic_params)
+            .Tagged(marker: marker, inner: inner) -> {
+                if marker == .Internal(.CppCallbackAbi) { true } else { self.type_derive_capability(inner, trait_name, visiting, bindings, generic_params) }
+            }
+            .Map(key: key, value: value), .Result(ok: key, err: value) -> self.type_derive_capability(key, trait_name, visiting, bindings, generic_params) && self.type_derive_capability(value, trait_name, visiting, bindings, generic_params)
+            .Tuple(fields) -> fields.iter().all(fn((_, field)) { self.type_derive_capability(field, trait_name, visiting, bindings, generic_params) })
+            // Synthetic union carriers have no checked PartialEq derive.
+            .Union(members) -> trait_name != "PartialEq" && members.iter().all(fn(member) { self.type_derive_capability(member, trait_name, visiting, bindings, generic_params) })
+            .Apply(name: name, args: args) -> {
+                if name.name == TYPE_PTR { return true }
+                if name.name == "View" { return trait_name == "Clone" || args.first().is_some_and(fn(inner) { self.type_derive_capability(inner, trait_name, visiting, bindings, generic_params) }) }
+                if name.name == "ViewMut" { return trait_name != "Clone" && args.first().is_some_and(fn(inner) { self.type_derive_capability(inner, trait_name, visiting, bindings, generic_params) }) }
+                if self.selected_user_capability_impl(ty, trait_name) { return true }
+                def_opt :: self.structural_type_def_for(ty)
+                if def_opt.is_none() { return args.iter().all(fn(arg) { self.type_derive_capability(arg, trait_name, visiting, bindings, generic_params) }) }
+                def :: def_opt.unwrap()
+                if !self.structural_derives_allowed(def) { return false }
+                is_alias :: def.kind == { .Alias(..) -> true, _ -> false }
+                if trait_name == "PartialEq" && !is_alias && (!self.derives_trait(def, Generics.EQUATABLE) || self.selected_user_capability_impl(ty, Generics.EQUATABLE) || def.name.starts_with("__JetUnion_")) { return false }
+                if trait_name == "Clone" && def.ownership == .Move { return false }
+                position :: visiting.iter().position(fn(id) { id == def.id })
+                if position.is_some() {
+                    self.derive_capability_cycle_floor.set(self.derive_capability_cycle_floor.get().min(position.unwrap()))
+                    return true
+                }
+                // Closed rows cache only final answers, not assumptions from outer cycles.
+                cacheable :: args.is_empty() && def.generic_params.is_empty() && bindings.is_empty() && generic_params.is_empty()
+                if cacheable {
+                    cached :: self.derive_capability_cache.borrow().get(trait_name).and_then(fn(rows) { rows.get(&def.id) })
+                    if cached.is_some() { return cached.unwrap() }
+                }
+                depth :: visiting.len()
+                outer_floor :: self.derive_capability_cycle_floor.replace(USize.MAX)
+                next_bindings := bindings.clone()
+                next_generic_params := generic_params.clone()
+                next_generic_params.extend(def.generic_params.iter().map(fn(parameter) { parameter.name.clone() }))
+                next_bindings.extend(def.generic_params.iter().zip(args).map(fn((parameter, argument)) { (parameter.name.clone(), argument.clone()) }))
+                visiting.push(def.id)
+                result :: def.kind == {
+                    .Struct(fields: fields, ..) -> fields.iter().filter(fn(field) { !field.computed }).all(fn(field) { self.type_derive_capability(&field.ty, trait_name, visiting, &next_bindings, &next_generic_params) })
+                    .Enum(variants: variants, ..) -> variants.iter().all(fn(variant) {
+                        variant.payload == {
+                            .Unit -> true
+                            .Single(payload) -> self.type_derive_capability(payload, trait_name, visiting, &next_bindings, &next_generic_params)
+                            .Named(fields) -> fields.iter().all(fn(field) { self.type_derive_capability(&field.ty, trait_name, visiting, &next_bindings, &next_generic_params) })
+                        }
+                    })
+                    .Distinct(base: base, ..) -> self.type_derive_capability(base, trait_name, visiting, &next_bindings, &next_generic_params)
+                    .Alias(target: target) -> self.type_derive_capability(target, trait_name, visiting, &next_bindings, &next_generic_params)
+                    .UnitFamily(..) -> true
+                }
+                _ :: visiting.pop()
+                floor :: self.derive_capability_cycle_floor.get()
+                self.derive_capability_cycle_floor.set(outer_floor.min(floor))
+                if cacheable && (!result || floor >= depth) { self.derive_capability_cache.borrow_mut().entry(trait_name.to_string()).or_default().insert(def.id, result) }
+                result
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8098
+    fn selected_user_capability_impl(ty: &MirType, trait_name: &String) -> Bool {
+        self.user_impls_by_trait.get(trait_name).is_some_and(fn(implementations) {
+            implementations.iter().any(fn(implementation) {
+                self.module_selected(implementation.module) && self.impl_selected_for_target(implementation) && (implementation.self_type.same_checked_type(ty) || implementation.self_type.nominal_name().zip(ty.nominal_name()).is_some_and(fn((left, right)) { left == right }))
+            })
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8121
+    // Plain enum display is the source case name on every tier; user Display wins.
+    fn emit_plain_enum_display_impl(def: &MirTypeDef, out: &String) -> {
+        variants_opt :: def.kind == { .Enum(variants: variants, ..) -> Some(variants), _ -> None }
+        if variants_opt.is_none() { return }
+        variants :: variants_opt.unwrap()
+        if !def.generic_params.is_empty() || variants.is_empty() || is_source_owned_core_web_query_enum(&def.key) || !variants.iter().all(fn(variant) { variant.payload == .Unit }) || self.selected_trait_impl_for_type(def, Generics.DISPLAY) { return }
+        name :: self.type_name(def.id)
+        out.push_str(&"impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        match self {{\n")
+        for variant in variants {
+            variant_name :: quote_rust_string(variant.name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(&variant.name))
+            out.push_str(&"            Self::{mangle_variant(&variant.name)} => {variant_name}.to_string(),\n")
+        }
+        out.push_str("        }\n    }\n}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8160
+    // #Printable distinct display forwards to its base, unless user Display wins.
+    fn emit_printable_distinct_display_impl(def: &MirTypeDef, out: &String) -> {
+        distinct :: def.kind == { .Distinct(..) -> true, _ -> false }
+        if !distinct || !def.auto_printable || self.selected_trait_impl_for_type(def, Generics.DISPLAY) { return }
+        name :: self.type_name(def.id)
+        out.push_str(&"impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        self.0.jet_display()\n    }}\n}}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8181
+    // Core source-owned error members use the same JetShow forwarding as Prelude.
+    fn emit_core_error_family_display_impl(def: &MirTypeDef, out: &String) -> {
+        unit_enum :: def.kind == { .Enum(variants: variants, ..) -> variants.iter().all(fn(variant) { variant.payload == .Unit }), _ -> false }
+        distinct_or_alias :: def.kind == { .Distinct(..), .Alias(..) -> true, _ -> false }
+        if !def.key.starts_with("<corelib>/") || !is_core_error_family_type(&def.key) || !def.generic_params.is_empty() || unit_enum || distinct_or_alias || self.selected_trait_impl_for_type(def, Generics.DISPLAY) { return }
+        name :: self.type_name(def.id)
+        out.push_str(&"impl JetDisplay for {name} {{\n    fn jet_display(&self) -> String {{\n        <Self as JetShow>::jet_show(self)\n    }}\n}}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8208
+    fn emit_structural_show_impl(def: &MirTypeDef, out: &String) -> {
+        emit_show :: def.auto_printable && !self.selected_trait_impl_for_type(def, Generics.PRINTABLE)
+        emit_debug :: self.derives_trait(def, Generics.DEBUG) && !self.selected_trait_impl_for_type(def, Generics.DEBUG)
+        self.emit_plain_enum_display_impl(def, out)
+        self.emit_printable_distinct_display_impl(def, out)
+        if emit_show { self.emit_core_error_family_display_impl(def, out) }
+        is_alias :: def.kind == { .Alias(..) -> true, _ -> false }
+        if (!emit_show && !emit_debug) || is_alias { return }
+        if is_source_owned_core_web_query_enum(&def.key) {
+            def.kind == {
+                .Enum(variants: variants, ..) -> {
+                    if variants.iter().all(fn(variant) { variant.payload == .Unit }) {
+                        name :: self.type_name(def.id)
+                        if emit_show { out.push_str(&native_core_query_enum_trait_impl(&name, "JetShow", "jet_show", variants.iter().map(fn(variant) { &variant.name }))) }
+                        if emit_debug { out.push_str(&native_core_query_enum_trait_impl(&name, "JetDebug", "jet_debug", variants.iter().map(fn(variant) { &variant.name }))) }
+                        return
+                    }
+                }
+                _ -> {}
+            }
+        }
+        if emit_show { self.emit_structural_impl(def, Generics.PRINTABLE, "JetShow", "jet_show", out) }
+        if emit_debug { self.emit_structural_impl(def, Generics.DEBUG, "JetDebug", "jet_debug", out) }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8256
+    fn emit_structural_impl(def: &MirTypeDef, trait_name: &String, rust_trait: &String, value_method: &String, out: &String) -> {
+        debug :: value_method == "jet_debug"
+        name :: self.type_name(def.id)
+        type_args :: if def.generic_params.is_empty() { "" } else { "<{def.generic_params.iter().map(fn(param) { mangle(&param.name) }).collect[[String]]().join(", ")}>" }
+        impl_generics :: self.structural_generics(def, trait_name)
+        source_name :: quote_rust_string(def.name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(&def.name))
+        out.push_str(&"impl{impl_generics} {rust_trait} for {name}{type_args} {{\n    fn {value_method}(&self) -> String {{\n")
+        def.kind == {
+            .Struct(fields: fields, ..) -> {
+                record :: if debug { "jet_debug_record_fields" } else { "jet_debug_record" }
+                out.push_str(&"        {record}({source_name}, [\n")
+                for (storage_index, field) in fields.iter().enumerate() {
+                    if field.computed { continue }
+                    field_name :: quote_rust_string(field.name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(&field.name))
+                    value :: self.structural_field_value(def, &field.name, "self", field, value_method)
+                    if debug { out.push_str(&"            JetDebugField {{ name: {field_name}.to_string(), value: {value}, storage_index: {storage_index}, redacted: {field.redact} }},\n") }
+                    else { out.push_str(&"            ({field_name}.to_string(), {value}),\n") }
+                }
+                out.push_str("        ])\n")
+            }
+            .Enum(variants: variants, ..) -> {
+                out.push_str("        match self {\n")
+                for variant in variants {
+                    variant_name :: quote_rust_string(variant.name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(&variant.name))
+                    variant_path :: if is_source_owned_core_web_query_enum(&def.key) { "Self::{native_core_query_enum_variant_name(&variant.name)}" } else { "Self::{mangle_variant(&variant.name)}" }
+                    variant.payload == {
+                        .Unit -> out.push_str(&"            {variant_path} => jet_debug_variant({variant_name}, None),\n")
+                        .Single(_) -> {
+                            value :: if def.boxed_edges.iter().any(fn(candidate) { candidate == variant.name }) { "payload.as_ref().{value_method}()" } else { "payload.{value_method}()" }
+                            out.push_str(&"            {variant_path}(payload) => jet_debug_variant({variant_name}, Some({value})),\n")
+                        }
+                        .Named(fields) -> {
+                            visible :: fields.iter().enumerate().filter(fn((_, field)) { !field.computed }).collect()
+                            pattern :: if visible.is_empty() { "{variant_path} {{ .. }}" } else {
+                                bindings :: visible.iter().enumerate().map(fn((index, (_, field))) { "{self.field_name(field.id)}: __jet_show_field_{index}" }).collect[[String]]().join(", ")
+                                "{variant_path} {{ {bindings}, .. }}"
+                            }
+                            if visible.is_empty() { out.push_str(&"            {pattern} => jet_debug_record({variant_name}, []),\n") }
+                            else {
+                                values :: visible.iter().enumerate().map(fn((index, (storage_index, field))) {
+                                    edge :: "{variant.name}.{field.name}"
+                                    value :: if def.boxed_edges.iter().any(fn(candidate) { candidate == edge }) { "__jet_show_field_{index}.as_ref().{value_method}()" } else { "__jet_show_field_{index}.{value_method}()" }
+                                    field_name :: quote_rust_string(field.name.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(&field.name))
+                                    if debug { "JetDebugField {{ name: {field_name}.to_string(), value: {value}, storage_index: {storage_index}, redacted: {field.redact} }}" } else { "({field_name}.to_string(), {value})" }
+                                }).collect[[String]]().join(", ")
+                                record :: if debug { "jet_debug_record_fields" } else { "jet_debug_record" }
+                                out.push_str(&"            {pattern} => {record}({variant_name}, [{values}]),\n")
+                            }
+                        }
+                    }
+                }
+                out.push_str("        }\n")
+            }
+            .Distinct(..) -> out.push_str(&"        self.0.{value_method}()\n")
+            .UnitFamily(members: members) -> {
+                out.push_str("        match self {\n")
+                for member in members {
+                    member_name :: quote_rust_string(member.strip_prefix(GENERATED_NAME_PREFIX).unwrap_or(member))
+                    member_path :: "Self::{mangle(member)}"
+                    out.push_str(&"            {member_path} => jet_debug_variant({member_name}, None),\n")
+                }
+                out.push_str("        }\n")
+            }
+            .Alias(..) -> panic("aliases do not own Printable implementations")
+        }
+        out.push_str("    }\n}\n\n")
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8467
+    // Runtime handles and compiler-owned rows have one checked runtime declaration.
+    fn runtime_declares_type(def: &MirTypeDef) -> Bool { self.is_handle_name(&def.name) || self.is_handle_name(&def.key) || is_compiler_owned_type(&def.key) }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8476
+    fn declares_type_def(def: &MirTypeDef) -> Bool { self.module_selected(def.module) && !self.runtime_declares_type(def) && !is_canonical_core_native_type(&def.key) && self.history_native_type_name(&def.key).is_none() }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8483
+    fn emit_type_def(def: &MirTypeDef, out: &String) -> {
+        self.push_generic_scope(&def.generic_params)
+        name :: self.type_name(def.id)
+        generics :: self.generic_params_from(&def.generic_params)
+        visibility :: self.visibility(if def.public { MirVisibility.Public } else if def.package_public { MirVisibility.Package } else { MirVisibility.Private })
+        if def.layout.is_some() {
+            def.layout.unwrap() == {
+                .C -> {
+                    is_enum :: def.kind == { .Enum(..) -> true, _ -> false }
+                    if is_enum && def.c_layout_tag.is_some() {
+                        _ :: self.c_abi_enum_facts(def)
+                        tag :: self.c_abi_enum_repr_tag(def)
+                        if tag.is_some() { out.push_str(&"#[repr(C, {tag.unwrap()})]\n") } else { out.push_str("#[repr(C)]\n") }
+                    } else { out.push_str("#[repr(C)]\n") }
+                }
+                .CAligned(alignment: alignment, ..) -> {
+                    fact :: def.layout_alignment.unwrap_or_else(fn() { panic("MIR aligned type {def.id:?} has no sema layout alignment fact") })
+                    if fact.requested_alignment != alignment { panic("MIR aligned type {def.id:?} fact/request mismatch: {fact.requested_alignment} != {alignment}") }
+                    out.push_str(&"#[repr(C, align({fact.effective_alignment}))]\n")
+                }
+                .Columnar -> {}
+            }
+        }
+        derives_allowed :: self.structural_derives_allowed(def)
+        declared_ty :: self.type_instances.get(&def.id).unwrap_or_else(fn() { panic("MIR type {def.id:?} has no canonical instance") })
+        clone_visiting := [MirTypeId].new()
+        debug_visiting := [MirTypeId].new()
+        empty_bindings :: [String:MirType].new()
+        empty_params :: Set[String].new()
+        clone_capable :: derives_allowed && self.type_derive_capability(declared_ty, "Clone", &clone_visiting, &empty_bindings, &empty_params)
+        debug_capable :: derives_allowed && self.type_derive_capability(declared_ty, "Debug", &debug_visiting, &empty_bindings, &empty_params)
+        clone_user_impl :: self.selected_user_capability_impl(declared_ty, "Clone")
+        debug_user_impl :: self.selected_user_capability_impl(declared_ty, "Debug")
+        derives := [String].new()
+        if clone_capable && !clone_user_impl { derives.push("Clone") }
+        if debug_capable && !debug_user_impl { derives.push("Debug") }
+        for trait_id in def.derives {
+            trait_name :: self.program.traits.iter().find(fn(trait_def) { trait_def.id == trait_id }).map(fn(trait_def) { &trait_def.name }).unwrap_or_else(fn() { panic("MIR derive trait ID {trait_id:?} has no row") })
+            if trait_name == "Clone" && !clone_capable && !clone_user_impl { panic("MIR type {def.id:?} derives Clone without a checked Rust Clone capability or user implementation") }
+            if trait_name == "Debug" && !debug_capable && !debug_user_impl { panic("MIR type {def.id:?} derives Debug without a checked Rust Debug capability or user implementation") }
+            if ["Clone", "Copy", "Debug", "Default", "Eq", "Hash", "Ord", "PartialEq", "PartialOrd"].contains(trait_name) {
+                capability :: trait_name == { "Clone" -> clone_capable && !clone_user_impl, "Debug" -> debug_capable && !debug_user_impl, _ -> derives_allowed }
+                if capability && !derives.contains(trait_name) { derives.push(trait_name.to_string()) }
+            } else {
+                self.validate_derived_trait(def, trait_id, trait_name)
+                // Equatable derive is the checked PartialEq fact for assert_eq.
+                eq_visiting := [MirTypeId].new()
+                if trait_name == Generics.EQUATABLE && derives_allowed && !derives.contains("PartialEq") && self.type_derive_capability(declared_ty, "PartialEq", &eq_visiting, &empty_bindings, &empty_params) { derives.push("PartialEq") }
+            }
+        }
+        is_alias :: def.kind == { .Alias(..) -> true, _ -> false }
+        if !derives.is_empty() && !is_alias { out.push_str(&"#[derive({derives.join(", ")})]\n") }
+        if def.must_use { out.push_str("#[must_use]\n") }
+        for attribute in def.serde {
+            (attribute.kind, attribute.value) == {
+                (.RenameAll, .Some(_)), (.Tag, .Some(_)), (.Untagged, .None), (.DenyUnknownFields, .None) -> {}
+                _ -> panic("MIR serde attribute has an invalid payload")
+            }
+        }
+        def.kind == {
+            .Struct(fields: fields, ..) -> {
+                out.push_str(&"{visibility}struct {name}{generics} {{\n")
+                for field in fields.iter().filter(fn(field) { !field.computed }) { out.push_str(&"    {self.field_visibility(field)}{self.field_name(field.id)}: {self.rust_decl_type(def, &field.name, &field.ty)},\n") }
+                out.push_str("}\n\n")
+            }
+            .Enum(variants: variants, ..) -> {
+                out.push_str(&"{visibility}enum {name}{generics} {{\n")
+                for variant in variants {
+                    variant.payload == {
+                        .Unit -> out.push_str(&"    {mangle_variant(&variant.name)},\n")
+                        .Single(ty) -> out.push_str(&"    {mangle_variant(&variant.name)}({self.rust_decl_type(def, &variant.name, ty)}),\n")
+                        .Named(fields) -> {
+                            out.push_str(&"    {mangle_variant(&variant.name)} {{\n")
+                            for field in fields {
+                                edge :: "{variant.name}.{field.name}"
+                                out.push_str(&"        {self.field_name(field.id)}: {self.rust_decl_type(def, &edge, &field.ty)},\n")
+                            }
+                            out.push_str("    },\n")
+                        }
+                    }
+                }
+                out.push_str("}\n\n")
+            }
+            .Distinct(base: base, ..) -> out.push_str(&"#[repr(transparent)]\n{visibility}struct {name}{generics}(pub {self.rust_type(base)});\n\n")
+            .Alias(target: target) -> out.push_str(&"{visibility}type {name}{generics} = {self.rust_type(target)};\n\n")
+            .UnitFamily(members: members) -> {
+                out.push_str(&"{visibility}enum {name}{generics} {{\n")
+                for member in members { out.push_str(&"    {mangle(member)},\n") }
+                out.push_str("}\n\n")
+            }
+        }
+        self.emit_structural_show_impl(def, out)
+        if def.layout == Some(MirStructLayout.Columnar) {
+            def.kind == { .Struct(fields: fields, ..) -> self.emit_columnar_row_adapter(def, fields, out), _ -> panic("MIR columnar layout requires a struct type definition") }
+        }
+        self.pop_generic_scope()
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8723
+    fn history_generate_expression(ty: &MirType) -> String? {
+        spec :: self.history_scalar_spec(ty)
+        if spec.is_none() { return None }
+        (kind, range) :: spec.unwrap()
+        kind == {
+            .Boolean -> Some("rng.below(2) != 0")
+            .Text -> Some("format!(\"history-{}\", rng.below(17))")
+            .Char -> Some("char::from_u32('a' as u32 + rng.below(26) as u32).unwrap_or('a')")
+            .Integer, .SignedInteger, .UnsignedInteger -> {
+                (lo, hi) := range.unwrap_or(if kind == .UnsignedInteger { (0, 16) } else { (-8, 8) })
+                if kind == .UnsignedInteger { lo = lo.max(0) }
+                span_opt :: U64.try_from(I128.from(hi) - I128.from(lo) + 1).ok()
+                if span_opt.is_none() { return None }
+                span :: span_opt.unwrap()
+                value :: "i64::try_from({lo}i128 + (rng.below({span}) as i128)).ok()?"
+                generated :: if kind == .Integer { "jet_foundation::Numeric::JetInt::try_from_i64({value}).ok()?" } else { "<{self.rust_type(ty)}>::try_from({value}).ok()?" }
+                Some(generated)
+            }
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8757
+    fn history_value_expression(kind: HistoryScalarKind, value: &String) -> String {
+        kind == {
+            .Integer -> "HistoryValue::Integer({value}.to_i64()?)"
+            .SignedInteger, .UnsignedInteger -> "HistoryValue::Integer(i64::try_from({value}).ok()?)"
+            .Boolean -> "HistoryValue::Boolean({value})"
+            .Text -> "HistoryValue::Text({value}.clone())"
+            .Char -> "HistoryValue::Text({value}.to_string())"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8771
+    fn history_tree_expression(kind: HistoryScalarKind?, value: &String) -> String {
+        kind == {
+            .Some(.Integer) -> "jet_std::DataTree::Number(({value}).to_string_rep())"
+            .Some(.SignedInteger), .Some(.UnsignedInteger) -> "jet_std::DataTree::Number(({value}).to_string())"
+            .Some(.Boolean) -> "jet_std::DataTree::Bool({value})"
+            .Some(.Text) -> "jet_std::DataTree::Text({value}.clone())"
+            .Some(.Char) -> "jet_std::DataTree::Text({value}.to_string())"
+            .None -> "jet_std::DataTree::Null"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8792
+    fn history_command_tree_expression(field: &MirType, value: &String) -> String {
+        spec :: self.history_scalar_spec(field)
+        if spec.is_some() { return Self.history_tree_expression(Some(spec.unwrap().0), value) }
+        nominal_name :: field.nominal_name().unwrap_or_default()
+        nominal_name :: nominal_name.rsplit_once("::").or_else(fn() { nominal_name.rsplit_once('.') }).map_or(nominal_name, fn((_, leaf)) { leaf })
+        nominal_name == { "HandleID", "TaskID", "EventID" -> "jet_std::DataTree::Int({value}.value as i64)", _ -> "{value}.jet_encode()" }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8809
+    fn history_rebuild_expression(ty: &MirType, kind: HistoryScalarKind, index: USize) -> String {
+        rust_ty :: self.rust_type(ty)
+        (_, range) :: self.history_scalar_spec(ty).unwrap_or_else(fn() { panic("unsupported generated history field") })
+        argument :: "&__history_arguments[{index}]"
+        kind == {
+            .Integer, .SignedInteger, .UnsignedInteger -> {
+                bounds := String.new()
+                if range.is_some() { (lo, hi) :: range.unwrap(); bounds.push_str(&"if *value < {lo} || *value > {hi} {{ return None; }}") }
+                if kind == .UnsignedInteger { bounds.push_str("if *value < 0 { return None; }") }
+                conversion :: if kind == .Integer { "jet_foundation::Numeric::JetInt::try_from_i64(*value).ok()?" } else { "<{rust_ty}>::try_from(*value).ok()?" }
+                "match {argument} {{ HistoryValue::Integer(value) => {{ {bounds} {conversion} }}, _ => return None }}"
+            }
+            .Boolean -> "match {argument} {{ HistoryValue::Boolean(value) => *value, _ => return None }}"
+            .Text -> "match {argument} {{ HistoryValue::Text(value) => value.clone(), _ => return None }}"
+            .Char -> "match {argument} {{ HistoryValue::Text(value) => {{ let mut chars = value.chars(); let value = chars.next()?; if chars.next().is_some() {{ return None; }} value }}, _ => return None }}"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8854
+    fn history_valid_expression(kind: HistoryScalarKind, index: USize, value: &String) -> String {
+        kind == {
+            .Integer, .SignedInteger, .UnsignedInteger -> {
+                conversion :: if kind == .Integer { "{value}.to_i64()" } else { "i64::try_from(*{value}).ok()" }
+                "matches!(__history_arguments.get({index}), Some(HistoryValue::Integer(raw)) if {conversion} == Some(*raw))"
+            }
+            .Boolean -> "matches!(__history_arguments.get({index}), Some(HistoryValue::Boolean(raw)) if *raw == *{value})"
+            .Text -> "matches!(__history_arguments.get({index}), Some(HistoryValue::Text(raw)) if raw == {value})"
+            .Char -> "matches!(__history_arguments.get({index}), Some(HistoryValue::Text(raw)) if raw == &(*{value}).to_string())"
+        }
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8880
+    fn history_base_provenance() -> (String, String, String) {
+        source :: self.artifact_identity.identity_digest()
+        tool :: "{HISTORY_ENGINE}:{self.program.facts.target_dossier.compiler_identity}"
+        target :: sha256_hex(&self.program.facts.target_dossier.cache_bytes(&self.config.target.triple))
+        (source, tool, target)
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8900
+    // Registry membership is not use: only actual checked instructions enable metadata.
+    fn history_runtime_metadata_enabled() -> Bool {
+        self.history_runtime_metadata.get_or_init(fn() {
+            histories :: self.program.core_calls.iter().filter(fn(row) { row.module == "core.testing" && row.member == "histories" }).map(fn(row) { row.id }).collect[Set[MirCoreCallId]]()
+            !histories.is_empty() && self.program.functions.iter().any(fn(function) {
+                function.blocks.iter().flat_map(fn(block) { &block.instructions }).any(fn(instruction) {
+                    instruction.operation == { .CoreCall(call: call, ..), .Call(callee: .Core(call), ..) -> histories.contains(call), _ -> false }
+                })
+            })
+        })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8924
+    fn history_native_type_name(name: &String) -> String? {
+        name_opt :: codegen.history_rust_type_name(name)
+        if name_opt.is_none() { return None }
+        name :: name_opt.unwrap()
+        Some(name == { "HistoryStrategy" -> "{self.config.root_prefix}JetHistoryStrategy", "HistoryRNG" -> "{self.config.root_prefix}JetHistoryRng", _ -> "crate::jet_testing_history_foundation::{name}" })
+    }
+    // Rust: crates/jet-codegen/src/Codegen/MIRRust.rs:8933
+    fn history_call_expression(function: &MirFunction, args: &[MirCallArg], type_args: &[MirType], borrow_mask: &[Bool]) -> String {
+        if type_args.len() != 1 { panic("MIR histories requires one checked command type") }
+        command_type :: &type_args[0]
+        if args.len() != 6 { panic("MIR histories requires six checked arguments") }
+        values :: args.iter().enumerate().map(fn((index, arg)) { self.call_arg_for_function(function, arg, borrow_mask.get(index).copied().unwrap_or(false)) }).collect[[String]]()
+        command_type_rust :: self.rust_type(command_type)
+        absent :: self.value_definition(function, args[2].value) == { .Some(.Absent) -> true, _ -> false }
+        strategy :: if absent { "None" } else {
+            strategy_type :: self.value_type(function, args[2].value).kind() == { .Option(strategy_type) -> strategy_type, _ -> panic("MIR histories strategy argument is not optional") }
+            (name, strategy_type_args) :: strategy_type.kind() == { .Apply(name: name, args: strategy_type_args) -> (name, strategy_type_args), _ -> panic("MIR histories strategy argument has no checked type identity") }
+            strategy_def :: self.history_type_def(name.id).unwrap_or_else(fn() { panic("MIR histories strategy type has no checked declaration") })
+            if strategy_def.name != "HistoryStrategy" || self.module_row(strategy_def.module).name != "core.testing" || strategy_type_args.len() != 1 || !strategy_type_args[0].same_checked_type(command_type) { panic("MIR histories strategy argument has the wrong checked type") }
+            "match ({values[2]}).as_ref() {{ Ok(strategy) => Some((*strategy).clone()), Err(_) => None }}"
+        }
+        model :: "(*({values[3]})).clone()"
+        actual :: "(*({values[4]})).clone()"
+        observe :: "(*({values[5]})).clone()"
+        call :: "{self.config.root_prefix}jet_testing_histories_with_provenance::<{command_type_rust}>(__jet_history_seed, __jet_history_cases, {strategy}, {model}, {actual}, {observe}, {self.history_provenance_expression()})"
+        "{{ match (({values[0]}).to_i64(), ({values[1]}).to_i64()) {{ (Some(__jet_history_seed), Some(__jet_history_cases)) => {call}, (None, _) => Err(\"history seed is invalid\".to_string()), (_, None) => Err(\"history case bound is invalid\".to_string()) }} }}"
+    }
+}

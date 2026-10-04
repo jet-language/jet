@@ -1,0 +1,194 @@
+use jet_foundation.Tests.Integration.PolyglotSystems as systems
+use jet_foundation.Tests.Integration.Common as common
+use jet.[CppBind, CFFI, Loader, Sema, compile_with_path, render_diagnostics, resolve_c_links]
+use std.[fs, env, thread, process]
+use std.process.Command
+use core.sys.target.selected_family
+
+// Rust: tests/polyglot_systems.rs:34
+#Test("cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface") {
+    clang :: systems.tool("clang++") ?? { return }
+    ar :: systems.tool("ar") ?? { return }
+    _nm :: systems.tool("nm") ?? { return }
+    rustc :: systems.tool("rustc") ?? { return }
+    target :: env("JET_BUILD_TARGET")
+    root :: env.temp_dir().join("jet_cpp_systems_{process.id()}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(root.join(".jet/bindings/cpp")).unwrap()
+    header :: root.join("counter.hpp")
+    fs.write(&header, "#pragma once\n#include <cstdint>\n\nint64_t decoy(int64_t value);\n\nnamespace acme {{\nclass Counter {{\npublic:\n    explicit Counter(int64_t start);\n    int64_t add(int64_t amount);\n    int64_t add(double factor);\n    int64_t operator+(int64_t amount);\n    int64_t fail_if_negative(int64_t value);\nprivate:\n    int64_t value;\n}};\n\nint64_t apply(int64_t (*callback)(int64_t), int64_t value);\ntemplate <typename T> T twice(T value) {{ return value + value; }}\n}}\n").unwrap()
+    implementation :: root.join("counter.cpp")
+    fs.write(&implementation, "#include \"counter.hpp\"\n\nint64_t decoy(int64_t value) {{ return value - 1000; }}\n\nnamespace acme {{\nCounter::Counter(int64_t start) : value(start) {{}}\nint64_t Counter::add(int64_t amount) {{ value += amount; return value; }}\nint64_t Counter::add(double factor) {{ value += static_cast<int64_t>(factor); return value; }}\nint64_t Counter::operator+(int64_t amount) {{ return value + amount; }}\nint64_t Counter::fail_if_negative(int64_t input) {{ if (input < 0) throw 1; return input; }}\nint64_t apply(int64_t (*callback)(int64_t), int64_t input) {{\n    auto result = callback(input);\n    if (result < 0) throw 2;\n    return result;\n}}\n}}\n").unwrap()
+    object :: root.join("counter.o")
+    library :: root.join("libcounter_impl.a")
+    // GATE #4494: real native compiler, archiver and oracle process calls.
+    compile := Command.new(&clang)
+    compile.args(["-std=c++17", "-fPIC", "-c"]).arg(&implementation).arg("-target").arg(target).arg("-o").arg(&object)
+    systems.run(&compile)
+    archive := Command.new(&ar)
+    archive.arg("rcs").arg(&library).arg(&object)
+    systems.run(&archive)
+    cache :: root.join(".jet/bindings/cpp")
+    options :: CppBind.BindOptions{
+        lib: "counter", target: target, clang: clang.clone(), archiver: ar,
+        include_dirs: [root.clone()], library_dirs: [root.clone()],
+        libraries: ["counter_impl"], namespaces: ["acme"],
+        templates: [CppBind.TemplateInstantiation{qualified_name: "acme::twice", cpp_args: ["int64_t"], jet_name: "twice_int"}]
+    }
+    result :: CppBind.bind(&header, &cache, &options).unwrap()
+    fs.write(cache.join("counter.jet"), &result.source).unwrap()
+    fs.write(cache.join("counter.provenance"), &result.provenance).unwrap()
+    assert(result.archive.is_file())
+    assert_ne(result.archive.parent(), Some(cache.as_path()))
+    assert(cache.join("libjet_cpp_counter.a").is_file())
+    assert(result.provenance.contains("schema=jet-ffi-bridge-provenance-v1"))
+    assert(result.provenance.contains("binder-schema=jet-cpp-bind-v3"))
+    assert(result.provenance.contains("target={target}"))
+    assert(result.provenance.contains("clang={clang.display()}"))
+    assert(result.provenance.contains("namespace=acme"))
+    assert(result.provenance.contains("library=counter_impl"))
+    assert(result.provenance.contains("linked-archive="))
+    assert(result.provenance.contains("linked-archive-sha256="))
+    assert(result.provenance.contains("descriptor=jet-ffi-descriptor-v1;"))
+    assert(!result.bound.iter().any(|name| -> name.contains("decoy")))
+    assert(result.source.contains("pub fn apply(callback:"))
+    assert(result.source.contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"))
+    assert(result.source.contains("-[FFI.Cpp]>"))
+    assert(!result.source.contains("=>"))
+    changed_target :: CppBind.cache_identity_for_test(&header, &options, "other-target")
+    selected_target :: CppBind.cache_identity_for_test(&header, &options, target)
+    assert_ne(changed_target, selected_target)
+    main :: root.join("main.jet")
+    source :: "use cpp.counter as cpp\n\nfn increment(value: Int) -[]> Int {{ return value + 1 }}\nfn reject(value: Int) -[]> Int {{ return -value }}\n\nfn run() {{\n    counter := cpp.new_counter(10) ?? panic(\"constructor\")\n    print(counter.add_amount(5) ?? panic(\"method\"))\n    print(counter.add_factor(2.0) ?? panic(\"overload\"))\n    print(counter.add(3) ?? panic(\"operator\"))\n    print(cpp.apply(increment, 41) ?? panic(\"callback\"))\n    print(cpp.apply(reject, 41) ?? -1)\n    print(cpp.twice_int(21) ?? panic(\"template\"))\n    print(counter.fail_if_negative(-1) ?? -1)\n    cpp.close_counter(^counter)\n}}\n"
+    fs.write(&main, source).unwrap()
+    output :: compile_with_path(source, main.to_str().unwrap()).unwrap_or_else(|diags| -> panic("{render_diagnostics(main.to_str().unwrap(), source, &diags)}"))
+    rust :: root.join("main.rs")
+    binary :: root.join("main_bin")
+    fs.write(&rust, output.rust).unwrap()
+    command := Command.new(&rustc)
+    command.args(["--edition", "2021", "--target", target]).arg(&rust).arg("-o").arg(&binary)
+    for arg in output.clinks.into_iter().chain(resolve_c_links(main.to_str().unwrap()).unwrap()) { command.arg(arg) }
+    systems.run(&command)
+    run_output :: Command.new(&binary).output().unwrap()
+    assert(run_output.status.success())
+    assert_eq(String.from_utf8_lossy(&run_output.stdout), "15\n17\n20\n42\n-1\n42\n-1\n")
+    bundle := Loader.load_entry_with_overlay(main.to_str().unwrap(), None, false).unwrap()
+    assert(Sema.check_bundle(&bundle, Sema.CompileMode.Run).is_empty())
+    boundary :: common.cranelift_resident_safe_detail(&bundle)
+    assert(!boundary.is_empty() && boundary.to_ascii_lowercase().contains("foreign"), "resident JIT must name its C++ boundary instead of silently falling back: {boundary}")
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/polyglot_systems.rs:215
+#Test("cpp_binder_uses_selected_target_tools_runtime_and_cache_identity") {
+    // GATE #4483: preserve the Unix-only arm and selected target tool facts.
+    if selected_family() != "unix" { return }
+    target :: "aarch64-apple-darwin"
+    // GATE #4494: native thread name, filesystem permissions and child process tools.
+    root :: env.temp_dir().join("jet_cpp_target_tools_{process.id()}_{thread.current().name().unwrap_or(\"test\")}")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&root).unwrap()
+    header :: root.join("probe.hpp")
+    fs.write(&header, "long probe(long value);\n").unwrap()
+    canonical :: fs.canonicalize(&header).unwrap()
+    clang_log :: root.join("clang.log")
+    ar_log :: root.join("ar.log")
+    clang :: root.join("fake-clang++")
+    ar :: root.join("fake-ar")
+    ast :: "{{\"kind\":\"TranslationUnitDecl\",\"inner\":[{{\"kind\":\"FunctionDecl\",\"name\":\"probe\",\"loc\":{{\"file\":\"{canonical.display()}\"}},\"type\":{{\"qualType\":\"long (long)\"}},\"inner\":[{{\"kind\":\"ParmVarDecl\",\"name\":\"value\",\"type\":{{\"qualType\":\"long\"}}}}]}}]}}"
+    fs.write(&clang, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{clang_log.display()}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake clang 1'; exit 0; fi\ncase \"$*\" in\n  *-ast-dump=json*) printf '%s\\n' '{ast}'; exit 0 ;;\nesac\nprevious=''\noutput=''\nfor argument in \"$@\"; do\n  if [ \"$previous\" = \"-o\" ]; then output=\"$argument\"; fi\n  previous=\"$argument\"\ndone\n: > \"$output\"\n").unwrap()
+    fs.write(&ar, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{ar_log.display()}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake ar 1'; exit 0; fi\n: > \"$2\"\n").unwrap()
+    for tool in [&clang, &ar] {
+        permissions := fs.metadata(tool).unwrap().permissions()
+        permissions.set_mode(0o755)
+        fs.set_permissions(tool, permissions).unwrap()
+    }
+    cache :: root.join(".jet/bindings/cpp")
+    options :: CppBind.BindOptions{
+        lib: "probe", target: target, clang: clang.clone(), archiver: ar.clone(),
+        include_dirs: [], library_dirs: [], libraries: [], namespaces: [], templates: []
+    }
+    _ :: CppBind.bind(&header, &cache, &options).unwrap()
+    clang_commands :: fs.read_to_string(&clang_log).unwrap()
+    assert(clang_commands.contains("-target aarch64-apple-darwin"))
+    assert(clang_commands.contains("-Wl,-undefined,error"))
+    assert(clang_commands.contains("proof.dylib"))
+    assert(fs.read_to_string(&ar_log).unwrap().contains("rcs"))
+    link :: fs.read_to_string(cache.join("probe.link")).unwrap()
+    assert(link.contains("target\taarch64-apple-darwin"))
+    assert(link.contains("l\tc++"))
+    flags :: CFFI.resolve_link_for_target("jet_cpp_probe", &root, target).unwrap()
+    assert(flags.link_names.contains("c++"))
+    assert(!flags.link_names.contains("stdc++"))
+    shared_input :: root.join("same-input")
+    fs.create_dir(&shared_input).unwrap()
+    include_options := options.clone()
+    include_options.include_dirs = [shared_input.clone()]
+    library_options := options.clone()
+    library_options.library_dirs = [shared_input.clone()]
+    include_identity :: CppBind.cache_identity_for_test(&header, &include_options, target)
+    library_identity :: CppBind.cache_identity_for_test(&header, &library_options, target)
+    assert_ne(include_identity, library_identity)
+    fs.write(&clang_log, "").unwrap()
+    include_result :: CppBind.bind(&header, &cache, &include_options).unwrap()
+    include_commands :: fs.read_to_string(&clang_log).unwrap()
+    include_proof :: include_commands.lines().find(|line| -> line.contains("-shared")).unwrap()
+    assert(!include_proof.contains("-L {shared_input.display()}"))
+    fs.write(&clang_log, "").unwrap()
+    library_result :: CppBind.bind(&header, &cache, &library_options).unwrap()
+    assert_ne(include_result.archive.parent(), library_result.archive.parent())
+    library_commands :: fs.read_to_string(&clang_log).unwrap()
+    library_proof :: library_commands.lines().find(|line| -> line.contains("-shared")).unwrap()
+    assert(library_proof.contains("-L {shared_input.display()}"))
+    first_identity :: CppBind.cache_identity_for_test(&header, &options, target)
+    fs.write(&ar, "#!/bin/sh\nprintf '%s\\n' \"$*\" >> '{ar_log.display()}'\nif [ \"$1\" = \"--version\" ]; then printf '%s\\n' 'fake ar 2'; exit 0; fi\n: > \"$2\"\n").unwrap()
+    second_identity :: CppBind.cache_identity_for_test(&header, &options, target)
+    assert_ne(first_identity, second_identity)
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/polyglot_systems.rs:351
+#Test("cpp_link_metadata_requires_exact_selected_target") {
+    target :: "aarch64-apple-darwin"
+    // GATE #4494: native thread name and filesystem.
+    root :: env.temp_dir().join("jet_cpp_link_target_{process.id()}_{thread.current().name().unwrap_or(\"test\")}")
+    dir :: root.join(".jet/bindings/cpp")
+    _ :: fs.remove_dir_all(&root)
+    fs.create_dir_all(&dir).unwrap()
+    fs.write(dir.join("libjet_cpp_probe.a"), "archive").unwrap()
+    metadata :: dir.join("probe.link")
+    for invalid in [
+        "l\tc++\n",
+        "target\tx86_64-unknown-linux-gnu\nl\tc++\n",
+        "target\taarch64-apple-darwin\ntarget\taarch64-apple-darwin\nl\tc++\n",
+        "target aarch64-apple-darwin\nl\tc++\n"
+    ] {
+        fs.write(&metadata, invalid).unwrap()
+        assert(CFFI.resolve_link_for_target("jet_cpp_probe", &root, target).is_err())
+    }
+    fs.write(&metadata, "target\taarch64-apple-darwin\nl\tc++\n").unwrap()
+    assert(CFFI.resolve_link_for_target("jet_cpp_probe", &root, target).is_ok())
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/polyglot_systems.rs:1089
+#Test("mixed_repo_edit_test_debug_profile_and_recovery_workflows") {
+    // GATE #4483: original Unix-only workflow arm.
+    if selected_family() != "unix" { return }
+    cc :: systems.mixed_required_tool("cc")
+    ar :: systems.mixed_required_tool("ar")
+    clang :: systems.mixed_required_tool("clang++")
+    strip :: systems.mixed_required_tool("strip")
+    _nm :: systems.mixed_required_tool("nm")
+    javac :: systems.mixed_required_tool("javac")
+    _javap :: systems.mixed_required_tool("javap")
+    _node :: systems.mixed_required_tool("node")
+    _python :: systems.mixed_required_tool("python3")
+    java_home :: systems.mixed_java_home(&javac)
+    root :: common.Scratch.new("mixed-repo")
+    systems.mixed_c_case(&root.path, &cc, &ar, &strip)
+    systems.mixed_cpp_case(&root.path, &clang, &ar, &strip, env("JET_BUILD_TARGET"))
+    systems.mixed_java_case(&root.path, &java_home)
+    systems.mixed_js_case(&root.path)
+    systems.mixed_python_case(&root.path)
+}

@@ -1,0 +1,665 @@
+use jet_foundation.Tests.Integration.Authority.*
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use jet
+use jetpack.RuntimePolicy
+use std.fs as fs
+use std.env as env
+use std.process.[Command, Stdio]
+use std.thread as thread
+use std.time.Duration
+use core.sys.target.[selected_os, selected_family]
+
+// Rust: tests/authority.rs:16
+#Test("authority_is_a_named_prelude_rights_carrier") {
+    source :: """
+struct Holder {
+    authority: Authority
+}
+fn run() {
+    authority :: Authority.workspace()
+    print("authority")
+}
+"""
+    output :: jet.compile(source).expect("Authority type should compile")
+    assert(output.rust.contains("pub struct JetAuthority"), "{output.rust}")
+    assert(output.rust.contains("rights: std::collections::BTreeSet<String>"), "{output.rust}")
+    assert(output.rust.contains("JetAuthority"), "{output.rust}")
+    assert(output.rust.contains("jet_authority_workspace()"), "{output.rust}")
+    assert(output.rust.contains("FS.Read:repo"), "{output.rust}")
+    assert(output.rust.contains("FS.Write:.jet/build"), "{output.rust}")
+}
+// Rust: tests/authority.rs:76
+#Test("authority_with_and_without_are_the_only_narrowing_family") {
+    output :: jet.compile(AUTHORITY_VALUE_SOURCE).expect("Authority operations should compile")
+    assert(output.rust.contains("jet_authority_with"), "{output.rust}")
+    assert(output.rust.contains("jet_authority_without"), "{output.rust}")
+    tir_support.assert_tiers_agree("authority_narrowing", AUTHORITY_VALUE_SOURCE, "authority\n")
+}
+// Rust: tests/authority.rs:92
+#Test("authority_with_outside_held_rights_is_e0712") {
+    source :: """
+fn run() {
+    authority :: Authority.workspace()
+    authority.with("FS.Write")
+}
+"""
+    (_, _, stderr) :: tir_support.jit_run("authority_outside", source)
+    assert(stderr.contains("E0712"), "JIT must report E0712: {stderr}")
+}
+// Rust: tests/authority.rs:104
+#Test("authority_boundary_consumers_take_the_named_value") {
+    source :: """
+use core.process as process
+struct SessionHolder {
+    authority: Authority
+}
+fn run() {
+    session :: SessionHolder{authority: Authority.workspace()}
+    #FX(authority: Exec, IO, Time.Wait) {
+        result :: process.run(["echo", "authority"], authority)
+        print("boundary")
+    }
+}
+"""
+    output :: jet.compile(source).expect("boundary APIs should accept Authority")
+    assert(output.rust.contains("jet_std_process_run_with_authority"), "{output.rust}")
+    assert(output.rust.contains("JetAuthority"), "{output.rust}")
+    assert(output.rust.contains("jet_authority_to_wire"), "{output.rust}")
+    assert(!output.rust.contains("let _authority"), "{output.rust}")
+}
+// Rust: tests/authority.rs:136
+#Test("plugin_call_rejects_an_overlarge_argument_list_before_guest_execution") {
+    scratch :: common.Scratch.new("plugin_large_argument_frame")
+    plugin_path :: write_plugin_component(&scratch, "large_args.wasm", &large_argument_component_wat(1))
+    plugin_path_text :: plugin_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    plugin_root :: scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    params :: (0..<1025).map(fn(_) { "1" }).collect().join(", ")
+    source :: """
+use core.plugin as plugin
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:__ROOT__"])
+    hostile :: plugin.load("__PATH__", policy)
+    _result :: hostile.scale(__PARAMS__) ?? {
+        print("rejected")
+        return
+    }
+    print("guest-executed")
+    print(_result)
+}
+""".replace("__ROOT__", plugin_root).replace("__PATH__", plugin_path_text).replace("__PARAMS__", params)
+    api :: plugin_api_snapshot("large_args", "scale", "a0: Int", "Int")
+    tiers := ["jit", "interpreter"]
+    if common.have_rustc() -> tiers.push("release")
+    loop tier in tiers {
+        (code, stdout, stderr) :: tir_support.run_plugin_tier("plugin_large_argument_list", &source, tier, &plugin_path, &api)
+        assert_ne(code, 0, "{tier} accepted an overlarge plugin argument list")
+        assert_eq(stdout, "", "{tier} emitted output before arity rejection")
+        assert(stderr.contains("E0104"), "{tier} did not report the standard arity diagnostic: {stderr}")
+    }
+}
+// Rust: tests/authority.rs:581
+#Test("plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers") {
+    TEST_NAME :: "plugin_call_stops_a_non_terminating_component_on_all_hosted_tiers"
+    if run_plugin_resource_child_if_selected(TEST_NAME) -> return
+    scratch :: common.Scratch.new("plugin_call_non_terminating")
+    path :: write_plugin_component(&scratch, "non_terminating.wasm", PLUGIN_NON_TERMINATING_COMPONENT_WAT)
+    source :: plugin_failure_source(&path, "spin", "execution-bound-failure", "guest-returned")
+    api :: plugin_api_snapshot("non_terminating", "spin", "", "Int")
+    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "execution-bound-failure", &path, &api)
+}
+// Rust: tests/authority.rs:609
+#Test("plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers") {
+    TEST_NAME :: "plugin_call_rejects_linear_memory_growth_beyond_the_cap_on_all_hosted_tiers"
+    if run_plugin_resource_child_if_selected(TEST_NAME) -> return
+    scratch :: common.Scratch.new("plugin_call_linear_memory")
+    path :: write_plugin_component(&scratch, "linear_memory.wasm", PLUGIN_LINEAR_MEMORY_COMPONENT_WAT)
+    source :: plugin_failure_source(&path, "grow", "memory-bound-failure", "guest-returned")
+    api :: plugin_api_snapshot("linear_memory", "grow", "", "Int")
+    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "memory-bound-failure", &path, &api)
+}
+// Rust: tests/authority.rs:638
+#Test("plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers") {
+    TEST_NAME :: "plugin_call_rejects_table_growth_beyond_the_cap_on_all_hosted_tiers"
+    if run_plugin_resource_child_if_selected(TEST_NAME) -> return
+    scratch :: common.Scratch.new("plugin_call_table")
+    path :: write_plugin_component(&scratch, "table.wasm", PLUGIN_TABLE_COMPONENT_WAT)
+    source :: plugin_failure_source(&path, "grow", "table-bound-failure", "guest-returned")
+    api :: plugin_api_snapshot("table", "grow", "", "Int")
+    assert_plugin_failure_on_all_hosted_tiers(TEST_NAME, &source, "table-bound-failure", &path, &api)
+}
+// Rust: tests/authority.rs:658
+#Test("authority_process_boundary_runs_on_all_hosted_tiers") {
+    source :: """
+use core.process as process
+fn run() {
+    #FX(authority: Exec, IO, Time.Wait) {
+        result :: process.run(["echo", "boundary"], authority)
+        print("boundary")
+    }
+}
+"""
+    tir_support.assert_tiers_agree("authority_process_boundary", source, "boundary\n")
+}
+// Rust: tests/authority.rs:673
+#Test("authority_plan_refuses_before_spawn_on_all_hosted_tiers") {
+    marker :: env.temp_dir().join("jet-authority-plan-marker-{std.process.id()}")
+    _ :: fs.remove_file(&marker)
+    source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["sh", "-c", "printf spawned > '__MARKER__'"]).cwd("/").under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("spawned")
+        .Err(_) -> print("refused")
+    }
+}
+""".replace("__MARKER__", marker.to_string_lossy())
+    output :: jet.compile(&source).expect("authority plan API should compile")
+    assert(output.rust.contains("jet_std_process_spec_under"), "{output.rust}")
+    assert(output.rust.contains("jet_process_spec_plan"), "{output.rust}")
+    native_backend :: RuntimePolicy.detect_sandbox().level == RuntimePolicy.SandboxLevel.Strong
+    expected :: if (selected_os() == "linux" || selected_os() == "macos") && native_backend -> "spawned\n" else -> "refused\n"
+    tir_support.assert_tiers_agree("authority_plan_no_spawn", &source, expected)
+    assert(!marker.exists(), "plan() spawned the authority-bound command")
+}
+// Rust: tests/authority.rs:716
+#Test("authority_process_binds_exact_resource_grants") {
+    cargo :: host_executable("cargo")
+    source :: """
+use core.process as process
+fn run() {
+    policy :: Authority.from_rights([
+        "FS.Read:repo",
+        "FS.Write:.jet/build",
+        "Exec:__CARGO__",
+    ])
+    spec :: process.cmd(["__CARGO__", "test"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("planned")
+        .Err(_) -> print("refused")
+    }
+}
+""".replace("__CARGO__", cargo)
+    output :: jet.compile(&source).expect("exact process grants should compile")
+    assert(output.rust.contains("jet_authority_from_rights"), "{output.rust}")
+    assert(output.rust.contains("jet_std_process_spec_under"), "{output.rust}")
+    native_backend :: RuntimePolicy.detect_sandbox().level == RuntimePolicy.SandboxLevel.Strong
+    expected :: if (selected_os() == "linux" || selected_os() == "macos") && native_backend -> "planned\n" else -> "refused\n"
+    tir_support.assert_tiers_agree("authority_process_exact_grants", &source, expected)
+}
+// Rust: tests/authority.rs:757
+#Test("authority_process_refuses_unenforced_scoped_network") {
+    source :: """
+use core.process as process
+fn run() {
+    policy :: Authority.from_rights(["Net:example.com"])
+    spec :: process.cmd(["/usr/bin/true"]).under(policy)
+    if spec.plan() == {
+        .Ok(_) -> print("accepted")
+        .Err(_) -> print("refused")
+    }
+}
+"""
+    tir_support.assert_tiers_agree("authority_process_scoped_network", source, "refused\n")
+}
+// Rust: tests/authority.rs:775
+#Test("authority_process_receipt_redacts_secret_output_on_all_hosted_tiers") {
+    if selected_family() != "unix" -> return
+    source :: """
+use core.process as process
+fn run() {
+    spec :: process.cmd(["sh", "-c", "printf '%s' \"$SECRET_TOKEN\""])
+        .env_clear()
+        .env("SECRET_TOKEN", "receipt-secret")
+        .stdout(.Capture)
+        .stderr(.Capture)
+    receipt :: spec.run() ?? panic("process receipt failed")
+    print(receipt.output)
+    print(receipt.redacted)
+    print(receipt.policy_digest != "")
+    print(receipt.descendants)
+}
+"""
+    output :: jet.compile(source).expect("ProcessReceipt fields should compile")
+    assert(output.rust.contains("ProcessReceipt"), "{output.rust}")
+    tir_support.assert_tiers_agree("authority_process_receipt_redaction", source, "<redacted>\ntrue\ntrue\ncontained\n")
+}
+// Rust: tests/authority.rs:803
+#Test("authority_process_plan_and_receipt_share_the_policy_digest") {
+    if selected_os() != "linux" && selected_os() != "macos" -> return
+    printf :: host_executable("printf")
+    source :: """
+use core.process as process
+fn run() {
+    policy :: Authority.from_rights([
+        "FS.Read:repo",
+        "FS.Write:.jet/build",
+        "Exec:__PRINTF__",
+    ])
+    spec :: process.cmd(["__PRINTF__", "receipt"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            receipt :: spec.run() ?? panic("run failed")
+            print(plan.policy_digest == receipt.policy_digest)
+            print(receipt.redacted)
+        }
+        .Err(_) -> print("refused")
+    }
+}
+""".replace("__PRINTF__", printf)
+    native_backend :: RuntimePolicy.detect_sandbox().level == RuntimePolicy.SandboxLevel.Strong
+    tir_support.assert_tiers_agree("authority_process_receipt_digest", &source, if native_backend -> "true\ntrue\n" else -> "refused\n")
+}
+// Rust: tests/authority.rs:841
+#Test("authority_process_macos_seatbelt_runs_and_denies_host_read") {
+    if selected_os() != "macos" -> return
+    success :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["/usr/bin/printf", "sandboxed"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            print(plan.backend)
+            if spec.run_checked() == {
+                .Ok(value) -> print(value.output)
+                .Err(_) -> print("denied")
+            }
+        }
+        .Err(_) -> print("refused")
+    }
+}
+"""
+    tir_support.assert_tiers_agree("authority_macos_seatbelt_success", success, "macos-seatbelt\nsandboxed\n")
+    hostile :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    if process.cmd(["/bin/sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy).run_checked() == {
+        .Ok(_) -> print("blocked")
+        .Err(_) -> print("escaped")
+    }
+}
+"""
+    tir_support.assert_tiers_agree("authority_macos_seatbelt_host_read", hostile, "blocked\n")
+}
+// Rust: tests/authority.rs:882
+#Test("authority_process_linux_bwrap_runs_and_denies_host_read") {
+    if selected_os() != "linux" -> return
+    success :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["printf", "sandboxed"]).cwd("/tmp").under(policy)
+    if spec.plan() == {
+        .Ok(plan) -> {
+            if {
+                plan.backend == "linux-bwrap" -> {
+                    if spec.run_checked() == {
+                        .Ok(value) -> print(value.output)
+                        .Err(_) -> print("denied")
+                    }
+                }
+                else -> print("wrong-backend")
+            }
+        }
+        .Err(_) -> print("refused")
+    }
+}
+"""
+    native_backend :: RuntimePolicy.detect_sandbox().level == RuntimePolicy.SandboxLevel.Strong
+    tir_support.assert_tiers_agree("authority_linux_bwrap_success", success, if native_backend -> "sandboxed\n" else -> "refused\n")
+    hostile :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    if process.cmd(["sh", "-c", "if test -r /etc/passwd; then exit 41; else exit 0; fi"]).cwd("/tmp").under(policy).run_checked() == {
+        .Ok(_) -> print("blocked")
+        .Err(_) -> print("escaped")
+    }
+}
+"""
+    tir_support.assert_tiers_agree("authority_linux_bwrap_host_read", hostile, if native_backend -> "blocked\n" else -> "refused\n")
+}
+// Rust: tests/authority.rs:941
+#Test("authority_process_windows_appcontainer_runs_and_denies_host_read") {
+    if selected_os() != "windows" -> return
+    success :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    if process.cmd(["cmd.exe", "/C", "exit", "0"]).cwd("/tmp").under(policy).run_checked() == {
+        .Ok(_) -> print("sandboxed")
+        .Err(_) -> print("refused")
+    }
+}
+"""
+    tir_support.assert_tiers_agree("authority_windows_appcontainer_success", success, "sandboxed\n")
+    marker_path :: env.temp_dir().join("jet-authority-windows-host-secret-{std.process.id()}.txt")
+    fs.write(&marker_path, "host-secret").expect("write Windows host-read marker")
+    marker :: marker_path.to_string_lossy().replace('\\', "/")
+    hostile :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    if process.cmd(["cmd.exe", "/C", "type \"__MARKER__\""]).cwd("/tmp").under(policy).run_checked() == {
+        .Ok(_) -> print("escaped")
+        .Err(_) -> print("blocked")
+    }
+}
+""".replace("__MARKER__", marker)
+    tir_support.assert_tiers_agree("authority_windows_appcontainer_host_read", &hostile, "blocked\n")
+    _ :: fs.remove_file(marker)
+}
+// Rust: tests/authority.rs:988
+#Test("authority_process_windows_plan_and_receipt_share_policy_digest") {
+    if selected_os() != "windows" -> return
+    source :: """
+use core.process as process
+fn run() {
+    policy :: process.workspace()
+    spec :: process.cmd(["cmd.exe", "/C", "exit", "0"]).under(policy)
+    plan :: spec.plan() ?? panic("plan failed")
+    receipt :: spec.run() ?? panic("run failed")
+    print(plan.policy_digest == receipt.policy_digest)
+    print(receipt.backend)
+}
+"""
+    tir_support.assert_tiers_agree("authority_process_windows_receipt_digest", source, "true\nwindows-appcontainer\n")
+}
+// Rust: tests/authority.rs:1009
+#Test("authority_example_runs_on_all_hosted_tiers") {
+    tir_support.assert_example_cli_tiers_agree_with_package("types/authority", .Some(tir_support.TIR_TEST_PACKAGE), fn(actual) { assert_eq(actual, "authority\n") })
+}
+// Rust: tests/authority.rs:1018
+#Test("authority_is_not_a_type_selection_or_dispatch_input") {
+    source :: """
+fn run() {
+    #FX(Authority) {
+        print("Authority must remain ordinary data")
+    }
+}
+"""
+    diagnostics :: jet.compile(source).expect_err("Authority must not act as an effect/type fact")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0930" }), "{diagnostics:#?}")
+}
+// Rust: tests/authority.rs:1037
+#Test("authority_parser_accepts_the_named_value") {
+    (tokens, diagnostics) :: jet.Lexer.lex("fn run() { #FX(authority: FS.Read) { value :: authority.with(\"FS.Read\") } }")
+    assert(diagnostics.is_empty(), "{diagnostics:#?}")
+    _ :: jet.Parser.parse(&tokens).expect("parser must accept Authority")
+}
+// Rust: tests/authority.rs:1046
+#Test("authority_sema_keeps_the_named_type") {
+    output :: jet.compile(AUTHORITY_VALUE_SOURCE).expect("sema should accept Authority")
+    assert(output.rust.contains("JetAuthority"), "{output.rust}")
+}
+// Rust: tests/authority.rs:1052
+#Test("authority_tir_runs_the_same_value") {
+    tir_support.assert_tiers_agree("authority_tir", AUTHORITY_VALUE_SOURCE, "authority\n")
+}
+// Rust: tests/authority.rs:1057
+#Test("authority_aot_runs_the_same_value") {
+    (code, stdout, stderr) :: tir_support.build_and_run_full("jet_authority_aot", "authority_aot", AUTHORITY_VALUE_SOURCE)
+    assert_eq(code, 0, "AOT failed: {stderr}")
+    assert_eq(stdout, "authority\n")
+}
+// Rust: tests/authority.rs:1068
+#Test("authority_jit_runs_the_same_value") {
+    (code, stdout, stderr) :: tir_support.jit_run("authority_jit", AUTHORITY_VALUE_SOURCE)
+    assert_eq(code, 0, "JIT failed: {stderr}")
+    assert_eq(stdout, "authority\n")
+}
+// Rust: tests/authority.rs:1075
+#Test("authority_dev_runs_the_same_value") {
+    (code, stdout, stderr) :: tir_support.interpreter_run("authority_dev", AUTHORITY_VALUE_SOURCE)
+    assert_eq(code, 0, "dev/interpreter failed: {stderr}")
+    assert_eq(stdout, "authority\n")
+}
+// Rust: tests/authority.rs:1083
+#Test("authority_comptime_uses_the_same_value") {
+    source :: "AUTHORITY :: prep { Authority.from_rights([\"FS.Read\", \"IO\"]) }\nNARROWED :: prep { AUTHORITY.with(\"FS.Read\") }\nRELEASED :: prep { NARROWED.without(\"FS.Read\") }\n\nfn run() { print(\"authority\") }\n"
+    output :: jet.compile(source).expect("comptime should construct Authority")
+    assert(output.rust.contains("JetAuthority"), "{output.rust}")
+}
+// Rust: tests/authority.rs:1090
+#Test("authority_repl_accepts_the_same_value") {
+    transcript :: jet.REPL.run_transcript(&[
+        "authority :: Authority.workspace()",
+        "narrowed :: authority.with(\"FS.Read\")",
+        "released :: narrowed.without(\"FS.Read\")",
+        "#FX(scoped: FS.Read) { inside :: scoped.with(\"FS.Read\") }",
+        "print(\"authority\")",
+    ], .None)
+    assert(transcript.contains("authority"), "REPL changed Authority meaning: {transcript}")
+}
+// Rust: tests/authority.rs:1108
+#Test("authority_web_accepts_the_same_value") {
+    source :: "#Target(Web)\nfn run() {\n    #FX(authority: IO) {\n        narrowed :: authority.with(\"IO\")\n        _released :: narrowed.without(\"IO\")\n        print(\"authority\")\n    }\n}\n"
+    web :: jet.compile_web_with_path(source, "tests/fixtures/authority_web.jet").expect("web should accept Authority").web.expect("web tier dropped Authority")
+    assert(web.wasm_rust.contains("pub extern \"C\" fn jet_entry_"), "web run entry missing")
+    assert(web.wasm_rust.contains("jet_runtime_boundary(|| {"), "web run did not retain the runtime boundary")
+    assert(web.wasm_rust.contains("jet_authority_with"), "web lost Authority.with")
+    assert(web.wasm_rust.contains("jet_authority_without"), "web lost Authority.without")
+}
+// Rust: tests/authority.rs:1145
+#Test("plugin_call_rejects_an_overlarge_frame_for_a_zero_param_export") {
+    scratch :: common.Scratch.new("plugin_zero_param_frame")
+    plugin_path :: write_plugin_component(&scratch, "zero_param.wasm", PLUGIN_ZERO_PARAM_COMPONENT_WAT)
+    plugin_path_text :: plugin_path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    plugin_root :: scratch.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    params :: (0..<1025).map(fn(_) { "1" }).collect().join(", ")
+    source :: """
+use core.plugin as plugin
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:__ROOT__"])
+    hostile :: plugin.load("__PATH__", policy)
+    _result :: hostile.zero(__PARAMS__) ?? {
+        print("rejected")
+        return
+    }
+    print("guest-executed")
+    print(_result)
+}
+""".replace("__ROOT__", plugin_root).replace("__PATH__", plugin_path_text).replace("__PARAMS__", params)
+    api :: plugin_api_snapshot("zero_param", "zero", "", "Int")
+    tiers := ["jit", "interpreter"]
+    if common.have_rustc() -> tiers.push("release")
+    loop tier in tiers {
+        (code, stdout, stderr) :: tir_support.run_plugin_tier("plugin_zero_param_overlarge_frame", &source, tier, &plugin_path, &api)
+        assert_ne(code, 0, "{tier} unexpectedly ran an overlarge plugin frame")
+        assert_eq(stdout, "", "{tier} emitted output before arity rejection")
+        assert(stderr.contains("E0104"), "{tier} did not report the standard arity diagnostic: {stderr}")
+    }
+}
+// Rust: tests/authority.rs:1208
+#Test("plugin_load_rejects_a_symlink_outside_the_granted_read_root") {
+    if selected_family() != "unix" -> return
+    // GATE #4494: native symlink fixture.
+    outside :: common.Scratch.new("plugin_outside_read_root")
+    allowed :: common.Scratch.new("plugin_allowed_read_root")
+    target :: write_plugin_component(&outside, "target.wasm", PLUGIN_ZERO_PARAM_COMPONENT_WAT)
+    link :: allowed.join("link.wasm")
+    std.os.unix.fs.symlink(&target, &link).expect("create hostile plugin symlink")
+    plugin_path :: link.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    root :: allowed.path.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"")
+    source :: """
+use core.plugin as plugin
+fn run() {
+    policy :: Authority.from_rights(["FS.Read:__ROOT__"])
+    hostile :: plugin.load("__PATH__", policy)
+    _result :: hostile.zero() ?? {
+        print("rejected")
+        return
+    }
+    print("guest-executed")
+    print(_result)
+}
+""".replace("__ROOT__", root).replace("__PATH__", plugin_path)
+    api :: plugin_api_snapshot("link", "zero", "", "Int")
+    tiers := ["jit", "interpreter"]
+    if common.have_rustc() -> tiers.push("release")
+    loop tier in tiers {
+        (code, stdout, stderr) :: tir_support.run_plugin_tier("plugin_symlink_outside_read_root", &source, tier, &link, &api)
+        assert_ne(code, 0, "{tier} followed a plugin symlink outside its root")
+        assert_eq(stdout, "", "{tier} emitted output before symlink rejection")
+        assert(stderr.contains("file authority path contains a symlink"), "{tier} did not report the symlink rejection: {stderr}")
+    }
+}
+// Rust: tests/authority.rs:1270
+#Test("erased_devtools_publications_do_not_feed_panel_state") {
+    source :: """
+use core.ui as ui
+use core.devtools as devtools
+struct State {
+    selected: String{"none"}
+    event_count: Int{0}
+}
+fn panel_lines(state: State) -> [UINode] {
+    return [UINode]{
+        ui.text(state.selected),
+        ui.text("{state.event_count}")
+    }
+}
+#DevPanel
+pub fn panel(state: State) -> UINode {
+    return ui.box(panel_lines(state))
+}
+fn run() {
+    selected_value :: "overview"
+    #Off {
+        devtools.publish(field: .selected, value: selected_value)
+        devtools.publish(field: .event_count, value: 1)
+    }
+    print("ok")
+}
+"""
+    diagnostics :: tir_support.compile_source("erased_devtools_publications", source).expect_err("erased publications must not satisfy panel state fields")
+    error_codes :: diagnostics.into_iter().filter(fn(diagnostic) { diagnostic.severity == jet.Diagnostics.Severity.Error }).map(fn(diagnostic) { diagnostic.code }).collect()
+    assert_eq(error_codes, ["E1414", "E1414"])
+}
+// Rust: tests/authority.rs:1315
+#Test("erased_authority_scope_does_not_survive_erasure") {
+    source :: """
+fn erased() {
+    #Off {
+        #FX(authority: FS.Read) {
+            print("erased")
+        }
+    }
+    authority :: Authority.workspace()
+    authority.with("FS.Write")
+}
+fn active() {
+    #FX(authority: FS.Read) {
+        print("active")
+    }
+    authority :: Authority.workspace()
+    authority.with("FS.Write")
+}
+fn run() {}
+"""
+    diagnostics :: jet.compile(source).expect_err("active authority scope must reject IO")
+    e0712 :: diagnostics.iter().filter(fn(diagnostic) { diagnostic.code == "E0712" }).count()
+    assert_eq(e0712, 1, "only the active authority scope must reject IO: {diagnostics:#?}")
+}
+// Rust: tests/authority.rs:1373
+#Test("manifestless_script_cannot_spawn_but_reads_its_arguments") {
+    scratch :: common.Scratch.new("script-authority-spawn")
+    marker :: scratch.join("spawned.txt").to_str().expect("scratch path is UTF-8")
+    loop tier in SCRIPT_TIERS {
+        spawn :: script_run(tier, &[], "spawn.jet", &[marker])
+        stderr :: String.from_utf8_lossy(&spawn.stderr)
+        assert(!spawn.status.success(), "{tier:?}: spawn must be refused:\n{stderr}")
+        assert(stderr.contains("E1803"), "{tier:?}: {stderr}")
+        assert(stderr.contains("undecided for `Exec"), "{tier:?}: E1803 names the Exec root: {stderr}")
+        assert(stderr.contains("--allow=Exec"), "{tier:?}: the Fix holds the exact --allow command: {stderr}")
+        assert(spawn.stdout.is_empty(), "{tier:?}: no user code ran")
+        assert(!OSPath.new(marker).exists(), "{tier:?}: no process started")
+        argv :: script_run(tier, &[], "argv.jet", &["a", "b"])
+        assert(argv.status.success(), "{tier:?}: reading arguments needs no grant:\n{String.from_utf8_lossy(&argv.stderr)}")
+        assert_eq(String.from_utf8_lossy(&argv.stdout), "args=2\n", "{tier:?}")
+    }
+}
+// Rust: tests/authority.rs:1401
+#Test("leaf_grants_cover_file_reads_but_not_writes") {
+    scratch :: common.Scratch.new("script-authority-files")
+    target :: scratch.join("written.txt").to_str().expect("scratch path is UTF-8")
+    loop tier in SCRIPT_TIERS {
+        read :: script_run(tier, &["--allow=FS.Read"], "readfile.jet", &[])
+        assert(read.status.success(), "{tier:?}: --allow=FS.Read covers files.read:\n{String.from_utf8_lossy(&read.stderr)}")
+        assert_eq(String.from_utf8_lossy(&read.stdout), "read=true\n", "{tier:?}")
+        write :: script_run(tier, &["--allow=FS.Read"], "writefile.jet", &[target])
+        stderr :: String.from_utf8_lossy(&write.stderr)
+        assert(!write.status.success(), "{tier:?}: FS.Read must not cover a write")
+        assert(stderr.contains("E1803") && stderr.contains("`FS.Write`"), "{tier:?}: {stderr}")
+        assert(!OSPath.new(target).exists(), "{tier:?}: the refused write never ran")
+        root :: script_run(tier, &["--allow=FS"], "writefile.jet", &[target])
+        assert(root.status.success(), "{tier:?}: the FS root covers the write leaf:\n{String.from_utf8_lossy(&root.stderr)}")
+        assert_eq(fs.read_to_string(target).unwrap(), "written", "{tier:?}")
+        fs.remove_file(target).unwrap()
+    }
+}
+// Rust: tests/authority.rs:1435
+// D-SCRIPT-CONFIRM1=A through a real util-linux script pseudo-terminal.
+#Test("script_confirmation_prompt_accepts_enter_and_refuses_n") {
+    // GATE #4494: native PTY subprocess and pipe writing.
+    if Command.new("script").arg("--version").output().is_err() {
+        eprintln("skipping: util-linux `script` is required for a pseudo-terminal")
+        return
+    }
+    scratch :: common.Scratch.new("script-authority-prompt")
+    loop (answer, expect_spawn) in [("\n", true), ("n\n", false)] {
+        marker :: scratch.join(if expect_spawn -> "yes.txt" else -> "no.txt")
+        command :: "{env!("CARGO_BIN_EXE_jet")} run {SCRIPT_AUTHORITY_DIR}/spawn.jet {marker.display()}"
+        child := Command.new("script").args(["-qec", &command, "/dev/null"])
+            .current_dir(env!("CARGO_MANIFEST_DIR")).env("NO_COLOR", "1").env("JET_RECEIPT_BYPASS", "1")
+            .env_remove("CI").stdin(Stdio.piped()).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("script must start")
+        {
+            stdin := child.stdin.take().expect("script stdin")
+            thread.sleep(Duration.from_millis(500))
+            stdin.write_all(answer.as_bytes()).unwrap()
+        }
+        output :: child.wait_with_output().expect("script must finish")
+        transcript :: String.from_utf8_lossy(&output.stdout)
+        assert(transcript.contains("spawn.jet will:"), "{transcript}")
+        assert(transcript.contains("starts other programs"), "{transcript}")
+        assert(transcript.contains("Run it? [Y/n/always]"), "{transcript}")
+        assert_eq(marker.exists(), expect_spawn, "answer {answer:?}: {transcript}")
+        if !expect_spawn -> assert_eq(output.status.code(), .Some(1), "`n` stops with exit 1: {transcript}")
+    }
+}
+// Rust: tests/authority.rs:1499
+#Test("package_without_authority_block_prints_and_reads_args_on_all_tiers") {
+    dir :: "tests/fixtures/package_default_authority"
+    loop tier in PACKAGE_DEFAULT_TIERS {
+        hello :: package_default_run(tier, "{dir}/hello.jet", &[])
+        assert(hello.status.success(), "{tier:?}: printing needs no grant:\n{String.from_utf8_lossy(&hello.stderr)}")
+        assert_eq(String.from_utf8_lossy(&hello.stdout), "hello\n", "{tier:?}")
+        argv :: package_default_run(tier, "{dir}/argv.jet", &["a", "b"])
+        assert(argv.status.success(), "{tier:?}: reading arguments needs no grant:\n{String.from_utf8_lossy(&argv.stderr)}")
+        assert_eq(String.from_utf8_lossy(&argv.stdout), "args=2\n", "{tier:?}")
+    }
+}
+// Rust: tests/authority.rs:1521
+#Test("package_without_authority_block_refuses_spawn_net_and_file_write") {
+    loop (fixture, right, marker) in [
+        ("e1803_package_default_spawn", "`Exec", "e1803-package-spawned-must-not-exist.txt"),
+        ("e1803_package_default_net", "`Net", ""),
+        ("e1803_package_default_write", "`FS", "e1803-package-write-must-not-exist.txt"),
+    ] {
+        loop tier in PACKAGE_DEFAULT_TIERS {
+            output :: package_default_run(tier, "tests/ui/{fixture}/run.jet", &[])
+            stderr :: String.from_utf8_lossy(&output.stderr)
+            assert(!output.status.success(), "{fixture} {tier:?}: must be refused:\n{stderr}")
+            assert(stderr.contains("E1803"), "{fixture} {tier:?}: {stderr}")
+            assert(stderr.contains(right), "{fixture} {tier:?}: E1803 names {right}: {stderr}")
+            assert(stderr.contains("package.jet (which has no authority block) has not allowed that yet."), "{fixture} {tier:?}: the Why is one plain sentence: {stderr}")
+            assert(!stderr.contains("required_effects="), "{fixture} {tier:?}: {stderr}")
+            assert(output.stdout.is_empty(), "{fixture} {tier:?}: no user code ran")
+            if !marker.is_empty() -> assert(!OSPath.new(env!("CARGO_MANIFEST_DIR")).join(marker).exists(), "{fixture} {tier:?}: the refused operation never ran")
+        }
+    }
+}

@@ -1,0 +1,53 @@
+use SelfhostHostBoundary.[ambient_parse, field, assert_parsed_function, assert_no_compiler_callback]
+use jet_driver.[run_compiler_work]
+use jet_foundation.[CompilerStack]
+// GATE #4494: real thread identities and retained panic payloads.
+use std.thread
+use std.panic
+
+// Rust: tests/selfhost_host_boundary.rs:45
+#Test("root_boundary_runs_real_compiler_queries_on_one_scoped_worker") {
+    assert_no_compiler_callback()
+    caller :: thread.current().id()
+    run_compiler_work(fn() {
+        assert(CompilerStack.on_compiler_worker())
+        worker :: thread.current().id()
+        assert_ne(worker, caller)
+        tree :: ambient_parse("fn retained_host_probe() {}\n")
+        assert_parsed_function(&tree, "retained_host_probe")
+        run_compiler_work(fn() {
+            assert_eq(thread.current().id(), worker)
+            invalid :: ambient_parse("fn run( {\n")
+            if field(&invalid, "diagnostics") == {
+                .List(diagnostics) -> {
+                    found := false
+                    loop diagnostic in diagnostics {
+                        if field(&diagnostic, "code") == { .Str(code) && code == "E0003" -> found = true; else -> {} }
+                    }
+                    assert(found, "malformed syntax must keep the parser's diagnostic across the host seam")
+                }
+                else -> panic("compiler syntax tree must expose diagnostics")
+            }
+        })
+        payload :: panic.catch_unwind(fn() { run_compiler_work(fn() { panic.panic_any(U32{0x3581}) }) })
+            .expect_err("nested compiler panic must reach the active worker")
+        assert_eq(payload.downcast_ref<U32>(), Val(U32{0x3581}))
+        assert_eq(thread.current().id(), worker)
+        assert_parsed_function(&ambient_parse("fn still_scoped() {}\n"), "still_scoped")
+    })
+    assert_no_compiler_callback()
+}
+// Rust: tests/selfhost_host_boundary.rs:75
+#Test("root_boundary_preserves_panic_payload_and_releases_compiler_authority") {
+    assert_no_compiler_callback()
+    payload :: panic.catch_unwind(fn() {
+        run_compiler_work(fn() {
+            tree :: ambient_parse("fn before_unwind() {}\n")
+            assert_parsed_function(&tree, "before_unwind")
+            panic.panic_any(U32{0x218})
+        })
+    }).expect_err("the retained Rust worker must propagate its panic")
+    assert_eq(payload.downcast_ref<U32>(), Val(U32{0x218}))
+    assert_no_compiler_callback()
+    assert(!CompilerStack.on_compiler_worker())
+}

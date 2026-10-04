@@ -1,1111 +1,417 @@
-// PORT-PENDING 1134 tests-polyglot-systems: tests/polyglot_systems.rs:1-1107
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::path::PathBuf;
-//RS use std::process::Command;
-//RS 
-//RS #[cfg(unix)]
-//RS use std::path::Path;
-//RS #[cfg(unix)]
-//RS use std::process::Output;
-//RS 
-//RS #[cfg(unix)]
-//RS use std::os::unix::fs::PermissionsExt;
-//RS 
-//RS fn tool(name: &str) -> Option<PathBuf> {
-//RS     std::env::var_os("PATH")
-//RS         .into_iter()
-//RS         .flat_map(|value| std::env::split_paths(&value).collect::<Vec<_>>())
-//RS         .map(|dir| dir.join(name))
-//RS         .find(|path| path.is_file())
-//RS         .and_then(|path| fs::canonicalize(path).ok())
-//RS }
-//RS 
-//RS fn run(command: &mut Command) {
-//RS     let output = command.output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "{}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn cpp_clang_ast_binder_links_external_namespace_and_on_demand_surface() {
-//RS     let Some(clang) = tool("clang++") else { return };
-//RS     let Some(ar) = tool("ar") else { return };
-//RS     let Some(_nm) = tool("nm") else { return };
-//RS     let Some(rustc) = tool("rustc") else { return };
-//RS     let target = env!("JET_BUILD_TARGET");
-//RS     let root = std::env::temp_dir().join(format!("jet_cpp_systems_{}", std::process::id()));
-//RS     let _ = fs::remove_dir_all(&root);
-//RS     fs::create_dir_all(root.join(".jet/bindings/cpp")).unwrap();
-//RS 
-//RS     let header = root.join("counter.hpp");
-//RS     fs::write(
-//RS         &header,
-//RS         r#"#pragma once
-//RS #include <cstdint>
-//RS 
-//RS int64_t decoy(int64_t value);
-//RS 
-//RS namespace acme {
-//RS class Counter {
-//RS public:
-//RS     explicit Counter(int64_t start);
-//RS     int64_t add(int64_t amount);
-//RS     int64_t add(double factor);
-//RS     int64_t operator+(int64_t amount);
-//RS     int64_t fail_if_negative(int64_t value);
-//RS private:
-//RS     int64_t value;
-//RS };
-//RS 
-//RS int64_t apply(int64_t (*callback)(int64_t), int64_t value);
-//RS template <typename T> T twice(T value) { return value + value; }
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let implementation = root.join("counter.cpp");
-//RS     fs::write(
-//RS         &implementation,
-//RS         r#"#include "counter.hpp"
-//RS 
-//RS int64_t decoy(int64_t value) { return value - 1000; }
-//RS 
-//RS namespace acme {
-//RS Counter::Counter(int64_t start) : value(start) {}
-//RS int64_t Counter::add(int64_t amount) { value += amount; return value; }
-//RS int64_t Counter::add(double factor) { value += static_cast<int64_t>(factor); return value; }
-//RS int64_t Counter::operator+(int64_t amount) { return value + amount; }
-//RS int64_t Counter::fail_if_negative(int64_t input) { if (input < 0) throw 1; return input; }
-//RS int64_t apply(int64_t (*callback)(int64_t), int64_t input) {
-//RS     auto result = callback(input);
-//RS     if (result < 0) throw 2;
-//RS     return result;
-//RS }
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let object = root.join("counter.o");
-//RS     let library = root.join("libcounter_impl.a");
-//RS     run(Command::new(&clang)
-//RS         .args(["-std=c++17", "-fPIC", "-c"])
-//RS         .arg(&implementation)
-//RS         .arg("-target")
-//RS         .arg(target)
-//RS         .arg("-o")
-//RS         .arg(&object));
-//RS     run(Command::new(&ar).arg("rcs").arg(&library).arg(&object));
-//RS 
-//RS     let cache = root.join(".jet/bindings/cpp");
-//RS     let options = jet::CppBind::BindOptions {
-//RS         lib: "counter".into(),
-//RS         target: target.into(),
-//RS         clang: clang.clone(),
-//RS         archiver: ar,
-//RS         include_dirs: vec![root.clone()],
-//RS         library_dirs: vec![root.clone()],
-//RS         libraries: vec!["counter_impl".into()],
-//RS         namespaces: vec!["acme".into()],
-//RS         templates: vec![jet::CppBind::TemplateInstantiation {
-//RS             qualified_name: "acme::twice".into(),
-//RS             cpp_args: vec!["int64_t".into()],
-//RS             jet_name: "twice_int".into(),
-//RS         }],
-//RS     };
-//RS     let result = jet::CppBind::bind(&header, &cache, &options).unwrap();
-//RS     fs::write(cache.join("counter.jet"), &result.source).unwrap();
-//RS     fs::write(cache.join("counter.provenance"), &result.provenance).unwrap();
-//RS     assert!(result.archive.is_file());
-//RS     assert_ne!(result.archive.parent(), Some(cache.as_path()));
-//RS     assert!(cache.join("libjet_cpp_counter.a").is_file());
-//RS     assert!(result
-//RS         .provenance
-//RS         .contains("schema=jet-ffi-bridge-provenance-v1"));
-//RS     assert!(result.provenance.contains("binder-schema=jet-cpp-bind-v3"));
-//RS     assert!(result.provenance.contains(&format!("target={target}")));
-//RS     assert!(result
-//RS         .provenance
-//RS         .contains(&format!("clang={}", clang.display())));
-//RS     assert!(result.provenance.contains("namespace=acme"));
-//RS     assert!(result.provenance.contains("library=counter_impl"));
-//RS     assert!(result.provenance.contains("linked-archive="));
-//RS     assert!(result.provenance.contains("linked-archive-sha256="));
-//RS     assert!(result
-//RS         .provenance
-//RS         .contains("descriptor=jet-ffi-descriptor-v1;"));
-//RS     assert!(!result.bound.iter().any(|name| name.contains("decoy")));
-//RS     assert!(result.source.contains("pub fn apply(callback:"));
-//RS     assert!(result
-//RS         .source
-//RS         .contains("// jet-ffi-descriptor=jet-ffi-descriptor-v1;"));
-//RS     assert!(result.source.contains("-[FFI.Cpp]>"));
-//RS     assert!(!result.source.contains("=>"));
-//RS 
-//RS     let changed_target = jet::CppBind::cache_identity_for_test(&header, &options, "other-target");
-//RS     let selected_target = jet::CppBind::cache_identity_for_test(&header, &options, target);
-//RS     assert_ne!(changed_target, selected_target);
-//RS 
-//RS     let main = root.join("main.jet");
-//RS     let source = r#"use cpp.counter as cpp
-//RS 
-//RS fn increment(value: Int) -[]> Int { return value + 1 }
-//RS fn reject(value: Int) -[]> Int { return -value }
-//RS 
-//RS fn run() {
-//RS     counter := cpp.new_counter(10) ?? panic("constructor")
-//RS     print(counter.add_amount(5) ?? panic("method"))
-//RS     print(counter.add_factor(2.0) ?? panic("overload"))
-//RS     print(counter.add(3) ?? panic("operator"))
-//RS     print(cpp.apply(increment, 41) ?? panic("callback"))
-//RS     print(cpp.apply(reject, 41) ?? -1)
-//RS     print(cpp.twice_int(21) ?? panic("template"))
-//RS     print(counter.fail_if_negative(-1) ?? -1)
-//RS     cpp.close_counter(^counter)
-//RS }
-//RS "#;
-//RS     fs::write(&main, source).unwrap();
-//RS     let output = jet::compile_with_path(source, main.to_str().unwrap()).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "{}",
-//RS             jet::render_diagnostics(main.to_str().unwrap(), source, &diags)
-//RS         )
-//RS     });
-//RS     let rust = root.join("main.rs");
-//RS     let binary = root.join("main_bin");
-//RS     fs::write(&rust, output.rust).unwrap();
-//RS     let mut command = Command::new(&rustc);
-//RS     command
-//RS         .args(["--edition", "2021", "--target", target])
-//RS         .arg(&rust)
-//RS         .arg("-o")
-//RS         .arg(&binary);
-//RS     for arg in output
-//RS         .clinks
-//RS         .into_iter()
-//RS         .chain(jet::resolve_c_links(main.to_str().unwrap()).unwrap())
-//RS     {
-//RS         command.arg(arg);
-//RS     }
-//RS     run(&mut command);
-//RS     let run_output = Command::new(&binary).output().unwrap();
-//RS     assert!(run_output.status.success());
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&run_output.stdout),
-//RS         "15\n17\n20\n42\n-1\n42\n-1\n"
-//RS     );
-//RS 
-//RS     let mut bundle =
-//RS         jet::Loader::load_entry_with_overlay(main.to_str().unwrap(), None, false).unwrap();
-//RS     assert!(jet::Sema::check_bundle(&mut bundle, jet::Sema::CompileMode::Run).is_empty());
-//RS     let boundary = common::cranelift_resident_safe_detail(&bundle);
-//RS     assert!(
-//RS         !boundary.is_empty() && boundary.to_ascii_lowercase().contains("foreign"),
-//RS         "resident JIT must name its C++ boundary instead of silently falling back: {boundary}"
-//RS     );
-//RS 
-//RS     let _ = fs::remove_dir_all(root);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn cpp_binder_uses_selected_target_tools_runtime_and_cache_identity() {
-//RS     let target = "aarch64-apple-darwin";
-//RS     let root = std::env::temp_dir().join(format!(
-//RS         "jet_cpp_target_tools_{}_{}",
-//RS         std::process::id(),
-//RS         std::thread::current().name().unwrap_or("test")
-//RS     ));
-//RS     let _ = fs::remove_dir_all(&root);
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     let header = root.join("probe.hpp");
-//RS     fs::write(&header, "long probe(long value);\n").unwrap();
-//RS     let canonical = fs::canonicalize(&header).unwrap();
-//RS     let clang_log = root.join("clang.log");
-//RS     let ar_log = root.join("ar.log");
-//RS     let clang = root.join("fake-clang++");
-//RS     let ar = root.join("fake-ar");
-//RS     fs::write(
-//RS         &clang,
-//RS         format!(
-//RS             r#"#!/bin/sh
-//RS printf '%s\n' "$*" >> '{}'
-//RS if [ "$1" = "--version" ]; then printf '%s\n' 'fake clang 1'; exit 0; fi
-//RS case "$*" in
-//RS   *-ast-dump=json*) printf '%s\n' '{}'; exit 0 ;;
-//RS esac
-//RS previous=''
-//RS output=''
-//RS for argument in "$@"; do
-//RS   if [ "$previous" = "-o" ]; then output="$argument"; fi
-//RS   previous="$argument"
-//RS done
-//RS : > "$output"
-//RS "#,
-//RS             clang_log.display(),
-//RS             format!(
-//RS                 r#"{{"kind":"TranslationUnitDecl","inner":[{{"kind":"FunctionDecl","name":"probe","loc":{{"file":"{}"}},"type":{{"qualType":"long (long)"}},"inner":[{{"kind":"ParmVarDecl","name":"value","type":{{"qualType":"long"}}}}]}}]}}"#,
-//RS                 canonical.display()
-//RS             )
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         &ar,
-//RS         format!(
-//RS             r#"#!/bin/sh
-//RS printf '%s\n' "$*" >> '{}'
-//RS if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 1'; exit 0; fi
-//RS : > "$2"
-//RS "#,
-//RS             ar_log.display()
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     for tool in [&clang, &ar] {
-//RS         let mut permissions = fs::metadata(tool).unwrap().permissions();
-//RS         permissions.set_mode(0o755);
-//RS         fs::set_permissions(tool, permissions).unwrap();
-//RS     }
-//RS 
-//RS     let cache = root.join(".jet/bindings/cpp");
-//RS     let options = jet::CppBind::BindOptions {
-//RS         lib: "probe".into(),
-//RS         target: target.into(),
-//RS         clang: clang.clone(),
-//RS         archiver: ar.clone(),
-//RS         include_dirs: vec![],
-//RS         library_dirs: vec![],
-//RS         libraries: vec![],
-//RS         namespaces: vec![],
-//RS         templates: vec![],
-//RS     };
-//RS     jet::CppBind::bind(&header, &cache, &options).unwrap();
-//RS     let clang_commands = fs::read_to_string(&clang_log).unwrap();
-//RS     assert!(clang_commands.contains("-target aarch64-apple-darwin"));
-//RS     assert!(clang_commands.contains("-Wl,-undefined,error"));
-//RS     assert!(clang_commands.contains("proof.dylib"));
-//RS     assert!(fs::read_to_string(&ar_log).unwrap().contains("rcs"));
-//RS     let link = fs::read_to_string(cache.join("probe.link")).unwrap();
-//RS     assert!(link.contains("target\taarch64-apple-darwin"));
-//RS     assert!(link.contains("l\tc++"));
-//RS     let flags = jet::CFFI::resolve_link_for_target("jet_cpp_probe", &root, target).unwrap();
-//RS     assert!(flags.link_names.contains(&"c++".to_string()));
-//RS     assert!(!flags.link_names.contains(&"stdc++".to_string()));
-//RS 
-//RS     let shared_input = root.join("same-input");
-//RS     fs::create_dir(&shared_input).unwrap();
-//RS     let mut include_options = options.clone();
-//RS     include_options.include_dirs = vec![shared_input.clone()];
-//RS     let mut library_options = options.clone();
-//RS     library_options.library_dirs = vec![shared_input.clone()];
-//RS     let include_identity = jet::CppBind::cache_identity_for_test(&header, &include_options, target);
-//RS     let library_identity = jet::CppBind::cache_identity_for_test(&header, &library_options, target);
-//RS     assert_ne!(include_identity, library_identity);
-//RS 
-//RS     fs::write(&clang_log, "").unwrap();
-//RS     let include_result = jet::CppBind::bind(&header, &cache, &include_options).unwrap();
-//RS     let include_commands = fs::read_to_string(&clang_log).unwrap();
-//RS     let include_proof = include_commands
-//RS         .lines()
-//RS         .find(|line| line.contains("-shared"))
-//RS         .unwrap();
-//RS     assert!(!include_proof.contains(&format!("-L {}", shared_input.display())));
-//RS 
-//RS     fs::write(&clang_log, "").unwrap();
-//RS     let library_result = jet::CppBind::bind(&header, &cache, &library_options).unwrap();
-//RS     assert_ne!(
-//RS         include_result.archive.parent(),
-//RS         library_result.archive.parent()
-//RS     );
-//RS     let library_commands = fs::read_to_string(&clang_log).unwrap();
-//RS     let library_proof = library_commands
-//RS         .lines()
-//RS         .find(|line| line.contains("-shared"))
-//RS         .unwrap();
-//RS     assert!(library_proof.contains(&format!("-L {}", shared_input.display())));
-//RS 
-//RS     let first_identity = jet::CppBind::cache_identity_for_test(&header, &options, target);
-//RS     fs::write(
-//RS         &ar,
-//RS         format!(
-//RS             r#"#!/bin/sh
-//RS printf '%s\n' "$*" >> '{}'
-//RS if [ "$1" = "--version" ]; then printf '%s\n' 'fake ar 2'; exit 0; fi
-//RS : > "$2"
-//RS "#,
-//RS             ar_log.display()
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     let second_identity = jet::CppBind::cache_identity_for_test(&header, &options, target);
-//RS     assert_ne!(first_identity, second_identity);
-//RS 
-//RS     let _ = fs::remove_dir_all(root);
-//RS }
-//RS 
-//RS #[test]
-//RS fn cpp_link_metadata_requires_exact_selected_target() {
-//RS     let target = "aarch64-apple-darwin";
-//RS     let root = std::env::temp_dir().join(format!(
-//RS         "jet_cpp_link_target_{}_{}",
-//RS         std::process::id(),
-//RS         std::thread::current().name().unwrap_or("test")
-//RS     ));
-//RS     let dir = root.join(".jet/bindings/cpp");
-//RS     let _ = fs::remove_dir_all(&root);
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     fs::write(dir.join("libjet_cpp_probe.a"), "archive").unwrap();
-//RS     let metadata = dir.join("probe.link");
-//RS 
-//RS     for invalid in [
-//RS         "l\tc++\n",
-//RS         "target\tx86_64-unknown-linux-gnu\nl\tc++\n",
-//RS         "target\taarch64-apple-darwin\ntarget\taarch64-apple-darwin\nl\tc++\n",
-//RS         "target aarch64-apple-darwin\nl\tc++\n",
-//RS     ] {
-//RS         fs::write(&metadata, invalid).unwrap();
-//RS         assert!(jet::CFFI::resolve_link_for_target("jet_cpp_probe", &root, target).is_err());
-//RS     }
-//RS     fs::write(&metadata, "target\taarch64-apple-darwin\nl\tc++\n").unwrap();
-//RS     assert!(jet::CFFI::resolve_link_for_target("jet_cpp_probe", &root, target).is_ok());
-//RS 
-//RS     let _ = fs::remove_dir_all(root);
-//RS }
-//RS 
-//RS // ---------------------------------------------------------------------------
-//RS // Card #1348 — mixed-repository adoption loop.
-//RS //
-//RS // This is deliberately kept in the existing polyglot target.  It is the
-//RS // executable companion to Docs/spec/reference/mixed-repo.md and exercises the
-//RS // shipped Jet-as-host surfaces in one representative repository shape.  The
-//RS // native Jet Library -> C/C++ host direction is covered by
-//RS // `tests/library_outputs.rs`; JVM/JS/Python guest exports remain outside the
-//RS // current native Library contract.
-//RS // ---------------------------------------------------------------------------
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_required_tool(name: &str) -> PathBuf {
-//RS     tool(name).unwrap_or_else(|| {
-//RS         panic!(
-//RS             "mixed-repo production matrix requires `{name}`; install the host toolchain or run the host-gated proof in the provisioned Jet environment"
-//RS         )
-//RS     })
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_jet(cwd: &Path) -> Command {
-//RS     let mut command = Command::new(env!("CARGO_BIN_EXE_jet"));
-//RS     command.current_dir(cwd).env("NO_COLOR", "1");
-//RS     command
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_jet_output(cwd: &Path, args: &[&str], java_home: Option<&Path>) -> Output {
-//RS     let mut command = mixed_jet(cwd);
-//RS     if let Some(java_home) = java_home {
-//RS         command.env("JAVA_HOME", java_home);
-//RS     }
-//RS     command
-//RS         .args(args)
-//RS         .output()
-//RS         .unwrap_or_else(|error| panic!("could not start jet {args:?}: {error}"))
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_output_text(output: &Output) -> String {
-//RS     format!(
-//RS         "stdout:\n{}\nstderr:\n{}",
-//RS         String::from_utf8_lossy(&output.stdout),
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_assert_ok(label: &str, output: &Output) {
-//RS     assert!(output.status.success(), "{label} failed\n{}", mixed_output_text(output));
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_assert_failed_with(label: &str, output: &Output, marker: &str) {
-//RS     assert!(!output.status.success(), "{label} unexpectedly passed");
-//RS     let text = mixed_output_text(output);
-//RS     assert!(text.contains(marker), "{label} omitted `{marker}`\n{text}");
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_assert_common_provenance(path: &Path) -> String {
-//RS     let text = fs::read_to_string(path).unwrap();
-//RS     assert!(
-//RS         text.contains("schema=jet-ffi-bridge-provenance-v1\n"),
-//RS         "{} did not use the common bridge provenance schema:\n{text}",
-//RS         path.display()
-//RS     );
-//RS     assert!(
-//RS         text.lines().any(|line| line.starts_with("identity=")),
-//RS         "{} has no bridge identity:\n{text}",
-//RS         path.display()
-//RS     );
-//RS     text
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_write_package(root: &Path, name: &str, deps: Option<String>) {
-//RS     let dependency_line = deps
-//RS         .map(|deps| format!("deps: {{ {deps} }}\n"))
-//RS         .unwrap_or_default();
-//RS     fs::write(
-//RS         root.join("package.jet"),
-//RS         format!("name: \"{name}\"\nversion: \"0.1.0\"\n{dependency_line}"),
-//RS     )
-//RS     .unwrap();
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_build_archive(cc: &Path, ar: &Path, root: &Path, stem: &str, threaded: bool) {
-//RS     let source = root.join(format!("{stem}.c"));
-//RS     let object = root.join(format!("{stem}.o"));
-//RS     let archive = root.join(format!("lib{stem}.a"));
-//RS     let mut compile = Command::new(cc);
-//RS     compile.args(["-std=c11", "-fPIC", "-c"]);
-//RS     if threaded {
-//RS         compile.arg("-pthread");
-//RS     }
-//RS     compile.arg(&source).arg("-o").arg(&object);
-//RS     let output = compile.output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "C host compile failed\n{}",
-//RS         mixed_output_text(&output)
-//RS     );
-//RS     let mut archive_command = Command::new(ar);
-//RS     archive_command.args(["rcs"]).arg(&archive).arg(&object);
-//RS     let output = archive_command.output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "C host archive failed\n{}",
-//RS         mixed_output_text(&output)
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_build_cpp_archive(clang: &Path, ar: &Path, root: &Path, target: &str) {
-//RS     let source = root.join("counter.cpp");
-//RS     let object = root.join("counter.o");
-//RS     let archive = root.join("libcounter_impl.a");
-//RS     let mut compile = Command::new(clang);
-//RS     compile
-//RS         .args(["-std=c++17", "-fPIC", "-pthread", "-c", "-target"])
-//RS         .arg(target)
-//RS         .arg("-I")
-//RS         .arg(root)
-//RS         .arg(&source)
-//RS         .arg("-o")
-//RS         .arg(&object);
-//RS     let output = compile.output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "C++ host compile failed\n{}",
-//RS         mixed_output_text(&output)
-//RS     );
-//RS     let mut archive_command = Command::new(ar);
-//RS     archive_command.args(["rcs"]).arg(&archive).arg(&object);
-//RS     let output = archive_command.output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "C++ host archive failed\n{}",
-//RS         mixed_output_text(&output)
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_strip_archive(strip: &Path, archive: &Path, label: &str) {
-//RS     let mut command = Command::new(strip);
-//RS     if cfg!(target_os = "macos") {
-//RS         command.arg("-S");
-//RS     } else {
-//RS         command.arg("--strip-debug");
-//RS     }
-//RS     let output = command.arg(archive).output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "{label} strip failed\n{}",
-//RS         mixed_output_text(&output)
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_java_home(javac: &Path) -> PathBuf {
-//RS     let home = std::env::var_os("JAVA_HOME")
-//RS         .map(PathBuf::from)
-//RS         .or_else(|| javac.parent().and_then(Path::parent).map(Path::to_path_buf))
-//RS         .unwrap_or_else(|| panic!("cannot infer JAVA_HOME from {}", javac.display()));
-//RS     let runtime = home.join("lib/server").join(if cfg!(target_os = "macos") {
-//RS         "libjvm.dylib"
-//RS     } else {
-//RS         "libjvm.so"
-//RS     });
-//RS     assert!(
-//RS         runtime.is_file(),
-//RS         "JAVA_HOME={} has no embedded JVM runtime at {}",
-//RS         home.display(),
-//RS         runtime.display()
-//RS     );
-//RS     home
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_bind_c(root: &Path) -> Output {
-//RS     mixed_jet_output(
-//RS         root,
-//RS         &["inspect", "bind", "counter.h", "--pkg", "counter"],
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_bind_cpp(root: &Path, target: &str, clang: &Path, ar: &Path) -> Output {
-//RS     let mut command = mixed_jet(root);
-//RS     command
-//RS         .args(["inspect", "bind", "cpp", "counter.hpp", "--target"])
-//RS         .arg(target)
-//RS         .args(["--clang"])
-//RS         .arg(clang)
-//RS         .args(["--ar"])
-//RS         .arg(ar)
-//RS         .args(["--pkg", "counter", "--namespace", "acme", "-I"])
-//RS         .arg(root)
-//RS         .args(["-L"])
-//RS         .arg(root)
-//RS         .args(["-l", "counter_impl", "-l", "pthread"])
-//RS         .output()
-//RS         .unwrap()
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_bind_java(root: &Path, java_home: &Path) -> Output {
-//RS     mixed_jet_output(
-//RS         root,
-//RS         &["inspect", "bind", "java", "Counter.java", "--pkg", "counter"],
-//RS         Some(java_home),
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_bind_js(root: &Path) -> Output {
-//RS     mixed_jet_output(
-//RS         root,
-//RS         &[
-//RS             "inspect",
-//RS             "bind",
-//RS             "js",
-//RS             "ops.d.ts",
-//RS             "--runtime",
-//RS             "ops.mjs",
-//RS             "--pkg",
-//RS             "ops",
-//RS         ],
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_bind_python(root: &Path) -> Output {
-//RS     mixed_jet_output(
-//RS         root,
-//RS         &["inspect", "bind", "py", "ops.py", "--pkg", "ops"],
-//RS         None,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_run_workflow(root: &Path, expected: &str, java_home: Option<&Path>) {
-//RS     let run_file = root.join("run.jet");
-//RS     let run_path = run_file.to_str().unwrap();
-//RS     assert_eq!(jet::Debug::needs_native(run_path), Some(true));
-//RS 
-//RS     let checked = mixed_jet_output(root, &["check", "run.jet"], java_home);
-//RS     mixed_assert_ok("mixed-repo check", &checked);
-//RS 
-//RS     let built = mixed_jet_output(root, &["build", "--profile=debug", "run.jet"], java_home);
-//RS     mixed_assert_ok("mixed-repo debug build", &built);
-//RS 
-//RS     let tested = mixed_jet_output(
-//RS         root,
-//RS         &["test", "--coverage", "--profile=debug", "run.jet"],
-//RS         java_home,
-//RS     );
-//RS     mixed_assert_ok("mixed-repo test with coverage", &tested);
-//RS     assert!(
-//RS         mixed_output_text(&tested).contains("coverage:"),
-//RS         "test completed without a coverage report\n{}",
-//RS         mixed_output_text(&tested)
-//RS     );
-//RS 
-//RS     let run = mixed_jet_output(root, &["run", "--profile=debug", "run.jet"], java_home);
-//RS     mixed_assert_ok("mixed-repo debug-profile run", &run);
-//RS     assert_eq!(String::from_utf8_lossy(&run.stdout), expected);
-//RS 
-//RS     let debug_file = root.join("debug.jet");
-//RS     fs::write(
-//RS         &debug_file,
-//RS         include_str!("fixtures/mixed_repo/debug.jet"),
-//RS     )
-//RS     .unwrap();
-//RS     let debug = jet::Debug::run_session_result(debug_file.to_str().unwrap(), &["s", "c"]);
-//RS     assert_eq!(debug.status, jet::Debug::SessionStatus::Finished);
-//RS     assert!(debug.transcript.contains("program finished"));
-//RS     assert!(debug.transcript.contains("42"));
-//RS 
-//RS     let trace = root.join("profile.jettrace");
-//RS     let mut perf = mixed_jet(root);
-//RS     if let Some(java_home) = java_home {
-//RS         perf.env("JAVA_HOME", java_home);
-//RS     }
-//RS     let perf = perf
-//RS         .args(["perf", "run", "run.jet", "--profile=debug", "--out"])
-//RS         .arg(&trace)
-//RS         .output()
-//RS         .unwrap();
-//RS     mixed_assert_ok("mixed-repo profile capture", &perf);
-//RS     let trace_text = fs::read_to_string(&trace).unwrap();
-//RS     assert!(trace_text.contains("\"schema\":\"jet.trace\""));
-//RS     assert!(trace_text.contains("run.jet"));
-//RS     assert!(trace_text.contains("source_identity"));
-//RS     assert!(!trace_text.contains("__jet_"));
-//RS 
-//RS     let mut view = mixed_jet(root);
-//RS     let view = view
-//RS         .args(["perf", "view"])
-//RS         .arg(&trace)
-//RS         .arg("--json")
-//RS         .output()
-//RS         .unwrap();
-//RS     mixed_assert_ok("mixed-repo profile view", &view);
-//RS     let view_text = String::from_utf8_lossy(&view.stdout);
-//RS     assert!(view_text.contains("\"kind\":\"jet.trace.view\""));
-//RS     assert!(view_text.contains("\"flamegraph\":"));
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_recover_stale_descriptor(
-//RS     root: &Path,
-//RS     cache: &Path,
-//RS     expected: &str,
-//RS     java_home: Option<&Path>,
-//RS     rebind: impl FnOnce() -> Output,
-//RS ) {
-//RS     let original = fs::read_to_string(cache).unwrap();
-//RS     let stale = original.replacen(
-//RS         "jet-ffi-descriptor=",
-//RS         "jet-ffi-descriptor=stale-",
-//RS         1,
-//RS     );
-//RS     assert_ne!(original, stale);
-//RS     fs::write(cache, stale).unwrap();
-//RS     let rejected = mixed_jet_output(root, &["check", "run.jet"], java_home);
-//RS     mixed_assert_failed_with("stale foreign descriptor", &rejected, "E3208");
-//RS 
-//RS     let rebound = rebind();
-//RS     mixed_assert_ok("foreign descriptor recovery bind", &rebound);
-//RS     let recovered = mixed_jet_output(root, &["run", "--profile=debug", "run.jet"], java_home);
-//RS     mixed_assert_ok("foreign descriptor recovery run", &recovered);
-//RS     assert_eq!(String::from_utf8_lossy(&recovered.stdout), expected);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_assert_bad_bind(root: &Path, args: &[&str], cache: &Path) {
-//RS     let rejected = mixed_jet_output(root, args, None);
-//RS     mixed_assert_failed_with("malformed foreign source", &rejected, "E3208");
-//RS     assert!(!cache.exists(), "malformed foreign source published {cache:?}");
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_c_case(root: &Path, cc: &Path, ar: &Path, strip: &Path) {
-//RS     let root = root.join("c");
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     fs::write(
-//RS         root.join("counter.h"),
-//RS         include_str!("fixtures/mixed_repo/c/counter.h"),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         root.join("counter.c"),
-//RS         include_str!("fixtures/mixed_repo/c/counter.c"),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         root.join("run.jet"),
-//RS         include_str!("fixtures/mixed_repo/c/run.jet"),
-//RS     )
-//RS     .unwrap();
-//RS     mixed_write_package(
-//RS         &root,
-//RS         "mixed_c",
-//RS         Some(format!(
-//RS             "counter: c@\"{}\", pthread: c@system",
-//RS             root.display()
-//RS         )),
-//RS     );
-//RS     mixed_build_archive(cc, ar, &root, "counter", true);
-//RS 
-//RS     let bind = mixed_bind_c(&root);
-//RS     mixed_assert_ok("C header bind", &bind);
-//RS     let cache = root.join(".jet/bindings/c/counter.jet");
-//RS     assert!(fs::read_to_string(&cache)
-//RS         .unwrap()
-//RS         .contains("jet-ffi-descriptor="));
-//RS     assert!(root.join(".jet/bindings/c/counter.hash").is_file());
-//RS     let provenance = mixed_assert_common_provenance(
-//RS         &root.join(".jet/bindings/c/counter.provenance"),
-//RS     );
-//RS     assert!(provenance.contains("linked-archive="));
-//RS     assert!(provenance.contains("linked-archive-sha256="));
-//RS 
-//RS     let archive = root.join("libcounter.a");
-//RS     let original_archive = fs::read(&archive).unwrap();
-//RS     let mut changed_archive = original_archive.clone();
-//RS     changed_archive.push(0);
-//RS     fs::write(&archive, changed_archive).unwrap();
-//RS     let stale_archive = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("stale C implementation archive", &stale_archive, "E3208");
-//RS     fs::write(&archive, &original_archive).unwrap();
-//RS 
-//RS     mixed_run_workflow(&root, "42\n42\n", None);
-//RS     mixed_strip_archive(strip, &archive, "C host archive");
-//RS     let rebound = mixed_bind_c(&root);
-//RS     mixed_assert_ok("stripped C rebind", &rebound);
-//RS     let release = mixed_jet_output(&root, &["run", "--profile=release", "run.jet"], None);
-//RS     mixed_assert_ok("stripped C release run", &release);
-//RS     assert_eq!(String::from_utf8_lossy(&release.stdout), "42\n42\n");
-//RS 
-//RS     mixed_recover_stale_descriptor(&root, &cache, "42\n42\n", None, || mixed_bind_c(&root));
-//RS 
-//RS     fs::write(
-//RS         root.join("broken.h"),
-//RS         include_str!("fixtures/mixed_repo/c/broken.h"),
-//RS     )
-//RS     .unwrap();
-//RS     mixed_assert_bad_bind(
-//RS         &root,
-//RS         &["inspect", "bind", "broken.h", "--pkg", "broken"],
-//RS         &root.join(".jet/bindings/c/broken.jet"),
-//RS     );
-//RS     fs::write(
-//RS         root.join("broken.h"),
-//RS         "#include <stdint.h>\nint64_t repaired(int64_t value);\n",
-//RS     )
-//RS     .unwrap();
-//RS     let repaired = mixed_jet_output(
-//RS         &root,
-//RS         &["inspect", "bind", "broken.h", "--pkg", "broken"],
-//RS         None,
-//RS     );
-//RS     mixed_assert_ok("C malformed-header recovery", &repaired);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_cpp_case(root: &Path, clang: &Path, ar: &Path, strip: &Path, target: &str) {
-//RS     let root = root.join("cpp");
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     fs::write(
-//RS         root.join("counter.hpp"),
-//RS         include_str!("fixtures/mixed_repo/cpp/counter.hpp"),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         root.join("counter.cpp"),
-//RS         include_str!("fixtures/mixed_repo/cpp/counter.cpp"),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         root.join("run.jet"),
-//RS         include_str!("fixtures/mixed_repo/cpp/run.jet"),
-//RS     )
-//RS     .unwrap();
-//RS     mixed_write_package(&root, "mixed_cpp", None);
-//RS     mixed_build_cpp_archive(clang, ar, &root, target);
-//RS 
-//RS     let bind = mixed_bind_cpp(&root, target, clang, ar);
-//RS     mixed_assert_ok("C++ bind", &bind);
-//RS     let cache = root.join(".jet/bindings/cpp/counter.jet");
-//RS     let link = root.join(".jet/bindings/cpp/counter.link");
-//RS     assert!(fs::read_to_string(&cache)
-//RS         .unwrap()
-//RS         .contains("jet-ffi-descriptor="));
-//RS     let provenance = mixed_assert_common_provenance(
-//RS         &root.join(".jet/bindings/cpp/counter.provenance"),
-//RS     );
-//RS     assert!(provenance.contains("linked-archive="));
-//RS     assert!(provenance.contains("linked-archive-sha256="));
-//RS     assert!(link.is_file());
-//RS 
-//RS     let archive = root.join("libcounter_impl.a");
-//RS     let original_archive = fs::read(&archive).unwrap();
-//RS     let mut changed_archive = original_archive.clone();
-//RS     changed_archive.push(0);
-//RS     fs::write(&archive, changed_archive).unwrap();
-//RS     let stale_archive = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("stale C++ implementation archive", &stale_archive, "E3208");
-//RS     fs::write(&archive, &original_archive).unwrap();
-//RS 
-//RS     let header = root.join("counter.hpp");
-//RS     let original_header = fs::read_to_string(&header).unwrap();
-//RS     fs::write(&header, format!("{original_header}\n// stale binding source\n")).unwrap();
-//RS     let stale_source = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("stale C++ binding source", &stale_source, "E3208");
-//RS     fs::write(&header, original_header).unwrap();
-//RS 
-//RS     mixed_run_workflow(&root, "15\n17\n42\n42\n-1\n", None);
-//RS     mixed_strip_archive(strip, &archive, "C++ host archive");
-//RS     let rebound = mixed_bind_cpp(&root, target, clang, ar);
-//RS     mixed_assert_ok("stripped C++ rebind", &rebound);
-//RS     let release = mixed_jet_output(&root, &["run", "--profile=release", "run.jet"], None);
-//RS     mixed_assert_ok("stripped C++ release run", &release);
-//RS     assert_eq!(String::from_utf8_lossy(&release.stdout), "15\n17\n42\n42\n-1\n");
-//RS 
-//RS     mixed_recover_stale_descriptor(
-//RS         &root,
-//RS         &cache,
-//RS         "15\n17\n42\n42\n-1\n",
-//RS         None,
-//RS         || mixed_bind_cpp(&root, target, clang, ar),
-//RS     );
-//RS 
-//RS     let link_original = fs::read_to_string(&link).unwrap();
-//RS     let link_stale = link_original.replacen(
-//RS         &format!("target\t{target}"),
-//RS         "target\tmixed-invalid-target",
-//RS         1,
-//RS     );
-//RS     assert_ne!(link_original, link_stale);
-//RS     fs::write(&link, link_stale).unwrap();
-//RS     let abi_rejected = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("C++ ABI-target mismatch", &abi_rejected, "E3201");
-//RS     let rebound = mixed_bind_cpp(&root, target, clang, ar);
-//RS     mixed_assert_ok("C++ ABI-target recovery bind", &rebound);
-//RS     let recovered = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_ok("C++ ABI-target recovery run", &recovered);
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&recovered.stdout),
-//RS         "15\n17\n42\n42\n-1\n"
-//RS     );
-//RS 
-//RS     let link_original = fs::read_to_string(&link).unwrap();
-//RS     let link_stale = link_original.replacen(
-//RS         "l\tcounter_impl\n",
-//RS         "l\tcounter_impl_stale\n",
-//RS         1,
-//RS     );
-//RS     assert_ne!(link_original, link_stale);
-//RS     fs::write(&link, link_stale).unwrap();
-//RS     let stale_link = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("stale C++ link provenance", &stale_link, "E3208");
-//RS     let link_rebound = mixed_bind_cpp(&root, target, clang, ar);
-//RS     mixed_assert_ok("C++ link provenance recovery bind", &link_rebound);
-//RS     let link_recovered = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_ok("C++ link provenance recovery run", &link_recovered);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_java_case(root: &Path, java_home: &Path) {
-//RS     let root = root.join("jvm");
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     fs::write(
-//RS         root.join("Counter.java"),
-//RS         include_str!("fixtures/mixed_repo/jvm/Counter.java"),
-//RS     )
-//RS     .unwrap();
-//RS     fs::write(
-//RS         root.join("run.jet"),
-//RS         include_str!("fixtures/mixed_repo/jvm/run.jet"),
-//RS     )
-//RS     .unwrap();
-//RS     mixed_write_package(&root, "mixed_jvm", None);
-//RS 
-//RS     let bind = mixed_bind_java(&root, java_home);
-//RS     mixed_assert_ok("JVM bind", &bind);
-//RS     let cache = root.join(".jet/bindings/java/counter.jet");
-//RS     assert!(cache.is_file());
-//RS     mixed_assert_common_provenance(&root.join(".jet/bindings/java/counter.provenance"));
-//RS     assert!(root
-//RS         .join(".jet/bindings/java/counter.jvm-path")
-//RS         .is_file());
-//RS 
-//RS     mixed_run_workflow(&root, "42\n5.0\n-7\n", Some(java_home));
-//RS 
-//RS     let source = root.join("Counter.java");
-//RS     let original_source = fs::read_to_string(&source).unwrap();
-//RS     fs::write(&source, format!("{original_source}\n// stale binding source\n")).unwrap();
-//RS     let stale_source = mixed_jet_output(&root, &["run", "run.jet"], Some(java_home));
-//RS     mixed_assert_failed_with("stale JVM binding source", &stale_source, "E3208");
-//RS     fs::write(&source, original_source).unwrap();
-//RS 
-//RS     let edited = fs::read_to_string(&source)
-//RS         .unwrap()
-//RS         .replace("value += amount", "value += amount + 1");
-//RS     fs::write(&source, edited).unwrap();
-//RS     let rebound = mixed_bind_java(&root, java_home);
-//RS     mixed_assert_ok("edited JVM rebind", &rebound);
-//RS     let edited_run = mixed_jet_output(
-//RS         &root,
-//RS         &["run", "--profile=debug", "run.jet"],
-//RS         Some(java_home),
-//RS     );
-//RS     mixed_assert_ok("edited JVM run", &edited_run);
-//RS     assert_eq!(String::from_utf8_lossy(&edited_run.stdout), "43\n5.0\n-7\n");
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_js_case(root: &Path) {
-//RS     let root = root.join("js");
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     for (name, fixture) in [
-//RS         (
-//RS             "ops.d.ts",
-//RS             include_str!("fixtures/mixed_repo/js/ops.d.ts"),
-//RS         ),
-//RS         (
-//RS             "ops.mjs",
-//RS             include_str!("fixtures/mixed_repo/js/ops.mjs"),
-//RS         ),
-//RS         (
-//RS             "run.jet",
-//RS             include_str!("fixtures/mixed_repo/js/run.jet"),
-//RS         ),
-//RS         (
-//RS             "broken.d.ts",
-//RS             include_str!("fixtures/mixed_repo/js/broken.d.ts"),
-//RS         ),
-//RS     ] {
-//RS         fs::write(root.join(name), fixture).unwrap();
-//RS     }
-//RS     mixed_write_package(&root, "mixed_js", None);
-//RS 
-//RS     let bind = mixed_bind_js(&root);
-//RS     mixed_assert_ok("JavaScript bind", &bind);
-//RS     let cache = root.join(".jet/bindings/js/ops.jet");
-//RS     assert!(cache.is_file());
-//RS     mixed_assert_common_provenance(&root.join(".jet/bindings/js/ops.provenance"));
-//RS     mixed_run_workflow(&root, "5\n99\n123\n", None);
-//RS 
-//RS     let runtime = root.join("ops.mjs");
-//RS     let original_runtime = fs::read_to_string(&runtime).unwrap();
-//RS     fs::write(&runtime, format!("{original_runtime}\n// stale binding source\n")).unwrap();
-//RS     let stale_source = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("stale JavaScript binding source", &stale_source, "E3208");
-//RS     fs::write(&runtime, original_runtime).unwrap();
-//RS 
-//RS     mixed_recover_stale_descriptor(&root, &cache, "5\n99\n123\n", None, || {
-//RS         mixed_bind_js(&root)
-//RS     });
-//RS     mixed_assert_bad_bind(
-//RS         &root,
-//RS         &[
-//RS             "inspect",
-//RS             "bind",
-//RS             "js",
-//RS             "broken.d.ts",
-//RS             "--runtime",
-//RS             "ops.mjs",
-//RS             "--pkg",
-//RS             "broken",
-//RS         ],
-//RS         &root.join(".jet/bindings/js/broken.jet"),
-//RS     );
-//RS 
-//RS     let edited = fs::read_to_string(&runtime)
-//RS         .unwrap()
-//RS         .replace("return left + right", "return left + right + 1");
-//RS     fs::write(&runtime, edited).unwrap();
-//RS     let rebound = mixed_bind_js(&root);
-//RS     mixed_assert_ok("edited JavaScript rebind", &rebound);
-//RS     let edited_run = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_ok("edited JavaScript run", &edited_run);
-//RS     assert_eq!(String::from_utf8_lossy(&edited_run.stdout), "6\n99\n123\n");
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn mixed_python_case(root: &Path) {
-//RS     let root = root.join("python");
-//RS     fs::create_dir_all(&root).unwrap();
-//RS     for (name, fixture) in [
-//RS         ("ops.py", include_str!("fixtures/mixed_repo/python/ops.py")),
-//RS         (
-//RS             "run.jet",
-//RS             include_str!("fixtures/mixed_repo/python/run.jet"),
-//RS         ),
-//RS         (
-//RS             "broken.py",
-//RS             include_str!("fixtures/mixed_repo/python/broken.py"),
-//RS         ),
-//RS     ] {
-//RS         fs::write(root.join(name), fixture).unwrap();
-//RS     }
-//RS     mixed_write_package(&root, "mixed_python", None);
-//RS 
-//RS     let bind = mixed_bind_python(&root);
-//RS     mixed_assert_ok("Python bind", &bind);
-//RS     let cache = root.join(".jet/bindings/py/ops.jet");
-//RS     assert!(cache.is_file());
-//RS     mixed_assert_common_provenance(&root.join(".jet/bindings/py/ops.provenance"));
-//RS     mixed_run_workflow(&root, "5\nfalse\n99\n123\n", None);
-//RS 
-//RS     let source = root.join("ops.py");
-//RS     let original_source = fs::read_to_string(&source).unwrap();
-//RS     fs::write(&source, format!("{original_source}\n# stale binding source\n")).unwrap();
-//RS     let stale_source = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_failed_with("stale Python binding source", &stale_source, "E3208");
-//RS     fs::write(&source, original_source).unwrap();
-//RS 
-//RS     mixed_recover_stale_descriptor(&root, &cache, "5\nfalse\n99\n123\n", None, || {
-//RS         mixed_bind_python(&root)
-//RS     });
-//RS     mixed_assert_bad_bind(
-//RS         &root,
-//RS         &["inspect", "bind", "py", "broken.py", "--pkg", "broken"],
-//RS         &root.join(".jet/bindings/py/broken.jet"),
-//RS     );
-//RS 
-//RS     let edited = fs::read_to_string(&source)
-//RS         .unwrap()
-//RS         .replace("return left + right", "return left + right + 1");
-//RS     fs::write(&source, edited).unwrap();
-//RS     let rebound = mixed_bind_python(&root);
-//RS     mixed_assert_ok("edited Python rebind", &rebound);
-//RS     let edited_run = mixed_jet_output(&root, &["run", "run.jet"], None);
-//RS     mixed_assert_ok("edited Python run", &edited_run);
-//RS     assert_eq!(
-//RS         String::from_utf8_lossy(&edited_run.stdout),
-//RS         "6\nfalse\n99\n123\n"
-//RS     );
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn mixed_repo_edit_test_debug_profile_and_recovery_workflows() {
-//RS     let cc = mixed_required_tool("cc");
-//RS     let ar = mixed_required_tool("ar");
-//RS     let clang = mixed_required_tool("clang++");
-//RS     let strip = mixed_required_tool("strip");
-//RS     let _nm = mixed_required_tool("nm");
-//RS     let javac = mixed_required_tool("javac");
-//RS     let _javap = mixed_required_tool("javap");
-//RS     let _node = mixed_required_tool("node");
-//RS     let _python = mixed_required_tool("python3");
-//RS     let java_home = mixed_java_home(&javac);
-//RS     let root = common::Scratch::new("mixed-repo");
-//RS 
-//RS     mixed_c_case(&root.path, &cc, &ar, &strip);
-//RS     mixed_cpp_case(&root.path, &clang, &ar, &strip, env!("JET_BUILD_TARGET"));
-//RS     mixed_java_case(&root.path, &java_home);
-//RS     mixed_js_case(&root.path);
-//RS     mixed_python_case(&root.path);
-//RS }
-// END-PORT-PENDING 1134 tests/polyglot_systems.rs:1-1107
+use std.fs
+use std.env
+use std.process.[Command, Output]
+use core.sys.target.[selected_os, selected_family]
+use jet.Debug
 
+// Rust: tests/polyglot_systems.rs:15
+pub fn tool(name: String) -> OSPath? {
+    env.var_os("PATH").into_iter()
+        .flat_map(|value| -> env.split_paths(&value).collect())
+        .map(|dir| -> dir.join(name))
+        .find(|path| -> path.is_file())
+        .and_then(|path| -> fs.canonicalize(path).ok())
+}
+
+// Rust: tests/polyglot_systems.rs:24
+// GATE #4494: native process invocation.
+pub fn run(command: &Command) -> {
+    output :: command.output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(&output.stderr)}")
+}
+
+// Card #1348: mixed-repository adoption loop. Native Jet Library -> C/C++
+// hosts are covered by library_outputs; JVM/JS/Python guest exports remain
+// outside that native Library contract.
+// Rust: tests/polyglot_systems.rs:391
+pub fn mixed_required_tool(name: String) -> OSPath {
+    tool(name).unwrap_or_else(|| -> panic("mixed-repo production matrix requires `{name}`; install the host toolchain or run the host-gated proof in the provisioned Jet environment"))
+}
+
+// Rust: tests/polyglot_systems.rs:400
+// GATE #4494: native CLI process invocation.
+pub fn mixed_jet(cwd: OSPath) -> Command {
+    command := Command.new(env("CARGO_BIN_EXE_jet"))
+    command.current_dir(cwd).env("NO_COLOR", "1")
+    command
+}
+
+// Rust: tests/polyglot_systems.rs:407
+pub fn mixed_jet_output(cwd: OSPath, args: [String], java_home: OSPath?) -> Output {
+    command := mixed_jet(cwd)
+    if java_home is Some(home) { command.env("JAVA_HOME", home) }
+    command.args(args).output().unwrap_or_else(|error| -> panic("could not start jet {args:?}: {error}"))
+}
+
+// Rust: tests/polyglot_systems.rs:419
+pub fn mixed_output_text(output: Output) -> String {
+    "stdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}"
+}
+
+// Rust: tests/polyglot_systems.rs:428
+pub fn mixed_assert_ok(label: String, output: Output) -> {
+    assert(output.status.success(), "{label} failed\n{mixed_output_text(output)}")
+}
+
+// Rust: tests/polyglot_systems.rs:433
+pub fn mixed_assert_failed_with(label: String, output: Output, marker: String) -> {
+    assert(!output.status.success(), "{label} unexpectedly passed")
+    text :: mixed_output_text(output)
+    assert(text.contains(marker), "{label} omitted `{marker}`\n{text}")
+}
+
+// Rust: tests/polyglot_systems.rs:440
+pub fn mixed_assert_common_provenance(path: OSPath) -> String {
+    text :: fs.read_to_string(path).unwrap()
+    assert(text.contains("schema=jet-ffi-bridge-provenance-v1\n"), "{path.display()} did not use the common bridge provenance schema:\n{text}")
+    assert(text.lines().any(|line| -> line.starts_with("identity=")), "{path.display()} has no bridge identity:\n{text}")
+    text
+}
+
+// Rust: tests/polyglot_systems.rs:456
+pub fn mixed_write_package(root: OSPath, name: String, deps: String?) -> {
+    dependency_line :: deps.map(|deps| -> "deps: {{ {deps} }}\n").unwrap_or_default()
+    fs.write(root.join("package.jet"), "name: \"{name}\"\nversion: \"0.1.0\"\n{dependency_line}").unwrap()
+}
+
+// Rust: tests/polyglot_systems.rs:468
+pub fn mixed_build_archive(cc: OSPath, ar: OSPath, root: OSPath, stem: String, threaded: Bool) -> {
+    source :: root.join("{stem}.c")
+    object :: root.join("{stem}.o")
+    archive :: root.join("lib{stem}.a")
+    compile := Command.new(cc)
+    compile.args(["-std=c11", "-fPIC", "-c"])
+    if threaded { compile.arg("-pthread") }
+    compile.arg(&source).arg("-o").arg(&object)
+    output :: compile.output().unwrap()
+    assert(output.status.success(), "C host compile failed\n{mixed_output_text(output)}")
+    archive_command := Command.new(ar)
+    archive_command.args(["rcs"]).arg(&archive).arg(&object)
+    archived :: archive_command.output().unwrap()
+    assert(archived.status.success(), "C host archive failed\n{mixed_output_text(archived)}")
+}
+
+// Rust: tests/polyglot_systems.rs:495
+pub fn mixed_build_cpp_archive(clang: OSPath, ar: OSPath, root: OSPath, target: String) -> {
+    source :: root.join("counter.cpp")
+    object :: root.join("counter.o")
+    archive :: root.join("libcounter_impl.a")
+    compile := Command.new(clang)
+    compile.args(["-std=c++17", "-fPIC", "-pthread", "-c", "-target"]).arg(target).arg("-I").arg(root).arg(&source).arg("-o").arg(&object)
+    output :: compile.output().unwrap()
+    assert(output.status.success(), "C++ host compile failed\n{mixed_output_text(output)}")
+    archive_command := Command.new(ar)
+    archive_command.args(["rcs"]).arg(&archive).arg(&object)
+    archived :: archive_command.output().unwrap()
+    assert(archived.status.success(), "C++ host archive failed\n{mixed_output_text(archived)}")
+}
+
+// Rust: tests/polyglot_systems.rs:525
+pub fn mixed_strip_archive(strip: OSPath, archive: OSPath, label: String) -> {
+    command := Command.new(strip)
+    // GATE #4483: selected target, not the compiler host.
+    if selected_os() == "macos" { command.arg("-S") }
+    else { command.arg("--strip-debug") }
+    output :: command.arg(archive).output().unwrap()
+    assert(output.status.success(), "{label} strip failed\n{mixed_output_text(output)}")
+}
+
+// Rust: tests/polyglot_systems.rs:541
+pub fn mixed_java_home(javac: OSPath) -> OSPath {
+    home :: env.var_os("JAVA_HOME").map(|path| -> OSPath.from(path))
+        .or_else(|| -> javac.parent().and_then(|path| -> path.parent()).map(|path| -> path.to_path_buf()))
+        .unwrap_or_else(|| -> panic("cannot infer JAVA_HOME from {javac.display()}"))
+    // GATE #4483: selected OS controls the JVM library spelling.
+    runtime :: home.join("lib/server").join(if selected_os() == "macos" { "libjvm.dylib" } else { "libjvm.so" })
+    assert(runtime.is_file(), "JAVA_HOME={home.display()} has no embedded JVM runtime at {runtime.display()}")
+    home
+}
+
+// Rust: tests/polyglot_systems.rs:561
+pub fn mixed_bind_c(root: OSPath) -> Output {
+    mixed_jet_output(root, ["inspect", "bind", "counter.h", "--pkg", "counter"], None)
+}
+
+// Rust: tests/polyglot_systems.rs:570
+pub fn mixed_bind_cpp(root: OSPath, target: String, clang: OSPath, ar: OSPath) -> Output {
+    command := mixed_jet(root)
+    command.args(["inspect", "bind", "cpp", "counter.hpp", "--target"]).arg(target)
+        .args(["--clang"]).arg(clang).args(["--ar"]).arg(ar)
+        .args(["--pkg", "counter", "--namespace", "acme", "-I"]).arg(root)
+        .args(["-L"]).arg(root).args(["-l", "counter_impl", "-l", "pthread"]).output().unwrap()
+}
+
+// Rust: tests/polyglot_systems.rs:589
+pub fn mixed_bind_java(root: OSPath, java_home: OSPath) -> Output {
+    mixed_jet_output(root, ["inspect", "bind", "java", "Counter.java", "--pkg", "counter"], Some(java_home))
+}
+
+// Rust: tests/polyglot_systems.rs:598
+pub fn mixed_bind_js(root: OSPath) -> Output {
+    mixed_jet_output(root, ["inspect", "bind", "js", "ops.d.ts", "--runtime", "ops.mjs", "--pkg", "ops"], None)
+}
+
+// Rust: tests/polyglot_systems.rs:616
+pub fn mixed_bind_python(root: OSPath) -> Output {
+    mixed_jet_output(root, ["inspect", "bind", "py", "ops.py", "--pkg", "ops"], None)
+}
+
+// Rust: tests/polyglot_systems.rs:625
+pub fn mixed_run_workflow(root: OSPath, expected: String, java_home: OSPath?) -> {
+    run_file :: root.join("run.jet")
+    run_path :: run_file.to_str().unwrap()
+    assert_eq(Debug.needs_native(run_path), Some(true))
+    checked :: mixed_jet_output(root, ["check", "run.jet"], java_home)
+    mixed_assert_ok("mixed-repo check", checked)
+    built :: mixed_jet_output(root, ["build", "--profile=debug", "run.jet"], java_home)
+    mixed_assert_ok("mixed-repo debug build", built)
+    tested :: mixed_jet_output(root, ["test", "--coverage", "--profile=debug", "run.jet"], java_home)
+    mixed_assert_ok("mixed-repo test with coverage", tested)
+    assert(mixed_output_text(tested).contains("coverage:"), "test completed without a coverage report\n{mixed_output_text(tested)}")
+    run_output :: mixed_jet_output(root, ["run", "--profile=debug", "run.jet"], java_home)
+    mixed_assert_ok("mixed-repo debug-profile run", run_output)
+    assert_eq(String.from_utf8_lossy(&run_output.stdout), expected)
+    debug_file :: root.join("debug.jet")
+    fs.write(&debug_file, include_str("tests/fixtures/mixed_repo/debug.jet")).unwrap()
+    debug :: Debug.run_session_result(debug_file.to_str().unwrap(), ["s", "c"])
+    assert_eq(debug.status, Debug.SessionStatus.Finished)
+    assert(debug.transcript.contains("program finished"))
+    assert(debug.transcript.contains("42"))
+    trace :: root.join("profile.jettrace")
+    perf_command := mixed_jet(root)
+    if java_home is Some(home) { perf_command.env("JAVA_HOME", home) }
+    perf :: perf_command.args(["perf", "run", "run.jet", "--profile=debug", "--out"]).arg(&trace).output().unwrap()
+    mixed_assert_ok("mixed-repo profile capture", perf)
+    trace_text :: fs.read_to_string(&trace).unwrap()
+    assert(trace_text.contains("\"schema\":\"jet.trace\""))
+    assert(trace_text.contains("run.jet"))
+    assert(trace_text.contains("source_identity"))
+    assert(!trace_text.contains("__jet_"))
+    view_command := mixed_jet(root)
+    view :: view_command.args(["perf", "view"]).arg(&trace).arg("--json").output().unwrap()
+    mixed_assert_ok("mixed-repo profile view", view)
+    view_text :: String.from_utf8_lossy(&view.stdout)
+    assert(view_text.contains("\"kind\":\"jet.trace.view\""))
+    assert(view_text.contains("\"flamegraph\":"))
+}
+
+// Rust: tests/polyglot_systems.rs:694
+pub fn mixed_recover_stale_descriptor(root: OSPath, cache: OSPath, expected: String, java_home: OSPath?, rebind: fn() -> Output) -> {
+    original :: fs.read_to_string(cache).unwrap()
+    stale :: original.replacen("jet-ffi-descriptor=", "jet-ffi-descriptor=stale-", 1)
+    assert_ne(original, stale)
+    fs.write(cache, stale).unwrap()
+    rejected :: mixed_jet_output(root, ["check", "run.jet"], java_home)
+    mixed_assert_failed_with("stale foreign descriptor", rejected, "E3208")
+    rebound :: rebind()
+    mixed_assert_ok("foreign descriptor recovery bind", rebound)
+    recovered :: mixed_jet_output(root, ["run", "--profile=debug", "run.jet"], java_home)
+    mixed_assert_ok("foreign descriptor recovery run", recovered)
+    assert_eq(String.from_utf8_lossy(&recovered.stdout), expected)
+}
+
+// Rust: tests/polyglot_systems.rs:720
+pub fn mixed_assert_bad_bind(root: OSPath, args: [String], cache: OSPath) -> {
+    rejected :: mixed_jet_output(root, args, None)
+    mixed_assert_failed_with("malformed foreign source", rejected, "E3208")
+    assert(!cache.exists(), "malformed foreign source published {cache:?}")
+}
+
+// Rust: tests/polyglot_systems.rs:727
+pub fn mixed_c_case(root: OSPath, cc: OSPath, ar: OSPath, strip: OSPath) -> {
+    case_root :: root.join("c")
+    fs.create_dir_all(&case_root).unwrap()
+    fs.write(case_root.join("counter.h"), include_str("tests/fixtures/mixed_repo/c/counter.h")).unwrap()
+    fs.write(case_root.join("counter.c"), include_str("tests/fixtures/mixed_repo/c/counter.c")).unwrap()
+    fs.write(case_root.join("run.jet"), include_str("tests/fixtures/mixed_repo/c/run.jet")).unwrap()
+    mixed_write_package(case_root, "mixed_c", Some("counter: c@\"{case_root.display()}\", pthread: c@system"))
+    mixed_build_archive(cc, ar, case_root, "counter", true)
+    bind :: mixed_bind_c(case_root)
+    mixed_assert_ok("C header bind", bind)
+    cache :: case_root.join(".jet/bindings/c/counter.jet")
+    assert(fs.read_to_string(&cache).unwrap().contains("jet-ffi-descriptor="))
+    assert(case_root.join(".jet/bindings/c/counter.hash").is_file())
+    provenance :: mixed_assert_common_provenance(case_root.join(".jet/bindings/c/counter.provenance"))
+    assert(provenance.contains("linked-archive="))
+    assert(provenance.contains("linked-archive-sha256="))
+    archive :: case_root.join("libcounter.a")
+    original_archive :: fs.read(&archive).unwrap()
+    changed_archive := original_archive.clone()
+    changed_archive.push(0)
+    fs.write(&archive, changed_archive).unwrap()
+    stale_archive :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("stale C implementation archive", stale_archive, "E3208")
+    fs.write(&archive, &original_archive).unwrap()
+    mixed_run_workflow(case_root, "42\n42\n", None)
+    mixed_strip_archive(strip, archive, "C host archive")
+    rebound :: mixed_bind_c(case_root)
+    mixed_assert_ok("stripped C rebind", rebound)
+    release :: mixed_jet_output(case_root, ["run", "--profile=release", "run.jet"], None)
+    mixed_assert_ok("stripped C release run", release)
+    assert_eq(String.from_utf8_lossy(&release.stdout), "42\n42\n")
+    mixed_recover_stale_descriptor(case_root, cache, "42\n42\n", None, || -> mixed_bind_c(case_root))
+    fs.write(case_root.join("broken.h"), include_str("tests/fixtures/mixed_repo/c/broken.h")).unwrap()
+    mixed_assert_bad_bind(case_root, ["inspect", "bind", "broken.h", "--pkg", "broken"], case_root.join(".jet/bindings/c/broken.jet"))
+    fs.write(case_root.join("broken.h"), "#include <stdint.h>\nint64_t repaired(int64_t value);\n").unwrap()
+    repaired :: mixed_jet_output(case_root, ["inspect", "bind", "broken.h", "--pkg", "broken"], None)
+    mixed_assert_ok("C malformed-header recovery", repaired)
+}
+
+// Rust: tests/polyglot_systems.rs:811
+pub fn mixed_cpp_case(root: OSPath, clang: OSPath, ar: OSPath, strip: OSPath, target: String) -> {
+    case_root :: root.join("cpp")
+    fs.create_dir_all(&case_root).unwrap()
+    fs.write(case_root.join("counter.hpp"), include_str("tests/fixtures/mixed_repo/cpp/counter.hpp")).unwrap()
+    fs.write(case_root.join("counter.cpp"), include_str("tests/fixtures/mixed_repo/cpp/counter.cpp")).unwrap()
+    fs.write(case_root.join("run.jet"), include_str("tests/fixtures/mixed_repo/cpp/run.jet")).unwrap()
+    mixed_write_package(case_root, "mixed_cpp", None)
+    mixed_build_cpp_archive(clang, ar, case_root, target)
+    bind :: mixed_bind_cpp(case_root, target, clang, ar)
+    mixed_assert_ok("C++ bind", bind)
+    cache :: case_root.join(".jet/bindings/cpp/counter.jet")
+    link :: case_root.join(".jet/bindings/cpp/counter.link")
+    assert(fs.read_to_string(&cache).unwrap().contains("jet-ffi-descriptor="))
+    provenance :: mixed_assert_common_provenance(case_root.join(".jet/bindings/cpp/counter.provenance"))
+    assert(provenance.contains("linked-archive="))
+    assert(provenance.contains("linked-archive-sha256="))
+    assert(link.is_file())
+    archive :: case_root.join("libcounter_impl.a")
+    original_archive :: fs.read(&archive).unwrap()
+    changed_archive := original_archive.clone()
+    changed_archive.push(0)
+    fs.write(&archive, changed_archive).unwrap()
+    stale_archive :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("stale C++ implementation archive", stale_archive, "E3208")
+    fs.write(&archive, &original_archive).unwrap()
+    header :: case_root.join("counter.hpp")
+    original_header :: fs.read_to_string(&header).unwrap()
+    fs.write(&header, "{original_header}\n// stale binding source\n").unwrap()
+    stale_source :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("stale C++ binding source", stale_source, "E3208")
+    fs.write(&header, original_header).unwrap()
+    mixed_run_workflow(case_root, "15\n17\n42\n42\n-1\n", None)
+    mixed_strip_archive(strip, archive, "C++ host archive")
+    rebound :: mixed_bind_cpp(case_root, target, clang, ar)
+    mixed_assert_ok("stripped C++ rebind", rebound)
+    release :: mixed_jet_output(case_root, ["run", "--profile=release", "run.jet"], None)
+    mixed_assert_ok("stripped C++ release run", release)
+    assert_eq(String.from_utf8_lossy(&release.stdout), "15\n17\n42\n42\n-1\n")
+    mixed_recover_stale_descriptor(case_root, cache, "15\n17\n42\n42\n-1\n", None, || -> mixed_bind_cpp(case_root, target, clang, ar))
+    link_original :: fs.read_to_string(&link).unwrap()
+    link_stale :: link_original.replacen("target\t{target}", "target\tmixed-invalid-target", 1)
+    assert_ne(link_original, link_stale)
+    fs.write(&link, link_stale).unwrap()
+    abi_rejected :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("C++ ABI-target mismatch", abi_rejected, "E3201")
+    abi_rebound :: mixed_bind_cpp(case_root, target, clang, ar)
+    mixed_assert_ok("C++ ABI-target recovery bind", abi_rebound)
+    recovered :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_ok("C++ ABI-target recovery run", recovered)
+    assert_eq(String.from_utf8_lossy(&recovered.stdout), "15\n17\n42\n42\n-1\n")
+    link_current :: fs.read_to_string(&link).unwrap()
+    stale_names :: link_current.replacen("l\tcounter_impl\n", "l\tcounter_impl_stale\n", 1)
+    assert_ne(link_current, stale_names)
+    fs.write(&link, stale_names).unwrap()
+    stale_link :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("stale C++ link provenance", stale_link, "E3208")
+    link_rebound :: mixed_bind_cpp(case_root, target, clang, ar)
+    mixed_assert_ok("C++ link provenance recovery bind", link_rebound)
+    link_recovered :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_ok("C++ link provenance recovery run", link_recovered)
+}
+
+// Rust: tests/polyglot_systems.rs:914
+pub fn mixed_java_case(root: OSPath, java_home: OSPath) -> {
+    case_root :: root.join("jvm")
+    fs.create_dir_all(&case_root).unwrap()
+    fs.write(case_root.join("Counter.java"), include_str("tests/fixtures/mixed_repo/jvm/Counter.java")).unwrap()
+    fs.write(case_root.join("run.jet"), include_str("tests/fixtures/mixed_repo/jvm/run.jet")).unwrap()
+    mixed_write_package(case_root, "mixed_jvm", None)
+    bind :: mixed_bind_java(case_root, java_home)
+    mixed_assert_ok("JVM bind", bind)
+    cache :: case_root.join(".jet/bindings/java/counter.jet")
+    assert(cache.is_file())
+    _ :: mixed_assert_common_provenance(case_root.join(".jet/bindings/java/counter.provenance"))
+    assert(case_root.join(".jet/bindings/java/counter.jvm-path").is_file())
+    mixed_run_workflow(case_root, "42\n5.0\n-7\n", Some(java_home))
+    source :: case_root.join("Counter.java")
+    original_source :: fs.read_to_string(&source).unwrap()
+    fs.write(&source, "{original_source}\n// stale binding source\n").unwrap()
+    stale_source :: mixed_jet_output(case_root, ["run", "run.jet"], Some(java_home))
+    mixed_assert_failed_with("stale JVM binding source", stale_source, "E3208")
+    fs.write(&source, original_source).unwrap()
+    edited :: fs.read_to_string(&source).unwrap().replace("value += amount", "value += amount + 1")
+    fs.write(&source, edited).unwrap()
+    rebound :: mixed_bind_java(case_root, java_home)
+    mixed_assert_ok("edited JVM rebind", rebound)
+    edited_run :: mixed_jet_output(case_root, ["run", "--profile=debug", "run.jet"], Some(java_home))
+    mixed_assert_ok("edited JVM run", edited_run)
+    assert_eq(String.from_utf8_lossy(&edited_run.stdout), "43\n5.0\n-7\n")
+}
+
+// Rust: tests/polyglot_systems.rs:963
+pub fn mixed_js_case(root: OSPath) -> {
+    case_root :: root.join("js")
+    fs.create_dir_all(&case_root).unwrap()
+    for (name, fixture) in [
+        ("ops.d.ts", include_str("tests/fixtures/mixed_repo/js/ops.d.ts")),
+        ("ops.mjs", include_str("tests/fixtures/mixed_repo/js/ops.mjs")),
+        ("run.jet", include_str("tests/fixtures/mixed_repo/js/run.jet")),
+        ("broken.d.ts", include_str("tests/fixtures/mixed_repo/js/broken.d.ts"))
+    ] { fs.write(case_root.join(name), fixture).unwrap() }
+    mixed_write_package(case_root, "mixed_js", None)
+    bind :: mixed_bind_js(case_root)
+    mixed_assert_ok("JavaScript bind", bind)
+    cache :: case_root.join(".jet/bindings/js/ops.jet")
+    assert(cache.is_file())
+    _ :: mixed_assert_common_provenance(case_root.join(".jet/bindings/js/ops.provenance"))
+    mixed_run_workflow(case_root, "5\n99\n123\n", None)
+    runtime :: case_root.join("ops.mjs")
+    original_runtime :: fs.read_to_string(&runtime).unwrap()
+    fs.write(&runtime, "{original_runtime}\n// stale binding source\n").unwrap()
+    stale_source :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("stale JavaScript binding source", stale_source, "E3208")
+    fs.write(&runtime, original_runtime).unwrap()
+    mixed_recover_stale_descriptor(case_root, cache, "5\n99\n123\n", None, || -> mixed_bind_js(case_root))
+    mixed_assert_bad_bind(case_root, ["inspect", "bind", "js", "broken.d.ts", "--runtime", "ops.mjs", "--pkg", "broken"], case_root.join(".jet/bindings/js/broken.jet"))
+    edited :: fs.read_to_string(&runtime).unwrap().replace("return left + right", "return left + right + 1")
+    fs.write(&runtime, edited).unwrap()
+    rebound :: mixed_bind_js(case_root)
+    mixed_assert_ok("edited JavaScript rebind", rebound)
+    edited_run :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_ok("edited JavaScript run", edited_run)
+    assert_eq(String.from_utf8_lossy(&edited_run.stdout), "6\n99\n123\n")
+}
+
+// Rust: tests/polyglot_systems.rs:1032
+pub fn mixed_python_case(root: OSPath) -> {
+    case_root :: root.join("python")
+    fs.create_dir_all(&case_root).unwrap()
+    for (name, fixture) in [
+        ("ops.py", include_str("tests/fixtures/mixed_repo/python/ops.py")),
+        ("run.jet", include_str("tests/fixtures/mixed_repo/python/run.jet")),
+        ("broken.py", include_str("tests/fixtures/mixed_repo/python/broken.py"))
+    ] { fs.write(case_root.join(name), fixture).unwrap() }
+    mixed_write_package(case_root, "mixed_python", None)
+    bind :: mixed_bind_python(case_root)
+    mixed_assert_ok("Python bind", bind)
+    cache :: case_root.join(".jet/bindings/py/ops.jet")
+    assert(cache.is_file())
+    _ :: mixed_assert_common_provenance(case_root.join(".jet/bindings/py/ops.provenance"))
+    mixed_run_workflow(case_root, "5\nfalse\n99\n123\n", None)
+    source :: case_root.join("ops.py")
+    original_source :: fs.read_to_string(&source).unwrap()
+    fs.write(&source, "{original_source}\n# stale binding source\n").unwrap()
+    stale_source :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_failed_with("stale Python binding source", stale_source, "E3208")
+    fs.write(&source, original_source).unwrap()
+    mixed_recover_stale_descriptor(case_root, cache, "5\nfalse\n99\n123\n", None, || -> mixed_bind_python(case_root))
+    mixed_assert_bad_bind(case_root, ["inspect", "bind", "py", "broken.py", "--pkg", "broken"], case_root.join(".jet/bindings/py/broken.jet"))
+    edited :: fs.read_to_string(&source).unwrap().replace("return left + right", "return left + right + 1")
+    fs.write(&source, edited).unwrap()
+    rebound :: mixed_bind_python(case_root)
+    mixed_assert_ok("edited Python rebind", rebound)
+    edited_run :: mixed_jet_output(case_root, ["run", "run.jet"], None)
+    mixed_assert_ok("edited Python run", edited_run)
+    assert_eq(String.from_utf8_lossy(&edited_run.stdout), "6\nfalse\n99\n123\n")
+}

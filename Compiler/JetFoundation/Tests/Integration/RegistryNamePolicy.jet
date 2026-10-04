@@ -1,0 +1,53 @@
+use core.fs as fs
+use std.[env, process]
+use std.process.[Command, Output]
+use std.time.[SystemTime, UNIX_EPOCH]
+use jet
+
+// GATE #4494: real process, filesystem and clock providers.
+// Rust: tests/registry_name_policy.rs:7
+fn scratch(label: String) -> OSPath {
+    path :: env.temp_dir().join("jet_registry_name_policy_{label}_{process.id()}_{SystemTime.now().duration_since(UNIX_EPOCH).unwrap().as_nanos()}")
+    fs.create_dir_all(&path).unwrap()
+    path
+}
+// Rust: tests/registry_name_policy.rs:20
+fn git(cwd: OSPath, args: [String]) -> Output {
+    output :: Command.new("git").args(args).current_dir(cwd).output().unwrap_or_else((error) -> panic("git {args:?} failed to start: {error}"))
+    assert(output.status.success(), "git {args:?} failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    output
+}
+// Rust: tests/registry_name_policy.rs:34
+fn seed_existing_name(registry: OSPath) -> {
+    _ :: Command.new("git").args(["init", "--bare", registry.to_str().unwrap()]).status().unwrap()
+    _ :: Command.new("git").args(["--git-dir", registry.to_str().unwrap(), "symbolic-ref", "HEAD", "refs/heads/main"]).status().unwrap()
+    work :: registry.with_extension("seed-{process.id()}")
+    url :: "file://{registry.to_str().unwrap()}"
+    _ :: git(OSPath.new("."), ["clone", &url, work.to_str().unwrap()])
+    entry :: jet.Publish.IndexEntry{
+        name: "librewolf", version: "1.0.0", content_hash: "sha256-existing",
+        fingerprint: "sha256-existing-fingerprint", yanked: false,
+        tier: jet.Publish.RegistryTier.Core, gate_status: jet.Publish.GateStatus.core_reviewed(),
+        public_key: "", signature: ""
+    }
+    index :: work.join("index/librewolf/librewolf.jsonl")
+    fs.create_dir_all(index.parent().unwrap()).unwrap()
+    fs.write(&index, "{entry.to_jsonl()}\n").unwrap()
+    _ :: git(&work, ["config", "user.email", "test@jet.test"])
+    _ :: git(&work, ["config", "user.name", "Jet Test"])
+    _ :: git(&work, ["add", "."])
+    _ :: git(&work, ["commit", "-m", "seed package name"])
+    _ :: git(&work, ["push", "origin", "HEAD:main"])
+    fs.remove_dir_all(work).unwrap()
+}
+// Rust: tests/registry_name_policy.rs:75
+fn init_project(project: OSPath) -> {
+    fs.create_dir_all(project).unwrap()
+    fs.write(project.join("package.jet"), "name: \"librewolf-fixed-bin\"\nversion: \"1.0.0\"\njet: \">=0.1.0\"\ndescription: \"\"\nlicense: \"MIT\"\nrepository: \"\"\n").unwrap()
+    fs.write(project.join("run.jet"), "#Test(\"smoke\") { expect(1 == 1) }\nfn run() { print(\"hello\") }\n").unwrap()
+    _ :: git(project, ["init", "-b", "main"])
+    _ :: git(project, ["config", "user.email", "test@jet.test"])
+    _ :: git(project, ["config", "user.name", "Jet Test"])
+    _ :: git(project, ["add", "."])
+    _ :: git(project, ["commit", "-m", "initial package"])
+}

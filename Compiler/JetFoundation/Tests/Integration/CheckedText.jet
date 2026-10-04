@@ -1,0 +1,140 @@
+use jet_foundation.Tests.Integration.Common as common
+use jet
+use std.[fs, process]
+use std.process.Command
+
+// Rust: tests/checked_text.rs:11
+pub const SOURCE: String = """
+#Error
+enum TextError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = TextError
+    fn check(text: String) -[]> Unit TextError! {
+        if text == "" { return Err(TextError.Bad) }
+        return Ok()
+    }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "{hole}" }
+}
+fn run() -> {
+    value :: Pattern{"hello"}
+    print("{value.raw()}")
+}
+"""
+// Rust: tests/checked_text.rs:36
+pub const TIERS_SOURCE: String = """
+#Error
+enum TextError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = TextError
+    fn check(text: String) -[]> Unit TextError! {
+        if text == "hello [1]" || text == "ok" { return Ok() }
+        return Err(TextError.Bad)
+    }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "[1]" }
+}
+fn accepts(text: String) -[]> Bool {
+    result :: Pattern.from(text)
+    result ? value -> return true ! error -> return false
+}
+COMPTIME_GOOD :: prep { accepts("ok") }
+COMPTIME_BAD :: prep { accepts("") }
+fn run() -> {
+    literal :: Pattern{"hello {1}"}
+    print(literal.raw())
+    good :: Pattern.from("ok")
+    good ? value -> print(value.raw()) ! error -> print("good rejected")
+    bad :: Pattern.from("")
+    bad ? value -> print("bad accepted") ! error -> print("bad rejected")
+    runtime_good :: accepts("ok")
+    runtime_bad :: accepts("")
+    print("{COMPTIME_GOOD}")
+    print("{COMPTIME_BAD}")
+    print("{runtime_good}")
+    print("{runtime_bad}")
+}
+"""
+// Rust: tests/checked_text.rs:82
+pub const TIERS_STDOUT: String = "hello [1]\nok\nbad rejected\ntrue\nfalse\ntrue\nfalse\n"
+// Rust: tests/checked_text.rs:84
+pub const HTML_TIERS_SOURCE: String = """
+fn run() -> {
+    name :: "<script>&"
+    fragment :: HTML{"<strong>safe</strong>"}
+    page :: HTML{"<p>{name}</p>{fragment}"}
+    print(page.text())
+    static :: HTML{"<hr>"}
+    print(static.text())
+}
+"""
+// Rust: tests/checked_text.rs:95
+pub const HTML_TIERS_STDOUT: String = "<p>&lt;script&gt;&amp;</p><strong>safe</strong>\n<hr>\n"
+// Rust: tests/checked_text.rs:97
+pub const DYNAMIC_ERROR_SOURCE: String = """
+#Error
+enum PatternError { Rejected }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = PatternError
+    fn check(text: String) -[]> Unit PatternError! {
+        if text == "bad" { return Err(PatternError.Rejected) }
+        return Ok()
+    }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
+}
+impl PatternError -> Err {
+    return Err("pattern rejected", code: "E_PATTERN", cause: Err("invalid shape"))
+}
+fn parse(text: String) -[]> Pattern {
+    pattern :: Pattern.from(text)
+    return Ok(pattern)
+}
+fn load(text: String) -[]> Pattern {
+    pattern :: parse(text)?("loading pattern")
+    return Ok(pattern)
+}
+fn run() -> { _ :: load("bad") }
+"""
+// Rust: tests/checked_text.rs:135
+pub fn normalize_journey_paths(stderr: String) -> String {
+    normalized := stderr.lines().map(fn(line) {
+        open :: line.find(" (") ?? return line.to_string()
+        colon :: line.rfind(':') ?? return line.to_string()
+        if !line[open + 2..<colon].contains(".jet") -> return line.to_string()
+        "{line[..<open + 2]}<source>:{line[colon + 1..]}"
+    }).collect::<[String]>().join("\n")
+    if stderr.ends_with('\n') -> normalized.push('\n')
+    normalized
+}
+// Rust: tests/checked_text.rs:274
+pub fn assert_checked_text_web_tier() -> Unit {
+    output :: jet.compile_web_with_path(TIERS_SOURCE, "checked_text_web.jet").expect("ordinary CheckedText source should compile for web")
+    web :: output.web.expect("ordinary CheckedText source should produce web artifacts")
+    // Retired wasm-Rust symbol checks migrate to real checked-text acceptance.
+    assert_web_artifacts_run(&web.js_app, &web.dom_runtime, &web.wasm, TIERS_STDOUT, "checked-text-web")
+}
+// Rust: tests/checked_text.rs:293
+pub fn assert_html_web_tier() -> Unit {
+    output :: jet.compile_web_with_path(HTML_TIERS_SOURCE, "html_composition_web.jet").expect("typed HTML composition should compile for web")
+    web :: output.web.expect("typed HTML composition should produce web artifacts")
+    assert_web_artifacts_run(&web.js_app, &web.dom_runtime, &web.wasm, HTML_TIERS_STDOUT, "html-composition-web")
+}
+// Rust: tests/checked_text.rs:308
+pub fn assert_web_artifacts_run(js_app: String, dom_runtime: String, wasm: &[U8], expected_stdout: String, scratch_name: String) -> Unit {
+    // GATE #4494: real Node execution; wasm is the canonical emitted binary,
+    // never a Rust source callback or a fabricated execution result.
+    have_tool :: fn(name: String) { Command.new(name).arg("--version").output().map(fn(output) { output.status.success() }).unwrap_or(false) }
+    if !have_tool("node") {
+        eprintln("note: skipping web execution (need node)")
+        return
+    }
+    scratch :: common.Scratch.new(scratch_name)
+    fs.write(scratch.join("app.js"), js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), dom_runtime).unwrap()
+    fs.write(scratch.join("app.wasm"), wasm).unwrap()
+    fs.write(scratch.join("package.json"), """{"type":"module"}""").unwrap()
+    node :: Command.new("node").current_dir(&scratch.path).arg("app.js").output().expect("spawn web app")
+    assert(node.status.success(), "node rejected web output: stdout={String.from_utf8_lossy(&node.stdout)} stderr={String.from_utf8_lossy(&node.stderr)}")
+    assert_eq(String.from_utf8_lossy(&node.stdout), expected_stdout)
+}

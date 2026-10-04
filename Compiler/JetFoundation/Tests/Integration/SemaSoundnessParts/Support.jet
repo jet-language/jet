@@ -1,0 +1,105 @@
+use core.fs as fs
+use std.env as env
+use std.process.[Command, Stdio]
+use std.thread as thread
+use std.time.[Duration, Instant]
+use std.panic as panic_runtime
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.Common.[fixture_matches, normalize_fixture_selector]
+// SUITE is supplied by the including lane, as in the Rust include! owner.
+
+// Rust: tests/sema_soundness_parts/support.rs:9
+pub DEFAULT_DEV_CASE_DEADLINE :: Duration.from_secs(120)
+// Rust: tests/sema_soundness_parts/support.rs:18
+pub GATED_UNSAFE_STEMS :: ["lowlevel/lowlevel", "lowlevel/pointer_cast_deref", "memory/rawptr", "effects/single_use_discard", "memory/uninit", "crypto/crypto_migration"]
+// Rust: tests/sema_soundness_parts/support.rs:32
+pub fn original_example_stem(file_stem: String) -> String? {
+    rest :: file_stem.strip_prefix("ex_") ?? { return nil }
+    (dir, name) :: rest.split_once('_') ?? { return nil }
+    "{dir}/{name}"
+}
+// Rust: tests/sema_soundness_parts/support.rs:38
+CORPUS :: "tests/fuzz/sema"
+// Rust: tests/sema_soundness_parts/support.rs:40
+pub fn corpus_root() -> OSPath { OSPath.from(env.manifest_dir()).join(CORPUS) }
+// Rust: tests/sema_soundness_parts/support.rs:44
+pub fn cases(kind: String) -> [OSPath] {
+    dir :: corpus_root().join(kind)
+    files := fs.read_dir(dir).unwrap_or_else((e) -> panic("cannot read {dir.display()}: {e}")).flatten().map((e) -> e.path()).filter((p) -> p.extension().and_then((s) -> s.to_str()) == "jet").collect()
+    files.sort()
+    assert(!files.is_empty(), "empty sema soundness corpus: {dir.display()}")
+    ^files
+}
+// Rust: tests/sema_soundness_parts/support.rs:57
+pub fn relative(path: OSPath) -> String {
+    path.strip_prefix(env.manifest_dir()).unwrap().to_string_lossy().replace('\\', "/")
+}
+// Rust: tests/sema_soundness_parts/support.rs:64
+pub fn case_filter() -> String? {
+    env.var("SEMA_SOUNDNESS_CASE").ok().map((s) -> normalize_fixture_selector("SEMA_SOUNDNESS_CASE", s))
+}
+// Rust: tests/sema_soundness_parts/support.rs:70
+pub fn selected_cases(kind: String, filter: String?) -> [OSPath] {
+    cases(kind).into_iter().filter((path) -> fixture_matches(filter, relative(path))).collect()
+}
+// Rust: tests/sema_soundness_parts/support.rs:77
+pub fn require_lane_selection(lane: String, filter: String?, selected: USize) -> {
+    if filter is selector { assert_eq(selected, 1, "SEMA_SOUNDNESS_CASE must select exactly one {lane} fixture: {selector}") }
+    else { assert(selected > 0, "full {lane} corpus must not be empty") }
+}
+// Rust: tests/sema_soundness_parts/support.rs:87
+pub fn replay(path: OSPath, test: String) -> {
+    eprintln("replay: SEMA_SOUNDNESS_CASE={relative(path)} cargo test --test {SUITE} {test} -- --exact --nocapture")
+}
+// Rust: tests/sema_soundness_parts/support.rs:96
+pub fn require_rustc() -> {
+    assert(common.have_rustc(), "rustc unavailable; refusing to skip sema soundness")
+}
+// Rust: tests/sema_soundness_parts/support.rs:103
+pub fn expected_code(path: OSPath) -> String {
+    path.file_stem().and_then((s) -> s.to_str()).and_then((s) -> s.rsplit_once('.')).map(((_, code)) -> code.to_string()).unwrap_or_else(() -> panic("invalid fixture must end in .E####.jet: {path.display()}"))
+}
+// Rust: tests/sema_soundness_parts/support.rs:111
+pub fn default_dev_with_deadline(path: OSPath) -> (I32, String, String) Err! {
+    shown :: path.to_string_lossy().to_owned()
+    // GATE #4494: actual Jet executable, subprocess supervision, pipes and native clock.
+    child := Command.new(common.jet_bin()).args(["run", shown]).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().map_err((error) -> Err("could not start default dev: {error}"))?
+    deadline :: Instant.now() + DEFAULT_DEV_CASE_DEADLINE
+    loop {
+        if child.try_wait() == {
+            .Ok(status) -> {
+                if status.is_some() { break }
+                if Instant.now() < deadline { thread.sleep(Duration.from_millis(10)) }
+                else {
+                    _ :: child.kill()
+                    _ :: child.wait_with_output()
+                    return .Err(Err("default dev exceeded {DEFAULT_DEV_CASE_DEADLINE.as_secs()} seconds and was terminated"))
+                }
+            }
+            .Err(error) -> {
+                _ :: child.kill()
+                _ :: child.wait_with_output()
+                return .Err(Err("could not supervise default dev: {error}"))
+            }
+        }
+    }
+    output :: child.wait_with_output().map_err((error) -> Err("could not collect default dev output: {error}"))?
+    .Ok((output.status.code().unwrap_or(-1), String.from_utf8_lossy(output.stdout).to_owned(), String.from_utf8_lossy(output.stderr).to_owned()))
+}
+// Rust: tests/sema_soundness_parts/support.rs:155
+pub fn run_all_collecting_failures(paths: [OSPath], body: fn(OSPath) -> Unit Err!) -> [String] {
+    // GATE #4494: native panic hook/unwind boundaries; collect every fixture failure.
+    previous_hook :: panic_runtime.take_hook()
+    panic_runtime.set_hook((_) -> {})
+    failures := [String]{}
+    loop path in paths {
+        outcome :: panic_runtime.catch_unwind(panic_runtime.AssertUnwindSafe(() -> body(path)))
+        if outcome == {
+            .Ok(.Ok(())) -> {}
+            .Ok(.Err(msg)) -> failures.push(msg.message)
+            .Err(payload) -> failures.push("{relative(path)}: panicked: {common.panic_message(^payload)}")
+        }
+    }
+    panic_runtime.set_hook(^previous_hook)
+    ^failures
+}

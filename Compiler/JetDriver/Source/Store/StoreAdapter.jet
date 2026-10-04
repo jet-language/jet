@@ -1,1795 +1,458 @@
-// PORT-PENDING 0831 crates-jet-store-src-lib-slice-1: crates/jet-store/src/lib.rs:1-1791
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS #![deny(warnings)]
-//RS 
-//RS use jet_foundation::DataTree::DataTree;
-//RS use jet_foundation::JSON::{json_escape, parse_json};
-//RS use jet_foundation::SHA256::{sha256, sha256_hex};
-//RS use std::collections::{BTreeMap, BTreeSet};
-//RS use std::fmt;
-//RS use std::fs::{self, File, OpenOptions};
-//RS use std::io::{self, Read, Seek, Write};
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::Command;
-//RS use std::sync::atomic::{AtomicU64, Ordering};
-//RS use std::sync::OnceLock;
-//RS use std::thread;
-//RS use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-//RS 
-//RS fn field<'a>(object: &'a [(String, DataTree)], key: &str) -> Option<&'a DataTree> {
-//RS     object
-//RS         .iter()
-//RS         .find_map(|(name, value)| (name == key).then_some(value))
-//RS }
-//RS 
-//RS pub mod runtime;
-//RS pub mod diagnostic_record;
-//RS pub mod project_state;
-//RS pub mod receipt;
-//RS pub mod records;
-//RS pub use receipt::{ReceiptInput, ReceiptRecord};
-//RS pub use records::RecordKind;
-//RS pub const STORE_VERSION: &str = "jet.store.v1";
-//RS pub const STORE_ENV: &str = "JET_STORE_DIR";
-//RS pub const DEFAULT_CAP_BYTES: u64 = 20 * 1024 * 1024 * 1024;
-//RS pub const DEFAULT_RESERVE_BYTES: u64 = 2 * 1024 * 1024 * 1024;
-//RS /// Maximum time a store operation waits for a live lock owner by default.
-//RS pub const DEFAULT_LOCK_WAIT: Duration = Duration::from_secs(120);
-//RS const LOCK_RETRY: Duration = Duration::from_millis(10);
-//RS const LOCK_RETRY_MAX: Duration = Duration::from_millis(250);
-//RS const ACTION_MAGIC: &[u8] = b"jet.store.v1\0action\0";
-//RS const ARTIFACT_MAGIC: &[u8] = b"jet.store.v1\0artifact\0";
-//RS const MAX_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
-//RS static FILE_COUNTER: AtomicU64 = AtomicU64::new(1);
-//RS 
-//RS /// A canonical SHA-256 digest used by every local artifact namespace.
-//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct Digest([u8; 32]);
-//RS 
-//RS impl Digest {
-//RS     pub fn hash(bytes: &[u8]) -> Self {
-//RS         Self(sha256(bytes))
-//RS     }
-//RS 
-//RS     pub fn from_hex(value: &str) -> Result<Self, StoreError> {
-//RS         if value.len() != 64 {
-//RS             return Err(StoreError::InvalidDigest(value.to_string()));
-//RS         }
-//RS         let bytes = value.as_bytes();
-//RS         let mut digest = [0u8; 32];
-//RS         for index in 0..32 {
-//RS             let high = hex_value(bytes[index * 2])
-//RS                 .ok_or_else(|| StoreError::InvalidDigest(value.to_string()))?;
-//RS             let low = hex_value(bytes[index * 2 + 1])
-//RS                 .ok_or_else(|| StoreError::InvalidDigest(value.to_string()))?;
-//RS             digest[index] = (high << 4) | low;
-//RS         }
-//RS         Ok(Self(digest))
-//RS     }
-//RS 
-//RS     pub fn as_bytes(&self) -> &[u8; 32] {
-//RS         &self.0
-//RS     }
-//RS 
-//RS     pub fn to_hex(self) -> String {
-//RS         let mut output = String::with_capacity(64);
-//RS         for byte in self.0 {
-//RS             output.push(hex_digit(byte >> 4));
-//RS             output.push(hex_digit(byte & 0x0f));
-//RS         }
-//RS         output
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for Digest {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter.write_str(&(*self).to_hex())
-//RS     }
-//RS }
-//RS 
-//RS /// A verified immutable blob reference. The length is part of the handle so a
-//RS /// caller cannot accidentally consume a digest with a different payload size.
-//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct ObjectHandle {
-//RS     digest: Digest,
-//RS     length: u64,
-//RS }
-//RS 
-//RS impl ObjectHandle {
-//RS     pub fn new(digest: Digest, length: u64) -> Self {
-//RS         Self { digest, length }
-//RS     }
-//RS 
-//RS     pub fn from_bytes(bytes: &[u8]) -> Self {
-//RS         Self::new(Digest::hash(bytes), bytes.len() as u64)
-//RS     }
-//RS 
-//RS     pub fn digest(self) -> Digest {
-//RS         self.digest
-//RS     }
-//RS 
-//RS     pub fn length(self) -> u64 {
-//RS         self.length
-//RS     }
-//RS 
-//RS     pub fn key(self) -> String {
-//RS         self.digest.to_hex()
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for ObjectHandle {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         write!(formatter, "{}:{}", self.digest, self.length)
-//RS     }
-//RS }
-//RS 
-//RS /// A typed action-cache key. Action records are immutable per key and carry a
-//RS /// second digest in their envelope so replacement with another valid record is
-//RS /// still detected as corruption.
-//RS #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct ActionHandle {
-//RS     key: Digest,
-//RS }
-//RS 
-//RS impl ActionHandle {
-//RS     pub fn new(key: Digest) -> Self {
-//RS         Self { key }
-//RS     }
-//RS 
-//RS     pub fn from_key(key: &str) -> Self {
-//RS         Self::from_bytes(key.as_bytes())
-//RS     }
-//RS 
-//RS     pub fn from_bytes(key: &[u8]) -> Self {
-//RS         Self::new(Digest::hash(key))
-//RS     }
-//RS 
-//RS     pub fn digest(self) -> Digest {
-//RS         self.key
-//RS     }
-//RS 
-//RS     pub fn key(self) -> String {
-//RS         self.key.to_hex()
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for ActionHandle {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         self.key.fmt(formatter)
-//RS     }
-//RS }
-//RS 
-//RS /// A validated `lto/<namespace>/` directory name.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct LtoNamespace(String);
-//RS 
-//RS impl LtoNamespace {
-//RS     pub fn new(value: &str) -> Result<Self, StoreError> {
-//RS         validate_component(value, "LTO namespace")?;
-//RS         Ok(Self(value.to_string()))
-//RS     }
-//RS 
-//RS     pub fn name(&self) -> &str {
-//RS         &self.0
-//RS     }
-//RS }
-//RS 
-//RS impl AsRef<str> for LtoNamespace {
-//RS     fn as_ref(&self) -> &str {
-//RS         self.name()
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Display for LtoNamespace {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter.write_str(self.name())
-//RS     }
-//RS }
-//RS 
-//RS /// An artifact that a live build lease pins from pruning.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub enum LeaseTarget {
-//RS     Blob(ObjectHandle),
-//RS     Action(ActionHandle),
-//RS     Lto {
-//RS         namespace: LtoNamespace,
-//RS         object: ObjectHandle,
-//RS     },
-//RS }
-//RS 
-//RS impl LeaseTarget {
-//RS     pub fn blob(object: ObjectHandle) -> Self {
-//RS         Self::Blob(object)
-//RS     }
-//RS 
-//RS     pub fn action(action: ActionHandle) -> Self {
-//RS         Self::Action(action)
-//RS     }
-//RS 
-//RS     pub fn lto(namespace: &str, object: ObjectHandle) -> Result<Self, StoreError> {
-//RS         Ok(Self::Lto {
-//RS             namespace: LtoNamespace::new(namespace)?,
-//RS             object,
-//RS         })
-//RS     }
-//RS 
-//RS     fn entry_key(&self) -> EntryKey {
-//RS         match self {
-//RS             Self::Blob(object) => EntryKey::Blob(object.key()),
-//RS             Self::Action(action) => EntryKey::Action(action.key()),
-//RS             Self::Lto { namespace, object } => EntryKey::Lto(namespace.name().to_string(), object.key()),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// The machine-wide store configuration. The optional cap is an explicit host
-//RS /// override; without it the effective limit is adaptive. Lock acquisition
-//RS /// waits up to [`DEFAULT_LOCK_WAIT`] unless overridden.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct StoreConfig {
-//RS     root: PathBuf,
-//RS     cap_bytes: Option<u64>,
-//RS     reserve_bytes: u64,
-//RS     lock_wait: Duration,
-//RS }
-//RS 
-//RS impl StoreConfig {
-//RS     pub fn new(root: impl Into<PathBuf>) -> Self {
-//RS         Self {
-//RS             root: root.into(),
-//RS             cap_bytes: None,
-//RS             reserve_bytes: DEFAULT_RESERVE_BYTES,
-//RS             lock_wait: DEFAULT_LOCK_WAIT,
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn from_env() -> Result<Self, StoreError> {
-//RS         let root = match std::env::var_os(STORE_ENV) {
-//RS             Some(value) if !value.is_empty() => PathBuf::from(value),
-//RS             Some(_) => return Err(StoreError::Config(format!("{STORE_ENV} cannot be empty"))),
-//RS             None => default_store_root()?,
-//RS         };
-//RS         let cap_bytes = parse_optional_size("JET_STORE_CAP_BYTES")?;
-//RS         let reserve_bytes = parse_optional_size("JET_STORE_RESERVE_BYTES")?.unwrap_or(DEFAULT_RESERVE_BYTES);
-//RS         Ok(Self {
-//RS             root,
-//RS             cap_bytes,
-//RS             reserve_bytes,
-//RS             lock_wait: DEFAULT_LOCK_WAIT,
-//RS         })
-//RS     }
-//RS 
-//RS     pub fn with_cap_bytes(mut self, cap_bytes: u64) -> Self {
-//RS         self.cap_bytes = Some(cap_bytes);
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn with_reserve_bytes(mut self, reserve_bytes: u64) -> Self {
-//RS         self.reserve_bytes = reserve_bytes;
-//RS         self
-//RS     }
-//RS 
-//RS     /// Set the maximum time to wait for a live lock owner.
-//RS     pub fn with_lock_wait(mut self, lock_wait: Duration) -> Self {
-//RS         self.lock_wait = lock_wait;
-//RS         self
-//RS     }
-//RS 
-//RS     pub fn root(&self) -> &Path {
-//RS         &self.root
-//RS     }
-//RS 
-//RS     pub fn cap_bytes(&self) -> Option<u64> {
-//RS         self.cap_bytes
-//RS     }
-//RS 
-//RS     pub fn reserve_bytes(&self) -> u64 {
-//RS         self.reserve_bytes
-//RS     }
-//RS 
-//RS     pub fn lock_wait(&self) -> Duration {
-//RS         self.lock_wait
-//RS     }
-//RS }
-//RS 
-//RS impl Default for StoreConfig {
-//RS     fn default() -> Self {
-//RS         Self::from_env().unwrap_or_else(|_| Self::new(PathBuf::from(".cache").join("jet/store")))
-//RS     }
-//RS }
-//RS 
-//RS /// Ownership identity recorded in lock and lease files. PID alone is not
-//RS /// sufficient because a later process may reuse it.
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS pub struct ProcessIdentity {
-//RS     pid: u32,
-//RS     start: String,
-//RS }
-//RS 
-//RS impl ProcessIdentity {
-//RS     pub fn current() -> Self {
-//RS         current_process_identity()
-//RS     }
-//RS 
-//RS     pub fn new(pid: u32, start: impl Into<String>) -> Self {
-//RS         Self {
-//RS             pid,
-//RS             start: start.into(),
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn pid(&self) -> u32 {
-//RS         self.pid
-//RS     }
-//RS 
-//RS     pub fn start(&self) -> &str {
-//RS         &self.start
-//RS     }
-//RS }
-//RS 
-//RS /// A deterministic store listing entry.
-//RS #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub struct EntryStatus {
-//RS     pub kind: EntryKind,
-//RS     pub key: String,
-//RS     pub namespace: Option<String>,
-//RS     pub size_bytes: u64,
-//RS     pub last_use: u64,
-//RS     pub pinned: bool,
-//RS     pub path: PathBuf,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-//RS pub enum EntryKind {
-//RS     Blob,
-//RS     Action,
-//RS     Lto,
-//RS }
-//RS 
-//RS /// Store state suitable for status UIs and deterministic tests.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct StoreStatus {
-//RS     pub root: PathBuf,
-//RS     pub footprint_bytes: u64,
-//RS     pub limit_bytes: u64,
-//RS     pub reserve_bytes: u64,
-//RS     pub available_bytes: Option<u64>,
-//RS     pub live_leases: usize,
-//RS     pub host_limit_bytes: Option<u64>,
-//RS     pub entries: Vec<EntryStatus>,
-//RS     pub tiers: Vec<String>,
-//RS }
-//RS 
-//RS /// The result of one deterministic prune operation.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct PruneReport {
-//RS     pub target_bytes: u64,
-//RS     pub before_bytes: u64,
-//RS     pub after_bytes: u64,
-//RS     pub removed: Vec<EntryStatus>,
-//RS     pub pinned_bytes: u64,
-//RS     pub blocked: bool,
-//RS }
-//RS 
-//RS /// A verified action record that points at one immutable CAS object.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub struct StoredArtifact {
-//RS     pub action: ActionHandle,
-//RS     pub object: ObjectHandle,
-//RS     pub path: PathBuf,
-//RS     pub executable: bool,
-//RS }
-//RS /// One compiler-owned node execution recorded for `explain-build`.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct BuildNodeRecord {
-//RS     pub kind: String,
-//RS     pub key: String,
-//RS     pub subject: String,
-//RS     pub duration_ms: f64,
-//RS     pub why_ran: String,
-//RS     pub inputs: Vec<String>,
-//RS }
-//RS 
-//RS /// Immutable per-build node evidence stored in the machine-wide CAS.
-//RS #[derive(Clone, Debug, PartialEq)]
-//RS pub struct BuildRecord {
-//RS     pub schema: String,
-//RS     pub program: String,
-//RS     pub nodes: Vec<BuildNodeRecord>,
-//RS }
-//RS 
-//RS impl BuildRecord {
-//RS     pub const SCHEMA: &'static str = "jet.build-record/v1";
-//RS 
-//RS     pub fn new(program: impl Into<String>, nodes: Vec<BuildNodeRecord>) -> Self {
-//RS         Self {
-//RS             schema: Self::SCHEMA.to_string(),
-//RS             program: program.into(),
-//RS             nodes,
-//RS         }
-//RS     }
-//RS 
-//RS     /// The CAS payload is JSON so tools can inspect it without a second codec.
-//RS     pub fn to_json(&self) -> String {
-//RS         let mut output = format!(
-//RS             "{{\"schema\":\"{}\",\"program\":\"{}\",\"nodes\":[",
-//RS             json_escape(&self.schema),
-//RS             json_escape(&self.program)
-//RS         );
-//RS         for (index, node) in self.nodes.iter().enumerate() {
-//RS             if index != 0 {
-//RS                 output.push(',');
-//RS             }
-//RS             output.push_str(&format!(
-//RS                 "{{\"kind\":\"{}\",\"key\":\"{}\",\"subject\":\"{}\",\"duration_ms\":{},\"why_ran\":\"{}\",\"inputs\":[",
-//RS                 json_escape(&node.kind),
-//RS                 json_escape(&node.key),
-//RS                 json_escape(&node.subject),
-//RS                 if node.duration_ms.is_finite() && node.duration_ms >= 0.0 {
-//RS                     node.duration_ms
-//RS                 } else {
-//RS                     0.0
-//RS                 },
-//RS                 json_escape(&node.why_ran)
-//RS             ));
-//RS             for (input_index, input) in node.inputs.iter().enumerate() {
-//RS                 if input_index != 0 {
-//RS                     output.push(',');
-//RS                 }
-//RS                 output.push('"');
-//RS                 output.push_str(&json_escape(input));
-//RS                 output.push('"');
-//RS             }
-//RS             output.push_str("]}");
-//RS         }
-//RS         output.push_str("]}");
-//RS         output
-//RS     }
-//RS 
-//RS     pub fn from_json(payload: &str) -> Result<Self, String> {
-//RS         let value = parse_json(payload).map_err(|_| "build record is not valid JSON".to_string())?;
-//RS         let object = value
-//RS             .as_object()
-//RS             .map_err(|error| format!("build record must be an object: {error}"))?;
-//RS         let schema = field(object, "schema")
-//RS             .ok_or_else(|| "build record is missing schema".to_string())?
-//RS             .as_str()
-//RS             .map_err(|error| format!("build record schema is invalid: {error}"))?
-//RS             .to_string();
-//RS         if schema != Self::SCHEMA {
-//RS             return Err(format!("unsupported build record schema `{schema}`"));
-//RS         }
-//RS         let program = field(object, "program")
-//RS             .ok_or_else(|| "build record is missing program".to_string())?
-//RS             .as_str()
-//RS             .map_err(|error| format!("build record program is invalid: {error}"))?
-//RS             .to_string();
-//RS         let values = field(object, "nodes")
-//RS             .ok_or_else(|| "build record is missing nodes".to_string())?
-//RS             .as_array()
-//RS             .map_err(|error| format!("build record nodes are invalid: {error}"))?;
-//RS         let mut nodes = Vec::with_capacity(values.len());
-//RS         for value in values {
-//RS             let node = value
-//RS                 .as_object()
-//RS                 .map_err(|error| format!("build record node is invalid: {error}"))?;
-//RS             let string_field = |name: &str| -> Result<String, String> {
-//RS                 field(node, name)
-//RS                     .ok_or_else(|| format!("build record node is missing {name}"))?
-//RS                     .as_str()
-//RS                     .map(|value| value.to_string())
-//RS                     .map_err(|error| format!("build record node {name} is invalid: {error}"))
-//RS             };
-//RS             let duration_ms = match field(node, "duration_ms")
-//RS                 .ok_or_else(|| "build record node is missing duration_ms".to_string())?
-//RS             {
-//RS                 DataTree::Int(value) => *value as f64,
-//RS                 DataTree::Float(value) => *value,
-//RS                 _ => return Err("build record node duration_ms is invalid".to_string()),
-//RS             };
-//RS             if !duration_ms.is_finite() || duration_ms < 0.0 {
-//RS                 return Err("build record node duration_ms is out of range".to_string());
-//RS             }
-//RS             let inputs = field(node, "inputs")
-//RS                 .ok_or_else(|| "build record node is missing inputs".to_string())?
-//RS                 .as_array()
-//RS                 .map_err(|error| format!("build record node inputs are invalid: {error}"))?
-//RS                 .iter()
-//RS                 .map(|value| {
-//RS                     value
-//RS                         .as_str()
-//RS                         .map(|value| value.to_string())
-//RS                         .map_err(|error| format!("build record node input is invalid: {error}"))
-//RS                 })
-//RS                 .collect::<Result<Vec<_>, _>>()?;
-//RS             nodes.push(BuildNodeRecord {
-//RS                 kind: string_field("kind")?,
-//RS                 key: string_field("key")?,
-//RS                 subject: string_field("subject")?,
-//RS                 duration_ms,
-//RS                 why_ran: string_field("why_ran")?,
-//RS                 inputs,
-//RS             });
-//RS         }
-//RS         Ok(Self {
-//RS             schema,
-//RS             program,
-//RS             nodes,
-//RS         })
-//RS     }
-//RS }
-//RS 
-//RS /// Result of looking up a named artifact. Corrupt records and objects are
-//RS /// quarantined before `Corrupt` is returned.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum ArtifactLookup {
-//RS     Missing,
-//RS     Corrupt,
-//RS     Hit(StoredArtifact),
-//RS }
-//RS 
-//RS /// Result of restoring a named artifact to a display path.
-//RS #[derive(Clone, Debug, Eq, PartialEq)]
-//RS pub enum ArtifactRestore {
-//RS     Missing,
-//RS     Corrupt,
-//RS     Hit {
-//RS         object: ObjectHandle,
-//RS         executable: bool,
-//RS     },
-//RS }
-//RS 
-//RS #[derive(Debug)]
-//RS pub enum StoreError {
-//RS     Io(io::Error),
-//RS     Config(String),
-//RS     InvalidDigest(String),
-//RS     InvalidKey(String),
-//RS     Corrupt { path: PathBuf, reason: String },
-//RS     Conflict { path: PathBuf },
-//RS     Locked {
-//RS         path: PathBuf,
-//RS         owner_pid: Option<u32>,
-//RS         elapsed: Duration,
-//RS     },
-//RS     Capacity {
-//RS         path: PathBuf,
-//RS         needed_bytes: u64,
-//RS         available_bytes: Option<u64>,
-//RS         limit_bytes: u64,
-//RS     },
-//RS }
-//RS 
-//RS impl fmt::Display for StoreError {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         match self {
-//RS             Self::Io(error) => error.fmt(formatter),
-//RS             Self::Config(message) => formatter.write_str(message),
-//RS             Self::InvalidDigest(value) => write!(formatter, "invalid SHA-256 digest `{value}`"),
-//RS             Self::InvalidKey(value) => write!(formatter, "invalid store key `{value}`"),
-//RS             Self::Corrupt { path, reason } => {
-//RS                 write!(formatter, "corrupt store entry {}: {reason}", path.display())
-//RS             }
-//RS             Self::Conflict { path } => write!(formatter, "immutable store entry already differs: {}", path.display()),
-//RS             Self::Locked {
-//RS                 path,
-//RS                 owner_pid,
-//RS                 elapsed,
-//RS             } => {
-//RS                 let owner = owner_pid.map_or_else(|| "unknown".to_string(), |pid| pid.to_string());
-//RS                 write!(
-//RS                     formatter,
-//RS                     "store lock is owned by a live process (owner pid {owner}) after waiting {:.3}s: {}",
-//RS                     elapsed.as_secs_f64(),
-//RS                     path.display()
-//RS                 )
-//RS             }
-//RS             Self::Capacity {
-//RS                 path,
-//RS                 needed_bytes,
-//RS                 available_bytes,
-//RS                 limit_bytes,
-//RS             } => write!(
-//RS                 formatter,
-//RS                 "store cannot admit {} bytes for {} (available {:?}, limit {})",
-//RS                 needed_bytes,
-//RS                 path.display(),
-//RS                 available_bytes,
-//RS                 limit_bytes
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl std::error::Error for StoreError {
-//RS     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-//RS         match self {
-//RS             Self::Io(error) => Some(error),
-//RS             _ => None,
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS impl From<io::Error> for StoreError {
-//RS     fn from(error: io::Error) -> Self {
-//RS         Self::Io(error)
-//RS     }
-//RS }
-//RS 
-//RS /// The local content-addressed artifact store.
-//RS #[derive(Clone, Debug)]
-//RS pub struct Store {
-//RS     config: StoreConfig,
-//RS }
-//RS 
-//RS impl Store {
-//RS     pub fn open(config: StoreConfig) -> Result<Self, StoreError> {
-//RS         if config.root.as_os_str().is_empty() {
-//RS             return Err(StoreError::Config("store root cannot be empty".to_string()));
-//RS         }
-//RS         let store = Self { config };
-//RS         store.ensure_layout()?;
-//RS         Ok(store)
-//RS     }
-//RS 
-//RS     pub fn new(root: impl Into<PathBuf>) -> Result<Self, StoreError> {
-//RS         Self::open(StoreConfig::new(root))
-//RS     }
-//RS 
-//RS     pub fn from_env() -> Result<Self, StoreError> {
-//RS         Self::open(StoreConfig::from_env()?)
-//RS     }
-//RS 
-//RS     pub fn config(&self) -> &StoreConfig {
-//RS         &self.config
-//RS     }
-//RS 
-//RS     pub fn root(&self) -> &Path {
-//RS         self.config.root()
-//RS     }
-//RS 
-//RS     pub fn limit(&self) -> u64 {
-//RS         self.limit_with_disk(filesystem_stats(self.root()).map(|stats| stats.total_bytes))
-//RS     }
-//RS 
-//RS     pub fn effective_limit(&self) -> u64 {
-//RS         self.limit()
-//RS     }
-//RS 
-//RS     pub fn object_path(&self, object: &ObjectHandle) -> PathBuf {
-//RS         self.root().join("cas").join(object.key())
-//RS     }
-//RS 
-//RS     pub fn action_path(&self, action: &ActionHandle) -> PathBuf {
-//RS         self.root().join("ac").join(action.key())
-//RS     }
-//RS 
-//RS     pub fn lto_path<N: AsRef<str>>(&self, namespace: N, object: &ObjectHandle) -> PathBuf {
-//RS         self.root().join("lto").join(namespace.as_ref()).join(object.key())
-//RS     }
-//RS 
-//RS     pub fn publish_blob(&self, bytes: &[u8]) -> Result<ObjectHandle, StoreError> {
-//RS         let object = ObjectHandle::from_bytes(bytes);
-//RS         self.publish_object(object, bytes)?;
-//RS         Ok(object)
-//RS     }
-//RS 
-//RS     pub fn publish_object(&self, object: ObjectHandle, bytes: &[u8]) -> Result<(), StoreError> {
-//RS         let actual = ObjectHandle::from_bytes(bytes);
-//RS         if actual != object {
-//RS             return Err(StoreError::Corrupt {
-//RS                 path: self.object_path(&object),
-//RS                 reason: format!("published bytes are {actual}, expected {object}"),
-//RS             });
-//RS         }
-//RS         self.publish_data(EntryKey::Blob(object.key()), self.object_path(&object), bytes)
-//RS     }
-//RS 
-//RS     pub fn get_blob(&self, object: &ObjectHandle) -> Result<Option<Vec<u8>>, StoreError> {
-//RS         let key = EntryKey::Blob(object.key());
-//RS         let path = self.object_path(object);
-//RS         match read_file(&path)? {
-//RS             RawRead::Missing => Ok(None),
-//RS             RawRead::Corrupt(reason) => {
-//RS                 self.quarantine_after_read(&key, &path, &reason);
-//RS                 Ok(None)
-//RS             }
-//RS             RawRead::Bytes(bytes) => {
-//RS                 if bytes.len() as u64 != object.length() || Digest::hash(&bytes) != object.digest() {
-//RS                     self.quarantine_after_read(&key, &path, "digest or length mismatch");
-//RS                     return Ok(None);
-//RS                 }
-//RS                 self.touch_after_read(&key, bytes.len() as u64);
-//RS                 Ok(Some(bytes))
-//RS             }
-//RS         }
-//RS     }
-//RS     /// Read a blob when only its digest is available. This is the lookup used
-//RS     /// by BuildRecord pointers; the bytes remain verified before returning.
-//RS     pub fn blob_by_digest(&self, digest: &Digest) -> Result<Option<Vec<u8>>, StoreError> {
-//RS         let key = EntryKey::Blob(digest.to_hex());
-//RS         let path = self.root().join("cas").join(digest.to_hex());
-//RS         match read_file(&path)? {
-//RS             RawRead::Missing => Ok(None),
-//RS             RawRead::Corrupt(reason) => {
-//RS                 self.quarantine_after_read(&key, &path, &reason);
-//RS                 Ok(None)
-//RS             }
-//RS             RawRead::Bytes(bytes) => {
-//RS                 if Digest::hash(&bytes) != *digest {
-//RS                     self.quarantine_after_read(&key, &path, "digest mismatch");
-//RS                     return Ok(None);
-//RS                 }
-//RS                 self.touch_after_read(&key, bytes.len() as u64);
-//RS                 Ok(Some(bytes))
-//RS             }
-//RS         }
-//RS     }
-//RS     /// Publish one immutable build record through the ordinary blob CAS.
-//RS     ///
-//RS     /// `key` is the caller's content key. The last-run pointer that names
-//RS     /// the newest record for a program is workspace state; see
-//RS     /// [`Store::publish_last_build_record`].
-//RS     pub fn publish_build_record(
-//RS         &self,
-//RS         key: &str,
-//RS         record: &BuildRecord,
-//RS     ) -> Result<ObjectHandle, StoreError> {
-//RS         let object = self.publish_blob(record.to_json().as_bytes())?;
-//RS         self.ensure_layout()?;
-//RS         let pointer = self.build_record_pointer_path(key);
-//RS         if let Some(existing) = self.read_build_pointer(&pointer)? {
-//RS             if existing != object {
-//RS                 if self.build_record(key)?.as_ref() != Some(record) {
-//RS                     return Err(StoreError::Conflict { path: pointer });
-//RS                 }
-//RS             }
-//RS         }
-//RS         let _lock = self.acquire_lock()?;
-//RS         atomic_write(&pointer, object.to_string().as_bytes())?;
-//RS         Ok(object)
-//RS     }
-//RS 
-//RS     /// Publish a build record and point the workspace's last-run pointer
-//RS     /// for its program at it (owner ruling 2026-09-30: per-workspace state
-//RS     /// lives in the workspace-root `.jet/`, the records in this store).
-//RS     pub fn publish_last_build_record(
-//RS         &self,
-//RS         workspace_root: &Path,
-//RS         key: &str,
-//RS         record: &BuildRecord,
-//RS     ) -> Result<ObjectHandle, StoreError> {
-//RS         let object = self.publish_build_record(key, record)?;
-//RS         project_state::write_last_run(workspace_root, &record.program, key)?;
-//RS         Ok(object)
-//RS     }
-//RS 
-//RS     /// Load an immutable build record addressed by its content key.
-//RS     pub fn build_record(&self, key: &str) -> Result<Option<BuildRecord>, StoreError> {
-//RS         let pointer = self.build_record_pointer_path(key);
-//RS         let Some(object) = self.read_build_pointer(&pointer)? else {
-//RS             return Ok(None);
-//RS         };
-//RS         let Some(bytes) = self.get_blob(&object)? else {
-//RS             return Ok(None);
-//RS         };
-//RS         let payload = String::from_utf8(bytes).map_err(|_| StoreError::Corrupt {
-//RS             path: pointer,
-//RS             reason: "build record blob is not UTF-8".to_string(),
-//RS         })?;
-//RS         BuildRecord::from_json(&payload)
-//RS             .map(Some)
-//RS             .map_err(|reason| StoreError::Corrupt {
-//RS                 path: self.build_record_pointer_path(key),
-//RS                 reason,
-//RS             })
-//RS     }
-//RS 
-//RS     /// The workspace's last recorded run of `program`.
-//RS     pub fn last_build_record(
-//RS         &self,
-//RS         workspace_root: &Path,
-//RS         program: &str,
-//RS     ) -> Result<Option<BuildRecord>, StoreError> {
-//RS         match project_state::last_run(workspace_root, program) {
-//RS             Some(key) => self.build_record(&key),
-//RS             None => Ok(None),
-//RS         }
-//RS     }
-//RS 
-//RS     fn build_record_pointer_path(&self, key: &str) -> PathBuf {
-//RS         self.root()
-//RS             .join("build-records")
-//RS             .join("records")
-//RS             .join(Digest::hash(key.as_bytes()).to_hex())
-//RS     }
-//RS 
-//RS     fn read_build_pointer(&self, path: &Path) -> Result<Option<ObjectHandle>, StoreError> {
-//RS         let bytes = match read_file(path)? {
-//RS             RawRead::Missing => return Ok(None),
-//RS             RawRead::Corrupt(reason) => {
-//RS                 return Err(StoreError::Corrupt {
-//RS                     path: path.to_path_buf(),
-//RS                     reason,
-//RS                 });
-//RS             }
-//RS             RawRead::Bytes(bytes) => bytes,
-//RS         };
-//RS         let value = String::from_utf8(bytes)
-//RS             .map_err(|_| StoreError::Corrupt {
-//RS                 path: path.to_path_buf(),
-//RS                 reason: "build record pointer is not UTF-8".to_string(),
-//RS             })?
-//RS             .trim()
-//RS             .to_string();
-//RS         let (digest, length) = value.split_once(':').ok_or_else(|| StoreError::Corrupt {
-//RS             path: path.to_path_buf(),
-//RS             reason: "build record pointer has invalid handle".to_string(),
-//RS         })?;
-//RS         let digest = Digest::from_hex(digest)?;
-//RS         let length = length.parse::<u64>().map_err(|_| StoreError::Corrupt {
-//RS             path: path.to_path_buf(),
-//RS             reason: "build record pointer has invalid length".to_string(),
-//RS         })?;
-//RS         Ok(Some(ObjectHandle::new(digest, length)))
-//RS     }
-//RS 
-//RS     pub fn get_object(&self, object: &ObjectHandle) -> Result<Option<Vec<u8>>, StoreError> {
-//RS         self.get_blob(object)
-//RS     }
-//RS 
-//RS     pub fn contains(&self, object: &ObjectHandle) -> Result<bool, StoreError> {
-//RS         Ok(self.get_blob(object)?.is_some())
-//RS     }
-//RS 
-//RS     pub fn publish_action(&self, action: ActionHandle, record: &[u8]) -> Result<(), StoreError> {
-//RS         let path = self.action_path(&action);
-//RS         let key = EntryKey::Action(action.key());
-//RS         let encoded = encode_action(action, record);
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         match read_file(&path)? {
-//RS             RawRead::Missing => {}
-//RS             RawRead::Corrupt(reason) => self.quarantine_locked(&key, &path, &reason)?,
-//RS             RawRead::Bytes(existing) => match decode_action(action, &existing) {
-//RS                 Ok(value) if value == record => {
-//RS                     self.append_journal_locked("touch", &key, existing.len() as u64)?;
-//RS                     return Ok(());
-//RS                 }
-//RS                 Ok(_) => return Err(StoreError::Conflict { path }),
-//RS                 Err(reason) => self.quarantine_locked(&key, &path, &reason)?,
-//RS             },
-//RS         }
-//RS         self.ensure_capacity_locked(encoded.len() as u64, &path)?;
-//RS         atomic_write(&path, &encoded)?;
-//RS         self.append_journal_locked("put", &key, encoded.len() as u64)
-//RS     }
-//RS 
-//RS     pub fn get_action(&self, action: &ActionHandle) -> Result<Option<Vec<u8>>, StoreError> {
-//RS         let record = self.get_action_untouched(action)?;
-//RS         if record.is_some() {
-//RS             self.touch_actions(std::slice::from_ref(action));
-//RS         }
-//RS         Ok(record)
-//RS     }
-//RS 
-//RS     /// Read one action record without recording the use in the journal. A
-//RS     /// caller that reads many records in one run records the uses together
-//RS     /// with `touch_actions`.
-//RS     pub fn get_action_untouched(&self, action: &ActionHandle) -> Result<Option<Vec<u8>>, StoreError> {
-//RS         let key = EntryKey::Action(action.key());
-//RS         let path = self.action_path(action);
-//RS         match read_file(&path)? {
-//RS             RawRead::Missing => Ok(None),
-//RS             RawRead::Corrupt(reason) => {
-//RS                 self.quarantine_after_read(&key, &path, &reason);
-//RS                 Ok(None)
-//RS             }
-//RS             RawRead::Bytes(bytes) => match decode_action(*action, &bytes) {
-//RS                 Ok(record) => Ok(Some(record)),
-//RS                 Err(_) if is_unsupported_store_version(&bytes) => Ok(None),
-//RS                 Err(reason) => {
-//RS                     self.quarantine_after_read(&key, &path, &reason);
-//RS                     Ok(None)
-//RS                 }
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     /// Record one use of each stored action record under one lock and one
-//RS     /// journal write. A failure only costs eviction order.
-//RS     pub fn touch_actions(&self, actions: &[ActionHandle]) {
-//RS         if actions.is_empty() {
-//RS             return;
-//RS         }
-//RS         let Ok(_lock) = self.acquire_lock() else {
-//RS             return;
-//RS         };
-//RS         let entries = actions
-//RS             .iter()
-//RS             .filter_map(|action| {
-//RS                 let length = fs::metadata(self.action_path(action)).ok()?.len();
-//RS                 Some((EntryKey::Action(action.key()), length))
-//RS             })
-//RS             .collect::<Vec<_>>();
-//RS         let lines = entries
-//RS             .iter()
-//RS             .map(|(key, length)| ("touch", key, *length))
-//RS             .collect::<Vec<_>>();
-//RS         let _ = self.append_journal_entries_locked(&lines);
-//RS     }
-//RS 
-//RS     /// Publish many action records under one lock, one capacity check and
-//RS     /// one journal write. A key that already holds different bytes is left
-//RS     /// as it is (the `Conflict` of `publish_action`); the others still land.
-//RS     pub fn publish_actions(&self, records: &[(ActionHandle, Vec<u8>)]) -> Result<(), StoreError> {
-//RS         self.publish_action_batch(records, true)
-//RS     }
-//RS 
-//RS     /// `publish_actions` for records that only cache recomputable results,
-//RS     /// such as compiled functions: each record is written without its own
-//RS     /// disk syncs, which would dominate a batch of thousands of small
-//RS     /// records. A read verifies every record against its digest, so a record
-//RS     /// a crash lost or tore reads as missing and its result is recomputed.
-//RS     pub fn publish_cache_actions(&self, records: &[(ActionHandle, Vec<u8>)]) -> Result<(), StoreError> {
-//RS         self.publish_action_batch(records, false)
-//RS     }
-//RS 
-//RS     fn publish_action_batch(
-//RS         &self,
-//RS         records: &[(ActionHandle, Vec<u8>)],
-//RS         durable: bool,
-//RS     ) -> Result<(), StoreError> {
-//RS         if records.is_empty() {
-//RS             return Ok(());
-//RS         }
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         let mut journal = Vec::new();
-//RS         let mut pending = Vec::new();
-//RS         for (action, record) in records {
-//RS             let path = self.action_path(action);
-//RS             let key = EntryKey::Action(action.key());
-//RS             match read_file(&path)? {
-//RS                 RawRead::Missing => {}
-//RS                 RawRead::Corrupt(reason) => self.quarantine_locked(&key, &path, &reason)?,
-//RS                 RawRead::Bytes(existing) => match decode_action(*action, &existing) {
-//RS                     Ok(value) if value == *record => {
-//RS                         journal.push(("touch", key, existing.len() as u64));
-//RS                         continue;
-//RS                     }
-//RS                     Ok(_) => continue,
-//RS                     Err(reason) => self.quarantine_locked(&key, &path, &reason)?,
-//RS                 },
-//RS             }
-//RS             pending.push((path, key, encode_action(*action, record)));
-//RS         }
-//RS         if let Some((path, ..)) = pending.first() {
-//RS             let incoming = pending
-//RS                 .iter()
-//RS                 .map(|(_, _, encoded)| encoded.len() as u64)
-//RS                 .sum::<u64>();
-//RS             self.ensure_capacity_locked(incoming, path)?;
-//RS         }
-//RS         for (path, key, encoded) in pending {
-//RS             if durable {
-//RS                 atomic_write(&path, &encoded)?;
-//RS             } else {
-//RS                 replace_unsynced(&path, &encoded)?;
-//RS             }
-//RS             journal.push(("put", key, encoded.len() as u64));
-//RS         }
-//RS         let lines = journal
-//RS             .iter()
-//RS             .map(|(operation, key, length)| (*operation, key, *length))
-//RS             .collect::<Vec<_>>();
-//RS         self.append_journal_entries_locked(&lines)
-//RS     }
-//RS 
-//RS     pub fn action(&self, key: &str) -> ActionHandle {
-//RS         ActionHandle::from_key(key)
-//RS     }
-//RS 
-//RS     pub fn publish_lto<N: AsRef<str>>(&self, namespace: N, bytes: &[u8]) -> Result<ObjectHandle, StoreError> {
-//RS         let namespace = LtoNamespace::new(namespace.as_ref())?;
-//RS         let object = ObjectHandle::from_bytes(bytes);
-//RS         let key = EntryKey::Lto(namespace.name().to_string(), object.key());
-//RS         self.publish_data(key, self.lto_path(&namespace, &object), bytes)?;
-//RS         Ok(object)
-//RS     }
-//RS 
-//RS     pub fn get_lto<N: AsRef<str>>(
-//RS         &self,
-//RS         namespace: N,
-//RS         object: &ObjectHandle,
-//RS     ) -> Result<Option<Vec<u8>>, StoreError> {
-//RS         let namespace = LtoNamespace::new(namespace.as_ref())?;
-//RS         let key = EntryKey::Lto(namespace.name().to_string(), object.key());
-//RS         let path = self.lto_path(&namespace, object);
-//RS         match read_file(&path)? {
-//RS             RawRead::Missing => Ok(None),
-//RS             RawRead::Corrupt(reason) => {
-//RS                 self.quarantine_after_read(&key, &path, &reason);
-//RS                 Ok(None)
-//RS             }
-//RS             RawRead::Bytes(bytes) => {
-//RS                 if bytes.len() as u64 != object.length() || Digest::hash(&bytes) != object.digest() {
-//RS                     self.quarantine_after_read(&key, &path, "digest or length mismatch");
-//RS                     return Ok(None);
-//RS                 }
-//RS                 self.touch_after_read(&key, bytes.len() as u64);
-//RS                 Ok(Some(bytes))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn lto_namespace(&self, namespace: &str) -> Result<LtoNamespace, StoreError> {
-//RS         LtoNamespace::new(namespace)
-//RS     }
-//RS 
-//RS     pub fn acquire_lease(&self, objects: &[ObjectHandle]) -> Result<Lease, StoreError> {
-//RS         let targets: Vec<LeaseTarget> = objects.iter().copied().map(LeaseTarget::Blob).collect();
-//RS         self.acquire_artifact_lease(&targets)
-//RS     }
-//RS 
-//RS     pub fn lease(&self, objects: &[ObjectHandle]) -> Result<Lease, StoreError> {
-//RS         self.acquire_lease(objects)
-//RS     }
-//RS 
-//RS     pub fn acquire_artifact_lease(&self, targets: &[LeaseTarget]) -> Result<Lease, StoreError> {
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         let owner = ProcessIdentity::current();
-//RS         let path = self
-//RS             .root()
-//RS             .join("leases")
-//RS             .join(format!("lease-{}-{}", owner.pid(), next_counter()));
-//RS         let mut keys = BTreeSet::new();
-//RS         for target in targets {
-//RS             keys.insert(target.entry_key());
-//RS         }
-//RS         let mut bytes = format!("{STORE_VERSION}|lease|{}|{}\n", owner.pid(), owner.start()).into_bytes();
-//RS         for key in keys {
-//RS             let (kind, value) = key.wire();
-//RS             bytes.extend_from_slice(format!("{kind}|{value}\n").as_bytes());
-//RS         }
-//RS         create_new_synced(&path, &bytes)?;
-//RS         sync_dir(path.parent().expect("lease path has parent"))?;
-//RS         Ok(Lease { path, owner })
-//RS     }
-//RS 
-//RS     pub fn status(&self) -> Result<StoreStatus, StoreError> {
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         self.status_locked()
-//RS     }
-//RS 
-//RS     /// Return the persisted machine-level cap, if one was configured.
-//RS     pub fn host_limit(&self) -> Result<Option<u64>, StoreError> {
-//RS         let path = self.host_limit_path();
-//RS         let bytes = match fs::read(&path) {
-//RS             Ok(bytes) => bytes,
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
-//RS             Err(error) => return Err(StoreError::Io(error)),
-//RS         };
-//RS         let value = std::str::from_utf8(&bytes)
-//RS             .map_err(|_| StoreError::Config(format!("host limit is not valid UTF-8: {}", path.display())))?
-//RS             .trim();
-//RS         if value.is_empty() {
-//RS             return Err(StoreError::Config(format!("host limit is empty: {}", path.display())));
-//RS         }
-//RS         Ok(Some(parse_size(value)?))
-//RS     }
-//RS 
-//RS     /// Persist or clear the stricter machine-level cap.
-//RS     pub fn set_host_limit(&self, limit_bytes: Option<u64>) -> Result<(), StoreError> {
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         let path = self.host_limit_path();
-//RS         match limit_bytes {
-//RS             Some(limit) => atomic_write(&path, format!("{limit}\n").as_bytes()),
-//RS             None => match fs::remove_file(&path) {
-//RS                 Ok(()) => sync_dir(self.root()),
-//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-//RS                 Err(error) => Err(StoreError::Io(error)),
-//RS             },
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn prune(&self, target_bytes: Option<u64>) -> Result<PruneReport, StoreError> {
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         let target = target_bytes.unwrap_or_else(|| self.limit());
-//RS         self.prune_locked(target)
-//RS     }
-//RS 
-//RS     pub fn prune_to(&self, target_bytes: u64) -> Result<PruneReport, StoreError> {
-//RS         self.prune(Some(target_bytes))
-//RS     }
-//RS 
-//RS     /// Publish a file as one CAS blob and an immutable action record keyed by
-//RS     /// the caller's already-computed lower-case SHA-256 build key.
-//RS     pub fn publish_file(&self, key: &str, source: &Path) -> Result<StoredArtifact, StoreError> {
-//RS         let metadata = fs::symlink_metadata(source)?;
-//RS         if metadata.file_type().is_symlink() || !metadata.is_file() {
-//RS             return Err(StoreError::Corrupt {
-//RS                 path: source.to_path_buf(),
-//RS                 reason: "published artifact is not a regular file".to_string(),
-//RS             });
-//RS         }
-//RS         let bytes = fs::read(source)?;
-//RS         self.publish_bytes(key, &bytes, is_executable(&metadata))
-//RS     }
-//RS 
-//RS     /// Publish in-memory bytes as one CAS blob and an immutable action record
-//RS     /// keyed by the caller's already-computed lower-case SHA-256 build key.
-//RS     /// The bytes are hashed once; the blob is written atomically under that
-//RS     /// digest, so the returned handle names exactly these bytes.
-//RS     pub fn publish_bytes(
-//RS         &self,
-//RS         key: &str,
-//RS         bytes: &[u8],
-//RS         executable: bool,
-//RS     ) -> Result<StoredArtifact, StoreError> {
-//RS         let action = action_for_key(key)?;
-//RS         let object = ObjectHandle::from_bytes(bytes);
-//RS         let path = self.object_path(&object);
-//RS         self.publish_data(EntryKey::Blob(object.key()), path.clone(), bytes)?;
-//RS         self.publish_action(action, &encode_artifact(object, executable))?;
-//RS         Ok(StoredArtifact {
-//RS             action,
-//RS             object,
-//RS             path,
-//RS             executable,
-//RS         })
-//RS     }
-//RS 
-//RS     /// Verify and locate a named artifact without copying it.
-//RS     pub fn lookup_artifact(&self, key: &str) -> Result<ArtifactLookup, StoreError> {
-//RS         let action = action_for_key(key)?;
-//RS         let action_path = self.action_path(&action);
-//RS         let record = match read_file(&action_path)? {
-//RS             RawRead::Missing => return Ok(ArtifactLookup::Missing),
-//RS             RawRead::Corrupt(reason) => {
-//RS                 self.quarantine_after_read(&EntryKey::Action(action.key()), &action_path, &reason);
-//RS                 return Ok(ArtifactLookup::Corrupt);
-//RS             }
-//RS             RawRead::Bytes(bytes) => match decode_action(action, &bytes) {
-//RS                 Ok(record) => record,
-//RS                 Err(_) if is_unsupported_store_version(&bytes) => {
-//RS                     return Ok(ArtifactLookup::Missing);
-//RS                 }
-//RS                 Err(reason) => {
-//RS                     self.quarantine_after_read(&EntryKey::Action(action.key()), &action_path, &reason);
-//RS                     return Ok(ArtifactLookup::Corrupt);
-//RS                 }
-//RS             },
-//RS         };
-//RS         let Some((object, executable)) = decode_artifact(&record) else {
-//RS             self.quarantine_after_read(
-//RS                 &EntryKey::Action(action.key()),
-//RS                 &action_path,
-//RS                 "artifact record has an unknown version or short header",
-//RS             );
-//RS             return Ok(ArtifactLookup::Corrupt);
-//RS         };
-//RS         let object_path = self.object_path(&object);
-//RS         match read_file(&object_path)? {
-//RS             RawRead::Missing => {
-//RS                 self.quarantine_after_read(
-//RS                     &EntryKey::Action(action.key()),
-//RS                     &action_path,
-//RS                     "artifact record references a missing object",
-//RS                 );
-//RS                 Ok(ArtifactLookup::Corrupt)
-//RS             }
-//RS             RawRead::Corrupt(reason) => {
-//RS                 self.quarantine_after_read(&EntryKey::Blob(object.key()), &object_path, &reason);
-//RS                 self.quarantine_after_read(
-//RS                     &EntryKey::Action(action.key()),
-//RS                     &action_path,
-//RS                     "artifact record references a corrupt object",
-//RS                 );
-//RS                 Ok(ArtifactLookup::Corrupt)
-//RS             }
-//RS             RawRead::Bytes(bytes) => {
-//RS                 if bytes.len() as u64 != object.length() || Digest::hash(&bytes) != object.digest() {
-//RS                     self.quarantine_after_read(
-//RS                         &EntryKey::Blob(object.key()),
-//RS                         &object_path,
-//RS                         "digest or length mismatch",
-//RS                     );
-//RS                     self.quarantine_after_read(
-//RS                         &EntryKey::Action(action.key()),
-//RS                         &action_path,
-//RS                         "artifact record references a corrupt object",
-//RS                     );
-//RS                     return Ok(ArtifactLookup::Corrupt);
-//RS                 }
-//RS                 self.touch_after_read(&EntryKey::Blob(object.key()), bytes.len() as u64);
-//RS                 self.touch_after_read(&EntryKey::Action(action.key()), record.len() as u64);
-//RS                 Ok(ArtifactLookup::Hit(StoredArtifact {
-//RS                     action,
-//RS                     object,
-//RS                     path: object_path,
-//RS                     executable,
-//RS                 }))
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     /// Verify and copy a named artifact to `destination`, preserving its
-//RS     /// executable bit. Corrupt entries are removed from the active namespace.
-//RS     pub fn restore_file(&self, key: &str, destination: &Path) -> Result<ArtifactRestore, StoreError> {
-//RS         let lookup = self.lookup_artifact(key)?;
-//RS         match lookup {
-//RS             ArtifactLookup::Missing => Ok(ArtifactRestore::Missing),
-//RS             ArtifactLookup::Corrupt => Ok(ArtifactRestore::Corrupt),
-//RS             ArtifactLookup::Hit(artifact) => {
-//RS                 let _lease = self.acquire_artifact_lease(&[
-//RS                     LeaseTarget::Action(artifact.action),
-//RS                     LeaseTarget::Blob(artifact.object),
-//RS                 ])?;
-//RS                 let bytes = fs::read(&artifact.path)?;
-//RS                 atomic_write(destination, &bytes)?;
-//RS                 set_executable(destination, artifact.executable)?;
-//RS                 Ok(ArtifactRestore::Hit {
-//RS                     object: artifact.object,
-//RS                     executable: artifact.executable,
-//RS                 })
-//RS             }
-//RS         }
-//RS     }
-//RS 
-//RS     fn publish_data(&self, key: EntryKey, path: PathBuf, bytes: &[u8]) -> Result<(), StoreError> {
-//RS         self.ensure_layout()?;
-//RS         let _lock = self.acquire_lock()?;
-//RS         match read_file(&path)? {
-//RS             RawRead::Missing => {}
-//RS             RawRead::Corrupt(reason) => self.quarantine_locked(&key, &path, &reason)?,
-//RS             RawRead::Bytes(existing) => {
-//RS                 if existing == bytes {
-//RS                     self.append_journal_locked("touch", &key, existing.len() as u64)?;
-//RS                     return Ok(());
-//RS                 }
-//RS                 self.quarantine_locked(&key, &path, "existing bytes do not match their key")?;
-//RS             }
-//RS         }
-//RS         self.ensure_capacity_locked(bytes.len() as u64, &path)?;
-//RS         atomic_write(&path, bytes)?;
-//RS         self.append_journal_locked("put", &key, bytes.len() as u64)
-//RS     }
-//RS 
-//RS     fn status_locked(&self) -> Result<StoreStatus, StoreError> {
-//RS         let mut journal = read_journal(&self.root().join("journal"))?;
-//RS         if !journal.valid {
-//RS             self.compact_journal_locked()?;
-//RS             journal = read_journal(&self.root().join("journal"))?;
-//RS         }
-//RS         let leases = self.read_leases_locked(true)?;
-//RS         let pinned: BTreeSet<EntryKey> = leases
-//RS             .iter()
-//RS             .flat_map(|lease| lease.targets.iter().cloned())
-//RS             .collect();
-//RS         let mut entries = self.scan_entries()?;
-//RS         for entry in &mut entries {
-//RS             entry.last_use = journal
-//RS                 .entries
-//RS                 .get(&entry.key)
-//RS                 .map(|meta| meta.last_use)
-//RS                 .unwrap_or(0);
-//RS             entry.pinned = pinned.contains(&entry.key);
-//RS         }
-//RS         entries.sort_by(|left, right| left.key.cmp(&right.key));
-//RS         let footprint = entries
-//RS             .iter()
-//RS             .fold(0u64, |sum, entry| sum.saturating_add(entry.size_bytes));
-//RS         let disk = filesystem_stats(self.root());
-//RS         let entries = entries.iter().map(StoredEntry::status).collect();
-//RS         Ok(StoreStatus {
-//RS             root: self.root().to_path_buf(),
-//RS             footprint_bytes: footprint,
-//RS             limit_bytes: self.limit_with_disk(disk.as_ref().map(|stats| stats.total_bytes)),
-//RS             reserve_bytes: self.config.reserve_bytes(),
-//RS             available_bytes: disk.map(|stats| stats.available_bytes),
-//RS             live_leases: leases.len(),
-//RS             host_limit_bytes: self.host_limit()?,
-//RS             entries,
-//RS             tiers: vec!["local".to_string()],
-//RS         })
-//RS     }
-//RS 
-//RS     fn prune_locked(&self, target_bytes: u64) -> Result<PruneReport, StoreError> {
-//RS         let journal = read_journal(&self.root().join("journal"))?;
-//RS         let leases = self.read_leases_locked(true)?;
-//RS         let pinned: BTreeSet<EntryKey> = leases
-//RS             .iter()
-//RS             .flat_map(|lease| lease.targets.iter().cloned())
-//RS             .collect();
-//RS         let mut entries = self.scan_entries()?;
-//RS         for entry in &mut entries {
-//RS             entry.last_use = journal
-//RS                 .entries
-//RS                 .get(&entry.key)
-//RS                 .map(|meta| meta.last_use)
-//RS                 .unwrap_or(0);
-//RS             entry.pinned = pinned.contains(&entry.key);
-//RS         }
-//RS         let before = entries
-//RS             .iter()
-//RS             .fold(0u64, |sum, entry| sum.saturating_add(entry.size_bytes));
-//RS         let pinned_bytes = entries
-//RS             .iter()
-//RS             .filter(|entry| entry.pinned)
-//RS             .fold(0u64, |sum, entry| sum.saturating_add(entry.size_bytes));
-//RS         let mut order = entries.clone();
-//RS         order.sort_by(|left, right| {
-//RS             (left.pinned, left.last_use, &left.key).cmp(&(right.pinned, right.last_use, &right.key))
-//RS         });
-//RS         let mut after = before;
-//RS         let mut removed = Vec::new();
-//RS         for entry in order {
-//RS             if after <= target_bytes {
-//RS                 break;
-//RS             }
-//RS             if entry.pinned {
-//RS                 continue;
-//RS             }
-//RS             match fs::remove_file(&entry.path) {
-//RS                 Ok(()) => {
-//RS                     sync_dir(entry.path.parent().expect("store entry has parent"))?;
-//RS                     after = after.saturating_sub(entry.size_bytes);
-//RS                     self.append_journal_locked("remove", &entry.key, entry.size_bytes)?;
-//RS                     removed.push(entry.status());
-//RS                 }
-//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-//RS                 Err(error) => return Err(StoreError::Io(error)),
-//RS             }
-//RS         }
-//RS         if !removed.is_empty() || journal.bytes > MAX_JOURNAL_BYTES {
-//RS             self.compact_journal_locked()?;
-//RS         }
-//RS         Ok(PruneReport {
-//RS             target_bytes,
-//RS             before_bytes: before,
-//RS             after_bytes: after,
-//RS             removed,
-//RS             pinned_bytes,
-//RS             blocked: after > target_bytes,
-//RS         })
-//RS     }
-//RS 
-//RS     fn ensure_capacity_locked(&self, incoming: u64, path: &Path) -> Result<(), StoreError> {
-//RS         let disk = filesystem_stats(self.root());
-//RS         let limit = self.limit_with_disk(disk.as_ref().map(|stats| stats.total_bytes));
-//RS         if incoming > limit {
-//RS             return Err(StoreError::Capacity {
-//RS                 path: path.to_path_buf(),
-//RS                 needed_bytes: incoming,
-//RS                 available_bytes: disk.map(|stats| stats.available_bytes),
-//RS                 limit_bytes: limit,
-//RS             });
-//RS         }
-//RS         let footprint = self
-//RS             .scan_entries()?
-//RS             .iter()
-//RS             .fold(0u64, |sum, entry| sum.saturating_add(entry.size_bytes));
-//RS         if footprint.saturating_add(incoming) > limit {
-//RS             let _ = self.prune_locked(limit.saturating_sub(incoming))?;
-//RS         }
-//RS         let footprint = self
-//RS             .scan_entries()?
-//RS             .iter()
-//RS             .fold(0u64, |sum, entry| sum.saturating_add(entry.size_bytes));
-//RS         let available = disk.map(|stats| stats.available_bytes);
-//RS         let disk_needed = incoming
-//RS             .saturating_mul(2)
-//RS             .saturating_add(self.config.reserve_bytes());
-//RS         let disk_ok = available.is_none_or(|free| free >= disk_needed);
-//RS         if footprint.saturating_add(incoming) > limit || !disk_ok {
-//RS             return Err(StoreError::Capacity {
-//RS                 path: path.to_path_buf(),
-//RS                 needed_bytes: incoming,
-//RS                 available_bytes: available,
-//RS                 limit_bytes: limit,
-//RS             });
-//RS         }
-//RS         Ok(())
-//RS     }
-//RS     fn limit_with_disk(&self, total_bytes: Option<u64>) -> u64 {
-//RS         let adaptive = total_bytes
-//RS             .map(|total| (total / 10).min(DEFAULT_CAP_BYTES).max(1))
-//RS             .unwrap_or(DEFAULT_CAP_BYTES);
-//RS         let configured = self.config.cap_bytes().unwrap_or(adaptive);
-//RS         self.host_limit()
-//RS             .ok()
-//RS             .flatten()
-//RS             .map_or(configured, |host| configured.min(host))
-//RS     }
-//RS 
-//RS     fn host_limit_path(&self) -> PathBuf {
-//RS         self.root().join("host-limit")
-//RS     }
-//RS 
-//RS     fn ensure_layout(&self) -> Result<(), StoreError> {
-//RS         fs::create_dir_all(self.root())?;
-//RS         for name in ["cas", "ac", "lto", "locks", "leases", "quarantine", "build-records"] {
-//RS             ensure_dir(&self.root().join(name))?;
-//RS         }
-//RS         ensure_dir(&self.root().join("build-records").join("records"))?;
-//RS         Ok(())
-//RS     }
-//RS     fn quarantine_after_read(&self, key: &EntryKey, path: &Path, reason: &str) {
-//RS         let Ok(_lock) = self.acquire_lock() else {
-//RS             return;
-//RS         };
-//RS         let _ = self.quarantine_locked(key, path, reason);
-//RS     }
-//RS 
-//RS     fn touch_after_read(&self, key: &EntryKey, length: u64) {
-//RS         let Ok(_lock) = self.acquire_lock() else {
-//RS             return;
-//RS         };
-//RS         let _ = self.append_journal_locked("touch", key, length);
-//RS     }
-//RS     fn quarantine_locked(&self, key: &EntryKey, path: &Path, _reason: &str) -> Result<(), StoreError> {
-//RS         if !path.exists() && fs::symlink_metadata(path).is_err() {
-//RS             return Ok(());
-//RS         }
-//RS         let quarantine = self.root().join("quarantine");
-//RS         ensure_dir(&quarantine)?;
-//RS         let name = format!(
-//RS             "{}-{}-{}",
-//RS             key.kind_name(),
-//RS             key.storage_key(),
-//RS             next_counter()
-//RS         );
-//RS         let destination = quarantine.join(name);
-//RS         match fs::rename(path, &destination) {
-//RS             Ok(()) => {
-//RS                 sync_dir(path.parent().expect("quarantine source has parent"))?;
-//RS                 sync_dir(&quarantine)?;
-//RS                 let length = fs::metadata(&destination).map(|metadata| metadata.len()).unwrap_or(0);
-//RS                 self.append_journal_locked("remove", key, length)?;
-//RS                 Ok(())
-//RS             }
-//RS             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
-//RS             Err(error) => Err(StoreError::Io(error)),
-//RS         }
-//RS     }
-//RS 
-//RS     fn append_journal_locked(&self, operation: &str, key: &EntryKey, length: u64) -> Result<(), StoreError> {
-//RS         self.append_journal_entries_locked(&[(operation, key, length)])
-//RS     }
-//RS 
-//RS     /// Append one journal line per entry after one read of the journal's
-//RS     /// final line and one synced write.
-//RS     fn append_journal_entries_locked(&self, entries: &[(&str, &EntryKey, u64)]) -> Result<(), StoreError> {
-//RS         if entries.is_empty() {
-//RS             return Ok(());
-//RS         }
-//RS         let journal_path = self.root().join("journal");
-//RS         let last_sequence = match journal_tail_sequence(&journal_path)? {
-//RS             Some(sequence) => sequence,
-//RS             None => {
-//RS                 self.compact_journal_locked()?;
-//RS                 read_journal(&journal_path)?.last_sequence
-//RS             }
-//RS         };
-//RS         let mut lines = String::new();
-//RS         for (index, (operation, key, length)) in entries.iter().enumerate() {
-//RS             let sequence = last_sequence.saturating_add(index as u64 + 1);
-//RS             let (kind, value) = key.wire();
-//RS             let prefix = format!("{STORE_VERSION}|{operation}|{kind}|{value}|{length}|{sequence}|");
-//RS             let checksum = sha256_hex(prefix.as_bytes());
-//RS             lines.push_str(&prefix);
-//RS             lines.push_str(&checksum);
-//RS             lines.push('\n');
-//RS         }
-//RS         append_synced(&journal_path, lines.as_bytes())
-//RS     }
-//RS 
-//RS     fn compact_journal_locked(&self) -> Result<(), StoreError> {
-//RS         let journal_path = self.root().join("journal");
-//RS         let journal = read_journal(&journal_path)?;
-//RS         let mut entries = self.scan_entries()?;
-//RS         for entry in &mut entries {
-//RS             entry.last_use = journal
-//RS                 .entries
-//RS                 .get(&entry.key)
-//RS                 .map(|meta| meta.last_use)
-//RS                 .unwrap_or(0);
-//RS         }
-//RS         entries.sort_by(|left, right| (left.last_use, &left.key).cmp(&(right.last_use, &right.key)));
-//RS         let mut contents = Vec::new();
-//RS         for (index, entry) in entries.iter().enumerate() {
-//RS             let sequence = index as u64 + 1;
-//RS             let (kind, value) = entry.key.wire();
-//RS             let prefix = format!("{STORE_VERSION}|put|{kind}|{value}|{}|{sequence}|", entry.size_bytes);
-//RS             let checksum = sha256_hex(prefix.as_bytes());
-//RS             contents.extend_from_slice(format!("{prefix}{checksum}\n").as_bytes());
-//RS         }
-//RS         atomic_write(&journal_path, &contents)
-//RS     }
-//RS 
-//RS     fn read_leases_locked(&self, clean_stale: bool) -> Result<Vec<LeaseRecord>, StoreError> {
-//RS         let directory = self.root().join("leases");
-//RS         let mut paths = sorted_children(&directory)?;
-//RS         paths.retain(|path| {
-//RS             path.file_name()
-//RS                 .and_then(|name| name.to_str())
-//RS                 .is_some_and(|name| name.starts_with("lease-"))
-//RS         });
-//RS         let mut live = Vec::new();
-//RS         for path in paths {
-//RS             let bytes = match fs::read(&path) {
-//RS                 Ok(bytes) => bytes,
-//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-//RS                 Err(error) => return Err(StoreError::Io(error)),
-//RS             };
-//RS             let Some(record) = parse_lease(&path, &bytes) else {
-//RS                 continue;
-//RS             };
-//RS             match owner_liveness(&record.owner) {
-//RS                 Some(false) if clean_stale => {
-//RS                     if fs::remove_file(&path).is_ok() {
-//RS                         sync_dir(&directory)?;
-//RS                     }
-//RS                 }
-//RS                 Some(false) => {}
-//RS                 Some(true) | None => live.push(record),
-//RS             }
-//RS         }
-//RS         Ok(live)
-//RS     }
-//RS 
-//RS     fn scan_entries(&self) -> Result<Vec<StoredEntry>, StoreError> {
-//RS         let mut entries = Vec::new();
-//RS         scan_flat_namespace(
-//RS             &self.root().join("cas"),
-//RS             EntryKind::Blob,
-//RS             None,
-//RS             &mut entries,
-//RS         )?;
-//RS         scan_flat_namespace(&self.root().join("ac"), EntryKind::Action, None, &mut entries)?;
-//RS         let lto_root = self.root().join("lto");
-//RS         for namespace_path in sorted_children(&lto_root)? {
-//RS             let metadata = match fs::symlink_metadata(&namespace_path) {
-//RS                 Ok(metadata) => metadata,
-//RS                 Err(error) if error.kind() == io::ErrorKind::NotFound => continue,
-//RS                 Err(error) => return Err(StoreError::Io(error)),
-//RS             };
-//RS             if !metadata.is_dir() || metadata.file_type().is_symlink() {
-//RS                 continue;
-//RS             }
-//RS             let Some(namespace) = namespace_path.file_name().and_then(|name| name.to_str()) else {
-//RS                 continue;
-//RS             };
-//RS             if LtoNamespace::new(namespace).is_err() {
-//RS                 continue;
-//RS             }
-//RS             scan_flat_namespace(
-//RS                 &namespace_path,
-//RS                 EntryKind::Lto,
-//RS                 Some(namespace.to_string()),
-//RS                 &mut entries,
-//RS             )?;
-//RS         }
-//RS         entries.sort_by(|left, right| left.key.cmp(&right.key));
-//RS         Ok(entries)
-//RS     }
-//RS 
-//RS 
-//RS     fn acquire_lock(&self) -> Result<StoreLock, StoreError> {
-//RS         let path = self.root().join("locks").join("store.lock");
-//RS         let owner = ProcessIdentity::current();
-//RS         let owner_line = format!("{STORE_VERSION}|lock|{}|{}\n", owner.pid(), owner.start());
-//RS         let started = Instant::now();
-//RS         let deadline = started + self.config.lock_wait();
-//RS         let mut retry = LOCK_RETRY;
-//RS         loop {
-//RS             match OpenOptions::new().write(true).create_new(true).open(&path) {
-//RS                 Ok(mut file) => {
-//RS                     file.write_all(owner_line.as_bytes())?;
-//RS                     file.sync_all()?;
-//RS                     sync_dir(path.parent().expect("lock path has parent"))?;
-//RS                     return Ok(StoreLock {
-//RS                         path,
-//RS                         owner_line: owner_line.into_bytes(),
-//RS                         _file: file,
-//RS                     });
-//RS                 }
-//RS                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
-//RS                     let existing = fs::read(&path).ok();
-//RS                     let existing_owner = existing.as_deref().and_then(parse_owner_line);
-//RS                     let owner_pid = existing_owner.as_ref().map(ProcessIdentity::pid);
-//RS                     let is_live = existing_owner
-//RS                         .as_ref()
-//RS                         .map(|identity| owner_liveness(identity).unwrap_or(true))
-//RS                         .unwrap_or(true);
-//RS                     if !is_live && fs::remove_file(&path).is_ok() {
-//RS                         sync_dir(path.parent().expect("lock path has parent"))?;
-//RS                         retry = LOCK_RETRY;
-//RS                         continue;
-//RS                     }
-//RS                     let now = Instant::now();
-//RS                     if now >= deadline {
-//RS                         return Err(StoreError::Locked {
-//RS                             path,
-//RS                             owner_pid,
-//RS                             elapsed: now.saturating_duration_since(started),
-//RS                         });
-//RS                     }
-//RS                     thread::sleep(retry.min(deadline.saturating_duration_since(now)));
-//RS                     retry = retry.saturating_mul(2).min(LOCK_RETRY_MAX);
-//RS                 }
-//RS                 Err(error) => return Err(StoreError::Io(error)),
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// A live lease. Dropping it releases the file only if its ownership record is
-//RS /// unchanged; a later process can therefore never remove a live lease by PID
-//RS /// coincidence.
-//RS pub struct Lease {
-//RS     path: PathBuf,
-//RS     owner: ProcessIdentity,
-//RS }
-//RS 
-//RS impl Lease {
-//RS     pub fn path(&self) -> &Path {
-//RS         &self.path
-//RS     }
-//RS 
-//RS     pub fn owner(&self) -> &ProcessIdentity {
-//RS         &self.owner
-//RS     }
-//RS 
-//RS     pub fn is_live(&self) -> bool {
-//RS         owner_liveness(&self.owner).unwrap_or(true)
-//RS     }
-//RS }
-//RS 
-//RS impl fmt::Debug for Lease {
-//RS     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-//RS         formatter
-//RS             .debug_struct("Lease")
-//RS             .field("path", &self.path)
-//RS             .field("owner", &self.owner)
-//RS             .finish()
-//RS     }
-//RS }
-//RS 
-//RS impl Drop for Lease {
-//RS     fn drop(&mut self) {
-//RS         let expected = format!("{STORE_VERSION}|lease|{}|{}\n", self.owner.pid(), self.owner.start());
-//RS         let owned = fs::read(&self.path)
-//RS             .ok()
-//RS             .is_some_and(|bytes| bytes.starts_with(expected.as_bytes()));
-//RS         if owned && fs::remove_file(&self.path).is_ok() {
-//RS             if let Some(parent) = self.path.parent() {
-//RS                 let _ = sync_dir(parent);
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS struct StoreLock {
-//RS     path: PathBuf,
-//RS     owner_line: Vec<u8>,
-//RS     _file: File,
-//RS }
-//RS 
-//RS impl Drop for StoreLock {
-//RS     fn drop(&mut self) {
-//RS         if fs::read(&self.path).ok().as_deref() == Some(self.owner_line.as_slice()) {
-//RS             if fs::remove_file(&self.path).is_ok() {
-//RS                 if let Some(parent) = self.path.parent() {
-//RS                     let _ = sync_dir(parent);
-//RS                 }
-//RS             }
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-//RS enum EntryKey {
-//RS     Blob(String),
-//RS     Action(String),
-//RS     Lto(String, String),
-//RS }
-//RS 
-//RS impl EntryKey {
-//RS     fn kind(&self) -> EntryKind {
-//RS         match self {
-//RS             Self::Blob(_) => EntryKind::Blob,
-//RS             Self::Action(_) => EntryKind::Action,
-//RS             Self::Lto(_, _) => EntryKind::Lto,
-//RS         }
-//RS     }
-//RS 
-//RS     fn kind_name(&self) -> &'static str {
-//RS         match self {
-//RS             Self::Blob(_) => "blob",
-//RS             Self::Action(_) => "action",
-//RS             Self::Lto(_, _) => "lto",
-//RS         }
-//RS     }
-//RS 
-//RS     fn storage_key(&self) -> String {
-//RS         match self {
-//RS             Self::Blob(key) | Self::Action(key) => key.clone(),
-//RS             Self::Lto(namespace, key) => format!("{namespace}-{key}"),
-//RS         }
-//RS     }
-//RS 
-//RS     fn wire(&self) -> (&'static str, String) {
-//RS         match self {
-//RS             Self::Blob(key) => ("blob", key.clone()),
-//RS             Self::Action(key) => ("action", key.clone()),
-//RS             Self::Lto(namespace, key) => ("lto", format!("{namespace}~{key}")),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct StoredEntry {
-//RS     key: EntryKey,
-//RS     path: PathBuf,
-//RS     size_bytes: u64,
-//RS     last_use: u64,
-//RS     pinned: bool,
-//RS }
-//RS 
-//RS impl StoredEntry {
-//RS     fn status(&self) -> EntryStatus {
-//RS         let (key, namespace) = match &self.key {
-//RS             EntryKey::Blob(key) | EntryKey::Action(key) => (key.clone(), None),
-//RS             EntryKey::Lto(namespace, key) => (key.clone(), Some(namespace.clone())),
-//RS         };
-//RS         EntryStatus {
-//RS             kind: self.key.kind(),
-//RS             key,
-//RS             namespace,
-//RS             size_bytes: self.size_bytes,
-//RS             last_use: self.last_use,
-//RS             pinned: self.pinned,
-//RS             path: self.path.clone(),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct LeaseRecord {
-//RS     owner: ProcessIdentity,
-//RS     targets: Vec<EntryKey>,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug, Default)]
-//RS struct JournalState {
-//RS     entries: BTreeMap<EntryKey, JournalMeta>,
-//RS     last_sequence: u64,
-//RS     bytes: u64,
-//RS     valid: bool,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct JournalMeta {
-//RS     last_use: u64,
-//RS }
-//RS 
-//RS #[derive(Clone, Debug)]
-//RS struct DiskStats {
-//RS     total_bytes: u64,
-//RS     available_bytes: u64,
-//RS }
-//RS 
-//RS enum RawRead {
-//RS     Missing,
-//RS     Bytes(Vec<u8>),
-//RS     Corrupt(String),
-//RS }
-//RS 
-// END-PORT-PENDING 0831 crates/jet-store/src/lib.rs:1-1791
+// Canonical artifact-store declarations remain in Jetpack/Store/Source/ArtifactStore.
+// This compilation unit extends that owner; it does not define another store.
+use jet_foundation.DataTree.[DataTree]
+use jet_foundation.SHA256.[sha256_hex]
+use jet_store.ArtifactStore.[ArtifactStore, ArtifactStoreConfig, ArtifactStoreError, ArtifactDigest, ObjectHandle, ActionHandle, LtoNamespace, LeaseTarget, ArtifactProcessIdentity, ArtifactEntryKind, ArtifactEntryKey, ArtifactEntryStatus, ArtifactStoreStatus, ArtifactPruneReport, StoredArtifact, ArtifactLookup, ArtifactRestore, ArtifactLease, BuildNodeRecord, BuildRecord, ArtifactRawRead, store_artifact_read_file, store_artifact_decode_action, store_artifact_encode_action, store_artifact_encode_record, store_artifact_is_unsupported_version, store_artifact_action_for_key, store_artifact_atomic_write, store_artifact_append_synced, store_artifact_is_executable]
+use jet_store.project_state
+use jet_store.[journal_tail_sequence, read_journal, replace_unsynced]
+use std.fs
 
+// Rust: crates/jet-store/src/lib.rs:17
+fn field(object: [(String, DataTree)], key: String) -> DataTree? {
+    loop (name, value) in object { if name == key -> return Val(value) }
+    None
+}
+
+// Rust: crates/jet-store/src/lib.rs:23
+// runtime -> Jetpack/Store/Source/ArtifactStore/NativeRuntimeCache.jet.
+// Rust: crates/jet-store/src/lib.rs:24
+// diagnostic_record -> canonical jet_store.diagnostic_record.
+// Rust: crates/jet-store/src/lib.rs:25
+// project_state -> canonical jet_store.project_state (workspace .jet state).
+// Rust: crates/jet-store/src/lib.rs:26
+// receipt -> canonical jet_store.receipt, including ReceiptInput/ReceiptRecord.
+// Rust: crates/jet-store/src/lib.rs:27
+// records -> canonical jet_store.records, including RecordKind.
+// Rust: crates/jet-store/src/lib.rs:30
+// STORE_VERSION -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_VERSION.
+// Rust: crates/jet-store/src/lib.rs:31
+// STORE_ENV -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_ENV.
+// Rust: crates/jet-store/src/lib.rs:32
+// DEFAULT_CAP_BYTES -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_DEFAULT_CAP_BYTES.
+// Rust: crates/jet-store/src/lib.rs:33
+// DEFAULT_RESERVE_BYTES -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_DEFAULT_RESERVE_BYTES.
+// Rust: crates/jet-store/src/lib.rs:35
+// DEFAULT_LOCK_WAIT -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_DEFAULT_LOCK_WAIT_MS.
+// Rust: crates/jet-store/src/lib.rs:36
+// LOCK_RETRY -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_LOCK_RETRY_MS.
+// Rust: crates/jet-store/src/lib.rs:37
+// LOCK_RETRY_MAX -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_LOCK_RETRY_MAX_MS.
+// Rust: crates/jet-store/src/lib.rs:38
+// ACTION_MAGIC -> ArtifactStore/Codec.jet:store_artifact_action_magic (zero bytes, not a text escape).
+// Rust: crates/jet-store/src/lib.rs:39
+// ARTIFACT_MAGIC -> ArtifactStore/Codec.jet:store_artifact_record_magic.
+// Rust: crates/jet-store/src/lib.rs:40
+// MAX_JOURNAL_BYTES -> ArtifactStore/StoreConfig.jet:@STORE_ARTIFACT_MAX_JOURNAL_BYTES.
+// Rust: crates/jet-store/src/lib.rs:41
+// FILE_COUNTER belongs to the native unique-token primitive; GATE #4494 atomic counter.
+
+// Rust: crates/jet-store/src/lib.rs:45
+// Digest -> ArtifactStore/Identity.jet:ArtifactDigest.
+// Rust: crates/jet-store/src/lib.rs:48
+// Digest.hash -> ArtifactDigest.hash.
+// Rust: crates/jet-store/src/lib.rs:52
+// Digest.from_hex -> ArtifactDigest.from_hex (exact 64-byte validation and both hex cases).
+// Rust: crates/jet-store/src/lib.rs:68
+// Digest.as_bytes -> ArtifactDigest.as_bytes.
+// Rust: crates/jet-store/src/lib.rs:72
+// Digest.to_hex -> ArtifactDigest.to_hex.
+// Rust: crates/jet-store/src/lib.rs:83
+// Digest Display -> ArtifactDigest.to_hex.
+// Rust: crates/jet-store/src/lib.rs:91
+// ObjectHandle -> ArtifactStore/Identity.jet:ObjectHandle.
+// Rust: crates/jet-store/src/lib.rs:97
+// ObjectHandle.new -> ObjectHandle.new.
+// Rust: crates/jet-store/src/lib.rs:101
+// ObjectHandle.from_bytes -> ObjectHandle.from_bytes.
+// Rust: crates/jet-store/src/lib.rs:105
+// ObjectHandle.digest -> ObjectHandle.digest.
+// Rust: crates/jet-store/src/lib.rs:109
+// ObjectHandle.length -> ObjectHandle.length.
+// Rust: crates/jet-store/src/lib.rs:113
+// ObjectHandle.key -> ObjectHandle.key.
+// Rust: crates/jet-store/src/lib.rs:119
+// ObjectHandle Display -> ObjectHandle.text.
+// Rust: crates/jet-store/src/lib.rs:128
+// ActionHandle -> ArtifactStore/Identity.jet:ActionHandle.
+// Rust: crates/jet-store/src/lib.rs:133
+// ActionHandle.new -> ActionHandle.new.
+// Rust: crates/jet-store/src/lib.rs:137
+// ActionHandle.from_key -> ActionHandle.from_key.
+// Rust: crates/jet-store/src/lib.rs:141
+// ActionHandle.from_bytes -> ActionHandle.from_bytes.
+// Rust: crates/jet-store/src/lib.rs:145
+// ActionHandle.digest -> ActionHandle.digest.
+// Rust: crates/jet-store/src/lib.rs:149
+// ActionHandle.key -> ActionHandle.key.
+// Rust: crates/jet-store/src/lib.rs:155
+// ActionHandle Display -> ActionHandle.key.
+// Rust: crates/jet-store/src/lib.rs:162
+// LtoNamespace -> ArtifactStore/Identity.jet:LtoNamespace.
+// Rust: crates/jet-store/src/lib.rs:165
+// LtoNamespace.new -> LtoNamespace.new.
+// Rust: crates/jet-store/src/lib.rs:170
+// LtoNamespace.name -> LtoNamespace.name.
+// Rust: crates/jet-store/src/lib.rs:176
+// LtoNamespace.as_ref -> LtoNamespace.name.
+// Rust: crates/jet-store/src/lib.rs:182
+// LtoNamespace Display -> LtoNamespace.name.
+// Rust: crates/jet-store/src/lib.rs:189
+// LeaseTarget -> ArtifactStore/Identity.jet:LeaseTarget.
+// Rust: crates/jet-store/src/lib.rs:199
+// LeaseTarget.blob -> LeaseTarget.blob.
+// Rust: crates/jet-store/src/lib.rs:203
+// LeaseTarget.action -> LeaseTarget.action.
+// Rust: crates/jet-store/src/lib.rs:207
+// LeaseTarget.lto -> LeaseTarget.lto.
+// Rust: crates/jet-store/src/lib.rs:214
+// LeaseTarget.entry_key -> LeaseTarget.entry_key.
+// Rust: crates/jet-store/src/lib.rs:227
+// StoreConfig -> ArtifactStore/StoreConfig.jet:ArtifactStoreConfig.
+// Rust: crates/jet-store/src/lib.rs:235
+// StoreConfig.new -> ArtifactStoreConfig.new.
+// Rust: crates/jet-store/src/lib.rs:244
+// StoreConfig.from_env -> ArtifactStoreConfig.from_env.
+// Rust: crates/jet-store/src/lib.rs:260
+// StoreConfig.with_cap_bytes -> ArtifactStoreConfig.with_cap_bytes.
+// Rust: crates/jet-store/src/lib.rs:265
+// StoreConfig.with_reserve_bytes -> ArtifactStoreConfig.with_reserve_bytes.
+// Rust: crates/jet-store/src/lib.rs:271
+// StoreConfig.with_lock_wait -> ArtifactStoreConfig.with_lock_wait.
+// Rust: crates/jet-store/src/lib.rs:276
+// StoreConfig.root -> ArtifactStoreConfig.root.
+// Rust: crates/jet-store/src/lib.rs:280
+// StoreConfig.cap_bytes -> ArtifactStoreConfig.cap_bytes.
+// Rust: crates/jet-store/src/lib.rs:284
+// StoreConfig.reserve_bytes -> ArtifactStoreConfig.reserve_bytes.
+// Rust: crates/jet-store/src/lib.rs:288
+// StoreConfig.lock_wait -> ArtifactStoreConfig.lock_wait.
+// Rust: crates/jet-store/src/lib.rs:294
+// StoreConfig.default -> ArtifactStoreConfig.default.
+// Rust: crates/jet-store/src/lib.rs:302
+// ProcessIdentity -> ArtifactStore/Leases.jet:ArtifactProcessIdentity.
+// Rust: crates/jet-store/src/lib.rs:308
+// ProcessIdentity.current -> ArtifactProcessIdentity.current (native start token #4494).
+// Rust: crates/jet-store/src/lib.rs:312
+// ProcessIdentity.new -> ArtifactProcessIdentity.new.
+// Rust: crates/jet-store/src/lib.rs:319
+// ProcessIdentity.pid -> ArtifactProcessIdentity.pid.
+// Rust: crates/jet-store/src/lib.rs:323
+// ProcessIdentity.start -> ArtifactProcessIdentity.start.
+// Rust: crates/jet-store/src/lib.rs:330
+// EntryStatus -> ArtifactStore/Store.jet:ArtifactEntryStatus.
+// Rust: crates/jet-store/src/lib.rs:341
+// EntryKind -> ArtifactStore/Identity.jet:ArtifactEntryKind.
+// Rust: crates/jet-store/src/lib.rs:349
+// StoreStatus -> ArtifactStore/Store.jet:ArtifactStoreStatus.
+// Rust: crates/jet-store/src/lib.rs:363
+// PruneReport -> ArtifactStore/Store.jet:ArtifactPruneReport.
+// Rust: crates/jet-store/src/lib.rs:374
+// StoredArtifact -> ArtifactStore/Store.jet:StoredArtifact.
+// Rust: crates/jet-store/src/lib.rs:382
+// BuildNodeRecord -> ArtifactStore/BuildRecord.jet:BuildNodeRecord.
+// Rust: crates/jet-store/src/lib.rs:393
+// BuildRecord -> ArtifactStore/BuildRecord.jet:BuildRecord.
+// Rust: crates/jet-store/src/lib.rs:400
+// BuildRecord.SCHEMA -> ArtifactStore/BuildRecord.jet:@STORE_BUILD_RECORD_SCHEMA.
+// Rust: crates/jet-store/src/lib.rs:402
+// BuildRecord.new -> BuildRecord.new.
+// Rust: crates/jet-store/src/lib.rs:411
+// BuildRecord.to_json -> BuildRecord.to_json.
+// Rust: crates/jet-store/src/lib.rs:447
+// BuildRecord.from_json -> BuildRecord.from_json (canonical error-text reconciliation recorded for integration).
+// Rust: crates/jet-store/src/lib.rs:523
+// ArtifactLookup -> ArtifactStore/Store.jet:ArtifactLookup.
+// Rust: crates/jet-store/src/lib.rs:531
+// ArtifactRestore -> ArtifactStore/Store.jet:ArtifactRestore.
+// Rust: crates/jet-store/src/lib.rs:541
+// StoreError -> ArtifactStore/Identity.jet:ArtifactStoreError, one #Error carrier.
+// Rust: crates/jet-store/src/lib.rs:562
+// StoreError Display -> ArtifactStoreError.message.
+// Rust: crates/jet-store/src/lib.rs:603
+// StoreError.source is the contained IOError for .Io and absent otherwise.
+// Rust: crates/jet-store/src/lib.rs:612
+// From<IOError> -> ArtifactStoreError: Identity.jet impl IOError -> ArtifactStoreError.
+// Rust: crates/jet-store/src/lib.rs:619
+// Store -> ArtifactStore/Store.jet:ArtifactStore.
+// Rust: crates/jet-store/src/lib.rs:624
+// Store.open -> ArtifactStore.open.
+// Rust: crates/jet-store/src/lib.rs:633
+// Store.new -> ArtifactStore.new.
+// Rust: crates/jet-store/src/lib.rs:637
+// Store.from_env -> ArtifactStore.from_env.
+// Rust: crates/jet-store/src/lib.rs:641
+// Store.config -> ArtifactStore.config.
+// Rust: crates/jet-store/src/lib.rs:645
+// Store.root -> ArtifactStore.root.
+// Rust: crates/jet-store/src/lib.rs:649
+// Store.limit -> ArtifactStore.limit.
+// Rust: crates/jet-store/src/lib.rs:653
+// Store.effective_limit -> ArtifactStore.effective_limit.
+// Rust: crates/jet-store/src/lib.rs:657
+// Store.object_path -> ArtifactStore.object_path.
+// Rust: crates/jet-store/src/lib.rs:661
+// Store.action_path -> ArtifactStore.action_path.
+// Rust: crates/jet-store/src/lib.rs:665
+// Store.lto_path -> ArtifactStore.lto_path (LtoNamespace.name at typed callers).
+// Rust: crates/jet-store/src/lib.rs:669
+// Store.publish_blob -> ArtifactStore.publish_blob.
+// Rust: crates/jet-store/src/lib.rs:675
+// Store.publish_object -> ArtifactStore.publish_object.
+// Rust: crates/jet-store/src/lib.rs:686
+// Store.get_blob -> ArtifactStore.get_blob.
+// Rust: crates/jet-store/src/lib.rs:707
+// Store.blob_by_digest -> ArtifactStore.blob_by_digest.
+// Rust: crates/jet-store/src/lib.rs:731
+// Store.publish_build_record -> ArtifactStore.publish_build_record; remove canonical latest-pointer write at cutover.
+
+impl ArtifactStore {
+    // Rust: crates/jet-store/src/lib.rs:754
+    pub fn publish_last_build_record(self, workspace_root: OSPath, key: String, record: BuildRecord) -> ObjectHandle ArtifactStoreError! {
+        object :: self.publish_build_record(key, record)?
+        project_state.write_last_run(workspace_root, record.program, key)?
+        Ok(object)
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:766
+    // Store.build_record -> ArtifactStore.build_record.
+    // Rust: crates/jet-store/src/lib.rs:787
+    pub fn last_build_record(self, workspace_root: OSPath, program: String) -> BuildRecord? ArtifactStoreError! {
+        if project_state.last_run(workspace_root, program) == {
+            .Val(key) -> self.build_record(key)
+            .None -> Ok(None)
+        }
+    }
+    // Rust: crates/jet-store/src/lib.rs:798
+    // Store.build_record_pointer_path -> ArtifactStore.build_record_pointer_path.
+    // Rust: crates/jet-store/src/lib.rs:805
+    // Store.read_build_pointer -> ArtifactStore.read_build_pointer.
+    // Rust: crates/jet-store/src/lib.rs:835
+    // Store.get_object -> ArtifactStore.get_object.
+    // Rust: crates/jet-store/src/lib.rs:839
+    // Store.contains -> ArtifactStore.contains.
+    // Rust: crates/jet-store/src/lib.rs:843
+    // Store.publish_action -> ArtifactStore.publish_action.
+    // Rust: crates/jet-store/src/lib.rs:866
+    // Store.get_action -> canonical ArtifactStore.get_action; use get_action_untouched + touch_actions at cutover.
+
+    // Rust: crates/jet-store/src/lib.rs:877
+    pub fn get_action_untouched(self, action: ActionHandle) -> [U8]? ArtifactStoreError! {
+        key :: ArtifactEntryKey.Action(action.key())
+        path :: self.action_path(action)
+        if store_artifact_read_file(path)? == {
+            .Missing -> Ok(None)
+            .Corrupt(reason) -> {
+                self.quarantine_after_read(key, path, reason)
+                Ok(None)
+            }
+            .Bytes(bytes) -> {
+                if store_artifact_decode_action(action, bytes) == {
+                    .Ok(record) -> Ok(Val(record))
+                    .Err(error) -> {
+                        if store_artifact_is_unsupported_version(bytes) -> return Ok(None)
+                        self.quarantine_after_read(key, path, error.reason)
+                        Ok(None)
+                    }
+                }
+            }
+        }
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:899
+    pub fn touch_actions(self, actions: [ActionHandle]) -> {
+        if actions.is_empty() -> return
+        lock :: self.acquire_lock() ?? return
+        defer close(^lock)
+        lines := [(String, ArtifactEntryKey, Int)]{}
+        loop action in actions {
+            metadata :: fs.metadata(self.action_path(action)) ?? next // GATE #4494 retained file metadata.
+            &lines.push(("touch", ArtifactEntryKey.Action(action.key()), metadata.len()))
+        }
+        self.append_journal_entries_locked(lines).drop("a failed journal touch only costs eviction order")
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:923
+    pub fn publish_actions(self, records: [(ActionHandle, [U8])]) -> ArtifactStoreError! {
+        self.publish_action_batch(records, true)
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:932
+    pub fn publish_cache_actions(self, records: [(ActionHandle, [U8])]) -> ArtifactStoreError! {
+        self.publish_action_batch(records, false)
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:936
+    fn publish_action_batch(self, records: [(ActionHandle, [U8])], durable: Bool) -> ArtifactStoreError! {
+        if records.is_empty() -> return Ok(())
+        self.ensure_layout()?
+        lock :: self.acquire_lock()?
+        defer close(^lock)
+        journal := [(String, ArtifactEntryKey, Int)]{}
+        pending := [(String, ArtifactEntryKey, [U8])]{}
+        loop (action, record) in records {
+            path :: self.action_path(action)
+            key :: ArtifactEntryKey.Action(action.key())
+            if store_artifact_read_file(path)? == {
+                .Missing -> {}
+                .Corrupt(reason) -> self.quarantine_locked(key, path, reason)?
+                .Bytes(existing) -> {
+                    if store_artifact_decode_action(action, existing) == {
+                        .Ok(value) -> {
+                            if value == record -> &journal.push(("touch", key, existing.len()))
+                            next
+                        }
+                        .Err(error) -> self.quarantine_locked(key, path, error.reason)?
+                    }
+                }
+            }
+            &pending.push((path, key, store_artifact_encode_action(action, record)))
+        }
+        if !pending.is_empty() {
+            incoming := 0
+            loop (_, _, encoded) in pending -> incoming += encoded.len()
+            self.ensure_capacity_locked(incoming, pending[0].0)?
+        }
+        loop (path, key, encoded) in pending {
+            if durable { store_artifact_atomic_write(path, encoded)? }
+            else { replace_unsynced(path, encoded)? } // GATE #4494: real unsynced atomic replacement.
+            &journal.push(("put", key, encoded.len()))
+        }
+        self.append_journal_entries_locked(journal)
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:987
+    // Store.action -> ArtifactStore.action.
+    // Rust: crates/jet-store/src/lib.rs:991
+    // Store.publish_lto -> ArtifactStore.publish_lto.
+    // Rust: crates/jet-store/src/lib.rs:999
+    // Store.get_lto -> ArtifactStore.get_lto.
+    // Rust: crates/jet-store/src/lib.rs:1024
+    // Store.lto_namespace -> ArtifactStore.lto_namespace.
+    // Rust: crates/jet-store/src/lib.rs:1028
+    // Store.acquire_lease -> ArtifactStore.acquire_lease.
+    // Rust: crates/jet-store/src/lib.rs:1033
+    // Store.lease -> ArtifactStore.lease.
+    // Rust: crates/jet-store/src/lib.rs:1037
+    // Store.acquire_artifact_lease -> ArtifactStore.acquire_artifact_lease.
+    // Rust: crates/jet-store/src/lib.rs:1059
+    // Store.status -> ArtifactStore.status.
+    // Rust: crates/jet-store/src/lib.rs:1066
+    // Store.host_limit -> ArtifactStore.host_limit.
+    // Rust: crates/jet-store/src/lib.rs:1083
+    // Store.set_host_limit -> ArtifactStore.set_host_limit.
+    // Rust: crates/jet-store/src/lib.rs:1097
+    // Store.prune -> ArtifactStore.prune.
+    // Rust: crates/jet-store/src/lib.rs:1104
+    // Store.prune_to -> ArtifactStore.prune_to.
+    // Rust: crates/jet-store/src/lib.rs:1110
+    // Store.publish_file -> ArtifactStore.publish_file; use publish_bytes after regular-file metadata/read at cutover.
+
+    // Rust: crates/jet-store/src/lib.rs:1126
+    pub fn publish_bytes(self, key: String, bytes: [U8], executable: Bool) -> StoredArtifact ArtifactStoreError! {
+        action :: store_artifact_action_for_key(key)?
+        object :: ObjectHandle.from_bytes(bytes)
+        path :: self.object_path(object)
+        self.publish_data(ArtifactEntryKey.Blob(object.key()), path, bytes)?
+        self.publish_action(action, store_artifact_encode_record(object, executable))?
+        Ok(StoredArtifact{action, object, path, executable})
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:1146
+    // Store.lookup_artifact -> ArtifactStore.lookup_artifact.
+    // Rust: crates/jet-store/src/lib.rs:1221
+    // Store.restore_file -> ArtifactStore.restore_file, retaining the live lease through copy/chmod.
+    // Rust: crates/jet-store/src/lib.rs:1242
+    // Store.publish_data -> ArtifactStore.publish_data.
+    // Rust: crates/jet-store/src/lib.rs:1261
+    // Store.status_locked -> ArtifactStore.status_locked; typed key map reconciliation is recorded for integration.
+    // Rust: crates/jet-store/src/lib.rs:1300
+    // Store.prune_locked -> ArtifactStore.prune_locked, deterministic (pinned,last_use,key) ordering.
+    // Rust: crates/jet-store/src/lib.rs:1360
+    // Store.ensure_capacity_locked -> ArtifactStore.ensure_capacity_locked (u64 saturation reconciliation recorded).
+    // Rust: crates/jet-store/src/lib.rs:1397
+    // Store.limit_with_disk -> ArtifactStore.limit_with_disk.
+    // Rust: crates/jet-store/src/lib.rs:1408
+    // Store.host_limit_path -> ArtifactStore.host_limit_path.
+    // Rust: crates/jet-store/src/lib.rs:1412
+    // Store.ensure_layout -> ArtifactStore.ensure_layout; remove obsolete latest directory at cutover.
+    // Rust: crates/jet-store/src/lib.rs:1420
+    // Store.quarantine_after_read -> ArtifactStore.quarantine_after_read.
+    // Rust: crates/jet-store/src/lib.rs:1427
+    // Store.touch_after_read -> ArtifactStore.touch_after_read.
+    // Rust: crates/jet-store/src/lib.rs:1433
+    // Store.quarantine_locked -> ArtifactStore.quarantine_locked.
+    // Rust: crates/jet-store/src/lib.rs:1459
+    // Store.append_journal_locked -> ArtifactStore.append_journal_locked; delegate to the batch method at cutover.
+
+    // Rust: crates/jet-store/src/lib.rs:1465
+    fn append_journal_entries_locked(self, entries: [(String, ArtifactEntryKey, Int)]) -> ArtifactStoreError! {
+        if entries.is_empty() -> return Ok(())
+        journal_path :: files.join(self.root(), "journal")
+        last_sequence :: if journal_tail_sequence(journal_path)? == {
+            .Val(sequence) -> sequence
+            .None -> {
+                self.compact_journal_locked()?
+                read_journal(journal_path)?.last_sequence
+            }
+        }
+        lines := String.with_capacity(entries.len() * 192)
+        loop (index, (operation, key, length)) in entries {
+            sequence :: U64.from(last_sequence).saturating_add(U64.from(index + 1))
+            prefix :: "jet.store.v1|{operation}|{key.kind_name()}|{key.wire_value()}|{length}|{sequence}|"
+            &lines.push_str(prefix)
+            &lines.push_str(sha256_hex(prefix.bytes()))
+            &lines.push('\n')
+        }
+        store_artifact_append_synced(journal_path, lines.bytes())
+    }
+
+    // Rust: crates/jet-store/src/lib.rs:1490
+    // Store.compact_journal_locked -> ArtifactStore.compact_journal_locked (linear builder reconciliation recorded).
+    // Rust: crates/jet-store/src/lib.rs:1513
+    // Store.read_leases_locked -> ArtifactStore.read_leases_locked.
+    // Rust: crates/jet-store/src/lib.rs:1544
+    // Store.scan_entries -> ArtifactStore.scan_entries.
+    // Rust: crates/jet-store/src/lib.rs:1581
+    // Store.acquire_lock -> ArtifactStore.acquire_lock; native retained-file lifetime and AlreadyExists fidelity #4494/#4409.
+}
+
+// Rust: crates/jet-store/src/lib.rs:1633
+// Lease -> ArtifactStore/Leases.jet:ArtifactLease.
+// Rust: crates/jet-store/src/lib.rs:1639
+// Lease.path -> ArtifactLease.path.
+// Rust: crates/jet-store/src/lib.rs:1643
+// Lease.owner -> ArtifactLease.owner.
+// Rust: crates/jet-store/src/lib.rs:1647
+// Lease.is_live -> ArtifactLease.is_live (canonical liveness reconciliation recorded).
+// Rust: crates/jet-store/src/lib.rs:1653
+// Lease Debug -> structured ArtifactLease fields path/owner.
+// Rust: crates/jet-store/src/lib.rs:1663
+// Lease Drop -> ArtifactLease.Close.close, compare owned lease prefix before removal/sync.
+// Rust: crates/jet-store/src/lib.rs:1676
+// StoreLock -> ArtifactStore/Leases.jet:ArtifactStoreLock (native retained-file lifetime recorded).
+// Rust: crates/jet-store/src/lib.rs:1683
+// StoreLock Drop -> ArtifactStoreLock.Close.close, exact owner-line equality before removal/sync.
+// Rust: crates/jet-store/src/lib.rs:1695
+// EntryKey -> ArtifactStore/Identity.jet:ArtifactEntryKey, typed equality/hash/order GATE #4499.
+// Rust: crates/jet-store/src/lib.rs:1702
+// EntryKey.kind -> ArtifactEntryKey.kind.
+// Rust: crates/jet-store/src/lib.rs:1710
+// EntryKey.kind_name -> ArtifactEntryKey.kind_name.
+// Rust: crates/jet-store/src/lib.rs:1718
+// EntryKey.storage_key -> ArtifactEntryKey.storage_key.
+// Rust: crates/jet-store/src/lib.rs:1725
+// EntryKey.wire -> (ArtifactEntryKey.kind_name(), ArtifactEntryKey.wire_value()).
+// Rust: crates/jet-store/src/lib.rs:1735
+// StoredEntry -> ArtifactStore/Store.jet:ArtifactStoredEntry.
+// Rust: crates/jet-store/src/lib.rs:1744
+// StoredEntry.status -> ArtifactStoredEntry.status.
+// Rust: crates/jet-store/src/lib.rs:1762
+// LeaseRecord -> ArtifactStore/Leases.jet:ArtifactLeaseRecord.
+// Rust: crates/jet-store/src/lib.rs:1768
+// JournalState -> ArtifactStore/Leases.jet:ArtifactJournalState (typed map reconciliation recorded).
+// Rust: crates/jet-store/src/lib.rs:1776
+// JournalMeta -> canonical journal map value last-use count.
+// Rust: crates/jet-store/src/lib.rs:1782
+// DiskStats -> ArtifactStore/Codec.jet:ArtifactDiskStats.
+// Rust: crates/jet-store/src/lib.rs:1788
+// RawRead -> ArtifactStore/Codec.jet:ArtifactRawRead.

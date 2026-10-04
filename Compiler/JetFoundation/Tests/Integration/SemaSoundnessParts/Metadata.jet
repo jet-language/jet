@@ -1,0 +1,13 @@
+use Compiler.JetFoundation.Tests.Integration.SemaSoundnessParts.Support.*
+// Rust: tests/sema_soundness_parts/metadata.rs:2
+// Shared callable also exercised by the full-corpus floor test.
+pub fn selector_routes_exactly_one_fixture_category() -> {
+    filter :: case_filter()
+    counts :: ["valid", "invalid", "differential"].iter().map((kind) -> (kind, selected_cases(kind, filter).len())).collect()
+    if filter is selector {
+        assert_eq(counts.iter().map(((_, count)) -> count).sum::<USize>(), 1, "SEMA_SOUNDNESS_CASE must select exactly one fixture: {selector}; routes: {counts:?}")
+        assert_eq(counts.iter().filter(((_, count)) -> count == 1).count(), 1, "selector must route to exactly one category: {counts:?}")
+    } else {
+        assert(counts.iter().all(((_, count)) -> count > 0), "full corpus must keep every category non-vacuous: {counts:?}")
+    }
+}

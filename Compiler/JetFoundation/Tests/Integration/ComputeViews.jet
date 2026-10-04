@@ -1,0 +1,85 @@
+use jet_foundation.Tests.Common.[unique_tmp, Scratch]
+use jet_foundation.Tests.Integration.TirSupport.[write_test_package, TIR_TEST_PACKAGE, normalize_workspace_root_paths]
+use jet_foundation.Syntax.[sanitize_crate_name]
+use jet_driver.Interpreter.[RunOutcome, dev_iteration]
+use jet_driver.Driver.[compile_with_path, compile_web_with_path, render_diagnostics]
+use std.fs
+use std.process.[Command]
+// Rust: tests/compute_views.rs:15
+fn run_direct(name: String, src: String, force_interpreter: Bool) -> (Int, String, String) {
+    // GATE #4494: real scratch source and canonical Jet execution provider.
+    dir :: unique_tmp("compute_views_{name}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("main.jet")
+    fs.write(&path, src).unwrap()
+    result :: if dev_iteration(path.to_str().unwrap(), false, force_interpreter) == {
+        RunOutcome.Ran{stdout, stderr, exit_code} -> (exit_code, stdout, stderr)
+        RunOutcome.Problems(diags) -> panic("direct tier rejected compute view source: {diags.debug()}")
+    }
+    _ :: fs.remove_dir_all(&dir)
+    result
+}
+// Rust: tests/compute_views.rs:37
+// Retired resident/JIT/deopt representation assertions migrate to O0/O1/O2/Web
+// behavior. Every caller supplies the original exit/output/error law.
+fn assert_native_profiles(name: String, src: String, success: Bool, expected: String, error_text: String?) -> {
+    loop level in [Int]{0, 1, 2} {
+        (code, stdout, stderr) :: run_native_optimization("{name}_O{level}", src, level)
+        if success -> assert_eq(code, 0, stderr) else -> assert_ne(code, 0, "the native element/storage law must reject this operation")
+        assert_eq(stdout, expected, stderr)
+        if error_text == Val(text) -> assert(stderr.contains(text), "native O{level} used a non-canonical error: {stderr}")
+    }
+    (code, stdout, stderr) :: run_awaited_web("{name}_web", src)
+    if success -> assert_eq(code, 0, stderr) else -> assert_ne(code, 0, "the Web element/storage law must reject this operation")
+    assert_eq(stdout, expected, stderr)
+    if error_text == Val(text) -> assert(stderr.contains(text), "Web used a non-canonical error: {stderr}")
+}
+// Rust: tests/compute_views.rs:48
+fn run_forced_interpreter(name: String, src: String) -> (Int, String, String) { run_direct(name, src, true) }
+
+// Rust: tests/compute_views.rs:37, tests/tir_support/mod.rs:618-675
+// The original native adapter with an explicit downstream optimization profile.
+// This is a real compiler/tool invocation, not a trace or representation assertion.
+fn run_native_optimization(name: String, src: String, level: Int) -> (Int, String, String) {
+    scratch :: Scratch.new("compute_native_{name}")
+    dir :: scratch.path
+    write_test_package(&dir, TIR_TEST_PACKAGE)
+    jet_path :: dir.join("{name}.jet")
+    fs.write(&jet_path, src).unwrap()
+    shown :: jet_path.to_string_lossy()
+    out :: compile_with_path(src, shown).unwrap_or_else(fn(diags) -> panic("front end rejected:\n{render_diagnostics(shown, src, &diags)}"))
+    rs :: dir.join("{name}.rs")
+    bin :: dir.join(name)
+    fs.write(&rs, out.rust).unwrap()
+    command := Command.new("rustc")
+    command.args([String]{"--edition", "2021", "--crate-name", sanitize_crate_name(name), "-C", "opt-level={level}"})
+    command.arg(&rs).arg("-o").arg(&bin)
+    if out.ffi == Val(link) {
+        command.arg("--extern").arg("{link.crate_name}={link.rlib_path.display()}")
+        loop deps_dir in link.dependency_dirs() { if deps_dir.is_dir() -> command.arg("-L").arg("dependency={deps_dir.display()}") }
+    }
+    built :: command.output().unwrap()
+    assert(built.status.success(), "native build failed:\n{String.from_utf8_lossy(built.stderr)}")
+    run :: Command.new(&bin).output().unwrap()
+    stderr :: normalize_workspace_root_paths(String.from_utf8_lossy(run.stderr), &dir)
+    (run.status.code().unwrap_or(-1), String.from_utf8_lossy(run.stdout), stderr)
+}
+// Rust: tests/compute_views.rs:37, tests/tir_support/mod.rs:27-48
+// Preserve a hostile Web process's nonzero exit and its partial stdout too.
+fn run_awaited_web(name: String, src: String) -> (Int, String, String) {
+    scratch :: Scratch.new(name)
+    write_test_package(&scratch.path, TIR_TEST_PACKAGE)
+    entry :: scratch.path.join("run.jet")
+    fs.write(&entry, src).unwrap()
+    out :: compile_web_with_path(src, entry.to_str().unwrap()).unwrap_or_else(fn(diags) -> panic("{name} web fixture rejected: {diags.debug()}"))
+    web :: out.web.expect("web artifacts for the same Jet pass")
+    fs.write(scratch.path.join("package.json"), "{\"type\":\"module\"}\n").unwrap()
+    fs.write(scratch.path.join("app.js"), web.js_app).unwrap()
+    fs.write(scratch.path.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+    fs.write(scratch.path.join("app_wasm.rs"), web.wasm_rust).unwrap()
+    wasm :: Command.new("rustc").current_dir(&scratch.path).args([String]{"--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"}).output().expect("web proof requires rustc with wasm32 target")
+    assert(wasm.status.success(), "{name} web Wasm build: {String.from_utf8_lossy(wasm.stderr)}")
+    fs.write(scratch.path.join("run.mjs"), "const { jet_main } = await import('./app.js');\nawait jet_main();\n").unwrap()
+    node :: Command.new("node").current_dir(&scratch.path).arg("run.mjs").output().expect("web proof requires Node; absence is not a pass")
+    (node.status.code().unwrap_or(-1), String.from_utf8_lossy(node.stdout), String.from_utf8_lossy(node.stderr))
+}

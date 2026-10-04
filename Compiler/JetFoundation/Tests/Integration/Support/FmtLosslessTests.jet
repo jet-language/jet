@@ -1,0 +1,156 @@
+use FmtLossless.[run_supported_source_corpus, ordered_sources_diff]
+use std.thread as thread
+use std.panic as panic
+
+// Rust: tests/support/fmt_lossless.rs:1536
+#Test("fmt_is_lossless_on_supported_source_corpus") {
+    // Recursive expression frames need a dedicated 64 MiB worker stack on XML.
+    // GATE #4494: native thread builder, join, and panic payload propagation.
+    worker :: thread.Builder.new()
+        .name("fmt-lossless-corpus")
+        .stack_size(64 * 1024 * 1024)
+        .spawn(run_supported_source_corpus)
+        .expect("start lossless formatter corpus worker")
+    if worker.join() == .Err(payload) -> panic.resume_unwind(payload)
+}
+
+// Rust: tests/support/fmt_lossless.rs:1693
+#Test("canonical_rewrite_rules_are_explicit_and_narrow") {
+    allowed :: [
+        (name: "top-level ordering", original: `#Target(Web)
+use core.ui as ui
+fn run() {}
+`, formatted: `use core.ui as ui
+#Target(Web)
+fn run() {}
+`),
+        (name: "import-hoisted top-level comments", original: `// helper
+fn helper() {}
+// import
+use core.ui as ui
+`, formatted: `// helper
+// import
+use core.ui as ui
+fn helper() {}
+`),
+        (name: "spanless marker comment position", original: `// web target
+#Target(Web)
+fn run() {}
+`, formatted: `#Target(Web)
+// web target
+fn run() {}
+`),
+        (name: "marker grouping", original: `#Codable
+#RenameAll(camel)
+struct S {}
+`, formatted: `#[Codable, RenameAll(camel)]
+struct S {}
+`),
+        (name: "static generic call", original: `fn run() { Pool<Node>.new() }` + "\n", formatted: `fn run() { Pool.new<Node>() }` + "\n"),
+        // Retired syntax below is deliberate lexer-oracle data, not declarations.
+        (name: "external method", original: `fn Point.len(self) Int -> 1` + "\n", formatted: `impl Point { fn len(self) -> Int -> 1 }` + "\n"),
+        (name: "enum group separators", original: `enum E { G { A, B } }` + "\n", formatted: `enum E { G { A B } }` + "\n"),
+        (name: "struct declaration separators", original: `struct S { x: Int, y: Int }` + "\n", formatted: `struct S { x: Int y: Int }` + "\n"),
+        (name: "trailing comma", original: `fn run() { xs :: [1,] }` + "\n", formatted: `fn run() { xs :: [1] }` + "\n"),
+        (name: "default file alias", original: `use "./foo" as foo
+fn run() {}
+`, formatted: `use "./foo"
+fn run() {}
+`),
+        (name: "typed-literal dot removal", original: `fn run() { p :: Point.{x: 1} }` + "\n", formatted: `fn run() { p :: Point{x: 1} }` + "\n"),
+        (name: "arrow unification", original: `fn run() { if x == { .A => print(1) } }` + "\n", formatted: `fn run() { if x == { .A -> print(1) } }` + "\n"),
+        (name: "retired result arrow on braced function", original: `fn parse_age() => Int { return 42 }` + "\n", formatted: `fn parse_age() -> Int { return 42 }` + "\n"),
+        (name: "dispatch arm block", original: `fn run() { if x == { .A -> print(1) } }` + "\n", formatted: `fn run() { if x == { .A -> { print(1) } } }` + "\n"),
+        (name: "bare lambda params", original: `fn run() { f :: x -> x }` + "\n", formatted: `fn run() { f :: (x) -> x }` + "\n"),
+        (name: "bare enum variant pattern", original: `fn run() { if x == { A(v) -> print(v) } }` + "\n", formatted: `fn run() { if x == { .A(v) -> print(v) } }` + "\n"),
+        (name: "bare None variant pattern", original: `fn run() { if x == { None -> print(0) } }` + "\n", formatted: `fn run() { if x == { .None -> print(0) } }` + "\n"),
+        (name: "struct shorthand label", original: `fn run() { p :: Point{x} }` + "\n", formatted: `fn run() { p :: Point{x: x} }` + "\n"),
+        (name: "default module alias", original: `use core.encoding.json
+fn run() {}
+`, formatted: `use core.encoding.json as json
+fn run() {}
+`),
+        (name: "struct literal separator", original: `fn run() { p :: Point{x: 1 y: 2} }` + "\n", formatted: `fn run() { p :: Point{x: 1, y: 2} }` + "\n"),
+        (name: "anonymous union member order", original: `struct S { value: String | Char }` + "\n", formatted: `struct S { value: Char | String }` + "\n"),
+    ]
+    loop fixture in allowed {
+        diff :: ordered_sources_diff(fixture.original, fixture.formatted)
+        assert(diff.is_ok(), "allowed canonical rewrite failed: {fixture.name}: {diff:?}")
+    }
+    paired_forbidden :: [
+        (name: "top-level ordering does not reorder ordinary items", original: `fn first() {}
+fn second() {}
+`, formatted: `fn second() {}
+fn first() {}
+`),
+        (name: "import hoisting does not reorder comments", original: `// helper
+fn helper() {}
+// import
+use core.ui as ui
+`, formatted: `// import
+// helper
+use core.ui as ui
+fn helper() {}
+`),
+        (name: "spanless marker movement does not delete comments", original: `// web target
+#Target(Web)
+fn run() {}
+`, formatted: `#Target(Web)
+fn run() {}
+`),
+        (name: "marker grouping does not reorder markers", original: `#[Codable, RenameAll(camel)]
+struct S {}
+`, formatted: `#[RenameAll(camel), Codable]
+struct S {}
+`),
+        (name: "generic-call rewrite requires a call", original: `fn run() { value :: Pool<Node>.field }` + "\n", formatted: `fn run() { value :: Pool.field<Node> }` + "\n"),
+        (name: "external-method rewrite preserves receiver", original: `fn Point.len(self) Int -> 1` + "\n", formatted: `impl Other { fn len(self) -> Int -> 1 }` + "\n"),
+        (name: "task-block rewrite preserves body", original: `fn run() { task.group g { x :: task { work() } } }` + "\n", formatted: `fn run() { task.group g { x :: task { other() } } }` + "\n"),
+        (name: "enum-group comma rule preserves variant order", original: `enum E { G { A, B } }` + "\n", formatted: `enum E { G { B A } }` + "\n"),
+        (name: "struct-declaration comma rule preserves field order", original: `struct S { x: Int, y: Int }` + "\n", formatted: `struct S { y: Int x: Int }` + "\n"),
+        (name: "trailing-comma rule does not remove argument separators", original: `fn run() { call(a, b) }` + "\n", formatted: `fn run() { call(a b) }` + "\n"),
+        (name: "file-alias rule requires the default alias", original: `use "./foo" as bar
+fn run() {}
+`, formatted: `use "./foo"
+fn run() {}
+`),
+        (name: "arm-block rule does not remove explicit braces", original: `fn run() { if x == { .A -> { print(1) } } }` + "\n", formatted: `fn run() { if x == { .A -> print(1) } }` + "\n"),
+        (name: "lambda rule does not remove explicit parens", original: `fn run() { f :: (x) -> x }` + "\n", formatted: `fn run() { f :: x -> x }` + "\n"),
+        (name: "variant-dot rule requires a PascalCase pattern", original: `fn run() { if x == { value -> print(value) } }` + "\n", formatted: `fn run() { if x == { .value -> print(value) } }` + "\n"),
+        (name: "variant-dot rule requires a dispatch arm context", original: `fn run() { Foo work -> print(1) }` + "\n", formatted: `fn run() { .Foo work -> print(1) }` + "\n"),
+        (name: "shorthand expansion preserves field value", original: `fn run() { p :: Point{x} }` + "\n", formatted: `fn run() { p :: Point{x: y} }` + "\n"),
+        (name: "module alias requires exact use-path context", original: `use core.term as io
+fn run() { foo.bar }
+`, formatted: `use core.term as io
+fn run() { foo.bar as bar }
+`),
+        (name: "struct-literal separator rule does not remove commas", original: `fn run() { p :: Point{x: 1, y: 2} }` + "\n", formatted: `fn run() { p :: Point{x: 1 y: 2} }` + "\n"),
+        (name: "union order rule requires a type annotation", original: `fn run() { value :: left | right }` + "\n", formatted: `fn run() { value :: right | left }` + "\n"),
+        (name: "union order rule rejects struct field values", original: `fn run() { p :: Point{x: left | right} }` + "\n", formatted: `fn run() { p :: Point{x: right | left} }` + "\n"),
+        (name: "union order rule rejects dotted member replacement", original: `struct S { value: A | B.C }` + "\n", formatted: `struct S { value: B | A.C }` + "\n"),
+        (name: "union order rule rejects generic member replacement", original: `struct S { value: A | B<C> }` + "\n", formatted: `struct S { value: B | A<C> }` + "\n"),
+        (name: "union order rule preserves every member", original: `struct S { value: A | B }` + "\n", formatted: `struct S { value: A | C }` + "\n"),
+    ]
+    loop fixture in paired_forbidden {
+        assert(ordered_sources_diff(fixture.original, fixture.formatted).is_err(), "paired forbidden neighbor was accepted: {fixture.name}")
+    }
+    forbidden :: [
+        (name: "operand reorder", original: `fn run() { x :: a + b }` + "\n", formatted: `fn run() { x :: b + a }` + "\n"),
+        (name: "marker payload deletion", original: `#Pre(x > 0, "positive") fn f(x: Int) {}` + "\n", formatted: `#Pre(x > 0) fn f(x: Int) {}` + "\n"),
+        (name: "comment reorder", original: `// first
+// second
+fn run() {}
+`, formatted: `// second
+// first
+fn run() {}
+`),
+        (name: "grouping delimiter deletion", original: `fn run() { x :: (a + b) }` + "\n", formatted: `fn run() { x :: a + b }` + "\n"),
+        (name: "interpolation deletion", original: `fn run() { print("{a + b}") }` + "\n", formatted: `fn run() { print("{a}") }` + "\n"),
+        (name: "arbitrary dotted alias insertion", original: `fn run() { foo.bar }` + "\n", formatted: `fn run() { foo.bar as bar }` + "\n"),
+        (name: "operator deletion", original: `fn run() { x :: a && b }` + "\n", formatted: `fn run() { x :: a b }` + "\n"),
+        (name: "meaningful token addition", original: `fn run() { call(a) }` + "\n", formatted: `fn run() { call(a, b) }` + "\n"),
+    ]
+    loop fixture in forbidden {
+        assert(ordered_sources_diff(fixture.original, fixture.formatted).is_err(), "forbidden rewrite was accepted: {fixture.name}")
+    }
+}

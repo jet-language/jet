@@ -1,0 +1,476 @@
+use Compiler.JetFoundation.Tests.Integration.Reflect.*
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use jet.Comptime.[build_distinct_type_info, build_registered_fact_info, build_state_infos_with_graph, build_struct_type_info, CtReport, CtValue]
+use jet.AST.[Dimension, DistinctDef, Expr, InternalTag, Marker, ParamZone, QuantityKind, StructDef, TagMarker, Type, TypeParam, Measure, MarkerCallArg]
+use jet_foundation.Facts.[StateGraph, StateNode]
+use jet_foundation.Numeric.[JetInt]
+use core.sys.target as target
+use core.fs as fs
+use std.env as env
+use std.process as process
+use jet
+
+// Rust: tests/reflect.rs:24
+#Test("direct_layout_fact_feeds_top_level_binding") {
+    src :: """
+#Layout(c)
+struct Ring {
+    slots: [Int#1024]
+    head: Int
+    tail: Int
+}
+SIZE :: prep { Ring.$layout.size }
+ALIGNMENT :: prep { Ring.$layout.alignment }
+fn run() { print("{SIZE}:{ALIGNMENT}") }
+"""
+    // GATE #4483: widths/alignment are selected-target facts, not host assumptions.
+    expected :: "{target.size_of<JetInt>() * 1026}:{target.align_of<JetInt>()}\n"
+    tir_support.assert_tiers_agree("direct_layout_fact", src, expected)
+}
+
+// Rust: tests/reflect.rs:50
+#Test("arithmetic_policy_is_visible_in_function_reflection") {
+    // GATE #4494: real temporary directory and checked source reads.
+    root :: env.temp_dir().join("jet_reflect_arithmetic_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(path, "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n").unwrap()
+    (diagnostics, checked, effect_facts) :: jet.Driver.check_file_with_effect_facts(path.to_str().unwrap(), nil, false)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    bundle :: checked.expect("checked bundle")
+    facts :: jet.Driver.program_semantic_facts(&bundle, &effect_facts)
+    program :: jet.Comptime.build_program_info(&bundle, &facts)
+    functions :: if struct_field(&program, "functions") == {
+        .List(functions) -> functions
+        else -> panic("functions")
+    }
+    wrapped :: functions.iter().find((value) -> if struct_field(value, "name") == {
+        .Str(name) -> name == "wrapped"
+        else -> false
+    }).expect("wrapped reflection")
+    arithmetic :: if struct_field(wrapped, "arithmetic") == {
+        .List(arithmetic) -> arithmetic
+        else -> panic("arithmetic")
+    }
+    fields :: if arithmetic.first().expect("arithmetic row") == {
+        .Struct { fields, .. } -> fields
+        else -> panic("arithmetic row")
+    }
+    assert(fields.iter().any(((name, value)) -> name == "operation" && if value == { .Str(operation) -> operation == "add" else -> false }))
+    assert(fields.iter().any(((name, value)) -> name == "policy" && if value == { .Str(policy) -> policy == ".Wrapping" else -> false }))
+    assert(fields.iter().any(((name, value)) -> name == "scope_span" && if value == { .Struct { .. } -> true else -> false }))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/reflect.rs:92
+#Test("checked_text_contract_is_reflected_on_the_nominal_type") {
+    root :: env.temp_dir().join("jet_reflect_checked_text_{process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    path :: root.join("main.jet")
+    fs.write(path, """
+#Error
+ enum PatternError { Bad }
+Pattern :: distinct String
+impl Pattern.CheckedText {
+    type Error = PatternError
+    fn check(text: String) -[]> PatternError! { return }
+    fn encode_hole<T: Printable>(value: T) -[]> String { return "" }
+}
+fn run() {}
+""").unwrap()
+    (diagnostics, checked, _) :: jet.Driver.check_file_with_effect_facts(path.to_str().unwrap(), nil, false)
+    assert(diagnostics.is_empty(), "{diagnostics:?}")
+    bundle :: checked.expect("checked bundle")
+    info :: jet.Comptime.reflect_type_value(&bundle.modules[bundle.entry].items, "Pattern", "main").expect("Pattern reflection")
+    assert(if struct_field(&info, "base") == { .Str(base) -> base == "String" else -> false })
+    assert(if struct_field(&info, "implements") == {
+        .List(values) -> values.iter().any((value) -> if value == { .Str(name) -> name == "CheckedText" else -> false })
+        else -> false
+    })
+    contracts :: if struct_field(&info, "trait_contracts") == { .List(contracts) -> contracts else -> panic("trait contracts") }
+    contract :: contracts.iter().find((value) -> if struct_field(value, "name") == { .Str(name) -> name == "CheckedText" else -> false }).expect("CheckedText reflection contract")
+    associated_types :: if struct_field(contract, "associated_types") == { .List(associated_types) -> associated_types else -> panic("associated types") }
+    assert(associated_types.iter().any((value) -> if (struct_field(value, "name"), struct_field(value, "type")) == {
+        (.Str(name), .Str(ty)) -> name == "Error" && ty == "PatternError"
+        else -> false
+    }))
+    methods :: if struct_field(contract, "methods") == { .List(methods) -> methods else -> panic("contract methods") }
+    assert(methods.iter().any((value) -> if struct_field(value, "name") == { .Str(name) -> name == "check" else -> false }))
+    assert(methods.iter().any((value) -> if struct_field(value, "name") == { .Str(name) -> name == "encode_hole" else -> false }))
+    _ :: fs.remove_dir_all(root)
+}
+
+// Rust: tests/reflect.rs:271
+#Test("state_info_exposes_terminal_and_reachability_facts") {
+    graph :: StateGraph{
+        states: [
+            StateNode{name: "Open", terminal: false, reachable: true},
+            StateNode{name: "Closed", terminal: true, reachable: true},
+        ],
+        transitions: [],
+    }
+    states :: ["Open", "Closed"]
+    value :: build_state_infos_with_graph("Door", &states, &graph)
+    assert(if list_struct_field(&value, 0, "terminal") == { .Bool(false) -> true else -> false })
+    assert(if list_struct_field(&value, 1, "terminal") == { .Bool(true) -> true else -> false })
+    assert(if list_struct_field(&value, 0, "reachable") == {
+        .Present(value) -> if value.as_ref() == { .Bool(true) -> true else -> false }
+        else -> false
+    })
+    assert(if list_struct_field(&value, 1, "reachable") == {
+        .Present(value) -> if value.as_ref() == { .Bool(true) -> true else -> false }
+        else -> false
+    })
+}
+
+// Rust: tests/reflect.rs:308
+#Test("state_info_keeps_no_entry_reachability_unknown") {
+    graph :: StateGraph{
+        states: [
+            StateNode{name: "Raw", terminal: false, reachable: nil},
+            StateNode{name: "Done", terminal: true, reachable: nil},
+        ],
+        transitions: [],
+    }
+    states :: ["Raw", "Done"]
+    value :: build_state_infos_with_graph("Unseeded", &states, &graph)
+    assert(if list_struct_field(&value, 0, "reachable") == { .Failed(.Clean(_)) -> true else -> false })
+    assert(if list_struct_field(&value, 1, "reachable") == { .Failed(.Clean(_)) -> true else -> false })
+}
+
+// Rust: tests/reflect.rs:337
+#Test("type_info_exposes_methods_type_params_and_markers") {
+    s :: StructDef{
+        span: span(),
+        is_pub: true,
+        is_package_pub: false,
+        name: "Box",
+        name_span: span(),
+        type_params: [TypeParam{name: "T", name_span: span(), bounds: ["Comparable"], prep: nil}],
+        fields: [field("value", "T", true), field("hidden", "Int", false)],
+        state: nil,
+        methods: [method("show", true)],
+        cli_bindings: [],
+        trait_impls: [],
+        derives: [("Debug", span())],
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: nil,
+        is_single_use: false,
+        single_use_span: nil,
+        layout: nil,
+        layout_span: nil,
+        serde_markers: [],
+        type_markers: [],
+        is_must_use: false,
+        must_use_span: nil,
+        validate_block: [],
+        validate_span: nil,
+    }
+    info :: build_struct_type_info(&s)
+    assert(if struct_field(&info, "name") == { .Str(name) -> name.as_str() == "Box" else -> false })
+    assert(if struct_field(&info, "path") == { .Str(path) -> path.as_str() == "Box" else -> false })
+    assert_eq(list_len(struct_field(&info, "fields")), 2)
+    assert_eq(list_len(struct_field(&info, "methods")), 1)
+    assert_eq(list_len(struct_field(&info, "type_params")), 1)
+    assert(if list_struct_field(struct_field(&info, "fields"), 0, "span") == {
+        .Struct { fields, .. } -> fields.iter().any(((name, value)) -> name == "start" && if value == { .Int(0) -> true else -> false })
+        else -> false
+    })
+    assert(if list_struct_field(struct_field(&info, "methods"), 0, "span") == {
+        .Struct { fields, .. } -> fields.iter().any(((name, value)) -> name == "end" && if value == { .Int(1) -> true else -> false })
+        else -> false
+    })
+    assert(if list_struct_field(struct_field(&info, "type_params"), 0, "span") == {
+        .Struct { fields, .. } -> fields.iter().any(((name, value)) -> name == "start" && if value == { .Int(0) -> true else -> false })
+        else -> false
+    })
+    markers :: struct_field(&info, "markers")
+    assert_eq(list_len(markers), 1)
+    assert(if markers == {
+        .List(xs) -> if &xs[0] == {
+            .Struct { fields, .. } -> fields.iter().any(((name, value)) -> name == "name" && if value == { .Str(value) -> value == "Debug" else -> false })
+            else -> false
+        }
+        else -> false
+    })
+    assert(if struct_field(&info, "expanded_markers") == { .List(xs) -> xs.is_empty() else -> false })
+}
+
+// Rust: tests/reflect.rs:416
+#Test("field_info_carries_visibility") {
+    s :: StructDef{
+        span: span(),
+        is_pub: true,
+        is_package_pub: false,
+        name: "Secret",
+        name_span: span(),
+        type_params: [],
+        fields: [field("visible", "Int", true), field("hidden", "Int", false)],
+        state: nil,
+        methods: [],
+        cli_bindings: [],
+        trait_impls: [],
+        derives: [],
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: nil,
+        is_single_use: false,
+        single_use_span: nil,
+        layout: nil,
+        layout_span: nil,
+        serde_markers: [],
+        type_markers: [],
+        is_must_use: false,
+        must_use_span: nil,
+        validate_block: [],
+        validate_span: nil,
+    }
+    info :: build_struct_type_info(&s)
+    fields :: if struct_field(&info, "fields") == { .List(fields) -> fields else -> panic("fields") }
+    hidden_fields :: if &fields[1] == { .Struct { fields, .. } -> fields else -> panic("field struct") }
+    is_pub :: &hidden_fields.iter().find(((n, _)) -> n == "is_pub").unwrap().1
+    assert(if is_pub == { .Bool(false) -> true else -> false })
+}
+
+// Rust: tests/reflect.rs:460
+#Test("marker_arguments_are_typed_in_the_written_view") {
+    marker :: Marker{
+        name: "Inline",
+        negated: false,
+        name_span: span(),
+        args: [MarkerCallArg.Expr(Expr.Ident("Always", span()))],
+        arg_labels: [nil],
+        span: span(),
+        ct: nil,
+    }
+    s :: StructDef{
+        span: span(),
+        is_pub: true,
+        is_package_pub: false,
+        name: "Hot",
+        name_span: span(),
+        type_params: [],
+        fields: [],
+        state: nil,
+        methods: [],
+        cli_bindings: [],
+        trait_impls: [],
+        derives: [],
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: nil,
+        is_single_use: false,
+        single_use_span: nil,
+        layout: nil,
+        layout_span: nil,
+        serde_markers: [],
+        type_markers: [^marker],
+        is_must_use: false,
+        must_use_span: nil,
+        validate_block: [],
+        validate_span: nil,
+    }
+    info :: build_struct_type_info(&s)
+    markers :: if struct_field(&info, "markers") == { .List(markers) -> markers else -> panic("markers") }
+    fields :: if &markers[0] == { .Struct { fields, .. } -> fields else -> panic("marker") }
+    args :: if &fields.iter().find(((name, _)) -> name == "args").unwrap().1 == { .List(args) -> args else -> panic("args") }
+    assert(if &args[0] == {
+        .Struct { fields, .. } ->
+            fields.iter().any(((name, value)) -> name == "ty" && if value == { .Str(value) -> value == "InlineMode" else -> false })
+            && fields.iter().any(((name, value)) -> name == "value" && if value == {
+                .Enum { type_name, variant, args } -> type_name == "InlineMode" && variant == "Always" && args.is_empty()
+                else -> false
+            })
+        else -> false
+    })
+}
+
+// Rust: tests/reflect.rs:529
+#Test("distinct_capability_marker_is_visible_in_reflection") {
+    marker :: Marker{name: "Comparable", negated: false, name_span: span(), args: [], arg_labels: [], span: span(), ct: nil}
+    info :: build_distinct_type_info(&DistinctDef{
+        is_pub: true,
+        is_package_pub: false,
+        type_markers: [^marker],
+        derives: [("Comparable", span())],
+        quantity: nil,
+        name: "CustomerID",
+        name_span: span(),
+        base: Type.Int,
+        base_span: span(),
+        range: nil,
+        span: span(),
+    }, "main")
+    assert(if struct_field(&info, "markers") == {
+        .List(values) -> values.iter().any((value) -> if value == {
+            .Struct { fields, .. } -> fields.iter().any(((name, value)) -> name == "name" && if value == { .Str(value) -> value == "Comparable" else -> false })
+            else -> false
+        })
+        else -> false
+    })
+    assert(if struct_field(&info, "expanded_markers") == { .List(values) -> values.len() == 1 else -> false })
+}
+
+// Rust: tests/reflect.rs:572
+#Test("registered_type_planes_reflect_as_typed_values") {
+    fields := []
+    loop (name, ty) in [
+        ("bounded", Type.IntN{signed: true, bits: 8}),
+        ("shape", Type.FixedList{elem: Box.new(Type.Int), len: Measure.literal("length", 4)}),
+        ("quantity", Type.Quantity{base: Box.new(Type.Int), dimension: Dimension.base("Length")}),
+        ("classified", Type.Tagged{marker: TagMarker.User("Audited"), inner: Box.new(Type.Int)}),
+        ("nominal", Type.Tagged{marker: TagMarker.Internal(InternalTag.CoreCryptoNominal), inner: Box.new(Type.Named("Secret"))}),
+        ("callable", Type.Fn{
+            params: [Type.Int],
+            ret: Box.new(Type.Int),
+            effect_bound: nil,
+            param_contract: [("value", ParamZone.Either)],
+            call_metadata: nil,
+            return_view_provenance: nil,
+        }),
+        ("approximate", Type.Float32),
+    ] {
+        projected := field(name, "Int", true)
+        projected.ty = ^ty
+        fields.push(^projected)
+    }
+    info :: build_struct_type_info(&StructDef{
+        span: span(),
+        is_pub: true,
+        is_package_pub: false,
+        name: "Planes",
+        name_span: span(),
+        type_params: [],
+        fields: ^fields,
+        state: nil,
+        methods: [],
+        cli_bindings: [],
+        trait_impls: [],
+        derives: [],
+        auto_derive_default: true,
+        is_published_schema: false,
+        published_schema_span: nil,
+        is_single_use: false,
+        single_use_span: nil,
+        layout: nil,
+        layout_span: nil,
+        serde_markers: [],
+        type_markers: [],
+        is_must_use: false,
+        must_use_span: nil,
+        validate_block: [],
+        validate_span: nil,
+    })
+    facts :: if struct_field(&info, "facts") == { .List(facts) -> facts else -> panic("facts") }
+    loop expected in ["Range", "Layout", "Measure", "Exactness", "Dimension", "Classification", "Nominal", "Obligation"] {
+        fact :: facts.iter().find((fact) -> if struct_field(fact, "kind") == { .Enum { variant, .. } -> variant == expected else -> false }).unwrap_or_else(() -> panic("missing typed `{expected}` fact in {facts:?}"))
+        assert(if struct_field(fact, "value") == { .Struct { .. } -> true else -> false })
+    }
+    fact_of_kind :: (kind: String) -> {
+        facts.iter().find((fact) -> if struct_field(fact, "kind") == { .Enum { variant, .. } -> variant == kind else -> false }).unwrap_or_else(() -> panic("missing `{kind}` payload in {facts:?}"))
+    }
+    range_slot :: struct_field(struct_field(fact_of_kind("Range"), "value"), "range")
+    range :: if range_slot == { .Present(range) -> range else -> panic("range payload is not present") }
+    assert(if struct_field(range, "start") == { .Int(-128) -> true else -> false })
+    assert(if struct_field(range, "end") == { .Int(127) -> true else -> false })
+    layout_slot :: struct_field(struct_field(fact_of_kind("Layout"), "value"), "layout")
+    layout :: if layout_slot == { .Present(layout) -> layout else -> panic("layout payload is not present") }
+    assert(if struct_field(layout, "bytes") == { .Int(1) -> true else -> false })
+    measure_slot :: struct_field(struct_field(fact_of_kind("Measure"), "value"), "measure")
+    measure :: if measure_slot == { .Present(measure) -> measure else -> panic("measure payload is not present") }
+    assert(if (struct_field(measure, "kind"), struct_field(measure, "value")) == {
+        (.Str(kind), .Present(value)) -> kind == "length" && if value.as_ref() == { .Int(4) -> true else -> false }
+        else -> false
+    })
+    exactness_fact :: facts.iter()
+        .filter((fact) -> if struct_field(fact, "kind") == { .Enum { variant, .. } -> variant == "Exactness" else -> false })
+        .find((fact) -> if struct_field(struct_field(fact, "value"), "exactness") == {
+            .Present(value) -> if struct_field(value, "kind") == { .Enum { variant, .. } -> variant == "Approximate" else -> false }
+            else -> false
+        }).expect("approximate exactness payload")
+    exactness_slot :: struct_field(struct_field(exactness_fact, "value"), "exactness")
+    exactness :: if exactness_slot == { .Present(exactness) -> exactness else -> panic("exactness payload is not present") }
+    assert(if struct_field(exactness, "precision") == { .Present(value) -> if value.as_ref() == { .Int(24) -> true else -> false } else -> false })
+    dimension_slot :: struct_field(struct_field(fact_of_kind("Dimension"), "value"), "dimension")
+    dimension :: if dimension_slot == { .Present(dimension) -> dimension else -> panic("dimension payload is not present") }
+    assert(if struct_field(dimension, "axes") == {
+        .List(axes) -> axes.iter().any((axis) -> if (struct_field(axis, "name"), struct_field(axis, "exponent")) == {
+            (.Str(name), .Int(1)) -> name == "Length"
+            else -> false
+        })
+        else -> false
+    })
+    classification_slot :: struct_field(struct_field(fact_of_kind("Classification"), "value"), "classification")
+    classification :: if classification_slot == { .Present(classification) -> classification else -> panic("classification payload is not present") }
+    assert(if struct_field(classification, "name") == { .Str(name) -> name == "Audited" else -> false })
+    nominal_slot :: struct_field(struct_field(fact_of_kind("Nominal"), "value"), "nominal")
+    nominal :: if nominal_slot == { .Present(nominal) -> nominal else -> panic("nominal payload is not present") }
+    assert(if struct_field(nominal, "name") == { .Str(name) -> name == "core.crypto" else -> false })
+    obligation_slot :: struct_field(struct_field(fact_of_kind("Obligation"), "value"), "obligation")
+    obligation :: if obligation_slot == { .Present(obligation) -> obligation else -> panic("obligation payload is not present") }
+    params :: if struct_field(obligation, "param_contract") == { .List(params) -> params else -> panic("obligation parameter contract") }
+    assert(if params.first().map((param) -> (struct_field(param, "name"), struct_field(param, "zone"))) == {
+        .Val((.Str(name), .Enum { type_name, variant, .. })) -> name == "value" && type_name == "ParamZone" && variant == "Either"
+        else -> false
+    })
+}
+
+// Rust: tests/reflect.rs:785
+#Test("range_and_dimension_facts_are_typed_records") {
+    info :: build_distinct_type_info(&DistinctDef{
+        is_pub: true,
+        is_package_pub: false,
+        type_markers: [],
+        derives: [],
+        quantity: (Dimension.base("Length"), QuantityKind.Linear),
+        name: "Severity",
+        name_span: span(),
+        base: Type.Int,
+        base_span: span(),
+        range: (0, 10, span()),
+        span: span(),
+    }, "main")
+    assert(if struct_field(&info, "name") == { .Str(name) -> name.as_str() == "Severity" else -> false })
+    assert(if struct_field(&info, "path") == { .Str(path) -> path.as_str() == "main.Severity" else -> false })
+    facts :: if struct_field(&info, "facts") == { .List(facts) -> facts else -> panic("facts") }
+    is_kind :: (fact: &CtValue, expected: String) -> if struct_field(fact, "kind") == {
+        .Enum { variant, .. } -> variant == expected
+        other -> panic("expected typed fact kind, got {other:?}")
+    }
+    range :: facts.iter().find((fact) -> is_kind(fact, "Range")).expect("range fact")
+    range_value :: if struct_field(struct_field(range, "value"), "range") == { .Present(range_value) -> range_value else -> panic("range fact must carry a present Range") }
+    assert(if struct_field(range_value, "start") == { .Int(0) -> true else -> false })
+    assert(if struct_field(range_value, "end") == { .Int(10) -> true else -> false })
+    assert(if struct_field(struct_field(range, "value"), "dimension") == { .Failed(.Clean(_)) -> true else -> false })
+    dimension :: facts.iter().find((fact) -> is_kind(fact, "Dimension")).expect("dimension fact")
+    dimension_value :: if struct_field(struct_field(dimension, "value"), "dimension") == { .Present(dimension_value) -> dimension_value else -> panic("dimension fact must carry a present DimensionInfo") }
+    axes :: if struct_field(dimension_value, "axes") == { .List(axes) -> axes else -> panic("dimension axes") }
+    assert(axes.iter().any((axis) -> if (struct_field(axis, "name"), struct_field(axis, "exponent")) == {
+        (.Str(name), .Int(1)) -> name == "Length"
+        else -> false
+    }))
+    assert(if struct_field(struct_field(dimension, "value"), "range") == { .Failed(.Clean(_)) -> true else -> false })
+}
+
+// Rust: tests/reflect.rs:860
+#Test("orphan_fact_rows_are_typed_and_readable") {
+    loop (name, kind) in [
+        ("Sendability", "Sendability"),
+        ("Attribution", "Attribution"),
+        ("Origin", "Origin"),
+        ("ViewProvenance", "ViewProvenance"),
+        ("UnitScaleProvenance", "UnitScaleProvenance"),
+        ("Maturity", "Maturity"),
+    ] {
+        info :: build_registered_fact_info(name).expect("registered orphan fact")
+        assert(if struct_field(&info, "kind") == { .Enum { variant, .. } -> variant == kind else -> false })
+        assert(if struct_field(&info, "value") == { .Struct { .. } -> true else -> false })
+        if name == "Attribution" {
+            assert(if struct_field(&info, "path") == { .Str(path) -> path == "report.$attribution" else -> false })
+        }
+    }
+}

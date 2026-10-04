@@ -1,0 +1,956 @@
+use jet_foundation.Tests.Integration.CorelibParts.PlatformEmail.*
+use jet_foundation.Tests.Integration.Common as common
+use tir_support
+use jet
+use std.fs as fs
+use std.env as env
+use std.process as process
+use std.process.Command
+// GATE #4494: original native filesystem, process and AOT fixtures.
+
+// Rust: tests/corelib_parts/derives.rs:2
+#Test("generic_codable_injects_wire_param_bounds") {
+    // Wire-reaching T must use Encode/Decode; phantom K needs neither contract.
+    tir_support.assert_tiers_agree("generic_serde", """
+use core.encoding.json as json
+#Codable
+struct Wrap<T> { value: T }
+struct Phantom { label: String }
+#Codable
+struct Tagged<K> { raw: Int  #Skip marker: K? }
+fn run() {
+    value :: Wrap<Int>{value: 7}
+    print(json.to_string(value))
+    back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("decode")
+    print(back.value)
+    tagged :: Tagged<Phantom>{raw: 9, marker: None}
+    print(json.to_string(tagged))
+    decoded :: json.decode<Tagged<Phantom>>("{{\"raw\":3}}") ?? panic("phantom")
+    print(decoded.raw)
+}
+""", "{\"value\":7}\n42\n{\"raw\":9}\n3\n")
+    errors :: jet.compile("""
+use core.encoding.json as json
+struct NoCodec { value: Int }
+#Codable
+struct Wrap<T> { value: T }
+fn run() { print(json.to_string(Wrap<NoCodec>{value: NoCodec{value: 1}})) }
+""").expect_err("wire-reaching type parameter must satisfy Encode")
+    assert(!errors.is_empty())
+}
+// Rust: tests/corelib_parts/derives.rs:54
+#Test("generic_codable_round_trips") {
+    if !common.have_rustc() { eprintln("note: skipping generic serde round-trip (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_corelib_gserde_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, _stderr) :: build_and_run(&dir, "gserde", """
+use core.encoding.json as json
+#Codable
+struct Wrap<T> { value: T }
+#Codable
+struct Tagged<K> { raw: Int  #Skip marker: K? }
+fn run() {
+    wi :: Wrap<Int>{ value: 7 }
+    print(json.to_string(wi))
+    back :: json.decode<Wrap<Int>>("{{\"value\":42}}") ?? panic("bad")
+    print(back.value)
+    id :: Tagged<Wrap<Int>>{ raw: 9, marker: None }
+    print(json.to_string(id))
+    rid :: json.decode<Tagged<Wrap<Int>>>("{{\"raw\":3}}") ?? panic("bad id")
+    print(rid.raw)
+}
+""", &[], .None)
+    assert_eq(code, 0, "generic serde program should run cleanly")
+    assert_eq(stdout, "{\"value\":7}\n42\n{\"raw\":9}\n3\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:103
+#Test("toml_full_nested_decode_and_round_trip") {
+    if !common.have_rustc() { eprintln("note: skipping toml_full_nested_decode_and_round_trip (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_toml_full_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "toml_typed", """
+use core.encoding.toml as toml
+#Codable
+struct Server { host: String  port: Int }
+#Codable
+struct Config { title: String  server: Server  ports: [Int] }
+fn run() {
+    raw :: "title = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n"
+    cfg :: toml.decode<Config>(raw) ?? panic("bad toml")
+    print(cfg.title)
+    print(cfg.server.host)
+    print(cfg.server.port)
+    print(cfg.ports.len())
+    print(toml.to_string(cfg))
+}
+""", &[], .None)
+    assert_eq(code, 0, "toml typed decode failed: {stderr}")
+    assert_eq(stdout, "jet\ndb.local\n5432\n2\ntitle = \"jet\"\nports = [80, 443]\n\n[server]\nhost = \"db.local\"\nport = 5432\n")
+    (code2, stdout2, stderr2) :: build_and_run(&dir, "toml_dyn", """
+use core.encoding.toml as toml
+fn run() {
+    raw :: "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n"
+    d :: toml.parse(raw) ?? panic("bad")
+    print(toml.to_string(d))
+}
+""", &[], .None)
+    assert_eq(code2, 0, "toml dynamic parse failed: {stderr2}")
+    assert_eq(stdout2, "name = \"a\"\n\n[db]\nhost = \"h\"\nport = 1\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:169
+#Test("hand_written_encode_decode_round_trips") {
+    if !common.have_rustc() { eprintln("note: skipping hand_written_encode_decode_round_trips (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_hand_codec_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "hand_codec", """
+use core.encoding.json as json
+struct Email { addr: String }
+impl Email.Encode {
+    fn encode(self) -> DataTree {
+        m :: [String:DataTree]{ "email": DataTree.Text(~self.addr) }
+        return DataTree.Object(m)
+    }
+}
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email [FieldError]! {
+        f := &tree.field("email") ?? DataTree.Text("")
+        s := f.text() ?? ""
+        return Ok(Email{addr: s})
+    }
+}
+fn run() {
+    e := Email{addr: "a@b.com"}
+    s := json.to_string(e)
+    print(s)
+    back := json.decode<Email>(s) ?? panic("decode failed")
+    print(back.addr)
+}
+""", &[], .None)
+    assert_eq(code, 0, "hand codec round trip failed: {stderr}")
+    assert_eq(stdout, "{\"email\":\"a@b.com\"}\na@b.com\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:223
+#Test("derive_and_hand_written_codecs_share_one_engine") {
+    if !common.have_rustc() { eprintln("note: skipping derive_and_hand_written_codecs_share_one_engine (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_codec_engine_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "codec_engine", """
+use core.encoding.json as json
+#Codable
+struct DerivedEmail { address: String }
+struct HandEmail { address: String }
+impl HandEmail.Encode {
+    fn encode(self) -> DataTree { DataTree.Object(["address": DataTree.Text(~self.address)]) }
+}
+impl HandEmail.Decode {
+    fn decode(tree: DataTree) -> HandEmail [FieldError]! {
+        field :: &tree.field("address") ?? DataTree.Text("")
+        address :: field.text() ?? ""
+        return Ok(HandEmail{ address: address })
+    }
+}
+fn run() {
+    derived :: DerivedEmail{ address: "ada@jet" }
+    hand :: HandEmail{ address: "ada@jet" }
+    derived_wire :: json.to_string(derived)
+    hand_wire :: json.to_string(hand)
+    derived_bytes :: derived_wire.bytes()
+    hand_bytes :: hand_wire.bytes()
+    assert(derived_bytes == hand_bytes)
+    derived_back :: json.decode<DerivedEmail>(hand_wire) ?? panic("derived decode")
+    hand_back :: json.decode<HandEmail>(derived_wire) ?? panic("hand decode")
+    assert(derived_back.address == hand_back.address)
+    print(derived_bytes == hand_bytes)
+    print(derived_back.address == hand_back.address)
+}
+""", &[], .None)
+    assert_eq(code, 0, "derive/hand codec parity failed: {stderr}")
+    assert_eq(stdout, "true\ntrue\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:279
+#Test("serde_derive_and_generic_share_one_engine") {
+    if !common.have_rustc() { eprintln("note: skipping serde_derive_and_generic_share_one_engine (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_serde_engine_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "serde_engine", """
+use core.encoding.json as json
+#Codable
+struct Boxed<T> { value: T }
+fn generic_encode<T: Encode>(value: T) -> String { json.to_string(value) }
+fn generic_decode<T: Decode>(wire: String) -> T [FieldError]! { json.decode<T>(wire) }
+fn run() {
+    value :: Boxed<Int>{ value: 7 }
+    derived_wire :: json.to_string(value)
+    generic_wire :: generic_encode(value)
+    derived_bytes :: derived_wire.bytes()
+    generic_bytes :: generic_wire.bytes()
+    assert(derived_bytes == generic_bytes)
+    derived_back :: json.decode<Boxed<Int>>(generic_wire) ?? panic("derived decode")
+    generic_back :: generic_decode<Boxed<Int>>(derived_wire) ?? panic("generic decode")
+    assert(derived_back.value == generic_back.value)
+    print(derived_bytes == generic_bytes)
+    print(derived_back.value == generic_back.value)
+}
+""", &[], .None)
+    assert_eq(code, 0, "derive/generic serde parity failed: {stderr}")
+    assert_eq(stdout, "true\ntrue\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:325
+#Test("datatree_decode_dispatches_all_decode_impl_kinds") {
+    if !common.have_rustc() -> return
+    dir :: env.temp_dir().join("jet_datatree_decode_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+#Codable
+struct Point { x: Int }
+struct Email { addr: String }
+impl Email.Decode {
+    fn decode(tree: DataTree) -> Email [FieldError]! {
+        value := &tree.field("address") ?? DataTree.Text("")
+        return Ok(Email{ addr: value.text() ?? "" })
+    }
+}
+fn run() {
+    i_tree := DataTree.Int(41)
+    xs_tree := DataTree.Array([DataTree.Int(1), DataTree.Int(2)])
+    p_tree := DataTree.Object(["x": DataTree.Int(7)])
+    e_tree := DataTree.Object(["address": DataTree.Text("a@b")])
+    i := i_tree.decode<Int>() ?? panic("primitive")
+    xs := xs_tree.decode<[Int]>() ?? panic("list")
+    p := p_tree.decode<Point>() ?? panic("derive")
+    e := e_tree.decode<Email>() ?? panic("hand")
+    print(i + xs[1] + p.x)
+    print(e.addr)
+}
+"""
+    _ :: compile_temp("datatree_decode.jet", src)
+    // Behavioral dispatch replaces the retired generated-Rust call spelling checks.
+    tir_support.assert_tiers_agree("datatree_decode_dispatch", src, "50\na@b\n")
+    (code, stdout, stderr) :: build_and_run(&dir, "datatree_decode", src, &[], .None)
+    assert_eq(code, 0, "DataTree.decode dispatch failed: {stderr}")
+    assert_eq(stdout, "50\na@b\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:366
+#Test("generated_enum_codecs_reenter_jet_pipeline") {
+    if !common.have_rustc() -> return
+    dir :: env.temp_dir().join("jet_enum_serde_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#Codable
+enum Event {
+    Idle
+    Count(Int)
+    Named(name: String, enabled: Bool)
+}
+fn run() {
+    a := Event.Idle
+    b := Event.Count(3)
+    c := Event.Named{ name: "x", enabled: true }
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+    back := json.decode<Event>("{{\"Count\":7}}") ?? panic("decode")
+    if back == .Count(n) { print(n) }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "enum_serde", src, &[], .None)
+    assert_eq(code, 0, "generated enum codec failed: {stderr}")
+    assert_eq(stdout, "\"Idle\"\n{\"Count\":3}\n{\"Named\":{\"name\":\"x\",\"enabled\":true}}\n7\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:400
+#Test("generated_internal_tagged_enum_round_trips_every_variant_shape") {
+    dir :: env.temp_dir().join("jet_tagged_enum_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#[Codable, Discriminant("type")]
+enum Event { Idle  Count(Int)  Named(name: String, enabled: Bool) }
+fn run() {
+    unit := Event.Idle
+    tuple := Event.Count(3)
+    named := Event.Named{ name: "x", enabled: true }
+    print(json.to_string(unit))
+    print(json.to_string(tuple))
+    print(json.to_string(named))
+    a := json.decode<Event>("{{\"type\":\"Idle\"}}") ?? panic("unit")
+    b := json.decode<Event>("{{\"type\":\"Count\",\"value\":7}}") ?? panic("tuple")
+    c := json.decode<Event>("{{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}}") ?? panic("named")
+    print(json.to_string(a))
+    print(json.to_string(b))
+    print(json.to_string(c))
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "tagged_enum", src, &[], .None)
+    assert_eq(code, 0, "generated internally tagged enum failed: {stderr}")
+    assert_eq(stdout, "{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":3}\n{\"type\":\"Named\",\"name\":\"x\",\"enabled\":true}\n{\"type\":\"Idle\"}\n{\"type\":\"Count\",\"value\":7}\n{\"type\":\"Named\",\"name\":\"y\",\"enabled\":false}\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:439
+#Test("builtin_codec_expansion_has_no_ast_transplant_or_rust_fallback") {
+    // Generated codec meaning must be available in every tier, not a backend-only fallback.
+    tir_support.assert_tiers_agree("builtin_codec_expansion", """
+use core.encoding.json as json
+#Codable
+struct Record { value: Int }
+#Codable
+enum Event { Idle  Count(Int) }
+fn run() {
+    record :: json.decode<Record>("{{\"value\":5}}") ?? panic("struct")
+    event :: json.decode<Event>("{{\"Count\":7}}") ?? panic("enum")
+    print(json.to_string(record))
+    print(json.to_string(event))
+}
+""", "{\"value\":5}\n{\"Count\":7}\n")
+}
+// Rust: tests/corelib_parts/derives.rs:460
+#Test("generated_struct_codecs_preserve_option_and_computed_fields") {
+    dir :: env.temp_dir().join("jet_struct_serde_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#Codable
+struct Record {
+    base: Int
+    note: String?
+    doubled: Int -> base * 2
+}
+fn run() {
+    value := Record{ base: 4, note: None }
+    print(json.to_string(value))
+    back := json.decode<Record>("{{\"base\":5,\"doubled\":999}}") ?? panic("decode")
+    print(back.base)
+    print(back.doubled)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "struct_serde", src, &[], .None)
+    assert_eq(code, 0, "generated struct codec failed: {stderr}")
+    assert_eq(stdout, "{\"base\":4,\"doubled\":8}\n5\n10\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:489
+#Test("nested_pattern_subjects_clone_read_self_and_keep_take_self_by_value") {
+    dir :: env.temp_dir().join("jet_nested_pattern_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+struct Inner { note: String? }
+struct Envelope {
+    inner: Inner
+    fn borrowed(self) -> String {
+        if self.inner.note == Val(value) { return value }
+        return "none"
+    }
+    fn owned(^self) -> String {
+        if self.inner.note == Val(value) { return value }
+        return "none"
+    }
+}
+fn owned_local_nested_field_remains_reusable() {
+    local := Envelope{ inner: Inner{ note: Val("local") } }
+    if local.inner.note == Val(value) { print(value) }
+    if local.inner.note == Val(value) { print(value) }
+}
+fn run() {
+    borrowed := Envelope{ inner: Inner{ note: Val("borrowed") } }
+    print(borrowed.borrowed())
+    owned := Envelope{ inner: Inner{ note: Val("owned") } }
+    print(owned.owned())
+    owned_local_nested_field_remains_reusable()
+}
+"""
+    _ :: compile_temp("nested_pattern_borrow_provenance.jet", src)
+    // Rust: tests/corelib_parts/derives.rs:490 — method_body retired with Rust text inspection.
+    tir_support.assert_tiers_agree("nested_pattern_borrow_provenance", src, "borrowed\nowned\nlocal\nlocal\n")
+    (code, stdout, stderr) :: build_and_run(&dir, "nested_pattern", src, &[], .None)
+    assert_eq(code, 0, "nested borrowed/take-self proof failed: {stderr}")
+    assert_eq(stdout, "borrowed\nowned\nlocal\nlocal\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:551
+#Test("generated_struct_encode_preserves_order_with_rename_and_option") {
+    dir :: env.temp_dir().join("jet_struct_serde_order_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#Encode
+struct Wire {
+    first: String
+    #Rename("wireSecond") second: String
+    maybe: String?
+    last: Int
+}
+fn run() {
+    absent := Wire{ first: "a", second: "b", maybe: None, last: 4 }
+    present := Wire{ first: "a", second: "b", maybe: Val("c"), last: 4 }
+    arbitrary := [String:Int]{ "z": 1, "a": 2 }
+    print(json.to_string(absent))
+    print(json.to_string(present))
+    print(json.to_string(arbitrary))
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "struct_serde_order", src, &[], .None)
+    assert_eq(code, 0, "ordered generated struct codec failed: {stderr}")
+    assert_eq(stdout, "{\"first\":\"a\",\"wireSecond\":\"b\",\"last\":4}\n{\"first\":\"a\",\"wireSecond\":\"b\",\"maybe\":\"c\",\"last\":4}\n{\"a\":2,\"z\":1}\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:587
+#Test("generated_struct_codecs_preserve_flatten_rename_and_default") {
+    dir :: env.temp_dir().join("jet_struct_markers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#Codable
+struct Inner { x: Int  y: Bool }
+#[Codable, RenameAll(camel)]
+struct Outer {
+    display_name: String
+    #Flatten inner: Inner
+    count: Int{4 + 5}
+}
+fn run() {
+    value := Outer{ display_name: "n", inner: Inner{ x: 1, y: true }, count: 2 }
+    print(json.to_string(value))
+    back := json.decode<Outer>("{{\"displayName\":\"m\",\"x\":3,\"y\":false}}") ?? panic("decode")
+    print(back.display_name)
+    print(back.inner.x)
+    print(back.count)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "struct_markers", src, &[], .None)
+    assert_eq(code, 0, "generated marker codec failed: {stderr}")
+    assert_eq(stdout, "{\"count\":2,\"displayName\":\"n\",\"x\":1,\"y\":true}\nm\n3\n9\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:622
+#Test("generated_struct_decode_denies_unknown_fields") {
+    dir :: env.temp_dir().join("jet_struct_deny_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#[Codable, DenyUnknownFields]
+struct Strict { name: String }
+fn run() {
+    if json.decode<Strict>("{{\"name\":\"x\",\"extra\":1}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            loop error in errors {
+                print(error.path)
+                print(error.reason)
+            }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "struct_deny", src, &[], .None)
+    assert_eq(code, 0, "generated strict codec failed: {stderr}")
+    assert_eq(stdout, "extra\nE2412: unknown field `extra`\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:651
+#Test("generated_struct_decode_accumulates_nested_errors_and_validation") {
+    dir :: env.temp_dir().join("jet_struct_decode_errors_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#Codable
+struct Inner { left: Int  right: Bool }
+#Codable
+struct Outer { inner: Inner  count: Int }
+#Codable
+struct Account {
+    email: String
+    age: Int
+    validate {
+        check(email.contains("@"), at: email, "email")
+        check(age >= 18, at: age, "age")
+    }
+}
+fn run() {
+    if json.decode<Outer>("{{\"inner\":{{\"left\":\"bad\",\"right\":\"bad\"}},\"count\":\"bad\"}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            print(errors.len())
+            loop error in errors { print(error.path) }
+        }
+    }
+    if json.decode<Account>("{{\"email\":\"missing-at\",\"age\":12}}") == {
+        .Ok(_) -> {}
+        .Err(errors) -> {
+            print(errors.len())
+            loop error in errors { print(error.path) }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "struct_decode_errors", src, &[], .None)
+    assert_eq(code, 0, "generated decoder accumulation failed: {stderr}")
+    assert_eq(stdout, "3\ninner.left\ninner.right\ncount\n2\nemail\nage\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:702
+#Test("generated_decode_dispatches_across_module_boundaries") {
+    dir :: env.temp_dir().join("jet_serde_module_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    lib :: """
+#Codable
+pub struct Address { pub city: String }
+#Codable
+pub struct Order {
+    pub shipping: Address
+    pub quantities: [Int]
+    pub coupon: String?
+    pub labels: [String:Int]
+}
+"""
+    main :: """
+use core.encoding.json as json
+use orders
+fn run() {
+    order := json.decode<orders.Order>("{{\"shipping\":{{\"city\":\"Paris\"}},\"quantities\":[2,3],\"coupon\":null,\"labels\":{{\"fragile\":1}}}}") ?? panic("decode")
+    print(json.to_string(order))
+}
+"""
+    (code, stdout, stderr) :: build_and_run_multi(&dir, "serde_module", "main.jet", &[("main.jet", main), ("orders.jet", lib)])
+    assert_eq(code, 0, "cross-module generated decode failed: {stderr}")
+    assert_eq(stdout, "{\"shipping\":{\"city\":\"Paris\"},\"quantities\":[2,3],\"labels\":{\"fragile\":1}}\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:742
+#Test("user_derive_orphan_rule_allows_either_local_side") {
+    dir :: env.temp_dir().join("jet_derive_orphan_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    lib :: """
+derive T.RemoteLabel {
+    fn remote_label(self) -> String { "remote:{T.$name}" }
+}
+#LocalLabel
+pub struct RemoteType { pub value: Int }
+pub fn remote_type_label() -> String {
+    value := RemoteType{ value: 2 }
+    return value.local_label()
+}
+"""
+    main :: """
+use labels
+derive T.LocalLabel {
+    fn local_label(self) -> String { "local:{T.$name}" }
+}
+#RemoteLabel
+struct LocalType { value: Int }
+fn run() {
+    local := LocalType{ value: 1 }
+    print(local.remote_label())
+    print(labels.remote_type_label())
+}
+"""
+    (code, stdout, stderr) :: build_and_run_multi(&dir, "derive_orphan", "main.jet", &[("main.jet", main), ("labels.jet", lib)])
+    assert_eq(code, 0, "local-orphan derive dispatch failed: {stderr}")
+    assert_eq(stdout, "remote:LocalType\nlocal:RemoteType\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:790
+#Test("user_derive_layout_fact_matches_reflection_projection") {
+    dir :: env.temp_dir().join("jet_layout_facts_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+derive T.LayoutFacts {
+    info :: T.$layout
+    reflected :: T.reflect().layout
+    selected :: info[.count]
+    kind :: info.kind
+    target :: info.target
+    guarantee :: info.guarantee
+    layout_source :: info.source
+    reflected_kind :: reflected.kind
+    field_name :: selected.name
+    size :: info.size
+    reflected_size :: reflected.size
+    selected_offset :: selected.offset
+    reflected_offset :: reflected.fields[0].offset
+    name :: T.reflect().name
+    fn layout_facts(self) -> String { "{$kind}:{$target}:{$guarantee}:{$layout_source}:{$reflected_kind}:{$field_name}:{$size}:{$reflected_size}:{$selected_offset}:{$reflected_offset}" }
+}
+#LayoutFacts
+struct Packet { count: Int  label: String }
+#[Layout(c), LayoutFacts]
+struct CPacket { count: U32  flag: U8 }
+#[Layout(columnar), LayoutFacts]
+struct ColumnPacket { count: Int  label: String }
+fn run() {
+    packet := Packet{ count: 2, label: "ok" }
+    c_packet := CPacket{ count: 2, flag: 1 }
+    column_packet := ColumnPacket{ count: 2, label: "ok" }
+    print(packet.layout_facts())
+    print(c_packet.layout_facts())
+    print(column_packet.layout_facts())
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "layout_facts", src, &[], .None)
+    assert_eq(code, 0, "layout facts derive failed: {stderr}")
+    assert_eq(stdout, "default:x86_64-unknown-linux-gnu:physical layout unspecified:struct declaration:default:count:null:null:null:null\n" + "c:x86_64-unknown-linux-gnu:repr(C) declaration:struct declaration:c:count:8:8:0:0\n" + "columnar:x86_64-unknown-linux-gnu:columnar storage declaration:struct declaration:columnar:count:32:32:0:0\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:856
+#Test("user_derive_generated_struct_reenters_registration_and_serde") {
+    dir :: env.temp_dir().join("jet_derive_reentry_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+derive T.ConfigSchema {
+    #Codable
+    struct GeneratedConfig { ports: [Int]{[80, 443]} }
+}
+#ConfigSchema
+struct Schema<T> { witness: T }
+fn run() {
+    config := json.decode<GeneratedConfig>("{{}}") ?? panic("decode")
+    print(config.ports)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "user_derive_generated_struct", src, &[], .None)
+    assert_eq(code, 0, "generated struct did not re-enter registration: {stderr}")
+    assert_eq(stdout, "[80, 443]\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:893
+#Test("user_derive_generic_impl_runs_in_aot_and_default_dev") {
+    dir :: env.temp_dir().join("jet_derive_generic_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+derive T.TypeName {
+    info :: T.reflect()
+    param :: info.type_params[0].name
+    fn get_value(self) -> @param { ~self.value }
+    fn type_name(self) -> String { T.$name }
+}
+#TypeName
+struct Box<T> { value: T }
+fn run() {
+    boxed := Box<Int>{ value: 7 }
+    n := boxed.get_value()
+    print(n)
+    print(boxed.type_name())
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "user_derive_generic", src, &[], .None)
+    assert_eq(code, 0, "generic user derive failed in AOT: {stderr}")
+    assert_eq(stdout, "7\nBox\n")
+    file :: dir.join("user_derive_generic.jet")
+    fs.write(&file, src).unwrap()
+    // Default-dev and retired TIR-interpreter coverage now uses the canonical tier harness.
+    tir_support.assert_tiers_agree("user_derive_generic_dev", src, "7\nBox\n")
+    dev :: Command.new(jet_bin()).args(["dev", "--watch=off"]).arg(&file).current_dir(&dir).output().unwrap()
+    assert_eq(dev.status.code(), .Some(0), "generic user derive failed in dev: {String.from_utf8_lossy(&dev.stderr)}")
+    assert_eq(String.from_utf8_lossy(&dev.stdout), "7\nBox\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:953
+#Test("user_derive_generated_non_clonable_copy_is_rejected_in_sema") {
+    src :: """
+derive T.CopyCallback {
+    fn duplicate(self) -> fn(Int) -> Int { ~self.callback }
+}
+#CopyCallback
+struct Handler { callback: fn(Int) -> Int }
+fn run() { print(0) }
+"""
+    diags :: jet.compile(src).expect_err("generated function copy must be rejected")
+    assert(diags.iter().any(fn(diag) { diag.code == "E0211" }), "expected generated code to re-enter cloneability checking: {diags:?}")
+}
+// Rust: tests/corelib_parts/derives.rs:975
+#Test("structure_once_loops_cover_marker_impl_and_test_items") {
+    dir :: env.temp_dir().join("jet_structure_once_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    file :: dir.join("structure_once.jet")
+    source :: """
+marker AddFields($sites: [.Type]) {
+    type_name :: target.$name
+    prep loop field in target.$fields {
+        method :: "field_{field.$name}"
+        impl $type_name {
+            fn $method(self) -> String { field.$name }
+        }
+    }
+}
+struct Case { n: Int }
+#AddFields
+struct Person { first: String  last: String }
+CASES :: prep { [Case]{ Case{ n: 1 }, Case{ n: 2 } } }
+prep loop T in [Person] {
+    impl T {
+        fn generated(self) -> String { "generated" }
+    }
+}
+prep loop case in CASES {
+    #Test("case {case.n}") { assert(case.n > 0) }
+}
+fn run() {
+    person :: Person{ first: "a", last: "b" }
+    print(person.field_first())
+    print(person.field_last())
+    print(person.generated())
+}
+"""
+    fs.write(&file, source).unwrap()
+    shown :: file.to_string_lossy()
+    (harness, _) :: jet.compile_tests_with_path(source, &shown).unwrap_or_else(fn(diags) { panic("D-STRUCT-ONCE1 fixture rejected:\n{jet.render_diagnostics(&shown, source, &diags)}") })
+    assert(harness.contains("field_first"), "marker-body method missing")
+    assert(harness.contains("field_last"), "marker-body method missing")
+    assert(harness.contains("generated"), "closed type-list impl missing")
+    assert(harness.contains("case 1"), "first interpolated test missing")
+    assert(harness.contains("case 2"), "second interpolated test missing")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:1037
+#Test("structure_once_duplicate_generated_tests_reenter_test_registration") {
+    source :: """
+struct Case { n: Int }
+CASES :: prep { [Case]{ Case{ n: 1 }, Case{ n: 1 } } }
+prep loop case in CASES {
+    #Test("case {case.n}") { assert(case.n > 0) }
+}
+fn run() {}
+"""
+    diagnostics :: jet.compile(source).expect_err("duplicate generated tests must fail")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0105" }), "expected duplicate generated test diagnostic, got: {diagnostics:?}")
+}
+// Rust: tests/corelib_parts/derives.rs:1058
+#Test("structure_once_example_runs_aot_with_generated_meaning") {
+    if !common.have_rustc() { eprintln("note: skipping structure_once_example_runs_aot_with_generated_meaning (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_structure_once_aot_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    source :: include_str!("../../Examples/features/reflection/derive_loop.jet")
+    (code, stdout, stderr) :: build_and_run(&dir, "structure_once_aot", source, &[], .None)
+    assert_eq(code, 0, "D-STRUCT-ONCE1 AOT example failed: {stderr}")
+    assert_eq(stdout, "x\ny\nx\ny\ngenerated\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:1084
+#Test("consuming_core_constructor_copies_borrowed_field_explicitly") {
+    dir :: env.temp_dir().join("jet_core_borrowed_field_copy_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "core_borrowed_field_copy", """
+use core.encoding.json as json
+struct Address { text: String }
+struct Email { addr: String, nested: Address, items: [Address] }
+fn pick() -> Int { return 0 }
+fn encoded(e: Email, i: Int) -> String {
+    shallow := DataTree.Text(~e.addr)
+    nested := DataTree.Text(~e.nested.text)
+    indexed := DataTree.Text(~e.items[0].text)
+    computed := DataTree.Text(~e.items[i + 1].text)
+    called := DataTree.Text(~e.items[pick()].text)
+    parenthesized := DataTree.Text(~e.items[-(-i)].text)
+    conditional := DataTree.Text(~e.items[if i == 0 -> 0 else -> 1].text)
+    return "{json.to_string(shallow)}|{json.to_string(nested)}|{json.to_string(indexed)}|{json.to_string(computed)}|{json.to_string(called)}|{json.to_string(parenthesized)}|{json.to_string(conditional)}"
+}
+fn slice_data(xs: [DataTree]) -> DataTree { return DataTree.Array(xs[0..1]) }
+fn run() {
+    e := Email{addr: "a@b.com", nested: Address{text: "inside"}, items: [Address{text: "zero"}, Address{text: "item"}]}
+    sliced := slice_data([DataTree.Text("slice0"), DataTree.Text("slice1")])
+    print("{encoded(e, 0)}|{json.to_string(sliced)}")
+}
+""", &[], .None)
+    assert_eq(code, 0, "explicit field copy failed to compile/run: {stderr}")
+    assert_eq(stdout, "\"a@b.com\"|\"inside\"|\"zero\"|\"item\"|\"zero\"|\"zero\"|\"zero\"|[\"slice0\",\"slice1\"]\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:1141
+#Test("yaml_full_nested_decode_and_features") {
+    if !common.have_rustc() { eprintln("note: skipping yaml_full_nested_decode_and_features (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_yaml_full_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "yaml_typed", """
+use core.encoding.yaml as yaml
+#Codable
+struct Service { name: String  port: Int }
+#Codable
+struct Config { app: String  services: [Service] }
+fn run() {
+    raw :: "app: myapp\nservices:\n  - name: web\n    port: 80\n  - name: db\n    port: 5432\n"
+    cfg :: yaml.decode<Config>(raw) ?? panic("bad yaml")
+    print(cfg.app)
+    print(cfg.services.len())
+    print(cfg.services[0].name)
+    print(cfg.services[1].port)
+}
+""", &[], .None)
+    assert_eq(code, 0, "yaml typed decode failed: {stderr}")
+    assert_eq(stdout, "myapp\n2\nweb\n5432\n")
+    (code2, stdout2, stderr2) :: build_and_run(&dir, "yaml_adv", """
+use core.encoding.yaml as yaml
+fn run() {
+    raw :: "---\n# a config\nflowlist: [1, 2, 3]\nbase: &b\n  host: local\n  port: 80\nuse: *b\nnote: |\n  one\n  two\n"
+    d :: yaml.parse(raw) ?? panic("bad yaml")
+    if d == .Object(top) {
+        if top["flowlist"] == .Array(xs) { print(xs.len()) }
+        if top["use"] == .Object(u) { print(u.len()) }
+        if top["note"] == .Text(s) { print(s.contains("one")) }
+    }
+}
+""", &[], .None)
+    assert_eq(code2, 0, "yaml advanced features failed: {stderr2}")
+    assert_eq(stdout2, "3\n2\ntrue\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:1207
+#Test("yaml_hostile_alias_and_depth_match_all_execution_tiers") {
+    src :: """
+use core.encoding.yaml as yaml
+fn run() {
+    alias_items :: "  - *a\n".repeat(32768)
+    alias_raw :: "base: &a\n  value: x\nitems:\n{alias_items}"
+    if yaml.parse(alias_raw) == {
+        .Ok(_) -> { print("alias:accepted") }
+        .Err(_) -> { print("alias:rejected") }
+    }
+    open :: "[".repeat(65)
+    close :: "]".repeat(65)
+    depth_raw :: "{open}0{close}"
+    if yaml.parse(depth_raw) == {
+        .Ok(_) -> { print("depth:accepted") }
+        .Err(_) -> { print("depth:rejected") }
+    }
+}
+"""
+    tir_support.assert_tiers_agree("yaml_hostile_alias_and_depth", src, "alias:rejected\ndepth:rejected\n")
+}
+// Rust: tests/corelib_parts/derives.rs:1236
+#Test("json_and_toml_hostile_depth_match_all_execution_tiers") {
+    src :: """
+use core.encoding.json as json
+use core.encoding.toml as toml
+fn run() {
+    open64 :: "[".repeat(64)
+    close64 :: "]".repeat(64)
+    if json.parse("{open64}{close64}") == {
+        .Ok(_) -> { print("json64:accepted") }
+        .Err(error) -> { print("json64:{error.line}:{error.message}") }
+    }
+    open65 :: "[".repeat(65)
+    close65 :: "]".repeat(65)
+    if json.parse("{open65}{close65}") == {
+        .Ok(_) -> { print("json65:accepted") }
+        .Err(error) -> { print("json65:{error.line}:{error.message}") }
+    }
+    if toml.parse("value = {open64}{close64}") == {
+        .Ok(_) -> { print("toml64:accepted") }
+        .Err(error) -> { print("toml64:{error.line}:{error.message}") }
+    }
+    if toml.parse("value = {open65}{close65}") == {
+        .Ok(_) -> { print("toml65:accepted") }
+        .Err(error) -> { print("toml65:{error.line}:{error.message}") }
+    }
+}
+"""
+    tir_support.assert_tiers_agree("json_toml_hostile_depth", src, "json64:accepted\njson65:1:JSON value is nested too deeply\ntoml64:accepted\ntoml65:1:TOML value is nested too deeply\n")
+}
+// Rust: tests/corelib_parts/derives.rs:1281
+#Test("typed_decode_returns_field_errors_and_silently_migrates") {
+    if !common.have_rustc() { eprintln("note: skipping typed decode contract test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_decode_contract_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "decode_contract", """
+use core.encoding.json as json
+use core.encoding.toml as toml
+use core.encoding.csv as csv
+#[PublishedSchema, Codable]
+struct Config { port: Int  host: String }
+migration Config { add host: String = "localhost" }
+fn run() -> Unit [FieldError]! {
+    old :: json.decode<Config>("{{\"port\":2}}")
+    print("json {old.port} {old.host}")
+    toml_old :: toml.decode<Config>("port = 3\n")
+    print("toml {toml_old.port} {toml_old.host}")
+    rows :: csv.decode<Config>("port\n4\n5\n")
+    print("csv {rows.len()} {rows[1].port} {rows[1].host}")
+    if json.decode<Config>("{{\"port\":\"nope\",\"host\":\"h\"}}") == {
+        .Ok(value) -> print("unexpected {value.port}")
+        .Err(errors) -> print("error {errors.len()} {errors[0].path} {errors[0].reason}")
+    }
+}
+""", &[], .None)
+    assert_eq(code, 0, "canonical decode program failed: {stderr}")
+    assert_eq(stdout, "json 2 localhost\ntoml 3 localhost\ncsv 2 5 localhost\nerror 1 port expected Int, found text \"nope\"\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/derives.rs:1330
+#Test("typed_decode_has_no_second_success_result_api") {
+    src :: """
+use core.encoding.json as json
+#[PublishedSchema, Codable]
+struct User { id: Int  name: String }
+migration User { rename old_name -> name }
+fn run() {
+    user :: json.decode<User>("{{\"id\":1,\"old_name\":\"Ada\"}}") ?? panic("bad")
+    print(user.name)
+}
+"""
+    _ :: compile_temp("decode_contract_api.jet", src)
+    // Success is the decoded User, not a separate migration-status result.
+    tir_support.assert_tiers_agree("decode_contract_api", src, "Ada\n")
+    old_api :: """
+use core.encoding.json as json
+#[PublishedSchema, Codable]
+struct User { id: Int  name: String }
+fn run() { _ :: json.decode_with_status<User>("{{\"id\":1,\"name\":\"Ada\"}}") }
+"""
+    _ :: jet.compile(old_api).expect_err("typed decode must not expose a second success-result API")
+}
+// Rust: tests/corelib_parts/derives.rs:1355
+#Test("typed_decode_tier_fixture_is_canonical") {
+    binary :: jet_bin()
+    if !common.have_rustc() || !binary.exists() { eprintln("note: skipping typed decode tier fixture (need jet + rustc)"); return }
+    dir :: env.temp_dir().join("jet_decode_tiers_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.encoding.json as json
+#[PublishedSchema, Codable]
+struct Config { port: Int  host: String }
+migration Config { add host: String = "localhost" }
+fn run() {
+    value :: json.decode<Config>("{{\"port\":7}}") ?? panic("bad")
+    print("{value.port} {value.host}")
+}
+"""
+    (code, compiled, stderr) :: build_and_run(&dir, "decode_tier_fixture", src, &[], .None)
+    assert_eq(code, 0, "full decode fixture failed: {stderr}")
+    path :: dir.join("decode_tier_fixture.jet")
+    fs.write(&path, src).unwrap()
+    quick :: Command.new(&binary).arg("run").arg(&path).current_dir(&dir).output().unwrap()
+    assert(quick.status.success(), "quick decode fixture failed: {String.from_utf8_lossy(&quick.stderr)}")
+    assert_eq(String.from_utf8_lossy(&quick.stdout), compiled)
+    _ :: fs.remove_dir_all(&dir)
+}

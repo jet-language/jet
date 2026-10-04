@@ -1,889 +1,121 @@
-// PORT-PENDING 1139 tests-reflect: tests/reflect.rs:1-885
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Integration tests for D-METAREFLECT1 / D-REFLECT1 rich reflection.
-//RS 
-//RS mod common;
-//RS mod tir_support;
-//RS 
-//RS use jet::Comptime::{
-//RS     build_distinct_type_info, build_registered_fact_info, build_state_infos_with_graph,
-//RS     build_struct_type_info, CtReport, CtValue,
-//RS };
-//RS use jet::Diagnostics::Span;
-//RS use jet::AST::{
-//RS     AccessConvention, Dimension, DistinctDef, Expr, Field, Func, InternalTag, Marker, Param,
-//RS     ParamZone, QuantityKind, StructDef, TagMarker, Type, TypeParam,
-//RS };
-//RS use jet_foundation::Facts::{StateGraph, StateNode};
-//RS 
-//RS fn span() -> Span {
-//RS     Span::new(0, 1)
-//RS }
-//RS 
-//RS /// D-LAYOUT-FACTS1=B: a direct nominal layout fact can initialize an
-//RS /// ordinary top-level comptime binding, then project its target-sized bytes.
-//RS #[test]
-//RS fn direct_layout_fact_feeds_top_level_binding() {
-//RS     let src = r#"
-//RS #Layout(c)
-//RS struct Ring {
-//RS     slots: [Int#1024]
-//RS     head: Int
-//RS     tail: Int
-//RS }
-//RS 
-//RS SIZE :: prep { Ring.$layout.size }
-//RS ALIGNMENT :: prep { Ring.$layout.alignment }
-//RS 
-//RS fn run() {
-//RS     print("{SIZE}:{ALIGNMENT}")
-//RS }
-//RS "#;
-//RS     let expected = format!(
-//RS         "{}:{}\n",
-//RS         std::mem::size_of::<jet_foundation::Numeric::JetInt>() * 1026,
-//RS         std::mem::align_of::<jet_foundation::Numeric::JetInt>(),
-//RS     );
-//RS     tir_support::assert_tiers_agree("direct_layout_fact", src, &expected);
-//RS }
-//RS 
-//RS 
-//RS #[test]
-//RS fn arithmetic_policy_is_visible_in_function_reflection() {
-//RS     let root = std::env::temp_dir().join(format!("jet_reflect_arithmetic_{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&root);
-//RS     std::fs::create_dir_all(&root).unwrap();
-//RS     let path = root.join("main.jet");
-//RS     std::fs::write(
-//RS         &path,
-//RS         "#Arithmetic(.Wrapping)\npub fn wrapped(value: U8) -> U8 { return value + U8{1} }\nfn run() {}\n",
-//RS     )
-//RS     .unwrap();
-//RS     let (diagnostics, bundle, effect_facts) =
-//RS         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
-//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-//RS     let bundle = bundle.expect("checked bundle");
-//RS     let facts = jet::Driver::program_semantic_facts(&bundle, &effect_facts);
-//RS     let program = jet::Comptime::build_program_info(&bundle, &facts);
-//RS     let CtValue::List(functions) = struct_field(&program, "functions") else {
-//RS         panic!("functions");
-//RS     };
-//RS     let wrapped = functions
-//RS         .iter()
-//RS         .find(|value| matches!(struct_field(value, "name"), CtValue::Str(name) if name == "wrapped"))
-//RS         .expect("wrapped reflection");
-//RS     let CtValue::List(arithmetic) = struct_field(wrapped, "arithmetic") else {
-//RS         panic!("arithmetic");
-//RS     };
-//RS     let CtValue::Struct { fields, .. } = arithmetic.first().expect("arithmetic row") else {
-//RS         panic!("arithmetic row");
-//RS     };
-//RS     assert!(fields.iter().any(|(name, value)| {
-//RS         name == "operation" && matches!(value, CtValue::Str(operation) if operation == "add")
-//RS     }));
-//RS     assert!(fields.iter().any(|(name, value)| {
-//RS         name == "policy" && matches!(value, CtValue::Str(policy) if policy == ".Wrapping")
-//RS     }));
-//RS     assert!(fields.iter().any(|(name, value)| {
-//RS         name == "scope_span" && matches!(value, CtValue::Struct { .. })
-//RS     }));
-//RS     std::fs::remove_dir_all(root).ok();
-//RS }
-//RS 
-//RS #[test]
-//RS fn checked_text_contract_is_reflected_on_the_nominal_type() {
-//RS     let root = std::env::temp_dir().join(format!("jet_reflect_checked_text_{}", std::process::id()));
-//RS     let _ = std::fs::remove_dir_all(&root);
-//RS     std::fs::create_dir_all(&root).unwrap();
-//RS     let path = root.join("main.jet");
-//RS     std::fs::write(
-//RS         &path,
-//RS         r#"
-//RS #Error
-//RS enum PatternError { Bad }
-//RS Pattern :: distinct String
-//RS impl Pattern.CheckedText {
-//RS     type Error = PatternError
-//RS     fn check(text: String) PatternError! -[]> {
-//RS         return
-//RS     }
-//RS     fn encode_hole<T: Printable>(value: T) -[]> String {
-//RS         return ""
-//RS     }
-//RS }
-//RS fn run() {}
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS     let (diagnostics, bundle, _) =
-//RS         jet::Driver::check_file_with_effect_facts(path.to_str().unwrap(), None, false);
-//RS     assert!(diagnostics.is_empty(), "{diagnostics:?}");
-//RS     let bundle = bundle.expect("checked bundle");
-//RS     let info = jet::Comptime::reflect_type_value(
-//RS         &bundle.modules[bundle.entry].items,
-//RS         "Pattern",
-//RS         "main",
-//RS     )
-//RS     .expect("Pattern reflection");
-//RS     assert!(matches!(
-//RS         struct_field(&info, "base"),
-//RS         CtValue::Str(base) if base == "String"
-//RS     ));
-//RS     assert!(matches!(
-//RS         struct_field(&info, "implements"),
-//RS         CtValue::List(values)
-//RS             if values.iter().any(|value| matches!(value, CtValue::Str(name) if name == "CheckedText"))
-//RS     ));
-//RS     let CtValue::List(contracts) = struct_field(&info, "trait_contracts") else {
-//RS         panic!("trait contracts");
-//RS     };
-//RS     let contract = contracts
-//RS         .iter()
-//RS         .find(|value| matches!(struct_field(value, "name"), CtValue::Str(name) if name == "CheckedText"))
-//RS         .expect("CheckedText reflection contract");
-//RS     let CtValue::List(associated_types) = struct_field(contract, "associated_types") else {
-//RS         panic!("associated types");
-//RS     };
-//RS     assert!(associated_types.iter().any(|value| {
-//RS         matches!(
-//RS             (struct_field(value, "name"), struct_field(value, "type")),
-//RS             (CtValue::Str(name), CtValue::Str(ty)) if name == "Error" && ty == "PatternError"
-//RS         )
-//RS     }));
-//RS     let CtValue::List(methods) = struct_field(contract, "methods") else {
-//RS         panic!("contract methods");
-//RS     };
-//RS     assert!(methods.iter().any(|value| {
-//RS         matches!(struct_field(value, "name"), CtValue::Str(name) if name == "check")
-//RS     }));
-//RS     assert!(methods.iter().any(|value| {
-//RS         matches!(struct_field(value, "name"), CtValue::Str(name) if name == "encode_hole")
-//RS     }));
-//RS     std::fs::remove_dir_all(root).ok();
-//RS }
-//RS 
-//RS fn field(name: &str, ty: &str, is_pub: bool) -> Field {
-//RS     Field {
-//RS         is_pub,
-//RS         is_package_pub: false,
-//RS         name: name.to_string(),
-//RS         name_span: span(),
-//RS         ty: Type::Named(ty.to_string()),
-//RS         ty_span: span(),
-//RS         serde_markers: Vec::new(),
-//RS         redact: false,
-//RS         computed: None,
-//RS         default: None,
-//RS         default_ct: None,
-//RS     }
-//RS }
-//RS 
-//RS fn method(name: &str, is_pub: bool) -> Func {
-//RS     Func {
-//RS         span: span(),
-//RS         is_pub,
-//RS         is_package_pub: false,
-//RS         is_comptime: false,
-//RS         external_type: None,
-//RS         name: name.to_string(),
-//RS         name_span: span(),
-//RS         type_params: Vec::new(),
-//RS         head_pattern: None,
-//RS         params: vec![Param {
-//RS             convention: AccessConvention::Read,
-//RS             root: false,
-//RS             name: "self".to_string(),
-//RS             name_span: span(),
-//RS             public_label: None,
-//RS             zone: ParamZone::Either,
-//RS             ty: Type::Named("Self".to_string()),
-//RS             ty_span: span(),
-//RS             default: None,
-//RS             variadic: false,
-//RS             variadic_bound_list: None,
-//RS             declared_view_from_names: None,
-//RS         }],
-//RS         return_type: Some(Type::Named("String".to_string())),
-//RS         return_type_span: Some(span()),
-//RS         return_view_provenance: None,
-//RS         declared_return_view_provenance: None,
-//RS         gc_return: false,
-//RS         diverges: false,
-//RS         gc_scope: false,
-//RS         is_unsafe: false,
-//RS         unsafe_reason: None,
-//RS         unsafe_span: None,
-//RS         is_pure: false,
-//RS         is_sanitizer: false,
-//RS         scrub_tag: None,
-//RS         is_reactive: false,
-//RS         reactive_upgrades: Vec::new(),
-//RS         is_replayable: false,
-//RS         replayable_span: None,
-//RS         declared_effects: None,
-//RS         pre: vec![],
-//RS         post: vec![],
-//RS         effect_via: None,
-//RS         state_requires: None,
-//RS         state_transition: None,
-//RS         web_marker: None,
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         maturity: None,
-//RS         maturity_span: None,
-//RS         kernel: None,
-//RS         is_inline: false,
-//RS         is_inline_always: false,
-//RS         inline_span: None,
-//RS         meta: None,
-//RS         is_job: false,
-//RS         job_span: None,
-//RS         every: None,
-//RS         job_metadata: None,
-//RS         inline_foreign: None,
-//RS         undo: None,
-//RS         markers: Vec::new(),
-//RS         compiler_generated: false,
-//RS         body: Vec::new(),
-//RS     }
-//RS }
-//RS 
-//RS fn list_len(v: &CtValue) -> usize {
-//RS     match v {
-//RS         CtValue::List(xs) => xs.len(),
-//RS         _ => panic!("expected list, got {v:?}"),
-//RS     }
-//RS }
-//RS 
-//RS fn struct_field<'a>(v: &'a CtValue, name: &str) -> &'a CtValue {
-//RS     let CtValue::Struct { fields, .. } = v else {
-//RS         panic!("expected struct");
-//RS     };
-//RS     &fields.iter().find(|(n, _)| n == name).unwrap().1
-//RS }
-//RS 
-//RS fn list_struct_field<'a>(v: &'a CtValue, index: usize, name: &str) -> &'a CtValue {
-//RS     let CtValue::List(values) = v else {
-//RS         panic!("expected list");
-//RS     };
-//RS     struct_field(&values[index], name)
-//RS }
-//RS 
-//RS #[test]
-//RS fn state_info_exposes_terminal_and_reachability_facts() {
-//RS     let graph = StateGraph {
-//RS         states: vec![
-//RS             StateNode {
-//RS                 name: "Open".to_string(),
-//RS                 terminal: false,
-//RS                 reachable: Some(true),
-//RS             },
-//RS             StateNode {
-//RS                 name: "Closed".to_string(),
-//RS                 terminal: true,
-//RS                 reachable: Some(true),
-//RS             },
-//RS         ],
-//RS         transitions: Vec::new(),
-//RS     };
-//RS     let states = vec!["Open".to_string(), "Closed".to_string()];
-//RS     let value = build_state_infos_with_graph("Door", &states, Some(&graph));
-//RS     assert!(matches!(
-//RS         list_struct_field(&value, 0, "terminal"),
-//RS         CtValue::Bool(false)
-//RS     ));
-//RS     assert!(matches!(
-//RS         list_struct_field(&value, 1, "terminal"),
-//RS         CtValue::Bool(true)
-//RS     ));
-//RS     assert!(matches!(
-//RS         list_struct_field(&value, 0, "reachable"),
-//RS         CtValue::Present(value) if matches!(value.as_ref(), CtValue::Bool(true))
-//RS     ));
-//RS     assert!(matches!(
-//RS         list_struct_field(&value, 1, "reachable"),
-//RS         CtValue::Present(value) if matches!(value.as_ref(), CtValue::Bool(true))
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn state_info_keeps_no_entry_reachability_unknown() {
-//RS     let graph = StateGraph {
-//RS         states: vec![
-//RS             StateNode {
-//RS                 name: "Raw".to_string(),
-//RS                 terminal: false,
-//RS                 reachable: None,
-//RS             },
-//RS             StateNode {
-//RS                 name: "Done".to_string(),
-//RS                 terminal: true,
-//RS                 reachable: None,
-//RS             },
-//RS         ],
-//RS         transitions: Vec::new(),
-//RS     };
-//RS     let states = vec!["Raw".to_string(), "Done".to_string()];
-//RS     let value = build_state_infos_with_graph("Unseeded", &states, Some(&graph));
-//RS     assert!(matches!(
-//RS         list_struct_field(&value, 0, "reachable"),
-//RS         CtValue::Failed(CtReport::Clean(_))
-//RS     ));
-//RS     assert!(matches!(
-//RS         list_struct_field(&value, 1, "reachable"),
-//RS         CtValue::Failed(CtReport::Clean(_))
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn type_info_exposes_methods_type_params_and_markers() {
-//RS     let s = StructDef {
-//RS         span: span(),
-//RS         is_pub: true,
-//RS         is_package_pub: false,
-//RS         name: "Box".to_string(),
-//RS         name_span: span(),
-//RS         type_params: vec![TypeParam {
-//RS             name: "T".to_string(),
-//RS             name_span: span(),
-//RS             bounds: vec!["Comparable".to_string()],
-//RS             prep: None,
-//RS         }],
-//RS         fields: vec![field("value", "T", true), field("hidden", "Int", false)],
-//RS         state: None,
-//RS         methods: vec![method("show", true)],
-//RS         cli_bindings: Vec::new(),
-//RS         trait_impls: Vec::new(),
-//RS         derives: vec![("Debug".to_string(), span())],
-//RS         auto_derive_default: true,
-//RS         is_published_schema: false,
-//RS         published_schema_span: None,
-//RS         is_single_use: false,
-//RS         single_use_span: None,
-//RS         layout: None,
-//RS         layout_span: None,
-//RS         serde_markers: Vec::new(),
-//RS         type_markers: Vec::new(),
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         validate_block: Vec::new(),
-//RS         validate_span: None,
-//RS     };
-//RS     let info = build_struct_type_info(&s);
-//RS     assert!(matches!(
-//RS         struct_field(&info, "name"),
-//RS         CtValue::Str(name) if name.as_str() == "Box"
-//RS     ));
-//RS     assert!(matches!(
-//RS         struct_field(&info, "path"),
-//RS         CtValue::Str(path) if path.as_str() == "Box"
-//RS     ));
-//RS     assert_eq!(list_len(struct_field(&info, "fields")), 2);
-//RS     assert_eq!(list_len(struct_field(&info, "methods")), 1);
-//RS     assert_eq!(list_len(struct_field(&info, "type_params")), 1);
-//RS     assert!(matches!(
-//RS         list_struct_field(struct_field(&info, "fields"), 0, "span"),
-//RS         CtValue::Struct { fields, .. }
-//RS             if fields.iter().any(|(name, value)| name == "start" && matches!(value, CtValue::Int(0)))
-//RS     ));
-//RS     assert!(matches!(
-//RS         list_struct_field(struct_field(&info, "methods"), 0, "span"),
-//RS         CtValue::Struct { fields, .. }
-//RS             if fields.iter().any(|(name, value)| name == "end" && matches!(value, CtValue::Int(1)))
-//RS     ));
-//RS     assert!(matches!(
-//RS         list_struct_field(struct_field(&info, "type_params"), 0, "span"),
-//RS         CtValue::Struct { fields, .. }
-//RS             if fields.iter().any(|(name, value)| name == "start" && matches!(value, CtValue::Int(0)))
-//RS     ));
-//RS     let markers = struct_field(&info, "markers");
-//RS     assert_eq!(list_len(markers), 1);
-//RS     assert!(matches!(
-//RS         markers,
-//RS         CtValue::List(xs)
-//RS             if matches!(
-//RS                 &xs[0],
-//RS                 CtValue::Struct { fields, .. }
-//RS                     if fields.iter().any(|(name, value)|
-//RS                         name == "name" && matches!(value, CtValue::Str(value) if value == "Debug"))
-//RS             )
-//RS     ));
-//RS     assert!(matches!(
-//RS         struct_field(&info, "expanded_markers"),
-//RS         CtValue::List(xs) if xs.is_empty()
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn field_info_carries_visibility() {
-//RS     let s = StructDef {
-//RS         span: span(),
-//RS         is_pub: true,
-//RS         is_package_pub: false,
-//RS         name: "Secret".to_string(),
-//RS         name_span: span(),
-//RS         type_params: Vec::new(),
-//RS         fields: vec![field("visible", "Int", true), field("hidden", "Int", false)],
-//RS         state: None,
-//RS         methods: Vec::new(),
-//RS         cli_bindings: Vec::new(),
-//RS         trait_impls: Vec::new(),
-//RS         derives: Vec::new(),
-//RS         auto_derive_default: true,
-//RS         is_published_schema: false,
-//RS         published_schema_span: None,
-//RS         is_single_use: false,
-//RS         single_use_span: None,
-//RS         layout: None,
-//RS         layout_span: None,
-//RS         serde_markers: Vec::new(),
-//RS         type_markers: Vec::new(),
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         validate_block: Vec::new(),
-//RS         validate_span: None,
-//RS     };
-//RS     let info = build_struct_type_info(&s);
-//RS     let CtValue::List(fields) = struct_field(&info, "fields") else {
-//RS         panic!("fields");
-//RS     };
-//RS     let CtValue::Struct {
-//RS         fields: hidden_fields,
-//RS         ..
-//RS     } = &fields[1]
-//RS     else {
-//RS         panic!("field struct");
-//RS     };
-//RS     let is_pub = &hidden_fields.iter().find(|(n, _)| n == "is_pub").unwrap().1;
-//RS     assert!(matches!(is_pub, CtValue::Bool(false)));
-//RS }
-//RS 
-//RS #[test]
-//RS fn marker_arguments_are_typed_in_the_written_view() {
-//RS     let marker = Marker {
-//RS         name: "Inline".to_string(),
-//RS         negated: false,
-//RS         name_span: span(),
-//RS         args: vec![jet_foundation::AST::MarkerCallArg::Expr(Expr::Ident(
-//RS             "Always".to_string(),
-//RS             span(),
-//RS         ))],
-//RS         arg_labels: vec![None],
-//RS         span: span(),
-//RS         ct: None,
-//RS     };
-//RS     let s = StructDef {
-//RS         span: span(),
-//RS         is_pub: true,
-//RS         is_package_pub: false,
-//RS         name: "Hot".to_string(),
-//RS         name_span: span(),
-//RS         type_params: Vec::new(),
-//RS         fields: Vec::new(),
-//RS         state: None,
-//RS         methods: Vec::new(),
-//RS         cli_bindings: Vec::new(),
-//RS         trait_impls: Vec::new(),
-//RS         derives: Vec::new(),
-//RS         auto_derive_default: true,
-//RS         is_published_schema: false,
-//RS         published_schema_span: None,
-//RS         is_single_use: false,
-//RS         single_use_span: None,
-//RS         layout: None,
-//RS         layout_span: None,
-//RS         serde_markers: Vec::new(),
-//RS         type_markers: vec![marker],
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         validate_block: Vec::new(),
-//RS         validate_span: None,
-//RS     };
-//RS 
-//RS     let info = build_struct_type_info(&s);
-//RS     let CtValue::List(markers) = struct_field(&info, "markers") else {
-//RS         panic!("markers");
-//RS     };
-//RS     let CtValue::Struct { fields, .. } = &markers[0] else {
-//RS         panic!("marker");
-//RS     };
-//RS     let CtValue::List(args) = &fields.iter().find(|(name, _)| name == "args").unwrap().1 else {
-//RS         panic!("args");
-//RS     };
-//RS     assert!(matches!(
-//RS         &args[0],
-//RS         CtValue::Struct { fields, .. }
-//RS             if fields.iter().any(|(name, value)|
-//RS                 name == "ty" && matches!(value, CtValue::Str(value) if value == "InlineMode"))
-//RS             && fields.iter().any(|(name, value)|
-//RS                 name == "value"
-//RS                     && matches!(
-//RS                         value,
-//RS                         CtValue::Enum { type_name, variant, args }
-//RS                             if type_name == "InlineMode"
-//RS                                 && variant == "Always"
-//RS                                 && args.is_empty()
-//RS                     ))
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn distinct_capability_marker_is_visible_in_reflection() {
-//RS     let marker = Marker {
-//RS         name: "Comparable".to_string(),
-//RS         negated: false,
-//RS         name_span: span(),
-//RS         args: Vec::new(),
-//RS         arg_labels: Vec::new(),
-//RS         span: span(),
-//RS         ct: None,
-//RS     };
-//RS     let info = build_distinct_type_info(
-//RS         &DistinctDef {
-//RS             is_pub: true,
-//RS             is_package_pub: false,
-//RS             type_markers: vec![marker],
-//RS             derives: vec![("Comparable".to_string(), span())],
-//RS             quantity: None,
-//RS             name: "CustomerID".to_string(),
-//RS             name_span: span(),
-//RS             base: Type::Int,
-//RS             base_span: span(),
-//RS             range: None,
-//RS             span: span(),
-//RS         },
-//RS         "main",
-//RS     );
-//RS     assert!(matches!(
-//RS         struct_field(&info, "markers"),
-//RS         CtValue::List(values)
-//RS             if values.iter().any(|value| matches!(
-//RS                 value,
-//RS                 CtValue::Struct { fields, .. }
-//RS                     if fields.iter().any(|(name, value)|
-//RS                         name == "name" && matches!(value, CtValue::Str(value) if value == "Comparable"))
-//RS             ))
-//RS     ));
-//RS     assert!(matches!(
-//RS         struct_field(&info, "expanded_markers"),
-//RS         CtValue::List(values) if values.len() == 1
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn registered_type_planes_reflect_as_typed_values() {
-//RS     let mut fields = Vec::new();
-//RS     for (name, ty) in [
-//RS         (
-//RS             "bounded",
-//RS             Type::IntN {
-//RS                 signed: true,
-//RS                 bits: 8,
-//RS             },
-//RS         ),
-//RS         (
-//RS             "shape",
-//RS             Type::FixedList {
-//RS                 elem: Box::new(Type::Int),
-//RS                 len: jet::AST::Measure::literal("length", 4),
-//RS             },
-//RS         ),
-//RS         (
-//RS             "quantity",
-//RS             Type::Quantity {
-//RS                 base: Box::new(Type::Int),
-//RS                 dimension: Dimension::base("Length"),
-//RS             },
-//RS         ),
-//RS         (
-//RS             "classified",
-//RS             Type::Tagged {
-//RS                 marker: TagMarker::User("Audited".to_string()),
-//RS                 inner: Box::new(Type::Int),
-//RS             },
-//RS         ),
-//RS         (
-//RS             "nominal",
-//RS             Type::Tagged {
-//RS                 marker: TagMarker::Internal(InternalTag::CoreCryptoNominal),
-//RS                 inner: Box::new(Type::Named("Secret".to_string())),
-//RS             },
-//RS         ),
-//RS         (
-//RS             "callable",
-//RS             Type::Fn {
-//RS                 params: vec![Type::Int],
-//RS                 ret: Some(Box::new(Type::Int)),
-//RS                 effect_bound: None,
-//RS                 param_contract: Some(vec![("value".to_string(), ParamZone::Either)]),
-//RS                 call_metadata: None,
-//RS                 return_view_provenance: None,
-//RS             },
-//RS         ),
-//RS         ("approximate", Type::Float32),
-//RS     ] {
-//RS         let mut field = field(name, "Int", true);
-//RS         field.ty = ty;
-//RS         fields.push(field);
-//RS     }
-//RS     let info = build_struct_type_info(&StructDef {
-//RS         span: span(),
-//RS         is_pub: true,
-//RS         is_package_pub: false,
-//RS         name: "Planes".to_string(),
-//RS         name_span: span(),
-//RS         type_params: Vec::new(),
-//RS         fields,
-//RS         state: None,
-//RS         methods: Vec::new(),
-//RS         cli_bindings: Vec::new(),
-//RS         trait_impls: Vec::new(),
-//RS         derives: Vec::new(),
-//RS         auto_derive_default: true,
-//RS         is_published_schema: false,
-//RS         published_schema_span: None,
-//RS         is_single_use: false,
-//RS         single_use_span: None,
-//RS         layout: None,
-//RS         layout_span: None,
-//RS         serde_markers: Vec::new(),
-//RS         type_markers: Vec::new(),
-//RS         is_must_use: false,
-//RS         must_use_span: None,
-//RS         validate_block: Vec::new(),
-//RS         validate_span: None,
-//RS     });
-//RS     let CtValue::List(facts) = struct_field(&info, "facts") else {
-//RS         panic!("facts");
-//RS     };
-//RS     for expected in [
-//RS         "Range",
-//RS         "Layout",
-//RS         "Measure",
-//RS         "Exactness",
-//RS         "Dimension",
-//RS         "Classification",
-//RS         "Nominal",
-//RS         "Obligation",
-//RS     ] {
-//RS         let fact = facts
-//RS             .iter()
-//RS             .find(|fact| {
-//RS                 matches!(
-//RS                     struct_field(fact, "kind"),
-//RS                     CtValue::Enum { variant, .. } if variant == expected
-//RS                 )
-//RS             })
-//RS             .unwrap_or_else(|| panic!("missing typed `{expected}` fact in {facts:?}"));
-//RS         assert!(matches!(
-//RS             struct_field(fact, "value"),
-//RS             CtValue::Struct { .. }
-//RS         ));
-//RS     }
-//RS 
-//RS     let fact_of_kind = |kind: &str| {
-//RS         facts
-//RS             .iter()
-//RS             .find(|fact| matches!(struct_field(fact, "kind"), CtValue::Enum { variant, .. } if variant == kind))
-//RS             .unwrap_or_else(|| panic!("missing `{kind}` payload in {facts:?}"))
-//RS     };
-//RS     let range = struct_field(struct_field(fact_of_kind("Range"), "value"), "range");
-//RS     let CtValue::Present(range) = range else {
-//RS         panic!("range payload is not present");
-//RS     };
-//RS     assert!(matches!(struct_field(range, "start"), CtValue::Int(-128)));
-//RS     assert!(matches!(struct_field(range, "end"), CtValue::Int(127)));
-//RS 
-//RS     let layout = struct_field(struct_field(fact_of_kind("Layout"), "value"), "layout");
-//RS     let CtValue::Present(layout) = layout else {
-//RS         panic!("layout payload is not present");
-//RS     };
-//RS     assert!(matches!(struct_field(layout, "bytes"), CtValue::Int(1)));
-//RS 
-//RS     let measure = struct_field(struct_field(fact_of_kind("Measure"), "value"), "measure");
-//RS     let CtValue::Present(measure) = measure else {
-//RS         panic!("measure payload is not present");
-//RS     };
-//RS     assert!(matches!(
-//RS         (struct_field(measure, "kind"), struct_field(measure, "value")),
-//RS         (CtValue::Str(kind), CtValue::Present(value))
-//RS             if kind == "length" && matches!(value.as_ref(), CtValue::Int(4))
-//RS     ));
-//RS 
-//RS     let exactness = facts
-//RS         .iter()
-//RS         .filter(|fact| matches!(struct_field(fact, "kind"), CtValue::Enum { variant, .. } if variant == "Exactness"))
-//RS         .find(|fact| {
-//RS             matches!(
-//RS                 struct_field(struct_field(fact, "value"), "exactness"),
-//RS                 CtValue::Present(value)
-//RS                     if matches!(
-//RS                         struct_field(value, "kind"),
-//RS                         CtValue::Enum { variant, .. } if variant == "Approximate"
-//RS                     )
-//RS             )
-//RS         })
-//RS         .expect("approximate exactness payload");
-//RS     let exactness = struct_field(struct_field(exactness, "value"), "exactness");
-//RS     let CtValue::Present(exactness) = exactness else {
-//RS         panic!("exactness payload is not present");
-//RS     };
-//RS     assert!(matches!(
-//RS         struct_field(exactness, "precision"),
-//RS         CtValue::Present(value) if matches!(value.as_ref(), CtValue::Int(24))
-//RS     ));
-//RS 
-//RS     let dimension = struct_field(
-//RS         struct_field(fact_of_kind("Dimension"), "value"),
-//RS         "dimension",
-//RS     );
-//RS     let CtValue::Present(dimension) = dimension else {
-//RS         panic!("dimension payload is not present");
-//RS     };
-//RS     assert!(matches!(
-//RS         struct_field(dimension, "axes"),
-//RS         CtValue::List(axes) if axes.iter().any(|axis|
-//RS             matches!(
-//RS                 (struct_field(axis, "name"), struct_field(axis, "exponent")),
-//RS                 (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
-//RS             ))
-//RS     ));
-//RS 
-//RS     let classification = struct_field(
-//RS         struct_field(fact_of_kind("Classification"), "value"),
-//RS         "classification",
-//RS     );
-//RS     let CtValue::Present(classification) = classification else {
-//RS         panic!("classification payload is not present");
-//RS     };
-//RS     assert!(
-//RS         matches!(struct_field(classification, "name"), CtValue::Str(name) if name == "Audited")
-//RS     );
-//RS 
-//RS     let nominal = struct_field(struct_field(fact_of_kind("Nominal"), "value"), "nominal");
-//RS     let CtValue::Present(nominal) = nominal else {
-//RS         panic!("nominal payload is not present");
-//RS     };
-//RS     assert!(matches!(struct_field(nominal, "name"), CtValue::Str(name) if name == "core.crypto"));
-//RS 
-//RS     let obligation = struct_field(
-//RS         struct_field(fact_of_kind("Obligation"), "value"),
-//RS         "obligation",
-//RS     );
-//RS     let CtValue::Present(obligation) = obligation else {
-//RS         panic!("obligation payload is not present");
-//RS     };
-//RS     let CtValue::List(params) = struct_field(obligation, "param_contract") else {
-//RS         panic!("obligation parameter contract");
-//RS     };
-//RS     assert!(matches!(
-//RS         params.first().map(|param| (struct_field(param, "name"), struct_field(param, "zone"))),
-//RS         Some((CtValue::Str(name), CtValue::Enum { type_name, variant, .. }))
-//RS             if name == "value" && type_name == "ParamZone" && variant == "Either"
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn range_and_dimension_facts_are_typed_records() {
-//RS     let info = build_distinct_type_info(
-//RS         &DistinctDef {
-//RS             is_pub: true,
-//RS             is_package_pub: false,
-//RS             type_markers: Vec::new(),
-//RS             derives: Vec::new(),
-//RS             quantity: Some((Dimension::base("Length"), QuantityKind::Linear)),
-//RS             name: "Severity".to_string(),
-//RS             name_span: span(),
-//RS             base: Type::Int,
-//RS             base_span: span(),
-//RS             range: Some((0, 10, span())),
-//RS             span: span(),
-//RS         },
-//RS         "main",
-//RS     );
-//RS     assert!(matches!(
-//RS         struct_field(&info, "name"),
-//RS         CtValue::Str(name) if name.as_str() == "Severity"
-//RS     ));
-//RS     assert!(matches!(
-//RS         struct_field(&info, "path"),
-//RS         CtValue::Str(path) if path.as_str() == "main.Severity"
-//RS     ));
-//RS     let CtValue::List(facts) = struct_field(&info, "facts") else {
-//RS         panic!("facts");
-//RS     };
-//RS     let is_kind = |fact: &CtValue, expected: &str| match struct_field(fact, "kind") {
-//RS         CtValue::Enum { variant, .. } => variant == expected,
-//RS         other => panic!("expected typed fact kind, got {other:?}"),
-//RS     };
-//RS 
-//RS     let range = facts
-//RS         .iter()
-//RS         .find(|fact| is_kind(fact, "Range"))
-//RS         .expect("range fact");
-//RS     let CtValue::Present(range_value) = struct_field(struct_field(range, "value"), "range") else {
-//RS         panic!("range fact must carry a present Range");
-//RS     };
-//RS     assert!(matches!(
-//RS         struct_field(range_value, "start"),
-//RS         CtValue::Int(0)
-//RS     ));
-//RS     assert!(matches!(struct_field(range_value, "end"), CtValue::Int(10)));
-//RS     assert!(matches!(
-//RS         struct_field(struct_field(range, "value"), "dimension"),
-//RS         CtValue::Failed(CtReport::Clean(_))
-//RS     ));
-//RS 
-//RS     let dimension = facts
-//RS         .iter()
-//RS         .find(|fact| is_kind(fact, "Dimension"))
-//RS         .expect("dimension fact");
-//RS     let CtValue::Present(dimension_value) =
-//RS         struct_field(struct_field(dimension, "value"), "dimension")
-//RS     else {
-//RS         panic!("dimension fact must carry a present DimensionInfo");
-//RS     };
-//RS     let CtValue::List(axes) = struct_field(dimension_value, "axes") else {
-//RS         panic!("dimension axes");
-//RS     };
-//RS     assert!(axes.iter().any(|axis| {
-//RS         matches!(
-//RS             (struct_field(axis, "name"), struct_field(axis, "exponent")),
-//RS             (CtValue::Str(name), CtValue::Int(1)) if name == "Length"
-//RS         )
-//RS     }));
-//RS     assert!(matches!(
-//RS         struct_field(struct_field(dimension, "value"), "range"),
-//RS         CtValue::Failed(CtReport::Clean(_))
-//RS     ));
-//RS }
-//RS 
-//RS #[test]
-//RS fn orphan_fact_rows_are_typed_and_readable() {
-//RS     for (name, kind) in [
-//RS         ("Sendability", "Sendability"),
-//RS         ("Attribution", "Attribution"),
-//RS         ("Origin", "Origin"),
-//RS         ("ViewProvenance", "ViewProvenance"),
-//RS         ("UnitScaleProvenance", "UnitScaleProvenance"),
-//RS         ("Maturity", "Maturity"),
-//RS     ] {
-//RS         let info = build_registered_fact_info(name).expect("registered orphan fact");
-//RS         assert!(matches!(
-//RS             struct_field(&info, "kind"),
-//RS             CtValue::Enum { variant, .. } if variant == kind
-//RS         ));
-//RS         assert!(matches!(
-//RS             struct_field(&info, "value"),
-//RS             CtValue::Struct { .. }
-//RS         ));
-//RS         if name == "Attribution" {
-//RS             assert!(matches!(
-//RS                 struct_field(&info, "path"),
-//RS                 CtValue::Str(path) if path == "report.$attribution"
-//RS             ));
-//RS         }
-//RS     }
-//RS }
-// END-PORT-PENDING 1139 tests/reflect.rs:1-885
+// D-METAREFLECT1 / D-REFLECT1 rich reflection.
+use jet.Comptime.[CtValue]
+use jet.Diagnostics.[Span]
+use jet.AST.[AccessConvention, Field, Func, Param, ParamZone, Type]
 
+// Rust: tests/reflect.rs:17
+fn span() -> Span { Span.new(0, 1) }
+
+// Rust: tests/reflect.rs:163
+fn field(name: String, ty: String, is_pub: Bool) -> Field {
+    Field{
+        is_pub: is_pub,
+        is_package_pub: false,
+        name: name.to_string(),
+        name_span: span(),
+        ty: Type.Named(ty.to_string()),
+        ty_span: span(),
+        serde_markers: [],
+        redact: false,
+        computed: nil,
+        default: nil,
+        default_ct: nil,
+    }
+}
+
+// Rust: tests/reflect.rs:179
+fn method(name: String, is_pub: Bool) -> Func {
+    Func{
+        span: span(),
+        is_pub: is_pub,
+        is_package_pub: false,
+        is_comptime: false,
+        external_type: nil,
+        name: name.to_string(),
+        name_span: span(),
+        type_params: [],
+        head_pattern: nil,
+        params: [Param{
+            convention: AccessConvention.Read,
+            root: false,
+            name: "self",
+            name_span: span(),
+            public_label: nil,
+            zone: ParamZone.Either,
+            ty: Type.Named("Self"),
+            ty_span: span(),
+            default: nil,
+            variadic: false,
+            variadic_bound_list: nil,
+            declared_view_from_names: nil,
+        }],
+        return_type: Type.Named("String"),
+        return_type_span: span(),
+        return_view_provenance: nil,
+        declared_return_view_provenance: nil,
+        gc_return: false,
+        diverges: false,
+        gc_scope: false,
+        is_unsafe: false,
+        unsafe_reason: nil,
+        unsafe_span: nil,
+        is_pure: false,
+        is_sanitizer: false,
+        scrub_tag: nil,
+        is_reactive: false,
+        reactive_upgrades: [],
+        is_replayable: false,
+        replayable_span: nil,
+        declared_effects: nil,
+        pre: [],
+        post: [],
+        effect_via: nil,
+        state_requires: nil,
+        state_transition: nil,
+        web_marker: nil,
+        is_must_use: false,
+        must_use_span: nil,
+        maturity: nil,
+        maturity_span: nil,
+        kernel: nil,
+        is_inline: false,
+        is_inline_always: false,
+        inline_span: nil,
+        meta: nil,
+        is_job: false,
+        job_span: nil,
+        every: nil,
+        job_metadata: nil,
+        inline_foreign: nil,
+        undo: nil,
+        markers: [],
+        compiler_generated: false,
+        body: [],
+    }
+}
+
+// Rust: tests/reflect.rs:249
+fn list_len(v: &CtValue) -> USize {
+    if v == {
+        .List(xs) -> xs.len()
+        else -> panic("expected list, got {v:?}")
+    }
+}
+
+// Rust: tests/reflect.rs:256
+fn struct_field(v: &CtValue, name: String) -> &CtValue {
+    fields :: if v == {
+        .Struct { fields, .. } -> fields
+        else -> panic("expected struct")
+    }
+    &fields.iter().find(((n, _)) -> n == name).unwrap().1
+}
+
+// Rust: tests/reflect.rs:263
+fn list_struct_field(v: &CtValue, index: USize, name: String) -> &CtValue {
+    values :: if v == {
+        .List(values) -> values
+        else -> panic("expected list")
+    }
+    struct_field(&values[index], name)
+}

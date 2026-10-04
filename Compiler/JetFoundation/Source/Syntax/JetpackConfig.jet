@@ -1,780 +1,553 @@
-// PORT-PENDING 2130 crates-jet-foundation-src-syntax-jetpack-config: crates/jet-foundation/src/Syntax/jetpack_config.rs:1-776
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: env-namespace field name —
-//RS /// one typed `secrets: { NAME: declaration }` map under an `env.<name>`
-//RS /// role-module. Declarations are metadata records or read-time `compose`
-//RS /// plans; activation checks the encrypted store (E1263 when required input is
-//RS /// missing).
-//RS pub const ENV_FIELD_SECRETS: &str = "secrets";
-//RS 
-//RS /// D-JPK-SECRETMETA1=B / D-JPK-SECRETCOMPOSE1=D: the one typed secret-map
-//RS /// grammar. Keep every user-written declaration name registered here (I7).
-//RS pub const SECRET_COMPOSE: &str = "compose";
-//RS pub const SECRET_COMPOSE_FIELD_TEMPLATE: &str = "template";
-//RS pub const SECRET_COMPOSE_FIELD_FROM: &str = "from";
-//RS pub const SECRET_META_FIELD_DESCRIPTION: &str = "description";
-//RS pub const SECRET_META_FIELD_REQUIRED: &str = "required";
-//RS pub const SECRET_META_FIELD_ALLOWED_ENVIRONMENTS: &str = "allowed_environments";
-//RS pub const SECRET_META_FIELD_ROTATION: &str = "rotation";
-//RS pub const SECRET_META_FIELD_DEFAULT: &str = "default";
-//RS pub const SECRET_META_FIELD_GENERATE: &str = "generate";
-//RS pub const SECRET_NONE: &str = "none";
-//RS pub const SECRET_ROTATION_MAX_AGE: &str = "max_age";
-//RS pub const SECRET_GENERATOR_RANDOM: &str = "random";
-//RS pub const SECRET_GENERATOR_FIELD_LENGTH: &str = "length";
-//RS 
-//RS /// U19: `jetpack config <verb>` — today only `trust` pattern management.
-//RS pub const CONFIG_SUBCOMMAND: &str = "config";
-//RS pub const CONFIG_VERB_TRUST: &str = "trust";
-//RS /// U28 / D-JPK-NODAEMON1=A: sandbox fallback policy lives under `jetpack config
-//RS /// sandbox`; `require` hard-fails when unprivileged sandboxing is unavailable,
-//RS /// `allow` permits the explicit L0205 fallback warning.
-//RS pub const CONFIG_VERB_SANDBOX: &str = "sandbox";
-//RS pub const CONFIG_TRUST_VERB_ADD: &str = "add";
-//RS pub const CONFIG_TRUST_VERB_LIST: &str = "list";
-//RS pub const CONFIG_TRUST_VERB_REMOVE: &str = "remove";
-//RS pub const CONFIG_TRUST_VERBS: &[&str] = &[
-//RS     CONFIG_TRUST_VERB_ADD,
-//RS     CONFIG_TRUST_VERB_LIST,
-//RS     CONFIG_TRUST_VERB_REMOVE,
-//RS ];
-//RS pub const CONFIG_SANDBOX_VERB_REQUIRE: &str = "require";
-//RS pub const CONFIG_SANDBOX_VERB_ALLOW: &str = "allow";
-//RS pub const CONFIG_SANDBOX_VERB_STATUS: &str = "status";
-//RS pub const CONFIG_SANDBOX_VERBS: &[&str] = &[
-//RS     CONFIG_SANDBOX_VERB_REQUIRE,
-//RS     CONFIG_SANDBOX_VERB_ALLOW,
-//RS     CONFIG_SANDBOX_VERB_STATUS,
-//RS ];
-//RS 
-//RS /// U19: the one-shot bypass flag for the env/dev trust gate — never persists
-//RS /// a grant (unlike accepting the interactive prompt, which does).
-//RS pub const TRUST_BYPASS_FLAG: &str = "--trust";
-//RS 
-//RS /// U19: the shared trust store, `~/.jet/trust` (home-scoped: a user's trust
-//RS /// decisions follow them across projects). Plain newline-separated
-//RS /// `hash:`/`pattern:` lines. `Jetpack::Recipe`'s adapter trust marker uses the
-//RS /// same store and record format. Lives under the same default dir as
-//RS /// `~/.jet/config.jet` (`CONFIG_DEFAULT_DIR`).
-//RS pub const TRUST_FILE: &str = "trust";
-//RS 
-//RS /// D-JPK-DISPATCH1=B (A1, card c9jetpackgates): `jet` execs the engine
-//RS /// binary (`jetpack`, later `jetos`) for every engine verb instead of linking
-//RS /// it in-process — git/kubectl-style dispatch by executable name. Before
-//RS /// exec-ing the real command, `jet` runs `<engine> --engine-protocol`, a
-//RS /// hidden handshake flag every engine binary answers with its own
-//RS /// `CARGO_PKG_VERSION` on stdout; a mismatch against `jet`'s own version is
-//RS /// E1227 (`engine-version-skew`). This is process-dispatch plumbing between
-//RS /// two binaries jet ships together, never a token a user writes in a `.jet`
-//RS /// file, so I7 (every user-typeable keyword lives here with a decision ID)
-//RS /// does not require it to gate a Tower ballot of its own — it is this
-//RS /// gate's own implementation surface.
-//RS pub const ENGINE_PROTOCOL_FLAG: &str = "--engine-protocol";
-//RS 
-//RS /// Internal routing provenance: root `jet` overwrites this with its PID before
-//RS /// dispatching an engine process. Migration code also verifies the live parent.
-//RS pub const ROOT_ENGINE_DISPATCH_PID_ENV: &str = "JET_INTERNAL_ROOT_DISPATCH_PID";
-//RS 
-//RS /// D-JPK14, amended by owner ruling 2026-08-25: the visible prompt label
-//RS /// inside a Jetpack shell. The environment belongs to jetpack, so the prompt
-//RS /// names jetpack rather than the compiler.
-//RS pub const JETPACK_PROMPT_LABEL: &str = "jetpack";
-//RS 
-//RS /// D-JPK14: shell marker env var set inside a Jetpack shell.
-//RS pub const JETPACK_ENV_MARKER: &str = "JETPACK_ENV";
-//RS 
-//RS /// D-JPK14: env var carrying the realized package refs inside a Jetpack shell.
-//RS pub const JETPACK_REF_VAR: &str = "JETPACK_REF";
-//RS /// D-ENV-LIFECYCLE1: prompt hook activation identity.
-//RS pub const ENV_HOOK_ACTIVE_HASH_VAR: &str = "JETPACK_ENV_HASH";
-//RS 
-//RS /// D-JPK17 (D-JPK3 predates the current numbering; current directive law
-//RS /// lives under D-JPK17/D-JPK-REF1): the directive calls an `env.jet` author
-//RS /// writes. `pkg.source`
-//RS /// takes one arg (default built-in source) or two (named source + upstream/pin,
-//RS /// D-JPK17). D-JPK-REF1=A packages reference named sources as `package@source`.
-//RS pub const PACK_DIRECTIVE_SOURCE: &str = "pkg.source";
-//RS pub const PACK_DIRECTIVE_PACKAGES: &str = "pkg.packages";
-//RS pub const PACK_DIRECTIVE_PROMPT: &str = "pkg.prompt";
-//RS 
-//RS // ──────────────────────────────────────────────
-//RS // Unified ecosystem (jet + jetpack + jetos) — user-typeable surface (I7).
-//RS // Owner-ratified design-of-record: Docs/spec/syntax-decisions.md
-//RS // (U1–U7, ratified 2026-06-16). These IDs start with `U`, enforced by
-//RS // tests/decisions.rs alongside the S/N decisions. Tokens are recorded here;
-//RS // behavior lands in the Jetpack/Jetos implementation chunks (no syntax beyond
-//RS // what is ratified). The S52 amendment names (U1/U2) live with the S52 block.
-//RS // ──────────────────────────────────────────────
-//RS 
-//RS /// U3 (ratified 2026-06-16): module declaration keyword — `module name { … }`.
-//RS pub const KW_MODULE: &str = "module";
-//RS 
-//RS /// D-CONF-GENSPELL1=A (ratified 2026-08-06): generic modules use `<…>` for
-//RS /// type parameters, `(…)` for typed value parameters, and `::` for aliases.
-//RS /// `module cache<K>(capacity: Int) { … }` and
-//RS /// `module int_cache :: cache<Int>(64)` are the canonical forms.
-//RS /// Reuses existing `<`/`>` angle-bracket tokens (no new sigil, I7 satisfied).
-//RS pub const GENMOD_OPEN: &str = "<"; // reuses OP_LT
-//RS pub const GENMOD_CLOSE: &str = ">"; // reuses OP_GT
-//RS 
-//RS /// U3 / D-SHAPE-MODULEINTERNAL1=A (ratified 2026-07-15): a leading underscore
-//RS /// keeps `module _name { … }` out of automatic discovery and merge. Explicit
-//RS /// imports remain allowed under ordinary access rules; this is not privacy.
-//RS pub const MODULE_INTERNAL_PREFIX: &str = "_";
-//RS 
-//RS /// D-SHAPE-MODULEINTERNAL1=A: project-local explicit module opt-in.
-//RS pub const PROJECT_IMPORT_ROOT: &str = "project";
-//RS pub const PROJECT_IMPORT_PREFIX: &str = "project.";
-//RS 
-//RS /// S84 (ratified 2026-06-16): *dashed names* — the kebab-case naming rule for
-//RS /// package / module / system / image / env **names** (and `from: system.<name>`
-//RS /// references). The grammar is `ident (-ident)*`: a `-` joins two segments only
-//RS /// when it is span-adjacent to both (no surrounding whitespace), matching
-//RS /// nixpkgs/npm package-name convention (e.g. `image.halcyon-iso`,
-//RS /// `system.my-host`). No new sigil — this reuses the existing `-`/Minus token;
-//RS /// span adjacency is what keeps a spaced `a - b` as subtraction, so the rule
-//RS /// never bleeds into the expression grammar. No leading, trailing, or doubled
-//RS /// hyphen. Code identifiers (variables, fields, types, functions) stay plain
-//RS /// `ident`. Enforced in `parser.rs::expect_dashed_name`.
-//RS pub const NAME_SEGMENT_SEP: &str = "-";
-//RS 
-//RS /// U3 (ratified 2026-06-16): reserved namespaces any module may contribute to.
-//RS pub const NS_ENV: &str = "env";
-//RS pub const NS_SYSTEM: &str = "system";
-//RS pub const NS_IMAGE: &str = "image";
-//RS /// D-JPK-PROFILE1=D: a source-backed package generation declaration.
-//RS pub const NS_PROFILE: &str = "profile";
-//RS 
-//RS /// D-WORKSPACE2 (ratified 2026-06-25, option A): the monorepo index is the
-//RS /// reserved namespace `workspace` — `module workspace { members: … }` in
-//RS /// `workspace.jet` (D-WORKSPACE1=B; see WORKSPACE_FILE). Owner kept the
-//RS /// industry-standard term over the aviation menu (`fleet`/`wing`/…). Not yet wired
-//RS /// (resolver rides board card c156).
-//RS pub const NS_WORKSPACE: &str = "workspace";
-//RS 
-//RS /// D-PERFBUDGET-GRAMMAR1=A: reserved performance-policy role namespace.
-//RS /// `module perf.<role> { budgets: [Budget{ ... }] }` is sole declaration
-//RS /// surface. Names are reserved before parser/runtime implementation. Full law:
-//RS /// Docs/spec/performance-budget-decisions.md.
-//RS pub const NS_PERF: &str = "perf";
-//RS pub const PERF_FIELD_BUDGETS: &str = "budgets";
-//RS /// D-PERFBUDGET-COMPILE1=C (ratified 2026-07-16): typed compile workloads.
-//RS /// `compile_workloads: { name: CompilerWorkload.Edit{ target, patch } }`
-//RS /// plus the `CompileTime` metric and `CompilerProbe(Clean|NoChange|Edit(name))`
-//RS /// provider below are the sole compile-latency budget spellings.
-//RS pub const PERF_FIELD_COMPILE_WORKLOADS: &str = "compile_workloads";
-//RS pub const TYPE_BUDGET: &str = "Budget";
-//RS pub const TYPE_BUDGET_APPLIES: &str = "BudgetApplies";
-//RS pub const TYPE_COMPILER_WORKLOAD: &str = "CompilerWorkload";
-//RS 
-//RS /// D-JOS-PRIORITY-SURFACE2=A: typed wrapper used only when one option
-//RS /// contribution needs explicit precedence. Plain values remain ordinary.
-//RS pub const TYPE_OPTION_VALUE: &str = "OptionValue";
-//RS pub const OPTION_PRIORITY_TIERS: &[&str] = &["Default", "Force", "Priority"];
-//RS 
-//RS /// D-PERFBUDGET-GRAMMAR1=A: closed typed Budget vocabulary. Leading-dot enum
-//RS /// cases use these exact spellings; no metric-key shorthand or aliases exist.
-//RS pub const PERF_BUDGET_SCOPES: &[&str] = &["Package", "Env", "Service", "Scene", "Test", "Target"];
-//RS pub const PERF_BUDGET_PROVIDERS: &[&str] = &[
-//RS     "BuildArtifact",
-//RS     "CompilerFacts",
-//RS     "AllocationProbe",
-//RS     "BenchMeasurement",
-//RS     "ServiceProbe",
-//RS     "SceneProbe",
-//RS     "CompilerProbe",
-//RS ];
-//RS pub const PERF_BUDGET_METRICS: &[&str] = &[
-//RS     "BinarySize",
-//RS     "ArtifactSize",
-//RS     "GeneratedUnsafe",
-//RS     "PublicApiItems",
-//RS     "DependencyCount",
-//RS     "EffectCount",
-//RS     "AllocationCount",
-//RS     "AllocationBytes",
-//RS     "StartupTime",
-//RS     "FrameTime",
-//RS     "Latency",
-//RS     "Throughput",
-//RS     "MemoryHighWater",
-//RS     "BenchTime",
-//RS     "ServiceReadiness",
-//RS     "SceneAssetBytes",
-//RS     "DrawCalls",
-//RS     "CompileTime",
-//RS ];
-//RS pub const PERF_BUDGET_PERCENTILES: &[&str] = &["P50", "P90", "P95", "P99", "P999"];
-//RS pub const PERF_BUDGET_COMPARISONS: &[&str] = &["Absolute", "AbsoluteFrom", "RelativeTo"];
-//RS pub const PERF_BUDGET_LIMITS: &[&str] = &[
-//RS     "AtMost",
-//RS     "AtLeast",
-//RS     "RegressionAtMost",
-//RS     "ImprovementAtLeast",
-//RS ];
-//RS pub const PERF_BUDGET_ENFORCEMENT: &[&str] = &["Fail", "Warn"];
-//RS pub const PERF_BUDGET_SELECTIONS: &[&str] = &["Current", "All", "Only"];
-//RS pub const PERF_BUDGET_TARGET_SELECTORS: &[&str] = &["Class", "Triple"];
-//RS pub const PERF_BUDGET_TARGET_CLASSES: &[&str] =
-//RS     &["Native", "Web", "Freestanding", "Plugin", "OSImage"];
-//RS pub const PERF_BUDGET_PROFILES: &[&str] = &["Dev", "Release", "Small", "Test", "Bench", "Named"];
-//RS pub const PERF_BUDGET_UNIT_SUFFIXES: &[&str] =
-//RS     &["ns", "us", "ms", "s", "B", "KiB", "MiB", "GiB", "pct"];
-//RS 
-//RS /// D-TYPE2-TIME1=A: the normalization scale for each registered budget unit.
-//RS /// Time suffixes are canonical `core.units::Time` members and normalize to the
-//RS /// i64-nanosecond carrier (D-TIMERES1); byte suffixes normalize to bytes.
-//RS /// This registered row is the only scale table — no compiler pass keeps a
-//RS /// private duration suffix table.
-//RS pub fn perf_budget_unit_scale(suffix: &str) -> Option<u128> {
-//RS     Some(match suffix {
-//RS         "ns" | "B" => 1,
-//RS         "us" => 1_000,
-//RS         "ms" => 1_000_000,
-//RS         "s" => 1_000_000_000,
-//RS         "KiB" => 1_024,
-//RS         "MiB" => 1_048_576,
-//RS         "GiB" => 1_073_741_824,
-//RS         _ => return None,
-//RS     })
-//RS }
-//RS 
-//RS /// D-JPK-FLEET1=A (ratified 2026-07-02): a fleet is a map of named hosts to
-//RS /// `System` refs — `module fleet.<name> { hosts: { web1: system.<sys>.{ … } } }`.
-//RS /// Distinct from `workspace` (the monorepo index): a fleet is a deployment target.
-//RS /// Parse/capture/cross-check now; ssh realization rides single-host jetos (Phase D).
-//RS pub const NS_FLEET: &str = "fleet";
-//RS 
-//RS /// D-JOS-VMTEST1=A: a VM scenario is a checked test target over jetos systems.
-//RS /// `module vmtest.<name> { hosts: { node: system.<host> }, run: test { … } }`
-//RS /// is the canonical scenario declaration; the CLI and CI consume the same object.
-//RS pub const NS_VMTEST: &str = "vmtest";
-//RS 
-//RS /// U3 (ratified 2026-06-16): the type matching each reserved namespace.
-//RS pub const TYPE_ENV: &str = "Env";
-//RS /// D-JPK-PROFILE1=D: the type name of a `profile.<name>` contribution.
-//RS pub const TYPE_PROFILE: &str = "Profile";
-//RS /// D-FE-PROMPT-STRIP1: structured prompt config inside an `Env` contribution.
-//RS pub const TYPE_PROMPT: &str = "Prompt";
-//RS pub const TYPE_SYSTEM: &str = "System";
-//RS pub const TYPE_IMAGE: &str = "Image";
-//RS /// D-JPK-FLEET1: the type name of a `fleet.<name>` contribution record.
-//RS pub const TYPE_FLEET: &str = "Fleet";
-//RS /// D-ECO-OUTPUT-KINDS1 / D-SHAPE-OUTPUT-CALLABLE1: closed package result sum.
-//RS pub const TYPE_OUTPUT: &str = "Output";
-//RS pub const OUTPUT_KINDS: &[&str] = &[
-//RS     "Library",
-//RS     "Executable",
-//RS     "Service",
-//RS     "Check",
-//RS     "Environment",
-//RS     "Image",
-//RS     "Bundle",
-//RS     "System",
-//RS     "Fleet",
-//RS ];
-//RS pub const OUTPUT_FIELD_NAME: &str = "name";
-//RS pub const OUTPUT_FIELD_ENTRY: &str = "entry";
-//RS /// D-LIB-NAME1=A: a Library may declare a `.jetlib` loadable artifact.
-//RS pub const OUTPUT_FIELD_LOADABLE: &str = "loadable";
-//RS /// D-LIB-EXPORT1=C: a Library requests native static/shared output.
-//RS pub const OUTPUT_FIELD_NATIVE: &str = "native";
-//RS /// D-LIB-EXPORT1=C: names the foreign binding generators to run.
-//RS pub const OUTPUT_FIELD_BINDINGS: &str = "bindings";
-//RS pub const OUTPUT_DEFAULTS: &str = "defaults"; // D-ECO-OUTPUT-DEFAULT1=A
-//RS pub const OUTPUT_DEFAULT_RUN: &str = "run"; // D-ECO-OUTPUT-DEFAULT1=A
-//RS pub const OUTPUT_DEFAULT_CHECK: &str = "check"; // D-ECO-OUTPUT-DEFAULT1=A
-//RS pub const OUTPUT_DEFAULT_ENTER: &str = "enter"; // D-ECO-OUTPUT-DEFAULT1=A
-//RS pub const TYPE_OUTPUT_DEFAULTS: &str = "__OutputDefaults"; // internal AST tag
-//RS /// D-JOS-VMTEST1: the type name of a `vmtest.<name>` contribution record.
-//RS pub const TYPE_VMTEST: &str = "VmTest";
-//RS 
-//RS /// D-JPK-FLEET1: a `Fleet`'s one required field — the `hosts:` map.
-//RS pub const FLEET_FIELD_HOSTS: &str = "hosts";
-//RS /// D-JOS-VMTEST1: a `VmTest`'s host map, same host shape as `Fleet`.
-//RS pub const VMTEST_FIELD_HOSTS: &str = "hosts";
-//RS /// D-JOS-VMASSERT1: a `VmTest`'s typed assertion body.
-//RS pub const VMTEST_FIELD_RUN: &str = "run";
-//RS 
-//RS /// D-JETOS-FREEZE1: frozen element type of a `System`'s `services:` map.
-//RS /// `Service` is not a top-level namespace (it never appears as `service.<name>:`);
-//RS /// it is the inferred type of each bare `{ … }` record written under `services:`.
-//RS pub const TYPE_SERVICE: &str = "Service";
-//RS 
-//RS /// D-JETOS-FREEZE1: frozen jetos sketch fields kept only for legacy
-//RS /// parser/evaluator coverage while `system.*` is outside current syntax law.
-//RS pub const SYSTEM_FIELD_TARGET: &str = "target";
-//RS pub const SYSTEM_FIELD_PACKAGES: &str = "packages";
-//RS pub const SYSTEM_FIELD_SERVICES: &str = "services";
-//RS pub const SYSTEM_FIELD_OPTIONS: &str = "options";
-//RS /// D-JPK-PROFILE1=D: package-generation fields. `profile.<name>` declarations
-//RS /// are source-backed package sets; generation switching belongs to the shared
-//RS /// generation engine.
-//RS pub const PROFILE_FIELD_EXTENDS: &str = "extends";
-//RS pub const PROFILE_FIELD_PACKAGES: &str = "packages";
-//RS pub const PROFILE_FIELD_COLLISIONS: &str = "collisions";
-//RS 
-//RS /// D-JPK-SERVICE1: the required first field of every `Service` record.
-//RS pub const SERVICE_FIELD_ENABLE: &str = "enable";
-//RS 
-//RS /// D-JPK-SERVICE1 (supervised-services slice, card c9jetpackgates):
-//RS /// the recognized fields of a **dev-supervised** `Service` (an entry under an
-//RS /// `env.<name>` role-module's `services:` map). `Service` stays the one
-//RS /// ratified open record either way (same grammar as `system.*.services`,
-//RS /// `SYSTEM_FIELD_SERVICES`/`SERVICE_FIELD_ENABLE` reused verbatim) — only the
-//RS /// dev-runtime tier (`Jetpack::Services`) interprets these particular keys,
-//RS /// to start/probe/stop the supervised process: `ports` (the `[Int]` TCP ports
-//RS /// it listens on), `run` (the executable plus argv that starts it), `shutdown`
-//RS /// (the typed stop policy, else a bounded signal sequence), `data_dir` (its
-//RS /// persisted-state directory, else `.jet/services/<name>/data`), and `ready`
-//RS /// (a shell command polled until it exits 0 — the readiness contract, else a
-//RS /// TCP probe on `ports[0]`, else a bare process-alive check). Dependencies use
-//RS /// `after` only; retired `depends_on` declarations are rejected by the dev
-//RS /// supervisor as E1262.
-//RS pub const DEV_SERVICE_FIELD_PORTS: &str = "ports";
-//RS pub const DEV_SERVICE_FIELD_RUN: &str = "run";
-//RS pub const DEV_SERVICE_FIELD_SHUTDOWN: &str = "shutdown";
-//RS pub const DEV_SERVICE_FIELD_DATA_DIR: &str = "data_dir";
-//RS pub const DEV_SERVICE_FIELD_READY: &str = "ready";
-//RS pub const DEV_SERVICE_FIELD_RESTART: &str = "restart";
-//RS pub const DEV_SERVICE_FIELD_WATCH: &str = "watch";
-//RS pub const DEV_SERVICE_FIELD_AFTER: &str = "after";
-//RS pub const DEV_SERVICE_FIELD_BEFORE_START: &str = "before_start";
-//RS pub const DEV_SERVICE_FIELD_SOCKETS: &str = "sockets";
-//RS 
-//RS /// D-JPK-PLATFORM1: the typed platform values a `System.target` (and a
-//RS /// cross-compile `Image.target`) may hold — `linux.x64` / `linux.arm64`. Written
-//RS /// as a dotted typed value (an OS namespace `.` an arch), never a quoted string.
-//RS pub const PLATFORM_OS_LINUX: &str = "linux";
-//RS pub const PLATFORM_ARCH_X64: &str = "x64";
-//RS pub const PLATFORM_ARCH_ARM64: &str = "arm64";
-//RS 
-//RS /// D-JPK-IMAGE1: an `Image`'s fields — required `from: system.<name>`,
-//RS /// `from: packages.<name>`, or `from: env.<name>`, with optional `format:`
-//RS /// (default `iso`). `target`/`packages`/`services`/`options` are inherited from
-//RS /// the referenced `System` for disk images; environment OCI images may select
-//RS /// their own target and existing OCI controls below.
-//RS pub const IMAGE_FIELD_FROM: &str = "from";
-//RS pub const IMAGE_FIELD_FORMAT: &str = "format";
-//RS 
-//RS /// D-JPK-IMAGE1: the disk-image formats — `iso` (default) / `qcow` /
-//RS /// `raw`.
-//RS pub const IMAGE_FORMAT_ISO: &str = "iso";
-//RS pub const IMAGE_FORMAT_QCOW: &str = "qcow";
-//RS pub const IMAGE_FORMAT_RAW: &str = "raw";
-//RS 
-//RS /// D-JPK-IMAGE1 (=A, ratified 2026-07-01, c9jetpackgates): the keyword after
-//RS /// `from:` that selects the OCI-container referent (`from: packages.<name>` or
-//RS /// `from: env.<name>`), siblings of the original `from: system.<name>`.
-//RS pub const IMAGE_FROM_PACKAGES: &str = "packages";
-//RS 
-//RS /// D-JPK-IMAGE1: an `Image`'s optional `kind:` — a leading-dot enum literal
-//RS /// (`.Oci`/`.Iso`, D-ENUMDOT2) picking which referent `from:` names. Omitted,
-//RS /// it infers from `from:` itself (`system.*` → Iso, `packages.*` → Oci); written,
-//RS /// it must agree with `from:` or name a real kind (E1266 `image-unknown-kind`).
-//RS pub const IMAGE_KIND_ISO: &str = "Iso";
-//RS pub const IMAGE_KIND_OCI: &str = "Oci";
-//RS 
-//RS /// D-JPK-IMAGE1: the `.Oci`-only fields — exposed TCP ports (`[Int]`), env vars
-//RS /// (a `[KEY: "value"]` map), extra files layered into the image (`[String]`
-//RS /// project-relative paths), and an optional base image escape hatch
-//RS /// (`base: oci("<ref>")`, unrealized — no registry-pull client yet, D-JPK-
-//RS /// RINGSHIP1/D-JPK-BUILDTOOL1 territory, honestly gated rather than faked).
-//RS /// D-ENV-IMAGE1 adds the existing environment-image controls `target`,
-//RS /// `services`, `health`, `entrypoint`, and `user` to this same record.
-//RS pub const IMAGE_FIELD_KIND: &str = "kind";
-//RS pub const IMAGE_FIELD_EXPOSE: &str = "expose";
-//RS pub const IMAGE_FIELD_ENV_VARS: &str = "env_vars";
-//RS pub const IMAGE_FIELD_FILES: &str = "files";
-//RS pub const IMAGE_FIELD_BASE: &str = "base";
-//RS /// D-ENV-IMAGE1: optional environment-image projection controls.
-//RS pub const IMAGE_FIELD_SERVICES: &str = "services";
-//RS pub const IMAGE_FIELD_HEALTH: &str = "health";
-//RS pub const IMAGE_FIELD_ENTRYPOINT: &str = "entrypoint";
-//RS pub const IMAGE_FIELD_USER: &str = "user";
-//RS /// The `oci(...)` call name inside `base: oci("<ref>")`.
-//RS pub const IMAGE_BASE_FN: &str = "oci";
-//RS 
-//RS /// U3 (ratified 2026-06-16): project environment file (`env` namespace) and the
-//RS /// master jetos system config (`system`/`image` namespaces, default dir ~/.jet/).
-//RS pub const ENV_FILE: &str = "env.jet";
-//RS pub const CONFIG_FILE: &str = "config.jet";
-//RS 
-//RS /// D-ECO-FILEROOT1=A: the one reserved Package source filename. `pkg.jet`
-//RS /// remains only as explicit migration input while the current root is
-//RS /// `package.jet`.
-//RS pub const PACKAGE_FILE: &str = "package.jet";
-//RS 
-//RS /// D-WORKSPACE1 (B) + D-WORKSPACE2 (A), ratified 2026-06-25: the monorepo index
-//RS /// is a `module workspace { members: … }` written in `workspace.jet`, parallel to
-//RS /// `env.jet`/`config.jet`; the old root `jetpack.toml` plane is retired so the
-//RS /// whole project uses one grammar (Jet). `members:` may run arbitrary `comptime`
-//RS /// (D-WORKSPACE1=B). Wired by the resolver (board card c156). `NS_WORKSPACE` is
-//RS /// declared with the other reserved namespaces near `NS_ENV`.
-//RS pub const WORKSPACE_FILE: &str = "workspace.jet";
-//RS /// D-JPK-OVERLAY1=A: reviewed workspace overlay blocks.
-//RS pub const WORKSPACE_OVERLAY: &str = "overlay";
-//RS /// D-WORKSPACE1=B: the `members:` field in a workspace module — the comptime
-//RS /// expression that evaluates to the list of member package paths.
-//RS pub const MODULE_FIELD_MEMBERS: &str = "members";
-//RS 
-//RS /// D-JPK-OSVERB1=A (ratified 2026-07-06): the public jetos CLI surface is
-//RS /// `jet os <verb>`. The engine still executes in the `jetpack` process via
-//RS /// D-JPK-DISPATCH1, but users type `jet os`, not `jetpack os`.
-//RS pub const OS_SUBCOMMAND: &str = "os";
-//RS 
-//RS /// D-JPK-OSVERB1=A: public jetos verbs.
-//RS pub const OS_VERB_CHECK: &str = "check";
-//RS pub const OS_VERB_INIT: &str = "init";
-//RS pub const OS_VERB_SWITCH: &str = "switch";
-//RS pub const OS_VERB_BUILD: &str = "build";
-//RS /// D-JOS-PROOFAPI1=B: read the exact checked plan without building.
-//RS pub const OS_VERB_PLAN: &str = "plan";
-//RS /// D-JOS-PROOFAPI1=B: read proof/provenance artifacts for the latest generation.
-//RS pub const OS_VERB_PROOF: &str = "proof";
-//RS pub const OS_VERB_ROLLBACK: &str = "rollback";
-//RS pub const OS_VERB_GENERATIONS: &str = "generations";
-//RS pub const OS_VERB_LIFT: &str = "lift";
-//RS /// D-JOS-NIXIMPORT1=C: import semantic NixOS/flake-parts/Home Manager facts.
-//RS pub const OS_VERB_IMPORT: &str = "import";
-//RS /// D-JOS-MIGRATIONVERB1=A: explicit access to migration-only backends.
-//RS pub const OS_VERB_MIGRATE: &str = "migrate";
-//RS /// D-JOS-MIGRATIONVERB1=A: build and prove an honestly labeled NixOS comparison.
-//RS pub const OS_MIGRATION_COMPARE_NIXOS: &str = "compare-nixos";
-//RS /// D-JOS-MIGRATIONVERB1=A: publish proved comparison artifacts to this directory.
-//RS pub const OS_MIGRATION_FLAG_OUT: &str = "--out";
-//RS pub const OS_VERB_IMAGE: &str = "image";
-//RS /// D-JOS-VMCOMMAND1=A: `jet os vm prove` runs installer/reboot proof.
-//RS pub const OS_VERB_VM: &str = "vm";
-//RS /// D-JOS-NIXIMPORT1=C: select the NixOS host to import.
-//RS pub const OS_IMPORT_FLAG_HOST: &str = "--host";
-//RS /// D-JOS-NIXIMPORT1=C: select Home Manager users to import. Repeatable.
-//RS pub const OS_IMPORT_FLAG_USER: &str = "--user";
-//RS /// D-JOS-NIXIMPORT1=C: write generated JetOS config/audit files.
-//RS pub const OS_IMPORT_FLAG_WRITE: &str = "--write";
-//RS /// D-JOS-NIXIMPORT1=C: write generated files to this directory or config path.
-//RS pub const OS_IMPORT_FLAG_OUT: &str = "--out";
-//RS /// D-JOS-NIXIMPORT1=C: force audited scan mode when no semantic facts exist.
-//RS pub const OS_IMPORT_FLAG_FACTS_ONLY: &str = "--facts-only";
-//RS /// D-JOS-VMCOMMAND1=A: non-interactive VM install/reboot proof action.
-//RS pub const OS_VM_ACTION_PROVE: &str = "prove";
-//RS /// D-JOS-VMRUN1=A: interactive launch of a proved installed VM disk.
-//RS pub const OS_VM_ACTION_RUN: &str = "run";
-//RS /// D-JOS-VMTEST1=A: run a declared VM scenario and write proof artifacts.
-//RS pub const OS_VM_ACTION_TEST: &str = "test";
-//RS /// D-JOS-REALGUEST1=C: require real VM tools for replacement acceptance.
-//RS pub const OS_VM_FLAG_REAL: &str = "--real";
-//RS /// D-JOS-STUDIO-LAUNCH1=A / D-JOS-STUDIO-HOST1=A: `jetos studio`.
-//RS pub const STUDIO_SUBCOMMAND: &str = "studio";
-//RS /// D-JOS-USERAPPLY1=A: standalone user-profile management entrypoint.
-//RS pub const USER_SUBCOMMAND: &str = "user";
-//RS /// D-JOS-USERAPPLY1=A: standalone user-profile verbs.
-//RS pub const USER_VERBS: &[&str] = &["plan", "build", "switch", "rollback", "prove"];
-//RS /// D-JOS-STUDIO-HOST1=A: headless review mode over the same local protocol.
-//RS pub const STUDIO_FLAG_HEADLESS: &str = "--headless";
-//RS /// D-JOS-STUDIO-HOST1=A: serve browser fallback over local projection protocol.
-//RS pub const STUDIO_FLAG_SERVE: &str = "--serve";
-//RS /// D-JOS-STUDIO-HOST1=A: select the system host Studio projects/edits.
-//RS pub const STUDIO_FLAG_HOST: &str = "--host";
-//RS pub const OS_VERBS: &[&str] = &[
-//RS     OS_VERB_CHECK,
-//RS     OS_VERB_INIT,
-//RS     OS_VERB_PLAN,
-//RS     OS_VERB_PROOF,
-//RS     OS_VERB_BUILD,
-//RS     OS_VERB_SWITCH,
-//RS     OS_VERB_ROLLBACK,
-//RS     OS_VERB_GENERATIONS,
-//RS     OS_VERB_LIFT,
-//RS     OS_VERB_IMPORT,
-//RS     OS_VERB_MIGRATE,
-//RS     OS_VERB_IMAGE,
-//RS     OS_VERB_VM,
-//RS     STUDIO_SUBCOMMAND,
-//RS     USER_SUBCOMMAND,
-//RS ];
-//RS 
-//RS /// c146 (D-PKGSIGN1, ratified): package-signing CLI verbs (I7). `jet registry keygen`
-//RS /// creates the Ed25519 author key; `jet registry key backup` copies the secret key out
-//RS /// for safekeeping. `jet registry publish` signs by default and takes `--no-sign`.
-//RS pub const KEYGEN_SUBCOMMAND: &str = "keygen";
-//RS pub const KEY_SUBCOMMAND: &str = "key";
-//RS pub const KEY_VERB_BACKUP: &str = "backup";
-//RS pub const KEY_VERBS: &[&str] = &[KEY_VERB_BACKUP];
-//RS pub const PUBLISH_FLAG_NO_SIGN: &str = "--no-sign";
-//RS 
-//RS /// D-JPK-REF1=A amends D-JPK-OSHOST1: a bare host discovers `system.<host>` in
-//RS /// the current repo; `host@root` selects an exact external repo/config root.
-//RS pub const OS_HOST_SELECTOR: &str = "@";
-//RS 
-//RS /// D-JPK-OSHOST1=C: current-repo/external-root config filename.
-//RS pub const CONFIG_DEFAULT_DIR: &str = ".jet";
-//RS 
-//RS /// D-JPK-OSGEN1=C: switch may override the generated generation name.
-//RS pub const OS_FLAG_NAME: &str = "--name";
-//RS 
-//RS /// D-JPK-OSDISK1=C: installer/init accepts a manual disk path override.
-//RS pub const OS_FLAG_MANUAL_DISK: &str = "--manual";
-//RS /// D-JOS-VMCOMMAND1=A: VM proof target disk path.
-//RS pub const OS_FLAG_DISK: &str = "--disk";
-//RS 
-//RS /// D-FE-CLI1=D: consequence-scaled CLI output accepts both spellings for
-//RS /// bypassing mutation confirmation gates.
-//RS pub const CLI_FLAG_YES_SHORT: &str = "-y";
-//RS pub const CLI_FLAG_YES_LONG: &str = "--yes";
-//RS 
-//RS /// D-VERDICT-2192-1: `jetpack update` scope selectors.
-//RS pub const UPDATE_FLAG_DEPS: &str = "--deps";
-//RS pub const UPDATE_FLAG_TOOLS: &str = "--tools";
-//RS 
-//RS /// D-JPK-OSNS1=B: full-word option namespaces.
-//RS pub const OS_OPTION_NS_FILESYSTEM: &str = "filesystem";
-//RS pub const OS_OPTION_NS_NETWORK: &str = "network";
-//RS pub const OS_OPTION_NS_PACKAGES: &str = "packages";
-//RS /// D-JOS-SYSTEMTREE1=A: standard full-word jetos option namespaces.
-//RS pub const OS_OPTION_NS_SERVICES: &str = "services";
-//RS pub const OS_OPTION_NS_USERS: &str = "users";
-//RS pub const OS_OPTION_NS_GROUPS: &str = "groups";
-//RS pub const OS_OPTION_NS_SECRETS: &str = "secrets";
-//RS pub const OS_OPTION_NS_BOOT: &str = "boot";
-//RS pub const OS_OPTION_NS_KERNEL: &str = "kernel";
-//RS pub const OS_OPTION_NS_INIT: &str = "init";
-//RS pub const OS_OPTION_NS_HEALTH: &str = "health";
-//RS /// D-JOS-USERENV1=A: per-user environment declarations can appear as `user.*`
-//RS /// option projections while the role-module surface is being realized.
-//RS pub const OS_OPTION_NS_USER: &str = "user";
-//RS /// D-JOS-FLATPAK1=A: first-party foreign app ecosystem declarations.
-//RS pub const OS_OPTION_NS_APPS: &str = "apps";
-//RS /// D-JOS-KERNELTUNE1=A: performance and kernel-tuning profile declarations.
-//RS pub const OS_OPTION_NS_PERFORMANCE: &str = "performance";
-//RS /// D-JOS-DISK1=A: storage tree declarations consumed by installer and activation.
-//RS pub const OS_OPTION_NS_STORAGE: &str = "storage";
-//RS /// D-JOS-THEME1=A: reusable theme profile projection.
-//RS pub const OS_OPTION_NS_THEME: &str = "theme";
-//RS /// D-JOS-CONTAINER1=A: isolated workload declarations.
-//RS pub const OS_OPTION_NS_WORKLOAD: &str = "workload";
-//RS /// D-JOS-HARDWARE1=A: hardware scan/profile/specialisation declarations.
-//RS pub const OS_OPTION_NS_HARDWARE: &str = "hardware";
-//RS /// D-JOS-FLEETTARGET1=A / D-JOS-FLEETROLLOUT1=A: deploy target/rollout facts.
-//RS pub const OS_OPTION_NS_DEPLOY: &str = "deploy";
-//RS pub const OS_OPTION_NAMESPACES: &[&str] = &[
-//RS     OS_OPTION_NS_FILESYSTEM,
-//RS     OS_OPTION_NS_NETWORK,
-//RS     OS_OPTION_NS_PACKAGES,
-//RS     OS_OPTION_NS_SERVICES,
-//RS     OS_OPTION_NS_USERS,
-//RS     OS_OPTION_NS_GROUPS,
-//RS     OS_OPTION_NS_SECRETS,
-//RS     OS_OPTION_NS_BOOT,
-//RS     OS_OPTION_NS_KERNEL,
-//RS     OS_OPTION_NS_INIT,
-//RS     OS_OPTION_NS_HEALTH,
-//RS     OS_OPTION_NS_USER,
-//RS     OS_OPTION_NS_APPS,
-//RS     OS_OPTION_NS_PERFORMANCE,
-//RS     OS_OPTION_NS_STORAGE,
-//RS     OS_OPTION_NS_THEME,
-//RS     OS_OPTION_NS_WORKLOAD,
-//RS     OS_OPTION_NS_HARDWARE,
-//RS     OS_OPTION_NS_DEPLOY,
-//RS ];
-//RS 
-//RS /// U4 (ratified 2026-06-16): import-tree discovery builtin — `find("./modules")`
-//RS /// auto-discovers and merges every `.jet` module in the tree.
-//RS pub const BUILTIN_FIND: &str = "find";
-//RS 
-//RS /// U8 (ratified 2026-06-16): `sources:` and `imports:` are module-body fields,
-//RS /// nested inside `module name { … }` as siblings of the typed contributions
-//RS /// (`env.dev: Env { … }`) — not file top-level fields. Amends U4. D-JPK-REF1=A
-//RS /// makes `sources:` hold `name: target@provider` or bare-path entries.
-//RS pub const MODULE_FIELD_SOURCES: &str = "sources";
-//RS pub const MODULE_FIELD_IMPORTS: &str = "imports";
-//RS 
-//RS /// D-ENV-INTEGRATIONS1=A: first-party environment integrations are ordinary
-//RS /// typed import calls. They lower into the existing package/file/task/provider
-//RS /// and trust facts; they do not create a private resolver or activation plane.
-//RS pub const ENV_INTEGRATION_ANDROID: &str = "env.platform.android";
-//RS pub const ENV_INTEGRATION_APPLE: &str = "env.platform.apple";
-//RS pub const ENV_INTEGRATION_CERTIFICATES: &str = "env.security.certificates";
-//RS pub const ENV_INTEGRATION_HOSTS: &str = "env.network.hosts";
-//RS pub const ENV_INTEGRATION_CODEX: &str = "env.agent.codex";
-//RS pub const ENV_INTEGRATION_EDITOR: &str = "env.editor.vscode";
-//RS pub const ENV_INTEGRATION_CLOUD: &str = "env.cloud.credentials";
-//RS pub const ENV_INTEGRATION_VAULT: &str = "env.security.vault";
-//RS pub const ENV_INTEGRATIONS: &[&str] = &[
-//RS     ENV_INTEGRATION_ANDROID,
-//RS     ENV_INTEGRATION_APPLE,
-//RS     ENV_INTEGRATION_CERTIFICATES,
-//RS     ENV_INTEGRATION_HOSTS,
-//RS     ENV_INTEGRATION_CODEX,
-//RS     ENV_INTEGRATION_EDITOR,
-//RS     ENV_INTEGRATION_CLOUD,
-//RS     ENV_INTEGRATION_VAULT,
-//RS ];
-//RS 
-//RS /// U6/U8: the conventional name of the default source (`sources: { default: … }`)
-//RS /// that bare packages and `default.ripgrep` sugar resolve against. Not a
-//RS /// reserved keyword — just the well-known name `jetpack` falls back to.
-//RS pub const DEFAULT_SOURCE: &str = "default";
-//RS 
-//RS /// U3/U8: the `Env` contribution field carrying the shell prompt label.
-//RS pub const ENV_FIELD_PROMPT: &str = "prompt";
-//RS /// D-ENV-LIFECYCLE1: typed environment lifecycle fields.
-//RS pub const ENV_FIELD_DOTENV: &str = "dotenv";
-//RS pub const ENV_FIELD_UNSET: &str = "unset";
-//RS pub const ENV_FIELD_ON_ENTER: &str = "on_enter";
-//RS pub const ENV_FIELD_CHECKS: &str = "checks";
-//RS pub const ENV_FIELD_RELOAD: &str = "reload";
-//RS /// D-ECO6=A: map the typed environment to the project's Git hook directory.
-//RS pub const ENV_FIELD_GIT_HOOKS_PATH: &str = "git_hooks_path";
-//RS /// D-ECO12=A: typed environment formatter package for non-`.jet` files.
-//RS pub const ENV_FIELD_FORMATTER: &str = "formatter";
-//RS /// D-ENV-PROFILE1/D-ENV-LANGPACK1, renamed by D-CONF-WORD1=A: typed
-//RS /// environment composition fields. A preset is one named composition.
-//RS pub const ENV_FIELD_PRESETS: &str = "presets";
-//RS pub const ENV_FIELD_LANGUAGES: &str = "languages";
-//RS pub const ENV_FIELD_VARIABLES: &str = "variables";
-//RS /// D-ENV-FILES1: managed project-relative file declarations.
-//RS pub const ENV_FIELD_FILES: &str = "files";
-//RS /// D-ENVFLAG1=A/D-ENV-FACET1: select one declared environment module
-//RS /// (`env.<name>`). This is the environment axis; `--preset` selects a
-//RS /// declared composition.
-//RS pub const ENV_FLAG_ENV: &str = "--env";
-//RS /// D-ENVFLAG1=A: retired input only; this spelling is never an alias.
-//RS pub const ENV_FLAG_ENV_RETIRED: &str = "--env-profile";
-//RS pub const ENV_FLAG_PRESET: &str = "--preset";
-//RS /// D-ECO12=A: choose the environment formatter language for `jet fmt`.
-//RS pub const FMT_FLAG_LANG: &str = "--lang";
-//RS /// D-CONF-WORD1=A: the retired spelling, kept only to teach `--preset`.
-//RS pub const ENV_FLAG_PROFILE_RETIRED: &str = "--profile";
-//RS /// D-FE-PROMPT-STRIP1: `Prompt{ label: "...", path: .Short, strip: .On }`.
-//RS pub const PROMPT_FIELD_LABEL: &str = "label";
-//RS pub const PROMPT_FIELD_PATH: &str = "path";
-//RS pub const PROMPT_FIELD_STRIP: &str = "strip";
-//RS pub const PROMPT_SETTING_PATH: &str = "prompt.path";
-//RS pub const PROMPT_SETTING_STRIP: &str = "prompt.strip";
-//RS pub const PROMPT_PATH_SHORT: &str = "Short";
-//RS pub const PROMPT_PATH_FULL: &str = "Full";
-//RS pub const PROMPT_STRIP_ON: &str = "On";
-//RS pub const PROMPT_STRIP_OFF: &str = "Off";
-//RS 
-//RS /// D-JPK-REF1=A (ratified 2026-07-23, card #733; amends U6/U9), amended by
-//RS /// D-VERDICT-2190-1: package refs use `name['@'source]['#'version-or-channel]`;
-//RS /// source values use `target@provider`; local `./`, `../`, and `/` paths are
-//RS /// bare.
-//RS pub const TYPE_PKG: &str = "Pkg";
-//RS pub const REF_PROVIDER_AT: &str = "@";
-//RS 
-//RS /// Migration-era wrapper filename. The canonical Package root is
-//RS /// `PACKAGE_FILE`; this spelling is accepted only by the explicit migration
-//RS /// adapter and never competes with a canonical root.
-//RS pub const PAYLOAD_FILE: &str = "pkg.jet";
-//RS 
-//RS /// D-JPK-FILENAME2=B (A2, card c9jetpackgates, ratified 2026-07-02): retired
-//RS /// manifest filenames from earlier reshapes of this same file (U1 `jet.toml`
-//RS /// -> U10 `pack.jet` -> D-JPK-FILES `pkg.jet`). Finding one of these instead
-//RS /// of `PAYLOAD_FILE` is E1226, not a silent fallback — D-JPK-FILENAME2
-//RS /// reconfirmed `pkg.jet` as final, so these never come back as aliases.
-//RS /// `jetpack.toml` is a separate retired config plane and is rejected by the
-//RS /// Jetpack CLI with E1225; it is not a manifest fallback.
-//RS pub const STALE_MANIFEST_NAMES: &[&str] = &["pack.jet", "payload.jet", "jet.toml"];
-//RS 
-//RS /// D-CONF-PLANE1/D-CONF-NAME1=A (ratified 2026-08-06): the top-level
-//RS /// identity fields — bare `name:`/`version:`, no wrapper. Supersedes the
-//RS /// U10 `payload: { name, version, … }` block and the D-SHAPE5 `identity: .{
-//RS /// }` block; both are retired to a normal unknown-field error (E1206).
-//RS pub const MANIFEST_FIELD_NAME: &str = "name";
-//RS pub const MANIFEST_FIELD_VERSION: &str = "version";
-//RS 
-//RS /// D-CONF-NAME1/D-CONF-KEY1=A: the block nouns of the one Package manifest
-//RS /// vocabulary, alongside `MANIFEST_BLOCK_PACKAGES`/`MANIFEST_BLOCK_BUILD`/
-//RS /// `MANIFEST_BLOCK_EFFECTS`/`MANIFEST_BLOCK_GRANTS`/`MANIFEST_BLOCK_POLICY`
-//RS /// (each already declared with its own decision). `settings:` declares the
-//RS /// typed build facts consumed by `$build.settings.*`.
-//RS pub const MANIFEST_BLOCK_DEPS: &str = "deps";
-//RS pub const MANIFEST_BLOCK_OUTPUTS: &str = "outputs";
-//RS pub const MANIFEST_BLOCK_SETTINGS: &str = "settings";
-//RS pub const MANIFEST_BLOCK_MEMBERS: &str = "members";
-//RS 
-//RS /// D-STRUCT-EDGE1=A (ratified 2026-08-19): package-owned import boundaries
-//RS /// live under `boundaries: { deny: [ ... ] }`.
-//RS pub const MANIFEST_BLOCK_BOUNDARIES: &str = "boundaries";
-//RS 
-//RS /// U10 (ratified 2026-06-16): the block listing a payload's packages —
-//RS /// `packages: { name: kind }`. Each `name` is a top-level `module` (the package),
-//RS /// discovered by name in the tree; the old `exports: [module …]` folds into this.
-//RS pub const MANIFEST_BLOCK_PACKAGES: &str = "packages";
-//RS 
-//RS /// D-TGT1/D-TGT2 (ratified 2026-06-21): a package's build targets, replacing the
-//RS /// removed `kind:` (U10). The five shipped targets — `library` is imported for its
-//RS /// code, `executable` installs a binary on PATH, `test`/`example` build their own
-//RS /// artifacts, and `sandbox` (c81, D-PLUGIN1/D-DEP-WASM1) builds an isolated WASM Component Model
-//RS /// module. Written as a bare keyword (`deploy: executable`, D-TGT3) or inside a
-//RS /// `{ targets: [ … ] }` list.
-//RS pub const TARGET_LIBRARY: &str = "library";
-//RS pub const TARGET_EXECUTABLE: &str = "executable";
-//RS pub const TARGET_TEST: &str = "test";
-//RS pub const TARGET_EXAMPLE: &str = "example";
-//RS /// D-PLUGIN1=B / D-DEP-WASM1=A (ratified 2026-06-25; backend shipped c81): a
-//RS /// package built as `sandbox` compiles to an isolated `wasm32` Component Model
-//RS /// module (wasmtime host, typed `.wit` contract) instead of a native binary.
-//RS /// Safe by default — no `#Unsafe` gate (I1 holds by construction: the sandbox
-//RS /// is the safety boundary). Its exported surface is named by the `export:`
-//RS /// target field (`TARGET_FIELD_EXPORT`, D-PLUGIN-EXPORT1).
-//RS pub const TARGET_SANDBOX: &str = "sandbox";
-//RS /// D-ONCE-SANDBOX1=A: the former package target spelling. `jet fmt` and
-//RS /// `jet fix` rewrite it to `TARGET_SANDBOX` and print the retirement notice.
-//RS pub const RETIRED_TARGET_PLUGIN: &str = "plugin";
-//RS 
-//RS /// D-TGT2 (ratified 2026-06-21): target keywords reserved for a future increment —
-//RS /// recognized but rejected (no backend yet) until their tooling lands.
-//RS /// `sandbox` shipped (c81). Empty until the next reserved target is proposed.
-//RS pub const TARGET_RESERVED: &[&str] = &[];
-//RS 
-//RS /// D-TGT1 (ratified 2026-06-21): the per-package field listing build targets —
-//RS /// `app: { targets: [library, executable { entry: "src/cli.jet" }] }`. A bare
-//RS /// keyword value (`app: library`) is the single-target shorthand (D-TGT3). The
-//RS /// former `kind:` field is removed; using it is a teaching error (E1211).
-//RS pub const PACKAGE_FIELD_TARGETS: &str = "targets";
-//RS 
-//RS /// D-TGT1 (ratified 2026-06-21): the removed per-package kind field. Recognized
-//RS /// only to emit a migration teaching error pointing at `targets:`.
-//RS pub const PACKAGE_FIELD_KIND_REMOVED: &str = "kind";
-//RS 
-//RS /// D-TGT3/D-TGT4 (ratified 2026-06-21): fields a target block may carry —
-//RS /// `entry:` (D-TGT4 entry module), `name:` (output/bin name). Parsed when
-//RS /// present; behavior lands with the realize pipeline. `api:` (D-CAP4) is
-//RS /// retired by D-MEM1/S2 — a target block carrying it hits the ordinary
-//RS /// unknown-field error like any other typo'd key.
-//RS pub const TARGET_FIELD_ENTRY: &str = "entry";
-//RS pub const TARGET_FIELD_NAME: &str = "name";
-//RS /// D-PLUGIN-EXPORT1=A (ratified 2026-06-25): names a `sandbox` target's exported
-//RS /// surface (the `.wit` world name). Only meaningful on `sandbox { export: "…" }`;
-//RS /// defaults to the package name when omitted.
-//RS pub const TARGET_FIELD_EXPORT: &str = "export";
-//RS 
-//RS /// D-CAP1-words (historical, ratified 2026-06-21, tombstoned): the original
-//RS /// four-capability word vocabulary — `view`/`edit`/`take`/`share`. `view` and
-//RS /// `take` rode the S10 ownership keywords, since superseded by D-CAP7's
-//RS /// capability sigils (memory model v5: bare/`&`/`^`). `edit` and `share`
-//RS /// never left reserved-spelling status under that word law and are not wired
-//RS /// into the parser; check Docs/spec/syntax-decisions.md's Authority
-//RS /// section for current sigil-based capability law before reusing these.
-//RS pub const CAPABILITY_EDIT: &str = "edit";
-//RS pub const CAPABILITY_SHARE: &str = "share";
-//RS 
-//RS /// D-REL3 (ratified 2026-06-16): the project compatibility marker —
-//RS /// `edition: "2026"` in the `payload: { … }` block of `pkg.jet`. An edition
-//RS /// opts a project into a specific era of Jet syntax; a toolchain advertises the
-//RS /// editions it supports and rejects a future edition it can't provide (E2001).
-//RS /// Single-file `jet run file.jet` has no edition marker and always uses the
-//RS /// newest stable edition (E2-V4). Not an `S`/`N`/`U` surface decision, so it is
-//RS /// not enforced by tests/decisions.rs; it is a release-policy key recorded here
-//RS /// per I7.
-//RS pub const MANIFEST_FIELD_EDITION: &str = "edition";
-//RS 
-//RS /// D-RINGLAYER1=A: optional package runtime-layer ceiling in `payload: { … }`.
-//RS pub const MANIFEST_FIELD_LAYER: &str = "layer";
-//RS 
-// END-PORT-PENDING 2130 crates/jet-foundation/src/Syntax/jetpack_config.rs:1-776
+// Rust syntax registry: reuse existing Jetpack/Foundation/Source/Syntax.jet
+// (denoted JS below), Syntax/Spellings.jet (SS), and Registry/PerformanceBudgets.jet
+// (PB). New spellings live here; no second registry or compatibility aliases.
 
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:6
+// ENV_FIELD_SECRETS -> JS:332.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:10
+// SECRET_COMPOSE -> JS:333.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:11
+// SECRET_COMPOSE_FIELD_TEMPLATE -> JS:334.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:12
+// SECRET_COMPOSE_FIELD_FROM -> JS:335.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:13
+// SECRET_META_FIELD_DESCRIPTION -> JS:336.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:14
+// SECRET_META_FIELD_REQUIRED -> JS:337.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:15
+// SECRET_META_FIELD_ALLOWED_ENVIRONMENTS -> JS:338.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:16
+// SECRET_META_FIELD_ROTATION -> JS:339.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:17
+// SECRET_META_FIELD_DEFAULT -> JS:340.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:18
+// SECRET_META_FIELD_GENERATE -> JS:341.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:19
+// SECRET_NONE -> JS:342.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:20
+// SECRET_ROTATION_MAX_AGE -> JS:343.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:21
+// SECRET_GENERATOR_RANDOM -> JS:344.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:22
+// SECRET_GENERATOR_FIELD_LENGTH -> JS:345.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:25
+// CONFIG_SUBCOMMAND -> JS:301.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:26
+// CONFIG_VERB_TRUST -> JS:302.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:30
+// CONFIG_VERB_SANDBOX -> JS:303.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:31
+// CONFIG_TRUST_VERB_ADD -> JS:304.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:32
+// CONFIG_TRUST_VERB_LIST -> JS:305.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:33
+// CONFIG_TRUST_VERB_REMOVE -> JS:306.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:34
+// CONFIG_TRUST_VERBS -> JS:307.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:39
+// CONFIG_SANDBOX_VERB_REQUIRE -> JS:308.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:40
+// CONFIG_SANDBOX_VERB_ALLOW -> JS:309.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:41
+// CONFIG_SANDBOX_VERB_STATUS -> JS:310.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:42
+// CONFIG_SANDBOX_VERBS -> JS:311.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:50
+// TRUST_BYPASS_FLAG -> JS:675.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:57
+// TRUST_FILE -> JS:591.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:70
+// ENGINE_PROTOCOL_FLAG -> SS:77.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:74
+// ROOT_ENGINE_DISPATCH_PID_ENV -> SS:78.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:79
+// JETPACK_PROMPT_LABEL -> JS:173.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:82
+// JETPACK_ENV_MARKER -> JS:175.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:85
+// JETPACK_REF_VAR -> JS:177.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:87
+// ENV_HOOK_ACTIVE_HASH_VAR -> JS:179.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:94
+// PACK_DIRECTIVE_SOURCE -> JS:189.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:95
+// PACK_DIRECTIVE_PACKAGES -> JS:190.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:96
+// PACK_DIRECTIVE_PROMPT -> JS:191.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:108
+// KW_MODULE -> JS:73.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:115
+pub GENMOD_OPEN :: prep { "<" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:116
+pub GENMOD_CLOSE :: prep { ">" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:121
+// MODULE_INTERNAL_PREFIX -> JS:123.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:124
+pub PROJECT_IMPORT_ROOT :: prep { "project" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:125
+pub PROJECT_IMPORT_PREFIX :: prep { "project." }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:137
+pub NAME_SEGMENT_SEP :: prep { "-" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:140
+pub NS_ENV :: prep { "env" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:141
+pub NS_SYSTEM :: prep { "system" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:142
+pub NS_IMAGE :: prep { "image" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:144
+pub NS_PROFILE :: prep { "profile" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:151
+// NS_WORKSPACE -> JS:75.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:157
+pub NS_PERF :: prep { "perf" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:158
+pub PERF_FIELD_BUDGETS :: prep { "budgets" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:163
+pub PERF_FIELD_COMPILE_WORKLOADS :: prep { "compile_workloads" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:164
+// TYPE_BUDGET -> JS:330.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:165
+pub TYPE_BUDGET_APPLIES :: prep { "BudgetApplies" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:166
+pub TYPE_COMPILER_WORKLOAD :: prep { "CompilerWorkload" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:170
+pub TYPE_OPTION_VALUE :: prep { "OptionValue" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:171
+pub OPTION_PRIORITY_TIERS :: prep { [String]{"Default", "Force", "Priority"} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:175
+// PERF_BUDGET_SCOPES -> PB:3.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:176
+// PERF_BUDGET_PROVIDERS -> PB:4.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:185
+// PERF_BUDGET_METRICS -> PB:5.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:205
+// PERF_BUDGET_PERCENTILES -> PB:6.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:206
+// PERF_BUDGET_COMPARISONS -> PB:7.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:207
+// PERF_BUDGET_LIMITS -> PB:8.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:213
+// PERF_BUDGET_ENFORCEMENT -> PB:9.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:214
+// PERF_BUDGET_SELECTIONS -> PB:10.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:215
+// PERF_BUDGET_TARGET_SELECTORS -> PB:11.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:216
+// PERF_BUDGET_TARGET_CLASSES -> PB:12.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:218
+// PERF_BUDGET_PROFILES -> PB:13.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:219
+// PERF_BUDGET_UNIT_SUFFIXES -> PB:14.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:227
+// perf_budget_unit_scale -> PB:18; Int exactly represents all returned scales.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:244
+pub NS_FLEET :: prep { "fleet" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:249
+pub NS_VMTEST :: prep { "vmtest" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:252
+// TYPE_ENV -> JS:326.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:254
+// TYPE_PROFILE -> JS:327.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:256
+// TYPE_PROMPT -> JS:328.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:257
+pub TYPE_SYSTEM :: prep { "System" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:258
+// TYPE_IMAGE -> JS:329.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:260
+pub TYPE_FLEET :: prep { "Fleet" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:262
+pub TYPE_OUTPUT :: prep { "Output" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:263
+pub OUTPUT_KINDS :: prep { [String]{"Library", "Executable", "Service", "Check", "Environment", "Image", "Bundle", "System", "Fleet"} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:274
+pub OUTPUT_FIELD_NAME :: prep { "name" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:275
+pub OUTPUT_FIELD_ENTRY :: prep { "entry" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:277
+// OUTPUT_FIELD_LOADABLE -> JS:528.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:279
+// OUTPUT_FIELD_NATIVE -> JS:529.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:281
+// OUTPUT_FIELD_BINDINGS -> JS:530.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:282
+pub OUTPUT_DEFAULTS :: prep { "defaults" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:283
+pub OUTPUT_DEFAULT_RUN :: prep { "run" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:284
+pub OUTPUT_DEFAULT_CHECK :: prep { "check" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:285
+pub OUTPUT_DEFAULT_ENTER :: prep { "enter" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:286
+pub TYPE_OUTPUT_DEFAULTS :: prep { "__OutputDefaults" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:288
+pub TYPE_VMTEST :: prep { "VmTest" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:291
+pub FLEET_FIELD_HOSTS :: prep { "hosts" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:293
+pub VMTEST_FIELD_HOSTS :: prep { "hosts" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:295
+pub VMTEST_FIELD_RUN :: prep { "run" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:300
+pub TYPE_SERVICE :: prep { "Service" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:304
+// SYSTEM_FIELD_TARGET -> JS:347.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:305
+// SYSTEM_FIELD_PACKAGES -> JS:348.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:306
+pub SYSTEM_FIELD_SERVICES :: prep { "services" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:307
+pub SYSTEM_FIELD_OPTIONS :: prep { "options" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:311
+// PROFILE_FIELD_EXTENDS -> JS:350.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:312
+// PROFILE_FIELD_PACKAGES -> JS:351.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:313
+// PROFILE_FIELD_COLLISIONS -> JS:352.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:316
+// SERVICE_FIELD_ENABLE -> JS:354.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:332
+// DEV_SERVICE_FIELD_PORTS -> JS:356.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:333
+// DEV_SERVICE_FIELD_RUN -> JS:357.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:334
+// DEV_SERVICE_FIELD_SHUTDOWN -> JS:358.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:335
+// DEV_SERVICE_FIELD_DATA_DIR -> JS:359.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:336
+// DEV_SERVICE_FIELD_READY -> JS:360.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:337
+// DEV_SERVICE_FIELD_RESTART -> JS:361.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:338
+// DEV_SERVICE_FIELD_WATCH -> JS:362.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:339
+// DEV_SERVICE_FIELD_AFTER -> JS:363.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:340
+// DEV_SERVICE_FIELD_BEFORE_START -> JS:364.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:341
+// DEV_SERVICE_FIELD_SOCKETS -> JS:365.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:346
+// PLATFORM_OS_LINUX -> JS:367.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:347
+// PLATFORM_ARCH_X64 -> JS:368.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:348
+// PLATFORM_ARCH_ARM64 -> JS:369.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:355
+// IMAGE_FIELD_FROM -> JS:371.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:356
+// IMAGE_FIELD_FORMAT -> JS:372.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:360
+pub IMAGE_FORMAT_ISO :: prep { "iso" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:361
+pub IMAGE_FORMAT_QCOW :: prep { "qcow" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:362
+pub IMAGE_FORMAT_RAW :: prep { "raw" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:367
+pub IMAGE_FROM_PACKAGES :: prep { "packages" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:373
+// IMAGE_KIND_ISO -> JS:374.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:374
+// IMAGE_KIND_OCI -> JS:373.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:383
+// IMAGE_FIELD_KIND -> JS:375.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:384
+// IMAGE_FIELD_EXPOSE -> JS:376.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:385
+// IMAGE_FIELD_ENV_VARS -> JS:377.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:386
+// IMAGE_FIELD_FILES -> JS:378.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:387
+// IMAGE_FIELD_BASE -> JS:379.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:389
+// IMAGE_FIELD_SERVICES -> JS:381.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:390
+// IMAGE_FIELD_HEALTH -> JS:382.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:391
+// IMAGE_FIELD_ENTRYPOINT -> JS:383.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:392
+// IMAGE_FIELD_USER -> JS:384.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:394
+// IMAGE_BASE_FN -> JS:386.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:398
+// ENV_FILE -> SS:82.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:399
+// CONFIG_FILE -> SS:83.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:404
+// PACKAGE_FILE -> SS:73.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:412
+// WORKSPACE_FILE -> SS:84.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:414
+// WORKSPACE_OVERLAY -> JS:77.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:417
+// MODULE_FIELD_MEMBERS -> JS:125.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:422
+pub OS_SUBCOMMAND :: prep { "os" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:425
+pub OS_VERB_CHECK :: prep { "check" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:426
+pub OS_VERB_INIT :: prep { "init" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:427
+pub OS_VERB_SWITCH :: prep { "switch" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:428
+pub OS_VERB_BUILD :: prep { "build" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:430
+pub OS_VERB_PLAN :: prep { "plan" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:432
+pub OS_VERB_PROOF :: prep { "proof" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:433
+pub OS_VERB_ROLLBACK :: prep { "rollback" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:434
+pub OS_VERB_GENERATIONS :: prep { "generations" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:435
+pub OS_VERB_LIFT :: prep { "lift" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:437
+pub OS_VERB_IMPORT :: prep { "import" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:439
+pub OS_VERB_MIGRATE :: prep { "migrate" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:441
+pub OS_MIGRATION_COMPARE_NIXOS :: prep { "compare-nixos" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:443
+pub OS_MIGRATION_FLAG_OUT :: prep { "--out" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:444
+pub OS_VERB_IMAGE :: prep { "image" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:446
+pub OS_VERB_VM :: prep { "vm" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:448
+pub OS_IMPORT_FLAG_HOST :: prep { "--host" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:450
+pub OS_IMPORT_FLAG_USER :: prep { "--user" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:452
+pub OS_IMPORT_FLAG_WRITE :: prep { "--write" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:454
+pub OS_IMPORT_FLAG_OUT :: prep { "--out" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:456
+pub OS_IMPORT_FLAG_FACTS_ONLY :: prep { "--facts-only" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:458
+pub OS_VM_ACTION_PROVE :: prep { "prove" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:460
+pub OS_VM_ACTION_RUN :: prep { "run" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:462
+pub OS_VM_ACTION_TEST :: prep { "test" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:464
+pub OS_VM_FLAG_REAL :: prep { "--real" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:466
+pub STUDIO_SUBCOMMAND :: prep { "studio" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:468
+// USER_SUBCOMMAND -> JS:622.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:470
+pub USER_VERBS :: prep { [String]{"plan", "build", "switch", "rollback", "prove"} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:472
+pub STUDIO_FLAG_HEADLESS :: prep { "--headless" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:474
+pub STUDIO_FLAG_SERVE :: prep { "--serve" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:476
+pub STUDIO_FLAG_HOST :: prep { "--host" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:477
+pub OS_VERBS :: prep { [String]{OS_VERB_CHECK, OS_VERB_INIT, OS_VERB_PLAN, OS_VERB_PROOF, OS_VERB_BUILD, OS_VERB_SWITCH,
+    OS_VERB_ROLLBACK, OS_VERB_GENERATIONS, OS_VERB_LIFT, OS_VERB_IMPORT, OS_VERB_MIGRATE, OS_VERB_IMAGE, OS_VERB_VM, STUDIO_SUBCOMMAND, USER_SUBCOMMAND} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:498
+pub KEYGEN_SUBCOMMAND :: prep { "keygen" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:499
+pub KEY_SUBCOMMAND :: prep { "key" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:500
+pub KEY_VERB_BACKUP :: prep { "backup" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:501
+pub KEY_VERBS :: prep { [String]{KEY_VERB_BACKUP} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:502
+pub PUBLISH_FLAG_NO_SIGN :: prep { "--no-sign" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:506
+pub OS_HOST_SELECTOR :: prep { "@" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:509
+// CONFIG_DEFAULT_DIR -> JS:187.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:512
+// OS_FLAG_NAME -> JS:710.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:515
+pub OS_FLAG_MANUAL_DISK :: prep { "--manual" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:517
+pub OS_FLAG_DISK :: prep { "--disk" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:521
+// CLI_FLAG_YES_SHORT -> JS:666.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:522
+// CLI_FLAG_YES_LONG -> JS:667.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:525
+// UPDATE_FLAG_DEPS -> JS:669.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:526
+// UPDATE_FLAG_TOOLS -> JS:670.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:529
+pub OS_OPTION_NS_FILESYSTEM :: prep { "filesystem" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:530
+pub OS_OPTION_NS_NETWORK :: prep { "network" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:531
+pub OS_OPTION_NS_PACKAGES :: prep { "packages" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:533
+pub OS_OPTION_NS_SERVICES :: prep { "services" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:534
+pub OS_OPTION_NS_USERS :: prep { "users" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:535
+pub OS_OPTION_NS_GROUPS :: prep { "groups" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:536
+pub OS_OPTION_NS_SECRETS :: prep { "secrets" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:537
+pub OS_OPTION_NS_BOOT :: prep { "boot" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:538
+pub OS_OPTION_NS_KERNEL :: prep { "kernel" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:539
+pub OS_OPTION_NS_INIT :: prep { "init" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:540
+pub OS_OPTION_NS_HEALTH :: prep { "health" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:543
+pub OS_OPTION_NS_USER :: prep { "user" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:546
+pub OS_OPTION_NS_APPS :: prep { "apps" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:547
+pub OS_OPTION_NS_PERFORMANCE :: prep { "performance" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:549
+pub OS_OPTION_NS_STORAGE :: prep { "storage" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:551
+pub OS_OPTION_NS_THEME :: prep { "theme" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:553
+pub OS_OPTION_NS_WORKLOAD :: prep { "workload" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:555
+pub OS_OPTION_NS_HARDWARE :: prep { "hardware" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:557
+pub OS_OPTION_NS_DEPLOY :: prep { "deploy" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:558
+pub OS_OPTION_NAMESPACES :: prep { [String]{OS_OPTION_NS_FILESYSTEM, OS_OPTION_NS_NETWORK, OS_OPTION_NS_PACKAGES, OS_OPTION_NS_SERVICES,
+    OS_OPTION_NS_USERS, OS_OPTION_NS_GROUPS, OS_OPTION_NS_SECRETS, OS_OPTION_NS_BOOT, OS_OPTION_NS_KERNEL, OS_OPTION_NS_INIT,
+    OS_OPTION_NS_HEALTH, OS_OPTION_NS_USER, OS_OPTION_NS_APPS, OS_OPTION_NS_PERFORMANCE, OS_OPTION_NS_STORAGE, OS_OPTION_NS_THEME,
+    OS_OPTION_NS_WORKLOAD, OS_OPTION_NS_HARDWARE, OS_OPTION_NS_DEPLOY} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:582
+// BUILTIN_FIND -> JS:99.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:588
+pub MODULE_FIELD_SOURCES :: prep { "sources" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:589
+pub MODULE_FIELD_IMPORTS :: prep { "imports" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:594
+// ENV_INTEGRATION_ANDROID -> JS:101.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:595
+// ENV_INTEGRATION_APPLE -> JS:102.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:596
+// ENV_INTEGRATION_CERTIFICATES -> JS:103.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:597
+// ENV_INTEGRATION_HOSTS -> JS:104.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:598
+// ENV_INTEGRATION_CODEX -> JS:105.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:599
+// ENV_INTEGRATION_EDITOR -> JS:106.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:600
+// ENV_INTEGRATION_CLOUD -> JS:107.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:601
+// ENV_INTEGRATION_VAULT -> JS:108.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:602
+pub ENV_INTEGRATIONS :: prep { [String]{ENV_INTEGRATION_ANDROID, ENV_INTEGRATION_APPLE, ENV_INTEGRATION_CERTIFICATES, ENV_INTEGRATION_HOSTS,
+    ENV_INTEGRATION_CODEX, ENV_INTEGRATION_EDITOR, ENV_INTEGRATION_CLOUD, ENV_INTEGRATION_VAULT} }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:616
+// DEFAULT_SOURCE -> JS:314.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:619
+// ENV_FIELD_PROMPT -> JS:388.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:621
+// ENV_FIELD_DOTENV -> JS:390.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:622
+// ENV_FIELD_UNSET -> JS:391.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:623
+// ENV_FIELD_ON_ENTER -> JS:392.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:624
+// ENV_FIELD_CHECKS -> JS:393.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:625
+// ENV_FIELD_RELOAD -> JS:394.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:627
+// ENV_FIELD_GIT_HOOKS_PATH -> JS:110.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:629
+// ENV_FIELD_FORMATTER -> JS:112.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:632
+// ENV_FIELD_PRESETS -> JS:396.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:633
+// ENV_FIELD_LANGUAGES -> JS:397.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:634
+pub ENV_FIELD_VARIABLES :: prep { "variables" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:636
+// ENV_FIELD_FILES -> JS:399.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:640
+// ENV_FLAG_ENV -> JS:694.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:642
+// ENV_FLAG_ENV_RETIRED -> JS:695; teaching input, never an alias.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:643
+// ENV_FLAG_PRESET -> JS:690.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:645
+// FMT_FLAG_LANG -> JS:697.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:647
+// ENV_FLAG_PROFILE_RETIRED -> JS:691; teaching input, never an alias.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:649
+// PROMPT_FIELD_LABEL -> JS:401.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:650
+// PROMPT_FIELD_PATH -> JS:402.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:651
+// PROMPT_FIELD_STRIP -> JS:403.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:652
+// PROMPT_SETTING_PATH -> JS:404.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:653
+// PROMPT_SETTING_STRIP -> JS:405.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:654
+// PROMPT_PATH_SHORT -> JS:406.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:655
+// PROMPT_PATH_FULL -> JS:407.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:656
+// PROMPT_STRIP_ON -> JS:408.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:657
+// PROMPT_STRIP_OFF -> JS:409.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:663
+pub TYPE_PKG :: prep { "Pkg" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:664
+// REF_PROVIDER_AT -> JS:8.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:669
+// PAYLOAD_FILE -> SS:74; explicit migration input only.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:678
+// STALE_MANIFEST_NAMES -> JS:168.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:684
+// MANIFEST_FIELD_NAME -> JS:461.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:685
+// MANIFEST_FIELD_VERSION -> JS:462.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:692
+// MANIFEST_BLOCK_DEPS -> JS:464.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:693
+// MANIFEST_BLOCK_OUTPUTS -> JS:466.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:694
+// MANIFEST_BLOCK_SETTINGS -> JS:467.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:695
+// MANIFEST_BLOCK_MEMBERS -> JS:468.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:699
+// MANIFEST_BLOCK_BOUNDARIES -> JS:472.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:704
+// MANIFEST_BLOCK_PACKAGES -> JS:465.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:712
+// TARGET_LIBRARY -> JS:513.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:713
+// TARGET_EXECUTABLE -> JS:514.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:714
+// TARGET_TEST -> JS:515.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:715
+// TARGET_EXAMPLE -> JS:516.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:722
+// TARGET_SANDBOX -> SS:75.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:725
+// RETIRED_TARGET_PLUGIN -> SS:76; teaching input, never an alias.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:730
+// TARGET_RESERVED -> JS:519.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:736
+// PACKAGE_FIELD_TARGETS -> JS:523.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:740
+// PACKAGE_FIELD_KIND_REMOVED -> JS:524; teaching input only.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:747
+// TARGET_FIELD_ENTRY -> JS:520.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:748
+// TARGET_FIELD_NAME -> JS:521.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:752
+// TARGET_FIELD_EXPORT -> JS:522.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:761
+pub CAPABILITY_EDIT :: prep { "edit" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:762
+pub CAPABILITY_SHARE :: prep { "share" }
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:772
+// MANIFEST_FIELD_EDITION -> JS:463.
+// Rust: crates/jet-foundation/src/Syntax/jetpack_config.rs:775
+pub MANIFEST_FIELD_LAYER :: prep { "layer" }

@@ -1,470 +1,162 @@
-// PORT-PENDING 2145 crates-jet-sema-src-sema-bundle-genericmodules-identity: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:1-466
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS use super::*;
-//RS 
-//RS fn frame_text(out: &mut Vec<u8>, text: &str) {
-//RS     super::frame_bytes(out, text.as_bytes());
-//RS }
-//RS 
-//RS pub(super) fn type_full_key(ty: &Type) -> Vec<u8> {
-//RS     fn write(out: &mut Vec<u8>, ty: &Type) {
-//RS         use Type::*;
-//RS         match ty {
-//RS             Int => out.push(1),
-//RS             Float => out.push(2),
-//RS             Bool => out.push(3),
-//RS             String => out.push(4),
-//RS             Char => out.push(5),
-//RS             List(inner) => {
-//RS                 out.push(6);
-//RS                 write(out, inner);
-//RS             }
-//RS             Map { key, value, .. } => {
-//RS                 out.push(7);
-//RS                 write(out, key);
-//RS                 write(out, value);
-//RS             }
-//RS             Shared(inner) => {
-//RS                 out.push(8);
-//RS                 write(out, inner);
-//RS             }
-//RS             Option(inner) => {
-//RS                 out.push(9);
-//RS                 write(out, inner);
-//RS             }
-//RS             Result { ok, err } => {
-//RS                 out.push(10);
-//RS                 write(out, ok);
-//RS                 write(out, err);
-//RS             }
-//RS             Fn { params, ret, .. } => {
-//RS                 out.push(11);
-//RS                 out.extend_from_slice(&(params.len() as u64).to_be_bytes());
-//RS                 for param in params {
-//RS                     write(out, param);
-//RS                 }
-//RS                 match ret {
-//RS                     Some(ret) => {
-//RS                         out.push(1);
-//RS                         write(out, ret);
-//RS                     }
-//RS                     None => out.push(0),
-//RS                 }
-//RS             }
-//RS             Named(name) => {
-//RS                 out.push(12);
-//RS                 frame_text(out, name);
-//RS             }
-//RS             Apply { name, args } => {
-//RS                 out.push(13);
-//RS                 frame_text(out, name);
-//RS                 out.extend_from_slice(&(args.len() as u64).to_be_bytes());
-//RS                 for arg in args {
-//RS                     write(out, arg);
-//RS                 }
-//RS             }
-//RS             TraitObject(names) => {
-//RS                 out.push(14);
-//RS                 out.extend_from_slice(&(names.len() as u64).to_be_bytes());
-//RS                 for name in names {
-//RS                     frame_text(out, name);
-//RS                 }
-//RS             }
-//RS             Tuple(fields) => {
-//RS                 out.push(15);
-//RS                 out.extend_from_slice(&(fields.len() as u64).to_be_bytes());
-//RS                 for (name, ty) in fields {
-//RS                     frame_text(out, name);
-//RS                     write(out, ty);
-//RS                 }
-//RS             }
-//RS             FixedList { elem, len, .. } => {
-//RS                 out.push(16);
-//RS                 write(out, elem);
-//RS                 frame_text(out, len.kind());
-//RS                 frame_text(out, &len.expression());
-//RS             }
-//RS             IntN { signed, bits } => {
-//RS                 out.push(17);
-//RS                 out.push(u8::from(*signed));
-//RS                 out.push(*bits);
-//RS             }
-//RS             Float32 => out.push(18),
-//RS             Tagged { inner, .. } => write(out, inner),
-//RS             Union(members) => {
-//RS                 out.push(19);
-//RS                 out.extend_from_slice(&(members.len() as u64).to_be_bytes());
-//RS                 for m in members {
-//RS                     write(out, m);
-//RS                 }
-//RS             }
-//RS             Quantity { base, dimension } => {
-//RS                 out.push(20);
-//RS                 write(out, base);
-//RS                 frame_text(out, &dimension.identity());
-//RS             }
-//RS             Measure(measure) => {
-//RS                 out.push(21);
-//RS                 frame_text(out, measure.kind());
-//RS                 frame_text(out, &measure.expression());
-//RS             }
-//RS             InlineRange { base, lo, hi } => {
-//RS                 out.push(22);
-//RS                 write(out, base);
-//RS                 out.extend_from_slice(&lo.to_be_bytes());
-//RS                 out.extend_from_slice(&hi.to_be_bytes());
-//RS             }
-//RS         }
-//RS     }
-//RS     let mut out = Vec::new();
-//RS     super::frame_bytes(&mut out, b"jet.type.full-key.v1");
-//RS     write(&mut out, ty);
-//RS     out
-//RS }
-//RS 
-//RS pub(super) fn parameter_bytes(params: &[ResolvedModuleParam]) -> Vec<u8> {
-//RS     let mut out = Vec::new();
-//RS     out.extend_from_slice(&(params.len() as u64).to_be_bytes());
-//RS     for param in params {
-//RS         match param {
-//RS             ResolvedModuleParam::Type { name, bound } => {
-//RS                 out.push(0);
-//RS                 frame_text(&mut out, name);
-//RS                 frame_text(&mut out, bound.as_deref().unwrap_or(""));
-//RS             }
-//RS             ResolvedModuleParam::Value { name, ty } => {
-//RS                 out.push(1);
-//RS                 frame_text(&mut out, name);
-//RS                 super::frame_bytes(&mut out, &type_full_key(ty));
-//RS             }
-//RS             ResolvedModuleParam::Invalid => out.push(2),
-//RS         }
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS pub(super) fn definition_full_key(
-//RS     package_identity: &str,
-//RS     module_path: &str,
-//RS     lexical_path: &str,
-//RS     name: &str,
-//RS ) -> Vec<u8> {
-//RS     let mut out = Vec::new();
-//RS     super::frame_bytes(&mut out, b"jet.genmod.definition.v1");
-//RS     frame_text(&mut out, package_identity);
-//RS     frame_text(&mut out, module_path);
-//RS     frame_text(&mut out, lexical_path);
-//RS     frame_text(&mut out, "generic-module");
-//RS     frame_text(&mut out, name);
-//RS     out
-//RS }
-//RS 
-//RS fn quoted_field(text: &str, field: &str) -> Option<String> {
-//RS     let needle = format!("{field}:");
-//RS     text.match_indices(&needle).find_map(|(offset, _)| {
-//RS         let boundary = text[..offset].chars().next_back();
-//RS         if boundary.is_some_and(|ch| ch.is_alphanumeric() || ch == '_') {
-//RS             return None;
-//RS         }
-//RS         let rest = text[offset + needle.len()..]
-//RS             .trim_start()
-//RS             .strip_prefix('"')?;
-//RS         Some(rest.split('"').next()?.to_string())
-//RS     })
-//RS }
-//RS 
-//RS fn canonical_semver(version: &str) -> String {
-//RS     let (core_pre, build) = version
-//RS         .split_once('+')
-//RS         .map_or((version, None), |(core, build)| (core, Some(build)));
-//RS     let (core, pre) = core_pre
-//RS         .split_once('-')
-//RS         .map_or((core_pre, None), |(core, pre)| (core, Some(pre)));
-//RS     let parts: Vec<_> = core.split('.').collect();
-//RS     if parts.len() != 3
-//RS         || parts.iter().any(|part| {
-//RS             part.is_empty()
-//RS                 || !part.bytes().all(|byte| byte.is_ascii_digit())
-//RS                 || (part.len() > 1 && part.starts_with('0'))
-//RS         })
-//RS     {
-//RS         return version.trim().to_string();
-//RS     }
-//RS     let mut canonical = parts
-//RS         .iter()
-//RS         .map(|part| part.parse::<u64>().unwrap_or(0).to_string())
-//RS         .collect::<Vec<_>>()
-//RS         .join(".");
-//RS     if let Some(pre) = pre {
-//RS         canonical.push('-');
-//RS         canonical.push_str(pre);
-//RS     }
-//RS     if let Some(build) = build {
-//RS         canonical.push('+');
-//RS         canonical.push_str(build);
-//RS     }
-//RS     canonical
-//RS }
-//RS 
-//RS fn lock_value(line: &str, field: &str) -> Option<String> {
-//RS     let (key, value) = line.split_once('=')?;
-//RS     (key.trim() == field).then(|| value.trim().trim_matches('"').to_string())
-//RS }
-//RS 
-//RS fn inline_lock_value(table: &str, field: &str) -> Option<String> {
-//RS     let table = table.trim().trim_start_matches('{').trim_end_matches('}');
-//RS     table.split(',').find_map(|part| {
-//RS         let (key, value) = part.split_once('=')?;
-//RS         (key.trim() == field).then(|| value.trim().trim_matches('"').to_string())
-//RS     })
-//RS }
-//RS 
-//RS fn credential_free_git_url(url: &str) -> String {
-//RS     let without_fragment = url.split(['?', '#']).next().unwrap_or(url);
-//RS     let Some((scheme, authority_path)) = without_fragment.split_once("://") else {
-//RS         return without_fragment.to_string();
-//RS     };
-//RS     let (authority, path) = authority_path
-//RS         .split_once('/')
-//RS         .unwrap_or((authority_path, ""));
-//RS     let clean_authority = authority
-//RS         .rsplit_once('@')
-//RS         .map_or(authority, |(_, clean)| clean);
-//RS     format!(
-//RS         "{}://{}{}{}",
-//RS         scheme.to_ascii_lowercase(),
-//RS         clean_authority,
-//RS         if path.is_empty() { "" } else { "/" },
-//RS         path
-//RS     )
-//RS }
-//RS 
-//RS fn canonical_lock_source(
-//RS     project_root: &Path,
-//RS     package_root: &Path,
-//RS     dependency_name: Option<&str>,
-//RS     package_name: &str,
-//RS ) -> String {
-//RS     if dependency_name.is_none() {
-//RS         return "workspace".into();
-//RS     }
-//RS     let raw = jet_foundation::CheckReads::read_to_string(project_root.join(crate::Syntax::UNIFIED_LOCK_FILE))
-//RS         .unwrap_or_default();
-//RS     let wanted = dependency_name.unwrap_or(package_name);
-//RS     let mut current = false;
-//RS     let mut name = String::new();
-//RS     let mut version = String::new();
-//RS     let mut source = String::new();
-//RS     let mut locked = String::new();
-//RS     let mut content_hash = String::new();
-//RS     let mut records = Vec::new();
-//RS     for line in raw
-//RS         .lines()
-//RS         .map(str::trim)
-//RS         .filter(|line| !line.is_empty() && !line.starts_with('#'))
-//RS     {
-//RS         if line.starts_with('[') {
-//RS             if current {
-//RS                 records.push((
-//RS                     std::mem::take(&mut name),
-//RS                     std::mem::take(&mut version),
-//RS                     std::mem::take(&mut source),
-//RS                     std::mem::take(&mut locked),
-//RS                     std::mem::take(&mut content_hash),
-//RS                 ));
-//RS             }
-//RS             current = line == "[[package]]";
-//RS             continue;
-//RS         }
-//RS         if !current {
-//RS             continue;
-//RS         }
-//RS         if let Some(value) = lock_value(line, "name") {
-//RS             name = value;
-//RS         } else if let Some(value) = lock_value(line, "version") {
-//RS             version = value;
-//RS         } else if let Some(value) = lock_value(line, "source") {
-//RS             source = value;
-//RS         } else if let Some(value) = lock_value(line, "locked") {
-//RS             locked = value;
-//RS         } else if let Some(value) = lock_value(line, "content-hash") {
-//RS             content_hash = value;
-//RS         }
-//RS     }
-//RS     if current {
-//RS         records.push((name, version, source, locked, content_hash));
-//RS     }
-//RS     if let Some((_, locked_version, source, locked, content_hash)) = records
-//RS         .into_iter()
-//RS         .find(|(name, ..)| name == wanted || name == package_name)
-//RS     {
-//RS         if let Some(path) = inline_lock_value(&source, "path") {
-//RS             if let Some(registry) = path.strip_prefix("registry:") {
-//RS                 return format!(
-//RS                     "registry:{registry}@{}#{content_hash}",
-//RS                     canonical_semver(&locked_version)
-//RS                 );
-//RS             }
-//RS             let canonical = if Path::new(&path).is_absolute() {
-//RS                 wanted.to_string()
-//RS             } else {
-//RS                 path.replace('\\', "/")
-//RS                     .split('/')
-//RS                     .filter(|part| !part.is_empty() && *part != ".")
-//RS                     .collect::<Vec<_>>()
-//RS                     .join("/")
-//RS             };
-//RS             let content = if !content_hash.is_empty() {
-//RS                 content_hash
-//RS             } else {
-//RS                 inline_lock_value(&locked, "tree-hash").unwrap_or_else(|| "unlocked".into())
-//RS             };
-//RS             return format!("path:{canonical}#{content}");
-//RS         }
-//RS         if let Some(url) = inline_lock_value(&source, "git") {
-//RS             let rev = inline_lock_value(&locked, "rev").unwrap_or_default();
-//RS             let tree = inline_lock_value(&locked, "tree-hash").unwrap_or(content_hash);
-//RS             return format!("git:{}@{rev}#{tree}", credential_free_git_url(&url));
-//RS         }
-//RS     }
-//RS     let relative = package_root
-//RS         .strip_prefix(project_root)
-//RS         .ok()
-//RS         .and_then(|path| path.to_str())
-//RS         .filter(|path| !path.is_empty())
-//RS         .map(|path| path.replace('\\', "/"))
-//RS         .unwrap_or_else(|| wanted.to_string());
-//RS     format!("path:{relative}")
-//RS }
-//RS 
-//RS pub(in crate::Sema) fn owning_package<'a>(
-//RS     bundle: &'a ProgramBundle,
-//RS     module_path: &Path,
-//RS ) -> (&'a Path, Option<&'a str>) {
-//RS     bundle
-//RS         .dep_roots
-//RS         .iter()
-//RS         .filter(|(_, root)| module_path.starts_with(root))
-//RS         .max_by_key(|(_, root)| root.components().count())
-//RS         .map(|(name, root)| (root.as_path(), Some(name.as_str())))
-//RS         .unwrap_or((bundle.project_root.as_path(), None))
-//RS }
-//RS 
-//RS pub(in crate::Sema) fn package_identity(
-//RS     bundle: &ProgramBundle,
-//RS     root: &Path,
-//RS     dependency_name: Option<&str>,
-//RS ) -> String {
-//RS     // Each candidate is read through the audited reader, so an absent
-//RS     // manifest is recorded as absent and its later appearance is noticed.
-//RS     let manifest = [crate::Syntax::PACKAGE_FILE, crate::Syntax::PAYLOAD_FILE]
-//RS         .iter()
-//RS         .find_map(|name| jet_foundation::CheckReads::read_to_string(root.join(name)).ok())
-//RS         .unwrap_or_default();
-//RS     let name = quoted_field(&manifest, "name")
-//RS         .or_else(|| dependency_name.map(str::to_string))
-//RS         .unwrap_or_else(|| "workspace".into());
-//RS     let version = canonical_semver(
-//RS         &quoted_field(&manifest, "version").unwrap_or_else(|| "0.0.0+workspace".into()),
-//RS     );
-//RS     let source = canonical_lock_source(&bundle.project_root, root, dependency_name, &name);
-//RS     let mut bytes = Vec::new();
-//RS     super::frame_bytes(&mut bytes, b"jet.package.identity.v2");
-//RS     frame_text(&mut bytes, &name);
-//RS     frame_text(&mut bytes, &version);
-//RS     frame_text(&mut bytes, &source);
-//RS     crate::SHA256::sha256_hex(&bytes)
-//RS }
-//RS 
-//RS pub(super) fn instance_identity(
-//RS     key: &ModuleInstanceKey,
-//RS     template: &TemplateInfo,
-//RS     alias: &ModuleAliasDef,
-//RS     source_module: &str,
-//RS     args: &[ResolvedModuleArg],
-//RS ) -> crate::AST::ModuleInstanceIdentity {
-//RS     let full_key = key.bytes();
-//RS     let fingerprint = crate::SHA256::sha256_hex(&full_key);
-//RS     crate::AST::ModuleInstanceIdentity {
-//RS         fingerprint: fingerprint.clone(),
-//RS         full_key,
-//RS         definition_id: template.definition_id.clone(),
-//RS         argument_keys: key.args.clone(),
-//RS         argument_values: args.iter().map(resolved_argument_value).collect(),
-//RS         argument_provenance: alias
-//RS             .args
-//RS             .iter()
-//RS             .map(|arg| argument_provenance(arg, template))
-//RS             .collect(),
-//RS         template_span: template.def.span,
-//RS         applications: vec![crate::AST::ModuleInstanceApplication {
-//RS             name: alias.name.clone(),
-//RS             source_module: source_module.to_string(),
-//RS             semantic_identity: format!("instance:{fingerprint}"),
-//RS             span: alias.name_span,
-//RS         }],
-//RS     }
-//RS }
-//RS 
-//RS fn resolved_argument_value(arg: &ResolvedModuleArg) -> String {
-//RS     match arg {
-//RS         ResolvedModuleArg::Type(ty) => format!("type:{}", type_name(ty)),
-//RS         ResolvedModuleArg::Value(value, _) => format!("value:{}", value.jet_show()),
-//RS     }
-//RS }
-//RS 
-//RS fn argument_provenance(arg: &ModuleArg, template: &TemplateInfo) -> Vec<String> {
-//RS     let ModuleArg::Value(expr, _) = arg else {
-//RS         return vec!["type argument".to_string()];
-//RS     };
-//RS     let Some(path) = module_expr_path(expr) else {
-//RS         return vec!["closed value expression".to_string()];
-//RS     };
-//RS     if let Some(name) = path.strip_prefix(crate::Syntax::COMPILER_BUILD_FACT_SETTINGS_PREFIX) {
-//RS         let mut sources = template
-//RS             .build_facts
-//RS             .setting_provenance
-//RS             .get(name)
-//RS             .cloned()
-//RS             .unwrap_or_default();
-//RS         sources.push(format!("argument:{path}"));
-//RS         return sources;
-//RS     }
-//RS     vec![format!("argument:{path}")]
-//RS }
-//RS 
-//RS fn module_expr_path(expr: &Expr) -> Option<String> {
-//RS     match expr {
-//RS         Expr::Ident(name, _) | Expr::ComptimeName { name, .. } => Some(name.clone()),
-//RS         Expr::Field(base, member, _) => Some(format!("{}.{}", module_expr_path(base)?, member)),
-//RS         Expr::Paren(inner, _) => module_expr_path(inner),
-//RS         _ => None,
-//RS     }
-//RS }
-//RS 
-//RS pub(super) fn register_instance_fingerprint(
-//RS     registry: &mut HashMap<String, Vec<u8>>,
-//RS     identity: &crate::AST::ModuleInstanceIdentity,
-//RS     span: Span,
-//RS ) {
-//RS     if let Some(previous) = registry.get(&identity.fingerprint) {
-//RS         if previous != &identity.full_key {
-//RS             let hex = |bytes: &[u8]| {
-//RS                 bytes
-//RS                     .iter()
-//RS                     .map(|byte| format!("{byte:02x}"))
-//RS                     .collect::<String>()
-//RS             };
-//RS             jet_foundation::ice!(
-//RS                 Some(span),
-//RS                 "E0859 generic module instance fingerprint collision: digest={} first-full-key={} second-full-key={}; compilation stopped before codegen",
-//RS                 identity.fingerprint, hex(previous), hex(&identity.full_key),
-//RS             );
-//RS         }
-//RS     } else {
-//RS         registry.insert(identity.fingerprint.clone(), identity.full_key.clone());
-//RS     }
-//RS }
-//RS 
-// END-PORT-PENDING 2145 crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:1-466
+// Native bundle identity publication; reuse canonical full-key framing and pure manifest kernels.
+use jet_foundation.[Type, ProgramBundle, ModuleAliasDef, ModuleArg, ModuleInstanceIdentity, ModuleInstanceApplication, Expr, Span, type_name]
+use jet_foundation.CheckReads
+use jet_foundation.Syntax.[UNIFIED_LOCK_FILE, PACKAGE_FILE, PAYLOAD_FILE]
+use jet_foundation.Hash.SHA256.sha256_hex
+use jet_sema.[ModuleInstanceKey, TemplateInfo, ResolvedModuleArg, SemaGenericModuleParam]
+use Sema.GenericModules.Identity.[sema_genmod_frame, sema_genmod_frame_text, sema_genmod_type_full_key, sema_genmod_parameter_bytes, sema_genmod_definition_full_key, sema_genmod_expr_path, sema_genmod_argument_provenance]
+// Pure kernels have one current owner; integration publishes these inward from Driver.
+use jet_driver.Driver.GenericModuleIdentity.[jet_driver_genmod_quoted_field, jet_driver_genmod_semver, jet_driver_genmod_lock_value, jet_driver_genmod_inline_value, jet_driver_genmod_clean_git]
 
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:3
+fn frame_text(out: &[U8], text: String) -> Unit { sema_genmod_frame_text(&out, text) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:7
+// Includes nested write (8), every type tag 1..22, erased Tagged metadata and exact big-endian framing.
+pub fn type_full_key(ty: Type) -> [U8] { sema_genmod_type_full_key(ty) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:123
+pub fn parameter_bytes(params: [SemaGenericModuleParam]) -> [U8] { sema_genmod_parameter_bytes(params) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:144
+pub fn definition_full_key(package_identity: String, module_path: String, lexical_path: String, name: String) -> [U8] {
+    sema_genmod_definition_full_key(package_identity, module_path, lexical_path, name)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:160
+fn quoted_field(text: String, field: String) -> String? { jet_driver_genmod_quoted_field(text, field) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:174
+fn canonical_semver(version: String) -> String { jet_driver_genmod_semver(version) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:207
+fn lock_value(line: String, field: String) -> String? { jet_driver_genmod_lock_value(line, field) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:212
+fn inline_lock_value(table: String, field: String) -> String? { jet_driver_genmod_inline_value(table, field) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:220
+fn credential_free_git_url(url: String) -> String { jet_driver_genmod_clean_git(url) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:240
+fn canonical_lock_source(project_root: OSPath, package_root: OSPath, dependency_name: String?, package_name: String) -> String {
+    if dependency_name == None { return "workspace" }
+    // GATE #4494: audited CheckReads retains absent-file dependencies as well as present reads.
+    raw :: CheckReads.read_to_string(project_root.join(UNIFIED_LOCK_FILE)).unwrap_or("")
+    wanted :: dependency_name ?? package_name
+    current := false
+    name := ""
+    version := ""
+    source := ""
+    locked := ""
+    content_hash := ""
+    records := [(String, String, String, String, String)]{}
+    for original in raw.lines() {
+        line := original.trim() // #4303
+        if line.is_empty() || line.starts_with("#") { continue }
+        if line.starts_with("[") {
+            if current {
+                &records.push((^name, ^version, ^source, ^locked, ^content_hash))
+                name = ""
+                version = ""
+                source = ""
+                locked = ""
+                content_hash = ""
+            }
+            current = line == "[[package]]"
+            continue
+        }
+        if !current { continue }
+        if lock_value(line, "name") == .Val(value) { name = value }
+        else if lock_value(line, "version") == .Val(value) { version = value }
+        else if lock_value(line, "source") == .Val(value) { source = value }
+        else if lock_value(line, "locked") == .Val(value) { locked = value }
+        else if lock_value(line, "content-hash") == .Val(value) { content_hash = value }
+    }
+    if current { &records.push((^name, ^version, ^source, ^locked, ^content_hash)) }
+    if records.iter().find(fn(record) { record.0 == wanted || record.0 == package_name }) == .Val(record) {
+        (_, locked_version, source, locked, content_hash) :: record
+        if inline_lock_value(source, "path") == .Val(path) {
+            if path.strip_prefix("registry:") == .Val(registry) { return "registry:{registry}@{canonical_semver(locked_version)}#{content_hash}" }
+            // GATE #4500: native absolute-path classification.
+            canonical :: if OSPath.from(path).is_absolute() { ~wanted } else {
+                path.replace("\\", "/").split("/").filter(fn(part) { !part.is_empty() && part != "." }).collect().join("/")
+            }
+            content :: if !content_hash.is_empty() { content_hash } else { inline_lock_value(locked, "tree-hash") ?? "unlocked" }
+            return "path:{canonical}#{content}"
+        }
+        if inline_lock_value(source, "git") == .Val(url) {
+            rev :: inline_lock_value(locked, "rev") ?? ""
+            tree :: inline_lock_value(locked, "tree-hash") ?? content_hash
+            return "git:{credential_free_git_url(url)}@{rev}#{tree}"
+        }
+    }
+    relative :: package_root.strip_prefix(project_root).ok().and_then(fn(path) { path.to_str() })
+        .filter(fn(path) { !path.is_empty() }).map(fn(path) { path.replace("\\", "/") }).unwrap_or(wanted)
+    "path:{relative}"
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:338
+pub fn owning_package(bundle: ProgramBundle, module_path: OSPath) -> (OSPath, String?) {
+    // GATE #4500: borrowed native path components and root-prefix selection.
+    selected := None as (OSPath, String?)?
+    longest := 0
+    for (name, root) in bundle.dep_roots {
+        if !module_path.starts_with(root) { continue }
+        length :: root.components().count()
+        // Iterator max_by_key retains the last equal-length root, like Rust.
+        if selected == None || length >= longest { selected = Val((root, Val(name))); longest = length }
+    }
+    selected ?? (bundle.project_root, None)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:351
+pub fn package_identity(bundle: ProgramBundle, root: OSPath, dependency_name: String?) -> String {
+    manifest := ""
+    for candidate in [PACKAGE_FILE, PAYLOAD_FILE] {
+        if CheckReads.read_to_string(root.join(candidate)) == .Ok(contents) { manifest = ^contents; break }
+    }
+    name :: quoted_field(manifest, "name") ?? dependency_name ?? "workspace"
+    version :: canonical_semver(quoted_field(manifest, "version") ?? "0.0.0+workspace")
+    source :: canonical_lock_source(bundle.project_root, root, dependency_name, name)
+    bytes := [U8]{}
+    sema_genmod_frame(&bytes, "jet.package.identity.v2".bytes())
+    frame_text(&bytes, name)
+    frame_text(&bytes, version)
+    frame_text(&bytes, source)
+    sha256_hex(bytes)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:377
+pub fn instance_identity(key: ModuleInstanceKey, template: TemplateInfo, alias: ModuleAliasDef, source_module: String, args: [ResolvedModuleArg]) -> ModuleInstanceIdentity {
+    full_key :: key.bytes()
+    fingerprint :: sha256_hex(full_key)
+    argument_values := [String]{}
+    for arg in args { &argument_values.push(resolved_argument_value(arg)) }
+    argument_provenance_rows := [[String]]{}
+    for arg in alias.args { &argument_provenance_rows.push(argument_provenance(arg, template)) }
+    ModuleInstanceIdentity(full_key: full_key, fingerprint: ~fingerprint, definition_id: ~template.definition_id,
+        argument_keys: ~key.args, argument_values: ^argument_values, argument_provenance: ^argument_provenance_rows,
+        template_span: template.def.span, applications: [ModuleInstanceApplication(name: ~alias.name, source_module: ~source_module, semantic_identity: "instance:{fingerprint}", span: alias.name_span)])
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:407
+fn resolved_argument_value(arg: ResolvedModuleArg) -> String {
+    arg == {
+        .Type(ty) -> "type:{type_name(ty)}"
+        .Value(value, _) -> "value:{value.jet_show()}"
+    }
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:414
+fn argument_provenance(arg: ModuleArg, template: TemplateInfo) -> [String] {
+    sema_genmod_argument_provenance(arg, template.build_facts)
+}
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:434
+fn module_expr_path(expr: Expr) -> String? { sema_genmod_expr_path(expr) }
+// Rust: crates/jet-sema/src/Sema/Bundle/GenericModules/Identity.rs:443
+pub fn register_instance_fingerprint(registry: &[String:[U8]], identity: ModuleInstanceIdentity, span: Span) -> Unit {
+    if registry.get(identity.fingerprint) == .Val(previous) {
+        if previous != identity.full_key {
+            hex :: fn(bytes: [U8]) {
+                digits :: "0123456789abcdef".bytes()
+                rendered := [U8].with_capacity(bytes.len() * 2)
+                for byte in bytes {
+                    &rendered.push(digits[(byte >> 4) as Int])
+                    &rendered.push(digits[(byte & U8{15}) as Int])
+                }
+                String.from_bytes(rendered).expect("hexadecimal is UTF-8")
+            }
+            // GATE #4409: canonical internal compiler error stops before codegen.
+            jet_foundation.ice(Val(span), "E0859 generic module instance fingerprint collision: digest={identity.fingerprint} first-full-key={hex(previous)} second-full-key={hex(identity.full_key)}; compilation stopped before codegen")
+        }
+    } else {
+        registry[identity.fingerprint] = ~identity.full_key
+    }
+}

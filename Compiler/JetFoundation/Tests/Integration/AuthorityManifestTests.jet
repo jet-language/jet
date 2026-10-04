@@ -1,0 +1,363 @@
+use std.[fs, env]
+use std.process.[id]
+use jet.[Manifest, compile_with_path, compile_web]
+use jet.Package.[PackageFacts, ProvenanceRequirement]
+use jet.EffectBudget.[PackageEffects, enforce]
+use jet.Sema.[EffectSet, check_bundle, CompileMode]
+use jet.Diagnostics.[Span]
+use jet.Fetch.[FetchOptions, fetch]
+use jet.Publish.[ResolveMode]
+use jet.Lock
+use jet.Loader.[load_entry]
+use jet.REPL.[run_transcript]
+use jet_devserver.Devtools.[JetDevtoolsEnvelope, JetDevtoolsHostKind, JetDevtoolsPanelCapability, JetDevtoolsPanelCatalog, JetDevtoolsPanelId, JetDevtoolsJobPanelFact, JetDevtoolsJobPanelEventKind, JetDevtoolsJobPanelLifecycleState, JetDevtoolsJobPanelState]
+// GATE #4494: the real CLI/filesystem providers, not production mocks.
+
+// Rust: tests/authority_manifest.rs:62
+#Test("default_run_records_source_linked_authority_delegation") {
+    repo :: authority_project("run-delegation-receipt")
+    package :: """
+name: "authority_receipts"
+version: "0.1.0"
+authority: {{ holds: {{ allow: [Exec, IO] }} }}
+"""
+    program :: """
+use core.process as process
+
+fn run() -> {{
+    #FX(authority: Exec, IO) {{
+        result :: process.run(["echo", "receipt"], authority)
+        print("done")
+    }}
+}}
+"""
+    fs.write(repo.join("package.jet"), package).expect("receipt package")
+    fs.write(repo.join("run.jet"), program).expect("receipt program")
+    output :: run_authority_cli(repo, ["run", "run.jet"])
+    assert(output.status.success(), "default run rejected the receipt project:\nstdout={String.from_utf8_lossy(output.stdout)}\nstderr={String.from_utf8_lossy(output.stderr)}")
+    receipt :: fs.read_to_string(repo.join(".jet/receipts/authority.jsonl")).expect("default run should write the authority receipt")
+    delegation :: receipt.lines().find(|line| line.contains("\"kind\":\"delegation\"")).expect("default run should write a delegation receipt")
+    assert(delegation.contains("\"scope\":\"authority@"), delegation)
+    assert(delegation.contains("\"resource\":\"process\""), delegation)
+    assert(delegation.contains("\"operation\":\"run\""), delegation)
+    assert(delegation.contains("\"source\":\"run.jet\""), delegation)
+    assert(delegation.contains("\"authority\":\"authority\""), delegation)
+    assert(delegation.contains("\"policy_source\":\"#FX; declared policy\""), delegation)
+}
+
+// Rust: tests/authority_manifest.rs:119
+#Test("authority_receipt_rejects_symlinked_ancestor_without_redirecting_write") {
+    if core.sys.target.selected_family() != "unix" -> return // GATE #4483 original cfg(unix).
+    repo :: authority_project("receipt-symlink-ancestor")
+    outside :: repo.with_file_name("jet_authority_manifest_receipt_target_{id()}")
+    fs.remove_dir_all(outside).drop("remove previous receipt target")
+    fs.create_dir_all(outside).expect("receipt target directory")
+    target :: outside.join("authority.jsonl")
+    fs.write(target, "must survive\n").expect("receipt target")
+    package :: """
+name: "authority_receipts"
+version: "0.1.0"
+authority: {{ holds: {{ allow: [Exec, IO] }} }}
+"""
+    program :: """
+use core.process as process
+
+fn run() -> {{
+    #FX(authority: Exec, IO) {{
+        result :: process.run(["echo", "receipt"], authority)
+        print("done")
+    }}
+}}
+"""
+    fs.write(repo.join("package.jet"), package).expect("receipt package")
+    fs.write(repo.join("run.jet"), program).expect("receipt program")
+    fs.create_dir_all(repo.join(".jet")).expect("receipt metadata directory")
+    std.os.unix.fs.symlink(outside, repo.join(".jet/receipts")).expect("symlink receipt directory") // GATE #4494.
+    output :: run_authority_cli(repo, ["run", "run.jet"])
+    assert(!output.status.success(), "run accepted a symlinked receipt directory:\nstdout={String.from_utf8_lossy(output.stdout)}\nstderr={String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read_to_string(target).expect("receipt target still exists"), "must survive\n")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+    fs.remove_dir_all(outside).drop("remove receipt target")
+}
+
+// Rust: tests/authority_manifest.rs:168
+#Test("malformed_authority_fields_share_e1221") {
+    cases :: [(String, String)]{
+        ("holds", "authority: {{ holds: {{ allow: [NotAnAuthority] }} }}"),
+        ("grants", "authority: {{ grants: {{ \"dep\": [NotAnAuthority] }} }}"),
+        ("trust", "authority: {{ trust: {{ default: maybe }} }}"),
+        ("providers", "authority: {{ providers: {{ nix: {{ deny: [\"openssl-1.0\"] }} }} }}")
+    }
+    loop (field_name, block) in cases {
+        source :: "name: \"demo\"\nversion: \"0.1.0\"\n{block}\n"
+        diagnostic :: Manifest.parse(OSPath.from("package.jet"), source).unwrap_err()
+        assert_eq(diagnostic.code, "E1221", "{field_name}: {diagnostic:?}")
+        assert(diagnostic.what.contains("authority"), "{field_name}: {diagnostic:?}")
+        assert(diagnostic.fix.contains("authority:"), "{field_name}: {diagnostic:?}")
+    }
+}
+
+// Rust: tests/authority_manifest.rs:198
+#Test("retired_authority_fields_name_the_new_block") {
+    loop block in ["grants: {{ \"dep\": [Net] }}", "policy: {{ trust: {{ default: prompt }} }}", "policy: {{ providers: {{ nix: {{ registry: \"nixpkgs\" }} }} }}"] {
+        source :: "name: \"demo\"\nversion: \"0.1.0\"\n{block}\n"
+        diagnostic :: Manifest.parse(OSPath.from("package.jet"), source).expect_err("retired authority field must fail")
+        assert_eq(diagnostic.code, "E1206", "{block}: {diagnostic:?}")
+        assert(diagnostic.why.contains("authority:"), "{block}: {diagnostic:?}")
+        assert(diagnostic.fix.contains("authority:"), "{block}: {diagnostic:?}")
+    }
+}
+
+// Rust: tests/authority_manifest.rs:222
+#Test("policy_keeps_unsafe_mode_and_package_floors") {
+    source :: """
+name: "demo"
+version: "0.1.0"
+policy: {{ unsafe: .Forbid, gc: true, explicit_units: true, copies: .Explicit, sentries: .On }}
+authority: {{ holds: {{ deny: [Mem.Alloc] }} }}
+"""
+    facts :: PackageFacts.parse(source, "package.jet").expect("policy floors and unsafe mode stay in policy")
+    keys :: facts.policy.declarations.iter().map(|declaration| declaration.key.name()).collect()
+    assert_eq(keys, ["unsafe", "gc", "explicit_units", "copies", "sentries"])
+    assert_eq(facts.authority.holds.deny, Val([String]{"Mem.Alloc"}))
+    assert(facts.authority.trust.is_none())
+    assert(facts.authority.providers.is_empty())
+    loop retired in ["policy: {{ no_alloc: true }}", "policy: {{ zero_rc: true }}", "policy: {{ arena_bounded: 65536 }}"] {
+        diagnostic :: Manifest.parse(OSPath.from("package.jet"), "name: \"demo\"\nversion: \"0.1.0\"\n{retired}\n").expect_err("retired memory floor must move to authority.holds.deny")
+        assert_eq(diagnostic.code, "E1206", "{retired}: {diagnostic:?}")
+        assert(diagnostic.why.contains("authority.holds"), "{retired}: {diagnostic:?}")
+        assert(diagnostic.fix.contains("authority.holds"), "{retired}: {diagnostic:?}")
+    }
+}
+
+// Rust: tests/authority_manifest.rs:269
+#Test("retired_effect_budget_names_authority_holds") {
+    source :: "name: \"demo\"\nversion: \"0.1.0\"\neffects: {{ deny: [Net] }}\n"
+    diagnostic :: Manifest.parse(OSPath.from("package.jet"), source).expect_err("retired effects key must fail closed")
+    assert_eq(diagnostic.code, "E1206")
+    assert(diagnostic.why.contains("authority.holds"), "{diagnostic:?}")
+    assert(diagnostic.fix.contains("authority.holds"), "{diagnostic:?}")
+}
+
+// Rust: tests/authority_manifest.rs:279
+#Test("e1220_keeps_dependency_and_effect_provenance_after_key_move") {
+    manifest :: PackageFacts.parse("name: \"demo\"\nversion: \"0.1.0\"\nauthority: {{ holds: {{ allow: [FS] }} }}\n", "package.jet").expect("authority holds")
+    entries :: [PackageEffects]{PackageEffects{name: "netdep", effects: EffectSet.from([String]{"Net"}), effect_sites: [:], panic_sites: [], boundary_span: Val(Span.new(4, 12))}}
+    diagnostics :: enforce(entries, manifest)
+    assert_eq(diagnostics.len(), 1)
+    diagnostic :: diagnostics[0]
+    assert_eq(diagnostic.code, "E1220")
+    assert(diagnostic.what.contains("netdep"))
+    assert(diagnostic.what.contains("Net"))
+    assert(diagnostic.why.contains("authority.holds"))
+    assert(diagnostic.fix.contains("authority.holds.allow"))
+    assert(diagnostic.fix.contains("authority.grants"))
+    assert_eq(diagnostic.span, None)
+}
+
+// Rust: tests/authority_manifest.rs:306
+#Test("i9_parser_reads_one_authority_block") {
+    facts :: PackageFacts.parse(@AUTHORITY_PACKAGE, "package.jet").expect("parser accepts the one authority block")
+    assert_eq(facts.authority.holds.allow, Val([String]{"IO"}))
+    assert_eq(facts.authority.grants.len(), 1)
+    assert_eq(facts.authority.trust.and_then(|trust| trust.require), Val(ProvenanceRequirement.None))
+    assert_eq(facts.authority.providers.len(), 1)
+}
+
+// Rust: tests/authority_manifest.rs:323
+#Test("lock_and_authority_ledger_mirror_the_manifest_block") {
+    repo :: authority_project("lock-ledger")
+    manifest :: Manifest.parse(repo.join("package.jet"), @AUTHORITY_PACKAGE).expect("manifest authority")
+    options :: FetchOptions{locked: false, update: false, update_dep: None, resolution: ResolveMode.Conservative}
+    (lock, _) :: fetch(repo, manifest, None, options).expect("authority-only manifest fetch")
+    assert_eq(lock.authority, Val(manifest.authority))
+    lock_path :: repo.join(".jet/lock")
+    lock_text :: fs.read_to_string(lock_path).expect("fetch writes unified lock")
+    parsed :: Lock.parse(lock_text).expect("authority lock parses")
+    assert_eq(parsed.authority, Val(manifest.authority))
+    output :: run_authority_cli(repo, ["inspect", "authority", "--json", "run.jet"])
+    assert(output.status.success(), "authority ledger failed:\nstdout={String.from_utf8_lossy(output.stdout)}\nstderr={String.from_utf8_lossy(output.stderr)}")
+    json :: String.from_utf8_lossy(output.stdout)
+    loop subject in ["authority.holds.allow", "authority.holds.deny", "image-codec", "authority.trust.default", "authority.trust.ci", "authority.trust.services.stripe", "authority.trust.require", "authority.providers.nix"] {
+        assert(json.contains("\"subject\":\"{subject}\""), "{subject}: {json}")
+    }
+    assert(json.contains(".jet/lock"), "lock authority provenance missing: {json}")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:373
+#Test("i9_sema_consumes_authority_holds") {
+    repo :: authority_project("sema")
+    entry :: repo.join("run.jet")
+    bundle := load_entry(entry.to_str().unwrap()).expect("load authority project")
+    diagnostics :: check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "sema changed authority meaning: {diagnostics:?}")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:388
+#Test("i9_interpreter_runs_the_authority_project") {
+    repo :: authority_project("interpreter")
+    entry :: repo.join("run.jet")
+    bundle := load_entry(entry.to_str().unwrap()).expect("interpreter front end accepts authority project")
+    diagnostics :: check_bundle(&bundle, CompileMode.Run)
+    assert(diagnostics.is_empty(), "interpreter sema changed authority meaning: {diagnostics:?}")
+    // Retired engine-carrier match becomes the same executable O0 behavior.
+    output :: run_authority_cli(repo, ["run", "run.jet"])
+    assert_eq(output.status.code(), Val(0), "interpreter stderr: {String.from_utf8_lossy(output.stderr)}")
+    assert_authority_output(output, "O0")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:421
+#Test("i9_aot_runs_the_authority_project") {
+    repo :: authority_project("aot")
+    assert_authority_output(run_authority_cli(repo, ["run", "--release", "run.jet"]), "AOT")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:429
+#Test("i9_jit_runs_the_authority_project") {
+    repo :: authority_project("jit")
+    // Retiring JIT route is the native O0 run route, retaining the original name/control.
+    assert_authority_output(run_authority_cli(repo, ["run", "run.jet"]), "O0")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:436
+#Test("i9_dev_runs_the_authority_project") {
+    repo :: authority_project("dev")
+    assert_authority_output(run_authority_cli(repo, ["dev", "run.jet", "--watch=off"]), "dev")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:446
+#Test("i9_comptime_keeps_the_authority_project_meaning") {
+    repo :: authority_project("comptime")
+    entry :: repo.join("run.jet")
+    output :: compile_with_path(@AUTHORITY_PROGRAM, entry.to_str().unwrap()).expect("comptime front end accepts authority project")
+    assert(output.rust.contains("\"authority\""))
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:456
+#Test("i9_repl_keeps_the_authority_project_meaning") {
+    repo :: authority_project("repl")
+    project :: repo.to_string_lossy().to_string()
+    transcript :: run_transcript(["run()"], Val(project))
+    assert(transcript.contains("authority"), "REPL changed authority meaning: {transcript}")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/authority_manifest.rs:468
+#Test("i9_web_consumes_the_authority_project") {
+    repo :: authority_project("web")
+    entry :: repo.join("run.jet")
+    output :: compile_web(entry.to_str().unwrap()).expect("web accepts authority project")
+    web :: output.web.expect("web tier dropped the authority project")
+    assert(web.wasm_rust.contains("authority") || web.js_app.contains("authority"), "web tier changed the authority project's output")
+    fs.remove_dir_all(repo).drop("remove authority fixture")
+}
+
+// Rust: tests/backend_queue.rs:18
+#Test("durable_queue_observations_are_consumed_by_jobs_panel") {
+    event :: queue_status_event()
+    catalog :: JetDevtoolsPanelCatalog.canonical().expect("canonical panel catalog")
+    assert_eq(catalog.panel_for_event(event), Val(JetDevtoolsPanelId.Jobs))
+    assert(event.payload_json().is_none())
+    envelope := JetDevtoolsEnvelope.new("queue-session", 1)
+    &envelope.push(event)
+    grants :: JetDevtoolsPanelCapability.ALL.to_vec()
+    panels :: catalog.project(envelope, JetDevtoolsHostKind.Headless, grants)
+    jobs :: panels.iter().find(|panel| panel.availability.descriptor.id == JetDevtoolsPanelId.Jobs).expect("Jobs panel descriptor")
+    assert(jobs.availability.is_available())
+    assert_eq(jobs.events.len(), 1)
+    assert_eq(jobs.events[0].kind(), "Job")
+    assert(jobs.events[0].fields_json().contains("\"depth\":1"))
+    assert(jobs.events[0].payload_json().is_none())
+}
+
+// Rust: tests/backend_queue.rs:40
+#Test("typed_job_lifecycle_facts_share_the_same_jobs_route") {
+    fact :: JetDevtoolsJobPanelFact{sequence: 1, timestamp_ms: 7, kind: JetDevtoolsJobPanelEventKind.Enqueue, state: JetDevtoolsJobPanelLifecycleState.Enqueued, job_id: "job-1", name: "Sync", labels: [], queue: "default", attempts: 0, duration_ms: None, worker: None, request_id: Val("request-1"), failure: None}
+    event :: fact.to_protocol_event("job-runtime").expect("typed lifecycle fact must marshal through the shared event boundary")
+    catalog :: JetDevtoolsPanelCatalog.canonical().expect("canonical panel catalog")
+    assert_eq(catalog.panel_for_event(event), Val(JetDevtoolsPanelId.Jobs))
+    assert(event.payload_json().is_none())
+    assert(event.fields_json().contains("\"request_id\":\"request-1\""))
+    state := JetDevtoolsJobPanelState.new()
+    &state.apply_fact(fact).expect("typed lifecycle fact must be consumed by the Jobs panel state")
+    assert_eq(state.job("job-1").unwrap().request_correlation(), Val("request-1"))
+}
+
+// Rust: tests/backend_queue.rs:75
+#Test("absent_snapshot_workers_preserve_lifecycle_worker_facts") {
+    state := JetDevtoolsJobPanelState.new()
+    &state.enqueue("job-1", "Sync", "default", [], None, 10).expect("lifecycle enqueue")
+    &state.start("job-1", 20, "worker-1").expect("lifecycle start")
+    &state.observe_queue_status("default", 8, false, 1, 10, 2, 30).expect("queue snapshot")
+    projection :: state.queue_projection("default", 40, None).expect("Jobs queue projection")
+    assert_eq(projection.depth, 1)
+    assert_eq(projection.wait_ms, 10)
+    assert_eq(projection.throughput, 2)
+    assert_eq(projection.workers, 1)
+}
+
+// Rust: tests/ban_bare_panic.rs:576
+#Test("examples_panic_budget_only_shrinks") {
+    repo :: root()
+    budget :: parse_examples_panic_budget()
+    current :: example_panic_counts(repo)
+    violations :: example_panic_budget_violations(current, budget)
+    assert(violations.is_empty(), "feature example panic budget grew or became stale:\n{violations.join("\n")}")
+}
+
+// Rust: tests/ban_bare_panic.rs:590
+#Test("examples_panic_budget_trips_on_seeded_growth") {
+    budget :: parse_examples_panic_budget()
+    seed :: budget.first().expect("panic budget needs a seeded growth entry")
+    seeded_source :: "panic(\"seeded\")\n".repeat(seed.baseline + 1)
+    seeded_count :: count_jet_panic_calls(seeded_source)
+    assert_eq(seeded_count, seed.baseline + 1)
+    violations :: example_panic_budget_violations([(seed.path, seeded_count)], budget)
+    assert(violations.iter().any(|violation| violation.starts_with(seed.path)), "seeded panic growth did not trip the path budget: {violations:?}")
+}
+
+// Rust: tests/ban_bare_panic.rs:610
+#Test("compiler_crates_ban_bare_panic_outside_allowlist") {
+    repo :: root()
+    violations := [String]{}
+    allowed := [String: Int]{}
+    loop (path, maximum, _) in @ALLOWLIST -> allowed[path] = maximum
+    loop scan_root in @SCAN_ROOTS {
+        files := [OSPath]{}
+        collect_rs_files(repo.join(scan_root), &files)
+        loop file in files {
+            rel :: file.strip_prefix(repo).unwrap().to_string_lossy().replace('\\', "/")
+            text :: fs.read_to_string(file) ?? ""
+            count :: count_bare_panics(text)
+            if count == 0 -> next
+            ceiling :: allowed.get(rel) ?? 0
+            if count > ceiling -> &violations.push("{rel}: {count} bare panic!( (allowlisted: {ceiling}) — use jet_foundation::ice!(span, \"…\") or add to ALLOWLIST with a reason")
+        }
+    }
+    assert(violations.is_empty(), "bare panic! outside the ice!/vetted allowlist (I2, card #453):\n{violations.join("\n")}")
+}
+
+// Rust: tests/ban_bare_panic.rs:655
+#Test("ban_logic_trips_on_a_seeded_bare_panic") {
+    seeded :: """
+fn already_vetted_test_fixture() {{
+    panic!("the allowlist permits this one vetted fixture");
+}}
+
+fn seeded_leak() {{
+    panic!("bare panic! slipped past ice! adoption");
+}}
+"""
+    count :: count_bare_panics(seeded)
+    allowlisted_ceiling_before_seed :: 1
+    assert_eq(count, 2, "fixture must contain one vetted and one seeded panic")
+    assert(count > allowlisted_ceiling_before_seed, "ban logic failed to reject growth past an existing allowlist ceiling")
+    assert(count > allowlisted_ceiling_before_seed, "seeded bare panic! did not trip the allowlisted-file ratchet")
+}

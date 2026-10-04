@@ -1,0 +1,187 @@
+use Compiler.JetFoundation.Tests.Integration.Terminal.*
+use Compiler.JetFoundation.Tests.Integration.TerminalDefaultSingleHome as single_home
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use core.sys.target
+use std.[env, thread]
+use std.process.[Command, Stdio]
+use std.time.[Duration, Instant]
+
+// Rust: tests/terminal.rs:226
+#Test("terminal_parity_uses_tty_prompt_and_progress_order") {
+    if target.selected_family() != "unix" { return }
+    assert_resident_tier_compiles_run()
+    transcripts :: ["O0", "O1", "O2", "Web"].map((mode) -> run_pty(mode))
+    normalized :: (transcript: String) -> transcript.replace('\r', "")
+    for transcript in transcripts.iter().skip(1) { assert_eq(normalized(&transcripts[0]), normalized(transcript)) }
+    for transcript in transcripts {
+        positions :: marker_positions(&transcript)
+        assert(positions.windows(2).all((pair) -> pair[0] < pair[1]), "PTY program order changed: {transcript}")
+        assert(transcript.contains("\rprogress"), "progress must redraw on a TTY: {transcript:?}")
+        assert(!transcript.contains("secret: non-tty"), "PTY secret read was treated as non-TTY: {transcript:?}")
+    }
+}
+// Rust: tests/terminal.rs:252
+#Test("terminal_parity_matches_non_tty_golden_and_stream_order") {
+    if target.selected_family() != "unix" { return }
+    assert_resident_tier_compiles_run()
+    assert_default_run_traces_native_tier()
+    expected_stdout :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/io/terminal_parity.out")).unwrap()
+    expected_stderr :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/io/terminal_parity.stderr.out")).unwrap()
+    expected_merged := expected_stdout.to_string()
+    expected_merged.push_str(expected_stderr)
+    for mode in ["O0", "O1", "O2", "Web"] {
+        output :: run_non_pty(mode)
+        assert_eq(output.stdout, expected_stdout, "non-PTY stdout drifted in {mode} mode")
+        assert_eq(output.stderr, expected_stderr, "non-PTY stderr drifted in {mode} mode")
+        assert_eq(run_non_pty_merged(mode), expected_merged, "non-PTY stream order drifted in {mode} mode")
+    }
+}
+// Rust: tests/terminal.rs:280
+#Test("stdin_lines_emit_before_eof_and_stop_at_blank") {
+    if target.selected_family() != "unix" { return }
+    for mode in ["O0", "O1", "O2", "Web"] {
+        scratch :: common.Scratch.new("stdin-lines-live")
+        source :: scratch.path.join("sentinel.jet")
+        fs.write(scratch.path.join("package.jet"), "name: \"stdin_stream\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n").unwrap()
+        fs.write(&source, """
+use core.term as io
+fn run() {
+    loop line in io.stdin().lines() {
+        if line == "" { break }
+        print(line)
+    }
+    print(io.readline())
+}
+""").unwrap()
+        stdout_path :: scratch.path.join("stdout")
+        stderr_path :: scratch.path.join("stderr")
+        child := Command.new(env.jet_bin()).args(["run", "--quiet", "--tier", mode]).arg(&source).current_dir(&scratch.path).env("NO_COLOR", "1").stdin(Stdio.piped()).stdout(Stdio.from(fs.File.create(&stdout_path).unwrap())).stderr(Stdio.from(fs.File.create(&stderr_path).unwrap())).spawn().expect("start live stdin program")
+        input := child.stdin.take().expect("live stdin pipe")
+        run_live :: () -> {
+            input.write_all("a\n".as_bytes()) ?? return .Err(err.to_string())
+            started :: Instant.now()
+            loop {
+                output :: fs.read_to_string(&stdout_path) ?? return .Err(err.to_string())
+                if output == "a\n" { break }
+                status :: child.try_wait() ?? return .Err(err.to_string())
+                if status.is_some() { return .Err("exited before echoing the first line: {output:?}") }
+                if started.elapsed() >= Duration.from_secs(120) { return .Err("withheld first-line output while stdin stayed open: {output:?}") }
+                thread.sleep(Duration.from_millis(10))
+            }
+            input.write_all("b\nc\n\nremainder\n".as_bytes()) ?? return .Err(err.to_string())
+            finished_start :: Instant.now()
+            loop {
+                status :: child.try_wait() ?? return .Err(err.to_string())
+                if status is finished {
+                    if !finished.success() { return .Err("sentinel run exited with {finished}") }
+                    output :: fs.read_to_string(&stdout_path) ?? return .Err(err.to_string())
+                    if output == "a\nb\nc\nremainder\n" { return .Ok(()) }
+                    return .Err("lost, duplicated, or consumed input past the sentinel: {output:?}")
+                }
+                if finished_start.elapsed() >= Duration.from_secs(10) { return .Err("blank sentinel did not stop the loop without EOF") }
+                thread.sleep(Duration.from_millis(10))
+            }
+        }
+        result :: run_live()
+        drop(input)
+        _ :: child.kill()
+        _ :: child.wait()
+        assert(result.is_ok(), "{mode}: {result:?}\n{fs.read_to_string(stderr_path).unwrap_or_default()}")
+    }
+}
+// Rust: tests/terminal.rs:373
+#Test("stdout_write_bytes_is_byte_exact_and_ordered_with_print") {
+    if target.selected_family() != "unix" { return }
+    for mode in ["O0", "O1", "O2", "Web"] {
+        scratch :: common.Scratch.new("stdout-write-bytes")
+        source :: scratch.path.join("bytes.jet")
+        fs.write(scratch.path.join("package.jet"), "name: \"stdout_bytes\"\nversion: \"0.1.0\"\nedition: \"2026\"\nauthority: { holds: { allow: [IO, Mem.Alloc, Time.Wait] } }\n").unwrap()
+        fs.write(&source, """
+use core.term as term
+fn run() {
+    out :: term.stdout()
+    print("a")
+    out.write_bytes([U8]{0x42, 0x4D, 0xFF, 0x00, 0x80, 13, 10}) ?? panic("write")
+    out.write_bytes([U8]{0xC3}) ?? panic("write")
+    term.stdout().write_bytes([U8]{0x28}) ?? panic("write")
+    print("z")
+}
+""").unwrap()
+        output :: Command.new(env.jet_bin()).args(["run", "--quiet", "--tier", mode]).arg(&source).current_dir(&scratch.path).env("NO_COLOR", "1").stdin(Stdio.null()).output().expect("run write_bytes program")
+        assert(output.status.success(), "{mode}: write_bytes program failed:\n{String.from_utf8_lossy(&output.stderr)}")
+        assert_eq(output.stdout, [U8]{0x61, 10, 0x42, 0x4D, 0xFF, 0, 0x80, 13, 10, 0xC3, 0x28, 0x7A, 10}, "{mode}: stdout bytes changed on the way out")
+    }
+}
+// Rust: tests/terminal.rs:528
+#Test("terminal_parity_ends_on_closed_input_on_every_tier") {
+    if target.selected_family() != "unix" { return }
+    assert_resident_tier_compiles_run()
+    expected :: expected_closed_input_stdout()
+    for mode in ["O0", "O1", "O2", "Web"] {
+        run :: run_without_input(mode)
+        assert(!run.timed_out, "{mode} mode never ended on a closed stdin after {run.elapsed:?}, and wrote {run.stdout_bytes} bytes: {run.stderr}")
+        assert(run.stdout_bytes <= 64 * 1024, "{mode} mode wrote an unbounded prompt log: {run.stdout_bytes} bytes")
+        assert_eq(run.code, .Val(0), "{mode} mode did not finish cleanly on a closed stdin: {run.stdout} {run.stderr}")
+        assert(!run.stdout.contains("Enter a number from 1 to 2."), "{mode} mode retried a closed stream instead of stopping: {run.stdout}")
+        assert_eq(run.stdout, expected, "{mode} mode drifted from the closed-input transcript every tier must produce")
+    }
+}
+// Rust: tests/terminal.rs:676
+#Test("error_report_matrix_tty_pipe_no_color_and_narrow_widths") {
+    if target.selected_family() != "unix" { return }
+    pipe :: report_on_pipe()
+    tty_ansi :: report_on_pty("stty rows 24 cols 80;", [])
+    tty_plain :: report_on_pty("stty rows 24 cols 80;", [("NO_COLOR", "")])
+    tty_narrow :: report_on_pty("stty rows 24 cols 40; export COLUMNS=40;", [("NO_COLOR", "")])
+    check_report_fixture("error_report_pipe.txt", &pipe.text)
+    check_report_fixture("error_report_tty_ansi.txt", &tty_ansi.text)
+    check_report_fixture("error_report_tty_no_color.txt", &tty_plain.text)
+    check_report_fixture("error_report_tty_narrow40.txt", &tty_narrow.text)
+    assert(!pipe.text.contains('\x1b'), "a pipe must carry no ANSI: {pipe.text:?}")
+    assert(pipe.text.contains("Examples/features/errors/error_context.jet:7"), "a pipe must keep whole paths: {pipe.text:?}")
+    assert(tty_ansi.text.contains('\x1b'), "a terminal must be painted: {tty_ansi.text:?}")
+    assert_eq(strip_sgr(&tty_ansi.text), tty_plain.text, "NO_COLOR changed more than the colour")
+    first :: (cell: &ReportCell) -> strip_sgr(&cell.text).lines().next().expect("every cell reports a root failure").to_string()
+    assert_eq(first(&pipe), "Error: file not found")
+    for cell in [&tty_ansi, &tty_plain, &tty_narrow] {
+        assert_eq(first(cell), first(&pipe), "the root failure moved")
+        assert_eq(cell.code, pipe.code, "terminal state changed the exit code")
+    }
+    for line in tty_narrow.text.lines() { assert(line.chars().count() <= 40, "a 40-column terminal must not be overflowed: {line:?}") }
+    for (number, function, line_number) in [(1, "parse_config", 7), (2, "load_config", 12), (3, "run", 16)] {
+        hop :: "  {number}. {function} (error_context.jet:{line_number})"
+        assert(tty_narrow.text.contains(&hop), "a narrow terminal dropped a location: want {hop:?} in {tty_narrow.text:?}")
+    }
+}
+// Rust: tests/terminal_default_single_home.rs:36
+#Test("no_hand_typed_80x24_terminal_default_outside_the_one_home") {
+    root :: single_home.root()
+    files := []
+    single_home.collect_rs_files(&root.join("crates"), &files)
+    violations := []
+    for file in files {
+        rel :: file.strip_prefix(&root).unwrap_or(&file).display().to_string()
+        if rel == single_home.TERMINAL_DEFAULT_HOME { continue }
+        text :: fs.read_to_string(&file).unwrap_or_default()
+        for (n, line) in text.lines().enumerate() {
+            has_cols_80 :: line.contains("cols: 80") || line.contains("cols:80")
+            has_rows_24 :: line.contains("rows: 24") || line.contains("rows:24")
+            if has_cols_80 || has_rows_24 {
+                trimmed := line.trim() // #4303
+                violations.push("{rel}:{n + 1}: {trimmed}")
+            }
+        }
+    }
+    assert(violations.is_empty(), "hand-typed 80x24 terminal default outside the one home ({single_home.TERMINAL_DEFAULT_HOME}):\n{violations.join("\n")}")
+}
+// Rust: tests/terminal_default_single_home.rs:69
+#Test("common_types_and_process_pty_read_the_one_home") {
+    root :: single_home.root()
+    common_types :: fs.read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/JetStd/CommonTypes.rs")).unwrap()
+    assert(common_types.contains("super::terminal_default::JET_TERMINAL_DEFAULT_COLS") && common_types.contains("super::terminal_default::JET_TERMINAL_DEFAULT_ROWS"), "TerminalPolicy::default must read Prelude/TerminalDefault.rs, not a literal")
+    process_pty :: fs.read_to_string(root.join("crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs")).unwrap()
+    assert(process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_COLS") && process_pty.contains("super::terminal_default::JET_TERMINAL_DEFAULT_ROWS"), "PtyConfig::default must read Prelude/TerminalDefault.rs, not a literal")
+    jit_process :: fs.read_to_string(root.join("crates/jet-jit/src/Process.rs")).unwrap()
+    assert(jit_process.contains("PtyConfig::default()"), "jet_jit_process_spec_terminal must build PtyConfig::default(), not a hand-typed literal")
+}

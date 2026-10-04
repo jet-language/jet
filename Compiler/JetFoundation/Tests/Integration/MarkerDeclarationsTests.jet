@@ -1,0 +1,311 @@
+use jet_foundation.Tests.Integration.MarkerDeclarations.*
+use jet_foundation.Tests.Integration.Common as common
+use jet.AST.[Expr, Item, MarkerDecl, StrPart, CtValue]
+use jet.[compile, Syntax, Comptime]
+use jet_foundation.[Facts, Policy, Registry]
+use jet_foundation.Policy.RuleSite
+use std.[fs, env, panic]
+use std.collections.BTreeSet
+
+// Rust: tests/marker_declarations.rs:42
+#Test("every_registry_row_is_one_written_declaration") {
+    written :: marker_declarations()
+    registry :: Registry.marker_rows().map(|row| -> row.rule.expect("marker rows carry their applied rule")).collect()
+    assert_eq(written.len(), registry.len(), "the registry and the file must hold the same rows")
+    for (declaration, row) in written.iter().zip(registry) {
+        assert_eq(declaration.name, row.name, "rows are served in written order")
+    }
+}
+// Rust: tests/marker_declarations.rs:63
+#Test("retired_marker_declaration_forms_are_confined_to_fixtures_and_history") {
+    root :: OSPath.from(env.var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"))
+    allowed :: ["Docs/spec/syntax-decisions.md", "tests/ui/marker_decl_rejected_forms.jet", "tests/ui/marker_decl_rejected_forms.stderr"]
+    marker_word :: ["mark", "er "].concat()
+    on_clause :: [" ", "on", " ", "["].concat()
+    second_list :: [")", "("].concat()
+    checked_text_node :: ["checked", "_text_head_decl"].concat()
+    frozen_parity :: root.join("dogfood/tower/tests/parity/fixtures")
+    pending := [root.to_path_buf()]
+    offenders: [String] := []
+    loop {
+        directory_opt :: pending.pop()
+        if directory_opt == None { break }
+        directory :: directory_opt.unwrap()
+        entries :: fs.read_dir(&directory)
+        if entries == Err(_) { continue }
+        for entry in entries.unwrap().flatten() {
+            path :: entry.path()
+            if path.starts_with(&frozen_parity) { continue }
+            metadata_result :: fs.symlink_metadata(&path)
+            if metadata_result == Err(_) { continue }
+            metadata :: metadata_result.unwrap()
+            if metadata.file_type().is_dir() {
+                name :: path.file_name().and_then(|name| -> name.to_str()).unwrap_or_default()
+                if [".git", ".claude", ".opencode", ".tmp", ".jet", ".tower", ".agent-worktrees", "jit-aot-parity-report", "node_modules", "target", "build", ".cache", "cache", "dist", "result"].contains(name)
+                    || name.starts_with("target-") || name.starts_with("build-") || name.starts_with("result-") { continue }
+                pending.push(^path)
+                continue
+            }
+            if !metadata.file_type().is_file() { continue }
+            relative :: path.strip_prefix(root).expect("walked under the repository root").to_string_lossy().replace('\\', "/")
+            if allowed.contains(&relative.as_str()) { continue }
+            source_result :: fs.read_to_string(&path)
+            if source_result == Err(_) { continue }
+            source :: source_result.unwrap()
+            for (line_number, line) in source.lines().enumerate() {
+                if (line.contains(&marker_word) && (line.contains(&on_clause) || line.contains(&second_list))) || line.contains(&checked_text_node) {
+                    offenders.push("{relative}:{line_number + 1}: {line}")
+                }
+            }
+        }
+    }
+    assert(offenders.is_empty(), "retired marker declaration forms escaped their fixture/history allowlist:\n{offenders.join("\n")}")
+}
+// Rust: tests/marker_declarations.rs:154
+#Test("the_parser_and_the_registry_read_the_same_rows") {
+    for declaration in marker_declarations() {
+        row :: Registry.marker_rows().find(|registered| -> registered.name == declaration.name).and_then(|registered| -> registered.rule)
+            .unwrap_or_else(|| -> panic("`{declaration.name}` is written but not registered"))
+        facts :: declaration.params.iter().filter(|param| -> Syntax.is_comptime_name(&param.name)).map(|param| -> param.name.as_str()).collect()
+        assert(facts.contains(&"$sites"), "`{declaration.name}` must say where it may be written")
+        assert(declaration.params.iter().all(|parameter| -> {
+            if Syntax.is_comptime_name(&parameter.name) { parameter.ty.is_none() && parameter.value.is_some() }
+            else { parameter.ty.is_some() }
+        }), "`{declaration.name}` must keep typed arguments and fixed metadata separate")
+        written_arguments :: declaration.params.iter().filter(|param| -> !Syntax.is_comptime_name(&param.name)).map(|param| -> param.name.as_str()).collect()
+        registered_arguments :: row.signature.params.iter().map(|param| -> param.name).collect()
+        registered_variadic :: declaration.params.iter().filter(|param| -> param.variadic).count()
+        assert_eq(registered_variadic, if row.signature.variadic.is_some() { 1 } else { 0 }, "`{declaration.name}` variadic list")
+        assert_eq(written_arguments.len(), registered_arguments.len() + registered_variadic, "`{declaration.name}` argument count")
+        for (index, name) in registered_arguments.iter().enumerate() {
+            assert_eq(&written_arguments[index], name, "`{declaration.name}` argument order")
+        }
+        written_sites :: declaration.params.iter().find(|parameter| -> parameter.name == "$sites")
+            .and_then(|parameter| -> parameter.value.as_deref()).and_then(|value| -> {
+                if value == {
+                    ListLit(values, _) -> Some(values.iter().filter_map(|value| -> {
+                        if value == {
+                            EnumLit{variant, ..} -> Some(variant.as_str())
+                            Field(_, member, _) -> Some(member.as_str())
+                            Ident(name, _) -> Some(name.as_str())
+                            _ -> None
+                        }
+                    }).collect())
+                    _ -> None
+                }
+            }).expect("@sites is a list value")
+        assert_eq(written_sites, row.sites.iter().map(|site| -> site.name()).collect(), "`{declaration.name}` site metadata")
+        written_repeatable :: declaration.params.iter().find(|parameter| -> parameter.name == "$repeatable")
+            .and_then(|parameter| -> parameter.value.as_deref()).is_some_and(|value| -> {
+                if value == { Bool(true, _) -> true; _ -> false }
+            })
+        assert_eq(written_repeatable, row.repeatable, "`{declaration.name}` repeatability metadata")
+    }
+}
+// Rust: tests/marker_declarations.rs:263
+#Test("a_written_site_list_reaches_the_registry") {
+    assert(Policy.rule_allows("Unsafe", RuleSite.Block))
+    assert(Policy.rule_allows("Redact", RuleSite.Field))
+    assert(!Policy.rule_allows("Redact", RuleSite.Type))
+    assert(Policy.applied_rule("Known").is_some_and(|row| -> row.sites.is_empty()), "a retired row keeps no legal site")
+}
+// Rust: tests/marker_declarations.rs:275
+#Test("every_effect_root_is_one_written_declaration") {
+    written :: declarations(Facts.EFFECT_SOURCE).into_iter().filter_map(|item| -> {
+        if item == { EffectDecl(declaration) -> Some(declaration.name); _ -> None }
+    }).collect()
+    assert(!written.is_empty(), "the effect file must declare roots")
+    assert_eq(written, Facts.EFFECT_ROOTS, "written roots are the served roots")
+}
+// Rust: tests/marker_declarations.rs:295
+#Test("every_fact_row_carries_its_law_columns") {
+    parsed :: declarations(Registry.FACT_SOURCE).into_iter().filter_map(|item| -> {
+        if item == { FactDecl(declaration) -> Some(declaration); _ -> None }
+    }).collect()
+    written :: Registry.FACT_SOURCE.lines().map(|line| -> line.trim()).filter(|line| -> line.starts_with("fact ")).collect()
+    declarations :: Registry.fact_declarations()
+    assert_eq(parsed.iter().map(|declaration| -> declaration.name.as_str()).collect(), declarations.iter().map(|declaration| -> declaration.source_name).collect(), "the real parser and the foundation reader must see the same fact rows")
+    assert_eq(declarations.len(), written.len(), "every fact declaration is read")
+    declaration_names: BTreeSet<String> :: declarations.iter().map(|declaration| -> declaration.name).collect()
+    rows :: Registry.rows().iter().filter(|row| -> declaration_names.contains(row.name)).collect()
+    row_names: BTreeSet<String> :: rows.iter().map(|row| -> row.name).collect()
+    assert_eq(row_names, declaration_names, "parsed fact declarations and registry rows must have the same names")
+    assert_eq(rows.len(), declarations.len(), "every fact declaration serves one row")
+    for declaration in declarations {
+        source :: written.iter().find(|source| -> source.starts_with("fact {declaration.source_name}("))
+            .unwrap_or_else(|| -> panic("fact `{declaration.name}` is not written"))
+        row :: rows.iter().find(|row| -> row.name == declaration.name).unwrap_or_else(|| -> panic("fact `{declaration.name}` has no registry row"))
+        assert(source.starts_with("fact {declaration.source_name}("))
+        parsed_declaration :: parsed.iter().find(|parsed| -> parsed.name == declaration.source_name)
+            .unwrap_or_else(|| -> panic("fact `{declaration.name}` has no parsed declaration"))
+        written_name :: parsed_declaration.params.iter().find(|param| -> param.name == "$name").and_then(|param| -> param.value.as_deref())
+            .and_then(|value| -> {
+                if value == {
+                    Str(parts, _) -> {
+                        literal :: parts.iter().all(|part| -> if part == { Lit(_) -> true; _ -> false })
+                        if !literal { return None }
+                        Some(parts.iter().map(|part| -> {
+                            if part == { Lit(text) -> text.as_str(); Interp(..) -> panic("checked literal fact name") }
+                        }).collect())
+                    }
+                    _ -> None
+                }
+            })
+        if written_name == Some(name) { assert_eq(name, declaration.name, "fact @name column") }
+        for column in ["@holds:", "@safe:", "@gates:"] { assert(source.contains(column), "`{declaration.name}` must write `{column}`") }
+        assert_eq(row.name, declaration.name)
+        assert_eq(row.target, declaration.target)
+        assert_eq(row.safe_direction, declaration.safe_direction)
+        assert_eq(row.gates, declaration.gates)
+    }
+}
+// Rust: tests/marker_declarations.rs:399
+#Test("source_rules_record_facts_and_add_checked_members") {
+    source :: "\nmarker Recorded($sites: [.Type])\n\nmarker AddGreeting($sites: [.Type]) {{\n    tname :: target.name\n    impl $tname {{\n        fn greeting(self) -> String {{ \"hello\" }}\n    }}\n}}\n\n#[Recorded, AddGreeting]\nstruct Person {{ name: String }}\n\nfn run() {{\n    person :: Person{{name: \"ada\"}}\n    print(person.greeting())\n}}\n"
+    _ :: compile(source).expect("source marker facts and additive bodies should compile")
+    parsed :: declarations(source)
+    recorded :: parsed.iter().find_map(|item| -> {
+        if item == { MarkerDecl(declaration) -> if declaration.name == "Recorded" { Some(declaration) } else { None }; _ -> None }
+    }).expect("bodyless source rule")
+    additive :: parsed.iter().find_map(|item| -> {
+        if item == { MarkerDecl(declaration) -> if declaration.name == "AddGreeting" { Some(declaration) } else { None }; _ -> None }
+    }).expect("bodyful source rule")
+    assert(recorded.body.is_none())
+    assert(additive.body.is_some())
+    source_declarations :: parsed.iter().filter_map(|item| -> {
+        if item == { MarkerDecl(declaration) -> Some(declaration.clone()); _ -> None }
+    }).collect()
+    vocabulary :: Policy.MarkerVocabulary.with_derives_and_declarations([].into_iter(), source_declarations)
+    person :: parsed.iter().find_map(|item| -> if item == { Struct(definition) -> Some(definition); _ -> None }).expect("reflected target type")
+    reflection :: Comptime.build_struct_type_info_with_path_and_vocabulary(person, &[], "Person", Some(&vocabulary))
+    fields :: if reflection == { Struct{fields, ..} -> fields; _ -> panic("TypeInfo must be a struct value") }
+    marker_field :: fields.iter().find(|(name, _)| -> name == "markers")
+    markers :: if marker_field == {
+        Some((_, CtValue.List(markers))) -> markers
+        _ -> panic("TypeInfo must expose marker facts")
+    }
+    assert(markers.iter().any(|marker| -> {
+        if marker == {
+            Struct{fields, ..} -> fields.iter().any(|(name, value)| -> name == "name" && if value == { Str(value) -> value == "Recorded"; _ -> false })
+            _ -> false
+        }
+    }))
+    reflected_add_greeting :: markers.iter().find(|marker| -> {
+        if marker == {
+            Struct{fields, ..} -> fields.iter().any(|(name, value)| -> name == "name" && if value == { Str(value) -> value == "AddGreeting"; _ -> false })
+            _ -> false
+        }
+    }).expect("AddGreeting reflection")
+    reflected_fields :: if reflected_add_greeting == { Struct{fields, ..} -> fields; _ -> panic("marker reflection must be a struct") }
+    assert(reflected_fields.iter().any(|(name, value)| -> name == "sites" && if value == {
+        List(values) -> values.iter().any(|value| -> if value == { Str(site) -> site == "Type"; _ -> false })
+        _ -> false
+    }))
+    assert(reflected_fields.iter().any(|(name, value)| -> name == "repeatable" && if value == { Bool(false) -> true; _ -> false }))
+}
+// Rust: tests/marker_declarations.rs:515
+#Test("source_rule_rejects_a_wrong_typed_argument") {
+    diagnostics :: compile("marker NeedsName(name: String, $sites: [.Type])\n#NeedsName(7)\nstruct Person {{ id: Int }}\n").expect_err("a source rule must check its typed argument")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0930"), "expected E0930: {diagnostics:?}")
+}
+// Rust: tests/marker_declarations.rs:529
+#Test("unknown_callable_rule_is_checked_against_the_bundle_registry") {
+    diagnostics :: compile("#MissingRule fn work() {{}}\nfn run() {{}}\n").expect_err("an undeclared callable rule must not remain a silent marker")
+    assert_eq(diagnostics.iter().filter(|diagnostic| -> diagnostic.code == "E0927").count(), 1, "expected one registered unknown-rule diagnostic: {diagnostics:?}")
+}
+// Rust: tests/marker_declarations.rs:543
+#Test("source_rule_rejects_a_site_not_in_its_declared_facts") {
+    diagnostics :: compile("marker TypeOnly($sites: [.Type])\n#TypeOnly fn work() {{}}\nfn run() {{}}\n").expect_err("a source rule must enforce its declared legal sites")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0355"), "expected the registered site diagnostic: {diagnostics:?}")
+}
+// Rust: tests/marker_declarations.rs:556
+#Test("source_rule_rejects_a_non_repeatable_duplicate") {
+    diagnostics :: compile("marker Once($sites: [.Type])\n#[Once, Once]\nstruct Person {{ id: Int }}\n").expect_err("a non-repeatable source rule must reject a duplicate")
+    duplicate :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0999").expect("duplicate rule diagnostic")
+    detail :: duplicate.detail.as_deref().unwrap_or("")
+    assert(detail.contains("first application span"), "{duplicate:?}")
+    assert(detail.contains("second application span"), "{duplicate:?}")
+}
+// Rust: tests/marker_declarations.rs:572
+#Test("source_rule_body_can_reject_a_function_target") {
+    diagnostics :: compile("\nmarker RejectsFunction($sites: [.Function]) {{\n    reject(\n        code: \"E0927\",\n        what: \"the function is not allowed\",\n        why: \"the test rule rejects this declaration\",\n        fix: \"remove the marker\"\n    )\n}}\n\n#RejectsFunction\nfn run() {{}}\n").expect_err("a function-site rule must run its checked body")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0927"), "expected the registered function-rule diagnostic: {diagnostics:?}")
+    assert(diagnostics.iter().all(|diagnostic| -> diagnostic.code == "E0927"), "the rule must surface its registered diagnostic directly: {diagnostics:?}")
+}
+// Rust: tests/marker_declarations.rs:606
+#Test("source_rule_collision_names_generated_and_written_spans") {
+    diagnostics :: compile("\nmarker AddGreeting($sites: [.Type]) {{\n    tname :: target.name\n    impl $tname {{\n        fn greeting(self) -> String {{ \"generated\" }}\n    }}\n}}\n\n#AddGreeting\nstruct Person {{ name: String }}\n\nimpl Person {{\n    fn greeting(self) -> String {{\n        return \"written\"\n    }}\n}}\n").expect_err("a source rule must not shadow a written member")
+    collision :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0105").expect("collision diagnostic")
+    assert(collision.what.contains("generated member"), "{collision:?}")
+    detail :: collision.detail.as_deref().unwrap_or("")
+    assert(detail.contains("generated member"), "{collision:?}")
+    assert(detail.contains("from rule"), "{collision:?}")
+    assert(detail.contains("existing member"), "{collision:?}")
+}
+// Rust: tests/marker_declarations.rs:641
+#Test("source_rule_rejection_keeps_the_registered_cause") {
+    diagnostics :: compile("\nmarker Rejects($sites: [.Type]) {{\n    reject(\n        code: \"E0927\",\n        what: \"the rule rejected this type\",\n        why: \"the test rule is deliberately strict\",\n        fix: \"remove the marker\"\n    )\n}}\n\n#Rejects\nstruct Person {{ id: Int }}\n\nfn run() {{}}\n").expect_err("a rule rejection must stop compilation")
+    assert(diagnostics.iter().any(|diagnostic| -> diagnostic.code == "E0927"), "expected the registered rule diagnostic: {diagnostics:?}")
+    assert(diagnostics.iter().all(|diagnostic| -> diagnostic.code == "E0927"), "the rule must surface its registered diagnostic directly: {diagnostics:?}")
+}
+
+// Rust: tests/marker_declarations.rs:679
+#Test("repeated_scheduler_fact_registration_is_stable_and_conflicts_are_diagnostic") {
+    A01_SOURCE :: "\nuse core.files as files\nuse core.process as process\nuse core.text as text\n\nstruct Field {{\n    key: String\n    value: String\n}}\n\nstruct Section {{\n    name: String\n    inherits: String\n    fields: [Field]\n}}\n\nfn quoted(value: String) -> String {{\n    trimmed :: value.trim()\n    pieces :: text.splitn(~trimmed, \"\\\"\", 3)\n    if pieces.len() != 3 -> panic(\"expected quoted value\")\n    pieces.get(1) ?? panic(\"expected quoted value\")\n}}\n\nfn run() {{\n    path :: process.argv().get(1) ?? panic(\"missing path\")\n    source :: files.read(path) ?? panic(\"read failed\")\n    sections := [Section]{{}}\n    current := -1\n\n    loop line in source.lines() {{\n        trimmed :: line.trim()\n        if line.trim().is_empty() -> next\n\n        opening :: text.splitn(~trimmed, \"[\", 2)\n        if opening.len() == 2 {{\n            rest :: opening.get(1) ?? panic(\"malformed section\")\n            closing :: text.splitn(rest, \"]\", 2)\n            if closing.len() == 2 && (closing.get(1) ?? \"x\").is_empty() {{\n                name :: closing.get(0) ?? panic(\"malformed section\")\n                &sections.push(Section{{name: name, inherits: \"\", fields: [Field]{{}}}})\n                current = sections.len() - 1\n                next\n            }}\n        }}\n\n        if current < 0 -> panic(\"field before section\")\n        pair :: text.splitn(~trimmed, \"=\", 2)\n        if pair.len() != 2 -> panic(\"malformed field\")\n        key :: (pair.get(0) ?? \"\").trim()\n        if key.is_empty() -> panic(\"empty field\")\n        value :: quoted(pair.get(1) ?? \"\")\n        if key == \"inherits\" {{\n            if sections[current].inherits != \"\" -> panic(\"duplicate field inherits in section {{sections[current].name}}\")\n            sections[current].inherits = value\n            next\n        }}\n        loop field in sections[current].fields {{\n            if field.key == key -> panic(\"duplicate field {{key}} in section {{sections[current].name}}\")\n        }}\n        &sections[current].fields.push(Field{{key: ~key, value: value}})\n    }}\n\n    loop section in sections {{\n        resolved := [Field]{{}}\n        if section.inherits != \"\" {{\n            base_index := -1\n            loop i in 0..<sections.len() {{\n                if sections[i].name == section.inherits {{\n                    base_index = i\n                    break\n                }}\n            }}\n            if base_index < 0 -> panic(\"missing inherited section {{section.inherits}}\")\n            loop field in sections[base_index].fields {{\n                &resolved.push(Field{{key: field.key, value: field.value}})\n            }}\n        }}\n        loop field in section.fields {{\n            found := false\n            loop i in 0..<resolved.len() {{\n                if resolved[i].key == field.key {{\n                    resolved[i].value = field.value\n                    found = true\n                    break\n                }}\n            }}\n            if !found -> &resolved.push(Field{{key: field.key, value: field.value}})\n        }}\n        loop field in resolved {{\n            print(\"{{section.name}}.{{field.key}}={{field.value}}\")\n        }}\n    }}\n}}\n"
+    // GATE #4494: compiler panic containment in the native test process.
+    assert_no_ice :: |source: String, label: String| -> {
+        outcome :: panic.catch_unwind(|| -> compile(source)).unwrap_or_else(|_| -> panic("{label} must not panic"))
+        if outcome == Err(diagnostics) {
+            assert(!diagnostics.is_empty() && diagnostics.iter().all(|diagnostic| -> Registry.diagnostic(&diagnostic.code).is_some()),
+                "{label} returned an unregistered diagnostic: {diagnostics:?}")
+        }
+    }
+    for attempt in 0..10 { assert_no_ice(A01_SOURCE, "A01 scheduler attempt {attempt}") }
+    for identity in ["Scheduler", "Target.Scheduler"] {
+        registrations :: Registry.rows().iter().filter(|row| -> row.name == identity).count()
+        assert_eq(registrations, 1, "scheduler identity `{identity}` must have one registry row")
+    }
+    assert(Registry.law_violations().is_empty(), "scheduler registry rows must satisfy the one-row law: {Registry.law_violations():?}")
+    DISTINCT_SOURCE :: "\nfact Scheduler($name: \"Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider], $decision: \"D-FREESTAND-SCHED1\")\nfact TargetScheduler($name: \"Target.Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfn run() {{}}\n"
+    distinct_outcome :: panic.catch_unwind(|| -> compile(DISTINCT_SOURCE)).expect("distinct scheduler identities must not panic")
+    assert(distinct_outcome.is_ok(), "distinct Scheduler and Target.Scheduler facts must remain separate: {distinct_outcome:?}")
+    DUPLICATE_SOURCE :: "\nfact TargetScheduler($name: \"Target.Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfact TargetScheduler($name: \"Target.Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfn run() {{}}\n"
+    duplicate_shape :: |source: String, label: String| -> {
+        outcome :: panic.catch_unwind(|| -> compile(source)).unwrap_or_else(|_| -> panic("{label} must not panic"))
+        diagnostics :: outcome.expect_err("{label} must be rejected")
+        duplicate :: diagnostics.iter().find(|diagnostic| -> diagnostic.code == "E0105")
+            .unwrap_or_else(|| -> panic("{label} must retain E0105: {diagnostics:?}"))
+        assert(diagnostics.iter().all(|diagnostic| -> Registry.diagnostic(&diagnostic.code).is_some()), "{label} must use registered diagnostics: {diagnostics:?}")
+        (duplicate.what.clone(), duplicate.why.clone(), duplicate.fix.clone(), duplicate.span, duplicate.detail.clone())
+    }
+    duplicate_baseline := None
+    for attempt in 0..10 {
+        shape :: duplicate_shape(DUPLICATE_SOURCE, "exact duplicate fact attempt {attempt}")
+        if duplicate_baseline == Some(expected) {
+            assert_eq(&shape, expected, "exact duplicate fact diagnostic must be deterministic")
+        } else { duplicate_baseline = Some(shape) }
+    }
+    ALIASED_DUPLICATE_SOURCE :: "\nfact Scheduler($name: \"Target.Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfact TargetScheduler($name: \"Target.Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfn run() {{}}\n"
+    _ :: duplicate_shape(ALIASED_DUPLICATE_SOURCE, "facts with one effective Target.Scheduler identity")
+    CONFLICT_SOURCE :: "\nfact TargetScheduler($name: \"Target.Scheduler\", $holds: .Build, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfact TargetScheduler($name: \"Target.Scheduler\", $holds: .Value, $safe: .Gain, $gates: [provider, digest], $decision: \"D-FREESTAND-SCHED1\")\nfn run() {{}}\n"
+    conflict_baseline := None
+    for attempt in 0..10 {
+        shape :: duplicate_shape(CONFLICT_SOURCE, "conflicting fact attempt {attempt}")
+        if conflict_baseline == Some(expected) {
+            assert_eq(&shape, expected, "conflicting fact diagnostic must be deterministic")
+        } else { conflict_baseline = Some(shape) }
+    }
+}
+// Rust: tests/marker_declarations.rs:900
+#Test("no_rust_file_keeps_a_second_copy") {
+    offenders: [String] := []
+    for path in rust_sources() {
+        text :: fs.read_to_string(&path).unwrap_or_default()
+        display :: path.display().to_string()
+        builds_a_row :: text.contains("sites: &[RuleSite::") || text.contains("rule!(")
+        if builds_a_row && !display.ends_with("Policy/MarkerSource.rs") { offenders.push("{display} builds marker rows in Rust") }
+        if text.contains("NON_CODE_ROWS") || text.contains("PRELUDE_GATES") { offenders.push("{display} keeps fact law rows in Rust") }
+        if text.contains("EFFECT_ROOTS: &[&str]") { offenders.push("{display} keeps a copy of the effect roots") }
+    }
+    assert_eq(offenders, [] as [String])
+}

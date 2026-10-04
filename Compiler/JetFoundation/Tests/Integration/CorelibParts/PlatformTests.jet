@@ -1,0 +1,934 @@
+use jet_foundation.Tests.Integration.CorelibParts.PlatformEmail.*
+use jet_driver.[compile]
+use std.fs
+use std.env
+use std.process.[Command, Output] // GATE #4494: actual native process providers.
+use std.time.[Instant, Duration] // GATE #4494: native monotonic deadlines.
+use std.thread // GATE #4494: real host wait.
+use core.sys.target // GATE #4483: selected OS/family.
+
+// Rust: tests/corelib_parts/platform.rs:2
+#Test("canonical_core_import_resolves") {
+    out :: compile_temp("core_imports.jet", """
+use core.files as fs
+fn run() -> { print(fs.exists("/tmp")) }
+""")
+    assert(out.rust.contains("jet_std_fs_exists"))
+}
+// Rust: tests/corelib_parts/platform.rs:17
+#Test("importing_core_without_calls_keeps_optional_helpers_unemitted") {
+    out :: compile_temp("core_import_only.jet", """
+use core.files as fs
+use core.term as io
+use core.sys as env
+use core.process as process
+use core.math as math
+use core.math.random as random
+use core.time as time
+use core.encoding.json as json
+fn run() -> {}
+""")
+    assert(!out.rust.contains("mod jet_std"))
+    assert(!out.rust.contains("jet_std_fs_read"))
+    assert(out.rust.contains("fn main()"))
+}
+// Rust: tests/corelib_parts/platform.rs:40
+#Test("core_data_import_and_codegen_resolve") {
+    out :: compile_temp("core_data_import.jet", """
+use core.data as data
+#Codable
+struct Ticket {
+    team: String
+    minutes: Float
+}
+fn run() -> {
+    rows :: data.csv<Ticket>("team,minutes\nCore,4.0") ?? panic("bad csv")
+    print(rows.len())
+}
+""")
+    assert(out.rust.contains("jet_enc_csv_decode"))
+    assert(out.rust.contains("jet_enc_csv_decode::<__jet_Ticket>"), "core.data.csv must lower its sema-owned list element type exactly:\n{out.rust}")
+    assert(!out.rust.contains("jet_enc_csv_decode::<Vec<__jet_Ticket>>"), "core.data.csv nested its list result at the runtime boundary:\n{out.rust}")
+    assert(!out.rust.contains("jet_data_count"), "ordinary list length must not lower through the removed data.count wrapper")
+}
+// Rust: tests/corelib_parts/platform.rs:76
+#Test("core_files_parallel_walk_and_read_count_share_lowering") {
+    out :: compile_temp("core_files_parallel_count.jet", """
+use core.files as fs
+fn count_file(path: String, needle: String) -> Int {
+    (fs.read(path) ?? panic("read failed")).count(needle)
+}
+fn run() -> {
+    entries :: fs.walk_parallel(".") ?? panic("walk failed")
+    print(entries.len())
+    print(count_file("README.md", "Jet"))
+}
+""")
+    assert(out.rust.contains("jet_std_fs_walk_parallel"), "parallel filesystem walk must use the shared runtime helper")
+    assert(out.rust.contains("jet_unicode_count"), "a String count after a fixed core read must lower to the shared text helper")
+    assert(!out.rust.contains("return Ok(jet_todo_stop("), "fixed core MethodCall aliases must not leave a receiver-type Todo")
+}
+// Rust: tests/corelib_parts/platform.rs:107
+#Test("core_files_optional_walk_keeps_jet_outcome_native_carrier") {
+    out :: compile_temp("core_files_optional_walk.jet", """
+use core.files as fs
+fn run() -> {
+    entries :: fs.walk(".", ignore: ".git") ?? panic("walk failed")
+    print(entries.len())
+}
+""")
+    assert(out.rust.contains("fn jet_std_fs_walk(") && out.rust.contains("ignore_name: JetOutcome<String, JetAbsent>"), "filesystem walk must keep its JetOutcome helper ABI")
+    call :: out.rust.lines().find(fn(line) -> line.contains("jet_std_fs_walk(") && !line.contains("fn jet_std_fs_walk(")).expect("generated source must call the filesystem walk helper")
+    assert(!call.contains(").ok()"), "direct filesystem rows must not project JetOutcome to native Option:\n{call}")
+}
+// Rust: tests/corelib_parts/platform.rs:138
+#Test("core_http_server_optional_controls_project_to_native_options") {
+    out :: compile_temp("core_http_server_optional_controls.jet", """
+use core.http.server as http_server
+fn run() -> HTTPError! {
+    mux :: http_server.mux()
+    mux.get("/", (req: HTTPRequest) -> Ok(http_server.response(200, "hello")))
+    server :: http_server.bind("127.0.0.1:18080", mux, deadline: 2s)
+    server.serve()
+}
+""")
+    calls :: out.rust.lines().filter(fn(line) -> line.contains("jet_http_server_bind(") && !line.contains("fn jet_http_server_bind(")).collect()
+    assert(calls.iter().any(fn(line) -> line.contains(").ok()")), "HTTP present optional carriers must project to native Option:\n{calls.debug()}")
+}
+// Rust: tests/corelib_parts/platform.rs:167
+#Test("core_files_depth_example_runs") {
+    jet :: jet_bin()
+    if !jet.exists() { return }
+    out :: Command.new(&jet).args(["run", "Examples/features/io/files_depth.jet"]).output().expect("run files_depth")
+    release :: Command.new(&jet).args(["run", "--release", "Examples/features/io/files_depth.jet"]).output().expect("run files_depth release")
+    assert(out.status.success(), "files_depth failed\nstdout:\n{String.from_utf8_lossy(&out.stdout)}\nstderr:\n{String.from_utf8_lossy(&out.stderr)}")
+    assert(release.status.success(), "files_depth release failed\nstdout:\n{String.from_utf8_lossy(&release.stdout)}\nstderr:\n{String.from_utf8_lossy(&release.stderr)}")
+    expected :: fs.read_to_string("Examples/features/expected/io/files_depth.out").unwrap()
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+    assert_eq(release.stdout, out.stdout)
+}
+// Rust: tests/corelib_parts/platform.rs:199
+#Test("core_files_stat_mode_matches_across_tiers") {
+    if target.selected_family() != "unix" { return }
+    jet :: jet_bin()
+    if !jet.exists() { return }
+    dir :: env.temp_dir().join("jet_corelib_stat_mode-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    regular :: dir.join("regular.txt")
+    fs.write(&regular, "regular").unwrap()
+    executable :: dir.join("executable.sh")
+    write_executable(&executable, "#!/bin/sh\nexit 0\n")
+    directory :: dir.join("directory")
+    fs.create_dir(&directory).unwrap()
+    symlink :: dir.join("regular.link")
+    source_path :: dir.join("stat_mode.jet")
+    source :: """
+use core.files as fs
+use core.process as process
+use core.sys as sys
+fn run() -> {
+    args :: process.argv().skip(1).to_list()
+    family :: sys.family()
+    absolute :: fs.absolute("regular.txt") ?? panic("absolute")
+    fs.set_mode(args[0], 0o644) ?? panic("regular mode setup")
+    fs.set_mode(args[2], 0o755) ?? panic("directory mode setup")
+    fs.symlink(args[0], args[3]) ?? panic("symlink setup")
+    regular :: fs.stat(args[0]) ?? panic("regular stat")
+    executable :: fs.stat(args[1]) ?? panic("executable stat")
+    directory :: fs.stat(args[2]) ?? panic("directory stat")
+    symlink :: fs.stat(args[3]) ?? panic("symlink stat")
+    fs.set_mode(args[0], 0o600) ?? panic("regular mode mutation")
+    fs.set_mode(args[2], 0o700) ?? panic("directory mode mutation")
+    regular_after :: fs.stat(args[0]) ?? panic("regular after stat")
+    directory_after :: fs.stat(args[2]) ?? panic("directory after stat")
+    print("family:{family}")
+    print("absolute:{absolute}")
+    print("{regular.mode},{executable.mode},{directory.mode},{symlink.mode},{regular_after.mode},{directory_after.mode}")
+}
+"""
+    fs.write(&source_path, source).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"stat_mode\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [Env, Exec, FS, IO, Mem.Alloc, Panic] } }\n").unwrap()
+    source_arg :: source_path.to_string_lossy().into_owned()
+    path_args :: [regular.to_string_lossy().into_owned(), executable.to_string_lossy().into_owned(), directory.to_string_lossy().into_owned(), symlink.to_string_lossy().into_owned()]
+    // Rust: tests/corelib_parts/platform.rs:256
+    run_tier :: fn(extra: &[String]) -> {
+        _ :: fs.remove_file(&symlink)
+        command := Command.new(&jet)
+        command.current_dir(&dir).arg("run").args(extra).arg(&source_arg).arg("--")
+        loop path in &path_args { command.arg(path) }
+        command.output().expect("run stat mode fixture")
+    }
+    default :: run_tier(&["--profile=dev"])
+    unoptimized :: run_tier(&["--profile=debug"])
+    release :: run_tier(&["--release"])
+    // Rust: tests/corelib_parts/platform.rs:274
+    observations :: fn(output: &Output, tier: String) -> {
+        assert(output.status.success(), "{tier} stat mode failed\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+        stdout :: String.from_utf8_lossy(&output.stdout)
+        lines := stdout.lines()
+        family :: lines.next().and_then(fn(line) -> line.strip_prefix("family:")).expect("platform family observation").to_string()
+        absolute :: lines.next().and_then(fn(line) -> line.strip_prefix("absolute:")).expect("absolute path observation").to_string()
+        mode_line := lines.next().expect("stat mode observation").trim() // #4303
+        modes :: mode_line.split(',').map(fn(mode) -> mode.parse<I64>().expect("numeric stat mode")).collect()
+        (family, absolute, modes)
+    }
+    (default_family, default_absolute, default_modes) :: observations(&default, "o1")
+    (unoptimized_family, unoptimized_absolute, unoptimized_modes) :: observations(&unoptimized, "o0")
+    (release_family, release_absolute, release_modes) :: observations(&release, "o2")
+    expected_absolute :: regular.to_string_lossy().into_owned()
+    expected_family :: target.selected_family()
+    assert_eq(default_family, expected_family)
+    assert_eq(unoptimized_family, expected_family)
+    assert_eq(release_family, expected_family)
+    assert_eq(default_absolute, expected_absolute)
+    assert_eq(unoptimized_absolute, expected_absolute)
+    assert_eq(release_absolute, expected_absolute)
+    assert_eq(default_modes.len(), 6)
+    assert_eq(unoptimized_modes, default_modes)
+    assert_eq(release_modes, default_modes)
+    assert_eq(default_modes[0] & 0o170000, 0o100000)
+    assert_eq(default_modes[0] & 0o777, 0o644)
+    assert_eq(default_modes[1] & 0o170000, 0o100000)
+    assert_eq(default_modes[1] & 0o777, 0o755)
+    assert_eq(default_modes[2] & 0o170000, 0o040000)
+    assert_eq(default_modes[2] & 0o777, 0o755)
+    assert_eq(default_modes[3] & 0o170000, 0o120000)
+    assert_ne(default_modes[3] & 0o111, 0)
+    assert_eq(default_modes[4] & 0o170000, 0o100000)
+    assert_eq(default_modes[4] & 0o777, 0o600)
+    assert_eq(default_modes[5] & 0o170000, 0o040000)
+    assert_eq(default_modes[5] & 0o777, 0o700)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/platform.rs:335
+#Test("core_files_fsync_is_consumed_across_tiers") {
+    jet :: jet_bin()
+    if !jet.exists() { return }
+    dir :: env.temp_dir().join("jet_corelib_fsync-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    journal :: dir.join("owned").join("closure.journal")
+    source_path :: dir.join("fsync.jet")
+    source :: """
+use core.files as fs
+fn run() -> {
+    fs.create_dir_all("owned") ?? panic("mkdir")
+    fs.write("owned/closure.journal", "closure") ?? panic("write")
+    fs.fsync("owned/closure.journal") ?? panic("fsync")
+    contents :: fs.read("owned/closure.journal") ?? panic("read")
+    print(contents)
+}
+"""
+    fs.write(&source_path, source).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"fsync\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [FS, IO, Mem.Alloc, Panic] } }\n").unwrap()
+    source_arg :: source_path.to_string_lossy().into_owned()
+    // Rust: tests/corelib_parts/platform.rs:363
+    run_tier :: fn(extra: &[String]) -> {
+        _ :: fs.remove_file(&journal)
+        command := Command.new(&jet)
+        command.current_dir(&dir).arg("run").args(extra).arg(&source_arg)
+        command.output().expect("run fsync fixture")
+    }
+    default :: run_tier(&["--profile=dev"])
+    unoptimized :: run_tier(&["--profile=debug"])
+    release :: run_tier(&["--release"])
+    loop (tier, output) in [("o1", &default), ("o0", &unoptimized), ("o2", &release)] {
+        assert(output.status.success(), "{tier} fsync failed\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+        assert_eq(output.stdout, "closure\n".as_bytes(), "{tier} fsync output")
+    }
+    assert_eq(unoptimized.stdout, default.stdout)
+    assert_eq(release.stdout, default.stdout)
+    assert(journal.exists(), "fsync fixture did not leave the owned file")
+    assert_eq(fs.read_to_string(&journal).unwrap(), "closure")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/platform.rs:399
+#Test("core_watcher_example_runs") {
+    jet :: jet_bin()
+    if !jet.exists() { return }
+    out :: Command.new(&jet).args(["run", "Examples/features/io/watcher.jet"]).output().expect("run watcher")
+    assert(out.status.success(), "watcher failed\nstdout:\n{String.from_utf8_lossy(&out.stdout)}\nstderr:\n{String.from_utf8_lossy(&out.stderr)}")
+    expected :: fs.read_to_string("Examples/features/expected/io/watcher.out").unwrap()
+    assert_eq(String.from_utf8_lossy(&out.stdout), expected)
+}
+// Rust: tests/corelib_parts/platform.rs:420
+#Test("core_process_builder_pipeline_and_spawn_run") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_corelib_process-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    work :: dir.join("work")
+    fs.create_dir_all(&work).unwrap()
+    probe :: dir.join("probe.sh")
+    emit :: dir.join("emit.sh")
+    cat :: dir.join("cat.sh")
+    lines :: dir.join("lines.sh")
+    write_executable(&probe, "#!/bin/sh\nprintf 'env=%s\\n' \"$JET_PROCESS_TEST\"\nprintf 'cwd=%s\\n' \"$(pwd)\"\nread line\nprintf 'stdin=%s\\n' \"$line\"\n")
+    write_executable(&emit, "#!/bin/sh\nprintf 'pipe-ok\\n'\n")
+    write_executable(&cat, "#!/bin/sh\ncat\n")
+    write_executable(&lines, "#!/bin/sh\nprintf 'line-one\\nline-two\\n'\n")
+    src :: """
+use core.process as process
+use core.time as time
+fn run() -> {
+    timeout :: Duration.seconds(2) ?? panic("duration")
+    spec :: process.cmd(["{jet_string_path(&probe)}"]).cwd("{jet_string_path(&work)}").env_clear().env("JET_PROCESS_TEST", "ok").stdin(.Capture).stdout(.Capture).stderr(.Capture).timeout(timeout).output_limit(10000)
+    probe_child :: spec.spawn() ?? panic("spawn failed")
+    probe_child.stdin.write("from-stdin\n") ?? panic("write failed")
+    result :: probe_child.wait() ?? panic("wait failed")
+    print(result.success)
+    print(result.code)
+    print(result.timed_out)
+    print(result.output)
+    piped :: process.pipeline([process.cmd(["{jet_string_path(&emit)}"]), process.cmd(["{jet_string_path(&cat)}"])]) ?? panic("pipeline failed")
+    print(piped.success)
+    print(piped.output)
+    child :: process.cmd(["{jet_string_path(&lines)}"]).stdout(.Stream).spawn() ?? panic("spawn failed")
+    loop line in child.stdout.lines() { print(line) }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.success)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_api", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.contains("true\n0\nfalse\n"), "{stdout}")
+    assert(stdout.contains("env=ok\n"), "{stdout}")
+    assert(stdout.contains("cwd={work.display()}\n"), "{stdout}")
+    assert(stdout.contains("stdin=from-stdin\n"), "{stdout}")
+    assert(stdout.contains("pipe-ok\n"), "{stdout}")
+    assert(stdout.contains("line-one\n"), "{stdout}")
+}
+// Rust: tests/corelib_parts/platform.rs:489
+#Test("core_process_pipeline_honors_final_redirection_modes") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_pipeline_redirect-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    first :: dir.join("first.sh")
+    last :: dir.join("last.sh")
+    write_executable(&first, "#!/bin/sh\nprintf 'edge\\n'\nprintf 'first-err\\n' >&2\n")
+    write_executable(&last, "#!/bin/sh\ncat\nprintf 'final-err\\n' >&2\n")
+    src :: """
+use core.process as process
+fn run() -> {
+    result :: process.pipeline([
+        process.cmd(["{jet_string_path(&first)}"]),
+        process.cmd(["{jet_string_path(&last)}"]).stdout(.Inherit).stderr(.Inherit)
+    ]) ?? panic("pipeline failed")
+    print(result.success)
+    print(result.output)
+    print(result.errors)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_pipeline_redirect", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "edge\ntrue\n\nfirst-err\n\n")
+    assert_eq(stderr, "final-err\n")
+}
+// Rust: tests/corelib_parts/platform.rs:532
+#Test("core_process_pipeline_honors_stage_timeout") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_pipeline_timeout-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    slow :: dir.join("slow.sh")
+    write_executable(&slow, "#!/bin/sh\nsleep 1\n")
+    src :: """
+use core.process as process
+fn run() -> {
+    timeout :: Duration.milliseconds(100) ?? panic("duration failed")
+    result :: process.pipeline([process.cmd(["{jet_string_path(&slow)}"]).timeout(timeout), process.cmd(["cat"])]) ?? panic("pipeline failed")
+    print(result.timed_out)
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_pipeline_timeout", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "true\n")
+    started :: Instant.now()
+    rerun :: Command.new(dir.join("process_pipeline_timeout")).current_dir(&dir).output().unwrap()
+    assert(started.elapsed() < Duration.from_millis(800), "pipeline ignored stage timeout: {started.elapsed().debug()}")
+    assert_eq(rerun.status.code(), Some(0))
+    assert_eq(rerun.stdout, "true\n".as_bytes())
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/platform.rs:577
+#Test("core_process_pipeline_limits_intermediate_stdout_without_deadlock") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_pipeline_output_limit-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    flood :: dir.join("flood.sh")
+    write_executable(&flood, "#!/bin/sh\ndd if=/dev/zero bs=8192 count=32 2>/dev/null | tr '\\000' x\n")
+    src :: """
+use core.process as process
+fn run() -> {
+    bounded :: process.cmd(["{jet_string_path(&flood)}"]).output_limit(1024)
+    result :: process.pipeline([bounded, process.cmd(["cat"])])
+    if result == {
+        .Ok(_) -> { print("limit:accepted") }
+        .Err(_) -> { print("limit:refused") }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_pipeline_output_limit", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "limit:refused\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/corelib_parts/platform.rs:618
+#Test("core_process_live_stream_does_not_block_on_sibling_output") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_live_backpressure-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    slow :: dir.join("slow.sh")
+    write_executable(&slow, """
+#!/bin/sh
+dd if=/dev/zero bs=131072 count=1 1>&2 2>/dev/null &
+writer=$!
+(sleep 2; kill -9 "$writer" 2>/dev/null) >/dev/null 2>&1 &
+killer=$!
+wait "$writer"
+kill "$killer" 2>/dev/null || true
+printf 'done\\n'
+""")
+    src :: """
+use core.process as process
+fn run() -> {
+    child :: process.cmd(["{jet_string_path(&slow)}"]).stdout(.Stream).stderr(.Stream).spawn() ?? panic("spawn failed")
+    loop line in child.stdout.lines() { print(line) }
+    child.wait() ?? panic("wait failed")
+    print("finished")
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_live_backpressure", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "done\nfinished\n")
+    assert(stderr.is_empty(), "unexpected child stderr: {stderr.debug()}")
+    started :: Instant.now()
+    rerun :: Command.new(dir.join("process_live_backpressure")).current_dir(&dir).output().unwrap()
+    assert(started.elapsed() < Duration.from_millis(1500), "live stream waited for the sibling pipe instead of draining it: {started.elapsed().debug()}")
+    assert_eq(rerun.status.code(), Some(0))
+    assert_eq(rerun.stdout, "done\nfinished\n".as_bytes())
+    assert(rerun.stderr.is_empty(), "unexpected child stderr: {rerun.stderr.debug()}")
+}
+// Rust: tests/corelib_parts/platform.rs:679
+#Test("core_process_limits_kill_descendants_and_stop_output_early") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_limits-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    timeout_pid :: dir.join("timeout.pid")
+    output_pid :: dir.join("output.pid")
+    timeout_script :: dir.join("timeout.sh")
+    output_script :: dir.join("output.sh")
+    write_executable(&timeout_script, "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{timeout_pid.display()}'\nwait\n")
+    write_executable(&output_script, "#!/bin/sh\nsleep 2 &\nprintf '%s\\n' \"$!\" > '{output_pid.display()}'\nprintf '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'\nwait\n")
+    src :: """
+use core.process as process
+use core.time as time
+fn run() -[Exec, IO, Time.Wait]> {
+    timeout :: Duration.seconds(1) ?? panic("duration")
+    timed :: process.run_spec(process.cmd(["{jet_string_path(&timeout_script)}"]).timeout(timeout)) ?? panic("timeout run failed")
+    print(timed.timed_out)
+    limited :: process.run_spec(process.cmd(["{jet_string_path(&output_script)}"]).output_limit(16))
+    if limited == {
+        .Ok(_) -> { print("limit:accepted") }
+        .Err(_) -> { print("limit:refused") }
+    }
+}
+"""
+    // Time only the already-built production executable, not compilation.
+    (code, stdout, stderr) :: build_and_run(&dir, "process_limits", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.contains("true\nlimit:refused\n"), "{stdout}")
+    started :: Instant.now()
+    rerun :: Command.new(dir.join("process_limits")).current_dir(&dir).output().unwrap()
+    assert(started.elapsed() < Duration.from_secs(2), "output limit waited for the child instead of terminating it: {started.elapsed().debug()}")
+    assert_eq(rerun.status.code(), Some(0))
+    assert_eq(rerun.stdout, "true\nlimit:refused\n".as_bytes())
+    loop pid_file in [&timeout_pid, &output_pid] {
+        pid_text :: fs.read_to_string(pid_file).unwrap()
+        pid := pid_text.trim() // #4303
+        alive :: Command.new("kill").args(["-0", pid]).status().unwrap().success()
+        if alive { _ :: Command.new("kill").args(["-9", pid]).status() }
+        assert(!alive, "process descendant {pid} survived enforcement")
+    }
+}
+// Rust: tests/corelib_parts/platform.rs:759
+#Test("core_process_streams_bound_both_pipes_and_close_stdin_after_wait") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_streams-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    flood :: dir.join("flood.sh")
+    write_executable(&flood, """
+#!/bin/sh
+dd if=/dev/zero bs=1048576 count=2 2>/dev/null | tr '\\000' x &
+out=$!
+dd if=/dev/zero bs=1048576 count=2 2>/dev/null | tr '\\000' y >&2 &
+err=$!
+wait "$out"
+wait "$err"
+""")
+    src :: """
+use core.process as process
+fn run() -[Exec, IO, Time.Wait]> {
+    limited :: process.run_spec(process.cmd(["{jet_string_path(&flood)}"]).output_limit(1024))
+    if limited == {
+        .Ok(_) -> { print("limit:accepted") }
+        .Err(_) -> { print("limit:refused") }
+    }
+    child :: process.cmd(["sh", "-c", "exit 0"]).stdin(.Capture).spawn() ?? panic("spawn failed")
+    child.wait() ?? panic("wait failed")
+    if child.stdin.write("late") == {
+        .Ok(_) -> { print("closed:accepted") }
+        .Err(_) -> { print("closed:typed-error") }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_streams", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "limit:refused\nclosed:typed-error\n")
+}
+// Rust: tests/corelib_parts/platform.rs:808
+// D-PROCESS-SESSION1=A: terminal opt-in stays on the same ProcessSpec.
+#Test("core_process_terminal_uses_unix_pty_for_run_and_spawn") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_terminal-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.process as process
+fn run() -[Exec, IO, Time.Wait]> {
+    plain :: process.run_spec(process.cmd(["echo", "plain-ok"]).stdout(.Capture)) ?? panic("default run failed")
+    print(plain.output.trim())
+    run_result :: process.run_spec(process.cmd(["printf", "run-ok"]).terminal()) ?? panic("terminal run failed")
+    print(run_result.output.contains("run-ok"))
+    child :: process.cmd(["printf", "spawn-ok"]).terminal().spawn() ?? panic("terminal spawn failed")
+    if child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
+            print("spawn: session")
+        }
+        .None -> { print("spawn: no session") }
+    }
+    waited :: child.wait() ?? panic("terminal wait failed")
+    print(waited.output.contains("spawn-ok"))
+    if process.pipeline([process.cmd(["echo", "a"]), process.cmd(["cat"]).terminal()]) == {
+        .Ok(_) -> { print("pipeline: accepted") }
+        .Err(_) -> { print("pipeline: refused") }
+    }
+    if process.run_spec(process.cmd([]).terminal()) == {
+        .Ok(_) -> { print("empty: accepted") }
+        .Err(e) -> {
+            if e == {
+                .InvalidInput(_) -> { print("empty: invalid") }
+                else -> { print("empty: wrong error") }
+            }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_terminal", src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.starts_with("plain-ok\n"), "{stdout}")
+    assert(stdout.contains("true\nspawn: session\ntrue\npipeline: refused\nempty: invalid\n"), "{stdout}")
+    compiled :: compile_temp("process_terminal_text.jet", src)
+    assert(compiled.rust.contains("posix_openpt"), "the Unix terminal path must include the native PTY backend")
+}
+// Rust: tests/corelib_parts/platform.rs:866
+// Real PTY identity, bidirectional input, ANSI bytes, requested window size.
+#Test("core_process_terminal_is_tty_bidirectional_and_preserves_control_bytes") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_terminal_bytes-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    probe :: dir.join("terminal_probe.sh")
+    write_executable(&probe, """
+#!/bin/sh
+if [ ! -t 0 ] || [ ! -t 1 ]; then exit 41; fi
+printf 'ready\\n'
+IFS= read -r line
+printf 'input:%s\\n' "$line"
+printf '\\033[31mcontrol\\033[0m\\n'
+stty size
+""")
+    src :: """
+use core.process as process
+fn run() -> {
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 100, rows: 30 },
+        mode: .Raw
+    }
+    child :: process.cmd(["{jet_string_path(&probe)}"]).terminal(policy).spawn() ?? panic("terminal spawn failed")
+    session :: child.terminal ?? panic("missing terminal session")
+    session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("resize failed")
+    child.stdin.write("typed\n") ?? panic("terminal write failed")
+    result :: child.wait() ?? panic("terminal wait failed")
+    print(result.success)
+    print(result.output)
+    if child.stdin.write("late") == {
+        .Ok(_) -> { print("closed:accepted") }
+        .Err(error) -> {
+            if error == {
+                .Closed(_) -> { print("closed:typed-error") }
+                else -> { print("closed:wrong-error") }
+            }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_terminal_bytes", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert(stdout.starts_with("true\nready\ninput:typed\n"), "{stdout.debug()}")
+    assert(stdout.contains("\x1b[31mcontrol\x1b[0m"), "ANSI bytes lost: {stdout.debug()}")
+    assert(stdout.contains("30 100"), "resize lost: {stdout.debug()}")
+    assert(stdout.ends_with("closed:typed-error\n"), "{stdout.debug()}")
+}
+// Rust: tests/corelib_parts/platform.rs:927
+// Terminal controls target the full Unix session process group.
+#Test("core_process_terminal_controls_reap_the_full_process_tree") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_terminal_tree-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    script :: dir.join("tree.sh")
+    interrupt_pid :: dir.join("interrupt.pid")
+    terminate_pid :: dir.join("terminate.pid")
+    kill_pid :: dir.join("kill.pid")
+    timeout_pid :: dir.join("timeout.pid")
+    drop_pid :: dir.join("drop.pid")
+    write_executable(&script, """
+#!/bin/sh
+sleep 30 &
+printf '%s\\n' "$!" > "$1"
+trap 'exit 130' INT
+trap 'exit 143' TERM
+while :; do sleep 1; done
+""")
+    src :: """
+use core.process as process
+use core.time as time
+fn dropped(path: String) -> {
+    child :: process.cmd(["{jet_string_path(&script)}", path]).terminal().spawn() ?? panic("drop spawn failed")
+    time.sleep(100ms)
+}
+fn run() -[Exec, IO, Time.Wait]> {
+    interrupt :: process.cmd(["{jet_string_path(&script)}", "{jet_string_path(&interrupt_pid)}"]).terminal().spawn() ?? panic("interrupt spawn failed")
+    time.sleep(100ms)
+    interrupt.interrupt() ?? panic("interrupt failed")
+    interrupt_result :: interrupt.wait() ?? panic("interrupt wait failed")
+    print(interrupt_result.success)
+    terminate :: process.cmd(["{jet_string_path(&script)}", "{jet_string_path(&terminate_pid)}"]).terminal().spawn() ?? panic("terminate spawn failed")
+    time.sleep(100ms)
+    terminate.terminate() ?? panic("terminate failed")
+    terminate_result :: terminate.wait() ?? panic("terminate wait failed")
+    print(terminate_result.success)
+    kill :: process.cmd(["{jet_string_path(&script)}", "{jet_string_path(&kill_pid)}"]).terminal().spawn() ?? panic("kill spawn failed")
+    time.sleep(100ms)
+    kill.kill() ?? panic("kill failed")
+    kill_result :: kill.wait() ?? panic("kill wait failed")
+    print(kill_result.success)
+    timeout :: Duration.milliseconds(100) ?? panic("timeout duration failed")
+    timed :: process.run_spec(process.cmd(["{jet_string_path(&script)}", "{jet_string_path(&timeout_pid)}"]).terminal().timeout(timeout)) ?? panic("timeout run failed")
+    print(timed.timed_out)
+    dropped("{jet_string_path(&drop_pid)}")
+    print("drop returned")
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_terminal_tree", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "false\nfalse\nfalse\ntrue\ndrop returned\n")
+    loop pid_file in [interrupt_pid, terminate_pid, kill_pid, timeout_pid, drop_pid] {
+        pid_text :: fs.read_to_string(&pid_file).unwrap()
+        pid := pid_text.trim() // #4303
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            alive :: Command.new("kill").args(["-0", pid]).status().unwrap().success()
+            if !alive { break }
+            if Instant.now() >= deadline {
+                _ :: Command.new("kill").args(["-9", pid]).status()
+                panic("terminal descendant {pid} survived {pid_file.debug()}")
+            }
+            thread.sleep(Duration.from_millis(10))
+        }
+    }
+}
+// Rust: tests/corelib_parts/platform.rs:1031
+// Cancellation unwinds process wait and reaps deliberately forked descendants.
+#Test("core_process_wait_cancellation_reaps_the_full_process_tree") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_cancel_tree-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    script :: dir.join("cancel-tree.sh")
+    descendant_pid :: dir.join("descendant.pid")
+    write_executable(&script, "#!/bin/sh\nsleep 30 &\nprintf '%s\\n' \"$!\" > '{descendant_pid.display()}'\nwhile :; do sleep 1; done\n")
+    src :: """
+use core.process as process
+use core.tasks as tasks
+use core.time as time
+fn run() -> {
+    (ready_tx, ready_rx) :: channel<Int>()
+    worker :: task {
+        child :: process.cmd(["{jet_string_path(&script)}"]).stdout(.Capture).stderr(.Capture).spawn() ?? panic("spawn failed")
+        ready_tx.send(1)
+        child.wait() ?? panic("cancelled wait returned")
+    }
+    _ready :: ready_rx.receive() ?? panic("ready failed")
+    time.sleep(100ms)
+    worker.cancel()
+    result :: worker.join()
+    if result == {
+        .Err(error) -> {
+            if error == {
+                .Cancelled -> { print("cancelled") }
+                else -> { print("wrong cancellation") }
+            }
+        }
+        .Ok(_) -> { print("completed") }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_cancel_tree", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "cancelled\n")
+    pid_text :: fs.read_to_string(&descendant_pid).unwrap()
+    pid := pid_text.trim() // #4303
+    deadline :: Instant.now() + Duration.from_secs(1)
+    loop {
+        alive :: Command.new("kill").args(["-0", pid]).status().unwrap().success()
+        if !alive { break }
+        if Instant.now() >= deadline {
+            _ :: Command.new("kill").args(["-9", pid]).status()
+            panic("cancelled process descendant {pid} survived task cleanup")
+        }
+        thread.sleep(Duration.from_millis(10))
+    }
+}
+// Rust: tests/corelib_parts/platform.rs:1106
+// D-PROCESS-SESSION1=A / D-PROCESS-SESSION2=D: stable typed terminal facts and policy.
+#Test("core_process_terminal_policy_and_capabilities_are_typed_and_resizable") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_terminal_policy-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.process as process
+fn run() -[Exec, IO, Time.Wait]> {
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 120, rows: 40 },
+        mode: .Raw
+    }
+    plan :: process.cmd(["echo", "hi"]).terminal(policy)
+    facts :: plan.abilities()
+    print(facts.has(TerminalFact.terminal))
+    print(facts.has(TerminalFact.resize))
+    print(facts.has(TerminalFact.raw))
+    print(facts.has("preview_x"))
+    if process.run_spec(plan) == {
+        .Ok(_) -> { print("terminal:ok") }
+        .Err(_) -> { print("terminal:unavailable") }
+    }
+    child :: process.cmd(["echo", "plain"]).stdout(.Capture).spawn() ?? panic("spawn failed")
+    if child.terminal == {
+        .Val(session) -> {
+            session.resize(TerminalSize{ cols: 80, rows: 24 }) ?? panic("resize failed")
+            print("plain child unexpectedly has terminal")
+        }
+        .None -> { print("plain child has no terminal") }
+    }
+    waited :: child.wait() ?? panic("wait failed")
+    print(waited.output.trim())
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_terminal_policy", src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "true\ntrue\ntrue\nfalse\nterminal:ok\nplain child has no terminal\nplain\n")
+    typo :: compile("""
+use core.process as process
+fn run() -> {
+    facts :: process.cmd(["echo", "x"]).abilities()
+    print(facts.has(TerminalFact.reszie))
+}
+""").expect_err("stable fact typos must fail in sema")
+    assert(typo.iter().any(fn(diag) -> diag.code == "E0302" && diag.what.contains("`TerminalFact` has no key `reszie`") && diag.fix.contains("`TerminalFact.resize`")), "{typo.debug()}")
+    preview_typo :: compile("""
+use core.process as process
+fn run() -> {
+    facts :: process.cmd(["echo", "x"]).abilities()
+    print(facts.has("reszie"))
+}
+""").expect_err("close preview-string typos must suggest the stable fact")
+    assert(preview_typo.iter().any(fn(diag) -> diag.code == "E0302" && diag.what.contains("`reszie` looks like `resize`") && diag.fix.contains("`TerminalFact.resize`")), "{preview_typo.debug()}")
+    plain_child_terminal :: compile("""
+use core.process as process
+fn run() -> {
+    child :: process.cmd(["echo", "plain"]).spawn() ?? panic("spawn failed")
+    child.terminal.resize(TerminalSize{ cols: 80, rows: 24 })
+}
+""").expect_err("a plain child must not expose a TerminalSession")
+    assert(plain_child_terminal.iter().any(fn(diag) -> diag.code == "E0311" && diag.what == "`.resize()` needs `TerminalSession`, not `TerminalSession?`" && diag.fix.contains("session.resize(size)")), "{plain_child_terminal.debug()}")
+}
+// Rust: tests/corelib_parts/platform.rs:1213
+// Real ConPTY byte stream, resize, and close before output-reader join.
+#Test("core_process_terminal_uses_windows_conpty_for_bytes_resize_and_close") {
+    if target.selected_os() != "windows" { return }
+    dir :: env.temp_dir().join("jet_core_process_terminal_conpty-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    script :: dir.join("conpty_probe.cmd")
+    red :: "\x1b[31m"
+    reset :: "\x1b[0m"
+    fs.write(&script, "@echo off\r\nmode con >nul 2>nul || exit /b 41\r\necho ready\r\nset /p line=\r\necho input:%line%\r\necho {red}control{reset}\r\nmode con\r\n").unwrap()
+    src :: """
+use core.process as process
+fn run() -> {
+    policy :: TerminalPolicy{
+        size: TerminalSize{ cols: 80, rows: 24 },
+        mode: .Cooked
+    }
+    child :: process.cmd(["cmd.exe", "/D", "/Q", "/C", "{jet_string_path(&script)}"])
+        .cwd("{jet_string_path(&dir)}")
+        .terminal(policy)
+        .spawn() ?? panic("ConPTY spawn failed")
+    session :: child.terminal ?? panic("missing ConPTY session")
+    session.resize(TerminalSize{ cols: 100, rows: 30 }) ?? panic("ConPTY resize failed")
+    child.stdin.write("typed\r\n") ?? panic("ConPTY input failed")
+    result :: child.wait() ?? panic("ConPTY wait failed")
+    print(result.success)
+    print(result.output)
+    if child.stdin.write("late") == {
+        .Ok(_) -> { print("closed:accepted") }
+        .Err(error) -> {
+            if error == {
+                .Closed(_) -> { print("closed:typed") }
+                else -> { print("closed:wrong") }
+            }
+        }
+    }
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "process_terminal_conpty", &src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    output :: stdout.replace("\r\n", "\n")
+    assert(output.starts_with("true\n"), "{stdout.debug()}")
+    assert(output.contains("ready\n"), "ready marker lost: {stdout.debug()}")
+    assert(output.contains("input:typed\n"), "input bytes lost: {stdout.debug()}")
+    assert(output.contains("\x1b[31mcontrol\x1b[0m"), "VT bytes lost: {stdout.debug()}")
+    assert(output.contains("100") && output.contains("30"), "resize lost: {stdout.debug()}")
+    assert(output.ends_with("closed:typed\n"), "closed stdin was not typed: {stdout.debug()}")
+    compiled :: compile_temp("process_terminal_conpty_text.jet", &src)
+    assert(compiled.rust.contains("CreatePseudoConsole"))
+    assert(compiled.rust.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE"))
+    assert(compiled.rust.contains("let native = jet_process_pty::spawn("))
+    assert(compiled.rust.contains("jet_process_pty::resize_console("))
+    assert(compiled.rust.contains("jet_std::ProcessHandle::Native"))
+    assert(compiled.rust.contains("TerminateJobObject"))
+    assert(compiled.rust.contains("ClosePseudoConsole"))
+    assert(compiled.rust.contains("input.write_all(&[3])"))
+    assert(!compiled.rust.contains("CREATE_NEW_PROCESS_GROUP"))
+    assert(!compiled.rust.contains("GenerateConsoleCtrlEvent"))
+}
+// Rust: tests/corelib_parts/platform.rs:1288
+#Test("core_process_sh_typed_text_keeps_each_hole_one_argv_item") {
+    if target.selected_family() != "unix" { return }
+    dir :: env.temp_dir().join("jet_core_process_sh-{std.process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, "process_sh_typed_text", """
+use core.process as process
+fn run() -[Exec, Time.Wait]> {
+    hostile :: "two words;*.jet"
+    first_spec :: process.cmd(["printf", "<%s>", hostile])
+    first :: process.run_spec(first_spec) ?? panic("typed-head command failed")
+    print(first.output)
+    second_spec :: process.cmd(["printf", "[%s]", hostile])
+    second :: process.run_spec(second_spec) ?? panic("second typed-head failed")
+    print(second.output)
+    audited :: process.cmd(["printf", "raw"])
+    third :: process.run_spec(audited) ?? panic("raw command failed")
+    print(third.output)
+}
+""", &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "<two words;*.jet>\n[two words;*.jet]\nraw\n")
+}
+// Rust: tests/corelib_parts/platform.rs:1320
+#Test("core_time_calendar_zone_and_dst_run") {
+    source_zone :: env.var_os("TZDIR").map(fn(dir) -> OSPath.new(dir).join("America/New_York")).filter(fn(path) -> path.exists()).unwrap_or_else(fn() -> OSPath.new("/usr/share/zoneinfo/America/New_York"))
+    if !source_zone.exists() { return }
+    dir :: env.temp_dir().join("jet_corelib_time_calendar-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    tzdb :: dir.join("tzdb")
+    fs.create_dir_all(tzdb.join("America")).unwrap()
+    fs.copy(&source_zone, tzdb.join("America/New_York")).unwrap()
+    src :: """
+use core.time as time
+use core.time as date
+fn run() -> {
+    zone :: time.zone("America/New_York") ?? panic("missing zone")
+    local :: time.zoned_local(date.new(2024, 3, 10), time.time(1, 30, 0), zone) ?? panic("local time")
+    print(local.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    civil :: local.add_period(time.period_days(1))
+    day :: Duration.hours(24) ?? panic("duration")
+    absolute :: local.add_duration(day)
+    print(civil.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(absolute.format("yyyy-MM-dd HH:mm:ss VV XXX"))
+    print(local.to_datetime().format_rfc3339())
+    parsed :: time.parse_rfc3339("2024-03-10T06:30:00Z") ?? panic("bad parse")
+    print(parsed.in_zone(zone).format("yyyy-MM-dd HH:mm:ss VV XXX"))
+}
+"""
+    tzdb_env :: tzdb.to_string_lossy().into_owned()
+    (code, stdout, stderr) :: build_and_run(&dir, "time_calendar", src, &[("JET_TZDB_DIR", &tzdb_env)], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "2024-03-10 01:30:00 America/New_York -05:00\n2024-03-11 01:30:00 America/New_York -04:00\n2024-03-11 02:30:00 America/New_York -04:00\n2024-03-10T06:30:00Z\n2024-03-10 01:30:00 America/New_York -05:00\n")
+    // I9: default run and full build preserve the same ZonedDateTime arithmetic.
+    jet :: jet_bin()
+    if jet.exists() {
+        quick_path :: dir.join("time_calendar.jet")
+        fs.write(&quick_path, src).unwrap()
+        quick :: Command.new(&jet).arg("run").arg(&quick_path).current_dir(&dir).env("JET_TZDB_DIR", &tzdb_env).output().unwrap()
+        assert(quick.status.success(), "default `jet run` failed:\n{String.from_utf8_lossy(&quick.stderr)}")
+        assert_eq(String.from_utf8_lossy(&quick.stdout), stdout, "zoned arithmetic must mean the same thing on the default tier and AOT (I9)")
+    }
+}
+// Rust: tests/corelib_parts/platform.rs:1397
+#Test("core_url_mime_parse_join_query_and_http_url_run") {
+    dir :: env.temp_dir().join("jet_corelib_url_mime-{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    src :: """
+use core.net.mime as mime
+use core.net.url as url
+fn run() -> {
+    base :: url.parse("https://Bücher.example:443/a/./b/../c?x=1#frag") ?? panic("bad url")
+    print(base.to_string())
+    print(base.host() ?? "none")
+    print(base.path())
+    print(base.query_pairs()[0][0])
+    print(base.query_pairs()[0][1])
+    rel :: base.join("../notify?user=ada lovelace&user=grace#done") ?? panic("bad join")
+    print(rel.to_string())
+    print(rel.path_segments().join("|"))
+    print(rel.fragment() ?? "none")
+    print(url.query([["user", "ada lovelace"], ["user", "grace"], ["empty", ""]]))
+    print(url.percent_encode("a b/c"))
+    print(url.percent_decode("a%20b%2Fc") ?? "bad")
+    html :: mime.parse("Text/HTML; charset=UTF-8") ?? panic("bad mime")
+    print(html.essence())
+    print(html.param("charset") ?? "none")
+    print(mime.from_extension("png") ?? "none")
+    print(mime.extension("image/png") ?? "none")
+    png :: mime.parse("image/png") ?? panic("bad mime")
+    print(url.data(png, "<h1>Hi</h1>").to_string())
+    print(url.file("/tmp/a b.txt").to_string())
+}
+"""
+    (code, stdout, stderr) :: build_and_run(&dir, "url_mime", src, &[], None)
+    assert_eq(code, 0, "stderr:\n{stderr}")
+    assert_eq(stdout, "https://xn--bcher-kva.example:443/a/c?x=1#frag\nxn--bcher-kva.example\n/a/c\nx\n1\nhttps://xn--bcher-kva.example:443/notify?user=ada%20lovelace&user=grace#done\nnotify\ndone\nuser=ada%20lovelace&user=grace&empty=\na%20b%2Fc\na b/c\ntext/html\nUTF-8\nimage/png\npng\ndata:image/png,%3Ch1%3EHi%3C%2Fh1%3E\nfile:///tmp/a%20b.txt\n")
+}

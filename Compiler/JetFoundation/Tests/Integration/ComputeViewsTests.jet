@@ -1,0 +1,177 @@
+use jet_foundation.Tests.Integration.ComputeViews.*
+use jet_foundation.Tests.Integration.TirSupport.[build_and_run, build_and_run_full, have_rustc, run_default_multi]
+use jet_driver.Driver.[compile]
+// Rust: tests/compute_views.rs:58
+#Test("tensor_mutable_window_write_uses_shared_prelude_policy") {
+    src :: """
+use core.compute as compute
+fn run() -> {
+    tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+    copied :: ~tensor[1..2]
+    edit :: &tensor[1..2]
+    edit[0] = 9.0
+    print(compute.to_list(copied))
+    print(compute.to_list(tensor))
+}
+"""
+    assert(have_rustc(), "compute view AOT coverage requires rustc; do not skip this proof")
+    (code, stdout) :: build_and_run("compute_tensor_views", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n")
+    (code, stdout, stderr) :: run_default_multi("compute_tensor_views_tir", "main.jet", &[(String, String)]{("main.jet", src)})
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n")
+    assert_native_profiles("compute_tensor_views", src, true, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n", None)
+    (code, stdout, stderr) :: run_forced_interpreter("mutable_window_interpreter", src)
+    assert_eq(code, 0, "forced interpreter failed: {stderr}")
+    assert_eq(stderr, "")
+    assert_eq(stdout, "[2.0, 3.0]\n[1.0, 9.0, 3.0, 4.0]\n")
+}
+// Rust: tests/compute_views.rs:97
+#Test("tensor_explicit_copy_is_deep_but_implicit_clone_shares_storage") {
+    src :: """
+use core.compute as compute
+struct Holder { value: Tensor }
+fn run() -> {
+    tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    copied :: ~tensor
+    copied_edit :: &copied[0..1]
+    copied_edit[0] = 9.0
+    print(compute.to_list(tensor))
+    print(compute.to_list(copied))
+    holder := Holder{ value: ~tensor }
+    aliased :: holder.value
+    aliased_edit :: &aliased[0..1]
+    aliased_edit[0] = 8.0
+}
+"""
+    assert(have_rustc(), "Tensor copy/clone AOT coverage requires rustc; do not skip this proof")
+    (code, stdout, stderr) :: build_and_run_full("compute_tensor_copy_clone_aot", "explicit_copy_vs_implicit_clone_aot", src)
+    assert_ne(code, 0, "an implicit Tensor clone must retain shared storage")
+    assert_eq(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n")
+    assert(stderr.contains("Tensor mutable view requires exclusive backing storage"), "AOT used the wrong Tensor clone policy:\n{stderr}")
+    (code, stdout, stderr) :: run_default_multi("compute_tensor_copy_clone_tir", "main.jet", &[(String, String)]{("main.jet", src)})
+    assert_ne(code, 0, "an implicit Tensor clone must retain shared storage")
+    assert_eq(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n")
+    assert(stderr.contains("Tensor mutable view requires exclusive backing storage"), "default runner used the wrong Tensor clone policy:\n{stderr}")
+    (code, stdout, stderr) :: run_direct("compute_tensor_copy_clone_resident", src, false)
+    assert_ne(code, 0, "an implicit Tensor clone must retain shared storage")
+    assert_eq(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n")
+    assert(stderr.contains("Tensor mutable view requires exclusive backing storage"), "direct runner used the wrong Tensor clone policy:\n{stderr}")
+    assert_native_profiles("compute_tensor_copy_clone", src, false, "[1.0, 2.0]\n[9.0, 2.0]\n", Val("Tensor mutable view requires exclusive backing storage"))
+    (code, stdout, stderr) :: run_forced_interpreter("compute_tensor_copy_clone_interpreter", src)
+    assert_ne(code, 0, "an implicit Tensor clone must retain shared storage")
+    assert_eq(stdout, "[1.0, 2.0]\n[9.0, 2.0]\n")
+    assert(stderr.contains("Tensor mutable view requires exclusive backing storage"), "forced interpreter used the wrong Tensor clone policy:\n{stderr}")
+}
+// Rust: tests/compute_views.rs:186
+#Test("tensor_slice_is_represented_by_the_compute_prelude") {
+    src :: """
+use core.compute as compute
+fn run() -> {
+    tensor :: compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    read :: ~tensor[0..1]
+    print(compute.to_list(read))
+}
+"""
+    _ :: compile(src).expect("Tensor bracket slices must type-check")
+    // Generated Rust substring checks retire with that engine: exercise the same
+    // slice-plus-explicit-copy meaning on every native profile and Web instead.
+    assert_native_profiles("compute_tensor_slice_copy", src, true, "[1.0, 2.0]\n", None)
+}
+// Rust: tests/compute_views.rs:203
+#Test("tensor_stored_range_uses_the_same_owned_and_mutable_window_law") {
+    src :: """
+use core.compute as compute
+fn run() -> {
+    tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+    window :: 1..2
+    copied :: ~tensor[window]
+    edit :: &tensor[window]
+    edit[1] = 8.0
+    print(compute.to_list(copied))
+    print(compute.to_list(tensor))
+}
+"""
+    assert(have_rustc(), "stored compute view AOT coverage requires rustc; do not skip this proof")
+    (code, stdout) :: build_and_run("compute_tensor_stored_range", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n")
+    (code, stdout, stderr) :: run_default_multi("compute_tensor_stored_range_tir", "main.jet", &[(String, String)]{("main.jet", src)})
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n")
+    assert_native_profiles("compute_tensor_stored_range", src, true, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n", None)
+    (code, stdout, stderr) :: run_forced_interpreter("compute_tensor_stored_range_interpreter", src)
+    assert_eq(code, 0, "forced interpreter failed: {stderr}")
+    assert_eq(stderr, "")
+    assert_eq(stdout, "[2.0, 3.0]\n[1.0, 2.0, 8.0, 4.0]\n")
+}
+// Rust: tests/compute_views.rs:247
+#Test("tensor_bare_range_is_a_borrowed_read_view") {
+    src :: """
+use core.compute as compute
+fn run() -> {
+    tensor := compute.from_list([1.0, 2.0, 3.0, 4.0]) ?? panic("tensor")
+    read :: tensor[1..2]
+    print(read[0])
+    print(read[1])
+}
+"""
+    assert(have_rustc(), "borrowed compute view AOT coverage requires rustc; do not skip this proof")
+    (code, stdout) :: build_and_run("compute_tensor_borrowed_read_view", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2.0\n3.0\n")
+    (code, stdout, stderr) :: run_default_multi("compute_tensor_borrowed_read_view_tir", "main.jet", &[(String, String)]{("main.jet", src)})
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "2.0\n3.0\n")
+    assert_native_profiles("compute_tensor_borrowed_read_view", src, true, "2.0\n3.0\n", None)
+    (code, stdout, stderr) :: run_forced_interpreter("compute_tensor_borrowed_read_view_interpreter", src)
+    assert_eq(code, 0, "forced interpreter failed: {stderr}")
+    assert_eq(stderr, "")
+    assert_eq(stdout, "2.0\n3.0\n")
+}
+// Rust: tests/compute_views.rs:288
+#Test("tensor_empty_half_open_window_is_kept_but_element_read_and_write_are_rejected") {
+    cases :: [(String, String)]{
+        ("empty_window_read", """
+use core.compute as compute
+fn run() -> {
+    tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    empty :: &tensor[0..<0]
+    print(empty.is_empty())
+    print(empty.len())
+    print(empty[0])
+}
+"""),
+        ("empty_window_write", """
+use core.compute as compute
+fn run() -> {
+    tensor := compute.from_list([1.0, 2.0]) ?? panic("tensor")
+    empty :: &tensor[0..<0]
+    print(empty.is_empty())
+    print(empty.len())
+    empty[0] = 9.0
+}
+""")
+    }
+    assert(have_rustc(), "empty Tensor window AOT coverage requires rustc; do not skip this proof")
+    loop (name, src) in cases {
+        (code, stdout, stderr) :: build_and_run_full("compute_tensor_empty_window_aot", name, src)
+        assert_ne(code, 0, "an empty Tensor element operation must fail")
+        assert_eq(stdout, "true\n0\n")
+        assert(stderr.contains("the list has 0 items, so position 0 doesn't exist"), "AOT used a non-canonical empty-window element error:\n{stderr}")
+        (code, stdout, stderr) :: run_default_multi("compute_tensor_empty_window_tir_{name}", "main.jet", &[(String, String)]{("main.jet", src)})
+        assert_ne(code, 0, "an empty Tensor element operation must fail")
+        assert_eq(stdout, "true\n0\n")
+        assert(stderr.contains("the list has 0 items, so position 0 doesn't exist"), "default runner used a non-canonical empty-window element error:\n{stderr}")
+        (code, stdout, stderr) :: run_direct("compute_tensor_empty_window_resident_{name}", src, false)
+        assert_ne(code, 0, "an empty Tensor element operation must fail")
+        assert_eq(stdout, "true\n0\n")
+        assert(stderr.contains("the list has 0 items, so position 0 doesn't exist"), "direct runner used a non-canonical empty-window element error:\n{stderr}")
+        assert_native_profiles("compute_tensor_empty_window_{name}", src, false, "true\n0\n", Val("the list has 0 items, so position 0 doesn't exist"))
+        (code, stdout, stderr) :: run_forced_interpreter("compute_tensor_empty_window_interpreter_{name}", src)
+        assert_ne(code, 0, "an empty Tensor element operation must fail")
+        assert_eq(stdout, "true\n0\n")
+        assert(stderr.contains("the list has 0 items, so position 0 doesn't exist"), "forced interpreter used a non-canonical empty-window element error:\n{stderr}")
+    }
+}

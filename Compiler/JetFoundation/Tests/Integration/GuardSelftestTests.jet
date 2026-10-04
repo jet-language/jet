@@ -1,0 +1,243 @@
+use jet.[compile, compile_with_path]
+use jet_foundation.Tests.Integration.GuardSelftest.*
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.UnsafeRatchet as unsafe_ratchet
+use common.[unified_diff, UNIFIED_DIFF_MAX_INPUT_BYTES, UNIFIED_DIFF_MAX_INPUT_LINES, UNIFIED_DIFF_MAX_OUTPUT_BYTES]
+use std.[fs, env, thread, time]
+
+// Rust: tests/guard_selftest.rs:20
+#Test("guards_stay_quiet_on_a_healthy_run") {
+    v: [UInt8] := []
+    for _ in 0..1024 { v.extend_from_slice(&[0u8; 1024]) }
+    assert_eq(v.len(), 1024 * 1024)
+}
+// Rust: tests/guard_selftest.rs:32
+#Test("persistent_test_scratch_stays_off_system_temp") {
+    scratch :: common.test_scratch_root("guard-selftest")
+    common.assert_test_path_on_disk(&scratch, "test scratch")
+}
+// Rust: tests/guard_selftest.rs:39
+// GATE #4494: expected-panic test harness attribute.
+#ShouldPanic("RAM-backed temp storage")
+#Test("test_path_guard_rejects_system_temp") {
+    common.assert_test_path_on_disk(&env.temp_dir().join("jet-test-path-guard"), "test scratch")
+}
+// Rust: tests/guard_selftest.rs:47
+#Test("unsafe_region_ratchet_trips_on_seeded_growth") { unsafe_ratchet.ratchet_trips_on_seeded_growth() }
+// Rust: tests/guard_selftest.rs:52
+#Test("unsafe_region_ratchet_allows_shrink") { unsafe_ratchet.ratchet_allows_shrink() }
+// Rust: tests/guard_selftest.rs:57
+#Test("generated_ffi_does_not_move_unsafe_baseline") { unsafe_ratchet.generated_ffi_does_not_move_baseline() }
+// Rust: tests/guard_selftest.rs:63
+#Ignore("trips the allocation-cap guard on purpose; run explicitly with a small JET_TEST_ALLOC_CAP_GB")
+#Test("alloc_cap_guard_trips") {
+    chunks: [[UInt8]] := []
+    loop {
+        chunks.push([0u8; 16 * 1024 * 1024])
+        if chunks.len() > 4096 { panic("guard did not abort before allocating {chunks.len()} chunks") }
+    }
+}
+// Rust: tests/guard_selftest.rs:80
+#Ignore("trips the wall-clock watchdog on purpose; run explicitly with a small JET_TEST_DEADLINE_SECS")
+#Test("deadline_guard_trips") {
+    // GATE #4494: native wall-clock sleep; guard must abort this process.
+    thread.sleep(time.Duration.from_secs(120))
+    panic("guard did not abort before the sleep finished")
+}
+
+// Rust: tests/hardening.rs:24
+#Test("deeply_nested_expression_gets_diagnostic") {
+    src :: "fn run() {{\n    print({"(".repeat(600)}1{")".repeat(600)})\n}}\n"
+    expect_error(&src, "E1403")
+}
+// Rust: tests/hardening.rs:34
+#Test("list_index_assign_requires_var") {
+    expect_error("\nfn run() {{\n    xs :: [1, 2, 3]\n    xs[0] = 9\n}}\n", "E0202")
+}
+// Rust: tests/hardening.rs:47
+#Test("instance_method_args_keep_read_convention") {
+    src :: "\nstruct Greeter {{\n    prefix: String\n\n    fn greet(self, name: String) -> String {{\n        return \"{{self.prefix}} {{name}}\"\n    }}\n}}\n\nfn run() {{\n    g :: Greeter{{ prefix: \"hi\" }}\n    name :: \"bob\"\n    print(g.greet(name))\n}}\n"
+    out :: compile(src).expect("should compile")
+    assert(out.rust.contains("__jet_greet(&("), "read-convention method arg must be borrowed: {out.rust}")
+}
+// Rust: tests/hardening.rs:72
+#Test("field_read_clones_instead_of_moving") {
+    src :: "\nstruct P {{\n    name: String\n}}\n\nfn run() {{\n    p :: P{{ name: \"x\" }}\n    s :: p.name\n    t :: p.name\n    print(s)\n    print(t)\n}}\n"
+    out :: compile(src).expect("should compile")
+    assert(out.rust.contains("__jet_name).clone()"), "field reads in owning position must clone: {out.rust}")
+}
+// Rust: tests/hardening.rs:95
+#Test("or_fallback_keeps_sema_rewrites") {
+    src :: "\nfn maybe() -> (Int?) {{\n    return None\n}}\n\nfn run() {{\n    m := [String:Int]{{}}\n    m[\"k\"] = 7\n    x :: maybe() ?? m[\"k\"]\n    print(x)\n}}\n"
+    out :: compile(src).expect("should compile")
+    assert(out.rust.contains("jet_index_map"), "map index inside `or` fallback must use the map helper: {out.rust}")
+}
+// Rust: tests/hardening.rs:117
+#Test("bare_question_return_uses_default_error") {
+    src :: "\nfn parse_count(raw: String) -> Int {{\n    if raw == \"\" {{\n        return Err(\"empty\")\n    }}\n    return Ok(1)\n}}\n\nfn run() {{\n    n :: parse_count(\"\") ?? 0\n    print(n)\n}}\n"
+    out :: compile(src).expect("default Err fallible return should compile")
+    assert(out.rust.contains("Result<i64, JetErr>"), "default Err should lower to the Prelude value: {out.rust}")
+}
+// Rust: tests/hardening.rs:140
+#Test("map_assign_through_field_uses_map_helper") {
+    src :: "\nstruct S {{\n    scores: [String:Int]\n}}\n\nfn run() {{\n    s := S{{ scores: [] }}\n    s.scores[\"a\"] = 1\n    print(s.scores[\"a\"])\n}}\n"
+    out :: compile(src).expect("should compile")
+    assert(out.rust.contains("jet_map_insert"), "indexed assign through a field must resolve to the map helper: {out.rust}")
+}
+// Rust: tests/hardening.rs:161
+#Test("struct_literal_field_knows_expected_type") {
+    src :: "\nstruct S {{\n    scores: [String:Int]\n}}\n\nfn run() {{\n    s := S{{ scores: [] }}\n    print(s.scores.len())\n}}\n"
+    _ :: compile(src).expect("empty map literal in field position should typecheck")
+}
+// Rust: tests/hardening.rs:177
+#Test("mut_self_method_requires_var_receiver") {
+    expect_error("\nstruct Crate {{\n    n: Int\n\n    fn poke(&self) {{\n        x :: self.n\n        print(x)\n    }}\n}}\n\nfn run() {{\n    b :: Crate{{ n: 1 }}\n    b.poke()\n}}\n", "E0202")
+}
+// Rust: tests/hardening.rs:199
+#Test("take_self_on_borrowed_param_is_error") {
+    expect_error("\nstruct Token {{\n    s: String\n\n    fn consume(^self) {{\n        print(0)\n    }}\n}}\n\nfn use_it(t: Token) {{\n    &t.consume()\n}}\n\nfn run() {{\n    print(0)\n}}\n", "E0120")
+}
+// Rust: tests/hardening.rs:223
+#Test("if_pattern_binding_moves_subject") {
+    expect_error("\nfn run() {{\no :: Val(\"hi\")\n    if o == Val(n) {{\n        print(n)\n    }}\n    print(o ?? \"none\")\n}}\n", "E0121")
+}
+// Rust: tests/hardening.rs:239
+#Test("switch_pattern_binding_moves_subject") {
+    expect_error("\nenum Shape {{\n    Circle(String)\n    Empty\n}}\n\nfn run() {{\n    s :: Shape.Circle(\"big\")\n    if s == {{\n        Circle(label) -> {{\n            print(label)\n        }}\n        Empty -> {{\n            print(\"empty\")\n        }}\n    }}\n    if s == {{\n        Circle(label2) -> {{\n            print(label2)\n        }}\n        Empty -> {{\n            print(\"still empty\")\n        }}\n    }}\n}}\n", "E0121")
+}
+// Rust: tests/hardening.rs:272
+#Test("statement_can_start_with_self") {
+    src :: "\nstruct Crate {{\n    items: [Int]\n\n    fn add(&self, n: Int) {{\n        &self.items.push(n)\n    }}\n}}\n\nfn run() {{\n    b := Crate{{ items: [0] }}\n    b.add(5)\n    print(b.items.len())\n}}\n"
+    _ :: compile(src).expect("`self.items.push(n);` should be a valid statement")
+}
+// Rust: tests/hardening.rs:292
+#Test("builtin_mutator_on_read_self_is_error") {
+    expect_error("\nstruct Crate {{\n    items: [Int]\n\n    fn add(self, n: Int) {{\n        &self.items.push(n)\n    }}\n}}\n\nfn run() {{\n    print(0)\n}}\n", "E0202")
+}
+// Rust: tests/hardening.rs:312
+#Test("user_struct_named_noclone_is_still_cloneable") {
+    src :: "\nstruct NoClone {{\n    n: Int\n}}\n\nfn eat(v: ^NoClone) {{\n    print(v.n)\n}}\n\nfn run() {{\n    v :: NoClone{{ n: 1 }}\n    eat(v)\n}}\n"
+    diags :: compile(src).expect_err("should error")
+    assert(diags.iter().any(|d| -> d.code == "E0209"))
+}
+// Rust: tests/hardening.rs:335
+#Test("int_where_struct_expected_is_error") {
+    expect_error("\nstruct P {{\n    n: Int\n}}\n\nfn show(p: P) {{\n    print(p.n)\n}}\n\nfn run() {{\n    show(7)\n}}\n", "E0112")
+}
+// Rust: tests/hardening.rs:356
+#Test("mut_arg_must_be_plain_name") {
+    expect_error("\nstruct S {{\n    n: Int\n}}\n\nfn bump(n: &Int) {{\n    n = n + 1\n}}\n\nfn run() {{\n    s :: S{{ n: 1 }}\n    bump(&s.n)\n}}\n", "E0202")
+}
+// Rust: tests/hardening.rs:391
+#Test("hyphenated_file_name_gets_sane_module_alias") {
+    dir :: temp_project("hyphen")
+    fs.write(dir.join("my-utils.jet"), "pub fn helper() -> Int {{\n    return 42\n}}\n").unwrap()
+    fs.write(dir.join("main.jet"), "use \"my-utils\" as util\nfn run() {{\n    print(util.helper())\n}}\n").unwrap()
+    rust :: compile_bundle(&dir.join("main.jet")).expect("should compile")
+    assert(rust.contains("mod __jet_my_utils"), "module alias must be a valid Rust identifier: {rust}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/hardening.rs:412
+#Test("imported_struct_constructs_and_reads_fields") {
+    dir :: temp_project("structs")
+    fs.write(dir.join("shapes.jet"), "pub struct Point {{\n    pub x: Int\n    pub y: Int\n}}\n").unwrap()
+    fs.write(dir.join("main.jet"), "use \"shapes\"\nfn run() {{\n    p :: shapes.Point{{ x: 1, y: 2 }}\n    print(p.x)\n}}\n").unwrap()
+    rust :: compile_bundle(&dir.join("main.jet")).expect("should compile")
+    assert(rust.contains("__jet_shapes::__jet_Point {{ __jet_x:") || rust.contains("__jet_shapes::__jet_Point{{__jet_x:"), "cross-module struct literal must match the declaration: {rust}")
+    assert(rust.contains("pub struct __jet_Point"), "module items must be reachable from the entry: {rust}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/hardening.rs:438
+#Test("duplicate_file_stems_get_unique_module_names") {
+    dir :: temp_project("dup")
+    fs.create_dir_all(dir.join("a")).unwrap()
+    fs.create_dir_all(dir.join("b")).unwrap()
+    fs.write(dir.join("a/util.jet"), "pub fn one() -> Int {{\n    return 1\n}}\n").unwrap()
+    fs.write(dir.join("b/util.jet"), "pub fn two() -> Int {{\n    return 2\n}}\n").unwrap()
+    fs.write(dir.join("main.jet"), "use \"a/util\" as autil\nuse \"b/util\" as butil\nfn run() {{\n    print(autil.one())\n    print(butil.two())\n}}\n").unwrap()
+    rust :: compile_bundle(&dir.join("main.jet")).expect("should compile")
+    assert(rust.contains("mod __jet_util") && rust.contains("mod __jet_util_2"), "same-stem modules must get unique mod names: {rust}")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/hardening.rs:466
+#Test("value_is_identifier_not_keyword") {
+    src :: "\nfn show(label: String, value: Int) {{\n    print(\"{{label}}: {{value}}\")\n}}\n\nfn run() {{\n    show(\"score\", 42)\n}}\n"
+    _ :: compile(src).expect("`value` may name a binding; only `val` is reserved")
+}
+
+// Rust: tests/harness_tools.rs:9
+#Test("unified_diff_keeps_small_diffs_complete") {
+    diff :: unified_diff("expected", "actual", "same\nold\n", "same\nnew\n")
+    assert(diff.starts_with("--- expected\n+++ actual\n@@"))
+    assert(diff.contains(" same\n"))
+    assert(diff.contains("-old\n"))
+    assert(diff.contains("+new\n"))
+    assert(!diff.contains("truncated"))
+}
+// Rust: tests/harness_tools.rs:19
+#Test("unified_diff_bounds_hostile_output_and_names_every_truncation") {
+    expected_line :: "{"e".repeat(1024)}\n"
+    actual_line :: "{"a".repeat(1024)}\n"
+    expected :: expected_line.repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 2)
+    actual :: actual_line.repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 2)
+    diff :: unified_diff("expected", "actual", &expected, &actual)
+    assert(diff.starts_with("--- expected\n+++ actual\n"))
+    assert(diff.contains("@@"))
+    assert(diff.contains("diff input truncated: expected"), "expected input truncation must be explicit")
+    assert(diff.contains("diff input truncated: actual"), "actual input truncation must be explicit")
+    assert(diff.contains("diff output truncated; remaining compared edits omitted"), "render truncation must be explicit")
+    assert(diff.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES)
+    assert(expected.len() > UNIFIED_DIFF_MAX_INPUT_BYTES)
+    assert(actual.len() > UNIFIED_DIFF_MAX_INPUT_BYTES)
+}
+// Rust: tests/harness_tools.rs:47
+#Test("unified_diff_line_limit_is_reported_without_scanning_all_lines") {
+    expected :: "old\n".repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 4)
+    actual :: "new\n".repeat(UNIFIED_DIFF_MAX_INPUT_LINES * 4)
+    diff :: unified_diff("expected", "actual", &expected, &actual)
+    assert(diff.contains("limits are {UNIFIED_DIFF_MAX_INPUT_BYTES} bytes/{UNIFIED_DIFF_MAX_INPUT_LINES} lines"))
+    assert(diff.len() <= UNIFIED_DIFF_MAX_OUTPUT_BYTES)
+}
+
+// Rust: tests/hostile_closeout_ledger.rs:340
+#Test("every_observed_hostile_closeout_finding_has_one_owner_row") {
+    observed :: raw_code_counts()
+    validate_hostile_closeout_ledger(LEDGER, &observed).unwrap_or_else(|error| -> panic("hostile closeout ledger is incomplete: {error}"))
+}
+// Rust: tests/hostile_closeout_ledger.rs:347
+#Test("closeout_rejects_an_observed_finding_when_its_owner_row_is_missing") {
+    observed :: raw_code_counts()
+    for spec in HOSTILE_CLOSEOUT_FINDINGS {
+        without_row :: LEDGER.lines().filter(|line| -> !line.contains("| {spec.finding} ")).collect().join("\n")
+        error :: validate_hostile_closeout_ledger(&without_row, &observed).expect_err("an observed finding without its owner row must fail closed")
+        observed_name :: spec.code.unwrap_or(spec.finding)
+        assert(error.contains(observed_name) && error.contains(spec.finding), "missing-row error lost identity for {spec.finding}: {error}")
+    }
+}
+// Rust: tests/hostile_closeout_ledger.rs:367
+#Test("closeout_rejects_a_mismatched_owner_or_witness") {
+    observed :: raw_code_counts()
+    for spec in HOSTILE_CLOSEOUT_FINDINGS {
+        row :: ledger_rows(LEDGER, spec.finding).into_iter().next().expect("every finding has a source row")
+        for required in [spec.owner, spec.raw_witness, spec.fixture] {
+            mismatched_row :: row.replace(required, "__mismatched__")
+            mismatched_ledger :: LEDGER.lines().map(|line| -> {
+                if line == row { mismatched_row.as_str() } else { line }
+            }).collect().join("\n")
+            error :: validate_hostile_closeout_ledger(&mismatched_ledger, &observed).expect_err("a mismatched owner or witness must fail closed")
+            assert(error.contains(spec.finding) && error.contains(required), "mismatch error lost {spec.finding} identity: {error}")
+        }
+    }
+}
+// Rust: tests/hostile_closeout_ledger.rs:399
+#Test("l0503_current_fixture_keeps_subject_span_and_teaching_snapshot") {
+    fixture :: fs.read_to_string(root().join("tests/ui_lint/prefer_compound_assign.jet")).expect("L0503 fixture")
+    snapshot :: fs.read_to_string(root().join("tests/ui_lint/prefer_compound_assign.warn")).expect("L0503 snapshot")
+    for expected in ["p.hp = p.hp - amount", "n = (n + 1)", "Indexed compound is E0164"] {
+        assert(fixture.contains(expected), "L0503 fixture lost {expected:?}")
+    }
+    assert_eq(snapshot.matches("Warning [L0503]").count(), 4, "L0503 snapshot warning count changed: {snapshot}")
+    for expected in ["prefer `p.hp -= …` instead of repeating the left side", "prefer `p.hp += …` instead of repeating the left side", "Why: compound assignment updates a place in one step without restating it", "Fix: write `p.hp -= …`", "More: jet-lang.dev/e/L0503"] {
+        assert(snapshot.contains(expected), "L0503 snapshot lost {expected:?}")
+    }
+}

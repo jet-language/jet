@@ -1,0 +1,372 @@
+use Try.[jet, fixture]
+use TypeSentinelGuard.[foundation_sources, scan, ALLOWED_SENTINELS]
+use Typestate.[codes, diagnostics, lint_codes, DECL, DIVERGENT, TIER_SOURCE, TIER_EXPECTED]
+use jet_driver as compiler
+use jet_diagnostics.[Span]
+use jet_loader as Loader
+use jet_sema as Sema
+use Common as common
+use TirSupport as tir_support
+// GATE #4494: actual native CLI/Node process invocation, source files and build environment.
+use std.fs
+use std.env
+use std.process.[Command]
+
+// Rust: tests/try.rs:49
+#Test("default_try_rechecks_overlay_then_rolls_back_byte_for_byte") {
+    (dir, plan, before, _) :: fixture("rollback", "two")
+    output :: Command.new(jet()).arg("try").arg(plan).output().unwrap()
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("claims re-checked"), "{stdout}")
+    assert(stdout.contains("claims reused"), "{stdout}")
+    assert(stdout.contains("rolled back (default)"), "{stdout}")
+    assert_eq(fs.read(dir.join("examples/main.jet")).unwrap(), before)
+    assert(!dir.join(".jet").exists(), "default try must not create a transaction directory")
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/try.rs:71
+#Test("keep_lands_the_same_bytes_as_the_staged_edit") {
+    (dir, plan, _, after) :: fixture("keep", "two")
+    output :: Command.new(jet()).args(["try", plan.to_str().unwrap(), "--keep"]).output().unwrap()
+    assert(output.status.success(), "stdout: {String.from_utf8_lossy(output.stdout)}\nstderr: {String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("kept"), "{String.from_utf8_lossy(output.stdout)}")
+    assert_eq(fs.read(dir.join("examples/main.jet")).unwrap(), after)
+    assert(dir.join(".jet/codemods").is_dir())
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/try.rs:94
+#Test("failed_verdict_rolls_back_without_keep") {
+    (dir, plan, before, _) :: fixture("failed", "one")
+    start :: before.windows(3).position(fn(window) { window == "one".bytes() }).unwrap()
+    // One extra quote makes the candidate invalid without corrupting the JSON plan.
+    fs.write(plan, "{{\"name\":\"failed\",\"entry\":\"examples/main.jet\",\"edits\":[{{\"path\":\"examples/main.jet\",\"start\":{start},\"end\":{start + 3},\"new_text\":\"one\\\"\"}}]}}\n").unwrap()
+    output :: Command.new(jet()).arg("try").arg(plan).output().unwrap()
+    assert(!output.status.success())
+    assert(String.from_utf8_lossy(output.stderr).contains("verdict failed"), "{String.from_utf8_lossy(output.stderr)}")
+    assert_eq(fs.read(dir.join("examples/main.jet")).unwrap(), before)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/type_sentinel_guard.rs:63
+#Test("defer_close_string_sentinel_stays_retired") {
+    manifest :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR"))
+    sentinel :: ["\\0jet", ".defer.close"].concat()
+    stack := [manifest.join("Source"), manifest.join("crates")]
+    loop !stack.is_empty() {
+        path :: &stack.pop() ?? break
+        if path.is_dir() {
+            loop entry in fs.read_dir(path).unwrap().flatten() { &stack.push(entry.path()) }
+            continue
+        }
+        if path.extension().and_then(fn(ext) { ext.to_str() }) != Val("rs") { continue }
+        text :: fs.read_to_string(path).unwrap()
+        assert(!text.contains(sentinel), "{path.display()}: defer-close string sentinel must stay retired; use Stmt::DeferClose")
+    }
+}
+// Rust: tests/type_sentinel_guard.rs:108
+#Test("nul_prefixed_type_sentinels_stay_on_the_allowlist") {
+    offenders := [String]{}
+    survivors_seen := 0
+    loop path in foundation_sources() {
+        loop hit in scan(path) {
+            marker :: hit.splitn(3, ": \\0").nth(1).map(fn(value) { "\\0{value}" })
+            allowed :: marker.is_some_and(fn(value) { ALLOWED_SENTINELS.any(fn(prefix) { value.starts_with(prefix) }) })
+            if allowed { survivors_seen += 1 } else { &offenders.push(hit) }
+        }
+    }
+    assert(offenders.is_empty(), "new \\0-prefixed compiler sentinel(s) outside the card #1662 allowlist (add a real typed field/variant instead, per D-FACT-HOME1):\n{offenders.join("\n")}")
+    assert(survivors_seen == 0, "allowlisted sentinel remains after the final sentinel retirement")
+}
+// Rust: tests/type_sentinel_guard.rs:137
+#Test("approx_and_quantity_sentinels_are_retired") {
+    loop path in foundation_sources() {
+        // Comments recording a retired name do not reintroduce it.
+        text :: fs.read_to_string(path).unwrap().lines().filter(fn(line) { !line.trim_start().starts_with("//") }).join("\n")
+        shown :: path.display()
+        assert(!text.contains("APPROX_NUMERIC_WIDEN_MARKER"), "{shown}: APPROX_NUMERIC_WIDEN_MARKER must stay retired (card #1662) — use Call::widen_approx")
+        assert(!text.contains("\\0Quantity"), "{shown}: the \\0Quantity string encoding must stay retired (card #1662) — use Type::Quantity")
+        assert(!text.contains("CHECKED_NUMERIC_WIDEN_MARKER"), "{shown}: CHECKED_NUMERIC_WIDEN_MARKER must stay retired (card #1662) — use Expr::MethodCall::checked_widen")
+        assert(!text.contains("COMPUTE_DIMENSION_PREFIX"), "{shown}: COMPUTE_DIMENSION_PREFIX must stay retired (card #1662) — use Type::ComputeDim(u64)")
+        loop retired_marker_const in ["CORE_CRYPTO_NOMINAL_MARKER", "DETERMINISTIC_CLOCK_MARKER", "SYSTEM_CLOCK_MARKER", "EXPIRING_SECRET_LOAN_MARKER", "SHARED_GUARD_READ_MARKER", "SHARED_GUARD_EDIT_MARKER", "TERMINAL_FACT_SET_MARKER", "CPP_CALLBACK_ABI_MARKER"] {
+            assert(!text.contains(retired_marker_const), "{shown}: {retired_marker_const} must stay retired (card #1662) — use Type::Tagged with TagMarker::Internal(InternalTag)")
+        }
+    }
+}
+// Rust: tests/typestate.rs:83
+#Test("correct_lifecycle_ok") {
+    src :: "{DECL}\nfn run() -> {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+    assert(codes(src).is_empty(), "correct order must compile: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:96
+#Test("transition_in_wrong_state_is_error") {
+    src :: "{DECL}\nfn run() -> {{\n  r := Reservation.book(\"a\")\n  r = r.check_in()\n}}\n"
+    assert(codes(src).contains("E0150"), "skipping pay() must be E0150: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:108
+#Test("guarded_read_in_wrong_state_is_error") {
+    src :: "{DECL}\nfn run() -> {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  print(r.room_key())\n}}\n"
+    assert(codes(src).contains("E0150"), "room_key before check_in must be E0150: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:121
+#Test("guarded_read_after_full_lifecycle_ok") {
+    src :: "{DECL}\nfn run() -> {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+    assert(!codes(src).contains("E0150"), "full lifecycle then read must be clean: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:134
+#Test("no_typestate_is_inert") {
+    src :: """
+struct Box { n: Int }
+impl Box { fn get(self) -[]> Int { return self.n } }
+fn run() -> {
+    b :: Box{ n: 1 }
+    print(b.get())
+}
+"""
+    assert(!codes(src).contains("E0150"), "no typestate → no E0150: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:154
+#Test("unknown_state_in_marker_is_e0151") {
+    src :: """
+struct Crate { state { Full, Empty }; data: Int }
+impl Crate {
+    #Transition(_, Full) fn fill(data: Int) -[]> Crate { return Crate{ data: data } }
+    #State(Stuffed) fn get(self) -[]> Int { return self.data }
+}
+fn run() -> {
+    b := Crate.fill(1)
+    print(b.get())
+}
+"""
+    assert(codes(src).contains("E0151"), "unknown state must be E0151: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:184
+#Test("unknown_transition_to_state_is_e0151") {
+    src :: """
+struct Crate { state { Full, Empty }; data: Int }
+impl Crate {
+    #Transition(_, Stuffed) fn fill(data: Int) -[]> Crate { return Crate{ data: data } }
+}
+fn run() -> {}
+"""
+    assert(codes(src).contains("E0151"), "undeclared to-state in Transition must be E0151: {codes(src):?}")
+}
+// Rust: tests/typestate.rs:207
+#Test("unknown_transition_from_state_is_e0151") {
+    src :: """
+struct Crate { state { Full, Empty } }
+impl Crate { #Transition(Gone, Full) fn fill() -[]> Crate { return Crate{} } }
+fn run() -> {}
+"""
+    found :: codes(src)
+    assert(found.contains("E0151"), "undeclared from-state in Transition must be E0151: {found:?}")
+}
+// Rust: tests/typestate.rs:223
+#Test("retired_top_level_state_companion_teaches_nested_owner") {
+    found :: codes("state Door {{ Ready }}\nstruct Door {{ opened: Bool }}\nfn run() -> {{}}\n")
+    assert(found.contains("E0157"), "{found:?}")
+}
+// Rust: tests/typestate.rs:232
+#Test("state_section_shape_diagnostics_are_distinct") {
+    empty :: codes("struct Empty {{ state {{}} }}\nfn run() -> {{}}\n")
+    assert(empty.contains("E0169"), "{empty:?}")
+    duplicate_section :: codes("struct Door {{ state {{ Ready }} state {{ Open }} }}\nfn run() -> {{}}\n")
+    assert(duplicate_section.contains("E0168"), "{duplicate_section:?}")
+    duplicate_name :: codes("struct Door {{ state {{ Ready, Ready }} }}\nfn run() -> {{}}\n")
+    assert(duplicate_name.contains("E0166"), "{duplicate_name:?}")
+    member_collision :: codes("struct Door {{ state {{ open }} open: Bool }}\nfn run() -> {{}}\n")
+    assert(member_collision.contains("E0167"), "{member_collision:?}")
+    missing_owner :: codes("struct Door {{ opened: Bool }}\nimpl Door {{ #State(Ready) fn open(self) -> {{}} }}\nfn run() -> {{}}\n")
+    assert(missing_owner.contains("E0159"), "{missing_owner:?}")
+}
+// Rust: tests/typestate.rs:264
+#Test("state_section_sema_diagnostic_spans_cover_the_section") {
+    empty :: "struct Empty {{ state {{}} }}\nfn run() -> {{}}\n"
+    empty_start :: empty.find("state {{").unwrap()
+    empty_end :: empty_start + empty[empty_start..].find("}").unwrap() + 1
+    empty_diagnostic :: diagnostics(empty).find(fn(diagnostic) { diagnostic.code == "E0169" }).expect("E0169")
+    assert_eq(empty_diagnostic.span, Val(Span.new(empty_start, empty_end)))
+    repeated :: "struct Door {{ state {{ Ready }} state {{ Open }} }}\nfn run() -> {{}}\n"
+    repeated_start :: repeated.rfind("state {{").unwrap()
+    repeated_end :: repeated_start + repeated[repeated_start..].find("}").unwrap() + 1
+    repeated_diagnostic :: diagnostics(repeated).find(fn(diagnostic) { diagnostic.code == "E0168" }).expect("E0168")
+    assert_eq(repeated_diagnostic.span, Val(Span.new(repeated_start, repeated_end)))
+}
+// Rust: tests/typestate.rs:291
+#Test("qualified_state_markers_seed_leaf_states") {
+    src :: """
+struct Door { state { Closed, Open } }
+impl Door {
+    #Transition(_, Door.State.Closed) fn new() -[]> Door { return Door{} }
+    #Transition(Door.State.Closed, Door.State.Open) fn open(self: ^Door) -[]> Door { return self }
+    #State(Door.State.Closed) fn inspect(self: ^Door) -[]> String {
+        next := self.open()
+        return "closed"
+    }
+}
+fn run() -> {}
+"""
+    found :: codes(src)
+    assert(found.is_empty(), "qualified markers must resolve to leaves: {found:?}")
+}
+// Rust: tests/typestate.rs:315
+#Test("member_collision_in_separate_impl_is_e0167") {
+    found :: codes("struct Door {{ state {{ open }} }}\nimpl Door {{ fn open(self) -> {{}} }}\nfn run() -> {{}}\n")
+    assert(found.contains("E0167"), "{found:?}")
+}
+// Rust: tests/typestate.rs:325
+#Test("generic_struct_state_set_is_shared_by_separate_impl") {
+    source :: """
+struct Box<T> {
+    state { Empty, Full }
+    value: T
+}
+impl Box {
+    #Transition(_, Empty) fn new(value: ^T) -[]> Box<T> { return Box<T>{ value: value } }
+    #Transition(Empty, Full) fn fill(self: ^Box<T>) -[]> Box<T> { return self }
+}
+impl Box { #State(Full) fn read(self) -[]> T { return self.value } }
+fn run() -> {
+    box := Box<Int>.new(1)
+    box = box.fill()
+    print(box.read())
+}
+"""
+    compiled :: compiler.compile(source).unwrap_or_else(fn(diags) { panic("{diags:?}") })
+    assert(!compiled.rust.contains("Empty"), "state labels must erase")
+    assert(!compiled.rust.contains("Full"), "state labels must erase")
+    assert(!compiled.rust.contains("discriminant"), "typestate must not add a tag")
+    wrong_order :: source.replace("    box = box.fill()\n", "")
+    assert(codes(wrong_order).contains("E0150"), "the shared generic state set must guard methods from a separate impl: {codes(wrong_order):?}")
+}
+// Rust: tests/typestate.rs:369
+#Test("typestate_graph_is_folded_before_aot_jit_and_interpreter") {
+    assert(tir_support.have_rustc(), "AOT proof needs rustc")
+    tir_support.assert_tiers_agree("typestate_graph_tiers", TIER_SOURCE, TIER_EXPECTED)
+    output :: compiler.compile(TIER_SOURCE).expect("typestate tier fixture must compile")
+    loop label in ["Queued", "Approved", "Settled", "Settlement.State"] {
+        assert(!output.rust.contains(label), "typestate fact `{label}` reached generated runtime Rust")
+    }
+}
+// Rust: tests/typestate.rs:382
+#Test("typestate_graph_runs_on_resident_jit_without_runtime_state") {
+    // Retired resident engine traces become actual O0/O1/O2/Web behavior.
+    scratch :: common.Scratch.new("typestate-jit")
+    path :: scratch.join("main.jet")
+    fs.write(path, TIER_SOURCE).unwrap()
+    shown :: path.to_string_lossy().to_string()
+    bundle := Loader.load_entry(shown).expect("typestate fixture loads")
+    found :: Sema.check_bundle(&bundle, Sema.CompileMode.Run)
+    assert(found.is_empty(), "typestate fixture diagnostics: {found:?}")
+    tir_support.assert_tiers_agree("typestate_graph_native_no_runtime_state", TIER_SOURCE, TIER_EXPECTED)
+}
+// Rust: tests/typestate.rs:422
+#Test("typestate_graph_reaches_web_without_runtime_state") {
+    scratch :: common.Scratch.new("typestate-web")
+    path :: scratch.join("main.jet")
+    fs.write(path, TIER_SOURCE).unwrap()
+    shown :: path.to_string_lossy().to_string()
+    output :: compiler.compile_web_with_path(TIER_SOURCE, shown).unwrap_or_else(fn(diags) {
+        panic("web typestate fixture rejected:\n{compiler.render_diagnostics(shown, TIER_SOURCE, diags)}")
+    })
+    web :: output.web.expect("web typestate fixture must produce artifacts")
+    loop label in ["Queued", "Approved", "Settled", "Settlement.State"] {
+        assert(!web.wasm_rust.contains(label), "typestate fact `{label}` reached web runtime Rust")
+    }
+    fs.write(scratch.join("app.js"), web.js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), web.dom_runtime).unwrap()
+    fs.write(scratch.join("package.json"), "{{\"type\":\"module\"}}").unwrap()
+    node :: Command.new("node").current_dir(scratch.path).arg("app.js").output().expect("spawn node")
+    assert(node.status.success(), "web typestate fixture failed:\nstdout: {String.from_utf8_lossy(node.stdout)}\nstderr: {String.from_utf8_lossy(node.stderr)}")
+    assert_eq(String.from_utf8_lossy(node.stdout), TIER_EXPECTED)
+}
+// Rust: tests/typestate.rs:461
+#Test("terminal_state_has_no_unreachable_lint") {
+    src :: "{DECL}\nfn run() -> {{\n  r := Reservation.book(\"a\")\n  r = r.pay()\n  r = r.check_in()\n  print(r.room_key())\n}}\n"
+    assert(codes(src).is_empty(), "a terminal state must compile: {codes(src):?}")
+    assert(!lint_codes(src).contains("L0153"), "reachable terminal state must have no reachability lint: {lint_codes(src):?}")
+}
+// Rust: tests/typestate.rs:479
+#Test("self_loop_and_reopen_states_are_nonterminal") {
+    src :: """
+struct Gate { state { Closed, Reopened }; w: Int }
+impl Gate {
+    #Transition(_, Closed) fn new(w: Int) -[]> Gate { return Gate{ w: w } }
+    #Transition(Closed, Closed) fn hold(self: ^Gate) -[]> Gate { return self }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+}
+fn run() -> {
+    g := Gate.new(1)
+    g = g.hold()
+    g = g.reopen()
+}
+"""
+    assert(codes(src).is_empty(), "no errors expected: {codes(src):?}")
+    lints :: lint_codes(src)
+    assert(lints.all(fn(code) { code != "L0153" }), "self-loop and reopen must not be unreachable: {lints:?}")
+}
+// Rust: tests/typestate.rs:513
+#Test("duplicate_transition_keeps_method_duplicate_diagnostic") {
+    src :: """
+struct Gate { state { Closed, Reopened } }
+impl Gate {
+    #Transition(_, Closed) fn new() -[]> Gate { return Gate{} }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+    #Transition(Closed, Reopened) fn reopen(self: ^Gate) -[]> Gate { return self }
+}
+fn run() -> {}
+"""
+    found :: codes(src)
+    assert(found.contains("E0105"), "duplicate transitions must retain E0105: {found:?}")
+}
+// Rust: tests/typestate.rs:531
+#Test("entry_graph_reports_only_unreachable_declared_states") {
+    src :: """
+struct Flow { state { Start, Done, Cancelled, Orphan } }
+impl Flow {
+    #Transition(_, Start) fn start() -[]> Flow { return Flow{} }
+    #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self }
+    #Transition(Start, Cancelled) fn cancel(self: ^Flow) -[]> Flow { return self }
+}
+fn run() -> {}
+"""
+    lints :: lint_codes(src)
+    assert_eq(lints.filter(fn(code) { code == "L0153" }).count(), 1, "only the unreachable declared state should warn: {lints:?}")
+}
+// Rust: tests/typestate.rs:552
+#Test("no_entry_graph_does_not_invent_reachability") {
+    src :: """
+struct Flow { state { Start, Done } }
+impl Flow { #Transition(Start, Done) fn done(self: ^Flow) -[]> Flow { return self } }
+fn run() -> {}
+"""
+    lints :: lint_codes(src)
+    assert(!lints.contains("L0153"), "{lints:?}")
+}
+// Rust: tests/typestate.rs:584
+#Test("divergent_branch_states_are_reported") {
+    src :: "{DIVERGENT}\nfn decide(paid: Bool) -> {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.id)\n}}\nfn run() -> {{ decide(true) }}\n"
+    assert(lint_codes(src).contains("L0152"), "a state-divergent branch must be reported: {lint_codes(src):?}")
+}
+// Rust: tests/typestate.rs:596
+#Test("divergent_branch_does_not_keep_the_last_walked_arm") {
+    src :: "{DIVERGENT}\nfn decide(paid: Bool) -> {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.cancel()\n  }}\n  print(order.ship())\n}}\nfn run() -> {{ decide(true) }}\n"
+    assert(!codes(src).contains("E0150"), "the last-walked arm must not decide the state: {codes(src):?}")
+    assert(lint_codes(src).contains("L0152"), "the divergence is reported instead: {lint_codes(src):?}")
+}
+// Rust: tests/typestate.rs:616
+#Test("agreeing_branches_keep_the_state") {
+    src :: "{DIVERGENT}\nfn decide(paid: Bool) -> {{\n  order := Order.start(1)\n  if {{\n    paid -> order = order.confirm()\n    else -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() -> {{ decide(true) }}\n"
+    assert(codes(src).is_empty(), "both paths reach `Confirmed`, so `ship` is in state: {codes(src):?}")
+    assert(!lint_codes(src).contains("L0152"), "agreeing paths are not a divergence: {lint_codes(src):?}")
+}
+// Rust: tests/typestate.rs:636
+#Test("agreeing_switch_arms_over_an_exhaustive_enum_keep_the_state") {
+    src :: "{DIVERGENT}\nenum Mode {{ Fast Slow }}\nfn decide(m: Mode) -> {{\n  order := Order.start(1)\n  if m == {{\n    .Fast -> order = order.confirm()\n    .Slow -> order = order.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() -> {{ decide(Mode.Fast) }}\n"
+    assert(codes(src).is_empty(), "both arms of an exhaustive dispatch reach `Confirmed`, so `ship` is in state: {codes(src):?}")
+    assert(!lint_codes(src).contains("L0152"), "an exhaustive pattern table has no fall-through path to diverge from: {lint_codes(src):?}")
+}
+// Rust: tests/typestate.rs:656
+#Test("counted_loop_zero_iterations_reports_the_pre_loop_divergence") {
+    src :: "{DIVERGENT}\nfn decide(n: Int) -> {{\n  order := Order.start(1)\n  loop i := 0, i < n {{\n    fresh := Order.start(2)\n    order = fresh.confirm()\n  }}\n  print(order.ship())\n}}\nfn run() -> {{ decide(1) }}\n"
+    assert(lint_codes(src).contains("L0152"), "the loop may run zero times, so `Draft` (skipped) and `Confirmed` (ran) must be reported as diverging: {lint_codes(src):?}")
+}

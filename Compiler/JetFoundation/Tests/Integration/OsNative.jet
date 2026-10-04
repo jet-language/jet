@@ -1,841 +1,377 @@
-// PORT-PENDING 1119 tests-os-native: tests/os_native.rs:1-837
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS mod common;
-//RS 
-//RS use std::fs;
-//RS use std::io::{BufRead, BufReader, Read};
-//RS use std::path::{Path, PathBuf};
-//RS use std::process::{Child, Command, ExitStatus, Stdio};
-//RS use std::sync::mpsc;
-//RS use std::thread;
-//RS use std::time::{Duration, Instant};
-//RS 
-//RS fn compile(dir: &Path, name: &str, src: &str) -> PathBuf {
-//RS     let source = dir.join(format!("{name}.jet"));
-//RS     fs::write(&source, src).unwrap();
-//RS     let shown = source.to_string_lossy();
-//RS     let out = jet::compile_with_path(src, &shown).unwrap_or_else(|diags| {
-//RS         panic!(
-//RS             "front end rejected fixture:\n{}",
-//RS             jet::render_diagnostics(&shown, src, &diags)
-//RS         )
-//RS     });
-//RS     let rust = dir.join(format!("{name}.rs"));
-//RS     let binary = dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
-//RS     fs::write(&rust, out.rust).unwrap();
-//RS     let built = Command::new("rustc")
-//RS         .args([
-//RS             "--edition",
-//RS             "2021",
-//RS             rust.to_str().unwrap(),
-//RS             "-o",
-//RS             binary.to_str().unwrap(),
-//RS         ])
-//RS         .output()
-//RS         .unwrap();
-//RS     assert!(
-//RS         built.status.success(),
-//RS         "rustc failed:\n{}",
-//RS         String::from_utf8_lossy(&built.stderr)
-//RS     );
-//RS     binary
-//RS }
-//RS 
-//RS fn wait_bounded(child: &mut Child, what: &str) -> ExitStatus {
-//RS     let deadline = Instant::now() + Duration::from_secs(10);
-//RS     loop {
-//RS         if let Some(status) = child.try_wait().unwrap() {
-//RS             return status;
-//RS         }
-//RS         if Instant::now() >= deadline {
-//RS             let _ = child.kill();
-//RS             let _ = child.wait();
-//RS             panic!("{what} did not finish within 10 seconds");
-//RS         }
-//RS         thread::sleep(Duration::from_millis(10));
-//RS     }
-//RS }
-//RS 
-//RS fn temp_dir(label: &str) -> PathBuf {
-//RS     let dir = std::env::temp_dir().join(format!(
-//RS         "jet-os-native-{label}-{}-{:?}",
-//RS         std::process::id(),
-//RS         thread::current().id()
-//RS     ));
-//RS     fs::create_dir_all(&dir).unwrap();
-//RS     dir
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn termios_target_supported() -> bool {
-//RS     cfg!(any(
-//RS         target_os = "linux",
-//RS         target_os = "android",
-//RS         target_os = "macos",
-//RS         target_os = "ios",
-//RS         target_os = "freebsd",
-//RS         target_os = "openbsd",
-//RS         target_os = "netbsd",
-//RS     ))
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn parse_probe_output(output: &[u8]) -> (String, std::collections::BTreeMap<String, usize>) {
-//RS     let text = String::from_utf8(output.to_vec()).expect("termios probe emitted non-UTF-8");
-//RS     let mut target = None;
-//RS     let mut values = std::collections::BTreeMap::new();
-//RS     for line in text.lines() {
-//RS         let (key, value) = line
-//RS             .split_once('=')
-//RS             .unwrap_or_else(|| panic!("malformed termios probe row: {line:?}"));
-//RS         if key == "target" {
-//RS             target = Some(value.to_string());
-//RS         } else {
-//RS             values.insert(
-//RS                 key.to_string(),
-//RS                 value
-//RS                     .parse::<usize>()
-//RS                     .unwrap_or_else(|_| panic!("non-numeric termios probe row: {line:?}")),
-//RS             );
-//RS         }
-//RS     }
-//RS     (
-//RS         target.unwrap_or_else(|| panic!("termios probe did not report its target: {text:?}")),
-//RS         values,
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn run_c_header_layout_probe(dir: &Path) -> (String, std::collections::BTreeMap<String, usize>) {
-//RS     let source = dir.join("termios_header_probe.c");
-//RS     let binary = dir.join("termios_header_probe");
-//RS     fs::write(
-//RS         &source,
-//RS         r#"
-//RS #include <stddef.h>
-//RS #include <stdio.h>
-//RS #include <termios.h>
-//RS 
-//RS #define JET_NONE ((size_t)-1)
-//RS 
-//RS #if defined(__ANDROID__)
-//RS #define JET_TARGET "android"
-//RS #elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
-//RS #define JET_TARGET "ios"
-//RS #elif defined(__APPLE__)
-//RS #define JET_TARGET "macos"
-//RS #elif defined(__FreeBSD__)
-//RS #define JET_TARGET "freebsd"
-//RS #elif defined(__OpenBSD__)
-//RS #define JET_TARGET "openbsd"
-//RS #elif defined(__NetBSD__)
-//RS #define JET_TARGET "netbsd"
-//RS #elif defined(__linux__)
-//RS #define JET_TARGET "linux"
-//RS #else
-//RS #define JET_TARGET "unsupported"
-//RS #endif
-//RS 
-//RS int main(void) {
-//RS     printf("target=%s\n", JET_TARGET);
-//RS     printf("size=%zu\n", sizeof(struct termios));
-//RS     printf("align=%zu\n", _Alignof(struct termios));
-//RS     printf("flag_size=%zu\n", sizeof(((struct termios *)0)->c_lflag));
-//RS     printf("c_iflag=%zu\n", offsetof(struct termios, c_iflag));
-//RS     printf("c_oflag=%zu\n", offsetof(struct termios, c_oflag));
-//RS     printf("c_cflag=%zu\n", offsetof(struct termios, c_cflag));
-//RS     printf("c_lflag=%zu\n", offsetof(struct termios, c_lflag));
-//RS #if defined(__linux__) || defined(__ANDROID__)
-//RS     printf("c_line=%zu\n", offsetof(struct termios, c_line));
-//RS     printf("line_size=%zu\n", sizeof(((struct termios *)0)->c_line));
-//RS #else
-//RS     printf("c_line=%zu\n", JET_NONE);
-//RS     printf("line_size=%zu\n", JET_NONE);
-//RS #endif
-//RS     printf("c_cc=%zu\n", offsetof(struct termios, c_cc));
-//RS     printf("cc_size=%zu\n", sizeof(((struct termios *)0)->c_cc));
-//RS #if defined(__ANDROID__)
-//RS     printf("c_ispeed=%zu\n", JET_NONE);
-//RS     printf("c_ospeed=%zu\n", JET_NONE);
-//RS     printf("speed_size=%zu\n", JET_NONE);
-//RS #else
-//RS     printf("c_ispeed=%zu\n", offsetof(struct termios, c_ispeed));
-//RS     printf("c_ospeed=%zu\n", offsetof(struct termios, c_ospeed));
-//RS     printf("speed_size=%zu\n", sizeof(((struct termios *)0)->c_ispeed));
-//RS #endif
-//RS     printf("nccs=%zu\n", (size_t)NCCS);
-//RS     printf("vmin=%zu\n", (size_t)VMIN);
-//RS     printf("vtime=%zu\n", (size_t)VTIME);
-//RS     printf("tcsanow=%zu\n", (size_t)TCSANOW);
-//RS     printf("echo=%zu\n", (size_t)ECHO);
-//RS     printf("icanon=%zu\n", (size_t)ICANON);
-//RS     return 0;
-//RS }
-//RS "#,
-//RS     )
-//RS     .unwrap();
-//RS 
-//RS     let mut compilers = Vec::new();
-//RS     if let Some(compiler) = std::env::var_os("CC") {
-//RS         compilers.push(compiler);
-//RS     } else {
-//RS         compilers.extend(["cc", "clang", "gcc"].into_iter().map(std::ffi::OsString::from));
-//RS     }
-//RS     let mut errors = Vec::new();
-//RS     for compiler in compilers {
-//RS         let built = Command::new(&compiler)
-//RS             .args(["-std=c11", source.to_str().unwrap(), "-o", binary.to_str().unwrap()])
-//RS             .output()
-//RS             .unwrap_or_else(|error| panic!("failed to invoke C compiler {compiler:?}: {error}"));
-//RS         if built.status.success() {
-//RS             let output = Command::new(&binary)
-//RS                 .output()
-//RS                 .expect("termios C-header probe must execute");
-//RS             assert!(
-//RS                 output.status.success(),
-//RS                 "termios C-header probe failed:\n{}",
-//RS                 String::from_utf8_lossy(&output.stderr)
-//RS             );
-//RS             return parse_probe_output(&output.stdout);
-//RS         }
-//RS         errors.push(format!(
-//RS             "{compiler:?}: {}",
-//RS             String::from_utf8_lossy(&built.stderr)
-//RS         ));
-//RS     }
-//RS     panic!("no C compiler accepted the termios header probe: {errors:?}");
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn run_rust_layout_probe(dir: &Path) -> std::collections::BTreeMap<String, usize> {
-//RS     let term = Path::new(env!("CARGO_MANIFEST_DIR"))
-//RS         .join("crates/jet-codegen/src/Prelude/Term.rs");
-//RS     let include_path = format!("{:?}", term.to_string_lossy());
-//RS     let source = dir.join("termios_rust_probe.rs");
-//RS     let binary = dir.join("termios_rust_probe");
-//RS     fs::write(
-//RS         &source,
-//RS         format!(
-//RS             r#"
-//RS include!({include_path});
-//RS 
-//RS fn main() {{
-//RS     println!("target=rust");
-//RS     let values = jet_term_layout_fingerprint();
-//RS     for (key, value) in [
-//RS         ("size", values[0]),
-//RS         ("align", values[1]),
-//RS         ("flag_size", values[2]),
-//RS         ("c_iflag", values[3]),
-//RS         ("c_oflag", values[4]),
-//RS         ("c_cflag", values[5]),
-//RS         ("c_lflag", values[6]),
-//RS         ("c_line", values[7]),
-//RS         ("c_cc", values[8]),
-//RS         ("c_ispeed", values[9]),
-//RS         ("c_ospeed", values[10]),
-//RS         ("nccs", values[11]),
-//RS         ("vmin", values[12]),
-//RS         ("vtime", values[13]),
-//RS         ("tcsanow", values[14]),
-//RS         ("echo", values[15]),
-//RS         ("icanon", values[16]),
-//RS         ("line_size", values[17]),
-//RS         ("speed_size", values[18]),
-//RS         ("cc_size", values[19]),
-//RS     ] {{
-//RS         println!("{{key}}={{value}}");
-//RS     }}
-//RS }}
-//RS "#
-//RS         ),
-//RS     )
-//RS     .unwrap();
-//RS     let built = Command::new("rustc")
-//RS         .args([
-//RS             "--edition",
-//RS             "2021",
-//RS             source.to_str().unwrap(),
-//RS             "-o",
-//RS             binary.to_str().unwrap(),
-//RS         ])
-//RS         .output()
-//RS         .expect("rustc must build the Term.rs layout probe");
-//RS     assert!(
-//RS         built.status.success(),
-//RS         "rustc rejected the Term.rs layout probe:\n{}",
-//RS         String::from_utf8_lossy(&built.stderr)
-//RS     );
-//RS     let output = Command::new(&binary)
-//RS         .output()
-//RS         .expect("Term.rs layout probe must execute");
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "Term.rs layout probe failed:\n{}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     let (_, values) = parse_probe_output(&output.stdout);
-//RS     values
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn termios_ffi_layout_matches_target_header_and_shared_by_native_tiers() {
-//RS     if !termios_target_supported() {
-//RS         eprintln!(
-//RS             "not applicable: Term.rs rejects target_os={}",
-//RS             std::env::consts::OS
-//RS         );
-//RS         return;
-//RS     }
-//RS 
-//RS     let dir = temp_dir("termios-layout");
-//RS     let (c_target, c_values) = run_c_header_layout_probe(&dir);
-//RS     assert_eq!(
-//RS         c_target,
-//RS         std::env::consts::OS,
-//RS         "the C probe and Rust test must run for the same target"
-//RS     );
-//RS     assert_ne!(c_target, "unsupported", "C header probe target is unsupported");
-//RS     let rust_values = run_rust_layout_probe(&dir);
-//RS     let keys = [
-//RS         "size",
-//RS         "align",
-//RS         "flag_size",
-//RS         "c_iflag",
-//RS         "c_oflag",
-//RS         "c_cflag",
-//RS         "c_lflag",
-//RS         "c_line",
-//RS         "c_cc",
-//RS         "c_ispeed",
-//RS         "c_ospeed",
-//RS         "nccs",
-//RS         "vmin",
-//RS         "vtime",
-//RS         "tcsanow",
-//RS         "echo",
-//RS         "icanon",
-//RS         "line_size",
-//RS         "speed_size",
-//RS         "cc_size",
-//RS     ];
-//RS     assert_eq!(c_values.len(), keys.len(), "C probe metric set drifted");
-//RS     assert_eq!(rust_values.len(), keys.len(), "Rust probe metric set drifted");
-//RS     for key in keys {
-//RS         assert_eq!(
-//RS             c_values.get(key),
-//RS             rust_values.get(key),
-//RS             "Term.rs disagrees with <termios.h> for {key}"
-//RS         );
-//RS     }
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS unsafe extern "C" {
-//RS     fn openpty(
-//RS         master: *mut i32,
-//RS         slave: *mut i32,
-//RS         name: *mut i8,
-//RS         termp: *const u8,
-//RS         winp: *const u8,
-//RS     ) -> i32;
-//RS     fn tcgetattr(fd: i32, termios: *mut u8) -> i32;
-//RS     fn fcntl(fd: i32, command: i32, ...) -> i32;
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS enum PtyRead {
-//RS     Bytes(Vec<u8>),
-//RS     End,
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn open_test_pty() -> (std::fs::File, std::fs::File) {
-//RS     use std::os::fd::FromRawFd;
-//RS     let (mut master_fd, mut slave_fd) = (-1, -1);
-//RS     assert_eq!(
-//RS         unsafe {
-//RS             openpty(
-//RS                 &mut master_fd,
-//RS                 &mut slave_fd,
-//RS                 std::ptr::null_mut(),
-//RS                 std::ptr::null(),
-//RS                 std::ptr::null(),
-//RS             )
-//RS         },
-//RS         0,
-//RS         "openpty must provide a real PTY"
-//RS     );
-//RS     assert!(master_fd >= 0 && slave_fd >= 0, "openpty returned invalid fds");
-//RS     // openpty may leave descriptors inheritable. Close-on-exec keeps the
-//RS     // reader's EIO/EOF boundary tied to the child, not an accidental clone.
-//RS     for fd in [master_fd, slave_fd] {
-//RS         let flags = unsafe { fcntl(fd, 1) };
-//RS         assert!(flags >= 0, "fcntl(F_GETFD) failed for PTY fd {fd}");
-//RS         assert_eq!(unsafe { fcntl(fd, 2, flags | 1) }, 0, "fcntl(FD_CLOEXEC) failed");
-//RS     }
-//RS     (
-//RS         unsafe { std::fs::File::from_raw_fd(master_fd) },
-//RS         unsafe { std::fs::File::from_raw_fd(slave_fd) },
-//RS     )
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn read_pty_termios(
-//RS     slave: &std::fs::File,
-//RS     layout: &std::collections::BTreeMap<String, usize>,
-//RS ) -> Vec<u8> {
-//RS     use std::os::fd::AsRawFd;
-//RS     let size = *layout.get("size").expect("termios size metric");
-//RS     assert!(
-//RS         size > 0 && size <= 256,
-//RS         "termios size outside probe buffer: {size}"
-//RS     );
-//RS     let mut words = vec![0u64; size.div_ceil(std::mem::size_of::<u64>())];
-//RS     let rc = unsafe { tcgetattr(slave.as_raw_fd(), words.as_mut_ptr().cast::<u8>()) };
-//RS     assert_eq!(rc, 0, "tcgetattr failed for PTY inspection");
-//RS     unsafe { std::slice::from_raw_parts(words.as_ptr().cast::<u8>(), size) }.to_vec()
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn termios_lflag(
-//RS     bytes: &[u8],
-//RS     layout: &std::collections::BTreeMap<String, usize>,
-//RS ) -> u64 {
-//RS     let offset = *layout.get("c_lflag").expect("termios c_lflag metric");
-//RS     let width = *layout.get("flag_size").expect("termios flag size metric");
-//RS     assert!(width > 0 && width <= 8 && offset + width <= bytes.len());
-//RS     let mut raw = [0u8; 8];
-//RS     raw[..width].copy_from_slice(&bytes[offset..offset + width]);
-//RS     u64::from_ne_bytes(raw)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn pty_contains(bytes: &[u8], marker: &[u8]) -> bool {
-//RS     !marker.is_empty() && bytes.windows(marker.len()).any(|window| window == marker)
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn wait_for_pty_marker(
-//RS     child: &mut Child,
-//RS     reader: &std::sync::mpsc::Receiver<PtyRead>,
-//RS     transcript: &mut Vec<u8>,
-//RS     marker: &[u8],
-//RS     what: &str,
-//RS     timeout: Duration,
-//RS ) {
-//RS     let deadline = Instant::now() + timeout;
-//RS     while !pty_contains(transcript, marker) {
-//RS         let remaining = deadline.saturating_duration_since(Instant::now());
-//RS         assert!(
-//RS             !remaining.is_zero(),
-//RS             "{what} did not arrive within {:?}; child={:?}; transcript={:?}",
-//RS             timeout,
-//RS             child.try_wait().ok().flatten(),
-//RS             String::from_utf8_lossy(transcript)
-//RS         );
-//RS         match reader.recv_timeout(remaining) {
-//RS             Ok(PtyRead::Bytes(bytes)) => transcript.extend(bytes),
-//RS             Ok(PtyRead::End) => panic!(
-//RS                 "PTY reader reached EOF before {what}; child={:?}; transcript={:?}",
-//RS                 child.try_wait().ok().flatten(),
-//RS                 String::from_utf8_lossy(transcript)
-//RS             ),
-//RS             Err(error) => panic!(
-//RS                 "PTY reader stopped before {what}: {error}; child={:?}; transcript={:?}",
-//RS                 child.try_wait().ok().flatten(),
-//RS                 String::from_utf8_lossy(transcript)
-//RS             ),
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS fn wait_for_pty_mode(
-//RS     slave: &std::fs::File,
-//RS     layout: &std::collections::BTreeMap<String, usize>,
-//RS     predicate: impl Fn(u64) -> bool,
-//RS     what: &str,
-//RS ) -> Vec<u8> {
-//RS     let deadline = Instant::now() + Duration::from_secs(10);
-//RS     loop {
-//RS         let bytes = read_pty_termios(slave, layout);
-//RS         if predicate(termios_lflag(&bytes, layout)) {
-//RS             return bytes;
-//RS         }
-//RS         assert!(
-//RS             Instant::now() < deadline,
-//RS             "{what} did not become observable within 10 seconds"
-//RS         );
-//RS         thread::sleep(Duration::from_millis(5));
-//RS     }
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS const TERM_PTY_PACKAGE: &str = r#"
-//RS name: "termios_pty"
-//RS version: "0.1.0"
-//RS authority: { holds: { allow: [IO, Mem.Alloc] } }
-//RS "#;
-//RS 
-//RS #[cfg(unix)]
-//RS const TERM_PTY_SUCCESS_SOURCE: &str = r#"
-//RS use core.term as term
-//RS 
-//RS fn run() {
-//RS     print("ready")
-//RS     #Live {
-//RS         _pressed :: term.read_key()
-//RS         print("raw-complete")
-//RS     }
-//RS     secret :: term.input_secret("secret> ")
-//RS     print("secret-ok:{secret}")
-//RS }
-//RS "#;
-//RS 
-//RS #[cfg(unix)]
-//RS const TERM_PTY_FAILURE_SOURCE: &str = r#"
-//RS use core.term as term
-//RS 
-//RS fn run() {
-//RS     print("ready")
-//RS     #Live {
-//RS         _pressed :: term.read_key()
-//RS         panic("injected terminal failure")
-//RS     }
-//RS }
-//RS "#;
-//RS 
-//RS #[cfg(unix)]
-//RS fn run_termios_pty_case(
-//RS     mode: &str,
-//RS     source: &str,
-//RS     failure: bool,
-//RS     layout: &std::collections::BTreeMap<String, usize>,
-//RS ) {
-//RS     use std::io::{Read as _, Write as _};
-//RS     use std::process::Stdio;
-//RS     let dir = temp_dir(&format!(
-//RS         "termios-pty-{mode}-{}",
-//RS         if failure { "fail" } else { "ok" }
-//RS     ));
-//RS     let entry = dir.join("main.jet");
-//RS     fs::write(&entry, source).unwrap();
-//RS     fs::write(dir.join("package.jet"), TERM_PTY_PACKAGE).unwrap();
-//RS 
-//RS     let (mut master, slave) = open_test_pty();
-//RS     let inspect = slave.try_clone().expect("PTY inspection clone");
-//RS     let baseline = read_pty_termios(&inspect, layout);
-//RS     let baseline_lflag = termios_lflag(&baseline, layout);
-//RS     let echo = *layout.get("echo").expect("termios ECHO metric") as u64;
-//RS     let icanon = *layout.get("icanon").expect("termios ICANON metric") as u64;
-//RS     assert_ne!(baseline_lflag & echo, 0, "openpty baseline must have ECHO set");
-//RS     assert_ne!(
-//RS         baseline_lflag & icanon,
-//RS         0,
-//RS         "openpty baseline must have ICANON set"
-//RS     );
-//RS 
-//RS     let mut args = vec!["run", "--quiet"];
-//RS     match mode {
-//RS         "release" => args.push("--release"),
-//RS         "default" => args.push("--trace-tiers"),
-//RS         "interpret" => args.push("--interpret"),
-//RS         other => panic!("unknown PTY mode {other}"),
-//RS     }
-//RS     args.push(entry.to_str().unwrap());
-//RS     let mut child = Command::new(env!("CARGO_BIN_EXE_jet"))
-//RS         .args(args)
-//RS         .current_dir(&dir)
-//RS         .env("NO_COLOR", "1")
-//RS         .env("JET_STORE_DIR", dir.join("cache"))
-//RS         .env("JET_RUN_CACHE_DIR", dir.join("run-cache"))
-//RS         .env("JETPACK_ROOT", dir.join("jetpack"))
-//RS         .stdin(Stdio::from(slave.try_clone().unwrap()))
-//RS         .stdout(Stdio::from(slave.try_clone().unwrap()))
-//RS         .stderr(Stdio::from(slave))
-//RS         .spawn()
-//RS         .unwrap_or_else(|error| panic!("{mode} PTY child must start: {error}"));
-//RS 
-//RS     let (tx, rx) = mpsc::channel();
-//RS     let mut reader = master.try_clone().expect("PTY reader clone");
-//RS     let reader_thread = thread::spawn(move || {
-//RS         let mut chunk = [0u8; 4096];
-//RS         loop {
-//RS             match reader.read(&mut chunk) {
-//RS                 Ok(0) => {
-//RS                     let _ = tx.send(PtyRead::End);
-//RS                     break;
-//RS                 }
-//RS                 Ok(count) => {
-//RS                     if tx.send(PtyRead::Bytes(chunk[..count].to_vec())).is_err() {
-//RS                         break;
-//RS                     }
-//RS                 }
-//RS                 Err(error) if error.raw_os_error() == Some(5) => {
-//RS                     let _ = tx.send(PtyRead::End);
-//RS                     break;
-//RS                 }
-//RS                 Err(error) => panic!("PTY reader failed: {error}"),
-//RS             }
-//RS         }
-//RS     });
-//RS     let mut transcript = Vec::new();
-//RS     wait_for_pty_marker(
-//RS         &mut child,
-//RS         &rx,
-//RS         &mut transcript,
-//RS         b"ready",
-//RS         "PTY ready marker",
-//RS         Duration::from_secs(60),
-//RS     );
-//RS     let _raw = wait_for_pty_mode(
-//RS         &inspect,
-//RS         layout,
-//RS         |flags| flags & echo == 0 && flags & icanon == 0,
-//RS         "raw mode",
-//RS     );
-//RS     master.write_all(b"x").expect("write PTY raw key");
-//RS 
-//RS     if failure {
-//RS         let status = wait_bounded(&mut child, &format!("{mode} failure PTY child"));
-//RS         let restored = read_pty_termios(&inspect, layout);
-//RS         assert_eq!(
-//RS             restored, baseline,
-//RS             "{mode} injected failure did not restore the complete termios state"
-//RS         );
-//RS         drop(inspect);
-//RS         loop {
-//RS             match rx.recv_timeout(Duration::from_secs(1)) {
-//RS                 Ok(PtyRead::Bytes(bytes)) => transcript.extend(bytes),
-//RS                 Ok(PtyRead::End) | Err(_) => break,
-//RS             }
-//RS         }
-//RS         reader_thread.join().expect("PTY reader thread");
-//RS         assert!(
-//RS             !status.success(),
-//RS             "{mode} injected failure unexpectedly succeeded"
-//RS         );
-//RS         let output = String::from_utf8_lossy(&transcript);
-//RS         assert!(
-//RS             output.contains("injected terminal failure"),
-//RS             "{mode} failure did not reach the injected runtime stop: {output:?}"
-//RS         );
-//RS         let _ = fs::remove_dir_all(&dir);
-//RS         return;
-//RS     }
-//RS 
-//RS     wait_for_pty_marker(
-//RS         &mut child,
-//RS         &rx,
-//RS         &mut transcript,
-//RS         b"raw-complete",
-//RS         "raw completion marker",
-//RS         Duration::from_secs(10),
-//RS     );
-//RS     let _secret = wait_for_pty_mode(
-//RS         &inspect,
-//RS         layout,
-//RS         |flags| flags & echo == 0 && flags & icanon == baseline_lflag & icanon,
-//RS         "secret echo-off mode",
-//RS     );
-//RS     master.write_all(b"answer\n").expect("write PTY secret");
-//RS     wait_for_pty_marker(
-//RS         &mut child,
-//RS         &rx,
-//RS         &mut transcript,
-//RS         b"secret-ok:answer",
-//RS         "secret success marker",
-//RS         Duration::from_secs(10),
-//RS     );
-//RS     let status = wait_bounded(&mut child, &format!("{mode} success PTY child"));
-//RS     let restored = read_pty_termios(&inspect, layout);
-//RS     assert_eq!(
-//RS         restored, baseline,
-//RS         "{mode} successful terminal use did not restore the complete termios state"
-//RS     );
-//RS     drop(inspect);
-//RS     loop {
-//RS         match rx.recv_timeout(Duration::from_secs(1)) {
-//RS             Ok(PtyRead::Bytes(bytes)) => transcript.extend(bytes),
-//RS             Ok(PtyRead::End) | Err(_) => break,
-//RS         }
-//RS     }
-//RS     reader_thread.join().expect("PTY reader thread");
-//RS     assert!(
-//RS         status.success(),
-//RS         "{mode} successful PTY child failed: {status}"
-//RS     );
-//RS     if mode == "default" {
-//RS         let output = String::from_utf8_lossy(&transcript);
-//RS         assert!(
-//RS             output.contains("tier1 native"),
-//RS             "default run did not execute resident JIT: {output:?}"
-//RS         );
-//RS         assert!(
-//RS             !output.contains("tier0 interp"),
-//RS             "default run deopted to interpreter: {output:?}"
-//RS         );
-//RS     }
-//RS     let output = String::from_utf8_lossy(&transcript);
-//RS     assert!(
-//RS         output.contains("secret-ok:answer"),
-//RS         "{mode} PTY output missing success: {output:?}"
-//RS     );
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn termios_pty_mode_and_restore_are_hostile_proven_across_native_tiers() {
-//RS     if !termios_target_supported() {
-//RS         eprintln!(
-//RS             "not applicable: Term.rs rejects target_os={}",
-//RS             std::env::consts::OS
-//RS         );
-//RS         return;
-//RS     }
-//RS     let dir = temp_dir("termios-pty-layout");
-//RS     let (_, layout) = run_c_header_layout_probe(&dir);
-//RS     let _ = fs::remove_dir_all(&dir);
-//RS     for mode in ["release", "default", "interpret"] {
-//RS         run_termios_pty_case(mode, TERM_PTY_SUCCESS_SOURCE, false, &layout);
-//RS         run_termios_pty_case(mode, TERM_PTY_FAILURE_SOURCE, true, &layout);
-//RS     }
-//RS }
-//RS 
-//RS #[test]
-//RS fn process_pty_reuses_the_canonical_termios_abi() {
-//RS     let term = include_str!("../crates/jet-codegen/src/Prelude/Term.rs");
-//RS     let pty = include_str!("../crates/jet-codegen/src/Prelude/CoreLib/ProcessPty.rs");
-//RS     assert_eq!(
-//RS         term.matches("struct Termios").count(),
-//RS         1,
-//RS         "the canonical terminal Prelude must own the only Termios definition"
-//RS     );
-//RS     assert!(
-//RS         !pty.contains("Termios")
-//RS             && !pty.contains("tcgetattr")
-//RS             && !pty.contains("tcsetattr")
-//RS             && !pty.contains("cfmakeraw"),
-//RS         "the PTY backend must not carry a second termios ABI"
-//RS     );
-//RS     assert!(
-//RS         term.contains("pub(super) fn configure_fd(fd: i32, raw: bool)")
-//RS             && term.contains("fn cfmakeraw(termios: *mut u8)")
-//RS             && pty.contains("super::super::jet_term_configure_fd(slave.as_raw_fd(), raw)?;"),
-//RS         "PTY configuration must use the canonical Termios seam"
-//RS     );
-//RS }
-//RS 
-//RS #[test]
-//RS fn native_os_facts_match_host_and_are_nonempty() {
-//RS     let dir = temp_dir("facts");
-//RS     let binary = compile(
-//RS         &dir,
-//RS         "facts",
-//RS         r#"
-//RS use core.sys as os
-//RS 
-//RS fn run() {
-//RS     print(os.name())
-//RS     print(os.family())
-//RS     print(os.arch())
-//RS     print(os.cpu_count() >= 1)
-//RS     print(os.pid() >= 1)
-//RS     print(os.hostname().len() > 0)
-//RS     print(os.temp_dir().len() > 0)
-//RS     print(os.executable().len() > 0)
-//RS }
-//RS "#,
-//RS     );
-//RS     let output = Command::new(binary).output().unwrap();
-//RS     assert!(
-//RS         output.status.success(),
-//RS         "facts child failed: {}",
-//RS         String::from_utf8_lossy(&output.stderr)
-//RS     );
-//RS     let stdout = String::from_utf8(output.stdout)
-//RS         .unwrap()
-//RS         .replace("\r\n", "\n");
-//RS     let lines: Vec<_> = stdout.lines().collect();
-//RS     assert_eq!(lines.len(), 8, "unexpected facts output: {stdout:?}");
-//RS     assert_eq!(lines[0], std::env::consts::OS);
-//RS     assert_eq!(lines[1], std::env::consts::FAMILY);
-//RS     assert_eq!(lines[2], std::env::consts::ARCH);
-//RS     assert_eq!(&lines[3..], &["true", "true", "true", "true", "true"]);
-//RS }
-//RS 
-//RS #[cfg(unix)]
-//RS #[test]
-//RS fn native_interrupt_runs_ordered_handlers_after_first_panics() {
-//RS     let dir = temp_dir("interrupt");
-//RS     let binary = compile(
-//RS         &dir,
-//RS         "interrupt",
-//RS         r#"
-//RS use core.sys as os
-//RS use core.process as process
-//RS 
-//RS fn run() {
-//RS     os.on_interrupt(() -> { panic("first handler failed") })
-//RS     os.on_interrupt(() -> {
-//RS         print("second")
-//RS         process.exit(0)
-//RS     })
-//RS     print("ready")
-//RS     loop { }
-//RS }
-//RS "#,
-//RS     );
-//RS     let mut child = Command::new(binary)
-//RS         .stdout(Stdio::piped())
-//RS         .stderr(Stdio::piped())
-//RS         .spawn()
-//RS         .unwrap();
-//RS     let (lines_tx, lines_rx) = mpsc::channel();
-//RS     let child_stdout = child.stdout.take().unwrap();
-//RS     thread::spawn(move || {
-//RS         for line in BufReader::new(child_stdout).lines() {
-//RS             if lines_tx.send(line).is_err() {
-//RS                 break;
-//RS             }
-//RS         }
-//RS     });
-//RS     let ready = match lines_rx.recv_timeout(Duration::from_secs(10)) {
-//RS         Ok(line) => line.unwrap(),
-//RS         Err(error) => {
-//RS             let _ = child.kill();
-//RS             let _ = child.wait();
-//RS             panic!("interrupt child did not become ready within 10 seconds: {error}");
-//RS         }
-//RS     };
-//RS     assert_eq!(ready, "ready");
-//RS     unsafe extern "C" {
-//RS         fn kill(pid: i32, signal: i32) -> i32;
-//RS     }
-//RS     assert_eq!(unsafe { kill(child.id() as i32, 2) }, 0);
-//RS     let status = wait_bounded(&mut child, "interrupt child");
-//RS     assert!(status.success(), "interrupt child failed: {status}");
-//RS     let mut stderr = String::new();
-//RS     child
-//RS         .stderr
-//RS         .take()
-//RS         .unwrap()
-//RS         .read_to_string(&mut stderr)
-//RS         .unwrap();
-//RS     let second = lines_rx
-//RS         .recv_timeout(Duration::from_secs(1))
-//RS         .expect("second handler produced no output")
-//RS         .unwrap();
-//RS     assert_eq!(second, "second");
-//RS     assert!(lines_rx.try_recv().is_err(), "unexpected handler output");
-//RS     assert!(
-//RS         stderr.contains("panic: first handler failed"),
-//RS         "first handler panic lost its interrupt boundary diagnostic: {stderr:?}"
-//RS     );
-//RS }
-// END-PORT-PENDING 1119 tests/os_native.rs:1-837
+use std.[fs, env, thread]
+use std.io.[BufReader, Read, Write]
+use std.process.[Child, Command, ExitStatus, Stdio]
+use std.sync.mpsc
+use std.time.[Duration, Instant]
+use core.path.OSPath
+use core.mem
+use core.sys as sys
+use Common as common
 
+// Rust: tests/os_native.rs:11
+// GATE #4494: retained native compiler artifact and real executable; no Rust execution bridge.
+pub fn compile(dir: &OSPath, name: String, src: String) -> OSPath {
+    source :: dir.join("{name}.jet")
+    fs.write(&source, src).unwrap()
+    binary :: dir.join("{name}{env.consts.EXE_SUFFIX}")
+    common.compile_entry_native(&source, &binary, "O2").unwrap_or_else(fn(diags) {
+        panic("front end rejected fixture:\n{common.render_compile_diagnostics(&source, src, &diags)}")
+    })
+    binary
+}
+
+// Rust: tests/os_native.rs:42
+pub fn wait_bounded(child: &Child, what: String) -> ExitStatus {
+    deadline :: Instant.now() + Duration.from_secs(10)
+    loop {
+        if child.try_wait().unwrap() is Some(status) { return status }
+        if Instant.now() >= deadline {
+            _ :: child.kill()
+            _ :: child.wait()
+            panic("{what} did not finish within 10 seconds")
+        }
+        thread.sleep(Duration.from_millis(10))
+    }
+}
+
+// Rust: tests/os_native.rs:57
+pub fn temp_dir(label: String) -> OSPath {
+    dir :: env.temp_dir().join("jet-os-native-{label}-{std.process.id()}-{thread.current().id():?}")
+    fs.create_dir_all(&dir).unwrap()
+    dir
+}
+
+// Rust: tests/os_native.rs:68
+// GATE #4483: selected target, not build-host cfg.
+pub fn termios_target_supported() -> Bool {
+    if sys.selected_family() != "unix" { return false }
+    ["linux", "android", "macos", "ios", "freebsd", "openbsd", "netbsd"].contains(sys.selected_os())
+}
+
+// Rust: tests/os_native.rs:81
+pub fn parse_probe_output(output: &[U8]) -> (String, [String: USize]) {
+    text :: String.from_utf8(output.to_vec()).expect("termios probe emitted non-UTF-8")
+    target := None
+    values := [String: USize]{}
+    for line in text.lines() {
+        (key, value) :: line.split_once('=').unwrap_or_else(fn() { panic("malformed termios probe row: {line:?}") })
+        if key == "target" { target = Some(value.to_string()) }
+        else {
+            values.insert(key.to_string(), value.parse<USize>().unwrap_or_else(fn(_) { panic("non-numeric termios probe row: {line:?}") }))
+        }
+    }
+    (target.unwrap_or_else(fn() { panic("termios probe did not report its target: {text:?}") }), values)
+}
+
+// Rust: tests/os_native.rs:107
+pub fn run_c_header_layout_probe(dir: &OSPath) -> (String, [String: USize]) {
+    source :: dir.join("termios_header_probe.c")
+    binary :: dir.join("termios_header_probe")
+    fs.write(&source, """
+#include <stddef.h>
+#include <stdio.h>
+#include <termios.h>
+#define JET_NONE ((size_t)-1)
+#if defined(__ANDROID__)
+#define JET_TARGET "android"
+#elif defined(__ENVIRONMENT_IPHONE_OS_VERSION_MIN_REQUIRED__)
+#define JET_TARGET "ios"
+#elif defined(__APPLE__)
+#define JET_TARGET "macos"
+#elif defined(__FreeBSD__)
+#define JET_TARGET "freebsd"
+#elif defined(__OpenBSD__)
+#define JET_TARGET "openbsd"
+#elif defined(__NetBSD__)
+#define JET_TARGET "netbsd"
+#elif defined(__linux__)
+#define JET_TARGET "linux"
+#else
+#define JET_TARGET "unsupported"
+#endif
+int main(void) {
+    printf("target=%s\n", JET_TARGET);
+    printf("size=%zu\n", sizeof(struct termios));
+    printf("align=%zu\n", _Alignof(struct termios));
+    printf("flag_size=%zu\n", sizeof(((struct termios *)0)->c_lflag));
+    printf("c_iflag=%zu\n", offsetof(struct termios, c_iflag));
+    printf("c_oflag=%zu\n", offsetof(struct termios, c_oflag));
+    printf("c_cflag=%zu\n", offsetof(struct termios, c_cflag));
+    printf("c_lflag=%zu\n", offsetof(struct termios, c_lflag));
+#if defined(__linux__) || defined(__ANDROID__)
+    printf("c_line=%zu\n", offsetof(struct termios, c_line));
+    printf("line_size=%zu\n", sizeof(((struct termios *)0)->c_line));
+#else
+    printf("c_line=%zu\n", JET_NONE);
+    printf("line_size=%zu\n", JET_NONE);
+#endif
+    printf("c_cc=%zu\n", offsetof(struct termios, c_cc));
+    printf("cc_size=%zu\n", sizeof(((struct termios *)0)->c_cc));
+#if defined(__ANDROID__)
+    printf("c_ispeed=%zu\n", JET_NONE);
+    printf("c_ospeed=%zu\n", JET_NONE);
+    printf("speed_size=%zu\n", JET_NONE);
+#else
+    printf("c_ispeed=%zu\n", offsetof(struct termios, c_ispeed));
+    printf("c_ospeed=%zu\n", offsetof(struct termios, c_ospeed));
+    printf("speed_size=%zu\n", sizeof(((struct termios *)0)->c_ispeed));
+#endif
+    printf("nccs=%zu\n", (size_t)NCCS);
+    printf("vmin=%zu\n", (size_t)VMIN);
+    printf("vtime=%zu\n", (size_t)VTIME);
+    printf("tcsanow=%zu\n", (size_t)TCSANOW);
+    printf("echo=%zu\n", (size_t)ECHO);
+    printf("icanon=%zu\n", (size_t)ICANON);
+    return 0;
+}
+""").unwrap()
+    compilers := []
+    if env.var_os("CC") is Some(compiler) { compilers.push(compiler) }
+    else { compilers.extend(["cc", "clang", "gcc"].map(fn(s) { std.ffi.OsString.from(s) })) }
+    errors := []
+    for compiler in compilers {
+        built :: Command.new(&compiler).args(["-std=c11", source.to_str().unwrap(), "-o", binary.to_str().unwrap()]).output().unwrap_or_else(fn(error) {
+            panic("failed to invoke C compiler {compiler:?}: {error}")
+        })
+        if built.status.success() {
+            output :: Command.new(&binary).output().expect("termios C-header probe must execute")
+            assert(output.status.success(), "termios C-header probe failed:\n{String.from_utf8_lossy(&output.stderr)}")
+            return parse_probe_output(&output.stdout)
+        }
+        errors.push("{compiler:?}: {String.from_utf8_lossy(&built.stderr)}")
+    }
+    panic("no C compiler accepted the termios header probe: {errors:?}")
+}
+
+// Rust: tests/os_native.rs:208
+// Rust remains a peer comparator for the canonical terminal layout.
+pub fn run_rust_layout_probe(dir: &OSPath) -> [String: USize] {
+    term :: OSPath.new(env.manifest_dir()).join("crates/jet-codegen/src/Prelude/Term.rs")
+    include_path :: "{term.to_string_lossy():?}"
+    source :: dir.join("termios_rust_probe.rs")
+    binary :: dir.join("termios_rust_probe")
+    probe := "include!({include_path});\nfn main() {{\n    println!(\"target=rust\");\n    let values = jet_term_layout_fingerprint();\n"
+    keys :: ["size", "align", "flag_size", "c_iflag", "c_oflag", "c_cflag", "c_lflag", "c_line", "c_cc", "c_ispeed", "c_ospeed", "nccs", "vmin", "vtime", "tcsanow", "echo", "icanon", "line_size", "speed_size", "cc_size"]
+    for (index, key) in keys.iter().enumerate() {
+        probe.push_str("    println!(\"{key}={{}}\", values[{index}]);\n")
+    }
+    probe.push_str("}\n")
+    fs.write(&source, probe).unwrap()
+    built :: Command.new("rustc").args(["--edition", "2021", source.to_str().unwrap(), "-o", binary.to_str().unwrap()]).output().expect("rustc must build the Term.rs layout probe")
+    assert(built.status.success(), "rustc rejected the Term.rs layout probe:\n{String.from_utf8_lossy(&built.stderr)}")
+    output :: Command.new(&binary).output().expect("Term.rs layout probe must execute")
+    assert(output.status.success(), "Term.rs layout probe failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    (_, values) :: parse_probe_output(&output.stdout)
+    values
+}
+
+// Rust: tests/os_native.rs:335
+// GATE #4494: real POSIX ABI, raw buffers and retained descriptor ownership.
+#FFI(c)
+fn openpty(master: &I32, slave: &I32, name: mem.Ptr<I8>, termp: mem.Ptr<U8>, winp: mem.Ptr<U8>) -> I32
+// Rust: tests/os_native.rs:342
+#FFI(c)
+fn tcgetattr(fd: I32, termios: mem.Ptr<U8>) -> I32
+// Rust: tests/os_native.rs:343
+#FFI(c)
+fn fcntl(fd: I32, command: I32, ...) -> I32
+// Rust: tests/os_native.rs:347
+pub enum PtyRead { Bytes([U8]), End }
+
+// Rust: tests/os_native.rs:353
+pub fn open_test_pty() -> (fs.File, fs.File) {
+    master_fd := I32(-1)
+    slave_fd := I32(-1)
+    #Unsafe("openpty writes live fd slots; no optional name, termios or window buffer supplied") {
+        assert_eq(openpty(&master_fd, &slave_fd, mem.Ptr<I8>.null(), mem.Ptr<U8>.null(), mem.Ptr<U8>.null()), 0, "openpty must provide a real PTY")
+    }
+    assert(master_fd >= 0 && slave_fd >= 0, "openpty returned invalid fds")
+    // Tie reader EIO/EOF to the child instead of accidental inheritable clones.
+    for fd in [master_fd, slave_fd] {
+        #Unsafe("fcntl operates on fresh openpty descriptors and sets close-on-exec") {
+            flags :: fcntl(fd, 1)
+            assert(flags >= 0, "fcntl(F_GETFD) failed for PTY fd {fd}")
+            assert_eq(fcntl(fd, 2, flags | 1), 0, "fcntl(FD_CLOEXEC) failed")
+        }
+    }
+    #Unsafe("each fresh descriptor transfers exactly once to its File owner") {
+        (fs.File.from_raw_fd(master_fd), fs.File.from_raw_fd(slave_fd))
+    }
+}
+
+// Rust: tests/os_native.rs:384
+pub fn read_pty_termios(slave: &fs.File, layout: &[String: USize]) -> [U8] {
+    size :: layout.get("size").expect("termios size metric")
+    assert(size > 0 && size <= 256, "termios size outside probe buffer: {size}")
+    words := [U64(0); size.div_ceil(mem.size_of<U64>())]
+    #Unsafe("aligned U64 storage covers the probed termios size; copy only initialized termios bytes") {
+        rc :: tcgetattr(slave.as_raw_fd(), words.as_mut_ptr().cast<U8>())
+        assert_eq(rc, 0, "tcgetattr failed for PTY inspection")
+        std.slice.from_raw_parts(words.as_ptr().cast<U8>(), size).to_vec()
+    }
+}
+
+// Rust: tests/os_native.rs:401
+pub fn termios_lflag(bytes: &[U8], layout: &[String: USize]) -> U64 {
+    offset :: layout.get("c_lflag").expect("termios c_lflag metric")
+    width :: layout.get("flag_size").expect("termios flag size metric")
+    assert(width > 0 && width <= 8 && offset + width <= bytes.len())
+    raw := [U8(0); 8]
+    raw[..width].copy_from_slice(&bytes[offset..offset + width])
+    U64.from_ne_bytes(raw)
+}
+
+// Rust: tests/os_native.rs:414
+pub fn pty_contains(bytes: &[U8], marker: &[U8]) -> Bool {
+    !marker.is_empty() && bytes.windows(marker.len()).any(fn(window) { window == marker })
+}
+
+// Rust: tests/os_native.rs:419
+pub fn wait_for_pty_marker(child: &Child, reader: &mpsc.Receiver<PtyRead>, transcript: &[U8], marker: &[U8], what: String, timeout: Duration) -> Unit {
+    deadline :: Instant.now() + timeout
+    while !pty_contains(transcript, marker) {
+        remaining :: deadline.saturating_duration_since(Instant.now())
+        assert(!remaining.is_zero(), "{what} did not arrive within {timeout:?}; child={child.try_wait().ok().flatten():?}; transcript={String.from_utf8_lossy(transcript):?}")
+        match reader.recv_timeout(remaining) {
+            .Ok(.Bytes(bytes)) -> transcript.extend(bytes)
+            .Ok(.End) -> panic("PTY reader reached EOF before {what}; child={child.try_wait().ok().flatten():?}; transcript={String.from_utf8_lossy(transcript):?}")
+            .Err(error) -> panic("PTY reader stopped before {what}: {error}; child={child.try_wait().ok().flatten():?}; transcript={String.from_utf8_lossy(transcript):?}")
+        }
+    }
+}
+
+// Rust: tests/os_native.rs:454
+pub fn wait_for_pty_mode(slave: &fs.File, layout: &[String: USize], predicate: fn(U64) -> Bool, what: String) -> [U8] {
+    deadline :: Instant.now() + Duration.from_secs(10)
+    loop {
+        bytes :: read_pty_termios(slave, layout)
+        if predicate(termios_lflag(&bytes, layout)) { return bytes }
+        assert(Instant.now() < deadline, "{what} did not become observable within 10 seconds")
+        thread.sleep(Duration.from_millis(5))
+    }
+}
+
+// Rust: tests/os_native.rs:475
+pub TERM_PTY_PACKAGE :: """
+name: "termios_pty"
+version: "0.1.0"
+authority: { holds: { allow: [IO, Mem.Alloc] } }
+"""
+// Rust: tests/os_native.rs:482
+pub TERM_PTY_SUCCESS_SOURCE :: """
+use core.term as term
+fn run() -> {
+    print("ready")
+    #Live {
+        _pressed :: term.read_key()
+        print("raw-complete")
+    }
+    secret :: term.input_secret("secret> ")
+    print("secret-ok:{secret}")
+}
+"""
+// Rust: tests/os_native.rs:497
+pub TERM_PTY_FAILURE_SOURCE :: """
+use core.term as term
+fn run() -> {
+    print("ready")
+    #Live {
+        _pressed :: term.read_key()
+        panic("injected terminal failure")
+    }
+}
+"""
+
+// Rust: tests/os_native.rs:510
+// GATE #4494: child stdio owns real PTY descriptors; native thread/channel reader.
+pub fn run_termios_pty_case(mode: String, source: String, failure: Bool, layout: &[String: USize]) -> Unit {
+    kind :: if failure -> "fail" else -> "ok"
+    dir :: temp_dir("termios-pty-{mode}-{kind}")
+    entry :: dir.join("main.jet")
+    fs.write(&entry, source).unwrap()
+    fs.write(dir.join("package.jet"), TERM_PTY_PACKAGE).unwrap()
+    (master, slave) := open_test_pty()
+    inspect :: slave.try_clone().expect("PTY inspection clone")
+    baseline :: read_pty_termios(&inspect, layout)
+    baseline_lflag :: termios_lflag(&baseline, layout)
+    echo :: layout.get("echo").expect("termios ECHO metric") as U64
+    icanon :: layout.get("icanon").expect("termios ICANON metric") as U64
+    assert_ne(baseline_lflag & echo, 0, "openpty baseline must have ECHO set")
+    assert_ne(baseline_lflag & icanon, 0, "openpty baseline must have ICANON set")
+    args := ["run", "--quiet"]
+    // Retired release/default/interpret tiers become native O2/O1/O0 behavioral journeys.
+    match mode {
+        "O2" -> args.push("-O2")
+        "O1" -> args.push("-O1")
+        "O0" -> args.push("-O0")
+        other -> panic("unknown PTY mode {other}")
+    }
+    args.push(entry.to_str().unwrap())
+    child := Command.new(env.cargo_bin_exe("jet")).args(args).current_dir(&dir)
+        .env("NO_COLOR", "1").env("JET_STORE_DIR", dir.join("cache"))
+        .env("JET_RUN_CACHE_DIR", dir.join("run-cache")).env("JETPACK_ROOT", dir.join("jetpack"))
+        .stdin(Stdio.from(slave.try_clone().unwrap())).stdout(Stdio.from(slave.try_clone().unwrap()))
+        .stderr(Stdio.from(^slave)).spawn().unwrap_or_else(fn(error) { panic("{mode} PTY child must start: {error}") })
+    (tx, rx) :: mpsc.channel<PtyRead>()
+    reader := master.try_clone().expect("PTY reader clone")
+    reader_thread :: thread.spawn(fn() {
+        chunk := [U8(0); 4096]
+        loop {
+            match reader.read(&chunk) {
+                .Ok(0) -> { _ :: tx.send(.End); break }
+                .Ok(count) -> { if tx.send(.Bytes(chunk[..count].to_vec())).is_err() { break } }
+                .Err(error) -> {
+                    if error.raw_os_error() == Some(5) { _ :: tx.send(.End); break }
+                    panic("PTY reader failed: {error}")
+                }
+            }
+        }
+    })
+    transcript := []
+    wait_for_pty_marker(&child, &rx, &transcript, b"ready", "PTY ready marker", Duration.from_secs(60))
+    _raw :: wait_for_pty_mode(&inspect, layout, fn(flags) { flags & echo == 0 && flags & icanon == 0 }, "raw mode")
+    master.write_all(b"x").expect("write PTY raw key")
+    if failure {
+        status :: wait_bounded(&child, "{mode} failure PTY child")
+        restored :: read_pty_termios(&inspect, layout)
+        assert_eq(restored, baseline, "{mode} injected failure did not restore the complete termios state")
+        drop(^inspect)
+        loop {
+            match rx.recv_timeout(Duration.from_secs(1)) {
+                .Ok(.Bytes(bytes)) -> transcript.extend(bytes)
+                .Ok(.End) -> break
+                .Err(_) -> break
+            }
+        }
+        reader_thread.join().expect("PTY reader thread")
+        assert(!status.success(), "{mode} injected failure unexpectedly succeeded")
+        output :: String.from_utf8_lossy(&transcript)
+        assert(output.contains("injected terminal failure"), "{mode} failure did not reach the injected runtime stop: {output:?}")
+        _ :: fs.remove_dir_all(&dir)
+        return
+    }
+    wait_for_pty_marker(&child, &rx, &transcript, b"raw-complete", "raw completion marker", Duration.from_secs(10))
+    _secret :: wait_for_pty_mode(&inspect, layout, fn(flags) { flags & echo == 0 && flags & icanon == baseline_lflag & icanon }, "secret echo-off mode")
+    master.write_all(b"answer\n").expect("write PTY secret")
+    wait_for_pty_marker(&child, &rx, &transcript, b"secret-ok:answer", "secret success marker", Duration.from_secs(10))
+    status :: wait_bounded(&child, "{mode} success PTY child")
+    restored :: read_pty_termios(&inspect, layout)
+    assert_eq(restored, baseline, "{mode} successful terminal use did not restore the complete termios state")
+    drop(^inspect)
+    loop {
+        match rx.recv_timeout(Duration.from_secs(1)) {
+            .Ok(.Bytes(bytes)) -> transcript.extend(bytes)
+            .Ok(.End) -> break
+            .Err(_) -> break
+        }
+    }
+    reader_thread.join().expect("PTY reader thread")
+    assert(status.success(), "{mode} successful PTY child failed: {status}")
+    output :: String.from_utf8_lossy(&transcript)
+    assert(output.contains("secret-ok:answer"), "{mode} PTY output missing success: {output:?}")
+    _ :: fs.remove_dir_all(&dir)
+}
+
+// Rust: tests/os_native.rs:815
+#FFI(c)
+pub fn kill(pid: I32, signal: I32) -> I32

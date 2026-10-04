@@ -1,0 +1,22 @@
+use std.[fs, env, process]
+use jet_foundation.Tests.Integration.DataBridges.build_and_run_env
+// Rust: tests/data_hostile.rs:8
+pub fn repo_root() -> OSPath { OSPath(env.var("CARGO_MANIFEST_DIR").unwrap()) }
+// Rust: tests/data_hostile.rs:12
+pub fn build_and_run(dir: &OSPath, name: String, src: String) -> (Int, String, String) {
+    build_and_run_env(dir, name, src, &[])
+}
+// Rust: tests/data_hostile.rs:57
+pub fn assert_example_matches_golden(stem: String) -> {
+    root :: repo_root()
+    src :: fs.read_to_string(root.join("Examples/features/tooling/{stem}.jet")).unwrap_or_else(fn(e) { panic("read {stem}.jet: {e}") })
+    expected :: fs.read_to_string(root.join("Examples/features/expected/tooling/{stem}.out")).unwrap_or_else(fn(e) { panic("read {stem}.out: {e}") })
+    dir :: env.temp_dir().join("jet_data_hostile_{stem}_{process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    (code, stdout, stderr) :: build_and_run(&dir, stem, &src)
+    assert_eq(code, 0, "{stem} failed: {stderr}")
+    assert_eq(stdout, expected, "{stem} stdout drifted from golden")
+    assert_eq(stderr, "", "{stem} unexpected stderr: {stderr}")
+    _ :: fs.remove_dir_all(&dir)
+}

@@ -1,1346 +1,493 @@
-// PORT-PENDING 2111 crates-jet-foundation-src-syntax-highlights: crates/jet-foundation/src/Syntax/highlights.rs:1-1342
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS /// D-HL1: generated editor grammars mark their owned sections with these
-//RS /// comments. Tests compare the committed section against fresh renderer output.
-//RS pub const HIGHLIGHT_GENERATED_START: &str = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS";
-//RS pub const HIGHLIGHT_GENERATED_END: &str = "END GENERATED JET SYNTAX HIGHLIGHTS";
-//RS 
-//RS /// D-HL1: lexical highlight class for every token the generated grammars own.
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-//RS pub enum HighlightClass {
-//RS     KeywordControl,
-//RS     KeywordDeclaration,
-//RS     KeywordOwnership,
-//RS     KeywordOther,
-//RS     Literal,
-//RS     TypeBuiltin,
-//RS     Builtin,
-//RS     MarkerRule,
-//RS     Operator,
-//RS     Sigil,
-//RS }
-//RS 
-//RS #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-//RS pub struct HighlightToken {
-//RS     pub text: &'static str,
-//RS     pub class: HighlightClass,
-//RS }
-//RS 
-//RS impl HighlightClass {
-//RS     pub fn textmate_scope(self) -> &'static str {
-//RS         match self {
-//RS             HighlightClass::KeywordControl => "keyword.control.jet",
-//RS             HighlightClass::KeywordDeclaration => "keyword.declaration.jet",
-//RS             HighlightClass::KeywordOwnership => "keyword.other.ownership.jet",
-//RS             HighlightClass::KeywordOther => "keyword.other.jet",
-//RS             HighlightClass::Literal => "constant.language.jet",
-//RS             HighlightClass::TypeBuiltin => "storage.type.builtin.jet",
-//RS             HighlightClass::Builtin => "support.function.builtin.jet",
-//RS             HighlightClass::MarkerRule => "entity.name.tag.rule.jet",
-//RS             HighlightClass::Operator => "keyword.operator.jet",
-//RS             HighlightClass::Sigil => "keyword.operator.sigil.jet",
-//RS         }
-//RS     }
-//RS 
-//RS     pub fn zed_capture(self) -> &'static str {
-//RS         match self {
-//RS             HighlightClass::KeywordControl => "@keyword.control",
-//RS             HighlightClass::KeywordDeclaration
-//RS             | HighlightClass::KeywordOwnership
-//RS             | HighlightClass::KeywordOther => "@keyword",
-//RS             HighlightClass::Literal => "@constant.builtin",
-//RS             HighlightClass::TypeBuiltin => "@type.builtin",
-//RS             HighlightClass::Builtin => "@function.builtin",
-//RS             HighlightClass::MarkerRule => "@attribute",
-//RS             HighlightClass::Operator | HighlightClass::Sigil => "@operator",
-//RS         }
-//RS     }
-//RS 
-//RS     fn label(self) -> &'static str {
-//RS         match self {
-//RS             HighlightClass::KeywordControl => "keyword.control",
-//RS             HighlightClass::KeywordDeclaration => "keyword.declaration",
-//RS             HighlightClass::KeywordOwnership => "keyword.ownership",
-//RS             HighlightClass::KeywordOther => "keyword.other",
-//RS             HighlightClass::Literal => "literal",
-//RS             HighlightClass::TypeBuiltin => "type.builtin",
-//RS             HighlightClass::Builtin => "builtin",
-//RS             HighlightClass::MarkerRule => "marker.rule",
-//RS             HighlightClass::Operator => "operator",
-//RS             HighlightClass::Sigil => "sigil",
-//RS         }
-//RS     }
-//RS }
-//RS 
-//RS /// D-HL1: one source of truth for lexical editor highlighting. FOREIGN_* words
-//RS /// stay out; teaching diagnostics are not colored as live syntax.
-//RS pub const JET_HIGHLIGHT_TOKENS: &[HighlightToken] = &[
-//RS     // Control flow.
-//RS     HighlightToken {
-//RS         text: KW_IF,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_ELSE,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_LOOP,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_IN,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_BREAK,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_RETURN,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_DEFER,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     // D-CONC-SPAWN1=D: only `task` is reserved; qualified selectors remain
-//RS     // spellings of the same surface without reserving bare `all`/`race`/etc.
-//RS     HighlightToken {
-//RS         text: KW_CONC_TASK,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_FREEZE,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_ALL,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_ANY,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_GROUP,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_RACE,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     // D-CONC-CHAN2=D: readiness timeout arm.
-//RS     HighlightToken {
-//RS         text: READINESS_AFTER,
-//RS         class: HighlightClass::KeywordControl,
-//RS     },
-//RS     // Declarations and contextual structure.
-//RS     HighlightToken {
-//RS         text: KW_FN,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_PUB,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_PRIV,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_USE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_AS,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_EXTERN,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_RUST,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_MODULE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_STRUCT,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_ENUM,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_ALIAS,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_IMPL,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_POLICY,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_WRAP,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_TRAIT,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_TAG,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_EFFECT_DECL,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_DERIVE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     // D-VERDICT-1308-1: retired `comptime` is teaching-only, not highlighted.
-//RS     HighlightToken {
-//RS         text: KW_DISTINCT,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_MIGRATION,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_RENAME,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_ADD,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_REMOVE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_CHANGE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_VIA,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_UNSAFE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_IMPURE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_REACTIVE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: CTX_BLOCK,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_TRANSACT,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_TEST,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_TODO,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_SCRUB,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_STATE,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_TRANSITION,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_STATE_DECL,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_PROTOCOL,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_MARKER,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: PROTO_CLIENT,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: PROTO_SERVER,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_VALIDATE_BLOCK,
-//RS         class: HighlightClass::KeywordDeclaration,
-//RS     },
-//RS     // D-PREP-SURFACE2=A / D-META-ROOT3=A / D-BUILD-FACT3=A: contextual prep,
-//RS     // the subjectless `$` fact roots, and the metadata query roots that have
-//RS     // no ratified `$` root yet.
-//RS     HighlightToken {
-//RS         text: KW_PREP,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: FACT_ROOT_BUILD,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: FACT_ROOT_PACKAGE,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: FACT_ROOT_PHASE,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: FACT_ROOT_PROGRAM,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: META_QUERY_SOURCE,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: META_QUERY_TYPES,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     // Ownership / builtins.
-//RS     HighlightToken {
-//RS         text: KW_SELF,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_UNINIT,
-//RS         class: HighlightClass::KeywordOwnership,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_IT,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: KW_SHARED,
-//RS         class: HighlightClass::KeywordOther,
-//RS     },
-//RS     HighlightToken {
-//RS         text: BUILTIN_ASSERT,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: BUILTIN_ASSERT_EQ,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: BUILTIN_PRINT,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: BUILTIN_INPUT,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: VALIDATE_CHECK_FN,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: BUILTIN_CHANNEL,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_JOIN,
-//RS         class: HighlightClass::Builtin,
-//RS     },
-//RS     // Literals.
-//RS     HighlightToken {
-//RS         text: LIT_TRUE,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     HighlightToken {
-//RS         text: LIT_FALSE,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     HighlightToken {
-//RS         text: LIT_NULL,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     HighlightToken {
-//RS         text: LIT_VALUE,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_FAILURE_CANCELLED,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_FAILURE_DEADLINE_BLOWN,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TASK_FAILURE_PANICKED,
-//RS         class: HighlightClass::Literal,
-//RS     },
-//RS     // Built-in types.
-//RS     HighlightToken {
-//RS         text: TYPE_INT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_FLOAT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_BOOL,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_STRING,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_ERR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_UNIT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_CHAR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SHARED,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SHARED_SNAPSHOT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SHARED_REVISION_ERROR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SHARED_GUARD,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SHARED_WEAK,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_CONDITION,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_TASK,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_RECEIVER,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SENDER,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_TASK_FAILURE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_BUDGET,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_BUDGET_APPLIES,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_HASH_MAP,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_BTREE_MAP,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_QUEUE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SET,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_RANK,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_PRIORITY_QUEUE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_LRU,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_BITS,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_BYTES,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_STREAM,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_ITER,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_VIEW_ITER,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SIGNAL,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_DERIVED,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_COMPUTED,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_EVENT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_HOOK,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_SUBSCRIPTION,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_EVENT_SCOPE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_EVENT_POLICY,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_EVENT_TRACE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_WATCH_HANDLE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_WATCH_SET,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_WATCH_EVENT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_EFFECT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_MEASUREMENT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_MEMO_STATS,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_COMPLEX,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_PTR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_DECIMAL,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: DURATION_TYPE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_KEY,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_IO_ERROR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_INSTANT,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_UTF8_ERROR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_JSON,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_ENCODING_ERROR,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_DATA,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     // TYPE_DATA_JSON shares the "JSON" spelling with TYPE_JSON (D-ACRO-LEX1=A).
-//RS     HighlightToken {
-//RS         text: TYPE_DATA_TOML,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_DATA_YAML,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_DATA_CSV,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_DB_VALUE,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_I8,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_I16,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_I32,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_I64,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_U8,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_U16,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_U32,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_U64,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_F32,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_F64,
-//RS         class: HighlightClass::TypeBuiltin,
-//RS     },
-//RS     // Operators and sigils.
-//RS     HighlightToken {
-//RS         text: SIGIL_BIND_IMMUT,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_BIND_MUT,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: COMPTIME_MARK,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_FENCE_OPEN,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_FENCE_CLOSE,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_MOVE,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_WRITE,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_COPY,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: SIGIL_SPREAD,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     // D-SPREAD1=A: member-spread sigil `prefix.[a, b]`.
-//RS     HighlightToken {
-//RS         text: OP_MEMBER_SPREAD,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_TRY_SUFFIX,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_RANGE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_RANGE_EXCLUSIVE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_UNIFIED_ARROW,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PLUS,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_MINUS,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_STAR,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SLASH,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     // D-FLOORDIV1=A: floor division and its compound.
-//RS     HighlightToken {
-//RS         text: OP_SLASH_PERCENT,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SLASH_PERCENT_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PERCENT,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     // D-MODSEM1=A: the truncated remainder and its compound.
-//RS     HighlightToken {
-//RS         text: OP_PERCENT_PERCENT,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PERCENT_PERCENT_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PIPE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SHL,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SHR,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_AND,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_OR,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_NOT,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_NE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_LT,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_GT,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_LE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_GE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_COMPARE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PLUS_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_MINUS_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_STAR_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SLASH_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PERCENT_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_AMP_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_PIPE_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_CARET_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     // D-XORSPELL1=A: exclusive-or and its compound.
-//RS     HighlightToken {
-//RS         text: OP_TILDE_PIPE,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_TILDE_PIPE_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SHL_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_SHR_EQ,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_FALLBACK,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_OPTIONAL_CHAIN,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: OP_NAMED_CTOR,
-//RS         class: HighlightClass::Operator,
-//RS     },
-//RS     HighlightToken {
-//RS         text: TYPE_FIXED_SIZE_SEP,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: MARKER_PREFIX,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS     HighlightToken {
-//RS         text: RULE_PREFIX,
-//RS         class: HighlightClass::Sigil,
-//RS     },
-//RS ];
-//RS 
-//RS pub fn highlighted_tokens_sorted() -> Vec<HighlightToken> {
-//RS     let mut tokens = JET_HIGHLIGHT_TOKENS.to_vec();
-//RS     for row in crate::Policy::APPLIED_RULES
-//RS         .iter()
-//RS         .filter(|row| matches!(row.status, crate::Policy::RuleStatus::Active))
-//RS     {
-//RS         tokens.push(HighlightToken {
-//RS             text: row.name,
-//RS             class: HighlightClass::MarkerRule,
-//RS         });
-//RS     }
-//RS     tokens.sort_by(|a, b| a.class.cmp(&b.class).then(a.text.cmp(b.text)));
-//RS     tokens.dedup_by(|a, b| a.text == b.text && a.class == b.class);
-//RS     tokens
-//RS }
-//RS 
-//RS pub fn render_vscode_generated_highlights() -> String {
-//RS     let mut out = String::new();
-//RS     out.push_str(&format!(
-//RS         "      \"comment\": \"{}\",\n",
-//RS         HIGHLIGHT_GENERATED_START
-//RS     ));
-//RS     out.push_str("      \"patterns\": [\n");
-//RS     let classes = [
-//RS         HighlightClass::KeywordControl,
-//RS         HighlightClass::KeywordDeclaration,
-//RS         HighlightClass::KeywordOwnership,
-//RS         HighlightClass::KeywordOther,
-//RS         HighlightClass::Literal,
-//RS         HighlightClass::TypeBuiltin,
-//RS         HighlightClass::Builtin,
-//RS         HighlightClass::MarkerRule,
-//RS         HighlightClass::Sigil,
-//RS         HighlightClass::Operator,
-//RS     ];
-//RS     let mut first = true;
-//RS     for class in classes {
-//RS         let words = class_words(class);
-//RS         let symbols = class_symbols(class);
-//RS         let (global_words, contextual_words) = split_vscode_keyword_words(class, words);
-//RS         if !global_words.is_empty() {
-//RS             let pattern = match class {
-//RS                 HighlightClass::MarkerRule => {
-//RS                     // Applied rules are `#Error` / `#[Codable]` / `@allow`, not bare names.
-//RS                     format!("#\\[?({})\\b", global_words.join("|"))
-//RS                 }
-//RS                 HighlightClass::Builtin => format!(
-//RS                     "(?<![.A-Za-z0-9_])({})(?=\\s*\\()",
-//RS                     global_words.join("|")
-//RS                 ),
-//RS                 HighlightClass::KeywordControl
-//RS                 | HighlightClass::KeywordDeclaration
-//RS                 | HighlightClass::KeywordOther
-//RS                 | HighlightClass::KeywordOwnership => format!(
-//RS                     "(?<![.A-Za-z0-9_])({})(?![A-Za-z0-9_])",
-//RS                     global_words.join("|")
-//RS                 ),
-//RS                 _ => format!("\\b({})\\b", global_words.join("|")),
-//RS             };
-//RS             push_vscode_pattern(
-//RS                 &mut out,
-//RS                 &mut first,
-//RS                 class.textmate_scope(),
-//RS                 &pattern,
-//RS             );
-//RS         }
-//RS         if !contextual_words.is_empty() {
-//RS             // Identifier-like keywords must not steal ordinary names. Keep
-//RS             // them in the generated section, but only color declaration shape.
-//RS             let mut as_word = false;
-//RS             let rest: Vec<String> = contextual_words
-//RS                 .into_iter()
-//RS                 .filter(|word| {
-//RS                     if word == "as" {
-//RS                         as_word = true;
-//RS                         false
-//RS                     } else {
-//RS                         true
-//RS                     }
-//RS                 })
-//RS                 .collect();
-//RS             if as_word {
-//RS                 push_vscode_pattern(
-//RS                     &mut out,
-//RS                     &mut first,
-//RS                     class.textmate_scope(),
-//RS                     "(?<![.A-Za-z0-9_])as(?=\\s+[A-Za-z_][A-Za-z0-9_]*)",
-//RS                 );
-//RS             }
-//RS             if !rest.is_empty() {
-//RS                 push_vscode_pattern(
-//RS                     &mut out,
-//RS                     &mut first,
-//RS                     class.textmate_scope(),
-//RS                     &format!(
-//RS                         "(?<![.A-Za-z0-9_])({})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))",
-//RS                         rest.join("|")
-//RS                     ),
-//RS                 );
-//RS             }
-//RS         }
-//RS         if !symbols.is_empty() {
-//RS             push_vscode_pattern(
-//RS                 &mut out,
-//RS                 &mut first,
-//RS                 class.textmate_scope(),
-//RS                 &format!("({})", symbols.join("|")),
-//RS             );
-//RS         }
-//RS     }
-//RS     out.push_str("\n      ],\n");
-//RS     out.push_str(&format!(
-//RS         "      \"endComment\": \"{}\"\n",
-//RS         HIGHLIGHT_GENERATED_END
-//RS     ));
-//RS     out
-//RS }
-//RS 
-//RS pub fn render_tree_sitter_generated_highlights() -> String {
-//RS     let mut out = String::new();
-//RS     out.push_str(&format!("// {}\n", HIGHLIGHT_GENERATED_START));
-//RS     for class in [
-//RS         HighlightClass::KeywordControl,
-//RS         HighlightClass::KeywordDeclaration,
-//RS         HighlightClass::KeywordOwnership,
-//RS         HighlightClass::KeywordOther,
-//RS         HighlightClass::Literal,
-//RS         HighlightClass::TypeBuiltin,
-//RS         HighlightClass::Builtin,
-//RS         HighlightClass::MarkerRule,
-//RS         HighlightClass::Sigil,
-//RS         HighlightClass::Operator,
-//RS     ] {
-//RS         let values = class_texts(class);
-//RS         out.push_str(&format!(
-//RS             "const {} = [{}];\n",
-//RS             tree_sitter_const_name(class),
-//RS             values
-//RS                 .iter()
-//RS                 .map(|s| format!("{:?}", s))
-//RS                 .collect::<Vec<_>>()
-//RS                 .join(", ")
-//RS         ));
-//RS     }
-//RS     out.push_str(&format!("// {}\n", HIGHLIGHT_GENERATED_END));
-//RS     out
-//RS }
-//RS 
-//RS pub fn render_zed_generated_highlights() -> String {
-//RS     let mut out = String::new();
-//RS     out.push_str(&format!("; {}\n", HIGHLIGHT_GENERATED_START));
-//RS     for class in [
-//RS         HighlightClass::KeywordControl,
-//RS         HighlightClass::KeywordDeclaration,
-//RS         HighlightClass::KeywordOwnership,
-//RS         HighlightClass::KeywordOther,
-//RS         HighlightClass::Literal,
-//RS         HighlightClass::TypeBuiltin,
-//RS         HighlightClass::Builtin,
-//RS         HighlightClass::MarkerRule,
-//RS         HighlightClass::Sigil,
-//RS         HighlightClass::Operator,
-//RS     ] {
-//RS         let values = class_texts(class);
-//RS         out.push_str(&format!("; {}: {}\n", class.label(), values.join(" ")));
-//RS         if class == HighlightClass::MarkerRule {
-//RS             continue;
-//RS         }
-//RS         let query_words = values
-//RS             .iter()
-//RS             .filter(|s| is_word_token(s) && is_zed_anonymous_word_token(s))
-//RS             .filter(|s| match class {
-//RS                 HighlightClass::KeywordControl
-//RS                 | HighlightClass::KeywordDeclaration
-//RS                 | HighlightClass::KeywordOwnership
-//RS                 | HighlightClass::KeywordOther => vscode_global_keyword_word(s),
-//RS                 _ => true,
-//RS             })
-//RS             .map(|s| format!("  {:?}", s))
-//RS             .collect::<Vec<_>>();
-//RS         if !query_words.is_empty() {
-//RS             out.push_str("[\n");
-//RS             out.push_str(&query_words.join("\n"));
-//RS             out.push_str(&format!("\n] {}\n\n", class.zed_capture()));
-//RS         }
-//RS     }
-//RS     out.push_str(&format!("; {}\n", HIGHLIGHT_GENERATED_END));
-//RS     out
-//RS }
-//RS 
-//RS fn push_vscode_pattern(out: &mut String, first: &mut bool, scope: &str, pattern: &str) {
-//RS     if !*first {
-//RS         out.push_str(",\n");
-//RS     }
-//RS     *first = false;
-//RS     out.push_str("        {\n");
-//RS     out.push_str(&format!("          \"name\": \"{}\",\n", scope));
-//RS     out.push_str(&format!(
-//RS         "          \"match\": \"{}\"\n",
-//RS         json_escape(pattern)
-//RS     ));
-//RS     out.push_str("        }");
-//RS }
-//RS 
-//RS fn class_texts(class: HighlightClass) -> Vec<&'static str> {
-//RS     let mut values = highlighted_tokens_sorted()
-//RS         .into_iter()
-//RS         .filter(|token| token.class == class)
-//RS         .filter(|token| !is_bracket_token(token.text))
-//RS         .map(|token| token.text)
-//RS         .collect::<Vec<_>>();
-//RS     values.sort();
-//RS     values.dedup();
-//RS     values
-//RS }
-//RS 
-//RS fn class_words(class: HighlightClass) -> Vec<String> {
-//RS     class_texts(class)
-//RS         .into_iter()
-//RS         .filter(|s| is_word_token(s))
-//RS         .map(regex_escape)
-//RS         .collect()
-//RS }
-//RS 
-//RS fn class_symbols(class: HighlightClass) -> Vec<String> {
-//RS     class_texts(class)
-//RS         .into_iter()
-//RS         .filter(|s| !is_word_token(s) && !is_bracket_token(s))
-//RS         .map(regex_escape)
-//RS         .collect()
-//RS }
-//RS 
-//RS /// `{` / `[` / `(` are grammar brackets, not highlight operators. Coloring
-//RS /// `{` as an operator makes nested braces and interpolations lose scopes.
-//RS fn is_bracket_token(s: &str) -> bool {
-//RS     matches!(s, "{" | "}" | "[" | "]" | "(" | ")")
-//RS }
-//RS 
-//RS /// Lexer-reserved words stay global. Identifier-like declaration words
-//RS /// (`add`, `client`, `as`, …) are colored only in declaration-shaped positions.
-//RS fn vscode_global_keyword_word(word: &str) -> bool {
-//RS     matches!(
-//RS         word,
-//RS         "fn" | "pub" | "priv" | "if" | "else" | "in" | "break" | "true" | "false"
-//RS             | "mutate" | "move" | "copy" | "struct" | "enum" | "impl" | "trait"
-//RS             | "tag" | "effect" | "derive" | "self" | "it" | "null" | "const"
-//RS             | "comptime" | "return" | "loop" | "yield" | "use" | "extern"
-//RS             | "module"
-//RS     )
-//RS }
-//RS 
-//RS fn split_vscode_keyword_words(
-//RS     class: HighlightClass,
-//RS     words: Vec<String>,
-//RS ) -> (Vec<String>, Vec<String>) {
-//RS     match class {
-//RS         HighlightClass::KeywordControl
-//RS         | HighlightClass::KeywordDeclaration
-//RS         | HighlightClass::KeywordOther
-//RS         | HighlightClass::KeywordOwnership => {
-//RS             let mut global = Vec::new();
-//RS             let mut contextual = Vec::new();
-//RS             for word in words {
-//RS                 if vscode_global_keyword_word(&word) {
-//RS                     global.push(word);
-//RS                 } else {
-//RS                     contextual.push(word);
-//RS                 }
-//RS             }
-//RS             (global, contextual)
-//RS         }
-//RS         _ => (words, Vec::new()),
-//RS     }
-//RS }
-//RS 
-//RS fn is_word_token(s: &str) -> bool {
-//RS     s.chars().all(|c| c == '_' || c.is_ascii_alphanumeric())
-//RS         && s.chars()
-//RS             .next()
-//RS             .is_some_and(|c| c == '_' || c.is_ascii_alphabetic())
-//RS }
-//RS 
-//RS fn is_zed_anonymous_word_token(s: &str) -> bool {
-//RS     // Zed validates query string literals against anonymous tree-sitter tokens.
-//RS     // Many generated highlight words are parsed as named nodes instead
-//RS     // (`type_identifier`, `marker_name`, `identifier`, etc.); emitting them here
-//RS     // makes the whole Jet language fail to load.
-//RS     matches!(
-//RS         s,
-//RS         "Bool"
-//RS             | "Char"
-//RS             | "Err"
-//RS             | "F32"
-//RS             | "F64"
-//RS             | "Float"
-//RS             | "I16"
-//RS             | "I32"
-//RS             | "I64"
-//RS             | "I8"
-//RS             | "Int"
-//RS             | "List"
-//RS             | "Map"
-//RS             | "String"
-//RS             | "Test"
-//RS             | "U16"
-//RS             | "U32"
-//RS             | "U64"
-//RS             | "U8"
-//RS             | "add"
-//RS             | "alias"
-//RS             | "as"
-//RS             | "break"
-//RS             | "change"
-//RS             | "comptime"
-//RS             | "continue"
-//RS             | "copy"
-//RS             | "defer"
-//RS             | "derive"
-//RS             | "distinct"
-//RS             | "else"
-//RS             | "enum"
-//RS             | "extern"
-//RS             | "false"
-//RS             | "fn"
-//RS             | "if"
-//RS             | "impl"
-//RS             | "in"
-//RS             | "loop"
-//RS             | "marker"
-//RS             | "migration"
-//RS             | "module"
-//RS             | "pub"
-//RS             | "remove"
-//RS             | "rename"
-//RS             | "return"
-//RS             | "rust"
-//RS             | "self"
-//RS             | "state"
-//RS             | "step"
-//RS             | "struct"
-//RS             | "tag"
-//RS             | "task"
-//RS             | "trait"
-//RS             | "true"
-//RS             | "use"
-//RS             | "via"
-//RS     )
-//RS }
-//RS 
-//RS fn regex_escape(s: &str) -> String {
-//RS     let mut out = String::new();
-//RS     for ch in s.chars() {
-//RS         if matches!(
-//RS             ch,
-//RS             '\\' | '.'
-//RS                 | '+'
-//RS                 | '*'
-//RS                 | '?'
-//RS                 | '^'
-//RS                 | '$'
-//RS                 | '('
-//RS                 | ')'
-//RS                 | '['
-//RS                 | ']'
-//RS                 | '{'
-//RS                 | '}'
-//RS                 | '|'
-//RS                 | '/'
-//RS                 | '-'
-//RS         ) {
-//RS             out.push('\\');
-//RS         }
-//RS         out.push(ch);
-//RS     }
-//RS     out
-//RS }
-//RS 
-//RS fn tree_sitter_const_name(class: HighlightClass) -> &'static str {
-//RS     match class {
-//RS         HighlightClass::KeywordControl => "JET_HIGHLIGHT_KEYWORD_CONTROL",
-//RS         HighlightClass::KeywordDeclaration => "JET_HIGHLIGHT_KEYWORD_DECLARATION",
-//RS         HighlightClass::KeywordOwnership => "JET_HIGHLIGHT_KEYWORD_OWNERSHIP",
-//RS         HighlightClass::KeywordOther => "JET_HIGHLIGHT_KEYWORD_OTHER",
-//RS         HighlightClass::Literal => "JET_HIGHLIGHT_LITERAL",
-//RS         HighlightClass::TypeBuiltin => "JET_HIGHLIGHT_TYPE_BUILTIN",
-//RS         HighlightClass::Builtin => "JET_HIGHLIGHT_BUILTIN",
-//RS         HighlightClass::MarkerRule => "JET_HIGHLIGHT_MARKER_RULE",
-//RS         HighlightClass::Operator => "JET_HIGHLIGHT_OPERATOR",
-//RS         HighlightClass::Sigil => "JET_HIGHLIGHT_SIGIL",
-//RS     }
-//RS }
-//RS use super::{
-//RS     BUILTIN_ASSERT, BUILTIN_ASSERT_EQ, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT,
-//RS     COMPTIME_MARK, CTX_BLOCK, DURATION_TYPE, KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
-//RS     KW_CONC_TASK, KW_DEFER, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN,
-//RS     KW_FN, KW_FREEZE, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MARKER, KW_MIGRATION,
-//RS     KW_MODULE, KW_POLICY, KW_PREP, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
-//RS     KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG,
-//RS     KW_TEST, KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE,
-//RS     KW_VALIDATE_BLOCK, KW_VIA, KW_WRAP, LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, MARKER_PREFIX,
-//RS     FACT_ROOT_BUILD, FACT_ROOT_PACKAGE, FACT_ROOT_PHASE, FACT_ROOT_PROGRAM, META_QUERY_SOURCE,
-//RS     META_QUERY_TYPES,
-//RS     OP_AMP_EQ, OP_AND, OP_CARET_EQ, OP_COMPARE, OP_EQ, OP_FALLBACK, OP_GE, OP_GT, OP_LE, OP_LT,
-//RS     OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_NAMED_CTOR, OP_NE, OP_NOT,
-//RS     OP_OPTIONAL_CHAIN, OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PERCENT_PERCENT, OP_PERCENT_PERCENT_EQ,
-//RS     OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_RANGE, OP_RANGE_EXCLUSIVE, OP_SHL,
-//RS     OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ, OP_SLASH_PERCENT, OP_SLASH_PERCENT_EQ,
-//RS     OP_STAR, OP_STAR_EQ, OP_TILDE_PIPE, OP_TILDE_PIPE_EQ, OP_TRY_SUFFIX, OP_UNIFIED_ARROW,
-//RS     PROTO_CLIENT, PROTO_SERVER, READINESS_AFTER, RULE_PREFIX, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT,
-//RS     SIGIL_COPY, SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
-//RS     TASK_ALL, TASK_ANY, TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN, TASK_FAILURE_PANICKED,
-//RS     TASK_GROUP, TASK_JOIN, TASK_RACE, TYPE_BITS, TYPE_BOOL, TYPE_BTREE_MAP, TYPE_BUDGET,
-//RS     TYPE_BUDGET_APPLIES, TYPE_BYTES, TYPE_CHAR, TYPE_COMPLEX, TYPE_COMPUTED, TYPE_CONDITION,
-//RS     TYPE_DATA, TYPE_DATA_CSV, TYPE_DATA_TOML, TYPE_DATA_YAML, TYPE_DB_VALUE, TYPE_DECIMAL,
-//RS     TYPE_DERIVED, TYPE_EFFECT, TYPE_ERR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE,
-//RS     TYPE_EVENT_TRACE, TYPE_F32, TYPE_F64, TYPE_FIXED_SIZE_SEP, TYPE_FLOAT, TYPE_HASH_MAP,
-//RS     TYPE_HOOK, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INSTANT, TYPE_INT, TYPE_IO_ERROR,
-//RS     TYPE_ITER, TYPE_JSON, TYPE_ENCODING_ERROR, TYPE_KEY, TYPE_LRU, TYPE_MEASUREMENT, TYPE_MEMO_STATS,
-//RS     TYPE_PRIORITY_QUEUE, TYPE_PTR, TYPE_QUEUE, TYPE_RANK, TYPE_RECEIVER, TYPE_SENDER, TYPE_SET,
-//RS     TYPE_SHARED, TYPE_SHARED_GUARD, TYPE_SHARED_REVISION_ERROR, TYPE_SHARED_SNAPSHOT, TYPE_SHARED_WEAK,
-//RS     TYPE_SIGNAL, TYPE_STREAM, TYPE_STRING, TYPE_SUBSCRIPTION, TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16,
-//RS     TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT, TYPE_UTF8_ERROR, TYPE_VIEW_ITER, TYPE_WATCH_EVENT,
-//RS     TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
-//RS     VALIDATE_CHECK_FN,
-//RS };
-//RS use crate::JSON::json_escape;
-//RS 
-// END-PORT-PENDING 2111 crates/jet-foundation/src/Syntax/highlights.rs:1-1342
+use jet_foundation.Syntax.[
+    BUILTIN_ASSERT, BUILTIN_ASSERT_EQ, BUILTIN_CHANNEL, BUILTIN_INPUT, BUILTIN_PRINT,
+    COMPTIME_MARK, CTX_BLOCK, DURATION_TYPE, KW_ADD, KW_ALIAS, KW_AS, KW_BREAK, KW_CHANGE,
+    KW_CONC_TASK, KW_DEFER, KW_DERIVE, KW_DISTINCT, KW_EFFECT_DECL, KW_ELSE, KW_ENUM, KW_EXTERN,
+    KW_FN, KW_FREEZE, KW_IF, KW_IMPL, KW_IMPURE, KW_IN, KW_IT, KW_LOOP, KW_MARKER, KW_MIGRATION,
+    KW_MODULE, KW_POLICY, KW_PREP, KW_PRIV, KW_PROTOCOL, KW_PUB, KW_REACTIVE, KW_REMOVE, KW_RENAME,
+    KW_RETURN, KW_RUST, KW_SCRUB, KW_SELF, KW_SHARED, KW_STATE, KW_STATE_DECL, KW_STRUCT, KW_TAG,
+    KW_TEST, KW_TODO, KW_TRAIT, KW_TRANSACT, KW_TRANSITION, KW_UNINIT, KW_UNSAFE, KW_USE,
+    KW_VALIDATE_BLOCK, KW_VIA, KW_WRAP, LIT_FALSE, LIT_NULL, LIT_TRUE, LIT_VALUE, MARKER_PREFIX,
+    FACT_ROOT_BUILD, FACT_ROOT_PACKAGE, FACT_ROOT_PHASE, FACT_ROOT_PROGRAM, META_QUERY_SOURCE,
+    META_QUERY_TYPES, OP_AMP_EQ, OP_AND, OP_CARET_EQ, OP_COMPARE, OP_EQ, OP_FALLBACK, OP_GE,
+    OP_GT, OP_LE, OP_LT, OP_MEMBER_SPREAD, OP_MINUS, OP_MINUS_EQ, OP_NAMED_CTOR, OP_NE,
+    OP_NOT, OP_OPTIONAL_CHAIN, OP_OR, OP_PERCENT, OP_PERCENT_EQ, OP_PERCENT_PERCENT,
+    OP_PERCENT_PERCENT_EQ, OP_PIPE, OP_PIPE_EQ, OP_PLUS, OP_PLUS_EQ, OP_RANGE,
+    OP_RANGE_EXCLUSIVE, OP_SHL, OP_SHL_EQ, OP_SHR, OP_SHR_EQ, OP_SLASH, OP_SLASH_EQ,
+    OP_SLASH_PERCENT, OP_SLASH_PERCENT_EQ, OP_STAR, OP_STAR_EQ, OP_TILDE_PIPE,
+    OP_TILDE_PIPE_EQ, OP_TRY_SUFFIX, OP_UNIFIED_ARROW, PROTO_CLIENT, PROTO_SERVER,
+    READINESS_AFTER, RULE_PREFIX, SIGIL_BIND_IMMUT, SIGIL_BIND_MUT, SIGIL_COPY,
+    SIGIL_FENCE_CLOSE, SIGIL_FENCE_OPEN, SIGIL_MOVE, SIGIL_SPREAD, SIGIL_WRITE,
+    TASK_ALL, TASK_ANY, TASK_FAILURE_CANCELLED, TASK_FAILURE_DEADLINE_BLOWN,
+    TASK_FAILURE_PANICKED, TASK_GROUP, TASK_JOIN, TASK_RACE, TYPE_BITS, TYPE_BOOL,
+    TYPE_BTREE_MAP, TYPE_BUDGET, TYPE_BUDGET_APPLIES, TYPE_BYTES, TYPE_CHAR,
+    TYPE_COMPLEX, TYPE_COMPUTED, TYPE_CONDITION, TYPE_DATA, TYPE_DATA_CSV,
+    TYPE_DATA_TOML, TYPE_DATA_YAML, TYPE_DB_VALUE, TYPE_DECIMAL, TYPE_DERIVED,
+    TYPE_EFFECT, TYPE_ERR, TYPE_EVENT, TYPE_EVENT_POLICY, TYPE_EVENT_SCOPE,
+    TYPE_EVENT_TRACE, TYPE_F32, TYPE_F64, TYPE_FIXED_SIZE_SEP, TYPE_FLOAT,
+    TYPE_HASH_MAP, TYPE_HOOK, TYPE_I16, TYPE_I32, TYPE_I64, TYPE_I8, TYPE_INSTANT,
+    TYPE_INT, TYPE_IO_ERROR, TYPE_ITER, TYPE_JSON, TYPE_ENCODING_ERROR, TYPE_KEY,
+    TYPE_LRU, TYPE_MEASUREMENT, TYPE_MEMO_STATS, TYPE_PRIORITY_QUEUE, TYPE_PTR,
+    TYPE_QUEUE, TYPE_RANK, TYPE_RECEIVER, TYPE_SENDER, TYPE_SET, TYPE_SHARED,
+    TYPE_SHARED_GUARD, TYPE_SHARED_REVISION_ERROR, TYPE_SHARED_SNAPSHOT,
+    TYPE_SHARED_WEAK, TYPE_SIGNAL, TYPE_STREAM, TYPE_STRING, TYPE_SUBSCRIPTION,
+    TYPE_TASK, TYPE_TASK_FAILURE, TYPE_U16, TYPE_U32, TYPE_U64, TYPE_U8, TYPE_UNIT,
+    TYPE_UTF8_ERROR, TYPE_VIEW_ITER, TYPE_WATCH_EVENT, TYPE_WATCH_HANDLE, TYPE_WATCH_SET,
+    VALIDATE_CHECK_FN,
+]
+use jet_foundation.Policy.[APPLIED_RULES, RuleStatus]
+use jet_foundation.JSON.json_escape
 
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:3
+// Editor grammars compare their owned sections against fresh renderer output.
+pub const HIGHLIGHT_GENERATED_START: String = "BEGIN GENERATED JET SYNTAX HIGHLIGHTS"
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:4
+pub const HIGHLIGHT_GENERATED_END: String = "END GENERATED JET SYNTAX HIGHLIGHTS"
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:7
+pub enum HighlightClass {
+    KeywordControl
+    KeywordDeclaration
+    KeywordOwnership
+    KeywordOther
+    Literal
+    TypeBuiltin
+    Builtin
+    MarkerRule
+    Operator
+    Sigil
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:21
+pub struct HighlightToken { pub text: String, pub class: HighlightClass }
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:27
+impl HighlightClass {
+    // Rust: crates/jet-foundation/src/Syntax/highlights.rs:28
+    pub fn textmate_scope(self) -> String {
+        if self == {
+            .KeywordControl -> "keyword.control.jet"
+            .KeywordDeclaration -> "keyword.declaration.jet"
+            .KeywordOwnership -> "keyword.other.ownership.jet"
+            .KeywordOther -> "keyword.other.jet"
+            .Literal -> "constant.language.jet"
+            .TypeBuiltin -> "storage.type.builtin.jet"
+            .Builtin -> "support.function.builtin.jet"
+            .MarkerRule -> "entity.name.tag.rule.jet"
+            .Operator -> "keyword.operator.jet"
+            .Sigil -> "keyword.operator.sigil.jet"
+        }
+    }
+    // Rust: crates/jet-foundation/src/Syntax/highlights.rs:43
+    pub fn zed_capture(self) -> String {
+        if self == {
+            .KeywordControl -> "@keyword.control"
+            .KeywordDeclaration | .KeywordOwnership | .KeywordOther -> "@keyword"
+            .Literal -> "@constant.builtin"
+            .TypeBuiltin -> "@type.builtin"
+            .Builtin -> "@function.builtin"
+            .MarkerRule -> "@attribute"
+            .Operator | .Sigil -> "@operator"
+        }
+    }
+    // Rust: crates/jet-foundation/src/Syntax/highlights.rs:57
+    fn label(self) -> String {
+        if self == {
+            .KeywordControl -> "keyword.control"
+            .KeywordDeclaration -> "keyword.declaration"
+            .KeywordOwnership -> "keyword.ownership"
+            .KeywordOther -> "keyword.other"
+            .Literal -> "literal"
+            .TypeBuiltin -> "type.builtin"
+            .Builtin -> "builtin"
+            .MarkerRule -> "marker.rule"
+            .Operator -> "operator"
+            .Sigil -> "sigil"
+        }
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:75
+// FOREIGN_* words are teaching diagnostics, never live highlighted syntax.
+pub const JET_HIGHLIGHT_TOKENS: [HighlightToken] = [
+    // Control flow; task selectors do not reserve their unqualified names.
+    HighlightToken{text: KW_IF, class: .KeywordControl},
+    HighlightToken{text: KW_ELSE, class: .KeywordControl},
+    HighlightToken{text: KW_LOOP, class: .KeywordControl},
+    HighlightToken{text: KW_IN, class: .KeywordControl},
+    HighlightToken{text: KW_BREAK, class: .KeywordControl},
+    HighlightToken{text: KW_RETURN, class: .KeywordControl},
+    HighlightToken{text: KW_DEFER, class: .KeywordControl},
+    HighlightToken{text: KW_CONC_TASK, class: .KeywordControl},
+    HighlightToken{text: KW_FREEZE, class: .Builtin},
+    HighlightToken{text: TASK_ALL, class: .KeywordControl},
+    HighlightToken{text: TASK_ANY, class: .KeywordControl},
+    HighlightToken{text: TASK_GROUP, class: .KeywordControl},
+    HighlightToken{text: TASK_RACE, class: .KeywordControl},
+    HighlightToken{text: READINESS_AFTER, class: .KeywordControl},
+    // Declarations and contextual structure.
+    HighlightToken{text: KW_FN, class: .KeywordDeclaration},
+    HighlightToken{text: KW_PUB, class: .KeywordDeclaration},
+    HighlightToken{text: KW_PRIV, class: .KeywordDeclaration},
+    HighlightToken{text: KW_USE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_AS, class: .KeywordDeclaration},
+    HighlightToken{text: KW_EXTERN, class: .KeywordDeclaration},
+    HighlightToken{text: KW_RUST, class: .KeywordDeclaration},
+    HighlightToken{text: KW_MODULE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_STRUCT, class: .KeywordDeclaration},
+    HighlightToken{text: KW_ENUM, class: .KeywordDeclaration},
+    HighlightToken{text: KW_ALIAS, class: .KeywordDeclaration},
+    HighlightToken{text: KW_IMPL, class: .KeywordDeclaration},
+    HighlightToken{text: KW_POLICY, class: .KeywordDeclaration},
+    HighlightToken{text: KW_WRAP, class: .KeywordDeclaration},
+    HighlightToken{text: KW_TRAIT, class: .KeywordDeclaration},
+    HighlightToken{text: KW_TAG, class: .KeywordDeclaration},
+    HighlightToken{text: KW_EFFECT_DECL, class: .KeywordDeclaration},
+    HighlightToken{text: KW_DERIVE, class: .KeywordDeclaration},
+    // Retired comptime is teaching-only.
+    HighlightToken{text: KW_DISTINCT, class: .KeywordDeclaration},
+    HighlightToken{text: KW_MIGRATION, class: .KeywordDeclaration},
+    HighlightToken{text: KW_RENAME, class: .KeywordDeclaration},
+    HighlightToken{text: KW_ADD, class: .KeywordDeclaration},
+    HighlightToken{text: KW_REMOVE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_CHANGE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_VIA, class: .KeywordDeclaration},
+    HighlightToken{text: KW_UNSAFE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_IMPURE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_REACTIVE, class: .KeywordDeclaration},
+    HighlightToken{text: CTX_BLOCK, class: .KeywordDeclaration},
+    HighlightToken{text: KW_TRANSACT, class: .KeywordDeclaration},
+    HighlightToken{text: KW_TEST, class: .KeywordDeclaration},
+    HighlightToken{text: KW_TODO, class: .KeywordDeclaration},
+    HighlightToken{text: KW_SCRUB, class: .KeywordDeclaration},
+    HighlightToken{text: KW_STATE, class: .KeywordDeclaration},
+    HighlightToken{text: KW_TRANSITION, class: .KeywordDeclaration},
+    HighlightToken{text: KW_STATE_DECL, class: .KeywordDeclaration},
+    HighlightToken{text: KW_PROTOCOL, class: .KeywordDeclaration},
+    HighlightToken{text: KW_MARKER, class: .KeywordDeclaration},
+    HighlightToken{text: PROTO_CLIENT, class: .KeywordDeclaration},
+    HighlightToken{text: PROTO_SERVER, class: .KeywordDeclaration},
+    HighlightToken{text: KW_VALIDATE_BLOCK, class: .KeywordDeclaration},
+    // Contextual prep, fact roots and metadata query roots.
+    HighlightToken{text: KW_PREP, class: .KeywordOther},
+    HighlightToken{text: FACT_ROOT_BUILD, class: .KeywordOther},
+    HighlightToken{text: FACT_ROOT_PACKAGE, class: .KeywordOther},
+    HighlightToken{text: FACT_ROOT_PHASE, class: .KeywordOther},
+    HighlightToken{text: FACT_ROOT_PROGRAM, class: .KeywordOther},
+    HighlightToken{text: META_QUERY_SOURCE, class: .KeywordOther},
+    HighlightToken{text: META_QUERY_TYPES, class: .KeywordOther},
+    // Ownership and builtins.
+    HighlightToken{text: KW_SELF, class: .KeywordOther},
+    HighlightToken{text: KW_UNINIT, class: .KeywordOwnership},
+    HighlightToken{text: KW_IT, class: .KeywordOther},
+    HighlightToken{text: KW_SHARED, class: .KeywordOther},
+    HighlightToken{text: BUILTIN_ASSERT, class: .Builtin},
+    HighlightToken{text: BUILTIN_ASSERT_EQ, class: .Builtin},
+    HighlightToken{text: BUILTIN_PRINT, class: .Builtin},
+    HighlightToken{text: BUILTIN_INPUT, class: .Builtin},
+    HighlightToken{text: VALIDATE_CHECK_FN, class: .Builtin},
+    HighlightToken{text: BUILTIN_CHANNEL, class: .Builtin},
+    HighlightToken{text: TASK_JOIN, class: .Builtin},
+    // Literals.
+    HighlightToken{text: LIT_TRUE, class: .Literal},
+    HighlightToken{text: LIT_FALSE, class: .Literal},
+    HighlightToken{text: LIT_NULL, class: .Literal},
+    HighlightToken{text: LIT_VALUE, class: .Literal},
+    HighlightToken{text: TASK_FAILURE_CANCELLED, class: .Literal},
+    HighlightToken{text: TASK_FAILURE_DEADLINE_BLOWN, class: .Literal},
+    HighlightToken{text: TASK_FAILURE_PANICKED, class: .Literal},
+    // Builtin types.
+    HighlightToken{text: TYPE_INT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_FLOAT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_BOOL, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_STRING, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_ERR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_UNIT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_CHAR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SHARED, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SHARED_SNAPSHOT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SHARED_REVISION_ERROR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SHARED_GUARD, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SHARED_WEAK, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_CONDITION, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_TASK, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_RECEIVER, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SENDER, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_TASK_FAILURE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_BUDGET, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_BUDGET_APPLIES, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_HASH_MAP, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_BTREE_MAP, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_QUEUE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SET, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_RANK, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_PRIORITY_QUEUE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_LRU, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_BITS, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_BYTES, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_STREAM, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_ITER, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_VIEW_ITER, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SIGNAL, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_DERIVED, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_COMPUTED, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_EVENT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_HOOK, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_SUBSCRIPTION, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_EVENT_SCOPE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_EVENT_POLICY, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_EVENT_TRACE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_WATCH_HANDLE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_WATCH_SET, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_WATCH_EVENT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_EFFECT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_MEASUREMENT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_MEMO_STATS, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_COMPLEX, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_PTR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_DECIMAL, class: .TypeBuiltin},
+    HighlightToken{text: DURATION_TYPE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_KEY, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_IO_ERROR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_INSTANT, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_UTF8_ERROR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_JSON, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_ENCODING_ERROR, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_DATA, class: .TypeBuiltin},
+    // TYPE_DATA_JSON shares TYPE_JSON's spelling.
+    HighlightToken{text: TYPE_DATA_TOML, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_DATA_YAML, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_DATA_CSV, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_DB_VALUE, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_I8, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_I16, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_I32, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_I64, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_U8, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_U16, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_U32, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_U64, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_F32, class: .TypeBuiltin},
+    HighlightToken{text: TYPE_F64, class: .TypeBuiltin},
+    // Operators and sigils.
+    HighlightToken{text: SIGIL_BIND_IMMUT, class: .Sigil},
+    HighlightToken{text: SIGIL_BIND_MUT, class: .Sigil},
+    HighlightToken{text: COMPTIME_MARK, class: .Sigil},
+    HighlightToken{text: SIGIL_FENCE_OPEN, class: .Sigil},
+    HighlightToken{text: SIGIL_FENCE_CLOSE, class: .Sigil},
+    HighlightToken{text: SIGIL_MOVE, class: .Sigil},
+    HighlightToken{text: SIGIL_WRITE, class: .Sigil},
+    HighlightToken{text: SIGIL_COPY, class: .Sigil},
+    HighlightToken{text: SIGIL_SPREAD, class: .Sigil},
+    HighlightToken{text: OP_MEMBER_SPREAD, class: .Operator},
+    HighlightToken{text: OP_TRY_SUFFIX, class: .Operator},
+    HighlightToken{text: OP_RANGE, class: .Operator},
+    HighlightToken{text: OP_RANGE_EXCLUSIVE, class: .Operator},
+    HighlightToken{text: OP_UNIFIED_ARROW, class: .Operator},
+    HighlightToken{text: OP_PLUS, class: .Operator},
+    HighlightToken{text: OP_MINUS, class: .Operator},
+    HighlightToken{text: OP_STAR, class: .Operator},
+    HighlightToken{text: OP_SLASH, class: .Operator},
+    HighlightToken{text: OP_SLASH_PERCENT, class: .Operator},
+    HighlightToken{text: OP_SLASH_PERCENT_EQ, class: .Operator},
+    HighlightToken{text: OP_PERCENT, class: .Operator},
+    HighlightToken{text: OP_PERCENT_PERCENT, class: .Operator},
+    HighlightToken{text: OP_PERCENT_PERCENT_EQ, class: .Operator},
+    HighlightToken{text: OP_PIPE, class: .Operator},
+    HighlightToken{text: OP_SHL, class: .Operator},
+    HighlightToken{text: OP_SHR, class: .Operator},
+    HighlightToken{text: OP_AND, class: .Operator},
+    HighlightToken{text: OP_OR, class: .Operator},
+    HighlightToken{text: OP_NOT, class: .Operator},
+    HighlightToken{text: OP_EQ, class: .Operator},
+    HighlightToken{text: OP_NE, class: .Operator},
+    HighlightToken{text: OP_LT, class: .Operator},
+    HighlightToken{text: OP_GT, class: .Operator},
+    HighlightToken{text: OP_LE, class: .Operator},
+    HighlightToken{text: OP_GE, class: .Operator},
+    HighlightToken{text: OP_COMPARE, class: .Operator},
+    HighlightToken{text: OP_PLUS_EQ, class: .Operator},
+    HighlightToken{text: OP_MINUS_EQ, class: .Operator},
+    HighlightToken{text: OP_STAR_EQ, class: .Operator},
+    HighlightToken{text: OP_SLASH_EQ, class: .Operator},
+    HighlightToken{text: OP_PERCENT_EQ, class: .Operator},
+    HighlightToken{text: OP_AMP_EQ, class: .Operator},
+    HighlightToken{text: OP_PIPE_EQ, class: .Operator},
+    HighlightToken{text: OP_CARET_EQ, class: .Operator},
+    HighlightToken{text: OP_TILDE_PIPE, class: .Operator},
+    HighlightToken{text: OP_TILDE_PIPE_EQ, class: .Operator},
+    HighlightToken{text: OP_SHL_EQ, class: .Operator},
+    HighlightToken{text: OP_SHR_EQ, class: .Operator},
+    HighlightToken{text: OP_FALLBACK, class: .Operator},
+    HighlightToken{text: OP_OPTIONAL_CHAIN, class: .Operator},
+    HighlightToken{text: OP_NAMED_CTOR, class: .Operator},
+    HighlightToken{text: TYPE_FIXED_SIZE_SEP, class: .Sigil},
+    HighlightToken{text: MARKER_PREFIX, class: .Sigil},
+    HighlightToken{text: RULE_PREFIX, class: .Sigil},
+]
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:916
+pub fn highlighted_tokens_sorted() -> [HighlightToken] {
+    tokens := JET_HIGHLIGHT_TOKENS.to_vec()
+    loop row in APPLIED_RULES.iter().filter(fn(row) { row.status == .Active }) {
+        &tokens.push(HighlightToken{text: row.name, class: .MarkerRule})
+    }
+    &tokens.sort_by(fn(a, b) { a.class.cmp(b.class).then(a.text.cmp(b.text)) }) // GATE #4499: declaration-order enum comparison.
+    &tokens.dedup_by(fn(a, b) { a.text == b.text && a.class == b.class })
+    tokens
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:932
+pub fn render_vscode_generated_highlights() -> String {
+    out := ""
+    &out.push_str("      \"comment\": \"{HIGHLIGHT_GENERATED_START}\",\n")
+    &out.push_str("      \"patterns\": [\n")
+    classes :: [HighlightClass.KeywordControl, .KeywordDeclaration, .KeywordOwnership, .KeywordOther, .Literal, .TypeBuiltin, .Builtin, .MarkerRule, .Sigil, .Operator]
+    first := true
+    loop class in classes {
+        words :: class_words(class)
+        symbols :: class_symbols(class)
+        (global_words, contextual_words) :: split_vscode_keyword_words(class, words)
+        if !global_words.is_empty() {
+            pattern :: if class == {
+                .MarkerRule -> "#\\[?({global_words.join("|")})\\b"
+                .Builtin -> "(?<![.A-Za-z0-9_])({global_words.join("|")})(?=\\s*\\()"
+                .KeywordControl | .KeywordDeclaration | .KeywordOther | .KeywordOwnership -> "(?<![.A-Za-z0-9_])({global_words.join("|")})(?![A-Za-z0-9_])"
+                else -> "\\b({global_words.join("|")})\\b"
+            }
+            push_vscode_pattern(&out, &first, class.textmate_scope(), pattern)
+        }
+        if !contextual_words.is_empty() {
+            // Identifier-like keywords color declaration shapes, not ordinary names.
+            as_word := false
+            rest := []
+            loop word in contextual_words {
+                if word == "as" { as_word = true } else { &rest.push(word) }
+            }
+            if as_word { push_vscode_pattern(&out, &first, class.textmate_scope(), "(?<![.A-Za-z0-9_])as(?=\\s+[A-Za-z_][A-Za-z0-9_]*)") }
+            if !rest.is_empty() {
+                push_vscode_pattern(&out, &first, class.textmate_scope(), "(?<![.A-Za-z0-9_])({rest.join("|")})(?=\\s*(?:\\{{|[A-Za-z_][A-Za-z0-9_]*\\s*:))")
+            }
+        }
+        if !symbols.is_empty() { push_vscode_pattern(&out, &first, class.textmate_scope(), "({symbols.join("|")})") }
+    }
+    &out.push_str("\n      ],\n")
+    &out.push_str("      \"endComment\": \"{HIGHLIGHT_GENERATED_END}\"\n")
+    out
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1034
+pub fn render_tree_sitter_generated_highlights() -> String {
+    out := ""
+    &out.push_str("// {HIGHLIGHT_GENERATED_START}\n")
+    loop class in [HighlightClass.KeywordControl, .KeywordDeclaration, .KeywordOwnership, .KeywordOther, .Literal, .TypeBuiltin, .Builtin, .MarkerRule, .Sigil, .Operator] {
+        values :: class_texts(class)
+        quoted :: values.iter().map(fn(s) { "{s:?}" }).collect().join(", ") // GATE #4409: Rust-compatible debug text.
+        &out.push_str("const {tree_sitter_const_name(class)} = [{quoted}];\n")
+    }
+    &out.push_str("// {HIGHLIGHT_GENERATED_END}\n")
+    out
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1064
+pub fn render_zed_generated_highlights() -> String {
+    out := ""
+    &out.push_str("; {HIGHLIGHT_GENERATED_START}\n")
+    loop class in [HighlightClass.KeywordControl, .KeywordDeclaration, .KeywordOwnership, .KeywordOther, .Literal, .TypeBuiltin, .Builtin, .MarkerRule, .Sigil, .Operator] {
+        values :: class_texts(class)
+        &out.push_str("; {class.label()}: {values.join(" ")}\n")
+        if class == .MarkerRule { continue }
+        query_words :: values.iter().filter(fn(s) { is_word_token(s) && is_zed_anonymous_word_token(s) }).filter(fn(s) {
+            if class == { .KeywordControl | .KeywordDeclaration | .KeywordOwnership | .KeywordOther -> vscode_global_keyword_word(s) else -> true }
+        }).map(fn(s) { "  {s:?}" }).collect() // GATE #4409
+        if !query_words.is_empty() {
+            &out.push_str("[\n")
+            &out.push_str(query_words.join("\n"))
+            &out.push_str("\n] {class.zed_capture()}\n\n")
+        }
+    }
+    &out.push_str("; {HIGHLIGHT_GENERATED_END}\n")
+    out
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1106
+fn push_vscode_pattern(out: &String, first: &Bool, scope: String, pattern: String) -> {
+    if !first { &out.push_str(",\n") }
+    first = false
+    &out.push_str("        {{\n")
+    &out.push_str("          \"name\": \"{scope}\",\n")
+    &out.push_str("          \"match\": \"{json_escape(pattern)}\"\n")
+    &out.push_str("        }}")
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1120
+fn class_texts(class: HighlightClass) -> [String] {
+    values := highlighted_tokens_sorted().into_iter().filter(fn(token) { token.class == class }).filter(fn(token) { !is_bracket_token(token.text) }).map(fn(token) { token.text }).collect()
+    &values.sort()
+    &values.dedup()
+    values
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1132
+fn class_words(class: HighlightClass) -> [String] {
+    class_texts(class).into_iter().filter(is_word_token).map(regex_escape).collect()
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1140
+fn class_symbols(class: HighlightClass) -> [String] {
+    class_texts(class).into_iter().filter(fn(s) { !is_word_token(s) && !is_bracket_token(s) }).map(regex_escape).collect()
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1150
+// Brackets belong to grammar nesting, not operator scopes.
+fn is_bracket_token(s: String) -> Bool { if s == { "{{" | "}}" | "[" | "]" | "(" | ")" -> true else -> false } }
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1156
+fn vscode_global_keyword_word(word: String) -> Bool {
+    if word == {
+        "fn" | "pub" | "priv" | "if" | "else" | "in" | "break" | "true" | "false" |
+        "mutate" | "move" | "copy" | "struct" | "enum" | "impl" | "trait" | "tag" |
+        "effect" | "derive" | "self" | "it" | "null" | "const" | "comptime" |
+        "return" | "loop" | "yield" | "use" | "extern" | "module" -> true
+        else -> false
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1167
+fn split_vscode_keyword_words(class: HighlightClass, words: [String]) -> ([String], [String]) {
+    if class == {
+        .KeywordControl | .KeywordDeclaration | .KeywordOther | .KeywordOwnership -> {
+            global := []
+            contextual := []
+            loop word in words { if vscode_global_keyword_word(word) { &global.push(word) } else { &contextual.push(word) } }
+            (global, contextual)
+        }
+        else -> (words, [])
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1191
+fn is_word_token(s: String) -> Bool {
+    s.chars().all(fn(c) { c == '_' || c.is_ascii_alphanumeric() }) && s.chars().next().is_some_and(fn(c) { c == '_' || c.is_ascii_alphabetic() })
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1198
+fn is_zed_anonymous_word_token(s: String) -> Bool {
+    // Queries may only name anonymous tree-sitter tokens, not named-node words.
+    if s == {
+        "Bool" | "Char" | "Err" | "F32" | "F64" | "Float" | "I16" | "I32" | "I64" | "I8" |
+        "Int" | "List" | "Map" | "String" | "Test" | "U16" | "U32" | "U64" | "U8" |
+        "add" | "alias" | "as" | "break" | "change" | "comptime" | "continue" | "copy" |
+        "defer" | "derive" | "distinct" | "else" | "enum" | "extern" | "false" | "fn" |
+        "if" | "impl" | "in" | "loop" | "marker" | "migration" | "module" | "pub" |
+        "remove" | "rename" | "return" | "rust" | "self" | "state" | "step" | "struct" |
+        "tag" | "task" | "trait" | "true" | "use" | "via" -> true
+        else -> false
+    }
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1265
+fn regex_escape(s: String) -> String {
+    out := ""
+    loop ch in s.chars() {
+        if ch == { '\\' | '.' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '{' | '}' | '|' | '/' | '-' -> &out.push('\\') else -> {} }
+        &out.push(ch)
+    }
+    out
+}
+// Rust: crates/jet-foundation/src/Syntax/highlights.rs:1293
+fn tree_sitter_const_name(class: HighlightClass) -> String {
+    if class == {
+        .KeywordControl -> "JET_HIGHLIGHT_KEYWORD_CONTROL"
+        .KeywordDeclaration -> "JET_HIGHLIGHT_KEYWORD_DECLARATION"
+        .KeywordOwnership -> "JET_HIGHLIGHT_KEYWORD_OWNERSHIP"
+        .KeywordOther -> "JET_HIGHLIGHT_KEYWORD_OTHER"
+        .Literal -> "JET_HIGHLIGHT_LITERAL"
+        .TypeBuiltin -> "JET_HIGHLIGHT_TYPE_BUILTIN"
+        .Builtin -> "JET_HIGHLIGHT_BUILTIN"
+        .MarkerRule -> "JET_HIGHLIGHT_MARKER_RULE"
+        .Operator -> "JET_HIGHLIGHT_OPERATOR"
+        .Sigil -> "JET_HIGHLIGHT_SIGIL"
+    }
+}

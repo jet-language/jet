@@ -1,0 +1,577 @@
+use WebDev.[have_tool, jet_bin, unused_local_port, http_get, http_get_without_session, http_get_with_content_type, wait_for_app_preview, wait_for_ports, wait_for_version_change, wait_for_status, wait_for_file_text, wait_for_canvas_port, port_from_url_line, forget_canvas_session, start_web_test_static_server, KillOnDrop, FIXTURE_SRC, FIXTURE_SRC_EDITED]
+use WebDev02.[wait_for_server_up]
+use jet_driver as jet
+// GATE #4494: real native CLI/TCP/fs/PTY/thread/channel/atomic/clock substrate.
+use std.fs
+use std.env
+use std.process.[Command, Stdio]
+use std.thread
+use std.time.[Duration, Instant]
+use std.sync.[Shared, mpsc]
+use std.sync.atomic.[AtomicBool, AtomicUsize, Ordering]
+use std.os.unix.fs.[symlink]
+// GATE #4483: cfg(unix/windows) uses the selected execution target.
+use core.sys.target
+
+// Rust: tests/web_dev.rs:391
+#Test("ui_showcase_uses_builtin_host_and_keeps_companion_page_live") {
+    if !have_tool("rustc") { eprintln("note: skipping UI showcase dev host proof (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_ui_showcase_dev_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), include_str("Examples/features/web/ui_web_click.jet")).unwrap()
+    fs.write(dir.join("ui_web_click.html"), include_str("Examples/features/web/ui_web_click.html")).unwrap()
+    port :: unused_local_port()
+    child :: Command.new(jet_bin()).args(["dev", "app.jet", "--port={port}"]).current_dir(dir).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("start UI showcase dev host")
+    guard :: KillOnDrop{child: ^child}
+    wait_for_server_up(port, Duration.from_secs(30))
+    loop request in 0..<3 {
+        (status, body) :: http_get(port, "/").expect("GET showcase companion page")
+        assert_eq(status, 200, "request {request}")
+        html :: String.from_utf8_lossy(body)
+        assert(html.contains("<h1>Reactive counter, rendered live</h1>"), "request {request}: {html}")
+        assert(html.contains("id=\"jet-app\"") && html.contains("jet_main"), "request {request}: showcase host served a generic shell")
+    }
+    (status, js) :: http_get(port, "/app.js").expect("GET showcase app.js")
+    assert_eq(status, 200)
+    assert(String.from_utf8_lossy(js).contains("function jet_main()"))
+    drop(^guard)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_dev.rs:452
+#Test("jet_dev_web_serves_and_rebuilds_on_save") {
+    if !have_tool("rustc") { eprintln("note: skipping jet_dev_web_serves_and_rebuilds_on_save (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_dev_web_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src_path :: dir.join("app.jet")
+    fs.write(src_path, FIXTURE_SRC).unwrap()
+    child := Command.new(jet_bin()).args(["dev", "app.jet", "--target=web"]).current_dir(dir).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("failed to start `jet dev --target=web`")
+    stdout :: child.stdout.take().unwrap()
+    guard :: KillOnDrop{child: ^child}
+    port :: wait_for_app_preview(^stdout)
+    assert(port >= 8080 && port <= 8089, "default app preview port escaped the stable range: {port}")
+    loop path in ["/C:/Windows/win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
+        (status, _) :: http_get(port, path).expect("static-path hostile request failed")
+        assert_eq(status, 400, "Windows absolute static path escaped the build root: {path}")
+    }
+    expected_initial :: jet.compile_web_with_path(FIXTURE_SRC, "app.jet").expect("front end rejected fixture").web.expect("web target compile must produce web artifacts").js_app
+    (status, body) :: http_get(port, "/app.js").expect("GET /app.js failed")
+    assert_eq(status, 200)
+    served :: String.from_utf8_lossy(body)
+    map_trailer :: "//# sourceMappingURL=app.js.map\n"
+    stripped :: served.strip_suffix(map_trailer).unwrap_or_else(fn() { panic("served app.js must end with the dev source-map trailer") })
+    assert_eq(stripped, expected_initial, "served app.js (minus the dev source-map trailer) should match a plain compile of the same source")
+    (status, _) :: http_get(port, "/app.js.map").expect("GET /app.js.map failed")
+    assert_eq(status, 200, "the referenced source map must be served")
+    (status, version_body) :: http_get(port, "/__jet_dev_version").expect("GET /__jet_dev_version failed")
+    assert_eq(status, 200)
+    baseline_version := String.from_utf8_lossy(version_body).trim().to_string() // #4303
+    (status, status_body) :: http_get(port, "/__jet_dev_status").expect("GET /__jet_dev_status failed")
+    assert_eq(status, 200)
+    status_text :: String.from_utf8_lossy(status_body)
+    assert(status_text.contains("\"state\":\"ready\""), "{status_text}")
+    assert(status_text.contains("\"clients\":"), "{status_text}")
+    (status, html_body) :: http_get_without_session(port, "/").expect("GET / failed")
+    assert_eq(status, 200)
+    html :: String.from_utf8_lossy(html_body)
+    assert(html.contains("__jet_dev_status") && html.contains("Build failed"), "served index.html should have the live-reload script injected")
+    (status, _) :: http_get_without_session(port, "/canvas").expect("GET app listener Canvas path")
+    assert_eq(status, 404, "the app listener must not expose the Canvas route")
+    fs.write(src_path, FIXTURE_SRC_EDITED).unwrap()
+    new_version :: wait_for_version_change(port, baseline_version, Duration.from_secs(15))
+    assert_ne(new_version, baseline_version)
+    expected_edited :: jet.compile_web_with_path(FIXTURE_SRC_EDITED, "app.jet").expect("front end rejected edited fixture").web.expect("web target compile must produce web artifacts").js_app
+    (status, body) :: http_get(port, "/app.js").expect("GET /app.js (after edit) failed")
+    assert_eq(status, 200)
+    served_edited :: String.from_utf8_lossy(body)
+    assert_eq(served_edited.strip_suffix(map_trailer).unwrap_or(served_edited), expected_edited, "served app.js should reflect the rebuilt (edited) source")
+    assert_ne(expected_initial, expected_edited, "sanity: the edit should actually change generated JS, or this test proves nothing")
+    drop(^guard)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_dev.rs:582
+#Test("jet_dev_web_publishes_from_a_repository_subdirectory") {
+    if !have_tool("rustc") { eprintln("note: skipping jet_dev_web_publishes_from_a_repository_subdirectory (need rustc)"); return }
+    root :: env.temp_dir().join("jet_dev_web_subdir_{std.process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root.join(".git")).unwrap()
+    app :: root.join("app")
+    fs.create_dir_all(app).unwrap()
+    fs.write(app.join("app.jet"), "fn run() -> {{\n    print(\"hello web\")\n}}\n").unwrap()
+    port :: unused_local_port()
+    child := Command.new(jet_bin()).args(["dev", "app.jet", "--target=web", "--port={port}"]).current_dir(app).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("failed to start `jet dev --target=web`")
+    stdout :: child.stdout.take().unwrap()
+    guard :: KillOnDrop{child: ^child}
+    assert_eq(wait_for_app_preview(^stdout), port)
+    (status, body) :: http_get(port, "/app.js").expect("GET /app.js failed")
+    assert_eq(status, 200)
+    trailer :: "//# sourceMappingURL=app.js.map\n".bytes()
+    published :: fs.read(root.join(".jet/build/app.js")).expect("app.js published at the project root")
+    assert_eq(published.strip_suffix(trailer).unwrap_or(published), body.strip_suffix(trailer).unwrap_or(body), "served app.js must be the bundle published under the project root")
+    drop(^guard)
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/web_dev.rs:630
+#Test("tanstack_start_dev_reference_loop_recovers_last_good_browser_state") {
+    if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") { eprintln("note: skipping TanStack reference dev loop (need rustc + node + chromium)"); return }
+    repo :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR"))
+    root :: env.temp_dir().join("jet_tanstack_reference_dev_{std.process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root.join("public")).unwrap()
+    loop path in ["run.jet", "package.jet", "public/index.html", "public/app.css"] {
+        source :: repo.join("Examples/features/web/tanstack_start").join(path)
+        destination :: root.join(path)
+        if destination.parent() == { .Val(parent) -> fs.create_dir_all(parent).unwrap(); .None -> {} }
+        fs.copy(source, destination).unwrap()
+    }
+    output :: Command.new("node").env("CHROMIUM", "chromium").arg(repo.join("Tools/web-dev-test/reference_app.mjs"))
+        .args(["--metric", "error_to_fix", "--manifest"]).arg(repo.join("Tools/agent-eval/dx/manifest.json"))
+        .args(["--exercise", "--app", "tanstack-start-orders", "--jet-env"]).arg(repo.join("Tools/agent/jet-env")).current_dir(root).output().expect("run TanStack reference dev loop")
+    assert(output.status.success(), "TanStack reference dev loop failed\nstdout:\n{String.from_utf8_lossy(output.stdout)}\nstderr:\n{String.from_utf8_lossy(output.stderr)}")
+    stdout :: String.from_utf8_lossy(output.stdout)
+    assert(stdout.contains("REFERENCE_METRIC:error_to_fix") && stdout.contains("diagnosis_ms=") && stdout.contains("repair_ms="), "reference dev loop did not report diagnosis and repair timing: {stdout}")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/web_dev.rs:683
+#Test("jet_dev_web_rejects_windows_absolute_static_paths") {
+    if !have_tool("rustc") { eprintln("note: skipping jet_dev_web_rejects_windows_absolute_static_paths (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_dev_windows_static_paths_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("app.jet"), FIXTURE_SRC).unwrap()
+    child := Command.new(jet_bin()).args(["dev", "app.jet", "--target=web"]).current_dir(dir).stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("failed to start `jet dev --target=web`")
+    stdout :: child.stdout.take().unwrap()
+    guard :: KillOnDrop{child: ^child}
+    port :: wait_for_app_preview(^stdout)
+    loop path in ["/C:/Windows/win.ini", "/C:\\Windows\\win.ini", "/\\Windows\\win.ini", "/\\\\server\\share\\secret"] {
+        (status, _) :: http_get(port, path).expect("Windows absolute static-path request failed")
+        assert_eq(status, 400, "Windows absolute static path escaped the build root: {path}")
+    }
+    drop(^guard)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_dev.rs:769
+#Test("web_test_static_server_rejects_symlink_escape") {
+    if target.selected_family() != "unix" { return }
+    if !have_tool("node") { eprintln("note: skipping web_test_static_server_rejects_symlink_escape (need node)"); return }
+    root :: env.temp_dir().join("jet-web-test-static-symlink-{std.process.id()}")
+    _ :: fs.remove_dir_all(root)
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("index.html"), "safe\n").unwrap()
+    outside :: root.with_file_name("jet-web-test-static-outside-{std.process.id()}")
+    fs.write(outside, "secret\n").unwrap()
+    symlink(outside, root.join("escape.js")).unwrap()
+    port :: unused_local_port()
+    child :: Command.new("node").arg(OSPath.from(env.build_var("CARGO_MANIFEST_DIR")).join("Tools/web-test/serve.mjs"))
+        .arg("--port").arg(port.to_string()).arg("--root").arg(root).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("start web-test static server")
+    guard :: KillOnDrop{child: ^child}
+    start :: Instant.now()
+    loop start.elapsed() < Duration.from_secs(10) {
+        if http_get(port, "/") == { .Val((200, _)) -> break; else -> {} }
+        thread.sleep(Duration.from_millis(25))
+    }
+    (status, _) :: http_get(port, "/escape.js").expect("static server request")
+    assert_eq(status, 400, "symlink outside the static root was served")
+    assert_eq(fs.read_to_string(outside).unwrap(), "secret\n")
+    _ :: fs.remove_dir_all(root)
+    _ :: fs.remove_file(outside)
+}
+// Rust: tests/web_dev.rs:827
+#Test("web_test_static_server_rejects_sibling_prefix_traversal") {
+    if !have_tool("node") { eprintln("note: skipping web_test_static_server_rejects_sibling_prefix_traversal (need node)"); return }
+    base :: env.temp_dir().join("jet-web-test-static-sibling-prefix-{std.process.id()}")
+    _ :: fs.remove_dir_all(base)
+    root :: base.join("root")
+    sibling :: base.join("root-sibling")
+    fs.create_dir_all(root).unwrap()
+    fs.create_dir_all(sibling).unwrap()
+    fs.write(root.join("index.html"), "safe\n").unwrap()
+    fs.write(sibling.join("secret.js"), "sibling-secret\n").unwrap()
+    (port, guard) :: start_web_test_static_server(root)
+    (status, content_type, _) :: http_get_with_content_type(port, "/").expect("GET / from static server")
+    assert_eq(status, 200)
+    assert_eq(content_type, "text/html; charset=utf-8")
+    (status, body) :: http_get_without_session(port, "/../root-sibling/secret.js").expect("sibling-prefix traversal request")
+    assert_eq(status, 400)
+    assert(!body.windows("sibling-secret".bytes().len()).any(fn(window) { window == "sibling-secret".bytes() }), "sibling-prefix traversal returned outside bytes")
+    drop(^guard)
+    _ :: fs.remove_dir_all(base)
+}
+// Rust: tests/web_dev.rs:866
+#Test("web_test_static_server_rejects_hardlinked_file") {
+    if target.selected_family() != "unix" && target.selected_os() != "windows" { return }
+    if !have_tool("node") { eprintln("note: skipping web_test_static_server_rejects_hardlinked_file (need node)"); return }
+    base :: env.temp_dir().join("jet-web-test-static-hardlink-{std.process.id()}")
+    _ :: fs.remove_dir_all(base)
+    root :: base.join("root")
+    outside :: base.join("outside.js")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("index.html"), "safe\n").unwrap()
+    fs.write(outside, "hardlink-secret\n").unwrap()
+    fs.hard_link(outside, root.join("hard.js")).unwrap()
+    (port, guard) :: start_web_test_static_server(root)
+    (status, body) :: http_get_without_session(port, "/hard.js").expect("hardlink request")
+    assert_eq(status, 400)
+    assert(!body.windows("hardlink-secret".bytes().len()).any(fn(window) { window == "hardlink-secret".bytes() }), "hardlinked outside bytes were served")
+    assert_eq(fs.read_to_string(outside).unwrap(), "hardlink-secret\n")
+    drop(^guard)
+    _ :: fs.remove_dir_all(base)
+}
+// Rust: tests/web_dev.rs:902
+#Test("web_test_static_server_final_swap_stays_inside_root") {
+    if target.selected_family() != "unix" { return }
+    if !have_tool("node") { eprintln("note: skipping web_test_static_server_final_swap_stays_inside_root (need node)"); return }
+    base :: env.temp_dir().join("jet-web-test-static-final-swap-{std.process.id()}")
+    _ :: fs.remove_dir_all(base)
+    root :: base.join("root")
+    destination :: root.join("race.js")
+    parked :: root.join("race.js.parked")
+    outside :: base.join("outside.js")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("index.html"), "safe\n").unwrap()
+    fs.write(destination, "inside-final\n").unwrap()
+    fs.write(outside, "outside-final\n").unwrap()
+    (port, guard) :: start_web_test_static_server(root)
+    stop :: Shared.new(AtomicBool.new(false))
+    leaked :: Shared.new(AtomicBool.new(false))
+    swaps :: Shared.new(AtomicUsize.new(0))
+    served :: Shared.new(AtomicUsize.new(0))
+    swap_stop :: stop.clone()
+    swap_target :: destination.clone()
+    swap_parked :: parked.clone()
+    swap_outside :: outside.clone()
+    swap_count :: swaps.clone()
+    swapper :: thread.spawn(fn() {
+        loop !swap_stop.load(Ordering.Relaxed) {
+            _ :: fs.remove_file(swap_parked)
+            if fs.rename(swap_target, swap_parked).is_ok() {
+                if symlink(swap_outside, swap_target).is_ok() { _ :: swap_count.fetch_add(1, Ordering.Relaxed) }
+                _ :: fs.remove_file(swap_target)
+                _ :: fs.rename(swap_parked, swap_target)
+                thread.sleep(Duration.from_micros(50))
+            }
+        }
+    })
+    requests := [std.thread.JoinHandle<()>]{}
+    loop _ in 0..<4 {
+        request_leaked :: leaked.clone()
+        request_served :: served.clone()
+        &requests.push(thread.spawn(fn() {
+            loop _ in 0..<256 {
+                (status, body) :: http_get_without_session(port, "/race.js") ?? continue
+                if status == 200 { _ :: request_served.fetch_add(1, Ordering.Relaxed) }
+                if body.windows("outside-final".bytes().len()).any(fn(window) { window == "outside-final".bytes() }) { request_leaked.store(true, Ordering.Relaxed); break }
+            }
+        }))
+    }
+    loop request in requests { request.join().unwrap() }
+    stop.store(true, Ordering.Relaxed)
+    swapper.join().unwrap()
+    assert(!leaked.load(Ordering.Relaxed))
+    assert(swaps.load(Ordering.Relaxed) > 0)
+    assert(served.load(Ordering.Relaxed) > 0)
+    drop(^guard)
+    _ :: fs.remove_dir_all(base)
+}
+// Rust: tests/web_dev.rs:986
+#Test("web_test_static_server_ancestor_swap_stays_inside_root") {
+    if target.selected_family() != "unix" { return }
+    if !have_tool("node") { eprintln("note: skipping web_test_static_server_ancestor_swap_stays_inside_root (need node)"); return }
+    base :: env.temp_dir().join("jet-web-test-static-ancestor-swap-{std.process.id()}")
+    _ :: fs.remove_dir_all(base)
+    root :: base.join("root")
+    nested :: root.join("nested")
+    parked :: root.join("nested.parked")
+    outside :: base.join("outside-parent")
+    fs.create_dir_all(nested).unwrap()
+    fs.create_dir_all(outside).unwrap()
+    fs.write(root.join("index.html"), "safe\n").unwrap()
+    fs.write(nested.join("race.js"), "inside-ancestor\n").unwrap()
+    fs.write(outside.join("race.js"), "outside-ancestor\n").unwrap()
+    (port, guard) :: start_web_test_static_server(root)
+    stop :: Shared.new(AtomicBool.new(false))
+    leaked :: Shared.new(AtomicBool.new(false))
+    swaps :: Shared.new(AtomicUsize.new(0))
+    served :: Shared.new(AtomicUsize.new(0))
+    swap_stop :: stop.clone()
+    swap_nested :: nested.clone()
+    swap_parked :: parked.clone()
+    swap_outside :: outside.clone()
+    swap_count :: swaps.clone()
+    swapper :: thread.spawn(fn() {
+        loop !swap_stop.load(Ordering.Relaxed) {
+            _ :: fs.remove_dir_all(swap_parked)
+            if fs.rename(swap_nested, swap_parked).is_ok() {
+                if symlink(swap_outside, swap_nested).is_ok() { _ :: swap_count.fetch_add(1, Ordering.Relaxed) }
+                _ :: fs.remove_file(swap_nested)
+                _ :: fs.rename(swap_parked, swap_nested)
+                thread.sleep(Duration.from_micros(50))
+            }
+        }
+    })
+    requests := [std.thread.JoinHandle<()>]{}
+    loop _ in 0..<4 {
+        request_leaked :: leaked.clone()
+        request_served :: served.clone()
+        &requests.push(thread.spawn(fn() {
+            loop _ in 0..<256 {
+                (status, body) :: http_get_without_session(port, "/nested/race.js") ?? continue
+                if status == 200 { _ :: request_served.fetch_add(1, Ordering.Relaxed) }
+                if body.windows("outside-ancestor".bytes().len()).any(fn(window) { window == "outside-ancestor".bytes() }) { request_leaked.store(true, Ordering.Relaxed); break }
+            }
+        }))
+    }
+    loop request in requests { request.join().unwrap() }
+    stop.store(true, Ordering.Relaxed)
+    swapper.join().unwrap()
+    assert(!leaked.load(Ordering.Relaxed))
+    assert(swaps.load(Ordering.Relaxed) > 0)
+    assert(served.load(Ordering.Relaxed) > 0)
+    drop(^guard)
+    _ :: fs.remove_dir_all(base)
+}
+// Rust: tests/web_dev.rs:1072
+#Test("jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep") {
+    if !have_tool("rustc") { eprintln("note: skipping jet_dev_web_error_overlay_status_last_good_and_recovery_stay_in_lockstep (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_dev_hybrid_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src_path :: dir.join("app.jet")
+    fs.write(src_path, FIXTURE_SRC).unwrap()
+    child := Command.new(jet_bin()).args(["dev", "app.jet", "--target=web", "--canvas", "--verbose"]).current_dir(dir).env("NO_COLOR", "1")
+        .stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().expect("failed to start hybrid `jet dev --target=web`")
+    stdout :: child.stdout.take().unwrap()
+    stderr := child.stderr.take().unwrap()
+    (stderr_tx, stderr_rx) :: mpsc.channel<String>()
+    _ :: thread.spawn(fn() {
+        bytes := [U8]{}
+        _ :: stderr.read_to_end(&bytes)
+        _ :: stderr_tx.send(String.from_utf8_lossy(bytes).to_string())
+    })
+    guard :: KillOnDrop{child: ^child}
+    ports :: wait_for_ports(^stdout)
+    port :: ports.canvas
+    application_port :: ports.application
+    ready :: wait_for_status(port, "tab-a", "ready", Duration.from_secs(10))
+    assert(ready.contains("\"clients\":1"), "{ready}")
+    assert(ready.contains("ready · localhost:{application_port} · 1 client"), "{ready}")
+    second_tab :: wait_for_status(port, "tab-b", "ready", Duration.from_secs(2))
+    assert(second_tab.contains("\"clients\":2"), "{second_tab}")
+    (_, baseline_body) :: http_get(port, "/__jet_dev_version").expect("baseline version")
+    baseline_version := String.from_utf8_lossy(baseline_body).trim().to_string() // #4303
+    (_, initial_js) :: http_get(application_port, "/app.js").expect("initial last-good app.js")
+    broken :: FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()")
+    fs.write(src_path, broken).unwrap()
+    error :: wait_for_status(port, "tab-a", "error", Duration.from_secs(10))
+    assert(error.contains("\"code\":\"E0102\""), "{error}")
+    assert(error.contains("Error [E0102]"), "{error}")
+    assert(error.contains("missing_hybrid_symbol"), "{error}")
+    assert(error.contains("error · E0102 · "), "{error}")
+    (_, error_version_body) :: http_get(port, "/__jet_dev_version").expect("version during error")
+    assert_eq(String.from_utf8_lossy(error_version_body).trim(), baseline_version, "error build must not trigger reload")
+    (_, last_good_js) :: http_get(application_port, "/app.js").expect("last-good app.js during error")
+    assert_eq(last_good_js, initial_js, "error build replaced last-good output")
+    (_, html_body) :: http_get(application_port, "/").expect("injected browser shell")
+    html :: String.from_utf8_lossy(html_body)
+    loop marker in ["overlayBody.textContent = s.diagnostic", "dismissedDiagnostic", "state === \"building\" || state === \"reconnecting\"", "location.reload()"] {
+        assert(html.contains(marker), "browser hybrid control missing {marker}")
+    }
+    fs.write(src_path, FIXTURE_SRC_EDITED).unwrap()
+    recovered_version :: wait_for_version_change(port, baseline_version, Duration.from_secs(15))
+    assert_ne(recovered_version, baseline_version)
+    recovered :: wait_for_status(port, "tab-a", "ready", Duration.from_secs(5))
+    assert(recovered.contains("\"diagnostic\":\"\""), "{recovered}")
+    assert(recovered.contains("\"code\":\"\""), "{recovered}")
+    expected_edited :: jet.compile_web_with_path(FIXTURE_SRC_EDITED, "app.jet").expect("front end rejected recovered fixture").web.expect("web output after recovery").js_app
+    (_, recovered_body) :: http_get(application_port, "/app.js").expect("recovered app.js")
+    recovered_js :: String.from_utf8_lossy(recovered_body)
+    assert_eq(recovered_js.strip_suffix("//# sourceMappingURL=app.js.map\n").unwrap_or(recovered_js), expected_edited)
+    drop(^guard)
+    terminal :: stderr_rx.recv_timeout(Duration.from_secs(5)).expect("collect append-only terminal transcript")
+    assert(!terminal.contains("\u{001B}"), "NO_COLOR transcript carried ANSI: {terminal}")
+    loop marker in ["jet dev  [ready]", "jet dev  [building]", "jet dev  [error] E0102", "Error [E0102]", "missing_hybrid_symbol", "save app.jet  →  error E0102", "save app.jet  →  rebuilt", "GET  /app.js"] {
+        assert(terminal.contains(marker), "terminal hybrid transcript missing {marker}:\n{terminal}")
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_dev.rs:1221
+#Test("jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts") {
+    if !have_tool("rustc") { eprintln("note: skipping jet_dev_web_first_save_after_ready_rebuilds_with_revision_facts (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_dev_web_first_save_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src_path :: dir.join("app.jet")
+    fs.write(src_path, FIXTURE_SRC).unwrap()
+    child := Command.new(jet_bin()).args(["dev", "app.jet", "--target=web", "--json"]).current_dir(dir).env("NO_COLOR", "1")
+        .stdout(Stdio.piped()).stderr(Stdio.null()).spawn().expect("failed to start `jet dev --target=web --json`")
+    stdout :: child.stdout.take().unwrap()
+    guard :: KillOnDrop{child: ^child}
+    (line_tx, line_rx) :: mpsc.channel<String>()
+    _ :: thread.spawn(fn() {
+        loop line in std.io.BufReader.new(^stdout).lines().map_while(fn(result) { result.ok() }) {
+            if line_tx.send(line).is_err() { return }
+        }
+    })
+    // Rust: tests/web_dev.rs:1263
+    next_line :: fn(needle: String, timeout: Duration) -> String {
+        deadline :: Instant.now() + timeout
+        loop {
+            remaining :: deadline.saturating_duration_since(Instant.now())
+            if line_rx.recv_timeout(remaining) == {
+                .Ok(line) && line.contains(needle) -> return line
+                .Ok(_) -> {}
+                .Err(_) -> panic("jet dev stdout never carried {needle:?} within {timeout:?}")
+            }
+        }
+    }
+    preview :: next_line("App preview: ", Duration.from_secs(120))
+    port :: port_from_url_line(preview, "App preview: ").expect("app preview port")
+    forget_canvas_session(port)
+    fs.write(src_path, FIXTURE_SRC_EDITED).unwrap()
+    accepted :: wait_for_version_change(port, "1", Duration.from_secs(60))
+    assert_eq(accepted, "2", "the first save after ready was not rebuilt")
+    rebuilt :: next_line("\"action\":\"dev.rebuild\"", Duration.from_secs(10))
+    assert(rebuilt.starts_with("{{\"schema\":\"jet.status/v1\""), "{rebuilt}")
+    assert(rebuilt.contains("\"ok\":true,\"reports\":[]"), "{rebuilt}")
+    assert(rebuilt.contains("\"candidate\":null"), "{rebuilt}")
+    assert(rebuilt.contains("\"accepted_revision\":2"), "{rebuilt}")
+    broken :: FIXTURE_SRC_EDITED.replace("print(size.height)", "print(size.height +)")
+    staged :: dir.join("app.jet.tmp")
+    fs.write(staged, broken).unwrap()
+    fs.rename(staged, src_path).unwrap()
+    error :: wait_for_status(port, "tab-a", "error", Duration.from_secs(60))
+    loop fact in ["\"version\":2,", "\"code\":\"E0003\"", "\"candidate\":3,", "\"diagnostic_revision\":3,", "\"accepted_revision\":2,", "\"last_good_revision\":2}"] {
+        assert(error.contains(fact), "dev status missing {fact}: {error}")
+    }
+    rejected :: next_line("\"action\":\"dev.rebuild\"", Duration.from_secs(10))
+    loop fact in ["\"ok\":false", "\"schema\":\"jet.report/v3\"", "E0003", "\"candidate\":3", "\"diagnostic_revision\":3", "\"accepted_revision\":2", "\"last_good_revision\":2"] {
+        assert(rejected.contains(fact), "watch-cycle record missing {fact}: {rejected}")
+    }
+    fs.write(src_path, FIXTURE_SRC).unwrap()
+    recovered :: wait_for_version_change(port, "2", Duration.from_secs(60))
+    assert_eq(recovered, "3")
+    ready :: wait_for_status(port, "tab-a", "ready", Duration.from_secs(10))
+    assert(ready.contains("\"diagnostic_revision\":null,"), "{ready}")
+    assert(ready.contains("\"accepted_revision\":3,"), "{ready}")
+    drop(^guard)
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_dev.rs:1331
+#Test("jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region") {
+    if !have_tool("rustc") || !have_tool("script") { eprintln("note: skipping jet_dev_web_real_pty_pins_header_toggles_verbose_and_restores_scroll_region (need rustc + script)"); return }
+    dir :: env.temp_dir().join("jet_dev_hybrid_pty_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src_path :: dir.join("app.jet")
+    transcript_path :: dir.join("terminal.typescript")
+    fs.write(src_path, FIXTURE_SRC).unwrap()
+    port :: unused_local_port()
+    command :: "env NO_COLOR=1 {jet_bin().display()} dev app.jet --target=web --canvas --port={port}"
+    pty := Command.new("script").args(["-qfec", command]).arg(transcript_path).current_dir(dir)
+        .stdin(Stdio.piped()).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("start real PTY wrapper")
+    input := pty.stdin.take().expect("PTY stdin")
+    guard := KillOnDrop{child: ^pty}
+    canvas_port :: wait_for_canvas_port(transcript_path, Duration.from_secs(20))
+    wait_for_server_up(canvas_port, Duration.from_secs(20))
+    ready :: wait_for_status(canvas_port, "pty-tab", "ready", Duration.from_secs(5))
+    assert(ready.contains("\"clients\":1"), "{ready}")
+    pinned :: wait_for_file_text(transcript_path, "jet dev  [ready] localhost:{port} · 1 client", Duration.from_secs(5))
+    assert(pinned.contains("watching app.jet · Canvas"), "pinned detail row missing:\n{pinned}")
+    assert(!pinned.contains("\u{001B}[32m"), "NO_COLOR PTY emitted colored status: {pinned:?}")
+    input.write_all("v".bytes()).unwrap()
+    input.flush().unwrap()
+    verbose :: wait_for_file_text(transcript_path, "verbose request/rebuild log enabled · press v to collapse", Duration.from_secs(5))
+    assert(verbose.contains("\u{001B}[3r") && verbose.contains("\u{001B}[3;1H"), "verbose mode never pinned rows 1-2 with a row-3 scroll region: {verbose:?}")
+    _ :: http_get(port, "/app.js").expect("request while verbose")
+    _ :: wait_for_file_text(transcript_path, "GET  /app.js", Duration.from_secs(5))
+    broken :: FIXTURE_SRC.replace("print(size.height)", "missing_hybrid_symbol()")
+    fs.write(src_path, broken).unwrap()
+    _ :: wait_for_status(canvas_port, "pty-tab", "error", Duration.from_secs(10))
+    error :: wait_for_file_text(transcript_path, "missing_hybrid_symbol", Duration.from_secs(5))
+    loop marker in ["jet dev  [error] E0102", "Error [E0102]", "Why:", "Fix:"] {
+        assert(error.contains(marker), "verbose PTY diagnostic missing {marker}:\n{error}")
+    }
+    input.write_all("v".bytes()).unwrap()
+    input.flush().unwrap()
+    collapsed :: wait_for_file_text(transcript_path, "\u{001B}[r\u{001B}[2J\u{001B}[H", Duration.from_secs(5))
+    scroll_regions_before :: collapsed.matches("\u{001B}[3r").count()
+    input.write_all("v".bytes()).unwrap()
+    input.flush().unwrap()
+    start :: Instant.now()
+    before_eof := 0
+    loop {
+        text :: fs.read_to_string(transcript_path).unwrap_or_default()
+        if text.matches("\u{001B}[3r").count() > scroll_regions_before { before_eof = text.len(); break }
+        if start.elapsed() > Duration.from_secs(5) { panic("PTY did not reactivate verbose scroll region: {text:?}") }
+        thread.sleep(Duration.from_millis(50))
+    }
+    input.write_all([U8]{4}).unwrap()
+    input.flush().unwrap()
+    eof_start :: Instant.now()
+    after_eof := ""
+    loop {
+        text :: fs.read_to_string(transcript_path).unwrap_or_default()
+        if text[before_eof..].contains("\u{001B}[r") { after_eof = text; break }
+        if eof_start.elapsed() > Duration.from_secs(5) { panic("EOF did not restore active scroll region: {text:?}") }
+        thread.sleep(Duration.from_millis(50))
+    }
+    scroll_regions_after_eof :: after_eof.matches("\u{001B}[3r").count()
+    _ :: wait_for_status(canvas_port, "post-eof-tab", "error", Duration.from_secs(5))
+    thread.sleep(Duration.from_millis(100))
+    after_refresh :: fs.read_to_string(transcript_path).unwrap()
+    assert_eq(after_refresh.matches("\u{001B}[3r").count(), scroll_regions_after_eof, "refresh reinstalled DECSTBM without raw controls: {after_refresh:?}")
+    input.write_all([U8]{3}).unwrap()
+    input.flush().unwrap()
+    exit_start :: Instant.now()
+    loop {
+        if guard.child.try_wait().unwrap() == {
+            .Val(status) -> { assert_eq(status.code(), Val(130), "PTY wrapper exit: {status}"); break }
+            .None -> {}
+        }
+        if exit_start.elapsed() > Duration.from_secs(5) { panic("PTY wrapper did not exit after Ctrl-C") }
+        thread.sleep(Duration.from_millis(50))
+    }
+    _ :: fs.remove_dir_all(dir)
+}
+// Rust: tests/web_dev.rs:1495
+#Test("jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix") {
+    if !have_tool("rustc") || !have_tool("node") || !have_tool("chromium") || !have_tool("script") {
+        eprintln("note: skipping jet_dev_web_browser_runs_hybrid_status_overlay_and_recovery_matrix (need rustc + node + chromium + script)")
+        return
+    }
+    dir :: env.temp_dir().join("jet_dev_hybrid_browser_{std.process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    src_path :: dir.join("app.jet")
+    transcript_path :: dir.join("browser-terminal.typescript")
+    fs.write(src_path, FIXTURE_SRC).unwrap()
+    port :: unused_local_port()
+    command :: "env NO_COLOR=1 {jet_bin().display()} dev app.jet --target=web --canvas --verbose --port={port}"
+    child := Command.new("script").args(["-qfec", command]).arg(transcript_path).current_dir(dir)
+        .stdin(Stdio.piped()).stdout(Stdio.null()).stderr(Stdio.null()).spawn().expect("failed to start browser-matrix dev server in PTY")
+    input := child.stdin.take().expect("browser-matrix PTY stdin")
+    guard := KillOnDrop{child: ^child}
+    wait_for_server_up(port, Duration.from_secs(20))
+    repo :: OSPath.from(env.build_var("CARGO_MANIFEST_DIR"))
+    output :: Command.new("node").arg(repo.join("Tools/web-dev-test/hybrid.mjs")).arg("--port").arg(port.to_string())
+        .arg("--source").arg(src_path).arg("--terminal-transcript").arg(transcript_path).current_dir(repo).output().expect("run hybrid browser matrix")
+    assert(output.status.success(), "hybrid browser matrix failed\nstdout:\n{String.from_utf8_lossy(output.stdout)}\nstderr:\n{String.from_utf8_lossy(output.stderr)}")
+    assert(String.from_utf8_lossy(output.stdout).contains("PASS hybrid dev-server browser matrix"), "browser matrix did not report completion")
+    assert_eq(fs.read_to_string(src_path).unwrap(), FIXTURE_SRC_EDITED)
+    before_ctrl_c :: fs.read_to_string(transcript_path).unwrap().len()
+    input.write_all([U8]{3}).unwrap()
+    input.flush().unwrap()
+    start :: Instant.now()
+    loop {
+        if guard.child.try_wait().unwrap() == {
+            .Val(status) -> { assert_eq(status.code(), Val(130), "browser PTY wrapper exit: {status}"); break }
+            .None -> {}
+        }
+        if start.elapsed() > Duration.from_secs(5) { panic("browser PTY wrapper did not exit after Ctrl-C") }
+        thread.sleep(Duration.from_millis(50))
+    }
+    final_transcript :: fs.read_to_string(transcript_path).unwrap()
+    assert(final_transcript[before_ctrl_c..].contains("\u{001B}[r"), "Ctrl-C did not restore active browser-matrix scroll region: {final_transcript:?}")
+    _ :: fs.remove_dir_all(dir)
+}

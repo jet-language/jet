@@ -1,0 +1,43 @@
+use std.fs
+use std.process.Command
+use jet
+// GATE #4494: actual Windows system ABI, retained FFI declarations.
+// Rust: tests/os_interrupt_windows.rs:14
+#FFI(system)
+fn FreeConsole() -> I32
+// Rust: tests/os_interrupt_windows.rs:15
+#FFI(system)
+fn AllocConsole() -> I32
+// Rust: tests/os_interrupt_windows.rs:16
+#FFI(system)
+fn SetConsoleCtrlHandler(handler: (fn(U32) -> I32)?, add: I32) -> I32
+// Rust: tests/os_interrupt_windows.rs:20
+#FFI(system)
+fn GenerateConsoleCtrlEvent(event: U32, process_group: U32) -> I32
+// Rust: tests/os_interrupt_windows.rs:23
+fn compile_interrupt_program(dir: &OSPath) -> OSPath {
+    src :: """
+use core.sys as os
+use core.process as process
+
+fn run() {
+    os.on_interrupt(() -> { panic("first handler failed") })
+    os.on_interrupt(() -> {
+        print("second")
+        process.exit(0)
+    })
+    print("ready")
+    loop { }
+}
+"""
+    source :: dir.join("interrupt.jet")
+    fs.write(&source, src).unwrap()
+    shown :: source.to_string_lossy()
+    out :: jet.compile_with_path(src, &shown).unwrap_or_else(|diags| panic("front end rejected fixture:\n{jet.render_diagnostics(&shown, src, &diags)}"))
+    rust :: dir.join("interrupt.rs")
+    binary :: dir.join("interrupt.exe")
+    fs.write(&rust, out.rust).unwrap()
+    built :: Command.new("rustc").args(["--edition", "2021", rust.to_str().unwrap(), "-o", binary.to_str().unwrap()]).output().unwrap()
+    assert(built.status.success(), "rustc failed:\n{String.from_utf8_lossy(&built.stderr)}")
+    binary
+}

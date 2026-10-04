@@ -1,0 +1,628 @@
+use std.[fs, env]
+use std.process.Command
+use std.collections.BTreeSet
+use jet
+use jet_env_model.ModuleEval
+use jet_foundation.Tests.Integration.Common
+use jet_foundation.Tests.Integration.TirSupport as T
+use jet_foundation.Tests.Integration.InlineRangeTiers as R
+use jet_foundation.Tests.Integration.InterpreterExtensionLintPolicy as P
+use jet_foundation.Tests.Integration.JetMeasure as M
+use jet_foundation.Tests.Integration.JetShellParity as S
+use jet_foundation.Tests.Integration.Jetdoc as D
+use jet_foundation.Tests.Integration.L0503Behavior as L
+use jet_foundation.Tests.Integration.Layout as Y
+use jet_foundation.Tests.Integration.LibUse as U
+use jetpack.Store.Roots
+use jet.Foreign.[BinderStatus, BinderSurface]
+use jet.AST.[ForeignNamespace, ImportKind]
+// GATE #4494: real subprocesses, atomics, clocks, temporary filesystem and native providers.
+
+// Rust: tests/inline_range_tiers.rs:39
+#Test("inline_range_comptime_and_repl_accept_legal_inputs") {
+    compiled :: jet.compile_with_path(R.EXAMPLE, "Examples/features/types/range_types.jet").expect("inline range example must compile through the shared front end")
+    assert(compiled.rust.contains("42"), "comptime inline-range binding was not carried into generated output")
+    // REPL accepts one item/statement; #Numeric belongs in the file-wide check.
+    transcript :: jet.REPL.run_transcript(&[
+        "fn set_brightness(level: Int(0..100)) -> Int(0..100) { level }",
+        "fn checked_inline(raw: Int) -> Int(0..100) String! { Int(0..100).from_int(raw) }",
+        "print(set_brightness(42))",
+        "print(checked_inline(3) ?? Int(0..100).from_int(0))"
+    ], None)
+    assert_eq(transcript, "ok\nok\n42\n3\n")
+}
+// Rust: tests/inline_range_tiers.rs:62
+#Test("named_range_conversion_keeps_exact_literal_before_interval_check") {
+    source :: """
+Die :: distinct Int(0..255)
+
+fn run() {
+    bad :: Die.from_int(999999999999999999999999999999999999)
+}
+"""
+    diagnostics :: jet.compile_with_path(source, "tests/fixtures/large_range_literal.jet").expect_err("an oversized exact literal must not enter a bounded range")
+    assert(diagnostics.iter().any(|d| d.code == "E0135"), "expected E0135, got {diagnostics:#?}")
+}
+// Rust: tests/inline_range_tiers.rs:81
+#Test("inline_range_example_matches_aot_default_run_and_interpreter") {
+    T.assert_example_cli_tiers_agree("types/range_types", R.EXPECTED)
+}
+// Rust: tests/inline_range_tiers.rs:86
+#Test("inline_range_web_runtime_matches_the_shared_value") {
+    source :: """#Target(Web)
+fn set_brightness(level: Int(0..100)) -> Int(0..100) { level }
+
+fn run() {
+    print(set_brightness(42))
+    print(Int(0..100).from_int(3))
+}
+"""
+    output :: jet.compile_web_with_path(source, "tests/fixtures/inline_range_web.jet").unwrap_or_else(|diags| panic("web inline-range source was rejected: {diags:#?}"))
+    web :: output.web.expect("web target must produce artifacts")
+    assert(web.js_app.contains("function jet_inline_range_from_int"), "web JS must embed the shared inline-range Prelude kernel")
+    assert(web.wasm_rust.contains("jet_inline_range_from_int"), "web Wasm must call the shared inline-range Prelude kernel")
+    if !R.have_tool("rustc") || !R.have_tool("node") || !R.have_wasm_target() {
+        eprintln("note: skipping inline-range web execution (need rustc, wasm32 target, and node)")
+        return
+    }
+    scratch :: Common.Scratch.new("inline-range-web")
+    fs.write(scratch.join("app.js"), &web.js_app).unwrap()
+    fs.write(scratch.join("jet_dom_runtime.js"), &web.dom_runtime).unwrap()
+    fs.write(scratch.join("app_wasm.rs"), &web.wasm_rust).unwrap()
+    fs.write(scratch.join("package.json"), "{\"type\":\"module\"}").unwrap()
+    wasm :: Command.new("rustc").current_dir(&scratch.path).args(["--edition", "2021", "--target", "wasm32-unknown-unknown", "--crate-type", "cdylib", "-O", "app_wasm.rs", "-o", "app.wasm"]).output().expect("spawn web rustc")
+    assert(wasm.status.success(), "rustc rejected inline-range web output: {String.from_utf8_lossy(&wasm.stderr)}")
+    node :: Command.new("node").current_dir(&scratch.path).arg("app.js").output().expect("spawn inline-range web app")
+    assert(node.status.success(), "node rejected inline-range web output: stdout={String.from_utf8_lossy(&node.stdout)} stderr={String.from_utf8_lossy(&node.stderr)}")
+    assert_eq(String.from_utf8_lossy(&node.stdout), "42\n3\n")
+}
+// Rust: tests/inline_range_tiers.rs:161
+#Test("named_range_parser_records_one_interval_fact") {
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(R.NAMED_RANGE_EXAMPLE)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    program :: jet.Parser.parse(&tokens).expect("named range example must parse")
+    distinct :: program.items.iter().find_map(|item| match item {
+        jet.AST.Item.Distinct(def) if def.name == "Die" -> Some(def)
+        _ -> None
+    }).expect("named range declaration")
+    (lo, hi, _) :: distinct.range.expect("named range interval")
+    assert_eq((lo, hi), (1, 6))
+}
+// Rust: tests/inline_range_tiers.rs:178
+#Test("named_range_sema_accepts_the_interval_proof") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("Examples/features/types/refinements.jet")
+    bundle := jet.Loader.load_entry(path.to_str().unwrap()).expect("load range example")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Check)
+    assert(diagnostics.is_empty(), "named range sema failed: {diagnostics:#?}")
+}
+// Rust: tests/inline_range_tiers.rs:190
+#Test("named_range_tir_keeps_the_fixed_list_read_direct") {
+    compiled :: jet.compile_with_path(R.NAMED_RANGE_EXAMPLE, "Examples/features/types/refinements.jet").expect("named range example must reach TIR")
+    start :: compiled.rust.find("pub fn __jet_pick").expect("generated pick function")
+    tail :: compiled.rust[start..]
+    body :: tail.split_once("\npub fn").map_or(tail, |(body, _)| body)
+    assert(body.contains(")["), "TIR lost direct fixed-list indexing: {body}")
+    assert(!body.contains("jet_index_vec"), "proven interval index regained a runtime helper: {body}")
+}
+// Rust: tests/inline_range_tiers.rs:214
+#Test("named_range_aot_matches_golden") {
+    if !T.have_rustc() { return }
+    (code, stdout) :: T.build_and_run("named_range_aot", R.NAMED_RANGE_EXAMPLE)
+    assert_eq(code, 0)
+    assert_eq(stdout, R.NAMED_RANGE_EXPECTED)
+}
+// Rust: tests/inline_range_tiers.rs:224
+#Test("named_range_default_jit_matches_golden") {
+    (code, stdout, stderr) :: T.jit_run("named_range_jit", R.NAMED_RANGE_EXAMPLE)
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, R.NAMED_RANGE_EXPECTED)
+}
+// Rust: tests/inline_range_tiers.rs:231
+#Test("named_range_interpreter_matches_golden") {
+    (code, stdout, stderr) :: T.interpreter_run("named_range_interpreter", R.NAMED_RANGE_EXAMPLE)
+    assert_eq(code, 0, stderr)
+    assert_eq(stdout, R.NAMED_RANGE_EXPECTED)
+}
+// Rust: tests/inline_range_tiers.rs:239
+#Test("named_range_comptime_folds_the_same_carrier") {
+    if !T.have_rustc() { return }
+    source :: """
+Die :: distinct Int(1..6)
+NAMED :: prep { Die.from_int(3) }
+
+fn run() {
+    print(NAMED.raw())
+}
+"""
+    (code, stdout) :: T.build_and_run("named_range_comptime", source)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\n")
+}
+// Rust: tests/inline_range_tiers.rs:257
+#Test("named_range_repl_uses_the_same_spelling") {
+    transcript :: jet.REPL.run_transcript(&["Die :: distinct Int(1..6)", "Die.from_int(3)"], None)
+    assert(!transcript.contains("error ["), "REPL rejected named range: {transcript}")
+    assert(transcript.contains("3"), "REPL lost named range value: {transcript}")
+}
+// Rust: tests/inline_range_tiers.rs:271
+#Test("named_range_web_backend_keeps_the_shared_interval_kernel") {
+    output :: jet.compile_web_with_path(R.NAMED_RANGE_EXAMPLE, "Examples/features/types/refinements.jet").expect("named range example must compile for web")
+    web :: output.web.expect("web target must produce artifacts")
+    assert(web.js_app.contains("function jet_inline_range_from_int"))
+    assert(web.wasm_rust.contains("jet_inline_range_from_int"))
+}
+// Rust: tests/interpreter_extension_lint_policy.rs:81
+#Test("literal_cli_run_and_interpret_enforce_compiler_extension_lint_policy") {
+    project :: Common.Scratch.new("extension-lint-policy")
+    fs.write(project.join("package.jet"), P.POLICY).unwrap()
+    fs.write(project.join("main.jet"), P.SOURCE).unwrap()
+    P.assert_denied("jet run", &P.run(&project.path, false))
+    P.assert_denied("jet run --interpret", &P.run(&project.path, true))
+}
+// Rust: tests/interpreter_extension_lint_policy.rs:91
+#Test("literal_cli_run_and_interpret_ignore_retired_pkg_jet_lint_policy") {
+    project :: Common.Scratch.new("retired-extension-lint-policy")
+    fs.write(project.join("pkg.jet"), P.POLICY).unwrap()
+    fs.write(project.join("main.jet"), P.SOURCE).unwrap()
+    P.assert_retired_policy_ignored("jet run", &P.run(&project.path, false))
+    P.assert_retired_policy_ignored("jet run --interpret", &P.run(&project.path, true))
+}
+// Rust: tests/jet_measure.rs:15
+#Test("jet_test_measure_selects_only_measure_claims") {
+    if !Common.have_rustc() { return }
+    scratch :: Common.Scratch.new("test_measure")
+    fs.write(scratch.join("claims.jet"), """fn run() {}
+
+#Test("measured") { .measure {
+    assert_eq(1, 1)
+} }
+
+#Test("ordinary") {
+    assert_eq(2, 2)
+}
+""").unwrap()
+    measured :: Command.new(M.jet_bin()).args(["test", "claims.jet", "--measure"]).current_dir(&scratch.path).env("NO_COLOR", "1").output().unwrap()
+    assert(measured.status.success(), "measured test failed:\nstdout:\n{String.from_utf8_lossy(&measured.stdout)}\nstderr:\n{String.from_utf8_lossy(&measured.stderr)}")
+    measured_stdout :: String.from_utf8_lossy(&measured.stdout)
+    assert(measured_stdout.contains("measured"), measured_stdout)
+    assert(!measured_stdout.contains("ordinary"), measured_stdout)
+    ordinary :: Command.new(M.jet_bin()).args(["test", "claims.jet"]).current_dir(&scratch.path).env("NO_COLOR", "1").output().unwrap()
+    assert(ordinary.status.success(), "{ordinary:?}")
+    ordinary_stdout :: String.from_utf8_lossy(&ordinary.stdout)
+    assert(ordinary_stdout.contains("measured"), ordinary_stdout)
+    assert(ordinary_stdout.contains("ordinary"), ordinary_stdout)
+}
+// Rust: tests/jet_measure.rs:64
+#Test("plain_jet_test_fails_a_crashing_measure_claim") {
+    if !Common.have_rustc() { return }
+    fixture :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/bench_fail.jet")
+    output :: Command.new(M.jet_bin()).args(["test", "--show-default"]).arg(&fixture).env("NO_COLOR", "1").output().expect("run plain jet test")
+    assert(!output.status.success(), "a failing .measure claim passed in plain test mode:\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("expected measured failure"), "the measured claim failure was not reported:\n{stderr}")
+}
+// Rust: tests/jet_measure.rs:92
+#Test("retired_measurement_command_teaches_test_measure") {
+    output :: Command.new(M.jet_bin()).args(["bench"]).env("NO_COLOR", "1").output().unwrap()
+    assert(!output.status.success(), "retired command unexpectedly ran")
+    stderr :: String.from_utf8_lossy(&output.stderr)
+    assert(stderr.contains("jet test --measure"), stderr)
+}
+// Rust: tests/jet_shell_parity.rs:20
+#Test("default_and_full_shell_declarations_are_typed_and_complete") {
+    root :: S.project_root()
+    source :: fs.read_to_string(root.join("env.jet")).expect("root env.jet")
+    assert(!source.contains("/nix/store"))
+    default :: ModuleEval.evaluate_env_with_environment(&source, &root, Some("dev")).expect("default environment evaluates")
+    expected_default: BTreeSet<String> :: ["cargo", "sccache", "clippy", "rustc", "rustfmt", "gcc", "clang", "lld", "nodejs_22", "python3", "nixfmt", "ripgrep", "jq", "gh", "fd", "bashInteractive", "zsh", "fish", "util-linux", "wasm-tools", "tree-sitter", "pkg-config", "tzdata", "vulkan-loader", "ruby", "php", "rWrapper", "rPackages.jsonlite"].into_iter().map(|name| "{name}@default").collect()
+    assert_eq(S.package_set(&default), expected_default)
+    full :: ModuleEval.evaluate_env_with_environment(&source, &root, Some("full")).expect("full environment evaluates")
+    assert_eq(full.package_refs.len(), 51)
+    full_packages :: S.package_set(&full)
+    loop name in ["rustup", "gnat", "fpc", "dart", "powershell", "gfortran", "gnucobol", "go", "jdk", "dotnet-sdk_8", "tcl", "lua5_4", "octave", "qemu", "wasmtime", "emscripten", "lldb", "raylib", "chromium", "firefox", "geckodriver", "gtk4", "bubblewrap", "rWrapper", "rPackages.jsonlite", "tzdata", "vulkan-loader"] {
+        assert(full_packages.contains("{name}@default"), "full environment misses {name}")
+    }
+}
+// Rust: tests/jetdoc.rs:57
+#Test("json_and_local_outputs_are_stable_and_complete") {
+    scratch :: D.Scratch.new()
+    entry :: scratch.copy_fixture("run.jet").to_string_lossy().into_owned()
+    first :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(first.status.success(), String.from_utf8_lossy(&first.stderr))
+    second :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(second.status.success(), String.from_utf8_lossy(&second.stderr))
+    assert_eq(first.stdout, second.stdout, "jetdoc JSON order drifted")
+    json :: String.from_utf8(first.stdout).expect("UTF-8 jetdoc JSON")
+    loop needle in ["\"schema_version\":1", "\"modules\"", "\"kind\":\"struct\"", "\"kind\":\"function\"", "\"kind\":\"marker\"", "\"kind\":\"protocol\"", "\"impls\"", "\"kind\":\"trait_impl\"", "\"doctests\"", "answer()", "\"failure_contract\":\"Int\"", "\"failure_source\":\"implicit default !Err\"", "\"examples\":[\"`answer()`\"]", "\"expression\":\"1 + 1\",\"expected\":\"2\"", "\"link\":\"run.jet#L35\"", "run.jet#L"] {
+        assert(json.contains(needle), "jetdoc JSON lacks {needle}: {json}")
+    }
+    order :: ["\"qualified_name\":\"Checked\"", "\"qualified_name\":\"Choice\"", "\"qualified_name\":\"Displayable\"", "\"qualified_name\":\"Displayable::display\"", "\"qualified_name\":\"Payment\"", "\"qualified_name\":\"Widget\"", "\"qualified_name\":\"answer\""]
+    positions: [Int] :: order.iter().map(|needle| json.find(needle).expect("ordered jetdoc item")).collect()
+    assert(positions.windows(2).all(|pair| pair[0] < pair[1]))
+    local :: D.jet_doc(&["doc", &entry], &scratch.path)
+    assert(local.status.success(), String.from_utf8_lossy(&local.stderr))
+    html :: fs.read_to_string(scratch.path.join("docs/index.html")).expect("HTML output")
+    markdown :: fs.read_to_string(scratch.path.join("docs/index.md")).expect("Markdown output")
+    loop needle in ["Jet Documentation", "<h4>Examples</h4>", "<li><code>`answer()`</code></li>", "1 + 1 // =&gt; 2", "../run.jet#L35", "run.jet#L"] { assert(html.contains(needle)) }
+    loop needle in ["Examples:\n\n- `answer()`", "failure: Int (implicit default Err!)", "## Doctests", "1 + 1 // => 2", "[Source](../run.jet#L35)", "run.jet#L"] { assert(markdown.contains(needle)) }
+}
+// Rust: tests/jetdoc.rs:121
+#Test("undocumented_public_api_has_a_command_snapshot") {
+    scratch :: D.Scratch.new()
+    entry :: scratch.copy_fixture("undocumented.jet").to_string_lossy().into_owned()
+    output :: D.jet_doc(&["doc", "--check", &entry], &scratch.path)
+    assert(!output.status.success())
+    rendered :: "{String.from_utf8_lossy(&output.stdout)}{String.from_utf8_lossy(&output.stderr)}".replace(&entry, "tests/fixtures/jetdoc/undocumented.jet")
+    snapshot :: include_str("tests/ui_lint/undocumented_public_api.warn")
+    assert_eq(rendered, snapshot, "undocumented-public-api UI snapshot drifted")
+}
+// Rust: tests/jetdoc.rs:138
+#Test("fixture_outputs_match_stable_goldens") {
+    scratch :: D.Scratch.new()
+    entry :: scratch.copy_fixture("undocumented.jet").to_string_lossy().into_owned()
+    json :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(json.status.success(), String.from_utf8_lossy(&json.stderr))
+    assert_eq(json.stdout, include_bytes("tests/fixtures/jetdoc/undocumented.json"))
+    local :: D.jet_doc(&["doc", &entry], &scratch.path)
+    assert(local.status.success(), String.from_utf8_lossy(&local.stderr))
+    assert_eq(fs.read(scratch.path.join("docs/index.md")).expect("Markdown output"), include_bytes("tests/fixtures/jetdoc/undocumented.md"))
+    assert_eq(fs.read(scratch.path.join("docs/index.html")).expect("HTML output"), include_bytes("tests/fixtures/jetdoc/undocumented.html"))
+}
+// Rust: tests/jetdoc.rs:163
+#Test("package_outputs_match_stable_goldens") {
+    scratch :: D.Scratch.new()
+    entry :: scratch.copy_fixture_package("undocumented.jet").to_string_lossy().into_owned()
+    json :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(json.status.success(), String.from_utf8_lossy(&json.stderr))
+    assert_eq(json.stdout, include_bytes("tests/fixtures/jetdoc/package-undocumented.json"), "package JSON output drifted")
+    local :: D.jet_doc(&["doc", &entry], &scratch.path)
+    assert(local.status.success(), String.from_utf8_lossy(&local.stderr))
+    assert_eq(fs.read(scratch.path.join("docs/index.md")).expect("Markdown output"), include_bytes("tests/fixtures/jetdoc/package-undocumented.md"), "package Markdown output drifted")
+    assert_eq(fs.read(scratch.path.join("docs/index.html")).expect("HTML output"), include_bytes("tests/fixtures/jetdoc/package-undocumented.html"), "package HTML output drifted")
+}
+// Rust: tests/jetdoc.rs:191
+#Test("package_fixture_rejects_order_and_content_drift") {
+    scratch :: D.Scratch.new()
+    entry :: scratch.copy_fixture_package("ordered.jet").to_string_lossy().into_owned()
+    first :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(first.status.success(), String.from_utf8_lossy(&first.stderr))
+    second :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(second.status.success(), String.from_utf8_lossy(&second.stderr))
+    assert_eq(first.stdout, second.stdout, "package JSON order is not stable")
+    json :: String.from_utf8(first.stdout).expect("UTF-8 package docs JSON")
+    loop needle in ["\"summary\":\"Alpha API.\"", "\"signature\":\"pub fn alpha() -> Int { 6 }\\nfailure: Int (implicit default !Err)\"", "\"summary\":\"Zulu API.\"", "\"signature\":\"pub fn zulu() -> Int { 7 }\\nfailure: Int (implicit default !Err)\"", "\"link\":\"ordered.jet#L7\"", "\"link\":\"ordered.jet#L4\""] {
+        assert(json.contains(needle), "package docs lack {needle}: {json}")
+    }
+    order :: ["\"qualified_name\":\"alpha\"", "\"qualified_name\":\"run\"", "\"qualified_name\":\"zulu\""]
+    positions: [Int] :: order.iter().map(|needle| json.find(needle).expect("ordered package item")).collect()
+    assert(positions.windows(2).all(|pair| pair[0] < pair[1]))
+}
+// Rust: tests/jetdoc.rs:226
+#Test("nested_state_docs_stay_on_the_struct_item") {
+    scratch :: D.Scratch.new()
+    entry_path :: scratch.path.join("nested_state.jet")
+    fs.write(&entry_path, "pub struct Door { state { Closed, Open } }\nfn run() {}\n").expect("write nested state fixture")
+    entry :: entry_path.to_string_lossy().into_owned()
+    output :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(output.status.success(), String.from_utf8_lossy(&output.stderr))
+    json :: String.from_utf8(output.stdout).expect("UTF-8 jetdoc JSON")
+    assert(json.contains("\"kind\":\"struct\""))
+    assert(json.contains("\"signature\":\"struct Door { state { Closed, Open } }\""))
+    assert(!json.contains("\"kind\":\"state\""))
+}
+// Rust: tests/jetdoc.rs:248
+#Test("checked_text_contract_is_rendered_in_generated_docs") {
+    scratch :: D.Scratch.new()
+    entry_path :: scratch.path.join("checked_text.jet")
+    fs.write(&entry_path, """#PubFile
+#Error
+enum PatternError { Bad }
+
+/// A checked pattern.
+Pattern :: distinct String
+
+impl Pattern.CheckedText {
+    type Error = PatternError
+
+    fn check(text: String) -[]> PatternError! {
+        return
+    }
+
+    fn encode_hole<T: Printable>(value: T) -[]> String {
+        return ""
+    }
+}
+
+fn run() {}
+""").expect("write checked-text docs fixture")
+    entry :: entry_path.to_string_lossy().into_owned()
+    json_output :: D.jet_doc(&["doc", "--json", &entry], &scratch.path)
+    assert(json_output.status.success(), "stdout: {String.from_utf8_lossy(&json_output.stdout)}\nstderr: {String.from_utf8_lossy(&json_output.stderr)}")
+    json :: String.from_utf8(json_output.stdout).expect("UTF-8 docs JSON")
+    assert(json.contains("Pattern :: distinct String"), json)
+    assert(json.contains("implements CheckedText"))
+    assert(json.contains("type Error = PatternError"))
+    assert(json.contains("encode_hole"))
+    rendered :: D.jet_doc(&["doc", &entry], &scratch.path)
+    assert(rendered.status.success(), String.from_utf8_lossy(&rendered.stderr))
+    markdown :: fs.read_to_string(scratch.path.join("docs/index.md")).expect("Markdown output")
+    html :: fs.read_to_string(scratch.path.join("docs/index.html")).expect("HTML output")
+    loop output in [&markdown, &html] {
+        assert(output.contains("Pattern :: distinct String"), output)
+        assert(output.contains("implements CheckedText"), output)
+        assert(output.contains("type Error = PatternError"), output)
+        assert(output.contains("encode_hole"), output)
+    }
+}
+// Rust: tests/l0503_behavior.rs:52
+#Test("l0503_fixture_keeps_exact_subject_span_and_policy") {
+    compiled :: jet.compile_with_path(L.SOURCE, "tests/ui_lint/prefer_compound_assign.jet").unwrap_or_else(|diags| panic("L0503 fixture must compile: {diags:?}"))
+    l0503: [jet.Diagnostic] := compiled.lints.iter().filter(|d| d.code == "L0503").collect()
+    l0503.sort_by_key(|d| d.span.map_or(Int.MAX, |span| span.start))
+    assert_eq(l0503.len(), L.EXPECTED_L0503.len(), "L0503 policy changed")
+    assert_eq(compiled.lints.len(), L.EXPECTED_L0503.len(), "fixture gained an incidental lint")
+    loop (diagnostic, (subject, expected_line, expected_column, expected_what, expected_fix)) in l0503.iter().zip(L.EXPECTED_L0503) {
+        assert_eq(diagnostic.what, expected_what)
+        assert_eq(diagnostic.why, L.WHY)
+        assert_eq(diagnostic.fix, expected_fix)
+        span :: diagnostic.span.expect("L0503 must identify its assignment operator")
+        assert_eq(L.SOURCE[span.start..span.end], "=")
+        prefix :: L.SOURCE[..span.start]
+        line_start :: prefix.rfind('\n').map_or(0, |offset| offset + 1)
+        line :: prefix.bytes().filter(|byte| byte == 10).count() + 1
+        assert_eq(line, expected_line)
+        assert_eq(span.start - line_start + 1, expected_column)
+        assignment_line :: L.SOURCE[line_start..].lines().next().expect("L0503 assignment line")
+        assert(assignment_line.contains("{subject} = {subject}") || assignment_line.contains("{subject} = ({subject}"), "L0503 subject disappeared from source line: {assignment_line}")
+    }
+    // Already-compound and indexed expansion (E0164) stay quiet.
+    assert(L.SOURCE.contains("n += 1"))
+    assert(L.SOURCE.contains("xs[0] = xs[0] + 1"))
+}
+// Rust: tests/l0503_behavior.rs:143
+#Test("l0503_fixture_runs_on_aot_default_dev_and_interpreter") {
+    default :: T.jit_run("l0503_behavior_default", L.SOURCE)
+    L.assert_runtime_output("default jet run", &default)
+    forced_interpreter :: T.interpreter_run("l0503_behavior_interpreter", L.SOURCE)
+    L.assert_runtime_output("forced interpreter", &forced_interpreter)
+    default_dev :: L.run_dev(false)
+    L.assert_runtime_output("default dev", &default_dev)
+    dev_interpreter :: L.run_dev(true)
+    L.assert_runtime_output("dev forced interpreter", &dev_interpreter)
+    if T.have_rustc() {
+        aot :: T.build_and_run_full("jet_l0503_aot", "l0503_behavior_aot", L.SOURCE)
+        L.assert_runtime_output("AOT", &aot)
+    }
+}
+// Rust: tests/layout.rs:84
+#Test("equal_split_compiles_and_runs") {
+    src :: """
+fn run() {
+    form :: Layout{
+        a.width == b.width,
+        a.width + b.width == 200.0
+    }
+    aw :: form.value(form.h("a", "width"))
+    bw :: form.value(form.h("b", "width"))
+    print("a={aw} b={bw}")
+}
+"""
+    assert(Y.error_codes(src).is_empty(), "equal-split layout should compile clean: {Y.error_codes(src):?}")
+    if out :: Y.build_and_run("equal_split", src) { assert_eq(out, "a=100.0 b=100.0\n") }
+}
+// Rust: tests/layout.rs:110
+#Test("min_max_bounds_clamp") {
+    src :: """
+fn run() {
+    form :: Layout{
+        x.width >= 50.0,
+        x.width <= 80.0
+    }
+    xv :: form.h("x", "width")
+    form.suggest(xv, 1000.0)
+    print("x={(form.value(xv))}")
+}
+"""
+    assert(Y.error_codes(src).is_empty(), "min/max bounds layout should compile clean: {Y.error_codes(src):?}")
+    if out :: Y.build_and_run("min_max", src) { assert_eq(out, "x=80.0\n") }
+}
+// Rust: tests/layout.rs:136
+#Test("proportional_split_via_addition") {
+    src :: """
+fn run() {
+    form :: Layout{
+        a.width == b.width + b.width,
+        a.width + b.width == 300.0
+    }
+    aw :: form.value(form.h("a", "width"))
+    bw :: form.value(form.h("b", "width"))
+    print("a={aw} b={bw}")
+}
+"""
+    assert(Y.error_codes(src).is_empty(), "proportional-split layout should compile clean: {Y.error_codes(src):?}")
+    if out :: Y.build_and_run("proportional", src) { assert_eq(out, "a=200.0 b=100.0\n") }
+}
+// Rust: tests/layout.rs:162
+#Test("cross_axis_width_vs_height_is_e2932") {
+    src :: """
+fn run() {
+    form :: Layout{
+        a.width >= a.height
+    }
+}
+"""
+    assert_eq(Y.error_codes(src), ["E2932"])
+}
+// Rust: tests/layout.rs:174
+#Test("non_comparison_line_is_e2933") {
+    src :: """
+fn run() {
+    x :: 1
+    form :: Layout{
+        x == 1
+    }
+}
+"""
+    assert_eq(Y.error_codes(src), ["E2933"])
+}
+// Rust: tests/layout.rs:187
+#Test("duplicate_constraint_is_lint_not_error") {
+    src :: """
+fn run() {
+    form :: Layout{
+        a.width >= 80.0,
+        a.width >= 80.0
+    }
+    print("ok")
+}
+"""
+    assert(Y.error_codes(src).is_empty(), "a duplicate constraint is a lint, not a compile error: {Y.error_codes(src):?}")
+    dir :: Y.unique_tmp()
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("fixture.jet")
+    fs.write(&path, src).unwrap()
+    out :: jet.compile_with_path(src, &path.to_string_lossy()).unwrap()
+    assert(out.lints.iter().any(|d| d.code == "E2934"), "expected an E2934 lint, got: {out.lints.iter().map(|d| d.code.as_str()).collect():?}")
+}
+// Rust: tests/layout.rs:220
+#Test("infeasible_required_constraints_report_conflict") {
+    src :: """
+fn run() {
+    form :: Layout{
+        a.width >= 100.0,
+        a.width <= 50.0
+    }
+    print("feasible={(form.is_feasible())}")
+    loop c in form.conflict() {
+        print("conflict: {c}")
+    }
+}
+"""
+    assert(Y.error_codes(src).is_empty(), "infeasibility is a runtime fact, not a compile error: {Y.error_codes(src):?}")
+    if out :: Y.build_and_run("infeasible", src) {
+        assert(out.starts_with("feasible=false\n"), "got: {out}")
+        assert(out.contains("conflict:"), "expected a named conflicting constraint, got: {out}")
+    }
+}
+// Rust: tests/layout.rs:251
+#Test("infeasible_value_read_panics_loudly") {
+    src :: """
+fn run() {
+    form :: Layout{
+        a.width >= 100.0,
+        a.width <= 50.0
+    }
+    print("{(form.value(form.h("a", "width")))}")
+}
+"""
+    assert(Y.error_codes(src).is_empty())
+    dir0 :: Y.unique_tmp()
+    fs.create_dir_all(&dir0).unwrap()
+    fpath :: dir0.join("fixture.jet")
+    fs.write(&fpath, src).unwrap()
+    out :: jet.compile_with_path(src, &fpath.to_string_lossy()).unwrap()
+    if !Common.have_rustc() { eprintln("note: rustc not found; compiled front end only"); return }
+    dir :: env.temp_dir()
+    rs :: dir.join("jet_layout_panic.rs")
+    bin :: dir.join("jet_layout_panic")
+    fs.write(&rs, &out.rust).unwrap()
+    c :: Command.new("rustc").args(["--edition", "2021"]).arg(&rs).arg("-o").arg(&bin).output().unwrap()
+    assert(c.status.success(), String.from_utf8_lossy(&c.stderr))
+    r :: Command.new(&bin).output().unwrap()
+    assert(!r.status.success(), "expected a panic (non-zero exit)")
+    stderr :: String.from_utf8_lossy(&r.stderr)
+    assert(stderr.contains("no feasible solution"), "expected the conflict message in the panic, got: {stderr}")
+}
+// Rust: tests/lib_use.rs:35
+#Test("ffi_selective_import_aliases_resolve") {
+    loop binder in jet.Foreign.BINDERS.iter().filter(|b| b.status == BinderStatus.Active && b.surface == BinderSurface.Namespace) {
+        root :: binder.language.root()
+        source :: "use {root}.[lib1 as first, lib2]\nfn run() {{ }}\n"
+        (tokens, lex_diagnostics) :: jet.Lexer.lex(&source)
+        assert(lex_diagnostics.is_empty(), "{root}: {lex_diagnostics:?}")
+        program :: jet.Parser.parse(&tokens).unwrap_or_else(|d| panic("{root}: {d:?}"))
+        import :: &program.imports[0]
+        match &import.kind {
+            ImportKind.Unqualified(..) -> {}
+            _ -> panic("{root} list took a foreign-only parser branch")
+        }
+        assert_eq(import.foreign_imports().unwrap(), [
+            (ForeignNamespace(language: binder.language, lib: "lib1"), "first"),
+            (ForeignNamespace(language: binder.language, lib: "lib2"), "lib2")
+        ])
+        single_source :: "use {root}.single as alias\nfn run() {{ }}\n"
+        (single_tokens, single_diagnostics) :: jet.Lexer.lex(&single_source)
+        assert(single_diagnostics.is_empty(), "{root}: {single_diagnostics:?}")
+        single_program :: jet.Parser.parse(&single_tokens).unwrap_or_else(|d| panic("{root}: {d:?}"))
+        single_import :: &single_program.imports[0]
+        match &single_import.kind {
+            ImportKind.Module(path, _) -> assert_eq(path, "{root}.single")
+            _ -> panic("{root} single import changed parser shape")
+        }
+        assert_eq(single_import.foreign_imports().unwrap(), [(ForeignNamespace(language: binder.language, lib: "single"), "alias")])
+    }
+}
+// Rust: tests/lib_use.rs:125
+#Test("realized_library_is_consumed_with_use") {
+    s :: Common.Scratch.new("ok")
+    hangar_root :: s.join("hangar-root")
+    fs.create_dir_all(&hangar_root).unwrap()
+    roots :: Roots(root: hangar_root.clone(), dev_mode: true)
+    producer :: s.join("jsonutil-src")
+    U.write(&producer.join("package.jet"), "name: \"jsonutil\"\nversion: \"0.1.0\"\npackages: { jsonutil: library }\n")
+    U.write(&producer.join("jsonutil.jet"), "module jsonutil { }\npub fn parse(raw: String) -> Int { 42 }\n")
+    realized :: U.realize_into_hangar(&roots, &producer, "jsonutil")
+    entry :: realized.metadata()
+    assert(entry.bin.is_empty(), "a library stages no PATH bin: {entry:?}")
+    consumer :: s.join("app")
+    U.write(&consumer.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n")
+    U.write(&consumer.join("main.jet"), "use jsonutil\nfn run() {\n    print(jsonutil.parse(\"x\"))\n}\n")
+    fs.create_dir_all(consumer.join(".jet/build")).unwrap()
+    out :: Command.new(U.jet_bin()).args(["run", "main.jet"]).current_dir(&consumer).env("JETPACK_ROOT", &hangar_root).output().unwrap()
+    stdout :: String.from_utf8_lossy(&out.stdout)
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(out.status.success(), "jet run failed\nstdout: {stdout}\nstderr: {stderr}")
+    assert(stdout.contains("42"), "stdout: {stdout}\nstderr: {stderr}")
+}
+// Rust: tests/lib_use.rs:186
+#Test("executable_is_not_importable") {
+    s :: Common.Scratch.new("exe")
+    hangar_root :: s.join("hangar-root")
+    fs.create_dir_all(&hangar_root).unwrap()
+    roots :: Roots(root: hangar_root.clone(), dev_mode: true)
+    producer :: s.join("deploy-src")
+    U.write(&producer.join("package.jet"), "name: \"deploy\"\nversion: \"0.1.0\"\npackages: { deploy: executable }\n")
+    U.write(&producer.join("deploy.jet"), "module deploy { }\n")
+    U.write(&producer.join("bin/deploy"), "#!/bin/sh\necho deploying\n")
+    realized :: U.realize_into_hangar(&roots, &producer, "deploy")
+    entry :: realized.metadata()
+    assert(!entry.bin.is_empty(), "an executable stages a PATH bin: {entry:?}")
+    consumer :: s.join("app")
+    U.write(&consumer.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { deploy: acme/deploy/abc123@github }\n")
+    U.write(&consumer.join("main.jet"), "use deploy\nfn run() {\n    print(\"hi\")\n}\n")
+    fs.create_dir_all(consumer.join(".jet/build")).unwrap()
+    out :: Command.new(U.jet_bin()).args(["run", "main.jet"]).current_dir(&consumer).env("JETPACK_ROOT", &hangar_root).output().unwrap()
+    assert(!out.status.success(), "use of an executable must fail")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E0982"), "stderr: {stderr}")
+    assert(stderr.contains("`deploy` is an executable package, so it can't be used with `use`"), "what line: {stderr}")
+    assert(stderr.contains("an `executable` package installs a binary on your PATH"), "why line: {stderr}")
+    assert(stderr.contains("change `deploy` to `library` in `package.jet`"), "fix line: {stderr}")
+}
+// Rust: tests/lib_use.rs:253
+#Test("unrealized_library_points_at_build_when_preparation_is_refused") {
+    s :: Common.Scratch.new("unrealized")
+    hangar_root :: s.join("hangar-root")
+    fs.create_dir_all(hangar_root.join("hangar")).unwrap()
+    consumer :: s.join("app")
+    U.write(&consumer.join("package.jet"), "name: \"app\"\nversion: \"0.1.0\"\ndeps: { jsonutil: acme/jsonutil/abc123@github }\n")
+    U.write(&consumer.join("main.jet"), "use jsonutil\nfn run() {\n    print(jsonutil.parse(\"x\"))\n}\n")
+    fs.create_dir_all(consumer.join(".jet/build")).unwrap()
+    out :: Command.new(U.jet_bin()).args(["run", "main.jet", "--no-prepare"]).current_dir(&consumer).env("JETPACK_ROOT", &hangar_root).output().unwrap()
+    assert(!out.status.success(), "an unrealized library must fail")
+    stderr :: String.from_utf8_lossy(&out.stderr)
+    assert(stderr.contains("E0983"), "stderr: {stderr}")
+    assert(stderr.contains("the library package `jsonutil` hasn't been built yet"), "what line: {stderr}")
+    assert(stderr.contains("its source staged in the shared store (hangar)"), "why line: {stderr}")
+    assert(stderr.contains("run `jetpack env --prep` to realize `jsonutil`"), "fix line: {stderr}")
+}

@@ -1,0 +1,23 @@
+use std.[env, fs, process]
+use std.process.Command
+use core.path.OSPath
+
+// Rust: tests/cffi_native_matrix.rs:12
+pub fn required(name: String) -> String {
+    env.var(name).unwrap_or_else(fn(_) { panic("{name} is required in the native C ABI matrix") })
+}
+// Rust: tests/cffi_native_matrix.rs:16
+pub fn command(program: String) -> Command {
+    parts := program.split_whitespace()
+    cmd := Command.new(parts.next().expect("empty command"))
+    cmd.args(parts)
+    cmd
+}
+// Rust: tests/cffi_native_matrix.rs:23
+// GATE #4494: actual process spawn, native tool exit status and byte streams.
+pub fn run_ok(cmd: &Command, label: String) -> Unit {
+    output :: cmd.output().unwrap_or_else(fn(e) { panic("could not start {label}: {e}") })
+    assert(output.status.success(), "{label} failed\nstdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+}
+// Rust: tests/cffi_native_matrix.rs:35
+pub fn binary(root: &OSPath) -> OSPath { root.join("matrix") }

@@ -1,35 +1,13 @@
-// PORT-PENDING 2176 crates-jet-codegen-src-codegen-tir-tir-to-mir-core: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_core.rs:1-31
-// Translate in place: replace the //RS lines below with the 1:1 Jet port (keep `// Rust: <file>:<line>` anchors).
-//RS //! Canonical Core-call projection for the TIR-to-MIR boundary.
-//RS //!
-//RS //! Core-call records are resolved before this seam.  This module only copies
-//RS //! the registry row into the canonical MIR carrier; it does not rediscover
-//RS //! symbols, routes, coverage, or backend policy.
-//RS 
-//RS use jet_foundation::MIR::MirCoreCall;
-//RS use jet_foundation::Syntax::CoreCallRecord;
-//RS 
-//RS /// Project the exact checked Core-call records used by a TIR program.
-//RS ///
-//RS /// The registry record, rather than a reconstructed `(module, member)` pair,
-//RS /// is the identity input so receiver rows and every resolved metadata field
-//RS /// survive unchanged.  The result has one row per `(id, key)`, in stable
-//RS /// `(id, key)` order, regardless of the input traversal order.
-//RS pub(super) fn lower_core_records(
-//RS     records: impl IntoIterator<Item = &'static CoreCallRecord>,
-//RS ) -> Vec<MirCoreCall> {
-//RS     let mut rows = records
-//RS         .into_iter()
-//RS         .map(MirCoreCall::from_record)
-//RS         .collect::<Vec<_>>();
-//RS     rows.sort_unstable_by(|left, right| {
-//RS         left.id
-//RS             .cmp(&right.id)
-//RS             .then_with(|| left.key.cmp(&right.key))
-//RS     });
-//RS     rows.dedup_by(|left, right| left.id == right.id && left.key == right.key);
-//RS     rows
-//RS }
-//RS 
-// END-PORT-PENDING 2176 crates/jet-codegen/src/Codegen/TIR/tir_to_mir_core.rs:1-31
+// Canonical Core-call projection for the TIR-to-MIR boundary.
+// Records are already resolved; preserve every metadata field, without rediscovery.
+use JetFoundation.MIR.[MirCoreCall]
+use JetFoundation.Syntax.[CoreCallRecord]
 
+// Rust: crates/jet-codegen/src/Codegen/TIR/tir_to_mir_core.rs:16
+// One row per (id, key), in stable (id, key) order, independent of traversal order.
+fn lower_core_records(records: [CoreCallRecord]) -> [MirCoreCall] {
+    rows := records.iter().map(|record| -> MirCoreCall.from_record(record)).collect()
+    rows.sort_unstable_by(|left, right| -> left.id.cmp(right.id).then_with(|| -> left.key.cmp(right.key)))
+    rows.dedup_by(|left, right| -> left.id == right.id && left.key == right.key)
+    ^rows
+}

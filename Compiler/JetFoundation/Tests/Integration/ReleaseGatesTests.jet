@@ -1,0 +1,412 @@
+use Compiler.JetFoundation.Tests.Integration.ReleaseGates.*
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use std.env as env
+use std.process.[Command]
+use std.process as process
+use jet as jet
+use jet.Manifest as Manifest
+use jet_foundation.Registry as Registry
+
+// GATE #4494: real native CLI/process/filesystem providers; no executed verification here.
+
+// Rust: tests/release_gates.rs:23
+#Test("small_profile_binary_is_smaller_than_default") {
+    jet :: jet_bin()
+    assert(jet.exists(), "need the native jet binary")
+    example :: root().join("Examples/features/collections/wordcount.jet")
+    assert(example.is_file(), "Examples/features/collections/wordcount.jet must exist")
+    dir :: env.temp_dir().join("jet_small_test_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.create_dir_all(dir.join(".jet/build")).unwrap()
+    build_default :: Command.new(jet).args(["build", example.to_str().unwrap()]).current_dir(dir).output().unwrap()
+    assert(build_default.status.success(), "default build failed:\n{String.from_utf8_lossy(build_default.stderr)}")
+    fs.rename(dir.join(".jet/build/wordcount"), dir.join(".jet/build/wordcount_default")).unwrap()
+    build_small :: Command.new(jet).args(["build", "--small", example.to_str().unwrap()]).current_dir(dir).output().unwrap()
+    assert(build_small.status.success(), "--small build failed:\n{String.from_utf8_lossy(build_small.stderr)}")
+    fs.rename(dir.join(".jet/build/wordcount"), dir.join(".jet/build/wordcount_small")).unwrap()
+    default_size :: fs.metadata(dir.join(".jet/build/wordcount_default")).unwrap().len()
+    small_size :: fs.metadata(dir.join(".jet/build/wordcount_small")).unwrap().len()
+    assert(small_size < default_size, "--small binary ({small_size} bytes) should be smaller than default ({default_size} bytes)")
+    _ :: fs.remove_dir_all(dir)
+}
+
+// Rust: tests/release_gates.rs:106
+#Test("ga_every_diagnostic_has_explain") {
+    index :: jet.Explain.index()
+    missing :: Registry.diagnostic_rows().iter().filter((row) -> !index.contains_key(row.code)).map((row) -> row.code.to_string()).collect()
+    assert(missing.is_empty(), "M17 GA gate: these diagnostic codes lack a `jet explain` entry:\n  {missing.join(", ")}")
+}
+
+// Rust: tests/release_gates.rs:124
+#Test("ga_milestone_features_front_end_clean") {
+    features :: [("modules/library.jet", "library authoring"), ("lowlevel/lowlevel.jet", "expert low-level tier"), ("net/http_server_tasks.jet", "HTTP service"), ("lowlevel/freestanding.jet", "freestanding smoke")]
+    features_dir :: root().join("Examples/features")
+    loop (file, desc) in features {
+        path :: features_dir.join(file)
+        assert(path.is_file(), "M17 GA gate: feature example missing: {path.display()}")
+        src :: fs.read_to_string(path).unwrap_or_else((_) -> panic("cannot read {path.display()}"))
+        result :: jet.compile_with_path(src, path.to_str().unwrap())
+        assert(result.is_ok(), "M17 GA gate: '{desc}' failed front end:\n{result.err():?}")
+    }
+}
+
+// Rust: tests/release_gates.rs:155
+#Test("ga_feature_size_budgets") {
+    jet :: jet_bin()
+    assert(jet.exists(), "need the native jet binary")
+    budgets :: [("basics/hello.jet", 512_000), ("io/cli.jet", 512 * 1024), ("net/http_server_tasks.jet", 3 * 1024 * 1024), ("modules/library.jet", 4_194_304), ("lowlevel/lowlevel.jet", 4_194_304), ("lowlevel/freestanding.jet", 4_194_304)]
+    features_dir :: root().join("Examples/features")
+    build_dir :: env.temp_dir().join("jet_ga_budgets_{process.id()}")
+    fs.create_dir_all(build_dir.join(".jet/build")).unwrap()
+    loop (file, max_bytes) in budgets {
+        src :: features_dir.join(file)
+        stem :: OSPath.from(file).file_stem().unwrap().to_string_lossy()
+        bin :: build_dir.join(".jet/build").join(stem)
+        out :: Command.new(jet).args(["build", "--small", src.to_str().unwrap()]).current_dir(build_dir).output().unwrap()
+        assert(out.status.success(), "GA size gate: `--small` build of {file} failed:\n{String.from_utf8_lossy(out.stderr)}")
+        size :: fs.metadata(bin).map((m) -> m.len()).unwrap_or(0)
+        assert(size <= max_bytes && size > 0, "GA size gate: {file} --small binary is {size} bytes (limit {max_bytes})")
+    }
+    _ :: fs.remove_dir_all(build_dir)
+}
+
+// Rust: tests/release_gates.rs:249
+#Test("version_banner") {
+    jet :: jet_bin()
+    assert(jet.exists(), "build the jet binary first (cargo build)")
+    loop argument in ["version", "--version"] {
+        out :: Command.new(jet).arg(argument).output().unwrap()
+        assert(out.status.success(), "jet {argument} exited non-zero")
+        stdout :: String.from_utf8_lossy(out.stdout).into_owned()
+        assert_eq(stdout, Manifest.version_banner())
+        check_fixture("version_banner.txt", stdout)
+    }
+}
+
+// Rust: tests/release_gates.rs:262
+#Test("prerelease_status_is_not_a_shipped_1_0_policy") {
+    status :: Manifest.current_release_status()
+    assert_eq(status.channel(), "prerelease")
+    assert_eq(status.disposition(), "current")
+    assert_eq(status.readiness(), "not-ready")
+    assert_eq(status.policy(), "future-1.0")
+    assert_eq(status.policy_disposition(), "planned")
+    assert(!status.policy_active())
+    banner :: Manifest.version_banner()
+    assert(banner.contains("release status: prerelease"))
+    assert(banner.contains("release disposition: current"))
+    assert(banner.contains("release readiness: not-ready"))
+    assert(banner.contains("1.0 compatibility policy: future-1.0 (planned; not active)"))
+}
+
+// Rust: tests/release_gates.rs:281
+#Test("claims_projection_uses_canonical_release_source_and_fails_closed") {
+    dir :: env.temp_dir().join("jet_release_claims_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    fs.write(dir.join("package.jet"), "name: \"release_claims\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: dir.join("run.jet")
+    fs.write(entry, "fn run() {}\n").unwrap()
+    output :: Command.new(jet_bin()).args(["inspect", "claims", entry.to_str().unwrap(), "--json"]).output().unwrap()
+    _ :: fs.remove_dir_all(dir)
+    assert(output.status.success(), "inspect claims failed: {String.from_utf8_lossy(output.stderr)}")
+    json :: String.from_utf8_lossy(output.stdout)
+    loop expected in ["\"action\":\"inspect.claims\"", "\"source\":\"manifest.capability_relation.rows\"", "\"status\":\"prerelease\"", "\"disposition\":\"current\"", "\"readiness\":\"not-ready\"", "\"compatibility_policy\":\"future-1.0\"", "\"compatibility_policy_disposition\":\"planned\"", "\"compatibility_policy_active\":false", "\"release_ready\":false", "\"claims\":[]"] {
+        assert(json.contains(expected), "claims output missing {expected}: {json}")
+    }
+}
+
+// Rust: tests/release_gates.rs:329
+#Test("edition_too_new") {
+    raw :: "name: \"wordstats\"\nversion: \"0.1.0\"\nedition: \"2099\"\n"
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).expect("manifest should parse")
+    err :: Manifest.check_edition_support(mf, "package.jet").expect_err("a future edition must be rejected")
+    assert_eq(err.code, "E2001")
+    rendered :: jet.render_diagnostics("package.jet", raw, [err])
+    check_fixture("edition_too_new.txt", rendered)
+}
+
+// Rust: tests/release_gates.rs:343
+#Test("supported_edition_is_accepted") {
+    raw :: "name: \"x\"\nversion: \"0.1.0\"\nedition: \"{Manifest.latest_edition()}\"\n"
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).unwrap()
+    assert(Manifest.check_edition_support(mf, "package.jet").is_ok())
+}
+
+// Rust: tests/release_gates.rs:353
+#Test("no_edition_field_is_accepted") {
+    raw :: "name: \"x\"\nversion: \"0.1.0\"\n"
+    mf :: Manifest.parse(OSPath.from("package.jet"), raw).unwrap()
+    assert_eq(mf.package.edition, None)
+    assert(Manifest.check_edition_support(mf, "package.jet").is_ok())
+}
+
+// Rust: tests/release_gates.rs:362
+#Test("core_encoding_migrations_use_one_marker_payload") {
+    encode :: jet.Syntax.core_marker_application("core.encoding.cbor", "encode").expect("cbor.encode deprecation")
+    assert_eq(encode.since, "2027")
+    assert_eq(encode.replacement, "cbor.to_bytes")
+    assert_eq(encode.removed_in, Val("2028"))
+    decode :: jet.Syntax.core_marker_application("core.encoding.cbor", "decode").expect("cbor.decode deprecation")
+    assert_eq(decode.since, "2027")
+    assert_eq(decode.replacement, "cbor.parse")
+    assert_eq(decode.removed_in, Val("2028"))
+}
+
+// Rust: tests/release_gates.rs:376
+#Test("cbor_deprecation_release_fixture") {
+    dir :: env.temp_dir().join("jet_release_deprecation_{process.id()}")
+    _ :: fs.remove_dir_all(dir)
+    fs.create_dir_all(dir).unwrap()
+    source :: "use core.encoding.cbor as cbor\nuse core.encoding.json as json\n\nfn run() {\n    tree :: json.parse(\"{{}}\") ?? panic(\"json\")\n    payload :: cbor.encode(tree)\n    print(\"ok\")\n}\n"
+    rendered := ""
+    loop edition in ["2027", "2028"] {
+        fs.write(dir.join("package.jet"), "name: \"cbor_release\"\nversion: \"0.1.0\"\nedition: \"{edition}\"\n").unwrap()
+        path :: dir.join("run.jet")
+        fs.write(path, source).unwrap()
+        diagnostics :: jet.check_with_path(path.to_str().unwrap())
+        rendered.push_str("edition {edition}\n")
+        rendered.push_str(jet.render_diagnostics("tests/release/cbor_{edition}.jet", source, diagnostics))
+    }
+    _ :: fs.remove_dir_all(dir)
+    check_fixture("deprecation.txt", rendered)
+}
+
+// Rust: tests/release_gates.rs:407
+#Test("compiled_workload_release_gate_uses_frozen_contract_and_canaries") {
+    repo :: root()
+    gate :: fs.read_to_string(repo.join("Tools/ci/compiled-workload-gate.sh")).expect("read compiled workload gate")
+    loop field in ["--contract", "--check", "outcomes.tsv", "measurements.tsv", "tiers.tsv", "jet_tool_version", "peer_tool_version", "review_status", "review_evidence", "review.tsv", "reviewer_is_independent", "review_workflow", "review_run", "review_actor", "rust_tolerance_ratio", "metric_is_loss"] {
+        assert(gate.contains(field), "compiled workload gate lost {field}")
+    }
+    runner_path :: repo.join("Tools/ci/compiled-workload-runner.mjs")
+    runner :: fs.read_to_string(runner_path).expect("read compiled workload runner")
+    loop field in ["runMeasured", "process.hrtime.bigint", "JET_WEB_CHROMIUM", "CdpDriver", "network=loopback-only", "network=disabled", "peerMeasured", "samples", "targetArtifactProof", "JET_STORE_DIR", ".jet"] {
+        assert(runner.contains(field), "compiled workload runner lost {field}")
+    }
+    registry :: Command.new("node").arg(runner_path).arg("--measurement-registry").current_dir(repo).output().expect("probe compiled workload measurement registry")
+    assert(registry.status.success(), "compiled workload measurement registry probe failed:\n{String.from_utf8_lossy(registry.stderr)}")
+    metric_registry :: String.from_utf8_lossy(registry.stdout)
+    loop field in ["\"linux\"", "\"macos\"", "\"windows\"", "\"VmHWM\"", "\"VmRSS\"", "\"PeakWorkingSet64\""] {
+        assert(metric_registry.contains(field), "compiled workload measurement registry lost {field}: {metric_registry}")
+    }
+    assert(metric_registry.contains("\"processProperty\":\"PeakWorkingSet64\""), "Windows memory measurement must use peak working set: {metric_registry}")
+    self_check :: fs.read_to_string(repo.join("Tools/ci/test-compiled-workload-gate.sh")).expect("read compiled workload gate self-check")
+    canaries :: fs.read_to_string(repo.join("tests/compiled_workloads/canaries.tsv")).expect("read compiled workload canaries")
+    loop line in canaries.lines().skip(1).filter((line) -> !line.is_empty()) {
+        name :: line.split('\t').nth(1).unwrap()
+        assert(self_check.contains("expect_reject {name}"), "removal canary is not exercised: {name}")
+    }
+    suites :: fs.read_to_string(repo.join("tests/suites.txt")).expect("read test suites")
+    assert(suites.lines().any((line) -> line.trim() == "tests/compiled_workloads"), "compiled workload self-check must stay in the named test suites")
+    output :: Command.new("bash").arg(repo.join("Tools/ci/compiled-workload-gate.sh")).arg("--contract").current_dir(repo).output().expect("run compiled workload contract gate")
+    assert(output.status.success(), "compiled workload contract gate failed:\n{String.from_utf8_lossy(output.stderr)}")
+}
+
+// Rust: tests/release_gates.rs:565
+#Test("ci_test_shards_cover_every_workspace_target_exactly_once") {
+    repo :: root()
+    shard_count :: 6
+    want :: full_workspace_test_target_inventory(repo)
+    assert(want.len() > 200, "sanity: expected well over 200 lib/bin/test targets across the workspace, got {want.len()}")
+    got: [String] := []
+    loop shard in 0..<shard_count {
+        out :: Command.new("bash").arg(repo.join("Tools/ci/test-shards.sh")).arg(shard.to_string()).arg(shard_count.to_string()).current_dir(repo).output().expect("run Tools/ci/test-shards.sh")
+        assert(out.status.success(), "shard {shard} enumeration failed:\n{String.from_utf8_lossy(out.stderr)}")
+        got.extend(String.from_utf8(out.stdout).unwrap().lines().map((line) -> line.to_string()))
+    }
+    // String keys retain the set's uniqueness check without a quadratic scan.
+    unique: [String:Bool] := [:]
+    loop target in got { unique[target] = true }
+    assert_eq(got.len(), unique.len(), "a test target appeared in more than one shard")
+    want_sorted := want.clone()
+    want_sorted.sort()
+    got_sorted := got.clone()
+    got_sorted.sort()
+    assert_eq(want_sorted, got_sorted, "the union of all CI test shards must equal the exact workspace test-target inventory (nothing silently skipped, nothing duplicated)")
+    assert_eq(got.iter().filter((target) -> target.as_str() == "-p jet --test grammar").count(), 1, "CI grammar drift tests must remain on exactly one production shard")
+}
+
+// Rust: tests/release_gates.rs:631
+#Test("ci_test_shards_use_the_committed_weight_table") {
+    repo :: root()
+    table :: fs.read_to_string(repo.join("Tools/ci/test-weights.tsv")).expect("read Tools/ci/test-weights.tsv")
+    inventory: [String:Bool] := [:]
+    loop target in full_workspace_test_target_inventory(repo) { inventory[target] = true }
+    weighed: [String:Bool] := [:]
+    loop (index, line) in table.lines().enumerate() {
+        row :: index + 1
+        if line.is_empty() || line.starts_with("#") { continue }
+        fields :: line.split('\t').collect()
+        assert_eq(fields.len(), 4, "Tools/ci/test-weights.tsv:{row} must be '<package>\t<kind>\t<target>\t<seconds>': {line:?}")
+        (package, kind, name, seconds) :: (fields[0], fields[1], fields[2], fields[3])
+        assert(seconds.parse<UInt64>().is_ok(), "Tools/ci/test-weights.tsv:{row} seconds must be a whole number: {seconds:?}")
+        target :: match kind {
+            "lib" -> "-p {package} --lib"
+            "bin" -> "-p {package} --bin {name}"
+            "test" -> "-p {package} --test {name}"
+            other -> panic("Tools/ci/test-weights.tsv:{row} has unknown target kind `{other}`")
+        }
+        assert(inventory.contains_key(target), "Tools/ci/test-weights.tsv:{row} weighs `{target}`, which is not a workspace test target — renamed or deleted, so its weight silently stopped applying")
+        assert(weighed.insert(target.clone(), true).is_none(), "Tools/ci/test-weights.tsv:{row} repeats `{target}`")
+    }
+    assert(!weighed.is_empty(), "the weight table must carry at least one measured row, or the weighted split is round-robin wearing a hat")
+    out :: Command.new("bash").arg(repo.join("Tools/ci/test-shards.sh")).args(["0", "6"]).current_dir(repo).output().expect("run Tools/ci/test-shards.sh")
+    assert(out.status.success(), "weighted shard enumeration failed:\n{String.from_utf8_lossy(out.stderr)}")
+    summary :: String.from_utf8_lossy(out.stderr)
+    assert(summary.contains("predicted ") && summary.contains("spread "), "Tools/ci/test-shards.sh must report the load and spread it computed: {summary}")
+}
+
+// Rust: tests/release_gates.rs:700
+#Test("verify_full_default_run_covers_whole_workspace") {
+    verify :: fs.read_to_string(root().join("Tools/agent/verify-full.sh")).expect("read Tools/agent/verify-full.sh")
+    assert(verify.contains("cargo test --workspace \"$@\""), "the unsharded default path must run `cargo test --workspace`, not the default-members-only `cargo test`")
+    assert(verify.contains("Tools/ci/test-shards.sh"), "the sharded path must delegate enumeration to Tools/ci/test-shards.sh")
+    assert(verify.contains("cargo test $test_target --no-run"))
+    assert(verify.contains("test_targets_repeat"))
+    assert(verify.contains("test-target inventory is nondeterministic"))
+    assert(verify.contains("CARGO_BUILD_JOBS"))
+    assert(!verify.contains("tmp_parent=\"${JET_VERIFY_TMPDIR:-/tmp}\""))
+}
+
+// Rust: tests/release_gates.rs:725
+#Test("warning_free_policy_is_strict_and_curated") {
+    verify :: fs.read_to_string(root().join("Tools/agent/verify-full.sh")).expect("read Tools/agent/verify-full.sh")
+    assert(verify.contains("D-CI2=A") && verify.contains("-D warnings"), "the production test path must inherit the warning wall")
+    jit :: fs.read_to_string(root().join("crates/jet-jit/src/lib.rs")).expect("read jet-jit lint policy")
+    assert(jit.contains("#![expect(") && jit.contains("reason = \"#804:"), "intentional Rust lint exceptions must use card-referenced #[expect]")
+}
+
+// Rust: tests/release_gates.rs:742
+#Test("ci_gate_evidence_preserves_success_and_failure_receipts") {
+    repo :: root()
+    scratch :: common.test_scratch_root("ci-evidence-{process.id()}")
+    _ :: fs.remove_dir_all(scratch)
+    fs.create_dir_all(scratch).unwrap()
+    script :: repo.join("Tools/ci/ci-evidence.sh")
+    success_dir :: scratch.join("success")
+    success :: Command.new("bash").arg(script).args(["--report-dir", success_dir.to_str().unwrap(), "--", "bash", "-c"]).arg("printf 'gate-ok\\n'").env_remove("GITHUB_ACTIONS").env("RUNNER_OS", "Linux").env("RUNNER_ARCH", "X64").current_dir(repo).output().expect("run CI evidence success path")
+    assert(success.status.success(), "successful gate must stay successful:\n{String.from_utf8_lossy(success.stderr)}")
+    assert_eq(String.from_utf8_lossy(success.stdout), "gate-ok\n", "evidence wrapper must preserve gate stdout")
+    success_receipt :: fs.read_to_string(success_dir.join("receipt.txt")).unwrap()
+    candidate :: success_receipt.lines().find_map((line) -> line.strip_prefix("candidate_commit=")).expect("receipt must record the candidate").to_owned()
+    assert_eq(candidate.len(), 40, "candidate revision must be a full SHA-1")
+    assert(success_receipt.contains("schema=jet.ci-evidence.v1"))
+    assert(success_receipt.contains("status=pass"))
+    assert(success_receipt.contains("candidate_commit={candidate}"))
+    loop field in ["source_candidate_commit", "toolchain_candidate_commit", "artifact_candidate_commit", "signature_candidate_commit", "test_candidate_commit", "support_matrix_candidate_commit", "provenance_candidate_commit", "release_metadata_candidate_commit"] {
+        assert(success_receipt.contains("{field}={candidate}"), "receipt must bind {field} to the candidate")
+    }
+    candidate_manifest :: fs.read_to_string(success_dir.join("candidate.txt")).unwrap()
+    assert(candidate_manifest.contains("schema=jet.ci-candidate.v1"))
+    loop field in ["candidate_commit", "source_candidate_commit", "toolchain_candidate_commit", "artifact_candidate_commit", "signature_candidate_commit", "test_candidate_commit", "support_matrix_candidate_commit", "provenance_candidate_commit", "release_metadata_candidate_commit"] {
+        assert(candidate_manifest.contains("{field}={candidate}"), "candidate manifest must bind {field} to the candidate")
+    }
+    assert(candidate_manifest.contains("signature=not-required-for-ci-test-gate"))
+    loop field in ["command_exit=0", "support_matrix=Linux/X64", "artifact_name=not-published", "provenance=github-actions:local/1", "source_manifest_sha256=", "toolchain_sha256="] { assert(success_receipt.contains(field)) }
+    assert_eq(fs.read_to_string(success_dir.join("command.stdout")).unwrap(), "gate-ok\n")
+
+    failure_dir :: scratch.join("failure")
+    failure :: Command.new("bash").arg(script).args(["--report-dir", failure_dir.to_str().unwrap(), "--", "bash", "-c"]).arg("printf 'gate-failed\\n' >&2; exit 23").env("GITHUB_SHA", candidate).env("RUNNER_OS", "Linux").env("RUNNER_ARCH", "X64").current_dir(repo).output().expect("run CI evidence failure path")
+    assert_eq(failure.status.code(), Val(23))
+    failure_receipt :: fs.read_to_string(failure_dir.join("receipt.txt")).unwrap()
+    assert(failure_receipt.contains("status=fail"))
+    assert(failure_receipt.contains("command_exit=23"))
+    assert_eq(fs.read_to_string(failure_dir.join("command.stderr")).unwrap(), "gate-failed\n")
+    assert(failure_dir.join("toolchain.txt").is_file(), "failed gates must retain toolchain evidence")
+
+    missing_runner_dir :: scratch.join("missing-runner")
+    missing_runner :: Command.new("bash").arg(script).args(["--report-dir", missing_runner_dir.to_str().unwrap(), "--", "bash", "-c"]).arg("printf 'must-not-run\\n'").env("GITHUB_ACTIONS", "true").env("GITHUB_SHA", candidate).env_remove("RUNNER_OS").env_remove("RUNNER_ARCH").env_remove("GITHUB_RUNNER_OS").env_remove("GITHUB_RUNNER_ARCH").current_dir(repo).output().expect("run CI evidence missing-runner path")
+    assert_eq(missing_runner.status.code(), Val(78))
+    assert_eq(fs.read_to_string(missing_runner_dir.join("command.stdout")).unwrap(), "")
+    missing_runner_receipt :: fs.read_to_string(missing_runner_dir.join("receipt.txt")).unwrap()
+    assert(missing_runner_receipt.contains("status=fail"))
+    assert(fs.read_to_string(missing_runner_dir.join("command.stderr")).unwrap().contains("runner OS identity is missing"))
+
+    stale_dir :: scratch.join("stale")
+    fs.create_dir_all(stale_dir).unwrap()
+    fs.write(stale_dir.join("receipt.txt"), "status=pass\n").unwrap()
+    stale :: Command.new("bash").arg(script).args(["--report-dir", stale_dir.to_str().unwrap(), "--", "bash", "-c"]).arg("printf 'must-not-run\\n'").env_remove("GITHUB_ACTIONS").env("GITHUB_SHA", candidate).env("RUNNER_OS", "Linux").env("RUNNER_ARCH", "X64").current_dir(repo).output().expect("run CI evidence stale-report path")
+    assert_eq(stale.status.code(), Val(78))
+    assert_eq(fs.read_to_string(stale_dir.join("command.stdout")).unwrap(), "")
+    stale_receipt :: fs.read_to_string(stale_dir.join("receipt.txt")).unwrap()
+    assert(stale_receipt.contains("status=fail"))
+    assert(fs.read_to_string(stale_dir.join("command.stderr")).unwrap().contains("stale file"))
+
+    artifact_mismatch_dir :: scratch.join("artifact-mismatch")
+    artifact_mismatch :: Command.new("bash").arg(script).args(["--report-dir", artifact_mismatch_dir.to_str().unwrap(), "--", "bash", "-c"]).arg("printf 'must-not-run\\n'").env_remove("GITHUB_ACTIONS").env("GITHUB_SHA", candidate).env("JET_CI_ARTIFACT_NAME", "ci-gate-evidence-shard-0-stale").current_dir(repo).output().expect("run CI evidence artifact identity failure path")
+    assert_eq(artifact_mismatch.status.code(), Val(78))
+    artifact_mismatch_receipt :: fs.read_to_string(artifact_mismatch_dir.join("receipt.txt")).unwrap()
+    assert(artifact_mismatch_receipt.contains("status=fail"))
+    assert(fs.read_to_string(artifact_mismatch_dir.join("command.stderr")).unwrap().contains("artifact name does not identify candidate"))
+    assert(artifact_mismatch_dir.join("candidate.txt").is_file())
+    _ :: fs.remove_dir_all(scratch)
+}
+
+// Rust: tests/release_gates.rs:961
+#Test("tower_hygiene_gate_is_read_only_and_blocks_missing_records") {
+    repo :: root()
+    fixture :: common.test_scratch_root("tower-hygiene-gate-{process.id()}")
+    _ :: fs.remove_dir_all(fixture)
+    fs.create_dir_all(fixture.join("Docs/spec")).unwrap()
+    fs.create_dir_all(fixture.join("tower")).unwrap()
+    fs.write(fixture.join("tower/tower.json"), """
+{
+  "meta": {"version": 4, "project": "fixture", "currentEpoch": null, "nextNum": 1, "rev": 0, "ui": {"toggled": []}},
+  "epochs": [{"id": "e1", "name": "Epoch 1", "goal": "", "status": "active"}],
+  "milestones": [],
+  "cards": [],
+  "decisions": [{"id": "D-OK1", "status": "ratified", "outcome": "A"}],
+  "questions": [],
+  "ideas": [],
+  "papercuts": [],
+  "events": []
+}
+""").unwrap()
+    fs.write(fixture.join("tower/history.json"), "{\"version\": 1, \"decisions\": [], \"cards\": [], \"events\": []}\n").unwrap()
+    fs.write(fixture.join("tower/read-only-marker.txt"), "must not change\n").unwrap()
+    fs.write(fixture.join("Docs/spec/ok.md"), "D-OK1\n").unwrap()
+    tower_before :: fs.read(fixture.join("tower/tower.json")).unwrap()
+    history_before :: fs.read(fixture.join("tower/history.json")).unwrap()
+    marker_before :: fs.read(fixture.join("tower/read-only-marker.txt")).unwrap()
+    success_report :: fixture.join("success.txt")
+    success :: run_tower_hygiene_gate(repo, fixture.join("tower"), fixture.join("Docs"), success_report)
+    assert(success.status.success(), "valid Tower hygiene must pass:\n{String.from_utf8_lossy(success.stdout)}")
+    success_text :: fs.read_to_string(success_report).unwrap()
+    loop field in ["status=pass", "read_only=pass", "lint_exit=0", "lint_repeat_exit=0", "lint_json=pass", "lint_repeat_json=pass", "candidate_commit=", "runner_os=", "node=v", "scope_input="] { assert(success_text.contains(field), "{success_text}") }
+    assert_eq(tower_before, fs.read(fixture.join("tower/tower.json")).unwrap())
+    assert_eq(history_before, fs.read(fixture.join("tower/history.json")).unwrap())
+    assert_eq(marker_before, fs.read(fixture.join("tower/read-only-marker.txt")).unwrap())
+
+    fs.write(fixture.join("Docs/spec/bad.md"), "D-MISSING1\n").unwrap()
+    failure_report :: fixture.join("failure.txt")
+    failure :: run_tower_hygiene_gate(repo, fixture.join("tower"), fixture.join("Docs"), failure_report)
+    assert(!failure.status.success(), "missing Tower decision record must block:\n{String.from_utf8_lossy(failure.stdout)}")
+    failure_text :: fs.read_to_string(failure_report).unwrap()
+    loop field in ["status=fail", "lint_exit=1", "lint_repeat_exit=1", "spec-decision-ref-missing", "D-MISSING1"] { assert(failure_text.contains(field), "{failure_text}") }
+    assert_eq(tower_before, fs.read(fixture.join("tower/tower.json")).unwrap())
+    assert_eq(history_before, fs.read(fixture.join("tower/history.json")).unwrap())
+    assert_eq(marker_before, fs.read(fixture.join("tower/read-only-marker.txt")).unwrap())
+
+    fs.create_dir_all(fixture.join("outside")).unwrap()
+    traversal_report :: fixture.join("outside/../tower/traversal.txt")
+    traversal :: run_tower_hygiene_gate(repo, fixture.join("tower"), fixture.join("Docs"), traversal_report)
+    assert(!traversal.status.success(), "a report path resolving into Tower must block the gate:\n{String.from_utf8_lossy(traversal.stdout)}")
+    assert(!fixture.join("tower/traversal.txt").exists(), "read-only gate wrote an audit report into Tower")
+
+    fs.create_dir_all(fixture.join("tower/tower.json.lock")).unwrap()
+    fs.write(fixture.join("tower/tower.json.lock/info.json"), "{\"pid\": 1, \"at\": 0}\n").unwrap()
+    locked_report :: fixture.join("locked.txt")
+    locked :: run_tower_hygiene_gate(repo, fixture.join("tower"), fixture.join("Docs"), locked_report)
+    assert(!locked.status.success(), "a Tower write lock must block the read-only gate:\n{String.from_utf8_lossy(locked.stdout)}")
+    locked_text :: fs.read_to_string(locked_report).unwrap()
+    assert(locked_text.contains("read_only=blocked"), "{locked_text}")
+    assert(locked_text.contains("lint_exit=not-run"), "{locked_text}")
+    assert(locked_text.contains("write lock"), "{locked_text}")
+    _ :: fs.remove_dir_all(fixture.join("tower/tower.json.lock"))
+    verify :: fs.read_to_string(repo.join("Tools/agent/verify-full.sh")).unwrap()
+    assert(verify.contains("Tools/ci/tower-hygiene-gate.sh"), "verify-full must run the production Tower hygiene gate")
+    _ :: fs.remove_dir_all(fixture)
+}

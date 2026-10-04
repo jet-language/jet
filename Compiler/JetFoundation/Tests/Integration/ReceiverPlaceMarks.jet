@@ -1,0 +1,9 @@
+use jet.Lexer.[TokKind, lex]
+
+// Rust: tests/receiver_place_marks.rs:7
+fn semi_before(source: String, mark: TokKind) -> Bool {
+    (tokens, diagnostics) :: lex(source)
+    assert(diagnostics.is_empty(), "{source:?}: {diagnostics:?}")
+    at :: tokens.iter().position((token) -> token.kind == mark).unwrap_or_else(() -> panic("{source:?} has no {mark:?}"))
+    at > 0 && tokens[at - 1].kind == TokKind.Semi
+}

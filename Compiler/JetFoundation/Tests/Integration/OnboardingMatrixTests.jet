@@ -1,0 +1,512 @@
+use std.[fs, env, process, thread]
+use std.process.[Command, Stdio]
+use std.io.[BufReader, BufRead, Read]
+use std.sync.mpsc
+use std.time.[Duration, Instant]
+use core.sys.target
+use jet
+use jet_semindex
+use jet_devserver
+use jet_foundation.Tests.Integration.Common
+use jet_foundation.Tests.Integration.TirSupport as T
+use jet_foundation.Tests.Integration.OnboardingMatrix as A
+use jet_foundation.Tests.Integration.OnboardingRecovery as B
+use jet_foundation.Tests.Integration.OperatorMatrix as O
+use jet_foundation.Tests.Integration.OsInterruptWindows as W
+use jet_foundation.Tests.Integration.PackageRootSingleHome as H
+use jet_foundation.Tests.Integration.PolicyScope.fixture
+// GATE #4494: real CLI, filesystem, Windows ABI, threads and channels.
+// Rust: tests/onboarding_matrix.rs:39
+#Test("terminal_editor_state_matrix") {
+    // FEATURE_CLAIM: claim.tooling-cli / cli-terminal-matrix
+    guide :: A.read("Docs/spec/guides/first-hour.md")
+    loop state in ["## Terminal and editor state matrix", "| Install ready |", "| Scaffolded |", "| Valid edit |", "| Invalid edit |", "| Missing entry |", "| Ambiguous project |", "| Legacy layout |", "| Offline or unsupported host |", "| Learn next |"] {
+        assert(guide.contains(state), "first-hour matrix lost state {state}")
+    }
+    assert(guide.contains("jet ?") && guide.contains("jet ? run"))
+    assert(guide.contains("jet check run.jet") && guide.contains("jet test run.jet"))
+    example :: A.read("Examples/features/basics/first_hour.jet")
+    assert(example.contains("First-hour tour"))
+    assert(A.root().join("Examples/features/expected/basics/first_hour.out").is_file())
+    assert(A.read("tests/golden.rs").contains("Examples/features"))
+    vscode :: A.read("Tools/editors/vscode/extension.js")
+    assert(vscode.contains("[\"run\", file]") && vscode.contains("[\"test\", file]"), "VS Code code lenses must invoke the production jet binary")
+    loop docs in ["Tools/editors/vscode/README.md", "Tools/editors/zed/README.md"] {
+        editor_docs :: A.read(docs)
+        assert(editor_docs.contains("run/test code lenses") || (editor_docs.contains("Run File") && editor_docs.contains("Test File")), "editor docs lost the run/test entry path: {docs}")
+    }
+    lsp :: A.read("tests/lsp.rs")
+    assert(lsp.contains("fn lsp_document_links_and_code_lenses()") && lsp.contains("jet.runFile") && lsp.contains("jet.testFile"), "LSP editor acceptance must keep both code lenses")
+    terminal_matrix :: A.read("tests/help_pty.rs")
+    loop proof in ["fn enter_expands_then_guides_without_hooks_instead_of_pasting()", "fn shell_prefill_mode_keeps_palette_on_tty_while_stdout_is_captured()", "fn explicit_color_law_reaches_interactive_renderer()", "fn live_narrow_resize_uses_actual_terminal_size()"] {
+        assert(terminal_matrix.contains(proof), "PTY matrix lost {proof}")
+    }
+    root :: Common.Scratch.new("onboarding-state-matrix")
+    created :: A.jet(&["new", "hello"], &root.path)
+    assert(created.status.success(), "jet new failed:\n{A.stderr(&created)}")
+    project :: root.join("hello")
+    loop file in ["package.jet", "run.jet", ".gitignore"] { assert(project.join(file).is_file(), "scaffold is missing {file}") }
+    palette :: A.jet(&["?", "--color=never"], &project)
+    assert(palette.status.success(), "non-TTY help failed:\n{A.stderr(&palette)}")
+    assert(A.stdout(&palette).contains("Build & Run"))
+    assert(!A.stdout(&palette).contains('\u{1b}'), "NO_COLOR leaked into help")
+    search :: A.jet(&["?", "run", "--color=never"], &project)
+    assert(search.status.success(), "non-TTY help search failed:\n{A.stderr(&search)}")
+    assert(A.stdout(&search).contains("jet run"))
+    assert(!A.stdout(&search).contains('\u{1b}'), "NO_COLOR leaked into search")
+    first_run :: A.jet(&["run"], &project)
+    assert(first_run.status.success(), "bare jet run failed:\n{A.stderr(&first_run)}")
+    assert_eq(A.stdout(&first_run), "hello, world\n")
+    explicit_run :: A.jet(&["run", "run.jet"], &project)
+    assert(explicit_run.status.success(), "explicit jet run failed:\n{A.stderr(&explicit_run)}")
+    fs.rename(project.join("run.jet"), project.join("run.jet.retired")).expect("hide the default entry for recovery")
+    missing :: A.jet(&["run"], &project)
+    assert(!missing.status.success(), "missing entry unexpectedly ran")
+    assert(A.stderr(&missing).contains("E2105"))
+    assert(A.stderr(&missing).contains("create `run.jet`") && A.stderr(&missing).contains("jet run <file.jet>"), "missing entry lost its recovery path:\n{A.stderr(&missing)}")
+    fs.rename(project.join("run.jet.retired"), project.join("run.jet")).expect("restore the default entry after recovery proof")
+    source_path :: project.join("run.jet")
+    source :: fs.read_to_string(&source_path).expect("read scaffold entry")
+    edited :: source.replace("hello, world", "hello from Jet")
+    fs.write(&source_path, &edited).expect("write edited entry")
+    loop args in [["check", "run.jet"], ["test", "run.jet"]] {
+        result :: A.jet(&args, &project)
+        assert(result.status.success(), "jet {args:?} failed:\n{A.stderr(&result)}")
+    }
+    edited_run :: A.jet(&["run"], &project)
+    assert(edited_run.status.success(), "edited jet run failed:\n{A.stderr(&edited_run)}")
+    assert_eq(A.stdout(&edited_run), "hello from Jet\n")
+    fs.write(&source_path, edited.replace("print", "pirnt")).expect("write invalid entry")
+    invalid :: A.jet(&["check", "run.jet"], &project)
+    assert(!invalid.status.success(), "invalid source unexpectedly passed check")
+    assert(A.stderr(&invalid).contains("E0102"), "invalid edit lost E0102:\n{A.stderr(&invalid)}")
+    assert(A.stderr(&invalid).contains("Fix:"), "invalid edit lost Fix:\n{A.stderr(&invalid)}")
+    fs.write(&source_path, edited).expect("restore edited entry")
+    recovered :: A.jet(&["run"], &project)
+    assert(recovered.status.success(), "recovery run failed:\n{A.stderr(&recovered)}")
+    assert_eq(A.stdout(&recovered), "hello from Jet\n")
+}
+// Rust: tests/onboarding_recovery.rs:40
+#Test("first_hour_scaffold_edit_check_test_and_run_recover") {
+    root :: Common.Scratch.new("onboarding-scaffold")
+    created :: B.jet(&["new", "hello"], &root.path)
+    assert(created.status.success(), "jet new failed:\n{B.stderr(&created)}")
+    project :: root.join("hello")
+    loop file in ["package.jet", "run.jet", ".gitignore"] { assert(project.join(file).is_file(), "scaffold is missing {file}") }
+    manifest :: fs.read_to_string(project.join("package.jet")).unwrap()
+    assert(manifest.contains("authority: { holds: { allow: [IO, Mem.Alloc] } }"), "print-only scaffold grants only the effects its run.jet uses:\n{manifest}")
+    source :: fs.read_to_string(project.join("run.jet")).unwrap()
+    assert(source.contains("fn run()") && !source.contains("#CLI"), "the default scaffold is the print-only starter:\n{source}")
+    first_run :: B.jet(&["run"], &project)
+    assert(first_run.status.success(), "bare jet run failed:\n{B.stderr(&first_run)}")
+    assert_eq(B.stdout(&first_run), "hello, world\n")
+    explicit_run :: B.jet(&["run", "run.jet"], &project)
+    assert(explicit_run.status.success(), "explicit jet run failed:\n{B.stderr(&explicit_run)}")
+    assert_eq(B.stdout(&explicit_run), "hello, world\n")
+    checked :: B.jet(&["check", "run.jet"], &project)
+    assert(checked.status.success(), "jet check failed:\n{B.stderr(&checked)}")
+    test :: B.jet(&["test", "run.jet"], &project)
+    assert(test.status.success(), "jet test failed:\n{B.stderr(&test)}")
+    source_path :: project.join("run.jet")
+    edited :: source.replace("print(greeting(\"world\"))", "print(\"hello from Jet\")")
+    fs.write(&source_path, &edited).unwrap()
+    edited_run :: B.jet(&["run"], &project)
+    assert(edited_run.status.success(), "edited jet run failed:\n{B.stderr(&edited_run)}")
+    assert_eq(B.stdout(&edited_run), "hello from Jet\n")
+    fs.write(&source_path, edited.replace("print", "pirnt")).unwrap()
+    invalid :: B.jet(&["check", "run.jet"], &project)
+    assert(!invalid.status.success(), "invalid source unexpectedly passed check")
+    assert(B.stderr(&invalid).contains("E0102"), "missing E0102:\n{B.stderr(&invalid)}")
+    assert(B.stderr(&invalid).contains("Fix:"), "diagnostic has no fix:\n{B.stderr(&invalid)}")
+    explanation :: B.jet(&["explain", "E0102"], &project)
+    assert(explanation.status.success(), "jet explain failed:\n{B.stderr(&explanation)}")
+    assert(B.stdout(&explanation).contains("E0102"), "explain omitted its code:\n{B.stdout(&explanation)}")
+    fs.write(&source_path, edited).unwrap()
+    recovered :: B.jet(&["run"], &project)
+    assert(recovered.status.success(), "recovery run failed:\n{B.stderr(&recovered)}")
+    assert_eq(B.stdout(&recovered), "hello from Jet\n")
+}
+// Rust: tests/onboarding_recovery.rs:141
+#Test("entry_recovery_covers_missing_ambiguous_legacy_and_stale_layouts") {
+    missing :: Common.Scratch.new("onboarding-missing-entry")
+    B.write_package(&missing.path, "missing_entry")
+    missing_run :: B.jet(&["run"], &missing.path)
+    assert(!missing_run.status.success())
+    assert(B.stderr(&missing_run).contains("run.jet"), "missing recovery omitted run.jet:\n{B.stderr(&missing_run)}")
+    assert(B.stderr(&missing_run).contains("Fix:"), "missing recovery omitted Fix:\n{B.stderr(&missing_run)}")
+    fs.write(missing.join("run.jet"), "fn run() { print(\"restored\") }\n").unwrap()
+    restored :: B.jet(&["run"], &missing.path)
+    assert(restored.status.success(), "restored entry failed:\n{B.stderr(&restored)}")
+    assert_eq(B.stdout(&restored), "restored\n")
+    workspace :: Common.Scratch.new("onboarding-ambiguous-workspace")
+    fs.write(workspace.join("workspace.jet"), "module workspace { members: [\"./packages/one\", \"./packages/two\"] }\n").unwrap()
+    loop name in ["one", "two"] {
+        package :: workspace.join("packages/{name}")
+        fs.create_dir_all(&package).unwrap()
+        B.write_package(&package, name)
+        fs.write(package.join("run.jet"), "fn run() {{ print(\"{name}\") }}\n").unwrap()
+    }
+    ambiguous :: B.jet(&["run"], &workspace.path)
+    assert(!ambiguous.status.success(), "ambiguous workspace unexpectedly ran")
+    assert(B.stderr(&ambiguous).contains("ambiguous"), "ambiguity was not named:\n{B.stderr(&ambiguous)}")
+    assert(B.stderr(&ambiguous).contains("-p"), "ambiguity omitted member recovery:\n{B.stderr(&ambiguous)}")
+    selected :: B.jet(&["run", "-p", "one"], &workspace.path)
+    assert(selected.status.success(), "selected workspace member failed:\n{B.stderr(&selected)}")
+    assert_eq(B.stdout(&selected), "one\n")
+    legacy :: Common.Scratch.new("onboarding-legacy-entry")
+    B.write_package(&legacy.path, "legacy_entry")
+    fs.write(legacy.join("main.jet"), "fn run() { print(\"legacy\") }\n").unwrap()
+    migrated :: B.jet(&["run"], &legacy.path)
+    assert(migrated.status.success(), "legacy entry did not recover:\n{B.stderr(&migrated)}")
+    assert_eq(B.stdout(&migrated), "legacy\n")
+    assert(legacy.join("run.jet").is_file())
+    assert(!legacy.join("main.jet").exists())
+    assert(B.stderr(&migrated).contains("migrated"), "migration notice missing:\n{B.stderr(&migrated)}")
+    conflict :: Common.Scratch.new("onboarding-legacy-conflict")
+    B.write_package(&conflict.path, "legacy_conflict")
+    fs.write(conflict.join("run.jet"), "fn run() { print(\"current\") }\n").unwrap()
+    fs.write(conflict.join("main.jet"), "fn run() { print(\"old\") }\n").unwrap()
+    conflict_run :: B.jet(&["run"], &conflict.path)
+    assert(!conflict_run.status.success())
+    assert(B.stderr(&conflict_run).contains("E2105"), "conflict lost its CLI diagnostic:\n{B.stderr(&conflict_run)}")
+    assert(B.stderr(&conflict_run).contains("ambiguous project entry"), "conflict omitted recovery:\n{B.stderr(&conflict_run)}")
+    fs.remove_file(conflict.join("main.jet")).unwrap()
+    conflict_recovered :: B.jet(&["run"], &conflict.path)
+    assert(conflict_recovered.status.success(), "conflict recovery failed:\n{B.stderr(&conflict_recovered)}")
+    assert_eq(B.stdout(&conflict_recovered), "current\n")
+    stale :: Common.Scratch.new("onboarding-stale-manifest")
+    fs.write(stale.join("pkg.jet"), "name: \"stale\"\n").unwrap()
+    fs.write(stale.join("run.jet"), "fn run() { print(\"stale\") }\n").unwrap()
+    stale_run :: B.jet(&["run"], &stale.path)
+    assert(!stale_run.status.success())
+    assert(B.stderr(&stale_run).contains("E1226"), "stale layout lost E1226:\n{B.stderr(&stale_run)}")
+    assert(B.stderr(&stale_run).contains("package.jet"), "stale layout omitted package.jet fix:\n{B.stderr(&stale_run)}")
+    fs.rename(stale.join("pkg.jet"), stale.join("package.jet")).unwrap()
+    stale_recovered :: B.jet(&["run"], &stale.path)
+    assert(stale_recovered.status.success(), "stale layout recovery failed:\n{B.stderr(&stale_recovered)}")
+    assert_eq(B.stdout(&stale_recovered), "stale\n")
+}
+// Rust: tests/onboarding_recovery.rs:281
+#Test("install_host_and_offline_failures_have_recovery") {
+    guide :: B.repo_text("Docs/spec/guides/first-hour.md")
+    exercises :: B.repo_text("Docs/spec/guides/diagnostic-recovery.md")
+    loop phrase in ["x86_64 Linux and x86_64 macOS", "platform-specific project track", "Installation fails", "repeat the install command", "Do not continue with a partial install", "The first install is offline", "reconnect and repeat the install", "The host is unsupported"] { assert(guide.contains(phrase), "first-hour recovery lost {phrase:?}") }
+    loop phrase in ["uname -s", "uname -m", "nix --version", "Recover install and host failures", "If the install fails because the network is offline", "If the install succeeds but `jet` is not found", "shell and run `jet version`"] { assert(exercises.contains(phrase), "diagnostic recovery lost {phrase:?}") }
+    missing_tools :: Common.Scratch.new("onboarding-install-offline")
+    doctor :: Command.new(env("CARGO_BIN_EXE_jet")).args(["self", "doctor"]).current_dir(&missing_tools.path).env("NO_COLOR", "1").env("PATH", &missing_tools.path).output().expect("jet self doctor should start after an install failure")
+    report :: B.stdout(&doctor)
+    assert(!doctor.status.success(), "missing toolchain unexpectedly passed")
+    loop phrase in ["rustc: not found on PATH", "Fix: install Rust", "registry: skipped (offline; pass --online to check)", "Warning [L2101]", "run `jet self doctor` again"] { assert(report.contains(phrase), "doctor recovery lost {phrase:?}:\n{report}") }
+}
+// Rust: tests/operator_matrix.rs:14
+#Test("mixed_operator_matrix_agrees_across_execution_tiers") {
+    T.assert_example_cli_tiers_agree("operators/mixed_types", O.EXPECTED)
+    // Retired resident-JIT trace replaced by actual retained native/web outputs.
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        (code, stdout, stderr) :: Common.run_entry_tier(O.SOURCE_PATH, tier)
+        assert_eq(code, 0, "{tier} `jet run` failed for {O.SOURCE_PATH}: {stderr}")
+        assert_eq(stdout, O.EXPECTED)
+    }
+}
+// Rust: tests/operator_matrix.rs:30
+#Test("mixed_operator_cli_types_projection_lists_reverse_owner") {
+    root :: OSPath.from(env("CARGO_MANIFEST_DIR"))
+    path :: root.join(O.SOURCE_PATH)
+    output :: Command.new(env("CARGO_BIN_EXE_jet")).args(["inspect", "types", path.to_str().unwrap()]).current_dir(&root).env("NO_COLOR", "1").output().expect("run `jet inspect types`")
+    assert_eq(output.status.code(), Some(0), "`jet inspect types` failed:\n{String.from_utf8_lossy(&output.stderr)}")
+    stdout :: String.from_utf8_lossy(&output.stdout)
+    assert(stdout.contains("Int * Money -> Money") && stdout.contains("mirror of Money.Mul(Int)"), "types projection omitted the Money mirror under its owning type:\n{stdout}")
+}
+// Rust: tests/os_interrupt_windows.rs:69
+#Test("windows_console_ctrl_c_runs_all_handlers_in_order") {
+    // GATE #4483: selected Windows arm, never assume writer's host OS.
+    if target.selected_os() != "windows" { return }
+    CTRL_C_EVENT: U32 :: 0
+    dir :: env.temp_dir().join("jet-os-interrupt-windows-{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    // Private console; child clears inherited ignore flag for its real handler.
+    #Unsafe("Windows console driver calls use exact system ABI") {
+        _ :: W.FreeConsole()
+        assert_ne(W.AllocConsole(), 0, "could not allocate private test console")
+        assert_ne(W.SetConsoleCtrlHandler(None, 1), 0, "could not protect test driver")
+    }
+    binary :: W.compile_interrupt_program(&dir)
+    child := Command.new(binary).stdout(Stdio.piped()).stderr(Stdio.piped()).spawn().unwrap()
+    (lines_tx, lines_rx) :: mpsc.channel()
+    child_stdout :: child.stdout.take().unwrap()
+    _ :: thread.spawn(() -> {
+        loop line in BufReader.new(^child_stdout).lines() {
+            if lines_tx.send(line).is_err() { break }
+        }
+    })
+    ready :: match lines_rx.recv_timeout(Duration.from_secs(10)) {
+        Ok(line) -> line.unwrap()
+        Err(error) -> {
+            _ :: child.kill()
+            _ :: child.wait()
+            panic("generated child did not become ready within 10 seconds: {error}")
+        }
+    }
+    assert_eq(ready, "ready")
+    #Unsafe("broadcast CTRL_C_EVENT to the private shared console") { assert_ne(W.GenerateConsoleCtrlEvent(CTRL_C_EVENT, 0), 0) }
+    deadline :: Instant.now() + Duration.from_secs(10)
+    status :: loop {
+        if status :: child.try_wait().unwrap() { break status }
+        if Instant.now() >= deadline {
+            _ :: child.kill()
+            _ :: child.wait()
+            panic("generated child did not handle CTRL_C_EVENT within 10 seconds")
+        }
+        thread.sleep(Duration.from_millis(10))
+    }
+    assert(status.success(), "generated child failed: {status}")
+    stderr := ""
+    child.stderr.take().unwrap().read_to_string(&stderr).unwrap()
+    second :: lines_rx.recv_timeout(Duration.from_secs(1)).expect("second handler produced no output").unwrap()
+    assert_eq(second, "second")
+    assert(lines_rx.try_recv().is_err(), "unexpected handler output")
+    assert(stderr.contains("panic: first handler failed"), "first handler panic lost its interrupt boundary diagnostic: {stderr:?}")
+}
+// Rust: tests/package_root_single_home.rs:49
+#Test("manifest_root_fn_lives_only_in_loader") {
+    homes :: H.homes_for("pub fn find_manifest_root")
+    assert_eq(homes, [H.ROOT_HOME], "package-root walk must live only in {H.ROOT_HOME}, found in: {homes:?}")
+}
+// Rust: tests/package_root_single_home.rs:59
+#Test("every_root_resolver_entry_point_calls_loader") {
+    root :: H.root()
+    loop relative in ["Source/LSP/Server.rs", "Source/lib.rs", "crates/jet-driver/src/Driver/mod.rs", "crates/jet-semindex/src/lib.rs", "crates/jet-devserver/src/WatchService.rs", "crates/jet-devserver/src/Canvas/project_scan.rs", "crates/jet-devserver/src/Canvas/query_actions.rs"] {
+        text :: fs.read_to_string(root.join(relative)).unwrap()
+        assert(text.contains("Loader::find_manifest_root"), "{relative} must call Loader::find_manifest_root")
+    }
+    loop forbidden in ["project_root_marker", "find_canonical_package_root", "find_package_root", "[\"package.jet\", \"Jet.toml\", \"jet.toml\", \".git\"]"] {
+        assert(H.homes_for(forbidden).is_empty(), "private package-root resolver remains: {forbidden}")
+    }
+}
+// Rust: tests/package_root_single_home.rs:90
+#Test("nested_entry_points_share_root_and_stale_diagnostic") {
+    fixture_root :: env.temp_dir().join("jet-package-root-test-{process.id()}")
+    _ :: fs.remove_dir_all(&fixture_root)
+    fs.create_dir_all(fixture_root.join("src/nested")).unwrap()
+    fs.write(fixture_root.join("package.jet"), "name: \"root\"\nversion: \"0.1.0\"\n").unwrap()
+    entry :: fixture_root.join("src/nested/main.jet")
+    fs.write(&entry, "fn run() {}\n").unwrap()
+    expected :: fs.canonicalize(&fixture_root).unwrap()
+    assert_eq(jet.Loader.find_manifest_root(entry.parent().unwrap()), Some(expected.clone()))
+    facts :: jet_semindex.package_facts_for_entry(&entry).unwrap().expect("semantic index must use package root")
+    assert_eq(facts.name, "root")
+    graph :: jet_devserver.WatchGraph.from_entry(&entry, &[]).unwrap()
+    assert(graph.watched_paths().contains(&expected.join("package.jet")))
+    project :: jet_devserver.Canvas.project_json_for_entry(&entry)
+    assert(project.contains("\"project_root\":\"{expected.display()}\""))
+    clean_lsp :: jet.LSP.check_document(&entry.display().to_string(), "fn run() {}\n")
+    assert(clean_lsp.iter().all(|d| d.code != "E1226"), "canonical package must not emit stale-manifest diagnostic: {clean_lsp:?}")
+    fs.remove_file(expected.join("package.jet")).unwrap()
+    fs.write(expected.join("jet.toml"), "").unwrap()
+    (_, stale) :: jet.Loader.stale_manifest_name_diagnostic(entry.parent().unwrap()).expect("stale manifest diagnostic")
+    assert_eq(stale.code, "E1226")
+    stale_lsp :: jet.LSP.check_document(&entry.display().to_string(), "fn run() {}\n")
+    assert(stale_lsp.iter().any(|d| d.code == "E1226"), "LSP must receive Loader's stale-manifest diagnostic: {stale_lsp:?}")
+    stale_watch :: match jet.Interpreter.dev_iteration(&entry.display().to_string(), false, true) {
+        jet.Interpreter.RunOutcome.Problems(ds) -> ds
+        outcome -> panic("watch entrypoint unexpectedly ran: {outcome:?}")
+    }
+    assert(stale_watch.iter().any(|d| d.code == "E1226"), "watch entrypoint must receive Loader's stale-manifest diagnostic: {stale_watch:?}")
+    stale_canvas :: jet_devserver.Canvas.graph_json_for_file(&entry).unwrap_err()
+    assert(stale_canvas.iter().any(|d| d.code == "E1226"), "Canvas must receive Loader's stale-manifest diagnostic: {stale_canvas:?}")
+    stale_build :: jet.compile_programmable_build(&entry.display().to_string(), &[]).expect_err("policy defaults must reject a retired manifest name")
+    assert(stale_build.iter().any(|d| d.code == "E1226"), "policy defaults must receive Loader's stale-manifest diagnostic: {stale_build:?}")
+    _ :: fs.remove_dir_all(&fixture_root)
+}
+// Rust: tests/panic_root.rs:2
+#Test("panic_is_not_required_by_positive_capability_bounds") {
+    loop source in ["\nfn run() {\n    #FX(FS) {\n        panic(\"stop\")\n    }\n}\n", "\nfn run() {\n    #FX(authority: FS) {\n        panic(\"stop\")\n    }\n}\n"] {
+        _ :: jet.compile(source).expect("Panic must not need a positive capability")
+    }
+}
+// Rust: tests/policy_scope.rs:16
+#Test("package_policy_cannot_authorize_unsafe") {
+    error :: jet.Package.PackageFacts.parse(&fixture("policy_package_unsafe_allow/package.jet"), "test").unwrap_err()
+    detail :: error.to_string()
+    assert(match error { jet.Package.PackageParseError.BadPackagePolicy(..) -> true, _ -> false })
+    assert(detail.contains("policy.unsafe") && detail.contains(".Deny"))
+}
+// Rust: tests/policy_scope.rs:31
+#Test("package_team_policy_parser_normalizes_typed_controls") {
+    package :: jet.Package.PackageFacts.parse("name: \"policy\"\nversion: \"0.1.0\"\ndeps: { zlib: c@system }\npolicy: { effects: { \"./src\": -[IO, IO]> }, unsafe: .Paths([\"./src\", \"src\"]), expert: .Deny, deps: .List([\"zlib\", \"zlib\"]), lints: { deny: [float_money] })\n", "test").unwrap()
+    ceiling :: package.policy.effects.get("src").unwrap()
+    assert_eq(ceiling.len(), 1)
+    assert(ceiling.contains("IO"))
+    assert_eq(package.policy.unsafe_paths, Some(["src"]))
+    assert_eq(package.policy.expert, Some(false))
+    assert_eq(package.policy.deps, Some(["zlib"]))
+    assert_eq(package.policy.lints_deny, Some(["float_money"]))
+}
+// Rust: tests/policy_scope.rs:54
+#Test("package_dependency_policy_checks_source_less_dependencies_once_in_order") {
+    root :: Common.unique_tmp("policy_dependency_facts")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("package.jet"), "name: \"policy\"\nversion: \"0.1.0\"\ndeps: { a_denied: c@system, m_allowed: c@system, z_denied: js@\"widget#version=1@npm\" }\npolicy: { deps: .List([\"m_allowed\"]) }\n").unwrap()
+    entry :: root.join("main.jet")
+    fs.write(&entry, "fn run() {}\n").unwrap()
+    bundle :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    dependency_names: [String] :: bundle.package_guarantees.dependency_names.iter().cloned().collect()
+    assert_eq(dependency_names, ["a_denied", "m_allowed", "z_denied"])
+    (diagnostics, _, _) :: jet.Driver.check_file_with_effect_facts(entry.to_str().unwrap(), None, false)
+    policy_diagnostics: [jet.Diagnostics.Diagnostic] :: diagnostics.iter().filter(|d| d.code == "E2960").collect()
+    assert_eq(policy_diagnostics.len(), 2, "{diagnostics:#?}")
+    assert(policy_diagnostics[0].what.contains("a_denied"))
+    assert(policy_diagnostics[1].what.contains("z_denied"))
+    assert(policy_diagnostics.iter().all(|d| d.what.contains("package.jet")))
+    assert(!policy_diagnostics.iter().any(|d| d.what.contains("m_allowed")))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/policy_scope.rs:105
+#Test("package_policy_declarations_inherit_to_imported_modules") {
+    root :: Common.unique_tmp("policy_inherited_package")
+    fs.create_dir_all(&root).unwrap()
+    fs.write(root.join("package.jet"), "name: \"policy\"\nversion: \"0.1.0\"\npolicy: { explicit_units: true }\n").unwrap()
+    fs.write(root.join("main.jet"), "use child\nfn run() {}\n").unwrap()
+    fs.write(root.join("child.jet"), "fn helper() {}\n").unwrap()
+    entry :: root.join("main.jet")
+    bundle :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap()
+    child :: bundle.modules.iter().find(|module| module.path.file_name().and_then(|name| name.to_str()) == Some("child.jet")).expect("imported child module")
+    assert(child.policy_declarations.iter().any(|d| d.key == jet.Policy.PolicyKey.ExplicitUnits && d.scope == jet.Policy.PolicyScope.Package && d.source.ends_with("package.jet")))
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/policy_scope.rs:133
+#Test("manifest_memory_denial_uses_the_effects_rights_tree") {
+    package :: jet.Package.PackageFacts.parse("name: \"memory\"\nversion: \"0.1.0\"\nauthority: { holds: { deny: [Mem.Alloc(above: 65536)] } }\n", "test").unwrap()
+    assert_eq(package.effects_deny, Some(["Mem.Alloc(above: 65536)"]))
+}
+// Rust: tests/policy_scope.rs:146
+#Test("package_gc_policy_applies_once_across_imported_modules") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/policy_gc_multimodule/run.jet")
+    bundle := jet.Loader.load_entry(path.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(!diagnostics.iter().any(|d| d.code == "E0355"))
+    function :: bundle.modules[0].items.iter().find_map(|item| match item {
+        jet.AST.Item.Func(function) if function.name == "run" -> Some(function)
+        _ -> None
+    }).unwrap()
+    assert(function.gc_scope)
+    assert(match function.body.first() {
+        Some(jet.AST.Stmt.Val(binding)) -> binding.gc_promotion.is_some()
+        _ -> false
+    })
+}
+// Rust: tests/policy_scope.rs:169
+#Test("hosted_gc_policy_matches_all_tiers") {
+    T.assert_example_cli_tiers_agree("memory/gc_cyclic", include_str("Examples/features/expected/memory/gc_cyclic.out"))
+}
+// Rust: tests/policy_scope.rs:177
+#Test("unsafe_obligations_are_checked_before_codegen") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/unsafe_obligations/run.jet")
+    bundle := jet.Loader.load_entry(path.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(diagnostics.iter().any(|d| d.code == "E3107"))
+    function :: bundle.modules[0].items.iter().find_map(|item| match item {
+        jet.AST.Item.Func(function) if function.name == "run" -> Some(function)
+        _ -> None
+    }).unwrap()
+    body :: match &function.body[1] {
+        jet.AST.Stmt.Unsafe(body: body, ..) -> body
+        _ -> panic("unsafe gate")
+    }
+    assert(!body.iter().any(|statement| match statement {
+        jet.AST.Stmt.Expr(jet.AST.Expr.Call(call)) -> call.name == jet.Syntax.INTERNAL_UNSAFE_ASSERT
+        _ -> false
+    }))
+    dev_bundle := jet.Loader.load_entry(path.to_str().unwrap()).unwrap()
+    dev_codes: [String] :: jet.Sema.check_bundle(&dev_bundle, jet.Sema.CompileMode.Check).into_iter().map(|d| d.code).collect()
+    run_codes: [String] :: diagnostics.into_iter().map(|d| d.code).collect()
+    assert_eq(dev_codes, run_codes, "AOT and dev/check share the pre-TIR obligation pass")
+}
+// Rust: tests/policy_scope.rs:213
+#Test("organization_obligations_floor_rejects_package_relaxation") {
+    declaration :: (scope, value, source: String) -> jet.Policy.PolicyDeclaration(key: jet.Policy.PolicyKey.Unsafe, value: value, scope: scope, span: jet.Diagnostics.Span.new(0, 0), target: None, source: source)
+    result :: jet.Policy.resolve(jet.Policy.PolicyKey.Unsafe, [
+        declaration(jet.Policy.PolicyScope.Organization, jet.Policy.PolicyValue.Obligations, "/admin/policy.jet"),
+        declaration(jet.Policy.PolicyScope.Package, jet.Policy.PolicyValue.Relaxed, "package.jet")
+    ])
+    assert(match result { Err(jet.Policy.PolicyError.Widening(..)) -> true, _ -> false })
+}
+// Rust: tests/policy_scope.rs:244
+#Test("organization_policy_document_is_exact_and_fails_closed") {
+    valid :: jet.Package.parse_policy_document("policy: { unsafe: .Obligations, impure: .GateOnly, nondeterministic: .GateOnly }\n").unwrap()
+    assert_eq(valid.len(), 3)
+    assert_eq(valid[0].value, jet.Policy.PolicyValue.Obligations)
+    assert_eq(valid[1].key, jet.Policy.PolicyKey.Impure)
+    assert_eq(valid[2].key, jet.Policy.PolicyKey.Nondeterministic)
+    assert(jet.Package.parse_policy_document("policy: { unsafe: .Obligations").is_err())
+    assert(jet.Package.parse_policy_document("policy: { unsafe: .Obligations }\npackage: {}").is_err())
+}
+// Rust: tests/policy_scope.rs:261
+#Test("package_policy_document_accepts_explicit_units") {
+    declarations :: jet.Package.parse_policy_document("policy: { explicit_units: true }\n").unwrap()
+    assert_eq(declarations.len(), 1)
+    assert_eq(declarations[0].key, jet.Policy.PolicyKey.ExplicitUnits)
+    assert_eq(declarations[0].value, jet.Policy.PolicyValue.Enabled)
+}
+// Rust: tests/policy_scope.rs:270
+#Test("copies_policy_is_package_and_source_explicit_only") {
+    declarations :: jet.Package.parse_policy_document("policy: { copies: .Explicit }\n").unwrap()
+    assert_eq(declarations.len(), 1)
+    assert_eq(declarations[0].key, jet.Policy.PolicyKey.Copies)
+    assert_eq(declarations[0].value, jet.Policy.PolicyValue.Explicit)
+    assert(jet.Package.parse_policy_document("policy: { copies: true }\n").is_err())
+    (tokens, lex) :: jet.Lexer.lex("#Policy(copies: .Explicit)\nfn run() {}\n")
+    assert(lex.is_empty())
+    program :: jet.Parser.parse(&tokens).unwrap()
+    assert(program.policy_declarations.iter().any(|d| d.key == jet.Policy.PolicyKey.Copies && d.value == jet.Policy.PolicyValue.Explicit))
+}
+// Rust: tests/policy_scope.rs:292
+#Test("package_copies_policy_restores_string_view_refusal") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("tests/fixtures/policy_copies_explicit/run.jet")
+    bundle := jet.Loader.load_entry(path.to_str().unwrap()).unwrap()
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Check)
+    assert(diagnostics.iter().any(|d| d.code == "E2307"), "package copies policy must restore the refusal: {diagnostics:?}")
+}
+// Rust: tests/policy_scope.rs:306
+#Test("audited_gates_share_the_five_scope_tightening_ladder") {
+    loop key in jet.Policy.AUDITED_GATE_KEYS {
+        rule :: jet.Policy.rule(key)
+        assert_eq(rule.scopes.len(), 5, "{key.name()} must expose every policy scope")
+        assert_eq(rule.combine, jet.Policy.PolicyCombine.Tighten)
+        assert_eq(jet.Policy.PolicyKey.parse(key.name()), Some(key))
+        assert(jet.Policy.parse_value(key, ".Forbid").is_ok())
+        assert_eq(jet.Policy.GateSet.parse("{key.name()}=allow"), Ok(key))
+    }
+}
+// Rust: tests/policy_scope.rs:326
+#Test("audited_gate_invocations_cannot_widen_an_organization_forbid") {
+    loop key in jet.Policy.AUDITED_GATE_KEYS {
+        declaration :: jet.Policy.PolicyDeclaration(key: key, value: jet.Policy.PolicyValue.Forbid, scope: jet.Policy.PolicyScope.Organization, span: jet.Diagnostics.Span.new(0, 0), target: None, source: "org-policy.jet")
+        result :: jet.Policy.resolve_with_gates(key, [declaration], &jet.Policy.GateSet.allow(key))
+        assert(match result { Err(jet.Policy.PolicyError.Widening(..)) -> true, _ -> false }, key.name())
+    }
+}
+// Rust: tests/policy_scope.rs:350
+#Test("audited_gate_invocations_are_allowed_under_tightening_modes") {
+    loop key in jet.Policy.AUDITED_GATE_KEYS {
+        declaration :: jet.Policy.PolicyDeclaration(key: key, value: jet.Policy.PolicyValue.Obligations, scope: jet.Policy.PolicyScope.Organization, span: jet.Diagnostics.Span.new(0, 0), target: None, source: "org-policy.jet")
+        assert(jet.Policy.resolve_with_gates(key, [declaration], &jet.Policy.GateSet.allow(key)).is_ok(), key.name())
+    }
+}
+// Rust: tests/policy_scope.rs:374
+#Test("audited_gate_ladder_example_allows_and_refuses_each_marker") {
+    path :: OSPath.from(env("CARGO_MANIFEST_DIR")).join("Examples/features/effects/audited_gate_ladder.jet")
+    loop key in jet.Policy.AUDITED_GATE_KEYS {
+        allowed := jet.Loader.load_entry(path.to_str().unwrap()).unwrap()
+        all := jet.Policy.GateSet.default()
+        loop allowed_key in jet.Policy.AUDITED_GATE_KEYS { all.insert(allowed_key) }
+        diagnostics :: jet.Sema.check_bundle_gates(&allowed, jet.Sema.CompileMode.Run, ^all)
+        assert(diagnostics.is_empty(), "allowed {key.name()} gate: {diagnostics:#?}")
+        refused := jet.Loader.load_entry(path.to_str().unwrap()).unwrap()
+        loop module in &refused.modules {
+            module.policy_declarations.push(jet.Policy.PolicyDeclaration(key: key, value: jet.Policy.PolicyValue.Forbid, scope: jet.Policy.PolicyScope.Organization, span: jet.Diagnostics.Span.new(0, 0), target: None, source: "org-policy.jet"))
+        }
+        refused_diagnostics :: jet.Sema.check_bundle_gates(&refused, jet.Sema.CompileMode.Run, jet.Policy.GateSet.allow(key))
+        assert(refused_diagnostics.iter().any(|d| d.code == "E3415"), "refused {key.name()} gate: {refused_diagnostics:#?}")
+    }
+}

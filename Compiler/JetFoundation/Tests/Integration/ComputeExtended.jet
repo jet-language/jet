@@ -1,0 +1,11 @@
+use jet_foundation.Tests.Integration.TirSupport.[build_and_run, run_default_multi, assert_tiers_agree]
+// Rust: tests/compute_extended.rs:13
+pub fn assert_aot_and_default_parity(name: String, source: String, required: &[String]) -> {
+    (aot_code, aot_stdout) :: build_and_run(name, source)
+    assert_eq(aot_code, 0, "AOT failed for {name}: {aot_stdout}")
+    for needle in required { assert(aot_stdout.contains(needle), "{name} missing `{needle}`: {aot_stdout}") }
+    (code, stdout, stderr) :: run_default_multi("{name}_native", "main.jet", &[("main.jet", source)])
+    assert_eq(code, 0, "default jet run failed for {name}: {stderr}")
+    assert_eq(stdout, aot_stdout, "AOT/default drift for {name}")
+    assert_tiers_agree(name, source, aot_stdout)
+}

@@ -1,0 +1,301 @@
+use jet_foundation.Tests.Integration.DataOneKernel.*
+use jet_foundation.Tests.Integration.DataflowStream as stream
+use jet_foundation.Tests.Integration.DbPolicy as policy
+use jet_foundation.Tests.Integration.DeadlineClockSingleHome as deadline
+use jet_foundation.Tests.Integration.Decisions as decisions
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use std.fs
+use std.env
+use std.process.Command
+// GATE #4494: real repository filesystem and compiled native fixture execution.
+
+// Rust: tests/data_one_kernel.rs:99
+#Test("only_one_core_data_statistics_implementation") {
+    kernel :: root().join(KERNEL)
+    assert(kernel.is_file(), "the one core.data statistics kernel is missing: {KERNEL}")
+    offenders := [String]{}
+    loop path in source_files() {
+        if path == kernel { continue }
+        text :: match fs.read_to_string(&path) { Ok(text) -> text, Err(_) -> continue }
+        relative :: path.strip_prefix(root()).unwrap_or(&path).display().to_string()
+        loop name in stats_function_names(text) { offenders.push("{relative}: fn {name}(… &[f64] …)") }
+        loop (needle, what) in FINGERPRINTS { if text.contains(needle) { offenders.push("{relative}: {what} (`{needle}`)") } }
+    }
+    assert(offenders.is_empty(), "a second core.data statistics implementation exists (I9). Every tier must call the one kernel at {KERNEL} instead:\n  {offenders.join("\n  ")}")
+}
+// Rust: tests/data_one_kernel.rs:138
+#Test("every_tier_includes_the_one_kernel") {
+    kernel_name :: "CoreLib/Top/DataStats.rs"
+    // Preserve the Rust reference renderer/comptime single-home comparators.
+    loop (path, how) in [("crates/jet-codegen/src/Codegen/mod.rs", "AOT embeds the kernel"), ("crates/jet-comptime/src/Comptime/Methods/core_calls.rs", "comptime includes the kernel")] {
+        text :: fs.read_to_string(root().join(path)).unwrap_or_else(fn(error) -> panic("cannot read {path}: {error}"))
+        assert(text.contains(kernel_name), "{how}: {path} no longer names {kernel_name}")
+    }
+    // Retiring JIT representation checks become canonical native/Web behavior.
+    tir_support.assert_tiers_agree("one_statistics_kernel", "use core.data as data\nfn run() -> { print(data.sum([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic(\"sum\")) }\n", "1.0\n")
+}
+// Rust: tests/data_one_kernel.rs:164
+#Test("rolling_mean_prefix_windows_when_window_exceeds_input") {
+    source :: """
+use core.data as data
+fn run() -> {
+    means :: data.rolling_mean([Float]{1.0, 2.0, 3.0}, 5) ?? panic("rolling mean")
+    if means.len() != 3 -> panic("rolling mean length")
+    if means[0] != 1.0 || means[1] != 1.5 || means[2] != 2.0 -> panic("rolling mean prefix")
+    print("rolling prefix windows: ok")
+}
+"""
+    tir_support.assert_tiers_agree("rolling_mean_prefix_windows", source, "rolling prefix windows: ok\n")
+}
+// Rust: tests/data_one_kernel.rs:179
+#Test("sum_preserves_neumaier_cancellation_result") {
+    source :: """
+use core.data as data
+fn run() -> {
+    result :: data.sum([Float]{10000000000000000.0, 1.0, -10000000000000000.0}) ?? panic("sum")
+    if result != 1.0 -> panic("sum lost the cancellation residual")
+    print("compensated sum: ok")
+}
+"""
+    tir_support.assert_tiers_agree("sum_cancellation", source, "compensated sum: ok\n")
+}
+// Rust: tests/data_one_kernel.rs:193
+#Test("rolling_mean_nonfinite_error_keeps_transform_identity") {
+    source :: """
+use core.data as data
+use core.data.[DataErrorKind]
+fn run() -> {
+    if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+        .Ok(_) -> panic("rolling mean accepted a non-finite value")
+        .Err(error) -> {
+            if error.kind != DataErrorKind.NonFinite -> panic("wrong rolling mean error kind")
+            if error.operation != "rolling_mean" -> panic("wrong rolling mean operation")
+            if error.index != Val(1) -> panic("wrong rolling mean error index")
+        }
+    }
+    print("rolling error policy: ok")
+}
+"""
+    tir_support.assert_tiers_agree("rolling_mean_error_policy", source, "rolling error policy: ok\n")
+}
+// Rust: tests/dataflow_stream.rs:54
+#Test("data_stream_limits_and_typed_errors") {
+    have_rustc :: common.have_rustc()
+    if !have_rustc { eprintln("note: skipping dataflow stream test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_dataflow_stream_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    events :: dir.join("events.csv")
+    events_path :: events.to_str().unwrap()
+    // Only the path token is substituted; fixture interpolation stays literal Jet.
+    fixture :: """
+use core.data as data
+use core.encoding as encoding
+use core.encoding.csv as csv
+use core.files as files
+#Codable
+struct Event {
+    service: String
+    latency_ms: Float
+}
+fn write_fixture(path: String) -> {
+    output :: files.create(path) ?? panic("create")
+    writer :: csv.writer(^output, encoding.EncodingLimits.safe()) ?? panic("writer")
+    writer.write(["service", "latency_ms"]) ?? panic("header")
+    writer.write(["api", "10.0"]) ?? panic("r1")
+    writer.write(["api", "20.0"]) ?? panic("r2")
+    writer.write(["db", "5.0"]) ?? panic("r3")
+    writer.write(["api", "30.0"]) ?? panic("r4")
+    &writer.flush() ?? panic("flush")
+    writer.finish() ?? panic("finish")
+}
+fn run() -> {
+    path :: "EVENTS_PATH_TOKEN"
+    write_fixture(path)
+    input :: files.open(path) ?? panic("open")
+    limits := data.DataLimits.safe()
+    limits.max_groups = 1
+    limits.max_output_rows = 10
+    reader :: data.csv_reader<Event>(^input, limits) ?? panic("reader")
+    first :: reader.next() ?? panic("next")
+    print("first:{first.service}:{first.latency_ms}")
+    if data.query(reader).group_by((e) -> e.service).mean((e) -> e.latency_ms).collect() == {
+        .Ok(_) -> print("groups:ok")
+        .Err(error) -> print("groups:{error.operation}:{error.reason}")
+    }
+    if data.mean([Float]{}) == {
+        .Ok(_) -> print("mean:ok")
+        .Err(error) -> print("mean:{error.operation}:{error.reason}")
+    }
+    if data.quantile([1.0, 2.0], 1.5) == {
+        .Ok(_) -> print("q:ok")
+        .Err(error) -> print("q:{error.operation}:{error.reason}")
+    }
+    if data.rolling_mean([1.0, 2.0], 0) == {
+        .Ok(_) -> print("roll:ok")
+        .Err(error) -> print("roll:{error.operation}:{error.reason}")
+    }
+}
+"""
+    src :: fixture.replace("EVENTS_PATH_TOKEN", events_path)
+    (code, stdout, stderr) :: stream.build_and_run(&dir, "data_stream_bounds", src)
+    assert_eq(stdout, "first:api:10.0\ngroups:query.group_by.mean:max_groups 1 exceeded\nmean:mean:mean of empty data is undefined\nq:quantile:quantile q must be a finite value in 0.0 through 1.0\nroll:rolling_mean:rolling width must be positive\n")
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/dataflow_stream.rs:132
+#Test("rolling_mean_nonfinite_matches_aot_and_default_dev") {
+    if !common.have_rustc() { eprintln("note: skipping rolling_mean parity test (need rustc)"); return }
+    dir :: env.temp_dir().join("jet_dataflow_rolling_{std.process.id()}")
+    _ :: fs.remove_dir_all(&dir)
+    fs.create_dir_all(&dir).unwrap()
+    source :: """
+use core.data as data
+fn run() -> {
+    if data.rolling_mean([1.0, Float.NAN, 3.0], 2) == {
+        .Ok(_) -> print("unexpected ok")
+        .Err(error) -> print("{error}")
+    }
+    compensated :: data.rolling_mean([10000000000000000.0, 1.0, -10000000000000000.0], 3) ?? panic("compensated")
+    print(compensated[2])
+    if data.rolling_mean([Float.MAX, Float.MAX], 2) == {
+        .Ok(_) -> print("unexpected overflow ok")
+        .Err(error) -> print("{error}")
+    }
+    zero :: data.rolling_mean([-0.0, -0.0], 2) ?? panic("zero")
+    print(zero[1])
+}
+"""
+    (code, stdout, stderr) :: stream.build_and_run(&dir, "rolling_nonfinite", source)
+    assert_eq(code, 0, "rolling_mean AOT failed: {stderr}")
+    assert_eq(stdout, "NonFinite rolling_mean, index 1: numeric input must be finite\n0.3333333333333333\nOverflow sum: finite overflow while summing\n0.0\n")
+    // Native/Web behavioral agreement replaces retired default-dev engine representation.
+    tir_support.assert_tiers_agree("rolling_nonfinite_native", source, stdout)
+    _ :: fs.remove_dir_all(&dir)
+}
+// Rust: tests/db_policy.rs:200
+#Test("typed_sql_hostile_operations_keep_policy_and_provenance_across_tiers") {
+    tir_support.assert_tiers_agree("db_policy_hostile", policy.HOSTILE_SOURCE, policy.HOSTILE_EXPECTED)
+}
+// Rust: tests/db_policy.rs:205
+#Test("typed_sql_canonical_scope_example_has_aot_default_and_interpreter_parity") {
+    tir_support.assert_tiers_agree("db_policy_scope_all_tiers", policy.SOURCE, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n")
+}
+// Rust: tests/db_policy.rs:214
+#Test("db_scope_enforces_policy_on_query_insert_and_live_aot") {
+    (code, stdout) :: tir_support.build_and_run("db_policy_scope", policy.SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n")
+}
+// Rust: tests/db_policy.rs:221
+#Test("db_scope_enforces_policy_on_query_insert_and_live_default") {
+    (code, stdout, stderr) :: tir_support.run_default_multi("db_policy_scope_native", "main.jet", &[("main.jet", policy.SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, "audit:DBPolicy(table=tasks, user=alice, expr=owner == user, predicate=owner = ?)\nschema:rejected\nrows:2\nlimit:1\nquery-one:ok\ntransaction:ok\nbypass:rejected\ncross:1:2\nblank-user:rejected\nlive:ok\ncomment:rejected\nblock:rejected\njoin:rejected\nsubquery:rejected\nupsert:rejected\nreplace:rejected\n")
+}
+// Rust: tests/db_policy.rs:280
+#Test("invalid_row_policy_is_denied_the_same_way_aot") {
+    (code, stdout) :: tir_support.build_and_run("db_policy_invalid", policy.INVALID_POLICY_SOURCE)
+    assert_eq(code, 0)
+    assert_eq(stdout, policy.INVALID_POLICY_EXPECTED)
+}
+// Rust: tests/db_policy.rs:287
+#Test("invalid_row_policy_is_denied_the_same_way_default") {
+    (code, stdout, stderr) :: tir_support.run_default_multi("db_policy_invalid_native", "main.jet", &[("main.jet", policy.INVALID_POLICY_SOURCE)])
+    assert_eq(code, 0, "default jet run failed: {stderr}")
+    assert_eq(stdout, policy.INVALID_POLICY_EXPECTED)
+}
+// Rust: tests/db_policy.rs:326
+#Test("sqlite_blob_round_trip_preserves_bytes_across_tiers") {
+    tir_support.assert_tiers_agree("db_policy_blob", policy.BLOB_SOURCE, "direct:[0, 1, 2, 127, 128, 255]\nexplicit:[0, 1, 2, 127, 128, 255]\nequal:true\n")
+}
+// Rust: tests/deadline_clock_single_home.rs:54
+#Test("deadline_clock_fn_lives_only_in_the_one_renderer") {
+    homes :: deadline.homes_for("fn jet_std_time_now")
+    assert_eq(homes, [deadline.DEADLINE_HOME.to_string()], "jet_std_time_now must be defined only in {deadline.DEADLINE_HOME}, found in: {homes:?}")
+}
+// Rust: tests/deadline_clock_single_home.rs:64
+#Test("deadline_thread_local_lives_only_in_the_one_renderer") {
+    homes :: deadline.homes_for("static JET_CTX_DEADLINE_MS")
+    assert_eq(homes, [deadline.DEADLINE_HOME.to_string()], "JET_CTX_DEADLINE_MS must be declared only in {deadline.DEADLINE_HOME}, found in: {homes:?}")
+}
+// Rust: tests/decisions.rs:14
+#Test("ratified_decisions_enforced") {
+    docs :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("Docs/spec/syntax-decisions.md")
+    syntax :: decisions.read_syntax_surface()
+    ratified :: decisions.extract_section_ids(docs, "## Ratified", "## Enforcement")
+    statuses :: decisions.parse_syntax_rs_status(syntax)
+    ids := statuses.keys().collect()
+    ids.sort()
+    loop id in ids {
+        status :: statuses[id]
+        assert(ratified.contains(&id), "{id} is in crates/jet-foundation/src/Syntax.rs or Syntax/ fragments but not ratified in Docs/spec/syntax-decisions.md")
+        assert_ne(status, "provisional", "{id} is ratified but still marked provisional in the canonical syntax source")
+    }
+}
+// Rust: tests/decisions.rs:45
+#Test("every_syntax_const_has_adjacent_decision_comment") {
+    root :: "crates/jet-foundation/src/Syntax"
+    files := ["crates/jet-foundation/src/Syntax.rs".to_string()]
+    entries := fs.read_dir(root).expect(root).map(fn(e) -> e.expect("Syntax fragment entry").path()).filter(fn(p) -> p.extension().and_then(fn(e) -> e.to_str()) == Some("rs")).collect()
+    entries.sort()
+    loop path in entries { files.push(path.display().to_string()) }
+    // Ratchet: foundational pre-decision keywords are exempt, never fabricate IDs.
+    // Rust: tests/decisions.rs:62
+    const EXEMPT_MARKER: String = "KW_DECISION_ID_EXEMPT"
+    // Rust: tests/decisions.rs:63
+    const EXEMPT_BASELINE: USize = 2 // KW_RETURN, KW_IT
+    violations := [String]{}
+    exempt_count := 0
+    loop file in &files {
+        source :: fs.read_to_string(file).unwrap_or_else(fn(err) -> panic("{file}: {err}"))
+        covered := false
+        exempt := false
+        loop (i, line) in source.lines().enumerate() {
+            t := line.trim() // #4303
+            if t.is_empty() { covered = false; exempt = false; continue }
+            if t.starts_with("///") || t.starts_with("//!") {
+                if decisions.line_has_decision_id(t) { covered = true }
+                if t.contains(EXEMPT_MARKER) { exempt = true }
+                continue
+            }
+            is_kw_or_sigil :: t.starts_with("pub const KW_") || t.starts_with("pub const SIGIL_")
+            if is_kw_or_sigil && !covered && !decisions.line_has_decision_id(t) {
+                if exempt { exempt_count += 1 }
+                else { violations.push("{file}:{i + 1}: {t}") }
+            }
+        }
+    }
+    assert(violations.is_empty(), "pub const KW_*/SIGIL_* declarations without an adjacent decision-ID doc comment (I7 — add `/// S123 (ratified): …` or `/// D-XXXX=A: …` directly above, no blank line in between; or a `KW_DECISION_ID_EXEMPT` marker comment if truly foundational and pre-dates the decision log):\n{violations.join("\n")}")
+    assert(exempt_count <= EXEMPT_BASELINE, "KW_DECISION_ID_EXEMPT count grew from {EXEMPT_BASELINE} to {exempt_count} — find/assign a real decision ID instead of exempting a new keyword const")
+}
+// Rust: tests/decisions.rs:138
+// #1670 / D-ONCE-LAW1=A: namespaced D- tombstones require provenance in the comment block.
+#Test("tombstoned_decision_ids_carry_provenance") {
+    docs :: fs.read_to_string("Docs/spec/syntax-decisions.md").expect("Docs/spec/syntax-decisions.md")
+    tombstones :: decisions.extract_tombstone_d_ids(docs)
+    assert(tombstones.contains("D-CTMARKER1") && tombstones.contains("D-MARKERMOVE1") && tombstones.contains("D-MARKERMOVE2") && tombstones.contains("D-MARKERMOVE3") && tombstones.contains("D-MARKER-FAMILY1"), "tombstone extraction regressed: expected D-CTMARKER1/D-MARKER-FAMILY1/D-MARKERMOVE1..3, got {tombstones:?}")
+    // Rust: tests/decisions.rs:151
+    const EXCLUDED_DIRS: [String] = []
+    // Rust: tests/decisions.rs:152
+    const EXCLUDED_FILES: [String] = []
+    // Rust: tests/decisions.rs:153
+    const PROVENANCE_WORDS: [String] = ["retires", "retired", "superseded", "formerly", "historical", "tombstoned", "predates"]
+    files := [String]{}
+    loop root in ["crates", "Source"] { decisions.collect_rs_files(root, &EXCLUDED_DIRS, &files) }
+    violations := [String]{}
+    loop path in &files {
+        if EXCLUDED_FILES.contains(&path.as_str()) { continue }
+        raw :: fs.read_to_string(path).unwrap_or_else(fn(err) -> panic("{path}: {err}"))
+        loop (block_start, block) in decisions.comment_blocks(raw) {
+            joined :: block.join(" ")
+            lower :: joined.to_lowercase()
+            loop id in &tombstones {
+                if !decisions.contains_id(joined, id) { continue }
+                has_provenance :: PROVENANCE_WORDS.iter().any(fn(w) -> lower.contains(w))
+                if !has_provenance { violations.push("{path}:{block_start}: cites tombstoned {id} with no provenance word ({PROVENANCE_WORDS.join("/")})") }
+            }
+        }
+    }
+    assert(violations.is_empty(), "comments cite a tombstoned decision ID as if it were live law (#1670, D-ONCE-LAW1):\n{violations.join("\n")}")
+}

@@ -1,0 +1,179 @@
+// D-TAIL-RETURN1=A / I9: one meaning across comptime, hosted tiers and web.
+use std.[fs, env]
+use std.process.Command
+use common
+
+// Rust: tests/tail_return_parity.rs:9
+pub PACKAGE_SOURCE :: """
+name: "tail_return_parity"
+version: "0.1.0"
+authority: { holds: { allow: [IO] } }
+"""
+// Rust: tests/tail_return_parity.rs:15
+pub COMPTIME_SOURCE :: """
+fn label(value: Int) -> String Never! {
+    if value == {
+        1 -> { "one" }
+        else -> { "other" }
+    }
+}
+fn early(flag: Bool) -> String Never! {
+    if flag { return "early" }
+    "late"
+}
+enum Packet {
+    Data(Int)
+    Retry(Int)
+    Empty
+    Ignore(Int)
+}
+fn packet_value(packet: Packet) -> Int Never! {
+    if packet == {
+        .Data(10..19) -> { 100 }
+        .Data(value) | .Retry(value) -> {
+            if value == 0 -> return 9
+            if value > 0 -> { value + 1 } else -> { -1 }
+        }
+        .Ignore(_) -> { 0 }
+        .Empty -> { 0 }
+        else -> { -2 }
+    }
+}
+EXPECTED_ONE :: prep { label(1) }
+EXPECTED_OTHER :: prep { label(2) }
+EXPECTED_EARLY :: prep { early(true) }
+EXPECTED_LATE :: prep { early(false) }
+EXPECTED_RANGE :: prep { packet_value(Packet.Data(12)) }
+EXPECTED_OR :: prep { packet_value(Packet.Retry(2)) }
+EXPECTED_NESTED_RETURN :: prep { packet_value(Packet.Data(0)) }
+EXPECTED_EMPTY :: prep { packet_value(Packet.Empty) }
+EXPECTED_WILDCARD :: prep { packet_value(Packet.Ignore(17)) }
+fn run() -> {
+    print(EXPECTED_ONE)
+    print(EXPECTED_OTHER)
+    print(EXPECTED_EARLY)
+    print(EXPECTED_LATE)
+    print(label(1))
+    print(label(2))
+    print(early(true))
+    print(early(false))
+    print(EXPECTED_RANGE)
+    print(EXPECTED_OR)
+    print(EXPECTED_NESTED_RETURN)
+    print(EXPECTED_EMPTY)
+    print(EXPECTED_WILDCARD)
+    print(packet_value(Packet.Data(12)))
+    print(packet_value(Packet.Retry(2)))
+    print(packet_value(Packet.Data(0)))
+    print(packet_value(Packet.Empty))
+    print(packet_value(Packet.Ignore(17)))
+}
+"""
+// Rust: tests/tail_return_parity.rs:80
+pub WEB_SOURCE :: """
+#Target(Web)
+#Target(JS)
+fn js_block(flag: Bool) -[]> Int {
+    if flag -> {
+        value :: 6
+        value + 1
+    } else -> { 3 }
+}
+#Target(JS)
+fn js_arm(value: Int) -[]> Int {
+    if value == {
+        1 -> { 10 }
+        else -> { 20 }
+    }
+}
+#Target(JS)
+fn js_early(flag: Bool) -[]> Int {
+    if flag { return 30 }
+    40
+}
+enum Packet {
+    Data(Int)
+    Retry(Int)
+    Empty
+    Ignore(Int)
+}
+#Target(JS)
+fn packet_value(packet: Packet) -[]> Int {
+    if packet == {
+        .Data(10..19) -> { 100 }
+        .Data(value) | .Retry(value) -> {
+            if value == 0 -> return 9
+            if value > 0 -> { value + 1 } else -> { -1 }
+        }
+        .Ignore(_) -> { 0 }
+        .Empty -> { 0 }
+        else -> { -2 }
+    }
+}
+#WasmExport
+fn wasm_block(flag: Bool) -[]> Int {
+    if flag -> { 7 } else -> { 3 }
+}
+#WasmExport
+fn wasm_arm(value: Int) -[]> Int {
+    if value == {
+        1 -> { 10 }
+        else -> { 20 }
+    }
+}
+#WasmExport
+fn wasm_early(flag: Bool) -[]> Int {
+    if flag { return 30 }
+    40
+}
+#Target(JS)
+fn run() -> {
+    print(js_block(true))
+    print(js_arm(2))
+    print(js_early(true))
+    print(js_early(false))
+    print(packet_value(Packet.Data(12)))
+    print(packet_value(Packet.Retry(2)))
+    print(packet_value(Packet.Data(0)))
+    print(packet_value(Packet.Ignore(17)))
+    print(packet_value(Packet.Empty))
+    print(wasm_block(true))
+    print(wasm_arm(2))
+    print(wasm_early(true))
+    print(wasm_early(false))
+}
+"""
+// Rust: tests/tail_return_parity.rs:291
+pub fn have_tool(name: String) -> Bool {
+    // GATE #4494: subprocess output capture.
+    Command.new(name).arg("--version").output().is_ok()
+}
+// Rust: tests/tail_return_parity.rs:294
+pub fn have_wasm_target() -> Bool {
+    // GATE #4494: query real installed target tooling.
+    Command.new("rustc").args(["--print", "target-libdir", "--target", "wasm32-unknown-unknown"]).output().map(output -> output.status.success()).unwrap_or(false)
+}
+// Rust: tests/tail_return_parity.rs:307
+pub fn assert_packaged_cli_tiers_agree(src: String, expected_stdout: String) -> {
+    // GATE #4494: filesystem, environment and actual CLI execution.
+    root := common.unique_tmp("jet_tail_return_parity")
+    fs.create_dir_all(root).unwrap()
+    fs.write(root.join("package.jet"), PACKAGE_SOURCE).unwrap()
+    fs.write(root.join("run.jet"), src).unwrap()
+    modes := ["O2", "O0", "O1"]
+    baseline: (String, Int, String)? := None
+    loop mode in modes {
+        cache := root.join("cache-{mode}")
+        command := Command.new(env.var("CARGO_BIN_EXE_jet").unwrap())
+        command.args(["run", "--tier", mode])
+        output := command.arg("run.jet").current_dir(root).env("JET_STORE_DIR", cache).env("JETPACK_ENV", "1").env("NO_COLOR", "1").output().unwrap()
+        result := (output.status.code().unwrap_or(-1), String.from_utf8_lossy(output.stdout).into_owned(), String.from_utf8_lossy(output.stderr).into_owned())
+        assert_eq(result.0, 0, "{mode} run failed:\n{result.2}")
+        assert_eq(result.1, expected_stdout, "{mode} output")
+        if baseline is .Some((baseline_mode, baseline_code, baseline_stdout)) {
+            assert_eq(result.0, baseline_code, "{mode} exit code disagreed with {baseline_mode}")
+            assert_eq(result.1, baseline_stdout, "{mode} output disagreed with {baseline_mode}")
+        } else { baseline = Some((mode, result.0, result.1)) }
+    }
+    _ :: fs.remove_dir_all(root)
+}

@@ -1,0 +1,79 @@
+// D-PIN1=A / D-PIN2=A / D-PIN3=A: tracked address-stability write windows.
+use Compiler.JetFoundation.Tests.Integration.Common as common
+use core.fs as fs
+use std.env as env
+use std.process as process
+use std.thread as thread
+use std.sync.atomic.[AtomicU64, Ordering]
+use jet as jet
+
+// Rust: tests/pin.rs:15
+// GATE #4494: atomic test-path uniqueness.
+SEQ: AtomicU64 := AtomicU64.new(0)
+// Rust: tests/pin.rs:16
+pub fn unique_tmp() -> OSPath {
+    n :: SEQ.fetch_add(1, Ordering.Relaxed)
+    env.temp_dir().join("jet_pin_{process.id()}_{n}")
+}
+// Rust: tests/pin.rs:23
+pub fn error_codes(src: String) -> [String] {
+    dir :: unique_tmp()
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("fixture.jet")
+    fs.write(path, src).unwrap()
+    match jet.compile_with_path(src, path.to_string_lossy()) {
+        Ok(_) -> []
+        Err(diags) -> diags.into_iter().map((d) -> d.code.to_string()).collect()
+    }
+}
+// Rust: tests/pin.rs:38
+// Generated Rust is a reference comparator only; executions use retained native tiers.
+pub fn build_and_run(name: String, src: String, allow_authored_unsafe: Bool) -> String? {
+    dir :: unique_tmp()
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("fixture.jet")
+    fs.write(path, src).unwrap()
+    out :: jet.compile_with_path(src, path.to_string_lossy()).unwrap_or_else((d) -> panic("front end rejected a should-compile fixture: {d.iter().map((x) -> x.code.as_str()).collect():?}"))
+    user :: common.strip_vetted_module(common.strip_vetted_prelude_modules(out.rust), "jet_taskgroup_borrowed_spawn")
+    if !allow_authored_unsafe {
+        leaked :: user.lines().filter((line) -> line.contains("unsafe") && !line.trim_start().starts_with("//")).take(5).collect()
+        assert(leaked.is_empty(), "a pin must not need `unsafe` outside the vetted prelude helpers:\n{leaked.join("\n")}")
+    }
+    stdout: String? := None
+    loop tier in ["O0", "O1", "O2", "Web"] {
+        common.compile_entry_tier(path, tier).expect("I2: checked pin fixture must lower through canonical native MIR")
+        result :: common.run_entry_tier(path, tier)
+        current :: String.from_utf8_lossy(result.stdout).to_string()
+        if stdout is Val(previous) { assert_eq(current, previous, "pin {name} tier {tier} output drifted") }
+        else { stdout = Val(^current) }
+    }
+    ^stdout
+}
+// Rust: tests/pin.rs:92
+// GATE #4494: retain 8 MiB stack for nested pin-place projections.
+pub fn interpret(src: String) -> String {
+    thread.Builder.new().name("jet-pin-interpret").stack_size(8 * 1024 * 1024).spawn(() -> interpret_on_thread(src)).expect("spawn pin interpret thread").join().expect("pin interpret thread")
+}
+// Rust: tests/pin.rs:105
+// The retired interpreter edge is the real O0 execution edge.
+pub fn interpret_on_thread(src: String) -> String {
+    dir :: unique_tmp()
+    fs.create_dir_all(dir).unwrap()
+    path :: dir.join("fixture.jet")
+    fs.write(path, src).unwrap()
+    bundle := jet.Loader.load_entry(path.to_string_lossy()).expect("fixture loads")
+    diags :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(!diags.iter().any((d) -> d.severity == jet.Diagnostics.Severity.Error), "fixture must type-check: {diags.iter().map((d) -> d.code.as_str()).collect():?}")
+    common.compile_entry_tier(path, "O0").expect("checked pin fixture lowers")
+    output :: common.run_entry_tier(path, "O0")
+    assert(output.status.success(), "pin fixture failed: {String.from_utf8_lossy(output.stderr)}")
+    String.from_utf8_lossy(output.stdout).to_string()
+}
+// Rust: tests/pin.rs:130
+pub const NODE: String = """
+use core.mem
+struct Node {
+    payload: Int
+    hops: Int
+}
+"""

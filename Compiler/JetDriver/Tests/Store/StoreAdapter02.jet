@@ -1,0 +1,274 @@
+use jet_store.[Store, StoreConfig, StoreError, ProcessIdentity, Digest, ObjectHandle, ActionHandle, ArtifactRestore, BuildRecord, STORE_VERSION]
+use jet_store.[next_counter, decode_action, parse_size]
+use std.fs
+use std.fs.OpenOptions
+use std.env
+use std.process.[Command, id]
+use std.sync.[Arc, Barrier]
+use std.thread
+use std.time.[Duration, Instant]
+use core.sys.target.selected_family
+
+// Rust: crates/jet-store/src/lib.rs:2404
+fn test_store(cap: U64) -> (Store, OSPath) {
+    root := env.temp_dir().join("jet-store-test-{id()}-{next_counter()}")
+    config := StoreConfig.new(root.clone()).with_cap_bytes(cap).with_reserve_bytes(0)
+    (Store.open(config).expect("store opens"), root)
+}
+// Rust: crates/jet-store/src/lib.rs:2412
+fn cleanup(root: &OSPath) -> Unit { _ :: fs.remove_dir_all(root) }
+
+// Rust: crates/jet-store/src/lib.rs:2417
+#Test("lock_timeout_reports_owner_and_elapsed_wait") {
+    (_, root) := test_store(1024)
+    store := Store.open(StoreConfig.new(root.clone()).with_cap_bytes(1024).with_reserve_bytes(0)
+        .with_lock_wait(Duration.from_millis(25))).expect("store opens")
+    lock := store.acquire_lock().expect("test lock")
+    error := store.acquire_lock() == { Err(error) -> error; Ok(_) -> { panic("live lock unexpectedly acquired") } }
+    text := error.to_string()
+    error == {
+        StoreError.Locked { path, owner_pid, elapsed } -> {
+            assert_eq(path, root.join("locks/store.lock"))
+            assert_eq(owner_pid, Val(ProcessIdentity.current().pid()))
+            assert(elapsed >= Duration.from_millis(25))
+        }
+        other -> { panic("unexpected lock error: {other:?}") }
+    }
+    assert(text.contains("owner pid")); assert(text.contains("after waiting"))
+    drop(lock); cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2451
+#Test("concurrent_publishers_wait_for_shared_lock") {
+    root := env.temp_dir().join("jet-store-concurrent-{id()}-{next_counter()}")
+    store := Store.open(StoreConfig.new(root.clone()).with_cap_bytes(1024 * 1024).with_reserve_bytes(0)
+        .with_lock_wait(Duration.from_secs(3))).expect("store opens")
+    lock := store.acquire_lock().expect("test lock")
+    // GATE #4494: actual threads, shared barrier, native timed wait.
+    barrier := Arc.new(Barrier.new(3))
+    left_store := store.clone(); left_barrier := barrier.clone()
+    left := thread.spawn(fn() { left_barrier.wait(); left_store.publish_blob("left".as_bytes()) })
+    right_store := store.clone(); right_barrier := barrier.clone()
+    right := thread.spawn(fn() { right_barrier.wait(); right_store.publish_blob("right".as_bytes()) })
+    barrier.wait(); thread.sleep(Duration.from_millis(2200)); drop(lock)
+    left := left.join().expect("left publisher thread")
+    right := right.join().expect("right publisher thread")
+    assert(left.is_ok(), "left publish failed: {left:?}")
+    assert(right.is_ok(), "right publish failed: {right:?}")
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2489
+#Test("blob_round_trip_and_layout") {
+    (store, root) := test_store(1024)
+    bytes := "hello store".as_bytes()
+    object := store.publish_blob(bytes).expect("publish")
+    assert_eq(object.length(), bytes.len() as U64)
+    assert_eq(store.get_blob(&object).expect("get"), Val(bytes.to_vec()))
+    assert(store.object_path(&object).is_file())
+    assert(root.join("cas").is_dir()); assert(root.join("ac").is_dir()); assert(root.join("lto").is_dir())
+    assert(root.join("locks").is_dir()); assert(root.join("leases").is_dir())
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2505
+#Test("corrupt_blob_is_quarantined_and_can_be_republished") {
+    (store, root) := test_store(1024)
+    object := store.publish_blob("good".as_bytes()).expect("publish")
+    fs.write(store.object_path(&object), "bad".as_bytes()).expect("corrupt")
+    assert_eq(store.get_blob(&object).expect("miss"), None)
+    quarantined := fs.read_dir(root.join("quarantine")).expect("quarantine directory").collect()
+    assert_eq(quarantined.len(), 1)
+    store.publish_object(object, "good".as_bytes()).expect("repair")
+    assert_eq(store.get_blob(&object).expect("get"), Val("good".as_bytes().to_vec()))
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2520
+#Test("action_envelope_is_verified_and_immutable") {
+    (store, root) := test_store(1024)
+    action := store.action("compile|unit-a")
+    store.publish_action(action, "record".as_bytes()).expect("publish")
+    assert_eq(store.get_action(&action).expect("get"), Val("record".as_bytes().to_vec()))
+    assert(store.publish_action(action, "different".as_bytes()) == { Err(StoreError.Conflict { .. }) -> true; _ -> false })
+    fs.write(store.action_path(&action), "bad".as_bytes()).expect("corrupt")
+    assert_eq(store.get_action(&action).expect("miss"), None)
+    assert_eq(fs.read_dir(root.join("quarantine")).expect("quarantine").count(), 1)
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2536
+#Test("lto_namespace_round_trip") {
+    (store, root) := test_store(1024)
+    object := store.publish_lto("output-identity", "thin-lto".as_bytes()).expect("publish")
+    assert_eq(store.get_lto("output-identity", &object).expect("get"), Val("thin-lto".as_bytes().to_vec()))
+    assert(store.lto_path("output-identity", &object).is_file())
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2548
+#Test("journal_replays_and_prune_is_lru_and_deterministic") {
+    (store, root) := test_store(1024)
+    first := store.publish_blob("1111".as_bytes()).expect("first")
+    second := store.publish_blob("2222".as_bytes()).expect("second")
+    third := store.publish_blob("3333".as_bytes()).expect("third")
+    _ :: store.get_blob(&second).expect("touch")
+    reopened := Store.open(store.config().clone()).expect("reopen")
+    status := reopened.status().expect("status")
+    assert_eq(status.entries.len(), 3)
+    report := reopened.prune_to(4).expect("prune")
+    assert_eq(report.after_bytes, 4)
+    assert(reopened.get_blob(&second).expect("second").is_some())
+    assert(reopened.get_blob(&first).expect("first").is_none())
+    assert(reopened.get_blob(&third).expect("third").is_none())
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2566
+#Test("live_lease_pins_blob_and_stale_lease_is_reclaimed") {
+    (store, root) := test_store(1024)
+    first := store.publish_blob("1111".as_bytes()).expect("first")
+    second := store.publish_blob("2222".as_bytes()).expect("second")
+    lease := store.acquire_lease(&[first]).expect("lease")
+    stale := root.join("leases").join("lease-stale")
+    fs.write(&stale, "{STORE_VERSION}|lease|4294967295|dead\nblob|{second.key()}\n").expect("stale lease")
+    report := store.prune_to(0).expect("prune")
+    assert(report.blocked); assert(store.get_blob(&first).expect("pinned").is_some()); assert(!stale.exists())
+    drop(lease)
+    report := store.prune_to(0).expect("prune after release")
+    assert(!report.blocked); assert_eq(report.after_bytes, 0)
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2586
+#Test("cap_refuses_oversized_write_without_partial_files") {
+    (store, root) := test_store(3)
+    result := store.publish_blob("four".as_bytes())
+    assert(result == { Err(StoreError.Capacity { .. }) -> true; _ -> false })
+    assert_eq(fs.read_dir(root.join("cas")).expect("cas").count(), 0)
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2595
+#Test("malformed_journal_replays_valid_prefix") {
+    (store, root) := test_store(1024)
+    object := store.publish_blob("payload".as_bytes()).expect("publish")
+    journal := OpenOptions.new().append(true).open(root.join("journal")).expect("journal")
+    journal.write_all("not a journal record\n".as_bytes()).expect("append")
+    drop(journal)
+    reopened := Store.open(store.config().clone()).expect("reopen")
+    assert_eq(reopened.get_blob(&object).expect("get"), Val("payload".as_bytes().to_vec()))
+    assert(reopened.status().expect("status").entries.len() == 1)
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2611
+#Test("size_parser_accepts_human_units") {
+    assert_eq(parse_size("42").unwrap(), 42)
+    assert_eq(parse_size("1k").unwrap(), 1024)
+    assert_eq(parse_size("2KB").unwrap(), 2 * 1024)
+    assert_eq(parse_size("3MiB").unwrap(), 3 * 1024 * 1024)
+    assert_eq(parse_size("4gb").unwrap(), 4 * 1024 * 1024 * 1024)
+    assert(parse_size("nope").is_err())
+    assert(parse_size("18446744073709551615K").is_err())
+}
+
+// Rust: crates/jet-store/src/lib.rs:2622
+#Test("host_limit_overrides_adaptive_and_persists") {
+    (store, root) := test_store(1024)
+    assert_eq(store.host_limit().unwrap(), None)
+    store.set_host_limit(Val(512)).unwrap()
+    assert_eq(store.host_limit().unwrap(), Val(512)); assert_eq(store.limit(), 512)
+    reopened := Store.open(store.config().clone()).unwrap()
+    assert_eq(reopened.host_limit().unwrap(), Val(512))
+    reopened.set_host_limit(None).unwrap()
+    assert_eq(reopened.host_limit().unwrap(), None)
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2636
+#Test("reserve_admission_refuses_when_disk_reserve_would_be_breached") {
+    (_, root) := test_store(U64.MAX)
+    gated := Store.open(StoreConfig.new(root.clone()).with_cap_bytes(U64.MAX).with_reserve_bytes(U64.MAX)).unwrap()
+    assert(gated.publish_blob("reserve".as_bytes()) == { Err(StoreError.Capacity { .. }) -> true; _ -> false })
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2652
+#Test("artifact_round_trip_repairs_corrupt_object") {
+    (store, root) := test_store(1024 * 1024)
+    source := root.join("input"); destination := root.join("output")
+    fs.write(&source, "artifact".as_bytes()).unwrap()
+    if selected_family() == "unix" {
+        // GATE #4494/#4500: actual native executable mode.
+        permissions := fs.metadata(&source).unwrap().permissions()
+        permissions.set_mode(0o755); fs.set_permissions(&source, permissions).unwrap()
+    }
+    key := Digest.hash("artifact-key".as_bytes()).to_hex()
+    artifact := store.publish_file(&key, &source).unwrap()
+    assert(artifact.path.starts_with(root.join("cas")))
+    assert(store.restore_file(&key, &destination).unwrap() == { ArtifactRestore.Hit { executable: true, .. } -> true; _ -> false })
+    assert_eq(fs.read(&destination).unwrap(), "artifact".as_bytes())
+    if selected_family() == "unix" { assert_ne(fs.metadata(&destination).unwrap().permissions().mode() & 0o111, 0) }
+    fs.write(&artifact.path, "broken".as_bytes()).unwrap()
+    assert(store.restore_file(&key, &destination).unwrap() == { ArtifactRestore.Corrupt -> true; _ -> false })
+    store.publish_file(&key, &source).unwrap()
+    assert(store.restore_file(&key, &destination).unwrap() == { ArtifactRestore.Hit { .. } -> true; _ -> false })
+    cleanup(&root)
+}
+
+// Rust: crates/jet-store/src/lib.rs:2699
+#Test("second_process_live_lease_blocks_prune") {
+    if selected_family() == "unix" {
+        CHILD_ROOT := "JET_STORE_LEASE_CHILD_ROOT"
+        CHILD_KEY := "JET_STORE_LEASE_CHILD_KEY"
+        CHILD_LENGTH := "JET_STORE_LEASE_CHILD_LENGTH"
+        CHILD_READY := "JET_STORE_LEASE_CHILD_READY"
+        CHILD_RELEASE := "JET_STORE_LEASE_CHILD_RELEASE"
+        // GATE #4494: real child process and shared native store/lease files.
+        if env.var_os(CHILD_ROOT) == Val(child_root) {
+            root := OSPath.from(child_root)
+            key := env.var(CHILD_KEY).unwrap()
+            length := env.var(CHILD_LENGTH).unwrap().parse::<U64>().unwrap()
+            object := ObjectHandle.new(Digest.from_hex(&key).unwrap(), length)
+            store := Store.open(StoreConfig.new(root).with_cap_bytes(1024).with_reserve_bytes(0)).unwrap()
+            lease := store.acquire_lease(&[object]).unwrap()
+            fs.write(env.var_os(CHILD_READY).unwrap(), "ready".as_bytes()).unwrap()
+            release := OSPath.from(env.var_os(CHILD_RELEASE).unwrap())
+            while !release.is_file() { thread.sleep(Duration.from_millis(5)) }
+            drop(lease)
+        } else {
+            (store, root) := test_store(1024)
+            object := store.publish_blob("leased".as_bytes()).unwrap()
+            ready := root.join("child-ready"); release := root.join("child-release")
+            child := Command.new(env.current_exe().unwrap())
+                .args(["--exact", "second_process_live_lease_blocks_prune", "--nocapture"])
+                .env(CHILD_ROOT, &root).env(CHILD_KEY, object.digest().to_hex()).env(CHILD_LENGTH, object.length().to_string())
+                .env(CHILD_READY, &ready).env(CHILD_RELEASE, &release).spawn().unwrap()
+            deadline := Instant.now() + Duration.from_secs(5)
+            while !ready.is_file() {
+                if child.try_wait().unwrap() == Val(status) { panic("lease child exited early: {status}") }
+                assert(Instant.now() < deadline, "timed out waiting for lease child")
+                thread.sleep(Duration.from_millis(5))
+            }
+            report := store.prune_to(0).unwrap()
+            assert(report.blocked); assert(store.object_path(&object).is_file())
+            fs.write(&release, "release".as_bytes()).unwrap()
+            assert(child.wait().unwrap().success())
+            report := store.prune_to(0).unwrap()
+            assert(!report.blocked)
+            cleanup(&root)
+        }
+    }
+}
+
+// Rust: crates/jet-store/src/lib.rs:2754
+#Test("previous_store_and_build_record_fixtures_fail_closed") {
+    action := ActionHandle.from_key("build-metadata-compat")
+    legacy_action := fs.read(OSPath.new("tests/fixtures/build-metadata-compat/store-v0.magic")).unwrap()
+    assert_eq(decode_action(action, &legacy_action).expect_err("previous store schema must be rejected"),
+        "action record has an unknown version or short header")
+    record := fs.read_to_string(OSPath.new("tests/fixtures/build-metadata-compat/build-record-v0.json")).unwrap()
+    assert_eq(BuildRecord.from_json(record).expect_err("previous build-record schema must be rejected"),
+        "unsupported build record schema `jet.build-record/v0`")
+}

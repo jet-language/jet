@@ -1,0 +1,333 @@
+use jet
+use std.fs
+use std.process.[Command]
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.FmtWaveA.[WHITESPACE_AND_LITERALS, TRIPLE_STRING, INTERPOLATION_SELECTORS, ATTACHED_COMMENTS, CLI_FIXTURE, semantic_identity, run_fmt]
+use jet_foundation.Tests.Integration.ForeignBuildHosts.[repo_root, read, maintained_lines]
+use jet_foundation.Tests.Integration.FreshAgentT4 as t4
+
+// Rust: tests/fmt_round_trip_regressions.rs:2
+#Test("qualified_variant_heads_round_trip_through_protocol_expansion") {
+    literal_source :: "fn make() -[]> Payment.Client {{ return Payment.Client{{_token: 0}} }}\n"
+    literal :: jet.format_source(literal_source).expect("qualified literal should format")
+    assert(literal.contains("Payment.Client{{_token: 0}}"), "{literal}")
+    assert(!literal.contains("Payment.Client.{{"), "{literal}")
+    assert_eq(literal, jet.format_source(&literal).expect("qualified literal should reformat"))
+    source :: read(&repo_root().join("Examples/features/concurrency/protocol.jet"))
+    formatted :: jet.format_source(source).expect("protocol source should format")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted protocol source should reformat"))
+    jet.compile(&formatted).expect("protocol expansion must emit canonical variant literals")
+}
+// Rust: tests/fmt_round_trip_regressions.rs:22
+#Test("generic_module_template_struct_heads_round_trip") {
+    source :: """
+module cache<K>(capacity: Int) {
+    struct Entry { key: K }
+    fn entry(k: K) -[]> Entry { return Entry{key: k} }
+}
+
+"""
+    formatted :: jet.format_source(source).expect("generic module source should format")
+    assert(formatted.contains("Entry{{"), "struct head was not canonicalized:\n{formatted}")
+    assert(!formatted.contains("Entry.{{"), "retired struct head survived formatting:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted generic module should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:45
+#Test("derive_template_bodies_round_trip_retired_signatures") {
+    source :: read(&repo_root().join("Examples/features/reflection/derive_loop.jet"))
+    formatted :: jet.format_source(source).expect("derive template should format")
+    assert(formatted.contains("fn $method(self) -> String {{ field.$name }}"), "derive callable was not canonicalized:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted derive template should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:59
+#Test("marker_template_bodies_round_trip_retired_signatures") {
+    source :: read(&repo_root().join("Examples/features/reflection/user_rule_body.jet"))
+    formatted :: jet.format_source(source).expect("marker template should format")
+    assert(formatted.contains("fn greeting(self) -> String {{ \"hello\" }}"), "marker callable was not canonicalized:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted marker template should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:73
+#Test("generic_module_and_library_bodies_round_trip_retired_signatures") {
+    generic :: read(&repo_root().join("Examples/features/modules/generic_modules.jet"))
+    formatted :: jet.format_source(generic).expect("generic module should format")
+    assert(formatted.contains("pub fn slot(k: K) -> Slot {{ Slot.Value(k) }}"), "generic module callable was not canonicalized:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted generic module should reformat"))
+    library :: read(&repo_root().join("Examples/features/modules/library.jet"))
+    library_formatted :: jet.format_source(library).expect("library should format")
+    assert(library_formatted.contains("fn greeting(self) -> String\n"), "library signature was not canonicalized:\n{library_formatted}")
+    assert_eq(library_formatted, jet.format_source(&library_formatted).expect("formatted library should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:98
+#Test("callback_view_provenance_round_trips_retired_function_type_arrows") {
+    source :: read(&repo_root().join("Examples/features/memory/view_from_callback.jet"))
+    formatted :: jet.format_source(source).expect("callback view source should format")
+    assert(formatted.contains("pick: fn(String, String) -> View<str> from _0"), "function-type result arrow survived formatting:\n{formatted}")
+    assert(formatted.contains(") -> View<str> from input {{"), "callable result arrow survived formatting:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted callback view source should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:116
+#Test("generated_source_template_bodies_round_trip_retired_signatures") {
+    source :: read(&repo_root().join("Examples/features/tooling/build_entry_discovery/packages/foundation/tools/build.jet"))
+    formatted :: jet.format_source(source).expect("generated source template should format")
+    assert(formatted.contains("fn foundation_marker() -> String {{ \"foundation\" }}"), "generated callable was not canonicalized:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted generated source template should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:133
+#Test("inline_module_struct_heads_round_trip") {
+    source :: """
+module arith {
+    struct Tally { total: Int }
+    fn tally(value: Int) -[]> Tally { return Tally{total: value} }
+}
+"""
+    formatted :: jet.format_source(source).expect("inline module source should format")
+    assert(formatted.contains("Tally{{"), "struct head was not canonicalized:\n{formatted}")
+    assert(!formatted.contains("Tally.{{"), "retired struct head survived formatting:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted inline module should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:155
+#Test("effect_arrows_round_trip_beside_foreign_bodies") {
+    source :: """
+#Import module c.demo {
+    fn probe(value: Int) -> Int = "probe"
+}
+
+fn run() -[IO]> Int {
+    return 1
+}
+"""
+    formatted :: jet.format_source(source).expect("foreign source should format")
+    assert(formatted.contains("fn probe(value: Int) -> Int = \"probe\""), "foreign declaration arrow was not canonicalized:\n{formatted}")
+    assert(formatted.contains("fn run() -[IO]> Int"), "effect arrow was not canonicalized:\n{formatted}")
+    assert(!formatted.contains("=[IO]=>") && !formatted.contains("Int) => Int"), "retired arrow survived formatting:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted foreign source should reformat"))
+}
+// Rust: tests/fmt_round_trip_regressions.rs:184
+#Test("interpolated_struct_literals_survive_retired_dot_migration") {
+    source :: "fn run() -> {{\n    print(\"{{NoDebug{{value: 2}}:Debug}}\")\n    print(\"{{Probe{{value: 2}} == Probe{{value: 1}}:Debug}}\")\n}}\n"
+    formatted :: jet.format_source(source).expect("interpolated literals should format")
+    assert(formatted.contains("print(\"{{NoDebug{{value: 2}}:Debug}}\")"), "formatter dropped the interpolated struct literal:\n{formatted}")
+    assert(formatted.contains("print(\"{{Probe{{value: 2}} == Probe{{value: 1}}:Debug}}\")"), "formatter dropped the interpolated struct comparison:\n{formatted}")
+    assert_eq(formatted, jet.format_source(&formatted).expect("formatted interpolations should reformat"))
+}
+// Rust: tests/fmt_wave_a.rs:62
+#Test("preservation_matrix_survives_two_canonical_formatter_passes") {
+    cases :: [
+        ("comments, tabs, newlines, quotes, and braces", WHITESPACE_AND_LITERALS, ["// tabbed comment: \"quotes\" {{braces}}", "quoted \\\"text\\\" and {{{{braces}}}}; escapes: \\t \\n", "/* nested */ still here */", "print(\"{{value}}\")"]),
+        ("triple strings", TRIPLE_STRING, ["banner :: \"\"\"\n", "hello, {{who}}\n", "        indented\n", "print(\"{{banner}}\")"]),
+        ("interpolation selectors", INTERPOLATION_SELECTORS, ["print(\"{{price:Fixed(2)}}\")", "print(\"{{price:Grouped(2)}}\")"]),
+        ("comments attached to declaration and control boundaries", ATTACHED_COMMENTS, ["// declaration boundary comment", "// control boundary comment", "if true", "print(\"attached\")"]),
+    ]
+    for (label, source, needles) in cases {
+        before :: semantic_identity(source)
+        once :: jet.format_source(source).unwrap_or_else((diagnostics) -> panic("fmt failed for {label}: {diagnostics:Debug}"))
+        for needle in needles { assert(once.contains(needle), "{label}: formatter dropped {needle:Debug}\n--- got ---\n{once}") }
+        assert(once.ends_with('\n'), "{label}: canonical output must end with a newline")
+        assert_eq(before, semantic_identity(&once), "{label}: first formatter pass changed semantic identity")
+        twice :: jet.format_source(&once).unwrap_or_else((diagnostics) -> panic("second fmt failed for {label}: {diagnostics:Debug}"))
+        assert_eq(once, twice, "{label}: formatter is not idempotent")
+        assert_eq(semantic_identity(&once), semantic_identity(&twice), "{label}: semantic identity changed across formatter passes")
+    }
+}
+// Rust: tests/fmt_wave_a.rs:136
+#Test("syntax_only_formatter_reports_invalid_input") {
+    diagnostics :: jet.format_source("fn broken(").expect_err("invalid syntax must not be accepted by the formatter")
+    assert(!diagnostics.is_empty(), "invalid syntax should return at least one formatter diagnostic")
+}
+// Rust: tests/fmt_wave_a.rs:157
+#Test("cli_check_diff_and_write_keep_distinct_file_outcomes") {
+    // GATE #4494: real subprocess modes and actual file mutations.
+    scratch :: common.Scratch.new("fmt-wave-a-cli")
+    path :: scratch.join("main.jet")
+    fs.write(&path, CLI_FIXTURE).expect("write deterministic fmt fixture")
+    before :: fs.read_to_string(&path).expect("read fmt fixture")
+    canonical :: jet.format_source(CLI_FIXTURE).expect("fixture should have canonical output")
+    check :: run_fmt(&scratch.path, &["fmt", "--check", "main.jet"])
+    assert_eq(check.status.code(), Some(1), "--check should reject dirty source: {}", String.from_utf8_lossy(&check.stderr))
+    assert_eq(fs.read_to_string(&path).unwrap(), before, "--check must not mutate the fixture")
+    diff :: run_fmt(&scratch.path, &["fmt", "--check", "--diff", "main.jet"])
+    assert_eq(diff.status.code(), Some(1), "--check --diff should reject dirty source: {}", String.from_utf8_lossy(&diff.stderr))
+    stdout :: String.from_utf8_lossy(&diff.stdout)
+    assert(stdout.contains("--- main.jet") && stdout.contains("+++ main.jet"), "--check --diff should print a unified diff, got:\n{stdout}")
+    assert_eq(fs.read_to_string(&path).unwrap(), before, "--check --diff must not mutate the fixture")
+    write :: run_fmt(&scratch.path, &["fmt", "main.jet"])
+    assert_eq(write.status.code(), Some(0), "write mode should succeed: {}", String.from_utf8_lossy(&write.stderr))
+    assert_eq(fs.read_to_string(&path).unwrap(), canonical, "write mode must persist the canonical formatter output")
+    clean :: run_fmt(&scratch.path, &["fmt", "--check", "main.jet"])
+    assert_eq(clean.status.code(), Some(0), "canonical fixture should pass --check")
+}
+// Rust: tests/foreign_build_hosts.rs:37
+#Test("adapters_use_one_jet_library_runner_and_fail_closed_outputs") {
+    root :: repo_root().join("Tools/foreign-build-hosts")
+    runner :: read(&root.join("jet-library.sh"))
+    powershell :: read(&root.join("jet-library.ps1"))
+    for text in [&runner, &powershell] {
+        assert(text.contains("build"), "runner does not invoke Jet build")
+        assert(text.contains("--lib"), "runner does not select Library export")
+        assert(text.contains("--locked"), "runner does not pin lock provenance")
+        assert(text.contains("--output"), "runner does not select manifest output")
+        assert(!text.contains("fetch --locked"), "runner substitutes a fetch preflight for the locked build")
+        assert(text.contains("package.jet"), "runner does not declare the manifest")
+        assert(text.contains(".jet/lock"), "runner does not declare the lock")
+        assert(text.contains("jet-host.receipt"), "runner does not publish provenance")
+        assert(text.contains("jet-host.stamp"), "runner does not publish completion")
+        assert(text.contains("\"schema\":2") || text.contains("schema = 2"), "runner does not version its structured receipt")
+        assert(text.contains("sha256"), "runner does not record content digests")
+        assert(text.contains("jet-library.complete"), "runner does not require the complete Jet artifact set")
+        assert(text.contains("timed out"), "runner lock wait is unbounded")
+        assert(text.contains("kill") || text.contains("Stop-Process"), "runner does not clean up cancellation")
+        assert(text.contains("JET-HOST-TOOL"), "runner lacks tool diagnostics")
+        assert(text.contains("JET-HOST-INPUT"), "runner lacks input diagnostics")
+        assert(text.contains("JET-HOST-ABI"), "runner lacks ABI diagnostics")
+        assert(text.contains("cl.exe"), "runner does not reject the MSVC ABI")
+    }
+    assert(runner.contains("${{CC:-cc}}"), "POSIX runner has no host-linker fallback")
+    assert(powershell.contains("taskkill.exe"), "Windows runner does not kill build descendants")
+    assert(powershell.contains("project parts"), "Windows runner does not derive the source closure")
+    assert(powershell.contains("TimeoutSeconds"), "Windows runner has no bounded build timeout")
+    for variable in ["RUSTC", "RUSTC_LINKER", "CC", "NO_COLOR", "PATH"] {
+        assert(powershell.contains("EnvironmentVariables[\"{variable}\"]"), "Windows runner does not pass {variable}")
+    }
+    for path in [root.join("cmake/Jet.cmake"), root.join("gradle/jet-library.gradle"), root.join("bazel/jet_library.bzl"), root.join("msbuild/Jet.Library.targets")] {
+        text :: read(&path)
+        assert(text.contains("jet-library"), "{} bypasses the shared runner", path.display())
+        assert(!text.contains("rustc"), "{} owns Jet code generation", path.display())
+        assert(!text.contains("cargo"), "{} owns a duplicate build engine", path.display())
+    }
+}
+// Rust: tests/foreign_build_hosts.rs:87
+#Test("representative_projects_declare_exact_inputs_and_stay_under_ten_lines") {
+    root :: repo_root().join("tests/fixtures/foreign_build_hosts")
+    for (host, build_file) in [("cmake", "CMakeLists.txt"), ("gradle", "build.gradle"), ("bazel", "BUILD.bazel"), ("msbuild", "host.proj")] {
+        project :: root.join(host)
+        build :: read(&project.join(build_file))
+        assert(maintained_lines(&project.join(build_file)) < 10, "{host} build grew past ten maintained lines")
+        for (input, fixture) in [("package.jet", "package.jet"), (".jet/lock", "lock.fixture"), ("library.jet", "library.jet"), ("extra.jet", "extra.jet")] {
+            assert(project.join(fixture).is_file(), "{host} is missing {input}")
+            named :: build.contains(input) || (input == ".jet/lock" && build.contains(".jet\\lock"))
+            assert(named, "{host} build does not name {input}")
+        }
+        assert(project.join("package.jet").is_file())
+        assert(read(&project.join("lock.fixture")).contains("[build.stamp]"))
+        assert(read(&project.join("package.jet")).contains(".Library"))
+        assert(build.contains("loadable"), "{host} does not name the native artifact")
+        host_source :: if host == "msbuild" { "host.cpp" } else { "host.c" }
+        assert(read(&project.join(host_source)).contains("on_tick(41) == 42"))
+    }
+}
+// Rust: tests/foreign_build_hosts.rs:123
+#Test("host_descriptors_are_small_and_route_to_native_library_targets") {
+    root :: repo_root().join("tests/fixtures/foreign_build_hosts")
+    cmake :: read(&root.join("cmake/CMakeLists.txt"))
+    assert(cmake.contains("find_package(Jet REQUIRED)"))
+    assert(!cmake.contains("CMAKE_MODULE_PATH"))
+    assert(cmake.contains("jet_library"))
+    assert(cmake.contains("target_link_libraries"))
+    cmake_adapter :: read(&repo_root().join("Tools/foreign-build-hosts/cmake/Jet.cmake"))
+    assert(cmake_adapter.contains("set(_kind static)"))
+    assert(cmake_adapter.contains("CMAKE_CXX_COMPILER"))
+    assert(cmake_adapter.contains("add_custom_target(\"${{TARGET}}_jet\" DEPENDS ${{_outputs}})"))
+    gradle :: read(&root.join("gradle/build.gradle"))
+    assert(gradle.contains("jet-library.gradle"))
+    assert(gradle.contains("dependsOn \"jetLibrary\""))
+    assert(gradle.contains("jetLibrary.staticLibrary"))
+    assert(gradle.contains("inputs.files jetLibrary.staticLibrary()"))
+    bazel :: read(&root.join("bazel/BUILD.bazel"))
+    assert(bazel.contains("jet_library"))
+    assert(bazel.contains("cc_binary"))
+    assert(bazel.contains("linkopts"))
+    bazel_adapter :: read(&repo_root().join("Tools/foreign-build-hosts/bazel/jet_library.bzl"))
+    assert(bazel_adapter.contains("ctx.actions.run"))
+    assert(bazel_adapter.contains("args.add"))
+    assert(bazel_adapter.contains("short_path"))
+    assert(!bazel_adapter.contains("$(location"))
+    msbuild :: read(&root.join("msbuild/host.proj"))
+    assert(msbuild.contains("Jet.Library.targets"))
+    assert(msbuild.contains("DependsOnTargets=\"JetLibrary\""))
+    assert(msbuild.contains("JetLibraryStatic"))
+    assert(msbuild.contains("Inputs=\"$(MSBuildProjectDirectory)\\host.cpp"))
+    assert(msbuild.contains("Outputs=\"$(IntermediateOutputPath)host.exe"))
+    msbuild_adapter :: read(&repo_root().join("Tools/foreign-build-hosts/msbuild/Jet.Library.targets"))
+    assert(msbuild_adapter.contains("$(MSBuildProjectDirectory)\\"))
+    assert(msbuild_adapter.contains(".jet\\lock"))
+    assert(msbuild_adapter.contains("$(MSBuildThisFileDirectory)..\\jet-library.ps1"))
+    assert(msbuild_adapter.contains("$(JetLibraryIntermediate)\\jet-host.stamp"))
+    lifecycle :: root.join("msbuild/lifecycle.cpp")
+    assert(lifecycle.is_file())
+    lifecycle_text :: read(&lifecycle)
+    assert(lifecycle_text.contains("#ifdef _WIN32"))
+    assert(lifecycle_text.contains("LoadLibraryA"))
+    assert(lifecycle_text.contains("std::thread"))
+    docs :: read(&repo_root().join("Docs/spec/reference/foreign-build-hosts.md"))
+    for term in ["CMake", "Gradle", "Bazel", "MSBuild", "--locked", "jet-host.receipt", "jet-host.stamp", "jet-library-set-v1", "lifecycle.cpp", "CMAKE_TOOLCHAIN_FILE"] {
+        assert(docs.contains(term), "reference docs omit {term}")
+    }
+}
+// Rust: tests/foreign_build_hosts.rs:189
+#Test("shared_runner_publishes_only_after_a_successful_jet_export") {
+    // GATE #4483: the original unix-only host-runner lane.
+    if core.sys.target.selected_family() != "unix" { return }
+    // GATE #4494: native shell, permissions and fail-closed publication.
+    scratch :: common.Scratch.new("foreign-host-runner")
+    fs.create_dir_all(scratch.path.join(".jet")).unwrap()
+    fs.write(scratch.path.join("package.jet"), "name: \"runner\"\nversion: \"0.1.0\"\n").unwrap()
+    fs.write(scratch.path.join(".jet/lock"), "version = 1\n\n[build.stamp]\ngit = \"runner\"\ndirty = false\ntoolchain = \"1.0.0\"\nat = \"2026-08-29T00:00:00.000000000Z\"\n\n[root]\ndependencies = []\n").unwrap()
+    fs.write(scratch.path.join("library.jet"), "pub fn on_tick(dt: Int) -> Int {{ dt + 1 }}\n").unwrap()
+    fake_jet :: scratch.path.join("fake-jet")
+    fs.write(&fake_jet, "#!/bin/sh\nif [ \"$1\" = project ] && [ \"$2\" = parts ]; then printf 'automatic __project.library library.jet\\n'; exit 0; fi\nif [ \"$1\" = build ] && [ \"${{FAKE_JET_FAIL:-0}}\" = 1 ]; then exit 17; fi\nif [ \"$1\" = build ]; then mkdir -p .jet/build; printf '%s\\n' \"$@\" > .jet/build/args; printf archive > .jet/build/libloadable.a; printf header > .jet/build/loadable.h; printf 'jet-jetlib-v3\\0' > .jet/build/loadable.jetlib; a=$(sha256sum .jet/build/libloadable.a | cut -d' ' -f1); h=$(sha256sum .jet/build/loadable.h | cut -d' ' -f1); j=$(sha256sum .jet/build/loadable.jetlib | cut -d' ' -f1); printf 'jet-library-set-v1\\nlibloadable.a\\tsha256-%s\\nloadable.h\\tsha256-%s\\nloadable.jetlib\\tsha256-%s\\n' \"$a\" \"$h\" \"$j\" > .jet/build/.loadable.jet-library.complete; fi\n").unwrap()
+    fs.set_permissions(&fake_jet, fs.Permissions.from_mode(0o755)).unwrap()
+    destination :: scratch.path.join("host-build")
+    runner :: repo_root().join("Tools/foreign-build-hosts/jet-library.sh")
+    args :: ["--jet", fake_jet.to_str().unwrap(), "--project", scratch.path.to_str().unwrap(), "--entry", "library.jet", "--output", "core", "--library", "loadable", "--dest", destination.to_str().unwrap(), "--kind", "static", "--loadable", "--input", "library.jet"]
+    first :: Command.new("bash").arg(&runner).args(&args).status().unwrap()
+    assert(first.success(), "the fake Jet Library export should publish")
+    assert(destination.join("libloadable.a").is_file())
+    assert(destination.join("loadable.h").is_file())
+    assert(destination.join("loadable.jetlib").is_file())
+    assert(destination.join("jet-host.receipt").is_file())
+    assert(destination.join("jet-host.stamp").is_file())
+    receipt :: read(&destination.join("jet-host.receipt"))
+    assert(receipt.contains("\"schema\":2"))
+    assert(receipt.contains("\"output\":\"core\""))
+    assert(receipt.contains("\"lock\":{{\"path\":\".jet/lock\",\"digest\":\"sha256-"))
+    assert(receipt.contains("\"command\":[\"build\",\"--lib\",\"--locked\",\"--output\",\"core\",\"--profile=dev\",\"library.jet\"]"))
+    assert(scratch.path.join(".jet/build/.loadable.jet-library.complete").is_file())
+    invoked :: read(&scratch.path.join(".jet/build/args"))
+    assert(invoked.lines().any((line) -> line == "--lib"))
+    assert(invoked.lines().any((line) -> line == "--locked"))
+    assert(invoked.lines().any((line) -> line == "--output"))
+    assert(invoked.lines().any((line) -> line == "core"))
+    assert(invoked.lines().any((line) -> line == "library.jet"))
+    failed :: Command.new("bash").arg(&runner).args(&args).env("FAKE_JET_FAIL", "1").status().unwrap()
+    assert(!failed.success(), "a failed Jet export must fail the host action")
+    assert(!destination.join("libloadable.a").exists())
+    assert(!destination.join("loadable.h").exists())
+    assert(!destination.join("loadable.jetlib").exists())
+    assert(!destination.join("jet-host.receipt").exists())
+    assert(!destination.join("jet-host.stamp").exists())
+    assert(!fs.read_dir(&destination).unwrap().flatten().any((entry) -> entry.file_name().to_string_lossy().starts_with(".jet-host-stage.")))
+}
+// Rust: tests/fresh_agent_t4.rs:99
+#Test("fresh_agent_t4_rejects_malformed_rows_on_all_applicable_tiers") {
+    root :: t4.fixture_root()
+    tiers := [("default", ["run"]), ("dev", ["dev", "--watch=off"]), ("interpreter", ["run", "--interpret"])] as [(String, [String])]
+    has_rustc :: Command.new("rustc").arg("--version").output().map((output) -> output.status.success()).unwrap_or(false)
+    if has_rustc { tiers.push(("aot", ["run", "--release"])) }
+    for (tier, tier_args) in tiers {
+        scratch :: t4.Scratch.new(tier)
+        t4.copy_fixture_project(&root, &scratch.path)
+        fs.copy(root.join("report.tsv"), scratch.path.join("report.tsv")).expect("copy valid T4 input")
+        valid :: t4.run_tier(&scratch, &tier_args)
+        assert(valid.status.success(), "{tier} valid T4 run failed: {}", String.from_utf8_lossy(&valid.stderr))
+        assert_eq(valid.stdout, t4.VALID_OUTPUT.as_bytes(), "{tier} valid output drifted")
+        assert(valid.stderr.is_empty(), "{tier} valid run wrote stderr: {}", String.from_utf8_lossy(&valid.stderr))
+        for case in t4.MALFORMED_CASES {
+            fs.copy(root.join("inputs").join(case.fixture), scratch.path.join("report.tsv")).expect("copy malformed T4 input")
+            malformed :: t4.run_tier(&scratch, &tier_args)
+            assert_eq(malformed.status.code(), Some(1), "{tier} {} returned the wrong exit code", case.fixture)
+            assert(malformed.stdout.is_empty(), "{tier} {} wrote stdout: {}", case.fixture, String.from_utf8_lossy(&malformed.stdout))
+            expected :: "report.tsv:{case.line}:{case.reason}\n"
+            assert_eq(String.from_utf8_lossy(&malformed.stderr), expected, "{tier} {} diagnostic drifted", case.fixture)
+        }
+    }
+}

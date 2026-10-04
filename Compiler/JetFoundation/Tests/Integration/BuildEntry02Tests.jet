@@ -1,0 +1,1175 @@
+use jet_foundation.Tests.Integration.BuildEntry.[project, write, opts]
+use jet_foundation.Tests.Integration.BuildEntry02.*
+use jet_foundation.Tests.Integration.Common as common
+use jet_foundation.Tests.Integration.Common.Scratch
+use jet.Driver.[compile_bundle_path_build, BuildRunOptions, BuildQueryExpression]
+use jet.Comptime.Build.[ActionOutcome, BuildExecutionEvent]
+use jet_foundation.JSON.[json_get, json_str, parse]
+use jet_foundation.DataTree.DataTree
+use jet
+use jet_store
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use std.fs as fs
+use std.env as env
+use std.process.Command
+use std.thread as thread
+use std.time.[Duration, Instant]
+use std.net.TcpListener
+use core.sys.target.selected_family
+// GATE #4494: all native subprocess, filesystem, network, environment and thread fixtures below.
+
+// Rust: tests/build_entry.rs:1803
+#Test("workspace_cli_grant_does_not_authorize_member_builds") {
+    root :: project("workspace-grant-boundary")
+    member :: root.join("packages/member")
+    fs.create_dir_all(&member).unwrap()
+    write(&root.join("workspace.jet"), "module workspace { members: [\"./packages/member\"] }\nfn build(b: BuildContext) -> BuildPlan { return b.plan() }\n")
+    write(&member.join("package.jet"), "name: \"member\"\nversion: \"0.1.0\"\n")
+    write(&member.join("run.jet"), """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("member must use its own grant") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: jet.compile_programmable_build_opts(root.join("workspace.jet").to_str().unwrap(), &["exec"], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3504" }), "member must not inherit the workspace CLI grant: {errors:#?}")
+    assert(!member.join("stamp").exists())
+}
+// Rust: tests/build_entry.rs:1850
+#Test("cache_restore_rebuilds_after_missing_or_invalid_store_entries") {
+    loop (case, damage) in [("missing", "remove"), ("invalid", "corrupt"), ("invalid-record", "corrupt-record")] {
+        root :: project("restore-{case}")
+        entry :: root.join("main.jet")
+        write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("write declared cached output") {
+        emit :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf fresh > artifact"], ["Exec", "FS"])
+        app :: b.add_executable("app", ["main.jet"], [emit])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+        _ :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+        store :: jet_store.Store.from_env().expect("open configured artifact store")
+        action_entries :: fs.read_dir(store.root().join("ac")).unwrap().filter_map(fn(result) { result.ok() }).map(fn(entry) { entry.path() }).filter(fn(path) { path.is_file() }).collect()
+        assert(!action_entries.is_empty(), "first build should publish an action record")
+        if damage == "corrupt-record" {
+            loop path in action_entries -> fs.write(path, "not an action record").unwrap()
+        } else {
+            blob_entries :: fs.read_dir(store.root().join("cas")).unwrap().filter_map(fn(result) { result.ok() }).map(fn(entry) { entry.path() }).filter(fn(path) { path.is_file() }).collect()
+            assert(!blob_entries.is_empty(), "first build should publish CAS blobs")
+            loop path in blob_entries {
+                if damage == "remove" -> fs.remove_file(path).unwrap()
+                else -> fs.write(path, "corrupt").unwrap()
+            }
+        }
+        rebuilt :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+        build :: rebuilt.build.expect("rebuild should expose execution")
+        assert(build.execution.events.iter().any(fn(event) {
+            if event == { .Finished{outcome: .Succeeded{exit_code: 0}, ..} -> true; else -> false }
+        }), "{case} store damage must trigger a successful rebuild")
+        assert(!build.execution.events.iter().any(fn(event) {
+            if event == { .Finished{outcome: .RestoredFromCache, ..} -> true; else -> false }
+        }), "{case} store damage must not restore the damaged action")
+    }
+}
+// Rust: tests/build_entry.rs:1933
+#Test("malformed_generated_body_is_a_jet_diagnostic_before_codegen") {
+    root :: project("bad-generated")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("broken") {
+        fn nope(
+    }
+        app :: b.add_executable("app", ["main.jet", ".jet/generated/main/broken.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap_err()
+    assert(!errors.is_empty())
+    assert(errors.iter().all(fn(d) { d.code != "ICE" }))
+    assert(errors.iter().any(fn(d) { d.code == "E0003" }))
+    assert(!root.join(".jet/generated/main/broken.jet").exists())
+    assert(!root.join(".jet/lock").exists())
+}
+// Rust: tests/build_entry.rs:1959
+#Test("imported_fn_build_never_runs_and_ordinary_build_name_stays_runtime") {
+    root :: project("selection")
+    dep :: root.join("dep.jet")
+    write(&dep, """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("should_not_exist") {
+        fn hidden() {}
+    }
+    return b.plan()
+}
+pub fn helper() {}
+""")
+    entry :: root.join("main.jet")
+    write(&entry, "use \"./dep\" as dep\nfn run() { dep.helper() }\n")
+    out :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap()
+    assert(out.build.is_none())
+    assert(!root.join(".jet/generated").exists())
+    write(&entry, "fn build() -> Int { return 1 }\nfn run() { print(build()) }\n")
+    ordinary :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect("a build-named function without BuildContext is ordinary runtime code")
+    assert(ordinary.build.is_none())
+    assert(ordinary.compile.rust.contains("fn main"))
+    assert(!jet.Driver.selects_build_entry(&fs.read_to_string(&entry).unwrap(), .None))
+}
+// Rust: tests/build_entry.rs:1999
+#Test("ungranted_action_fails_before_process_spawn") {
+    root :: project("grant")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("exercise denied authority") {
+    action :: b.action("escape", [], ["out"], ["sh", "-c", "printf bad > out"], ["Exec"])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap_err()
+    assert(errors.iter().any(fn(d) { d.code == "E3503" }))
+    assert(!root.join("out").exists())
+}
+// Rust: tests/build_entry.rs:2023
+#Test("action_generated_jet_reenters_frontend_before_runtime_codegen") {
+    root :: project("action-generated")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("generate declared source") {
+    action :: b.action(
+        "bad-gen", [], [".jet/generated/main/bad.jet"],
+        ["sh", "-c", "printf 'fn nope(' > .jet/generated/main/bad.jet"], ["Exec", "FS"]
+    )
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/bad.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err()
+    assert(errors.iter().any(fn(diag) { diag.what.contains("generated action `bad-gen`") }))
+    assert(!root.join(".jet/generated/main/bad.jet").exists())
+}
+// Rust: tests/build_entry.rs:2054
+#Test("jet_build_command_runs_selected_build_entry") {
+    root :: project("cli")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("write CLI test output") {
+    action :: b.action("stamp", [], ["stamp.txt"], ["sh", "-c", "printf cli-built > stamp.txt"], ["Exec", "FS"])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() { print("ok") }
+""")
+    output :: Command.new(env!("CARGO_BIN_EXE_jet")).current_dir(&root).arg("build").arg(&entry).arg("--allow-exec").arg("--allow-fs").output().unwrap()
+    assert(output.status.success(), "stdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert_eq(fs.read_to_string(root.join("stamp.txt")).unwrap(), "cli-built")
+}
+// Rust: tests/build_entry.rs:2098
+#Test("concurrent_jet_builds_share_store_lock_and_run") {
+    left :: Scratch.new("concurrent-build-left")
+    right :: Scratch.new("concurrent-build-right")
+    source :: "\nfn run() {\n    print(\"shared store\")\n}\n"
+    loop scratch in [&left, &right] {
+        write(&scratch.join("package.jet"), "name: \"concurrent-build\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n")
+        write(&scratch.join("main.jet"), source)
+    }
+    store :: left.join("store")
+    holder :: jet_store.Store.open(jet_store.StoreConfig.new(store.clone()).with_reserve_bytes(0)).expect("open shared store lock holder")
+    owner :: jet_store.ProcessIdentity.current()
+    lock_path :: holder.root().join("locks/store.lock")
+    fs.write(&lock_path, "jet.store.v1|lock|{owner.pid()}|{owner.start()}\n").expect("hold shared store lock")
+    spawn_build :: fn(scratch: &Scratch) {
+        Command.new(env!("CARGO_BIN_EXE_jet")).args(["build", "main.jet"]).current_dir(&scratch.path)
+            .env("JET_STORE_DIR", &store).env("JET_STORE_RESERVE_BYTES", "0").env("JET_RUN_CACHE_DIR", scratch.join("run-cache"))
+            .env("NO_COLOR", "1").spawn().expect("spawn concurrent build")
+    }
+    left_child :: spawn_build(&left)
+    right_child :: spawn_build(&right)
+    thread.sleep(Duration.from_millis(3000))
+    fs.remove_file(&lock_path).expect("release shared store lock")
+    left_build :: left_child.wait_with_output().expect("wait for left concurrent build")
+    right_build :: right_child.wait_with_output().expect("wait for right concurrent build")
+    loop (name, output) in [("left", left_build), ("right", right_build)] {
+        assert(output.status.success(), "{name} concurrent build failed:\nstdout: {String.from_utf8_lossy(&output.stdout)}\nstderr: {String.from_utf8_lossy(&output.stderr)}")
+    }
+    loop (name, scratch) in [("left", &left), ("right", &right)] {
+        run :: Command.new(scratch.join(".jet/build/main")).current_dir(&scratch.path).output().expect("run concurrent build binary")
+        assert(run.status.success(), "{name} binary failed:\nstdout: {String.from_utf8_lossy(&run.stdout)}\nstderr: {String.from_utf8_lossy(&run.stderr)}")
+        actual := String.from_utf8_lossy(&run.stdout).trim() // #4303
+        assert_eq(actual, "shared store")
+    }
+}
+// Rust: tests/build_entry.rs:2174
+#Test("jet_build_positional_name_resolves_one_workspace_member") {
+    root :: project("workspace-member-cli")
+    member :: root.join("packages/one")
+    fs.create_dir_all(&member).unwrap()
+    write(&root.join("workspace.jet"), "module workspace { members: [\"./packages/one\"] }\nfn run() {}\n")
+    write(&member.join("package.jet"), "name: \"one\"\nversion: \"0.1.0\"\nauthority: { holds: { allow: [IO] } }\n")
+    write(&member.join("run.jet"), "fn run() { print(\"one\") }\n")
+    fs.create_dir_all(member.join("tools")).unwrap()
+    write(&member.join("tools/build.jet"), """fn build(b: BuildContext) -> BuildPlan {
+    b.generate("member_generated") {
+        fn member_generated() -> String { "one" }
+    }
+    app :: b.add_executable("one", ["run.jet", ".jet/generated/one/member_generated.jet"], [])
+    return b.plan(app)
+}
+""")
+    output :: Command.new(env!("CARGO_BIN_EXE_jet")).current_dir(&root).args(["build", "one"]).output().expect("jet build <member>")
+    assert(output.status.success(), "stdout:\n{String.from_utf8_lossy(&output.stdout)}\nstderr:\n{String.from_utf8_lossy(&output.stderr)}")
+    assert(member.join(".jet/generated/one/member_generated.jet").is_file())
+}
+// Rust: tests/build_entry.rs:2217
+#Test("graph_query_is_static_json_and_lsp_check_sees_bad_signature") {
+    root :: project("query")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 99"], [])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+}
+fn run() {}
+""")
+    output :: Command.new(env!("CARGO_BIN_EXE_jet")).args(["inspect", "graph"]).arg(&entry).arg("--json").output().unwrap()
+    assert(output.status.success(), "{String.from_utf8_lossy(&output.stderr)}")
+    json :: String.from_utf8_lossy(&output.stdout)
+    assert(json.contains("\"name\":\"app\""))
+    assert(json.contains("\"name\":\"never-run\""))
+    assert(!root.join("out").exists(), "graph query must never execute actions")
+    lsp_plan :: jet.Driver.query_build_plan(entry.to_str().unwrap()).unwrap().unwrap()
+    assert_eq(lsp_plan.graph().targets[0].name, "app")
+    assert_eq(lsp_plan.graph().actions[0].name, "never-run")
+    write(&entry, "fn build() -> Int { return 1 }\nfn run() {}\n")
+    (diags, _) :: jet.Driver.check_file(entry.to_str().unwrap(), .None, true)
+    assert(diags.iter().all(fn(diag) { diag.code != "E3501" }), "ordinary `fn build` must not receive the build-entry diagnostic: {diags:?}")
+}
+// Rust: tests/build_entry.rs:2264
+#Test("graph_query_inspects_declared_effects_without_execution_grants") {
+    root :: project("query-effects")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("declare an inspectable action") {
+        action :: b.action("never-run", [], ["out"], ["sh", "-c", "exit 91"], ["Exec", "FS"])
+        app :: b.add_executable("app", ["main.jet"], [action])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    plan :: jet.Driver.evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression.Build).unwrap().expect("declared effects remain inspectable without execution grants")
+    assert_eq(plan.actions()[0].name, "never-run")
+    assert(!root.join("out").exists(), "query must never execute action")
+}
+// Rust: tests/build_entry.rs:2293
+#Test("graph_query_denies_ambient_impure_effects_before_host_side_effects") {
+    root :: project("query-denies-ambient")
+    entry :: root.join("main.jet")
+    marker :: root.join("must-not-exist")
+    write(&entry, """
+use core.files as files
+use core.sys as env
+use core.process as process
+fn build(b: BuildContext) -> BuildPlan {
+    #Impure("hostile inspection probe") {
+        write_result :: files.write("__MARKER__", "owned")
+        env.set("JET_QUERY_MUST_NOT_SET", "owned")
+        process_result :: process.run(["sh", "-c", "exit 97"])
+    }
+    return b.plan()
+}
+fn run() {}
+""".replace("__MARKER__", marker.display().to_string()))
+    env.remove_var("JET_QUERY_MUST_NOT_SET")
+    diagnostics :: jet.Driver.evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression.Build).expect_err("inspection must reject ambient comptime authority")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3411" }), "unexpected diagnostics: {diagnostics:?}")
+    assert(!marker.exists(), "inspection wrote to the host filesystem")
+    assert_eq(env.var_os("JET_QUERY_MUST_NOT_SET"), .None)
+}
+// Rust: tests/build_entry.rs:2334
+#Test("graph_query_denies_each_ambient_authority_class") {
+    cases :: [
+        ("filesystem", "core.files", "attempt :: api.write(\"blocked\", \"owned\")"),
+        ("environment", "core.sys", "api.set(\"JET_QUERY_BLOCKED\", \"owned\")"),
+        ("exec-process", "core.process", "attempt :: api.run([\"sh\", \"-c\", \"exit 97\"])"),
+        ("network", "core.net", "attempt :: api.tcp_listen(\"127.0.0.1:0\")"),
+    ]
+    loop (name, module, call) in cases {
+        root :: project("query-denies-{name}")
+        entry :: root.join("main.jet")
+        source :: """
+use __MODULE__ as api
+fn build(b: BuildContext) -> BuildPlan {
+    #Impure("hostile __NAME__ probe") { __CALL__ }
+    return b.plan()
+}
+fn run() {}
+""".replace("__MODULE__", module).replace("__NAME__", name).replace("__CALL__", call)
+        write(&entry, &source)
+        diagnostics :: jet.Driver.evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression.Build).expect_err("inspection must reject ambient comptime authority")
+        assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E3411" }), "{name} escaped inspection authority: {diagnostics:?}")
+    }
+}
+// Rust: tests/build_entry.rs:2379
+#Test("graph_overlay_uses_unsaved_text_and_canonical_cli_facts") {
+    root :: project("query-overlay")
+    entry :: root.join("main.jet")
+    write(&entry, "fn build(b: BuildContext) -> BuildPlan { app :: b.add_executable(\"disk\", [\"main.jet\"], [])\n return b.plan(app) }\nfn run() {}\n")
+    unsaved :: "fn build(b: BuildContext) -> BuildPlan { app :: b.add_executable(\"unsaved\", [\"main.jet\"], [])\n return b.plan(app) }\nfn run() {}\n"
+    disk :: jet.Driver.query_build_plan(entry.to_str().unwrap()).unwrap().unwrap()
+    overlay :: jet.Driver.query_build_plan_with_overlay(entry.to_str().unwrap(), unsaved).unwrap().unwrap()
+    assert_eq(disk.targets()[0].name, "disk")
+    assert_eq(overlay.targets()[0].name, "unsaved")
+    json :: jet.Driver.build_plan_json(&overlay, .None)
+    assert(json.contains("\"files\"") && json.contains("\"toolchains\"") && json.contains("\"generated\""))
+    editor_json :: jet.LSP.build_graph_json(entry.to_str().unwrap(), unsaved).unwrap().expect("overlay has build graph")
+    assert_eq(editor_json, json, "editor and CLI must serialize one BuildPlan graph")
+    queried :: jet.Driver.evaluate_build_query(entry.to_str().unwrap(), BuildQueryExpression.Build).unwrap().unwrap()
+    assert_eq(jet.Driver.build_plan_json(&queried, .None), jet.Driver.build_plan_json(&disk, .None), "fixed `build` expression must evaluate typed graph facts")
+}
+// Rust: tests/build_entry.rs:2417
+#Test("unselected_action_output_never_runs_checks_or_leaks") {
+    root :: project("selected-closure")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("declare selected closure") {
+    bad :: b.action("unselected", [], ["missing-generated.jet"], ["sh", "-c", "exit 77"], ["Exec", "FS"])
+    ignored :: b.add_executable("ignored", ["missing-generated.jet"], [bad])
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    assert_eq(output.build.unwrap().execution.metrics.actions_total, 0)
+    assert(!root.join("missing-generated.jet").exists())
+}
+// Rust: tests/build_entry.rs:2441
+#Test("malformed_generate_is_rejected_before_selection") {
+    root :: project("unselected-generate")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("ignored") {
+        fn broken(
+    }
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E0003" }))
+    assert(!root.join(".jet/generated/main/ignored.jet").exists())
+}
+// Rust: tests/build_entry.rs:2464
+#Test("runtime_reload_error_rolls_back_action_outputs_and_lock") {
+    root :: project("reload-rollback")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("rollback after runtime reload") {
+    stamp :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf changed > stamp"], ["Exec", "FS"])
+    app :: b.add_executable("app", ["main.jet", "missing.jet"], [stamp])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    assert(compile_bundle_path_build(entry.to_str().unwrap(), opts()).is_err())
+    assert(!root.join("stamp").exists())
+    assert(!root.join(".jet/lock").exists())
+}
+// Rust: tests/build_entry.rs:2487
+#Test("program_info_uses_qualified_collision_free_type_function_and_method_identities") {
+    // Build/effect-facts frames need a larger test worker stack.
+    worker :: thread.Builder.new().name("build-entry-program-identities").stack_size(32 * 1024 * 1024)
+        .spawn(run_program_info_uses_qualified_collision_free_type_function_and_method_identities).expect("start build_entry program-identities worker")
+    if worker.join() == { .Err(payload) -> std.panic.resume_unwind(payload); .Ok(_) -> {} }
+}
+// Rust: tests/build_entry.rs:2565
+#Test("program_info_reads_shared_semindex_rows") {
+    worker :: thread.Builder.new().name("build-entry-program-semindex").stack_size(32 * 1024 * 1024)
+        .spawn(run_program_info_reads_shared_semindex_rows).expect("start build_entry program-semindex worker")
+    if worker.join() == { .Err(payload) -> std.panic.resume_unwind(payload); .Ok(_) -> {} }
+}
+// Rust: tests/build_entry.rs:2600
+#Test("programmable_build_executes_destination_owned_distinct_conversion") {
+    // Match the other build workers' larger-stack isolation.
+    worker :: thread.Builder.new().name("build-entry-distinct-conversion").stack_size(32 * 1024 * 1024)
+        .spawn(run_programmable_build_executes_destination_owned_distinct_conversion).expect("start build_entry distinct-conversion worker")
+    if worker.join() == { .Err(payload) -> std.panic.resume_unwind(payload); .Ok(_) -> {} }
+}
+// Rust: tests/build_entry.rs:2646
+#Test("typed_toolchain_and_probe_flow_into_executed_action") {
+    root :: project("toolchain-probe")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("probe selected toolchain") {
+    tc :: b.toolchain("native", "x86_64-linux")
+    shell :: b.probe("shell", "find_program", "sh")
+    action :: b.action("stamp", [], ["probe.txt"], ["sh", "-c", "printf probe > probe.txt"], ["Exec", "FS"], tc, [shell])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    build :: output.build.unwrap()
+    assert_eq(build.probes.len(), 1)
+    assert(build.probes[0].success)
+    assert_eq(build.plan.toolchains().len(), 2)
+    assert_eq(build.plan.actions()[0].probes.len(), 1)
+    assert_eq(fs.read_to_string(root.join("probe.txt")).unwrap(), "probe")
+}
+
+// Rust: tests/build_entry.rs:2684
+#Test("sandbox_refuses_output_parent_symlink_escape") {
+    if selected_family() != "unix" -> return
+    root :: project("symlink-output")
+    outside :: project("symlink-outside")
+    std.os.unix.fs.symlink(&outside, root.join("redirect")).unwrap()
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec, FS]> BuildPlan {
+    #Impure("exercise hostile output path") {
+    action :: b.action("escape", [], ["redirect/pwn"], ["sh", "-c", "mkdir -p redirect; printf escaped > redirect/pwn"], ["Exec", "FS"])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err()
+    assert(errors.iter().any(fn(diag) { diag.code == "E3505" }))
+    assert(!outside.join("pwn").exists())
+}
+// Rust: tests/build_entry.rs:2717
+#Test("root_build_can_emit_structured_program_diagnostics") {
+    root :: project("program-diagnostic")
+    entry :: root.join("main.jet")
+    write(&entry, """
+struct Entity { id: Int }
+fn build(b: BuildContext) -> BuildPlan {
+    types :: b.program.types()
+    entity :: types[0]
+    b.error(entity.span, "ORG01", "entity must define archive", "company policy requires archival", "add an archive method")
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap_err()
+    diagnostic :: errors.iter().find(fn(diag) { diag.code == "ORG01" }).unwrap()
+    assert_eq(diagnostic.what, "entity must define archive")
+    assert_eq(diagnostic.why, "company policy requires archival")
+    assert_eq(diagnostic.fix, "add an archive method")
+    assert(diagnostic.span.is_some())
+}
+// Rust: tests/build_entry.rs:2751
+#Test("locked_generated_drift_fails_before_materialization") {
+    root :: project("locked-drift")
+    entry :: root.join("main.jet")
+    source :: fn(value: String) {
+        """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("value") {
+        fn generated_value() -> String { "__VALUE__" }
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/value.jet"], [])
+    return b.plan(app)
+}
+fn run() { print(generated_value()) }
+""".replace("__VALUE__", value)
+    }
+    write(&entry, &source("one"))
+    _ :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap()
+    generated :: root.join(".jet/generated/main/value.jet")
+    before :: fs.read_to_string(&generated).unwrap()
+    write(&entry, &source("two"))
+    locked := BuildRunOptions.default()
+    locked.locked = true
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), locked).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3512" }))
+    assert_eq(fs.read_to_string(generated).unwrap(), before)
+}
+// Rust: tests/build_entry.rs:2781
+#Test("generated_sources_materialize_and_compile_as_one_program") {
+    root :: project("generated-rounds")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("consumer") {
+        pub fn generated_value() -> String { "round two" }
+    }
+    b.generate("provider") {
+        pub fn message() -> String { "round two" }
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/consumer.jet", ".jet/generated/main/provider.jet"], [])
+    return b.plan(app)
+}
+fn run() { print(generated_value()) }
+""")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    build :: output.build.unwrap()
+    assert_eq(build.generated.len(), 2)
+    assert(root.join(".jet/generated/main/provider.jet").is_file())
+    assert(root.join(".jet/generated/main/consumer.jet").is_file())
+    assert(output.compile.rust.contains("generated_value"))
+}
+// Rust: tests/build_entry.rs:2809
+#Test("duplicate_generated_modules_fail_before_any_file_is_written") {
+    root :: project("generated-cycle")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("alpha") {
+        pub fn alpha() {}
+    }
+    b.generate("alpha") {
+        pub fn beta() {}
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/alpha.jet", ".jet/generated/main/beta.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3511" && diagnostic.what.contains("generated twice") && diagnostic.what.contains("alpha") }))
+    assert(!root.join(".jet/generated/main/alpha.jet").exists())
+    assert(!root.join(".jet/generated/main/beta.jet").exists())
+}
+// Rust: tests/build_entry.rs:2839
+#Test("emit_generated_exports_the_exact_materialized_source") {
+    root :: project("emit-generated")
+    entry :: root.join("main.jet")
+    generated :: "fn exported_generated() -> String { \"exported\" }\n"
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    b.generate("exported") {
+        fn exported_generated() -> String { "exported" }
+    }
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() { print(exported_generated()) }
+""")
+    _ :: jet.compile_programmable_build_emit_generated_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap()
+    // Keep the package segment in the visible generated export tree.
+    assert_eq(fs.read_to_string(root.join(".jet/generated/main/exported.jet")).unwrap(), generated)
+}
+// Rust: tests/build_entry.rs:2878
+#Test("package_grant_and_workspace_ceiling_resolve_before_execution") {
+    root :: project("policy-chain")
+    entry :: root.join("main.jet")
+    write(&root.join("package.jet"), "name: \"policy-chain\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("policy chain test") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf ok > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    _ :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap()
+    assert_eq(fs.read_to_string(root.join("stamp")).unwrap(), "ok")
+    fs.remove_file(root.join("stamp")).unwrap()
+    write(&root.join("workspace.jet"), "module workspace { policy: { deny: #(Exec) } }\n")
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &["exec"], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3503" }))
+    assert(!root.join("stamp").exists())
+}
+// Rust: tests/build_entry.rs:2933
+#Test("workspace_subject_grant_authorizes_a_package_without_cli_flags") {
+    root :: project("workspace-grant")
+    entry :: root.join("run.jet")
+    write(&root.join("package.jet"), "name: \"workspace-app\"\nversion: \"0.1.0\"\n")
+    write(&root.join("authority.jet"), "module workspace { policy: { grants: { \"workspace-app\": #(Exec) } } }\n")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("workspace grant test") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf workspace > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    _ :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap()
+    assert_eq(fs.read_to_string(root.join("stamp")).unwrap(), "workspace")
+}
+// Rust: tests/build_entry.rs:2973
+#Test("malformed_package_and_workspace_build_policy_fail_closed") {
+    root :: project("malformed-policy")
+    entry :: root.join("run.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("must never run under malformed policy") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["run.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: Exec }\n")
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E1221" }), "{errors:#?}")
+    assert(!root.join("stamp").exists())
+    write(&root.join("package.jet"), "name: \"bad\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n")
+    write(&root.join("workspace.jet"), "module workspace { policy: { deny: Exec } }\n")
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) {
+        diagnostic.code == "E3503"
+            && diagnostic.what == "this root build asks for authority missing from its declaration, `#Impure` gate, or effective policy."
+            && diagnostic.why.starts_with("workspace build policy in `")
+            && diagnostic.why.ends_with("`policy.deny:` must contain an effect tuple like `#(Net, Exec)`")
+            && diagnostic.fix == "declare the effect, gate the ambient operation with `#Impure(\"reason\")`, and grant the effect through CLI/package/workspace policy."
+    }), "{errors:#?}")
+    assert(!root.join("stamp").exists())
+    fs.remove_file(root.join("workspace.jet")).unwrap()
+    fs.create_dir(root.join("workspace.jet")).unwrap()
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3503" && diagnostic.why.contains("present but unavailable") }), "{errors:#?}")
+}
+// Rust: tests/build_entry.rs:3065
+#Test("unsupported_workspace_policy_allow_is_e3503") {
+    root :: project("unsupported-workspace-policy")
+    entry :: root.join("run.jet")
+    write(&root.join("authority.jet"), "module workspace { policy: { allow: #(Exec) } }\n")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("unsupported workspace policy must block build") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3503" && diagnostic.why.contains("policy.allow") }), "{errors:#?}")
+    assert(!root.join("stamp").exists())
+}
+// Rust: tests/build_entry.rs:3108
+#Test("nested_workspace_is_the_module_import_root") {
+    root :: project("nested-workspace-import-root")
+    child :: root.join("child")
+    fs.create_dir_all(&child).unwrap()
+    write(&root.join("package.jet"), "name: \"outer\"\nversion: \"0.1.0\"\n")
+    write(&root.join("outside.jet"), "module _outside { pub fn fixture() {} }\n")
+    write(&child.join("boundary.jet"), "module workspace { policy: { deny: #(FS) } }\n")
+    entry :: child.join("run.jet")
+    write(&entry, "use project._outside as outside\nfn run() { outside.fixture() }\n")
+    errors :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap_err()
+    diagnostic :: errors.iter().find(fn(diagnostic) { diagnostic.code == "E0603" }).expect("project-local import must fail at the nested workspace root")
+    assert_eq(diagnostic.what, "can't find a project module named `project._outside`")
+    assert_eq(diagnostic.why, "project-local imports resolve declared module names, not filenames")
+    assert_eq(diagnostic.fix, "declare `module _outside { ... }` under this project")
+}
+// Rust: tests/build_entry.rs:3150
+#Test("module_directory_entry_requires_run_jet_not_main_jet") {
+    root :: project("module-run-entry")
+    module :: root.join("tool")
+    fs.create_dir_all(&module).unwrap()
+    write(&module.join("main.jet"), "pub fn run() {}\n")
+    entry :: root.join("run.jet")
+    write(&entry, "use tool\nfn run() {}\n")
+    errors :: jet.Loader.load_entry(entry.to_str().unwrap()).unwrap_err()
+    diagnostic :: errors.iter().find(fn(diagnostic) { diagnostic.code == "E0603" }).expect("retired main.jet must not resolve a module directory")
+    assert_eq(diagnostic.what, "can't find a module named `tool`")
+    assert_eq(diagnostic.why, "search from the project root for `tool.jet`, or `tool/tool/tool.jet` / `run.jet`")
+    assert_eq(diagnostic.fix, "add `tool.jet` under this project, or fix the `use` name")
+    assert(diagnostic.why.contains("run.jet"))
+    assert(!diagnostic.why.contains("main.jet"))
+}
+// Rust: tests/build_entry.rs:3177
+#Test("outer_package_grant_cannot_override_inner_workspace_deny") {
+    root :: project("policy-precedence")
+    child :: root.join("child")
+    fs.create_dir_all(&child).unwrap()
+    write(&root.join("package.jet"), "name: \"parent\"\nversion: \"0.1.0\"\nbuild: { allow: #(Exec) }\n")
+    write(&child.join("boundary.jet"), "module workspace { policy_note: { deny: #(FS) }, policy: { trust: { nested: { deny: #(FS) } }, deny: #(Exec) } }\n")
+    entry :: child.join("run.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("workspace ceiling wins last") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["run.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3503" }), "{errors:#?}")
+    assert(!child.join("stamp").exists())
+}
+// Rust: tests/build_entry.rs:3220
+#Test("outer_workspace_grant_does_not_cross_inner_workspace_boundary") {
+    root :: project("workspace-grant-boundary")
+    child :: root.join("child")
+    fs.create_dir_all(&child).unwrap()
+    write(&root.join("outer-authority.jet"), "module workspace { policy: { grants: { \"run\": #(Exec) } } }\n")
+    write(&child.join("inner-authority.jet"), "module workspace { policy: { deny: #(FS) } }\n")
+    entry :: child.join("run.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("outer workspace grant must not apply") {
+    action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf bad > stamp"], ["Exec"])
+    app :: b.add_executable("app", ["run.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3503" }), "{errors:#?}")
+    assert(!child.join("stamp").exists())
+}
+// Rust: tests/build_entry.rs:3267
+#Test("inner_workspace_grant_overrides_outer_workspace_deny_from_canonical_run") {
+    root :: project("workspace-grant-precedence")
+    child :: root.join("child")
+    fs.create_dir_all(&child).unwrap()
+    write(&root.join("outer-authority.jet"), "module workspace { policy: { deny: #(Exec) } }\n")
+    write(&child.join("package.jet"), "name: \"run\"\nversion: \"0.1.0\"\n")
+    write(&child.join("authority.jet"), "module workspace { policy: { grants: { \"run\": #(Exec) } } }\n")
+    entry :: child.join("run.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("inner workspace grant must apply") {
+        action :: b.action("stamp", [], ["stamp"], ["sh", "-c", "printf inner > stamp"], ["Exec"])
+        app :: b.add_executable("app", ["run.jet"], [action])
+        return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    _ :: jet.compile_programmable_build_opts(entry.to_str().unwrap(), &[], false, jet.Policy.GateSet.allow(jet.Policy.PolicyKey.Impure), false, false, false, .None).expect("inner workspace grant should be the only active workspace policy")
+    assert_eq(fs.read_to_string(child.join("stamp")).unwrap(), "inner")
+}
+
+// Rust: tests/build_entry.rs:3314
+#Test("programmable_staging_preserves_web_cross_no_os_and_plugin_modes") {
+    root :: project("target-modes")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""")
+    web := BuildRunOptions.default()
+    web.web_target = true
+    assert(compile_bundle_path_build(entry.to_str().unwrap(), web).unwrap().compile.web.is_some())
+    cross := BuildRunOptions.default()
+    cross.cross_target = .Some("x86_64-unknown-linux-gnu")
+    assert(compile_bundle_path_build(entry.to_str().unwrap(), cross).unwrap().compile.rust.contains("fn main"))
+    no_os := BuildRunOptions.default()
+    no_os.no_os = true
+    no_os_result :: compile_bundle_path_build(entry.to_str().unwrap(), no_os)
+    assert(no_os_result.is_ok(), "{no_os_result.err():#?}")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    plugin :: b.add_library("plugin", ["main.jet"], [])
+    return b.plan(plugin)
+}
+pub fn transform(value: Int) -> Int { return value + 1 }
+""")
+    plugin := BuildRunOptions.default()
+    plugin.plugin_target = true
+    assert(compile_bundle_path_build(entry.to_str().unwrap(), plugin).unwrap().compile.plugin.is_some())
+}
+// Rust: tests/build_entry.rs:3372
+#Test("locked_action_output_drift_rolls_back_filesystem") {
+    root :: project("locked-action-output")
+    entry :: root.join("main.jet")
+    source :: fn(value: String) {
+        """
+fn build(b: BuildContext) -[Exec]> BuildPlan {
+    #Impure("locked action output") {
+    action :: b.action("emit", [], ["artifact"], ["sh", "-c", "printf __VALUE__ > artifact"], ["Exec"])
+    app :: b.add_executable("app", ["main.jet"], [action])
+    return b.plan(app)
+    }
+    return b.plan()
+}
+fn run() {}
+""".replace("__VALUE__", value)
+    }
+    write(&entry, &source("one"))
+    _ :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).unwrap()
+    assert_eq(fs.read_to_string(root.join("artifact")).unwrap(), "one")
+    write(&entry, &source("two"))
+    locked := opts()
+    locked.locked = true
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), locked).unwrap_err()
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3512" }))
+    assert_eq(fs.read_to_string(root.join("artifact")).unwrap(), "one")
+}
+// Rust: tests/build_entry.rs:3402
+#Test("build_context_find_and_embed_are_locked_tier_one_inputs") {
+    root :: project("find-embed")
+    fs.create_dir_all(root.join("assets")).unwrap()
+    write(&root.join("assets/message.txt"), "hello")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -[FS]> BuildPlan {
+    files :: b.find("assets/*.txt")
+    message :: b.embed(files[0])
+    b.generate("asset") {
+        fn generated_asset() -> String { "hello" }
+    }
+    app :: b.add_executable("app", ["main.jet", ".jet/generated/main/asset.jet"], [])
+    return b.plan(app)
+}
+fn run() { print(generated_asset()) }
+""")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap()
+    assert(output.compile.comptime_inputs.iter().any(fn(input) { input.path == "assets/message.txt" }))
+    lock :: fs.read_to_string(root.join(".jet/lock")).unwrap()
+    assert(lock.contains("assets/message.txt"))
+}
+// Rust: tests/build_entry.rs:3434
+#Test("build_context_fetch_uses_the_locked_tier_one_host_surface") {
+    root :: project("build-context-fetch")
+    input :: root.join("input.txt")
+    write(&input, "hello")
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    content :: b.fetch("file://__INPUT__", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+    if content != "hello" { panic("unexpected fetch content") }
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""".replace("__INPUT__", input.display().to_string()))
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).unwrap()
+    input_key :: "url:file://{input.display()}"
+    assert(output.compile.comptime_inputs.iter().any(fn(locked) {
+        locked.path == input_key && locked.hash == "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    }), "{output.compile.comptime_inputs:#?}")
+    lock :: fs.read_to_string(root.join(".jet/lock")).unwrap()
+    assert(lock.contains(&input_key), "{lock}")
+}
+// Rust: tests/build_entry.rs:3474
+#Test("build_context_fetch_rejects_private_networks_before_connecting") {
+    root :: project("build-context-fetch-loopback")
+    listener :: TcpListener.bind(("127.0.0.1", 0)).unwrap()
+    listener.set_nonblocking(true).unwrap()
+    port :: listener.local_addr().unwrap().port()
+    server :: thread.spawn(fn() {
+        deadline :: Instant.now() + Duration.from_secs(1)
+        loop {
+            if listener.accept() == {
+                .Ok(_) -> return true
+                .Err(error) -> {
+                    if error.kind() != std.io.ErrorKind.WouldBlock -> return false
+                    if Instant.now() >= deadline -> return false
+                    thread.yield_now()
+                }
+            }
+        }
+    })
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    _ :: b.fetch("http://127.0.0.1:__PORT__/secret", "__HASH__")
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""".replace("__PORT__", port.to_string()).replace("__HASH__", "0".repeat(64)))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("BuildContext.fetch must reject loopback before connecting")
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3414" }), "unexpected diagnostics: {errors:#?}")
+    assert(!server.join().unwrap(), "BuildContext.fetch contacted a private destination")
+    _ :: fs.remove_dir_all(root)
+}
+// Rust: tests/build_entry.rs:3523
+#Test("build_context_fetch_rejects_outside_files_before_reading") {
+    root :: project("build-context-fetch-outside")
+    outside :: env.temp_dir().join("jet-build-context-fetch-outside-{std.process.id()}")
+    _ :: fs.remove_file(&outside)
+    fs.write(&outside, "hello").unwrap()
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    _ :: b.fetch("file://__OUTSIDE__", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""".replace("__OUTSIDE__", outside.display().to_string()))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("BuildContext.fetch must reject files outside the source root")
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3414" }), "unexpected diagnostics: {errors:#?}")
+    _ :: fs.remove_dir_all(root)
+    _ :: fs.remove_file(outside)
+}
+// Rust: tests/build_entry.rs:3558
+#Test("build_context_fetch_rejects_hardlinks_to_outside_inodes") {
+    if selected_family() != "unix" -> return
+    root :: project("build-context-fetch-hardlink")
+    outside :: env.temp_dir().join("jet-build-context-fetch-hardlink-outside-{std.process.id()}")
+    _ :: fs.remove_file(&outside)
+    fs.write(&outside, "hello").unwrap()
+    hardlink :: root.join("linked-secret")
+    fs.hard_link(&outside, &hardlink).unwrap()
+    entry :: root.join("main.jet")
+    write(&entry, """
+fn build(b: BuildContext) -> BuildPlan {
+    _ :: b.fetch("file://__HARDLINK__", "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824")
+    app :: b.add_executable("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+""".replace("__HARDLINK__", hardlink.display().to_string()))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("BuildContext.fetch must reject hardlinks to outside inodes")
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E3414" }), "unexpected diagnostics: {errors:#?}")
+    _ :: fs.remove_dir_all(root)
+    _ :: fs.remove_file(outside)
+}
+// Rust: tests/build_entry.rs:3594
+#Test("pure_core_call_inside_impure_does_not_require_gates") {
+    // Build frames need the same larger stack as reflection/distinct conversion.
+    worker :: thread.Builder.new().name("build-entry-pure-inside-impure").stack_size(32 * 1024 * 1024)
+        .spawn(run_pure_core_call_inside_impure_does_not_require_gates).expect("start build_entry pure-inside-impure worker")
+    if worker.join() == { .Err(payload) -> std.panic.resume_unwind(payload); .Ok(_) -> {} }
+}
+// Rust: tests/build_entry.rs:3638
+#Test("vault_is_denied_unconditionally_inside_impure_build_context") {
+    root :: project("vault-inside-impure")
+    entry :: root.join("main.jet")
+    write(&entry, """
+use core.crypto.vault as vault
+fn build(b: BuildContext) -[Secret]> BuildPlan {
+    #Impure("must not grant secret access") {
+        secret :: vault.get("db_password")
+    }
+    return b.plan()
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("vault access must remain denied without an impurity escape hatch")
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E1265" }), "{errors:#?}")
+    assert(!errors.iter().any(fn(diagnostic) { diagnostic.code == "E3411" }))
+}
+// Rust: tests/build_entry.rs:3680
+// D-FAILURE-FOUNDATION1=A: success-only signature gets the ordinary implicit Err route.
+#Test("bare_build_plan_entry_uses_implicit_default_error_route") {
+    source :: """
+fn build(b: BuildContext) -> BuildPlan {
+    app :: b.add_library("app", ["main.jet"], [])
+    return b.plan(app)
+}
+fn run() {}
+"""
+    (tokens, lexer_diagnostics) :: jet.Lexer.lex(source)
+    assert(lexer_diagnostics.is_empty(), "{lexer_diagnostics:?}")
+    program :: jet.Parser.parse(&tokens).expect("bare BuildPlan entry parses")
+    build :: program.items.iter().find_map(fn(item) {
+        if item == {
+            .Func(function) -> if function.name == "build" -> .Some(function) else -> .None
+            else -> .None
+        }
+    }).expect("build entry is present")
+    assert(if build.return_type.as_ref() == { .Some(.Named(name)) -> name == "BuildPlan"; else -> false })
+    assert(jet.Sema.build_entry_signature_is_valid(build))
+    assert(build.failure_contract().is_default())
+    root :: project("bare-build-plan")
+    entry :: root.join("main.jet")
+    write(&entry, source)
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), opts()).expect("bare BuildPlan entry should run through jet build")
+    assert_eq(output.build.expect("programmable build should produce a result").plan.targets()[0].name, "app")
+}
+// Rust: tests/build_entry.rs:3724
+#Test("criterion9_programmable_build_valid_plan") {
+    root :: project("valid-programmable-build")
+    entry :: root.join("main.jet")
+    write(&entry, "\nfn build(b: BuildContext) -> BuildPlan {\n    return b.plan()\n}\n\nfn run() {}\n")
+    output :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect("a valid programmable build plan must compile")
+    plan :: output.build.expect("programmable build result is missing").plan
+    assert(plan.targets().is_empty(), "the empty valid plan has no targets")
+}
+// Rust: tests/build_entry.rs:3791
+#Test("criterion9_programmable_build_implicit_failure_preserves_build_error_identity") {
+    root :: project("implicit-build-error")
+    entry :: root.join("main.jet")
+    write(&entry, &duplicate_target_build_source("BuildPlan", ""))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("duplicate target must fail through the implicit Error route")
+    assert_duplicate_target_report(&errors)
+}
+// Rust: tests/build_entry.rs:3802
+#Test("criterion9_programmable_build_explicit_build_error_preserves_build_error_identity") {
+    root :: project("explicit-build-error")
+    entry :: root.join("main.jet")
+    write(&entry, &duplicate_target_build_source("BuildPlan BuildError!", ""))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("explicit BuildError must fail through the shared carrier")
+    assert_duplicate_target_report(&errors)
+}
+// Rust: tests/build_entry.rs:3816
+#Test("criterion9_programmable_build_error_union_widens_build_error_without_losing_identity") {
+    root :: project("build-error-union")
+    entry :: root.join("main.jet")
+    write(&entry, &duplicate_target_build_source("BuildPlan (BuildError | BuildConfigError)!", "#Error\nenum BuildConfigError { Invalid }"))
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("BuildError must widen into the declared error union")
+    assert_duplicate_target_report(&errors)
+}
+// Rust: tests/build_entry.rs:3833
+#Test("criterion9_programmable_build_ambiguous_error_conversion_is_rejected") {
+    root :: project("ambiguous-build-conversion")
+    entry :: root.join("main.jet")
+    write(&entry, """
+#Error
+enum BuildLeftError { One }
+#Error
+enum BuildRightError { One }
+#Error
+enum BuildTargetError { One }
+impl BuildError -> BuildLeftError { return BuildLeftError.One }
+impl BuildError -> BuildRightError { return BuildRightError.One }
+impl BuildLeftError -> BuildTargetError { return BuildTargetError.One }
+impl BuildRightError -> BuildTargetError { return BuildTargetError.One }
+fn build(b: BuildContext) -> BuildPlan BuildTargetError! {
+    first :: b.add_library("app", ["main.jet"], [])
+    return b.plan(first)
+}
+fn run() {}
+""")
+    errors :: compile_bundle_path_build(entry.to_str().unwrap(), BuildRunOptions.default()).expect_err("ambiguous error conversion must stop programmable-build checking")
+    assert(errors.iter().any(fn(diagnostic) { diagnostic.code == "E2419" }), "expected E2419, got {errors:#?}")
+}
+// Rust: tests/build_entry.rs:3869
+#Test("criterion9_programmable_build_cli_human_and_json_reports_match") {
+    root :: project("build-error-report-parity")
+    entry :: root.join("main.jet")
+    write(&entry, &duplicate_target_build_source("BuildPlan", ""))
+    run :: fn(json: Bool) {
+        command := Command.new(env!("CARGO_BIN_EXE_jet"))
+        command.current_dir(&root).env("NO_COLOR", "1").args(["build", "main.jet"])
+        if json -> command.arg("--json")
+        command.output().expect("jet build report command")
+    }
+    human :: run(false)
+    assert(!human.status.success(), "human build failure unexpectedly passed")
+    human_stderr :: String.from_utf8_lossy(&human.stderr)
+    assert(human_stderr.contains("Error [E3502]: build plan is invalid: target name `app` is registered twice"), "human report did not preserve the BuildError message:\n{human_stderr}")
+    assert(human_stderr.contains("More: jet-lang.dev/e/E3502"), "human report did not preserve the diagnostic URL:\n{human_stderr}")
+    json :: run(true)
+    assert(!json.status.success(), "JSON build failure unexpectedly passed")
+    json_stderr :: String.from_utf8_lossy(&json.stderr)
+    json_text := json_stderr.trim() // #4303
+    report :: parse(json_text).expect("jet build --json emits one report object")
+    assert_eq(json_get(&report, "code").and_then(json_str), .Some("E3502"))
+    what :: json_get(&report, "what").and_then(json_str).expect("JSON report has what")
+    assert(human_stderr.contains("Error [E3502]: {what}"))
+    build_error :: json_get(&report, "build_error").expect("JSON report has structured build error")
+    assert(if build_error == { .Object(_) -> true; else -> false }, "build_error is an object")
+    assert_eq(json_get(build_error, "typed_identity").and_then(json_str), .Some("BuildError::DuplicateTargetName"))
+    details :: json_get(build_error, "details").expect("structured details stay nested in the jet.err object")
+    assert(if details == { .Object(_) -> true; else -> false }, "structured details are an object")
+    assert_eq(json_get(details, "variant").and_then(json_str), .Some("DuplicateTargetName"))
+    fields :: json_get(details, "fields").expect("structured fields stay in the JSON report")
+    assert(if fields == { .Object(_) -> true; else -> false }, "structured fields are an object")
+    assert_eq(json_get(fields, "value").and_then(json_str), .Some("app"))
+}
+// Rust: tests/build_entry.rs:3954
+// I2/I3: frontend projection excludes build-only entries for every runtime engine.
+#Test("build_entry_is_absent_from_the_runtime_program") {
+    root :: project("build-entry-runtime-program")
+    entry :: root.join("run.jet")
+    write(&entry, BUILD_ENTRY_PROGRAM)
+    shown :: entry.to_string_lossy().into_owned()
+    compiled :: jet.compile_with_path(BUILD_ENTRY_PROGRAM, &shown).expect("a program with a build entry must reach codegen without an ICE")
+    emitted_build :: "fn {jet_foundation.Names.mangle(\"build\")}("
+    assert(!compiled.rust.contains(&emitted_build), "the build entry leaked into the runtime program (`{emitted_build}`)")
+    assert(compiled.rust.contains("runtime program"), "the runtime entry must still be emitted")
+    bundle := jet.Loader.load_entry(&shown).expect("build-entry bundle loads")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(!diagnostics.iter().any(fn(diagnostic) { diagnostic.severity == jet.Diagnostics.Severity.Error }), "{diagnostics:#?}")
+    assert(!bundle.modules.iter().any(fn(module) { module.items.iter().any(fn(item) {
+        if item == { .Func(func) -> func.name == "build"; else -> false }
+    }) }), "sema left the build entry in the checked runtime program")
+    assert(bundle.modules[bundle.entry].items.iter().any(fn(item) {
+        if item == { .Func(func) -> func.name == "run"; else -> false }
+    }), "the runtime entry must survive the projection")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/build_entry.rs:4006
+// I9: real cross-tier behavioral agreement replaces retired resident-JIT representation assertions.
+#Test("build_entry_program_runs_the_same_on_every_tier") {
+    root :: project("build-entry-tier-parity")
+    entry :: root.join("run.jet")
+    write(&entry, BUILD_ENTRY_PROGRAM)
+    shown :: entry.to_string_lossy().into_owned()
+    bundle := jet.Loader.load_entry(&shown).expect("build-entry bundle loads")
+    diagnostics :: jet.Sema.check_bundle(&bundle, jet.Sema.CompileMode.Run)
+    assert(!diagnostics.iter().any(fn(diagnostic) { diagnostic.severity == jet.Diagnostics.Severity.Error }), "{diagnostics:#?}")
+    tir_support.assert_tiers_agree("jet_build_entry_tiers", BUILD_ENTRY_PROGRAM, "runtime program\n")
+    _ :: fs.remove_dir_all(&root)
+}
+// Rust: tests/build_entry.rs:4097
+// Source scan: the only compiler-API exemption must stay paired with unconditional projection.
+#Test("the_compiler_api_exemption_stays_paired_with_the_drivers_projection") {
+    root :: OSPath.from(env!("CARGO_MANIFEST_DIR"))
+    pipeline :: fs.read_to_string(root.join("crates/jet-sema/src/Sema/Bundle/Pipeline/Completion.rs")).unwrap()
+    driver :: fs.read_to_string(root.join("crates/jet-driver/src/Driver/mod.rs")).unwrap()
+    sema_entry :: fs.read_to_string(root.join("crates/jet-sema/src/Sema/Bundle.rs")).unwrap()
+    code :: fn(text: String) {
+        text.lines().map(fn(line) { line.trim() }).filter(fn(line) { !line.is_empty() && !line.starts_with("//") }).map(fn(line) { line.to_string() }).collect::<[String]>()
+    }
+    exemptions :: code(&pipeline).into_iter().filter(fn(line) { line.contains("allow_compiler_api") && line.starts_with("if ") }).collect()
+    assert_eq(exemptions, ["if !allow_compiler_api && mode != CompileMode::Check {"],
+        "the build-entry projection may be skipped for exactly two reasons — the build session's own check, and `jet check`/LSP, which emits no code. A third condition, or a second site, hands codegen a build entry again (Tower card 2008, I2/I3).")
+    guarded_line :: code(&pipeline).windows(2).find(fn(pair) { pair[0].contains("if !allow_compiler_api") }).map(fn(pair) { pair[1].clone() }).expect("the exemption guards a statement")
+    assert(guarded_line.contains("strip_build_only_entries(bundle)"), "the `allow_compiler_api` conditional must guard the projection itself; it now guards `{guarded_line}`")
+    callers :: code(&driver).iter().filter(fn(line) { line.contains("check_bundle_with_effect_facts_for_build(") }).count()
+        + code(&sema_entry).iter().filter(fn(line) { line.contains("check_bundle_with_effect_facts_for_build(") }).filter(fn(line) { !line.contains("pub fn ") }).count()
+    assert_eq(callers, 1, "`check_bundle_with_effect_facts_for_build` is the only check that leaves a build entry in the bundle. Every caller must remove it afterwards, so a second caller must be paired by hand and this assertion updated deliberately.")
+    unconditional :: driver.lines().any(fn(line) {
+        line.trim() == "crate::Sema::strip_build_only_entries(&mut bundle);" && line.len() - line.trim_start().len() == 4
+    })
+    assert(unconditional, "the driver must project build-only entries out unconditionally. Moving that call under `if build_run.is_some()` or `if options.execute` restores the original defect for the inspect-only and package-check paths, where `emit_func` raises an internal compiler error instead of any diagnostic (Tower card 2008).")
+}

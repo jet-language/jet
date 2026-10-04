@@ -1,0 +1,9 @@
+use jet_comptime.Comptime.[validate_datetime_literal, validate_url_literal]
+
+// Rust: crates/jet-comptime/src/Comptime/mod.rs:3558
+#Test("boundary_heads_use_the_canonical_validation_kernels") {
+    assert(validate_url_literal("https://api.example.com/v2/jet-hole").is_ok())
+    assert(validate_url_literal("https:").is_err())
+    assert(validate_datetime_literal("2026-08-07T12:00:00Z").is_ok())
+    assert(validate_datetime_literal("2026-08-07T12:00:00").is_err())
+}

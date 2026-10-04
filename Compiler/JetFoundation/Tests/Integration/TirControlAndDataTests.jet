@@ -1,0 +1,1263 @@
+use Compiler.JetFoundation.Tests.Integration.TirControlAndData.[RESULT_HANDLER_PACKAGE]
+use Compiler.JetFoundation.Tests.Integration.TirSupport as tir_support
+use Compiler.JetFoundation.Tests.Integration.TirSupport.[assert_tiers_agree, build_and_run, build_and_run_full, compile, have_rustc, jit_run]
+use jet.Interpreter.[dev_iteration, RunOutcome]
+use jet.FixEngine
+use std.env
+use core.fs as fs
+
+// Rust: tests/tir_control_and_data.rs:20
+#Test("result_handler_reuses_result_split_on_all_tiers") {
+    src :: """
+fn classify(ok: Bool) -> Int {
+    if ok { return 7 }
+    return Err("bad")
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        classify(true) ? ok -> {
+            print("ok")
+            print(ok)
+            0
+        } ! _error -> {
+            print("error")
+            0
+        }
+        classify(false) ? ok -> {
+            print("ok")
+            print(ok)
+            0
+        } ! _error -> {
+            print("error")
+            0
+        }
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("result_handler_tiers", src, "ok\n7\nerror\n", RESULT_HANDLER_PACKAGE)
+}
+
+// Rust: tests/tir_control_and_data.rs:58
+#Test("result_handler_evaluates_effectful_receiver_once_on_all_tiers") {
+    src :: """
+fn classify(ok: Bool) -[IO]> Int {
+    print("source")
+    if ok { return 7 }
+    return Err("bad")
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        classify(false) ? _ok -> print("ok") ! _error -> print("error")
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("result_handler_effectful_receiver", src, "source\nerror\n", RESULT_HANDLER_PACKAGE)
+}
+
+// Rust: tests/tir_control_and_data.rs:84
+#Test("result_handler_preserves_diverging_arm_on_all_tiers") {
+    src :: """
+fn choose(ok: Bool) -> Int {
+    if ok { return 7 }
+    return Err("bad")
+}
+
+fn run() -> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        result :: choose(true) ? ok -> ok + 1 ! _error -> return
+        print(result)
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("result_handler_diverging", src, "8\n", RESULT_HANDLER_PACKAGE)
+}
+
+// Rust: tests/tir_control_and_data.rs:112
+#Test("result_handler_preserves_ownership_generic_and_nested_values_on_all_tiers") {
+    src :: """
+fn choose<T>(value: ^T, ok: Bool) -> T {
+    if ok { return value }
+    return Err("bad")
+}
+
+fn choose_text(value: ^String, ok: Bool) -> String {
+    if ok { return value }
+    return Err("bad")
+}
+
+fn owned(ok: Bool) -> String {
+    return choose_text("owned", ok) ? success -> success ! _failure -> "bad"
+}
+
+fn generic<T>(value: ^T, ok: Bool) -> T {
+    return choose<T>(^value, ok) ? success -> success ! _failure -> return Err("bad")
+}
+
+fn nested(value: Int, ok: Bool) -> Int {
+    return choose<Int>(^value, ok) ? success -> {
+        choose<Int>(^success, ok) ? nested_success -> nested_success + 1 ! _nested_failure -> 0
+    } ! _failure -> 0
+}
+
+fn run() -> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        print(owned(true))
+        print(owned(false))
+        print(generic(4, true) ? generic_value -> generic_value ! _generic_failure -> 0)
+        print(nested(4, true))
+        print(nested(4, false))
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("result_handler_ownership_generic_nested", src, "owned\nbad\n4\n5\n0\n", RESULT_HANDLER_PACKAGE)
+}
+
+// Rust: tests/tir_control_and_data.rs:158
+#Test("result_handler_example_matches_all_execution_tiers") {
+    expected :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/result_handler.out")).unwrap()
+    tir_support.assert_example_cli_tiers_agree("errors/result_handler", expected)
+    source :: fs.read_to_string(env.manifest_dir().join("Examples/features/errors/result_handler.jet")).unwrap()
+    (code, stdout, stderr) :: tir_support.jit_run("result_handler_example_jit", source)
+    assert_eq(code, 0, "default `jet run` failed for result_handler: {stderr}")
+    assert_eq(stdout, expected)
+    tir_support.assert_tiers_agree("result_handler_example_native", source, expected)
+}
+
+// Rust: tests/tir_control_and_data.rs:185
+#Test("braced_value_tails_and_arm_tables_agree_on_all_tiers") {
+    src :: """
+fn label(value: Int) -> String {
+    if value == {
+        1 -> { "one" }
+        else -> { "other" }
+    }
+}
+
+fn early(flag: Bool) -> String {
+    if flag { return "early" }
+    "late"
+}
+
+fn run() -> {
+    print(label(1))
+    print(label(2))
+    print(early(true))
+    print(early(false))
+}
+"""
+    tir_support.assert_tiers_agree("tail_return_values", src, "one\nother\nearly\nlate\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:213
+#Test("nested_return_if_keeps_live_value_branch_type") {
+    src :: """
+fn nested_return_if(value: DataTree, right: DataTree) -> Bool Never! {
+    return if value == {
+        .Text(left_text) -> {
+            return if right == {
+                .Text(right_text) -> left_text == right_text
+                else -> false
+            }
+        }
+        else -> true
+    }
+}
+
+fn run() -> {
+    print(nested_return_if(DataTree.Null, DataTree.Null))
+}
+"""
+    (jit_code, jit_stdout, jit_stderr) :: tir_support.jit_run("nested_return_if_live_branch", src)
+    assert_eq(jit_code, 0, "{jit_stderr}")
+    assert_eq(jit_stdout, "true\n", "{jit_stderr}")
+    // Retained native optimization tiers replace retired resident/deopt trace predicates.
+    tir_support.assert_tiers_agree("nested_return_if_live_branch_native", src, "true\n")
+    (interp_code, interp_stdout, interp_stderr) :: tir_support.interpreter_run("nested_return_if_live_branch_interp", src)
+    assert_eq(interp_code, 0, "{interp_stderr}")
+    assert_eq(interp_stdout, jit_stdout)
+    if have_rustc() {
+        (aot_code, aot_stdout, aot_stderr) :: build_and_run_full("jet_tir_test", "nested_return_if_live_branch_aot", src)
+        assert_eq(aot_code, 0, "{aot_stderr}")
+        assert_eq(aot_stdout, jit_stdout)
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:260
+#Test("value_block_tails_report_unit_and_lint_old_arm_table_shape") {
+    invalid :: """
+fn semicolon() -> Int {
+    1
+}
+
+fn declaration() -> Int {
+    value :: 1
+}
+
+fn assignment() -> Int {
+    value := 0
+    value = 1
+}
+
+fn run() -> {}
+"""
+    diagnostics :: tir_support.compile_source("tail_value_errors.jet", invalid).expect_err("unit-valued tails must be rejected in value blocks")
+    missing_values :: diagnostics.iter().filter((d) -> d.code == "E0114").collect()
+    assert_eq(missing_values.len(), 3, "diagnostics: {diagnostics:?}")
+    assert(missing_values.iter().all((diagnostic) -> diagnostic.span.is_some()))
+    lintable :: """
+fn label(value: Int) -> String {
+    if value == {
+        // Keep the arm comment.
+        1 -> return /* keep value comment */ "one"
+    }
+    // Keep the fallback comment.
+    return "other" // Keep the tail comment.
+}
+
+fn run() -> {}
+"""
+    output :: tir_support.compile_source("redundant_tail_return.jet", lintable).expect("the old arm-table spelling should still compile")
+    lint :: output.lints.iter().find((diagnostic) -> diagnostic.code == "L0513").expect("the redundant arm-table fallback must be linted")
+    edit :: lint.edit.as_ref().expect("L0513 must carry its source fix")
+    fixed :: FixEngine.apply_edits(lintable, [edit]).expect("the generated L0513 edit must apply")
+    assert(fixed.contains("else -> { \"other\" }"), "fixed source:\n{fixed}")
+    assert(fixed.contains("Keep the arm comment"), "fixed source:\n{fixed}")
+    assert(fixed.contains("keep value comment"), "fixed source:\n{fixed}")
+    assert(fixed.contains("Keep the fallback comment"), "fixed source:\n{fixed}")
+    assert(fixed.contains("Keep the tail comment"), "fixed source:\n{fixed}")
+    assert(!fixed.contains("return"), "fixed source:\n{fixed}")
+    semicolon_lintable :: """
+fn label(value: Int) -> String {
+    if value == {
+        1 -> return "one"
+    }
+    return "other"
+}
+
+fn run() -> {}
+"""
+    semicolon_output :: tir_support.compile_source("redundant_tail_return_semicolons.jet", semicolon_lintable).expect("semicolon-terminated direct returns should still be lintable")
+    semicolon_lint :: semicolon_output.lints.iter().find((diagnostic) -> diagnostic.code == "L0513").expect("semicolon-shaped fallback must be linted")
+    semicolon_fixed :: FixEngine.apply_edits(semicolon_lintable, [semicolon_lint.edit.as_ref().unwrap()]).expect("the semicolon-shaped L0513 edit must apply")
+    assert(!semicolon_fixed.contains("return"), "fixed source:\n{semicolon_fixed}")
+    assert(!semicolon_fixed.contains(';'), "fixed source:\n{semicolon_fixed}")
+    _ :: tir_support.compile_source("redundant_tail_return_semicolons_fixed.jet", &semicolon_fixed).expect("the generated value table must compile after semicolon removal")
+    effectful :: """
+fn label(value: Int) -> String {
+    if value == {
+        1 -> {
+            print("side")
+            return "one"
+        }
+        else -> { return "other" }
+    }
+}
+
+fn run() -> {}
+"""
+    effectful_output :: tir_support.compile_source("effectful_tail_return.jet", effectful).expect("effectful arm-table source should compile")
+    assert(!effectful_output.lints.iter().any((diagnostic) -> diagnostic.code == "L0513"))
+}
+
+// Rust: tests/tir_control_and_data.rs:388
+#Test("value_blocks_keep_early_exits_and_reject_statement_tails") {
+    valid :: """
+fn choose(flag: Bool) -> Int {
+    if flag -> { return 1 } else -> { 2 }
+}
+
+fn fallback(value: Int?) -> Int {
+    value ?? { return 9 }
+}
+
+fn run() -> {
+    print(choose(true))
+    print(choose(false))
+    print(fallback(None))
+}
+"""
+    tir_support.assert_tiers_agree("tail_return_nested_exits", valid, "1\n2\n9\n")
+    loop (name, source, expected_code) in [
+        ("nested_statement_tail", """
+fn nested(flag: Bool) -> Int {
+    if {
+        flag -> { print("side") }
+        else -> { print("other") }
+    }
+}
+fn run() -> {}
+""", "E0114"),
+        ("nested_declaration", """
+fn nested(flag: Bool) -> Int {
+    if flag -> { value :: 1 } else -> { print("other") }
+}
+fn run() -> {}
+""", "E0003"), // The parser rejects the declaration before tail totality.
+        ("fallback_statement_tail", """
+fn fallback(value: Int?) -> Int {
+    value ?? { print("side") }
+}
+fn run() -> {}
+""", "E0114")
+    ] {
+        diagnostics :: tir_support.compile_source(name, source).expect_err(name)
+        diagnostic :: diagnostics.iter().find((diagnostic) -> diagnostic.code == expected_code).unwrap_or_else(() -> panic("{name} expected {expected_code}: {diagnostics:?}"))
+        assert(diagnostic.span.is_some(), "{name}: {diagnostics:?}")
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:456
+#Test("value_tail_divergence_and_loop_flow_are_deterministic") {
+    valid :: """
+fn nested(flag: Bool) -> Int {
+    // Both nested branches leave without a value.
+    if {
+        flag -> { panic("then") }
+        else -> { panic("else") }
+    }
+}
+
+fn infinite() -> Int {
+    loop {
+        panic("stop")
+    }
+}
+
+fn infinite_true() -> Int {
+    loop true {
+        next
+    }
+}
+
+fn unreachable() -> Int {
+    return 1
+    print(2)
+}
+
+fn fallback(value: Int?) -> Int {
+    value ?? {
+        if {
+            true -> { panic("missing") }
+            else -> { panic("missing") }
+        }
+    }
+}
+
+fn unit_panic() -> () {
+    panic("unit")
+}
+
+fn unit_loop() -> () {
+    loop {
+        panic("unit")
+    }
+}
+
+fn run() -> {}
+"""
+    _ :: tir_support.compile_source("tail_divergence_valid.jet", valid).expect("diverging and unreachable tails should compile")
+    finite :: """
+fn finite() -> Int {
+    loop {
+        break
+    }
+}
+fn run() -> {}
+"""
+    diagnostics :: tir_support.compile_source("tail_divergence_finite.jet", finite).expect_err("a reachable loop break leaves a unit tail")
+    diagnostic :: diagnostics.iter().find((diagnostic) -> diagnostic.code == "E0114").expect("finite loop tail should report E0114")
+    assert(diagnostic.span.is_some(), "{diagnostics:?}")
+}
+
+// Rust: tests/tir_control_and_data.rs:527
+#Test("default_err_value_and_typed_err_arm_have_distinct_shapes") {
+    src :: """
+fn make() -> Err {
+    return Err("bad input", code: "E_BAD", cause: Err("root cause"))
+}
+
+fn typed(value: Err) -> {
+    return Err(value)
+}
+
+fn run() -> {
+    return typed(make())
+}
+"""
+    rust :: compile("tir_default_err_value", src)
+    assert(rust.contains("jet_err("), "default Err must call the Prelude constructor")
+    assert(rust.contains("return Err("), "typed Err arm must remain a Result wrapper")
+}
+
+// Rust: tests/tir_control_and_data.rs:555
+#Test("default_err_value_runs_on_the_default_jit_edge") {
+    src :: """
+fn run() -> {
+    return Err("unhandled", code: "E_RUN", cause: Err("root"))
+}
+"""
+    (code, stdout, stderr) :: jit_run("tir_default_err_run", src)
+    assert_eq(stdout, "")
+    assert_eq(code, 1, "default `jet run` should return an unhandled Err")
+    assert_eq(stderr, "Error [E_RUN]: unhandled\n  cause: root\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:570
+#Test("explicit_exit_101_maps_to_user_error_on_every_tier") {
+    src :: """
+use core.process as process
+fn run() -> {
+    process.exit(101)
+}
+"""
+    (jit_code, jit_stdout, jit_stderr) :: jit_run("tir_exit_101_jit", src)
+    assert_eq((jit_code, jit_stdout, jit_stderr), (1, "", ""))
+    (interp_code, interp_stdout, interp_stderr) :: tir_support.interpreter_run("tir_exit_101_interp", src)
+    assert_eq((interp_code, interp_stdout, interp_stderr), (1, "", ""))
+    if have_rustc() {
+        (aot_code, aot_stdout, aot_stderr) :: build_and_run_full("jet_tir_exit", "reserved_101", src)
+        assert_eq((aot_code, aot_stdout, aot_stderr), (1, "", ""))
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:603
+#Test("typed_error_union_widening_runs_on_jit_and_interpreter") {
+    src :: """
+#Error
+enum NarrowError { Narrow }
+#Error
+enum OtherError { Other }
+
+fn narrow() -> Int NarrowError! { Err(NarrowError.Narrow) }
+
+fn widen() -> Int (NarrowError | OtherError)! { narrow() }
+
+fn run() -> {
+    print(widen() ?? 7)
+}
+"""
+    (jit_code, jit_stdout, jit_stderr) :: tir_support.jit_run("tir_error_union_widen_jit", src)
+    assert_eq(jit_code, 0, "{jit_stderr}")
+    assert_eq(jit_stdout, "7\n")
+    tir_support.assert_tiers_agree("tir_error_union_widen_native", src, "7\n")
+    (interp_code, interp_stdout, interp_stderr) :: tir_support.interpreter_run("tir_error_union_widen_interp", src)
+    assert_eq(interp_code, 0, "{interp_stderr}")
+    assert_eq(interp_stdout, jit_stdout)
+}
+
+// Rust: tests/tir_control_and_data.rs:639
+#Test("implicit_failure_propagation_covers_call_positions") {
+    src :: """
+struct Holder {
+    value: Int
+
+    fn bump(self, by: Int) -> Int {
+        return add(self.value + by)
+    }
+}
+
+fn source(value: Int) -> Int {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value
+}
+
+fn add(value: Int) -> Int { value + 1 }
+
+fn is_zero(value: Int) -> Bool { value == 0 }
+
+fn argument(value: Int) -> Int {
+    return add(source(value))
+}
+
+fn nested(value: Int) -> Int {
+    return source(value) + 1
+}
+
+fn branch(value: Int) -> Int {
+    if is_zero(value) {
+        source(value)
+    }
+    return value
+}
+
+fn branch_value(value: Int) -> Int {
+    return if is_zero(value) -> { source(value) } else -> { value + 1 }
+}
+
+fn closure(value: Int) -> Int {
+    worker :: (n: Int) Int -> source(n) + 1
+    return worker(value)
+}
+
+fn method(value: Int) -> Int {
+    holder :: Holder{ value: source(value) }
+    return add(holder.bump(1))
+}
+
+fn run() -> {
+    print(argument(2) ?? 0)
+    print(nested(2) ?? 0)
+    print(branch(0) ?? 99)
+    print(closure(2) ?? 0)
+    print(method(2) ?? 0)
+    print(branch_value(0) ?? 99)
+}
+"""
+    tir_support.assert_tiers_agree("implicit_failure_propagation_positions", src, "3\n3\n99\n3\n5\n99\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:709
+#Test("implicit_failure_propagation_in_map_and_filter_callbacks") {
+    src :: """
+fn source(value: Int) -> Int {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value
+}
+
+fn source_flag(value: Int) -> Bool {
+    if value == 0 {
+        return Err("source failed")
+    }
+    return value > 1
+}
+
+fn add_one(value: Int) -> Int { value + 1 }
+fn retain_flag(value: Bool) -> Bool { value }
+
+fn run() -> {
+    values :: [1, 2]
+    mapped :: values.map((value: Int) -> add_one(source(value))) ?? []
+    filtered :: values.filter((value: Int) -> retain_flag(source_flag(value))) ?? []
+    mapped_block :: values.map((value: Int) -> {
+        add_one(source(value))
+    }) ?? []
+    filtered_block :: values.filter((value: Int) -> {
+        retain_flag(source_flag(value))
+    }) ?? []
+    mapped_failed :: [0, 1].map((value: Int) -> {
+        add_one(source(value))
+    }) ?? []
+    filtered_failed :: [0, 1].filter((value: Int) -> {
+        retain_flag(source_flag(value))
+    }) ?? []
+    print(mapped[0])
+    print(mapped[1])
+    print(filtered.len())
+    print(mapped_block[0])
+    print(mapped_block[1])
+    print(filtered_block.len())
+    print(mapped_failed.len())
+    print(filtered_failed.len())
+}
+"""
+    tir_support.assert_tiers_agree("implicit_failure_propagation_collection_callbacks", src, "2\n3\n1\n2\n3\n1\n0\n0\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:764
+#Test("jit_or_fallback_panic_keeps_rich_context") {
+    src :: """use core.process as process
+fn run() -> {
+    count :: process.argv().len()
+    missing :: process.argv().get(count + 1)
+    print(missing ?? panic("missing argument"))
+}
+"""
+    (code, stdout, stderr) :: tir_support.jit_run("jit_fallback_panic", src)
+    assert_eq(code, 70, "rich panic exit: out={stdout} err={stderr}")
+    assert(stdout.is_empty(), "{stdout}")
+    assert(stderr.contains("Stop [E3001]: `panic: missing argument`") && stderr.contains("jit_fallback_panic.jet:5 in run") && stderr.contains("print(missing ?? panic(\"missing argument\"))") && stderr.contains("count = "), "panic fallback lost rich context: {stderr}")
+}
+
+// Rust: tests/tir_control_and_data.rs:793
+#Test("index_hook_miss_uses_the_structured_runtime_stop") {
+    src :: """struct Tile {
+    value: Int
+}
+struct Grid {
+    cells: [Tile]
+}
+impl Grid.Index {
+    type Key = Int
+    type Value = Int
+    fn get(self, key: Int) -> Int? {
+        if key < 0 || key >= self.cells.len() -> return None
+        return Val(self.cells[key].value)
+    }
+}
+fn run() -> {
+    grid :: Grid{cells: [Tile{value: 1}]}
+    print(grid[9])
+}
+"""
+    loop (tier, (code, stdout, stderr)) in [
+        ("default", tir_support.jit_run("index_hook_miss_jit", src)),
+        ("interpreter", tir_support.interpreter_run("index_hook_miss_interp", src))
+    ] {
+        assert_eq(code, 70, "{tier}: out={stdout} err={stderr}")
+        assert(stdout.is_empty(), "{tier}: {stdout}")
+        assert(stderr.contains("Stop [E3001]: `panic: index miss`") && stderr.contains("print(grid[9])") && stderr.contains("in run"), "{tier}: {stderr}")
+        assert(!stderr.contains("unsupported"), "{tier}: {stderr}")
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:836
+#Test("returned_function_call_example_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("functions/returned_function_call", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/functions/returned_function_call.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:847
+#Test("named_function_value_example_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("functions/named_function_value", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/functions/named_function_value.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:858
+#Test("binary_codec_writer_example_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("parsing/binary-codecs", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/parsing/binary-codecs.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:870
+#Test("body_rules_example_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("basics/body_rules", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/basics/body_rules.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:880
+#Test("fallible_type_spelling_example_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("errors/fallible_run", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/fallible_run.out")).unwrap())
+}
+
+// Rust: tests/tir_control_and_data.rs:890
+#Test("bindingless_loop_example_matches_all_execution_tiers") {
+    expected :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/basics/loop_bindingless.out")).unwrap()
+    tir_support.assert_example_cli_tiers_agree("basics/loop_bindingless", expected)
+    path :: env.manifest_dir().join("Examples/features/basics/loop_bindingless.jet").to_string_lossy()
+    if dev_iteration(&path, false, true) == {
+        .Ran(exit_code, stdout, stderr) -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stdout, expected)
+            assert_eq(stderr, "")
+        }
+        .Problems(diagnostics) -> panic("forced interpreter rejected bindingless loop example: {diagnostics:?}")
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:923
+#Test("comprehension_forms_example_matches_all_execution_tiers") {
+    expected :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/basics/comprehension_forms.out")).unwrap()
+    tir_support.assert_example_cli_tiers_agree("basics/comprehension_forms", expected)
+    path :: env.manifest_dir().join("Examples/features/basics/comprehension_forms.jet").to_string_lossy()
+    if dev_iteration(&path, false, true) == {
+        .Ran(exit_code, stdout, stderr) -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stdout, expected)
+            assert_eq(stderr, "")
+        }
+        .Problems(diagnostics) -> panic("forced interpreter rejected comprehension forms example: {diagnostics:?}")
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:955
+#Test("loop_values_example_matches_all_execution_tiers") {
+    expected :: fs.read_to_string(env.manifest_dir().join("Examples/features/expected/basics/loop_values.out")).unwrap()
+    tir_support.assert_example_cli_tiers_agree("basics/loop_values", expected)
+    path :: env.manifest_dir().join("Examples/features/basics/loop_values.jet").to_string_lossy()
+    if dev_iteration(&path, false, true) == {
+        .Ran(exit_code, stdout, stderr) -> {
+            assert_eq(exit_code, 0)
+            assert_eq(stdout, expected)
+            assert_eq(stderr, "")
+        }
+        .Problems(diagnostics) -> panic("forced interpreter rejected loop_values example: {diagnostics:?}")
+    }
+}
+
+// Rust: tests/tir_control_and_data.rs:983
+#Test("channel_select_examples_match_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree("concurrency/select_channel", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/concurrency/select_channel.out")).unwrap())
+    tir_support.assert_example_cli_tiers_agree("concurrency/select_generic", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/concurrency/select_generic.out")).unwrap())
+    tir_support.assert_example_cli_tiers_agree("concurrency/channel_builtin_1560", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/concurrency/channel_builtin_1560.out")).unwrap())
+    tir_support.assert_example_cli_tiers_agree("concurrency/task_runtime_audit", fs.read_to_string(env.manifest_dir().join("Examples/features/expected/concurrency/task_runtime_audit.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:1006
+#Test("task_observation_examples_match_all_execution_tiers") {
+    tir_support.assert_example_cli_error_tiers_agree("concurrency/task_panic", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/concurrency/task_panic.err.out")).unwrap())
+    tir_support.assert_example_cli_error_tiers_agree("concurrency/task_blocked", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/concurrency/task_blocked.err.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:1022
+#Test("default_entry_error_golden_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_error_tiers_agree("errors/default_error_conversion", 1, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/default_error_conversion.err.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:1035
+#Test("field_error_entry_golden_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_error_tiers_agree("serde/decode_error_exit", 1, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/serde/decode_error_exit.err.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:1051
+#Test("propagation_trail_golden_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_error_tiers_agree("errors/error_context", 1, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/error_context.err.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:1064
+#Test("runtime_stop_goldens_match_all_execution_tiers") {
+    tir_support.assert_example_cli_error_tiers_agree("collections/list_bounds", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/collections/list_bounds.err.out")).unwrap())
+    tir_support.assert_example_cli_error_tiers_agree("collections/map_key", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/collections/map_key.err.out")).unwrap())
+    tir_support.assert_example_cli_error_tiers_agree("errors/panic", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/panic.err.out")).unwrap())
+    // Empty stdout detects failure to terminate before the unreachable print.
+    tir_support.assert_example_cli_error_tiers_agree("errors/qq_panic", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/qq_panic.err.out")).unwrap())
+    tir_support.assert_example_cli_error_tiers_agree("errors/stack_overflow", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/stack_overflow.err.out")).unwrap())
+    tir_support.assert_example_cli_error_tiers_agree("errors/todo_stop", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/todo_stop.err.out")).unwrap())
+    tir_support.assert_example_cli_error_tiers_agree("errors/u8_divide_zero", 70, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/errors/u8_divide_zero.err.out")).unwrap())
+}
+// Rust: tests/tir_control_and_data.rs:1109
+#Test("explicit_process_exit_cleanup_golden_matches_all_execution_tiers") {
+    tir_support.assert_example_cli_tiers_agree_with_package("io/process_exit_cleanup", Val("""
+name: "process-exit-cleanup"
+version: "0.1.0"
+authority: {
+    holds: {
+        allow: [Env, Exec, IO]
+    }
+}
+"""), (actual) -> {
+        assert_eq(actual, fs.read_to_string(env.manifest_dir().join("Examples/features/expected/io/process_exit_cleanup.out")).unwrap())
+    })
+}
+
+// Rust: tests/tir_control_and_data.rs:1135
+#Test("arithmetic_and_helper_call") {
+    if !have_rustc() { return }
+    src :: """fn double(n: Int) -> Int {
+    return (n * 2)
+}
+fn run() -> {
+    sum :: (7 + (3 * 4))
+    print("sum {sum}")
+    print(double(sum))
+}
+"""
+    (code, stdout) :: build_and_run("tir_arith", src)
+    assert_eq(code, 0, "should exit cleanly")
+    assert_eq(stdout, "sum 19\n38\n")
+}
+// Rust: tests/tir_control_and_data.rs:1155
+#Test("range_value_windows_are_no_copy_and_write_through") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    values := [10, 20, 30, 40, 50]
+    band :: 1..<4
+    window :: values[band]
+    print(~window)
+    edit :: &values[band]
+    edit[1] = 99
+    print(values)
+}
+"""
+    rust :: compile("tir_range_value_windows", src)
+    assert(rust.contains("let __jet_window = jet_view_range_new"), "bare Range projection must borrow without copying: {rust}")
+    assert(rust.contains("let __jet_edit = jet_view_mut_range_new"), "write Range projection must borrow the owner: {rust}")
+    (code, stdout) :: build_and_run("tir_range_value_windows", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "[20, 30, 40]\n[10, 20, 99, 40, 50]\n")
+}
+// Rust: tests/tir_control_and_data.rs:1186
+#Test("if_expression_and_string_param") {
+    if !have_rustc() { return }
+    src :: """fn shout(s: String) -> String {
+    return "{s}!"
+}
+fn run() -> {
+    n :: 7
+    parity :: if ((n % 2) == 0) -> "even" else -> "odd"
+    print(shout(parity))
+}
+"""
+    (code, stdout) :: build_and_run("tir_ifexpr", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "odd!\n")
+}
+// Rust: tests/tir_control_and_data.rs:1208
+#Test("if_else_chain_and_return") {
+    if !have_rustc() { return }
+    src :: """fn label(n: Int) -> String {
+    if ((n % 15) == 0) {
+        return "FizzBuzz"
+    } else if ((n % 3) == 0) {
+        return "Fizz"
+    } else if ((n % 5) == 0) {
+        return "Buzz"
+    }
+    return "{n}"
+}
+fn run() -> {
+    print(label(3))
+    print(label(5))
+    print(label(15))
+    print(label(7))
+}
+"""
+    (code, stdout) :: build_and_run("tir_ifchain", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "Fizz\nBuzz\nFizzBuzz\n7\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:1236
+#Test("discarded_if_does_not_unify_mixed_tail_values") {
+    src :: """
+fn branch(flag: Bool) -[IO]> {
+    if {
+        flag -> {
+            print("returned")
+            7
+        }
+        else -> { print("value") }
+    }
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        branch(true)
+        branch(false)
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("discarded_if_mixed_tails", src, "returned\nvalue\n", RESULT_HANDLER_PACKAGE)
+}
+// Rust: tests/tir_control_and_data.rs:1265
+#Test("discarded_if_without_else_falls_through") {
+    src :: """
+fn branch(flag: Bool) -[IO]> {
+    if flag {
+        print("inside")
+    }
+    print("after")
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        branch(false)
+        branch(true)
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("discarded_if_without_else", src, "after\ninside\nafter\n", RESULT_HANDLER_PACKAGE)
+}
+// Rust: tests/tir_control_and_data.rs:1291
+#Test("parenthesized_discarded_if_matches_direct_form") {
+    src :: """
+fn branch(flag: Bool) -[IO]> {
+    (if {
+        flag -> {
+            print("paren-returned")
+            11
+        }
+        else -> { print("paren-value") }
+    })
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        branch(true)
+        branch(false)
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("parenthesized_discarded_if", src, "paren-returned\nparen-value\n", RESULT_HANDLER_PACKAGE)
+}
+// Rust: tests/tir_control_and_data.rs:1320
+#Test("discarded_result_handler_evaluates_subject_once_without_tail_unification") {
+    src :: """
+fn classify(ok: Bool) -[IO]> Int {
+    print("subject")
+    if ok {
+        return 5
+    }
+    return Err("bad")
+}
+
+fn handle(ok: Bool) -[IO]> {
+        classify(ok) ? _success -> { print("success") } ! _failure -> {
+            print("failure")
+            9
+        }
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        handle(true)
+        handle(false)
+    }
+}
+"""
+    tir_support.assert_tiers_agree_with_application_policy("discarded_result_handler_mixed_tails", src, "subject\nsuccess\nsubject\nfailure\n", RESULT_HANDLER_PACKAGE)
+}
+// Rust: tests/tir_control_and_data.rs:1354
+#Test("deep_discarded_else_if_chain_stays_iterative") {
+    src := "fn deep(flag: Bool) -[IO]> {\n    "
+    loop _ in 0..<48 { src.push_str("if { flag -> print(\"stop\") else -> ") }
+    src.push_str("print(\"deep-tail\")")
+    loop _ in 0..<48 { src.push_str(" }") }
+    src.push_str("""
+}
+
+fn run() -[IO]> {
+    #FX(authority: IO) {
+        authority.with("IO")
+        deep(true)
+        deep(false)
+    }
+}
+""")
+    tir_support.assert_tiers_agree_with_application_policy("deep_discarded_else_if_chain", &src, "stop\ndeep-tail\n", RESULT_HANDLER_PACKAGE)
+}
+
+// Rust: tests/tir_control_and_data.rs:1390
+#Test("subjectless_guards_order_totality_and_nested_forms") {
+    if !have_rustc() { return }
+    src :: """
+fn check(note: String, answer: Bool) -> Bool {
+    print(note)
+    return answer
+}
+
+fn run() -> {
+    if {
+        check("first", false) -> print("wrong")
+        check("second", true) -> {
+            print("chosen")
+            if true -> print("nested")
+        }
+        check("never", true) -> print("wrong")
+    }
+    if {
+        false && check("short-circuited", true) -> print("wrong")
+    }
+    label :: if {
+        false -> "wrong"
+        true -> "value"
+        else -> "fallback"
+    }
+    print(label)
+}
+"""
+    (code, stdout) :: build_and_run("tir_subjectless_guards", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "first\nsecond\nchosen\nnested\nvalue\n")
+}
+// Rust: tests/tir_control_and_data.rs:1426
+#Test("subjectless_guard_pattern_bindings_dominate_selected_body") {
+    if !have_rustc() { return }
+    src :: """
+enum Choice {
+    A(Int)
+    B(Int)
+}
+
+fn choose(note: String, value: Int) -> Choice {
+    print(note)
+    return Choice.A(value)
+}
+
+fn run() -> {
+    left :: Choice.A(4)
+    right :: Choice.A(6)
+    if choose("first only", 4) == .B(x) && choose("never", 6) == .A(y) && x < y -> print("wrong")
+    if {
+        left == .A(x) && right == .A(y) && x < y -> print("table {x} {y}")
+        left == .B(_) -> print(0)
+    }
+    if choose("left", 4) == .A(x) && choose("right", 6) == .A(y) && x < y -> print("inline {x} {y}")
+    if true && left == .A(n) -> print("pre {n}")
+    label :: if {
+        left == .A(x) && right == .A(y) && x < y -> "value {x} {y}"
+        else -> "other"
+    }
+    print(label)
+}
+"""
+    (code, stdout) :: build_and_run("tir_subjectless_guard_patterns", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "first only\ntable 4 6\nleft\nright\ninline 4 6\npre 4\nvalue 4 6\n")
+}
+// Rust: tests/tir_control_and_data.rs:1470
+#Test("tir_function_and_method_coexist") {
+    if !have_rustc() { return }
+    src :: """struct Counter {
+    n: Int
+}
+impl Counter {
+    fn bumped(self) -> Int {
+        return (self.n + 1)
+    }
+}
+fn add(a: Int, b: Int) -> Int {
+    return (a + b)
+}
+fn run() -> {
+    c :: Counter{ n: 41 }
+    print(add(c.bumped(), 0))
+}
+"""
+    (code, stdout) :: build_and_run("tir_coexist", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n")
+}
+// Rust: tests/tir_control_and_data.rs:1499
+#Test("overflow_still_traps_on_tir_path") {
+    if !have_rustc() { return }
+    src :: """fn run() -> {
+a :: U8{ 200 }
+b :: U8{ 100 }
+    print(a + b)
+}
+"""
+    (code, _stdout) :: build_and_run("tir_overflow", src)
+    assert_eq(code, 70, "U8 overflow should trap (exit 70)")
+}
+// Rust: tests/tir_control_and_data.rs:1515
+#Test("unrelated_codable_does_not_require_union_codecs") {
+    if !have_rustc() { return }
+    src :: """
+struct Raw {
+    value: Int
+}
+
+fn hold(value: Int | Raw) -> Int | Raw {
+    return ~value
+}
+
+#Codable
+struct Encoded {
+    value: Int
+}
+
+fn run() -> {
+    raw :: Raw{ value: 7 }
+    _ :: hold(raw)
+    print("ok")
+}
+"""
+    (code, stdout) :: build_and_run("union_unrelated_codable", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "ok\n")
+}
+// Rust: tests/tir_control_and_data.rs:1545
+#Test("union_codec_emission_respects_derive_direction") {
+    if !have_rustc() { return }
+    src :: """
+use core.encoding.json as json
+
+struct WriteOnly {
+    marker: Int
+}
+
+impl WriteOnly.Encode {
+    fn encode(self) -> DataTree {
+        return DataTree.Text("write")
+    }
+}
+
+#Encode
+struct Output {
+    value: Int | WriteOnly
+}
+
+#Decode
+struct ReadOnly {
+    marker: Int
+}
+
+#Decode
+struct Input {
+    value: Int | ReadOnly
+}
+
+fn run() -> {
+    output :: Output{ value: WriteOnly{ marker: 1 } }
+    print(json.to_string(output))
+    _ :: json.decode<Input>("{{\"value\":7}}") ?? panic("input")
+    print("ok")
+}
+"""
+    (code, stdout) :: build_and_run("union_codec_direction", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "{\"value\":\"write\"}\nok\n")
+}
+// Rust: tests/tir_control_and_data.rs:1590
+#Test("optional_union_null_and_enum_payload_round_trip") {
+    if !have_rustc() { return }
+    src :: """
+use core.encoding.json as json
+
+#Codable
+struct MaybeRow {
+    value: Int? | String
+}
+
+#Codable
+enum Envelope {
+    Value(Int | String)
+}
+
+fn run() -> {
+    decoded :: json.decode<MaybeRow>("{{\"value\":null}}") ?? panic("row")
+    print(json.to_string(decoded))
+
+    envelope :: Envelope.Value(7)
+    envelope_wire :: json.to_string(envelope)
+    print(envelope_wire)
+    back :: json.decode<Envelope>(envelope_wire) ?? panic("envelope")
+    print(json.to_string(back))
+}
+"""
+    (code, stdout) :: build_and_run("union_codable_roundtrip", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "{\"value\":null}\n{\"Value\":7}\n{\"Value\":7}\n")
+}
+// Rust: tests/tir_control_and_data.rs:1624
+#Test("codable_union_distinct_member_uses_base_wire_shape") {
+    if !have_rustc() { return }
+    src :: """
+use core.encoding.json as json
+
+#CodableAsBase
+Usd :: distinct Int
+
+#Codable
+struct Row {
+    value: Usd | String
+}
+
+fn run() -> {
+    row :: Row{ value: Usd.from_int(7) }
+    wire :: json.to_string(row)
+    print(wire)
+    decoded :: json.decode<Row>(wire) ?? panic("row")
+    decoded_value :: decoded.value
+    if decoded_value == {
+        .Usd(value) -> print(value.raw())
+        .String(value) -> print(value)
+    }
+}
+"""
+    (code, stdout) :: build_and_run("union_codable_distinct", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "{\"value\":7}\n7\n")
+}
+
+// Rust: tests/tir_control_and_data.rs:1661
+#Test("infinite_and_while_loops") {
+    if !have_rustc() { return }
+    src :: """fn run() -> {
+    x := 0
+    loop {
+        x = (x + 1)
+        if (x == 3) {
+            break
+        }
+    }
+    print(x)
+    fuel := 3
+    loop fuel > 0 {
+        print("t-minus {fuel}")
+        fuel-= 1
+    }
+    print("liftoff")
+}
+"""
+    (code, stdout) :: build_and_run("tir_loops", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "3\nt-minus 3\nt-minus 2\nt-minus 1\nliftoff\n")
+}
+// Rust: tests/tir_control_and_data.rs:1691
+#Test("range_loops_inclusive_and_step") {
+    if !have_rustc() { return }
+    src :: """fn run() -> {
+    total := 0
+    loop n in 1..5 {
+        total = (total + n)
+    }
+    print(total)
+    loop k in 0..10, 2 {
+        print(k)
+    }
+}
+"""
+    assert_tiers_agree("tir_ranges", src, "15\n0\n2\n4\n6\n8\n10\n")
+}
+// Rust: tests/tir_control_and_data.rs:1714
+#Test("byte_buffer_for_in_uses_compact_carrier") {
+    if !have_rustc() { return }
+    src :: """
+fn run() -> {
+    bytes :: Bytes.from([65, 66, 67]).to_bytes()
+    total := 0
+    loop byte in bytes {
+        print(byte)
+        total += byte
+    }
+    loop (index, byte) in bytes, 2 {
+        print("{index}:{byte}")
+    }
+    print(total)
+}
+"""
+    assert_tiers_agree("tir_byte_buffer_for_in", src, "65\n66\n67\n0:65\n2:67\n198\n")
+}
+// Rust: tests/tir_control_and_data.rs:1741
+#Test("range_loops_exclusive") {
+    if !have_rustc() { return }
+    src :: """fn run() -> {
+    total := 0
+    loop n in 0..<5 {
+        total = (total + n)
+    }
+    print(total)
+    empty := 0
+    loop n in 3..<3 {
+        empty = (empty + 1)
+    }
+    print(empty)
+}
+"""
+    assert_tiers_agree("tir_ranges_excl", src, "10\n0\n")
+}
+// Rust: tests/tir_control_and_data.rs:1767
+#Test("range_values_store_pass_return_loop_and_slice") {
+    if !have_rustc() { return }
+    src :: """fn identity(band: ^Range) -> Range {
+    return band
+}
+fn run() -> {
+    bands :: [1..3, 8..<10]
+    print(bands[0])
+    print("{bands[1]:Debug}")
+    print(bands[0] == (1..3))
+    print(bands[0] == (1..<3))
+    print(bands[0].contains(3))
+    band :: identity(4..<7)
+    print(band.start)
+    print(band.end)
+    print(band.contains(6))
+    print(band.contains(7))
+    print((7..4).contains(5))
+    total := 0
+    loop n in band {
+        total = (total + n)
+    }
+    print(total)
+    xs :: [10, 20, 30, 40, 50, 60, 70, 80]
+    print(~xs[band])
+}
+"""
+    (code, stdout) :: build_and_run("tir_range_values", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "Range { start: 1, end: 3, exclusive: false }\nRange { start: 8, end: 10, exclusive: true }\ntrue\nfalse\ntrue\n4\n7\ntrue\nfalse\nfalse\n15\n[50, 60, 70]\n")
+}

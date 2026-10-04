@@ -1,0 +1,12 @@
+use Mod.strip_vetted_prelude_modules
+
+// Rust: tests/tir_support/mod.rs:996
+#Test("watcher_process_probe_is_vetted_without_hiding_user_unsafe") {
+    generated :: `// JET_VETTED_UNSAFE_BEGIN: jet_watch_process_probe
+unsafe { ffi() }
+// JET_VETTED_UNSAFE_END: jet_watch_process_probe
+unsafe { user_pointer() }`
+    stripped :: strip_vetted_prelude_modules(generated)
+    assert(!stripped.contains("ffi()"))
+    assert(stripped.contains(`unsafe { user_pointer() }`))
+}

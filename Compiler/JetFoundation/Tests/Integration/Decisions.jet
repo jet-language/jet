@@ -1,0 +1,172 @@
+// I7: ratified syntax decisions, adjacent provenance and honest tombstone citations.
+use std.fs
+use std.mem
+use std.collections.BTreeSet
+// GATE #4494: actual repository filesystem readers; #4499: canonical set equality.
+// Rust: tests/decisions.rs:202
+pub fn collect_rs_files(dir: String, exclude_dirs: &[String], out: &[String]) -> {
+    if exclude_dirs.iter().any(fn(ex) -> dir == ex || dir.starts_with("{ex}/")) { return }
+    entries :: match fs.read_dir(dir) { Ok(e) -> e, Err(_) -> return }
+    children := entries.filter_map(fn(e) -> e.ok()).map(fn(e) -> e.path()).collect()
+    children.sort()
+    loop path in children {
+        path_str :: path.display().to_string()
+        if exclude_dirs.iter().any(fn(ex) -> path_str == ex || path_str.starts_with("{ex}/")) { continue }
+        if path.is_dir() { collect_rs_files(path_str, exclude_dirs, out) }
+        else if path.extension().and_then(fn(e) -> e.to_str()) == Some("rs") { out.push(path_str) }
+    }
+}
+// Rust: tests/decisions.rs:235
+// Contiguous line-comment blocks retain their one-based start line.
+pub fn comment_blocks(raw: String) -> [(USize, [String])] {
+    blocks := [(USize, [String])]{}
+    current := [String]{}
+    current_start := 0
+    loop (i, line) in raw.lines().enumerate() {
+        t := line.trim_start() // #4303
+        if t.starts_with("//") {
+            if current.is_empty() { current_start = i + 1 }
+            current.push(line)
+        } else if !current.is_empty() {
+            blocks.push((current_start, mem.take(&current)))
+        }
+    }
+    if !current.is_empty() { blocks.push((current_start, ^current)) }
+    blocks
+}
+// Rust: tests/decisions.rs:260
+// Literal whole-ID match: alphanumerics or '-' next to an ID forbid a match.
+pub fn contains_id(text: String, id: String) -> Bool {
+    bytes :: text.as_bytes()
+    idb :: id.as_bytes()
+    if idb.is_empty() || bytes.len() < idb.len() { return false }
+    loop start in 0..=(bytes.len() - idb.len()) {
+        if bytes[start..<start + idb.len()] != idb { continue }
+        before_ok :: start == 0 || !(bytes[start - 1].is_ascii_alphanumeric() || bytes[start - 1] == b'-')
+        after :: start + idb.len()
+        after_ok :: after >= bytes.len() || !(bytes[after].is_ascii_alphanumeric() || bytes[after] == b'-')
+        if before_ok && after_ok { return true }
+    }
+    false
+}
+// Rust: tests/decisions.rs:292
+pub fn extract_tombstone_d_ids(docs: String) -> BTreeSet<String> {
+    section :: section_between(docs, "### Superseded IDs (tombstones)", "## Enforcement")
+    joined :: section.replace('\n', " ")
+    ids := BTreeSet<String>.new()
+    rest := joined.as_str()
+    loop {
+        start :: match rest.find("**") { Some(start) -> start, None -> break }
+        after_start := rest[start + 2..] // #4303
+        end :: match after_start.find("**") { Some(end) -> end, None -> break }
+        bold := after_start[..end] // #4303
+        id_part := match bold.find(" — ") { Some(i) -> bold[..i], None -> bold }
+        loop comma_piece in id_part.split(',') {
+            loop piece in comma_piece.split(" / ") {
+                piece := piece.trim() // #4303
+                if !piece.starts_with("D-") { continue }
+                loop expanded in expand_slash_compound(piece) { _ :: ids.insert(expanded) }
+            }
+        }
+        rest = after_start[end + 2..]
+    }
+    ids
+}
+// Rust: tests/decisions.rs:325
+// D-PREFIXn/m-suffix applies the final suffix to every expanded segment.
+pub fn expand_slash_compound(tok: String) -> [String] {
+    if !tok.contains('/') { return [tok.to_string()] }
+    segs :: tok.split('/').collect()
+    first :: segs[0]
+    prefix_end :: first.find(fn(c) -> c.is_ascii_digit()).unwrap_or(first.len())
+    prefix := first[..prefix_end] // #4303
+    last :: segs[segs.len() - 1]
+    last_digit_end :: last.find(fn(c) -> !c.is_ascii_digit()).unwrap_or(last.len())
+    suffix := last[last_digit_end..] // #4303
+    out := [String]{}
+    loop seg in &segs {
+        digits: String :: seg.chars().skip_while(fn(c) -> !c.is_ascii_digit()).take_while(fn(c) -> c.is_ascii_digit()).collect()
+        out.push("{prefix}{digits}{suffix}")
+    }
+    out
+}
+// Rust: tests/decisions.rs:356
+pub fn line_has_decision_id(line: String) -> Bool {
+    bytes :: line.as_bytes()
+    i := 0
+    loop i < bytes.len() {
+        c :: bytes[i]
+        if (c == b'S' || c == b'N' || c == b'U') && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() {
+            j := i + 1
+            loop j < bytes.len() && bytes[j].is_ascii_digit() { j += 1 }
+            word_start_ok :: i == 0 || !bytes[i - 1].is_ascii_alphanumeric()
+            word_end_ok :: j >= bytes.len() || !bytes[j].is_ascii_alphanumeric()
+            if word_start_ok && word_end_ok { return true }
+            i = j
+            continue
+        }
+        if c == b'D' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
+            if i == 0 || !bytes[i - 1].is_ascii_alphanumeric() { return true }
+        }
+        i += 1
+    }
+    false
+}
+// Rust: tests/decisions.rs:389
+pub fn read_syntax_surface() -> String {
+    root :: "crates/jet-foundation/src/Syntax.rs"
+    syntax := fs.read_to_string(root).expect(root)
+    dir :: "crates/jet-foundation/src/Syntax"
+    entries := fs.read_dir(dir).expect(dir).map(fn(entry) -> entry.expect("Syntax fragment entry").path()).filter(fn(path) -> path.extension().and_then(fn(ext) -> ext.to_str()) == Some("rs")).collect()
+    entries.sort()
+    loop path in entries {
+        syntax.push('\n')
+        syntax.push_str(&fs.read_to_string(&path).unwrap_or_else(fn(err) -> panic("{path.display()}: {err}")))
+    }
+    syntax
+}
+// Rust: tests/decisions.rs:408
+pub fn extract_section_ids(docs: String, start: String, end: String) -> BTreeSet<String> {
+    body :: section_between(docs, start, end)
+    ids_in_text(body)
+}
+// Rust: tests/decisions.rs:413
+pub fn section_between(docs: String, start: String, end: String) -> String {
+    from :: docs.find(start).unwrap_or_else(fn() -> panic("Docs/spec/syntax-decisions.md missing section header: {start}"))
+    rest := docs[from + start.len()..] // #4303
+    to :: rest.find(end).unwrap_or_else(fn() -> panic("Docs/spec/syntax-decisions.md missing section header after {start}: {end}"))
+    body := rest[..to] // #4303
+    body
+}
+// Rust: tests/decisions.rs:424
+pub fn ids_in_text(text: String) -> BTreeSet<String> {
+    out := BTreeSet<String>.new()
+    loop line in text.lines() { if line_id(line) == { Some(id) -> { _ :: out.insert(id) }, None -> {} } }
+    out
+}
+// Rust: tests/decisions.rs:434
+pub fn line_id(line: String) -> String? {
+    line := line.trim() // #4303
+    if !line.starts_with("**") { return None }
+    rest := line[2..] // #4303
+    end :: match rest.find(' ').or_else(fn() -> rest.find('\u{2014}')) { Some(end) -> end, None -> return None }
+    id := rest[..end] // #4303
+    if (id.starts_with('S') || id.starts_with('N') || id.starts_with('U')) && id[1..].chars().all(fn(c) -> c.is_ascii_digit()) {
+        Some(id.to_string())
+    } else { None }
+}
+// Rust: tests/decisions.rs:453
+pub fn parse_syntax_rs_status(syntax: String) -> [String:String] {
+    out := [String:String]{}
+    loop line in syntax.lines() {
+        line := line.trim() // #4303
+        if !line.starts_with("///") { continue }
+        rest := line.trim_start_matches('/').trim() // #4303
+        if !rest.starts_with('S') && !rest.starts_with('N') && !rest.starts_with('U') { continue }
+        id_end :: rest.find(' ').unwrap_or_else(fn() -> panic("malformed syntax.rs decision comment: {line}"))
+        id := rest[..id_end] // #4303
+        status :: if rest.contains("(provisional)") { "provisional" } else if rest.contains("(ratified") { "ratified" } else { continue }
+        out.insert(id.to_string(), status.to_string())
+    }
+    out
+}

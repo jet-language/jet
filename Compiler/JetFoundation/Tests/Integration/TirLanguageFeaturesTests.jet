@@ -1,0 +1,578 @@
+use jet_foundation.Tests.Integration.TirLanguageFeatures.*
+use jet_foundation.Tests.Integration.TirSupport as tir_support
+use tir_support.[build_and_run, build_and_run_full, build_and_run_multi, have_rustc, assert_tiers_agree]
+use jet
+use std.[fs, env, process]
+// GATE #4494: native filesystem/process substrate belongs to the real tier harness.
+
+// Rust: tests/tir_language_features.rs:19
+#Test("boundary_typed_heads_keep_one_meaning_across_tiers") {
+    src :: "\nfn run() {{\n    name :: \"ada lovelace\"\n    path_part :: \"ada/../etc\"\n    endpoint :: URL{{\"https://api.example.com/v2/{{name}}\"}}\n    opaque_endpoint :: URL{{\"https://api.example.com/v2/opaque/{{path_part}}\"}}\n    log_path :: Path{{\"/var/log/{{path_part}}.log\"}}\n    stamp :: DateTime{{\"2026-08-07T12:00:00Z\"}}\n    print(endpoint.to_string())\n    print(opaque_endpoint.to_string())\n    print(log_path.to_string())\n    print(stamp.to_string())\n}}\n"
+    assert_tiers_agree("boundary_typed_heads", src, "https://api.example.com/v2/ada%20lovelace\nhttps://api.example.com/v2/opaque/ada%2F..%2Fetc\n/var/log/ada%2F..%2Fetc.log\n2026-08-07 12:00:00 UTC\n")
+}
+// Rust: tests/tir_language_features.rs:44
+#Test("typed_head_raw_escape_keeps_plain_string_cooked_across_tiers") {
+    src :: "\nuse core.regex as re\n\nfn run() {{\n    plain :: \"\\n\"\n    print(plain.len())\n    print(re.is_match({{\"\\d+\"}}, \"id=42\"))\n}}\n"
+    assert_tiers_agree("typed_head_raw_escape", src, "1\ntrue\n")
+}
+// Rust: tests/tir_language_features.rs:61
+#Test("inferred_new_expected_type_routes_through_tir") {
+    if !have_rustc() -> return
+    src :: """
+struct Counter {{ value: Int }}
+struct Holder {{ counter: Counter }}
+struct GenericHolder<T> {{
+    value: T
+    step: fn(Int) -> Int
+}}
+impl GenericHolder {{
+    fn new(value: ^T) -> GenericHolder<T> {{
+        return GenericHolder<T>{{ value: value, step: (n: Int) -> n + 9 }}
+    }}
+    fn marker(self) -> Int {{ return self.step(0) }}
+}}
+impl Counter {{
+    fn new(value: Int) -> Counter {{ return Counter{{ value: value }} }}
+}}
+fn fresh(value: Int) -> Counter {{ return .new(value) }}
+fn read(counter: Counter) -> Int {{ return counter.value }}
+fn increment(value: Int) -> Int {{ return value + 1 }}
+fn run() {{
+    bound :: Counter.new(1)
+    holder :: Holder{{ counter: .new(2) }}
+    pool :: Pool<Holder>.new()
+    nested_pool :: Pool<Pool<Holder>>.new()
+    nested :: GenericHolder<GenericHolder<Int>>.new(.new(7))
+    nested_explicit :: GenericHolder<GenericHolder<Int>>.new(GenericHolder<Int>.new(8))
+    callback :: increment
+    callback_holder :: GenericHolder<fn(Int) -> Int>.new(^callback)
+    explicit :: Counter.new(4)
+    print(read(.new(5)))
+    print("{{bound.value}}{{holder.counter.value}}{{explicit.value}}")
+    print(fresh(6).value)
+    print("{{nested.value.value}}{{nested_explicit.value.value}}")
+    print(callback_holder.marker())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_inferred_new", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "5\n124\n6\n78\n9\n")
+}
+// Rust: tests/tir_language_features.rs:132
+#Test("generic_constructor_arguments_infer_through_tir") {
+    if !have_rustc() -> return
+    src :: """
+struct Box<T> {{ value: T }}
+impl Box {{
+    fn new(value: ^T) -> Box<T> {{ return Box<T>{{ value: value }} }}
+}}
+struct Pair<A, B> {{ first: A, second: B }}
+impl Pair {{
+    fn new(first: ^A, second: ^B) -> Pair<A, B> {{ return Pair<A, B>{{ first: first, second: second }} }}
+}}
+fn returned() -> Box<Int> {{ return Box.new(4) }}
+fn expected_box() -> Box<[Int]> {{ return Box.new([]) }}
+fn run() {{
+    direct :: Box.new(1)
+    expected :: expected_box()
+    nested :: Box.new(Box.new(2))
+    pair :: Pair.new("three", 3)
+    explicit :: Box<Int>.new(5)
+    print("{{direct.value}}{{nested.value.value}}")
+    print("{{pair.first}}{{pair.second}}{{returned().value}}{{explicit.value}}")
+}}
+"""
+    (code, stdout) :: build_and_run("tir_generic_constructor_infer", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12\nthree345\n")
+}
+// Rust: tests/tir_language_features.rs:188
+#Test("pure_fn") {
+    if !have_rustc() -> return
+    src :: "fn double(n: Int) -[]> Int {{\n    return (n * 2)\n}}\nfn greeting(name: String) -[]> String {{\n    return \"hi, {{name}}\"\n}}\nfn run() {{\n    print(double(21))\n    print(greeting(\"jet\"))\n}}\n"
+    (code, stdout) :: build_and_run("tir_pure", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\nhi, jet\n")
+}
+// Rust: tests/tir_language_features.rs:213
+#Test("todo_hole") {
+    if !have_rustc() -> return
+    src :: "fn double(n: Int) -> Int {{\n    return (n * 2)\n}}\nfn not_yet(n: Int) -> Int {{\n    return #Todo\n}}\nfn run() {{\n    print(double(21))\n}}\n"
+    (code, stdout) :: build_and_run("tir_todo", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "42\n")
+}
+// Rust: tests/tir_language_features.rs:237
+#Test("default_param_values") {
+    if !have_rustc() -> return
+    src :: "fn box_dims(w: Int, h: Int{{w}}, d: Int{{h}}) -> String {{\n    return \"{{w}}x{{h}}x{{d}}\"\n}}\nfn run() {{\n    print(box_dims(4))\n    print(box_dims(4, 2))\n    print(box_dims(4, 2, 1))\n}}\n"
+    (code, stdout) :: build_and_run("tir_defaults", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "4x4x4\n4x2x2\n4x2x1\n")
+}
+// Rust: tests/tir_language_features.rs:260
+#Test("default_parameter_references_keep_tier_parity") {
+    src :: "\nfn dimensions(width: Int, height: Int{{width}}, depth: Int{{height}}) -> String {{\n    return \"{{width}}x{{height}}x{{depth}}\"\n}}\n\nfn run() {{\n    print(dimensions(4))\n    print(dimensions(4, 2))\n    print(dimensions(4, 2, 1))\n}}\n"
+    assert_tiers_agree("default_parameter_references", src, "4x4x4\n4x2x2\n4x2x1\n")
+}
+// Rust: tests/tir_language_features.rs:278
+#Test("named_args") {
+    if !have_rustc() -> return
+    src :: """
+fn area(width: Int, height: Int) -> Int {{ return (width * height) }}
+fn connect(host: String, /, *, timeout seconds: Int{{30}}, tls: Bool{{true}}) -> String {{
+    return "{{host}} t={{seconds}} tls={{tls}}"
+}}
+fn identity<T>(value: T, *, note: String{{"unused"}}) -> T {{ return value }}
+fn force(*, force: Bool) -> Int {{ 1 }}
+fn apply(action: fn(*, force: Bool) -> Int) -> Int {{ return action(force: true) }}
+struct Logger {{ id: Int }}
+impl Logger {{
+    fn write(self, level: String, parts: ...String) -> String {{ return [level, ...parts].join(" ") }}
+}}
+fn run() {{
+    print(area(width: 4, height: 3))
+    print(area(4, height: 3))
+    print(connect("db", tls: false, timeout: 5))
+    print(connect("db", tls: false))
+    print(identity<Int>(note: "generic", value: 7))
+    print(apply(force))
+    logger :: Logger{{id: 0}}
+    print(logger.write(parts: "a", level: "L"))
+    print(logger.write("M", "b", "c"))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_named_args", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12\n12\ndb t=5 tls=false\ndb t=30 tls=false\n7\n1\nL a\nM b c\n")
+}
+// Rust: tests/tir_language_features.rs:325
+#Test("named_arg_diagnostic_covers_zero_parameter_calls") {
+    src :: "fn nothing() {{}}\nfn run() {{ nothing(value: 1) }}\n"
+    diagnostics :: jet.compile(src).expect_err("a label on a zero-parameter call must fail")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0764" }), "expected E0764 for a label on a zero-parameter call: {diagnostics:#?}")
+}
+// Rust: tests/tir_language_features.rs:337
+#Test("named_arg_diagnostic_covers_unlabelled_function_values") {
+    src :: "fn apply(action: fn(Int) -> Int) -> Int {{ return action(value: 1) }}\nfn run() {{ _ :: apply((value: Int) -> value) }}\n"
+    diagnostics :: jet.compile(src).expect_err("an unlabelled function type must reject labels")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0764" }), "expected E0764 for a label on an unlabelled function value: {diagnostics:#?}")
+}
+// Rust: tests/tir_language_features.rs:353
+#Test("function_value_arguments_preserve_public_callable_contracts") {
+    src :: "fn factory(action: fn(*, force: Bool) -> Int) -> Int {{ return action(force: true) }}\nfn invoke(callback: fn(fn(*, force: Bool) -> Int) -> Int) -> Int {{ return callback(plain) }}\nfn plain(value: Bool) -> Int {{ 1 }}\nfn run() {{ _ :: invoke(factory) }}\n"
+    diagnostics :: jet.compile(src).expect_err("a function value with the wrong public label must be rejected")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0112" }), "expected E0112 for a callable-contract mismatch: {diagnostics:#?}")
+}
+// Rust: tests/tir_language_features.rs:369
+#Test("unannotated_function_values_do_not_erase_strict_callable_contracts") {
+    src :: "fn factory(action: fn(*, force: Bool) -> Int) -> Int {{ return action(force: true) }}\nfn invoke(callback: fn(fn(*, force: Bool) -> Int) -> Int, plain: fn(Bool) -> Int) -> Int {{ return callback(plain) }}\nfn run() {{ _ :: invoke(factory, (value: Bool) -> 1) }}\n"
+    diagnostics :: jet.compile(src).expect_err("an unannotated function value must not satisfy a strict callable type")
+    assert(diagnostics.iter().any(fn(diagnostic) { diagnostic.code == "E0112" }), "expected E0112 for a missing strict callable contract: {diagnostics:#?}")
+}
+// Rust: tests/tir_language_features.rs:388
+#Test("distinct_types") {
+    if !have_rustc() -> return
+    src :: """
+UserID :: distinct Int
+#Numeric Meters :: distinct Float
+#UnitFamily(Currency) {{ usd }}
+fn greet(id: UserID) -> String {{ return "user {{(id.raw())}}" }}
+fn run() {{
+    uid :: UserID.from_int(42)
+    print(greet(uid))
+    a :: Meters.from_float(3.0)
+    b :: Meters.from_float(1.5)
+    c :: a + b
+    print("{{(c.raw())}} m")
+    x :: UserID.from_int(7)
+    y :: UserID.from_int(7)
+    print("{{(x == y)}}")
+    from_byte :: UserID.from_u8(8)
+    from_float :: UserID.from_float(9.9) ?? UserID.from_int(0)
+    print("{{(from_byte.raw())}} {{(from_float.raw())}}")
+    meters :: Meters.from_int(3)
+    dollars :: Usd.from_int(5)
+    print("{{(meters.raw())}} {{(dollars.raw())}}")
+}}
+"""
+    (code, stdout) :: build_and_run("tir_distinct", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "user 42\n4.5 m\ntrue\n8 9\n3.0 5.0\n")
+}
+// Rust: tests/tir_language_features.rs:424
+#Test("numeric_distinct_operator_borrows_synthetic_rhs") {
+    if !have_rustc() -> return
+    src :: "#UnitFamily(Length, base: meter) {{ meter }}\nfn run() {{\n    distance :: 12meter\n    area :: distance * distance\n    print(area)\n}}\n"
+    // Preserve operand reuse behavior without depending on the retired Rust emitter.
+    (code, stdout) :: build_and_run("tir_numeric_borrow", src)
+    assert_eq(code, 0)
+    (default_code, default_stdout, _) :: tir_support.jit_run("tir_numeric_borrow", src)
+    (interpreter_code, interpreter_stdout, _) :: tir_support.interpreter_run("tir_numeric_borrow", src)
+    assert_eq(default_code, code)
+    assert_eq(interpreter_code, code)
+    assert_eq(default_stdout, stdout)
+    assert_eq(interpreter_stdout, stdout)
+}
+// Rust: tests/tir_language_features.rs:444
+#Test("distinct_and_unit_numeric_source_matrix") {
+    if !have_rustc() -> return
+    src :: """
+UserID :: distinct Int
+Label :: distinct String
+#UnitFamily(Currency) {{ usd }}
+fn checked_user(value: U64) -> UserID String! {{ return UserID.from_u64(value) }}
+fn pass_user(value: UserID String!) -> UserID String! {{ return ~value }}
+fn run() {{
+    fallback :: UserID.from_int(0)
+    print(UserID.from_i8(-8).raw())
+    print(UserID.from_i16(-16).raw())
+    print(UserID.from_i32(-32).raw())
+    print(UserID.from_int(-64).raw())
+    print(UserID.from_u8(8).raw())
+    print(UserID.from_u16(16).raw())
+    print(UserID.from_u32(32).raw())
+    print((pass_user(checked_user(64)) ?? fallback).raw())
+    print((UserID.from_f32(3.75) ?? fallback).raw())
+    print((UserID.from_float(4.75) ?? fallback).raw())
+    print(Usd.from_i8(-8).raw())
+    print(Usd.from_i16(-16).raw())
+    print(Usd.from_i32(-32).raw())
+    print(Usd.from_int(-64).raw())
+    print(Usd.from_u8(8).raw())
+    print(Usd.from_u16(16).raw())
+    print(Usd.from_u32(32).raw())
+    print(Usd.from_u64(64).raw())
+    print(Usd.from_f32(3.75).raw())
+    print(Usd.from_float(4.75).raw())
+    label :: Label.from_string("converted")
+    print(label.raw())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_distinct_source_matrix", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "-8\n-16\n-32\n-64\n8\n16\n32\n64\n3\n4\n-8.0\n-16.0\n-32.0\n-64.0\n8.0\n16.0\n32.0\n64.0\n3.75\n4.75\nconverted\n")
+}
+// Rust: tests/tir_language_features.rs:495
+#Test("range_type_runtime_try_and_spelled_arithmetic_gate") {
+    if !have_rustc() -> return
+    src :: """
+#Numeric Severity :: distinct Int(0..10)
+fn checked(raw: Int) -> Severity String! {{ return Ok(Severity.from_int(raw)) }}
+fn pass_checked(value: Severity String!) -> Severity String! {{ return ~value }}
+fn direct() -> Severity {{ return Severity.from_u8(8) }}
+fn run() {{
+    a :: pass_checked(checked(4)) ?? panic("range")
+    b :: checked(6) ?? panic("range")
+    widened :: wrapping(a + b)
+    print("{{widened}}")
+    print(direct().raw())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_range_type_checked", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "10\n8\n")
+}
+// Rust: tests/tir_language_features.rs:523
+#Test("range_type_literal_proofs_cover_every_numeric_source_family") {
+    src :: "\n#Numeric Severity :: distinct Int(0..10)\n\nfn run() {{\n    signed :: Severity.from_i8(11)\n    unsigned :: Severity.from_u8(12)\n    narrow_float :: Severity.from_f32(13.0)\n    float :: Severity.from_float(14.0)\n}}\n"
+    diagnostics :: jet.compile(src).expect_err("all four literals exceed Severity's range")
+    range_errors :: diagnostics.iter().filter(fn(diagnostic) { diagnostic.code == "E0135" }).count()
+    assert_eq(range_errors, 4, "diagnostics: {diagnostics:#?}")
+}
+// Rust: tests/tir_language_features.rs:608
+#Test("contract_breach_output_matches_aot_jit_and_interpreter") {
+    assert_contract_breach_tiers("contract_pre_failure", "\n#Pre(value > 0, \"positive\") fn checked(value: Int) -> Int {{\n    return value\n}}\n\nfn run() {{\n    print(checked(0))\n}}\n", "Pre", 7)
+    assert_contract_breach_tiers("contract_post_failure", "\n#Post(result == 99, \"must equal 99\")\nfn get() -> Int {{\n    return 1\n}}\n\nfn run() {{\n    print(get())\n}}\n", "Post", 2)
+}
+// Rust: tests/tir_language_features.rs:641
+#Test("contract_interval_proof_erases_only_the_runtime_check") {
+    unproven :: "\n#Pre(value > 0, \"positive\") fn checked(value: Int) -> Int {{\n    return value\n}}\n\nfn run() {{\n    print(checked(1))\n}}\n"
+    proven :: "\n#Numeric Positive :: distinct Int(1..10)\n#Pre(value.raw() > 0, \"positive\") fn checked(value: Positive) -> Int {{\n    return value.raw()\n}}\n\nfn run() {{\n    value :: Positive.from_int(1)\n    print(checked(value))\n}}\n"
+    // Canonical behavioral counterparts to the retired generated-Rust check census.
+    assert_tiers_agree("contract_unproven", unproven, "1\n")
+    assert_tiers_agree("contract_proven", proven, "1\n")
+    assert_contract_breach_tiers("contract_unproven_failure", unproven.replace("checked(1)", "checked(0)"), "Pre", 7)
+}
+// Rust: tests/tir_language_features.rs:686
+#Test("method_precondition_reports_the_call_site") {
+    src :: "\nstruct Boxed {{\n    value: Int\n}}\n\nimpl Boxed {{\n    #Pre(self.value > 0, \"positive\") fn get(self) -> Int {{\n        return self.value\n    }}\n}}\n\nfn run() {{\n    item :: Boxed{{value: 0}}\n    print(item.get())\n}}\n"
+    assert_contract_breach_tiers("contract_method_pre_failure", src, "Pre", 14)
+}
+// Rust: tests/tir_language_features.rs:711
+#Test("static_method_precondition_reports_the_call_site") {
+    src :: "\nstruct Boxed {{\n    value: Int\n}}\n\nimpl Boxed {{\n    #Pre(value > 0, \"positive\") fn make(value: Int) -> Boxed {{\n        return Boxed{{value: value}}\n    }}\n}}\n\nfn run() {{\n    print(Boxed.make(0).value)\n}}\n"
+    assert_contract_breach_tiers("contract_static_method_pre_failure", src, "Pre", 13)
+}
+// Rust: tests/tir_language_features.rs:739
+#Test("named_tuples") {
+    if !have_rustc() -> return
+    src :: """
+fn bounds() -> (max: Int, min: Int) {{ return (min: 0, max: 10) }}
+fn run() {{
+    p :: (x: 1, y: 2)
+    q :: (y: 3, x: 4)
+    same_shape :: (p == q)
+    (a, b) :: ~p
+    print("{{p.x}} {{p.y}} {{a}} {{b}} {{same_shape}}")
+    pair :: bounds()
+    print("{{pair.min}} {{pair.max}}")
+}}
+"""
+    (code, stdout) :: build_and_run("tir_tuples", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "1 2 1 2 false\n0 10\n")
+}
+// Rust: tests/tir_language_features.rs:768
+#Test("json_value_construct_match_render") {
+    if !have_rustc() -> return
+    src :: """
+use core.encoding.json as json
+fn run() {{
+    raw :: "{{{{\\\"name\\\":\\\"jet\\\",\\\"ok\\\":true}}}}"
+    data :: json.parse(raw) ?? panic("bad json")
+    if data == .Object(entries) {{ print(entries.len()) }}
+    obj := [String:JSON]{{}}
+    obj["name"] = JSON.Text("jet")
+    obj["ok"] = JSON.Bool(true)
+    obj["none"] = JSON.Null
+    print(json.to_string(JSON.Object(obj)))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_json", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "2\n{{\"name\":\"jet\",\"none\":null,\"ok\":true}}\n")
+}
+// Rust: tests/tir_language_features.rs:796
+#Test("json_nested_variant_matching") {
+    if !have_rustc() -> return
+    src :: """
+use core.encoding.json as json
+fn run() {{
+    raw :: "{{{{\\\"port\\\":\\\"8080\\\",\\\"name\\\":\\\"api\\\"}}}}"
+    data :: json.decode(raw) ?? panic("bad json")
+    if data == .Object(entries) {{
+        port :: entries["port"]
+        name :: entries["name"]
+        if port == .Int(n) {{ print(n + 1) }}
+        if name == .Text(s) {{ print(s) }}
+    }}
+}}
+"""
+    (code, stdout) :: build_and_run("tir_json_coerce", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "8081\napi\n")
+}
+// Rust: tests/tir_language_features.rs:825
+#Test("regex_match_group") {
+    src :: "use core.regex as re\nfn run() {{\n    text :: \"order 42 shipped\"\n    m :: re.match({{\"(\\d+) shipped\"}}, text)\n    if m == .Val(mat) {{\n        whole :: mat.group(0) ?? \"none\"\n        print(whole)\n    }}\n}}\n"
+    dir :: env.temp_dir().join("jet_tir_regex_{process.id()}")
+    fs.create_dir_all(&dir).unwrap()
+    path :: dir.join("regex.jet")
+    fs.write(&path, src).unwrap()
+    shown :: path.to_string_lossy().into_owned()
+    _ :: jet.compile_with_path(src, shown).expect("front end rejected regex fixture")
+    // Actual match/group behavior replaces retired emitter-substring assertions.
+    assert_tiers_agree("tir_regex_group", src, "42 shipped\n")
+}
+// Rust: tests/tir_language_features.rs:859
+#Test("comptime_const_inline") {
+    if !have_rustc() -> return
+    src :: "VERSION :: prep {{ \"1.0\" }}\nBANNER :: prep {{ \"logbook {{VERSION}}\" }}\nfn wrap(s: String) -> String {{\n    return \"{{BANNER}}: {{s}}\"\n}}\nfn run() {{\n    print(wrap(\"hi\"))\n}}\n"
+    (code, stdout) :: build_and_run("tir_const", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "logbook 1.0: hi\n")
+}
+// Rust: tests/tir_language_features.rs:884
+#Test("foreign_enum_matching_and_payload") {
+    if !have_rustc() -> return
+    note :: """
+pub enum NoteType {{ User Feedback Project Reference }}
+pub struct Note {{
+    pub name: String
+    pub note_type: NoteType
+    pub parent: String?
+}}
+pub fn make_note(name: ^String, t: ^NoteType) -> Note {{ return Note{{name: name, note_type: t, parent: None}} }}
+pub fn kind_str(n: Note) -> String {{
+    k :: ~n.note_type
+    if k == {{
+        .User -> {{ return "user" }}
+        .Feedback -> {{ return "feedback" }}
+        .Project -> {{ return "project" }}
+        .Reference -> {{ return "reference" }}
+    }}
+}}
+fn run() {{ print("note") }}
+"""
+    entry :: """
+use "note"
+enum Query {{ Tag(String) Kind(NoteType) }}
+fn classify(raw: String) -> Query {{
+    if raw == "user" {{ return Query.Kind(NoteType.User) }}
+    return Query.Tag(~raw)
+}}
+fn describe(n: Note, q: ^Query) -> String {{
+    if q == {{
+        .Tag(t) -> {{ return "tag:{{t}}" }}
+        .Kind(k) -> {{ return "kind:{{note.kind_str(n)}}" }}
+    }}
+}}
+fn run() {{
+    n :: note.make_note("x", NoteType.User)
+    q :: classify("user")
+    print(describe(n, ^q))
+    q2 :: classify("design")
+    print(describe(n, ^q2))
+}}
+"""
+    (code, stdout) :: build_and_run_multi("tir_foreign_enum", "main.jet", &[("main.jet", entry), ("note.jet", note)])
+    assert_eq(code, 0)
+    assert_eq(stdout, "kind:user\ntag:design\n")
+}
+// Rust: tests/tir_language_features.rs:953
+#Test("result_names_do_not_reserve_user_functions_or_variants") {
+    if !have_rustc() -> return
+    src :: """
+enum Wrapped {{ Val(Int) Ok(Int) Err(Int) }}
+fn Ok(value: Int) -> Int {{ return (value + 10) }}
+fn Err(value: Int) -> Int {{ return (value + 20) }}
+fn run() {{
+    print(Ok(1))
+    print(Err(2))
+    wrapped :: Wrapped.Val(7)
+    if wrapped == {{
+        .Val(value) -> {{ print(value) }}
+        .Ok(value) -> {{ print(value) }}
+        .Err(value) -> {{ print(value) }}
+    }}
+}}
+"""
+    (code, stdout) :: build_and_run("tir_contextual_result_names", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "11\n22\n7\n")
+}
+// Rust: tests/tir_language_features.rs:994
+#Test("static_new_constructor") {
+    if !have_rustc() -> return
+    src :: """
+struct Rect {{ width: Int, height: Int }}
+impl Rect {{
+    fn new(width: Int, height: Int) -> Rect {{ return Rect{{width: width, height: height}} }}
+    fn area(self) -> Int {{ return (self.width * self.height) }}
+}}
+fn run() {{
+    r :: Rect.new(4, 3)
+    print(r.area())
+}}
+"""
+    (code, stdout) :: build_and_run("tir_static_new", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "12\n")
+}
+// Rust: tests/tir_language_features.rs:1026
+#Test("ambient_input") {
+    if !have_rustc() -> return
+    src :: "fn greet() -> String {{\n    name :: input() ?? \"world\"\n    return \"hello, {{name}}\"\n}}\nfn run() {{\n    print(greet())\n}}\n"
+    // EOF succeeds with empty text; the error fallback is not taken.
+    (code, stdout) :: build_and_run("tir_ambient_input", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "hello, \n")
+}
+// Rust: tests/tir_language_features.rs:1052
+#Test("http_router_dispatch") {
+    if !have_rustc() -> return
+    src :: """
+use core.http as http
+use core.http.server as server
+fn handle_root(req: HTTPRequest) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "welcome")) }}
+fn handle_user(id: String) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "user={{id}}")) }}
+fn run() {{
+    router :: http.router()
+    router.get("/", handle_root)
+    router.get("/users/:id", handle_user)
+    req :: http.parse("GET / HTTP/1.1\\nHost: localhost")
+    resp :: http.dispatch(router, req) ?? panic("dispatch")
+    print(resp.body().text(1024) ?? panic("body"))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_http_router", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "welcome\n")
+}
+// Rust: tests/tir_language_features.rs:1081
+#Test("http_mux_unannotated_handler_lambda_is_owned_in_aot") {
+    if !have_rustc() -> return
+    src :: "use core.http.server as server\nfn run() {{\n    mux :: server.mux()\n    mux.get(\"/\", (req) -> Ok(server.response(200, req.path())))\n    print(\"registered\")\n}}\n"
+    (code, stdout) :: build_and_run("tir_http_unannotated_handler", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "registered\n")
+}
+// Rust: tests/tir_language_features.rs:1101
+#Test("http_router_duplicate_route_is_jet_runtime_error") {
+    if !have_rustc() -> return
+    src :: "use core.http as http\nuse core.http.server as server\nfn handle(id: String, name: String) -> HTTPResponse HTTPError! {{\n    return Ok(server.response(200, \"ok\"))\n}}\nfn run() {{\n    router :: http.router()\n    router.get(\"/users/:id\", handle)\n    router.get(\"/users/:name\", handle)\n}}\n"
+    // Restore the missing run opener in the reference fixture, retaining line 9.
+    (code, _stdout, stderr) :: build_and_run_full("jet_tir_test", "tir_http_duplicate_route", src)
+    assert_ne(code, 0)
+    assert(stderr.contains("panic: E2804: duplicate route `GET /users/:name`"), "missing Jet-owned E2804 runtime text:\n{stderr}")
+    assert(stderr.contains("tir_http_duplicate_route.jet:9"), "missing Jet source location:\n{stderr}")
+    assert(!stderr.contains("thread 'main' panicked"), "raw Rust panic banner leaked:\n{stderr}")
+}
+// Rust: tests/tir_language_features.rs:1134
+#Test("http_router_named_catchall_and_encoded_marker_literals") {
+    if !have_rustc() -> return
+    src :: """
+use core.http as http
+use core.http.server as server
+fn asset(path: String) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "{{path}}")) }}
+fn literal(req: HTTPRequest) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "literal")) }}
+fn catch(rest: String) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "catch")) }}
+fn param_catch(id: String, rest: String) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "param-catch")) }}
+fn param_first(first: String) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "param-first")) }}
+fn static_first(last: String) -> HTTPResponse HTTPError! {{ return Ok(server.response(200, "static-first")) }}
+fn run() {{
+    router :: http.router()
+    router.get("/assets/*path", asset)
+    router.get("/literal/%3Aadmin/%2Astar", literal)
+    router.get("/a/*rest", catch)
+    router.get("/a/:id/*rest", param_catch)
+    router.get("/tie/:first/static", param_first)
+    router.get("/tie/static/:last", static_first)
+    first :: http.dispatch(router, http.parse("GET /assets/css/site.css HTTP/1.1\\nHost: localhost")) ?? panic("dispatch")
+    second :: http.dispatch(router, http.parse("GET /literal/%3Aadmin/%2Astar HTTP/1.1\\nHost: localhost")) ?? panic("dispatch")
+    third :: http.dispatch(router, http.parse("GET /a/x/y HTTP/1.1\\nHost: localhost")) ?? panic("dispatch")
+    fourth :: http.dispatch(router, http.parse("GET /tie/static/static HTTP/1.1\\nHost: localhost")) ?? panic("dispatch")
+    print(first.body().text(1024) ?? panic("body"))
+    print(second.body().text(1024) ?? panic("body"))
+    print(third.body().text(1024) ?? panic("body"))
+    print(fourth.body().text(1024) ?? panic("body"))
+}}
+"""
+    (code, stdout) :: build_and_run("tir_http_route_syntax", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "css/site.css\nliteral\nparam-catch\nstatic-first\n")
+}
+// Rust: tests/tir_language_features.rs:1183
+#Test("http_router_retired_bare_catchall_is_jet_runtime_error") {
+    if !have_rustc() -> return
+    src :: "use core.http as http\nuse core.http.server as server\nuse core.sys as env\nfn handle(req: HTTPRequest) -> HTTPResponse HTTPError! {{\n    return Ok(server.response(200, \"ok\"))\n}}\nfn run() {{\n    router :: http.router()\n    dynamic :: env.get(\"JET_HTTP_TEST_MARKER\") ?? \"*\"\n    pattern :: \"/assets/{{dynamic}}\"\n    router.get(pattern, handle)\n}}\n"
+    (code, _stdout, stderr) :: build_and_run_full("jet_tir_test", "tir_http_retired_catchall", src)
+    assert_ne(code, 0)
+    assert(stderr.contains("panic: E2805: invalid HTTP route `/assets/*`: write a named catch-all such as `*wildcard`"), "missing Jet-owned E2805 runtime text:\n{stderr}")
+    assert(stderr.contains("tir_http_retired_catchall.jet:11"), "missing source location:\n{stderr}")
+    assert(!stderr.contains("thread 'main' panicked"), "raw Rust panic banner leaked:\n{stderr}")
+}
+// Rust: tests/tir_language_features.rs:1223
+#Test("assert_builtins") {
+    if !have_rustc() -> return
+    src :: "fn run() {{\n    assert(((1 + 1) == 2))\n    assert(true, \"unreachable\")\n    assert_eq(6, (2 * 3))\n    print(\"ok\")\n}}\n"
+    (code, stdout) :: build_and_run("tir_assert", src)
+    assert_eq(code, 0)
+    assert_eq(stdout, "ok\n")
+}
+// Rust: tests/tir_language_features.rs:1244
+#Test("authority_scope") {
+    src :: "fn announce(label: String, n: Int) -[IO]> {{\n    print(\"{{label}}: {{n}}\")\n}}\nfn run() {{\n    #FX(authority: IO) {{\n        announce(\"answer\", 42)\n    }}\n}}\n"
+    assert_tiers_agree("tir_authority", src, "answer: 42\n")
+}

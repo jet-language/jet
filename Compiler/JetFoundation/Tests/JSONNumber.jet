@@ -1,0 +1,18 @@
+use jet_foundation.JSONNumber.[json_decimal_lexeme, json_exact_integer_text]
+
+// Rust: crates/jet-foundation/src/JSONNumber.rs:270
+#Test("exact_projection_keeps_scale_exponents_and_adjacent_integers") {
+    assert(json_decimal_lexeme("12.340")! == (false, [U8{1}, U8{2}, U8{3}, U8{4}, U8{0}], U32{3}))
+    assert(json_decimal_lexeme("1E-5")! == (false, [U8{1}], U32{5}))
+    assert(json_exact_integer_text("9007199254740993")! == "9007199254740993")
+    assert(json_exact_integer_text("1e30")! == "1000000000000000000000000000000")
+    rejected := false
+    _ :: json_exact_integer_text("1.5") catch _ -> { rejected = true; "" }
+    assert(rejected)
+    rejected = false
+    _ :: json_decimal_lexeme("NaN") catch _ -> { rejected = true; (false, [U8]{}, U32{0}) }
+    assert(rejected)
+    rejected = false
+    _ :: json_decimal_lexeme("1e1000001") catch _ -> { rejected = true; (false, [U8]{}, U32{0}) }
+    assert(rejected)
+}
